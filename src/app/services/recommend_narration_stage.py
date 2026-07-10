@@ -100,6 +100,7 @@ def run_narration(
     redis: Any = None,
     submit_fn: Optional[Callable[..., Any]] = None,
     guard_evidence: Any = None,
+    final_products: Any = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """Tier-1 narration latency control. Returns (assistant_message, llm_summary_job_id) and writes
     narration_mode / summary_ms / narration_pending into ``timing_breakdown``.
@@ -171,24 +172,27 @@ def run_narration(
             # message, so the frontend simply keeps the deterministic grounded answer it already
             # rendered — the swap only ever upgrades truthful prose.
             import copy as _copy
-            # deep-copy: the request thread keeps annotating these dicts (stock_level etc.)
-            # after submit — a shallow list share raced the worker's prompt build (audit #15)
+            # PX0 (GPT-5.5 #1/#4): narrate over — and guard + [N]-dereference against — the FINAL
+            # buyer-visible products, not the pre-cleanup `results` (which still held dropped
+            # pharmacy/accessory items at snapshot time). Deep-copy: the request thread keeps
+            # annotating these dicts (stock_level etc.) after submit (audit #15).
+            _src = final_products if final_products is not None else results
             try:
-                _results_snapshot = _copy.deepcopy(list(results or []))
+                _final_snapshot = _copy.deepcopy(list(_src or []))
             except Exception:
-                _results_snapshot = list(results or [])
+                _final_snapshot = list(_src or [])
             _constraints_snapshot = dict(constraints or {})
             _guard_evidence = guard_evidence
 
             def _guarded_summarize(*a: Any, **k: Any) -> Any:
                 out = summarize_fn(*a, **k)
                 msg = out[0] if isinstance(out, tuple) else out
-                if isinstance(msg, str) and msg.strip() and _results_snapshot:
+                if isinstance(msg, str) and msg.strip() and _final_snapshot:
                     try:
                         from src.app.services.product_claim_guard import guard_enabled, verify_product_narration
                         if guard_enabled():
                             gr = verify_product_narration(
-                                msg, _results_snapshot,
+                                msg, _final_snapshot,
                                 budget_min=_constraints_snapshot.get("budget_min"),
                                 budget_max=_constraints_snapshot.get("budget_max"),
                                 preamble=_guard_evidence,
@@ -213,12 +217,23 @@ def run_narration(
                         # FAIL CLOSED (audit #4): a guard that crashes must never certify — the
                         # deterministic answer stands and the record says verification errored.
                         return None, None, {"guard": "error"}
+                # #4: dereference [N] labels the way the sync finalizer does, so raw '[1]' never
+                # reaches the buyer through the async swap.
+                if isinstance(msg, str) and "[" in msg and _final_snapshot:
+                    try:
+                        from src.app.services.recommend_response_finalizer import _dereference_product_labels
+                        _clean = _dereference_product_labels({"assistant_message": msg, "results": _final_snapshot})
+                        _dm = _clean.get("assistant_message")
+                        if isinstance(_dm, str) and _dm.strip():
+                            return (_dm,) + tuple(out[1:]) if isinstance(out, tuple) else _dm
+                    except Exception:
+                        pass
                 return out
 
             try:
                 llm_summary_job_id = submit_fn(
                     executor, redis, _guarded_summarize,
-                    query, _results_snapshot, _constraints_snapshot, summ_model, trace_id,
+                    query, _final_snapshot, _constraints_snapshot, summ_model, trace_id,
                     context_preamble=combined_preamble, narration_inputs=narration_inputs,
                 )
             except Exception:

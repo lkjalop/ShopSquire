@@ -10964,6 +10964,20 @@ def suggest(
             or (flags.get("RECOMMEND_NARRATION_MODE") if isinstance(flags, dict) else None)
             or "blocking"
         ).strip().lower()
+        # PX0 (GPT-5.5 #1/#4, 2026-07-10): the async narration snapshot must be the FINAL
+        # buyer-visible product list, not the pre-cleanup `results`. The post-narration
+        # demote/drop_untyped at ~11460 drops pharmacy/accessory items AFTER the async snapshot,
+        # so the swapped prose narrated over dropped items ("they're all basic health products")
+        # and leaked [N] labels the finalizer would have dereferenced. Compute the final view once
+        # and hand it to the async path for the snapshot, guard, and [N] dereference.
+        _narr_final_products = _demote_off_category(list(results or []), query)
+        try:
+            from src.app.services.recommend_response_finalizer import drop_untyped_for_primary_intent as _dufpi_narr
+            _narr_final_products = _dufpi_narr(_narr_final_products, primary_intent=bool(
+                (_workload_ctx.get("floors") if isinstance(_workload_ctx, dict) else None)
+                or constraints.get("must_have_gpu") or constraints.get("use_case")))
+        except Exception:
+            pass
         from src.app.services.recommend_narration_stage import run_narration as _run_narration
         assistant_message, llm_summary_job_id = _run_narration(
             timing_breakdown,
@@ -10974,6 +10988,7 @@ def suggest(
             summarize_fn=_summarize_results,
             executor=_NARRATION_EXECUTOR, redis=redis,
             guard_evidence=_guard_evidence,
+            final_products=_narr_final_products,
         )
         # 0.4 Grounded narration guard (flag COMMERCE_NARRATION_GUARD) — reject ungrounded LLM claims
         # and fall back to deterministic prose. Extracted to apply_product_claim_guard.
