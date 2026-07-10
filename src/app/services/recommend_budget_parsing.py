@@ -89,6 +89,22 @@ def extract_explicit_budget_override(query: str | None) -> Dict[str, Any]:
     q_low = str(query or "").strip().lower()
     if not q_low:
         return {}
+    # CANONICAL GRAMMAR FIRST (2026-07-10, GPT-5.5 #2): the local floor regex below read
+    # "nothing over 2000" / "not above 1800" as a budget FLOOR (min) — inverted, so over-cap
+    # products leaked. budget_grammar.parse_budget (the one true money parser) gets them right;
+    # its confident result short-circuits, and anything it returns None for (bare "N to M" range,
+    # "is N enough") falls through to the legacy patterns it doesn't cover. A ceiling from an
+    # explicit cap phrase carries hard_cap=True so the nearest-above fallback stays disabled.
+    try:
+        from src.app.services.budget_grammar import parse_budget as _canon_budget
+        _bp = _canon_budget(q_low)
+        if _bp is not None and (_bp.budget_min is not None or _bp.budget_max is not None):
+            _out = {"budget_min": _bp.budget_min, "budget_max": _bp.budget_max, "mode": _bp.mode}
+            if _bp.mode == "ceiling" and _bp.budget_max is not None:
+                _out["hard_cap"] = True
+            return _out
+    except Exception:
+        pass
     m_between = re.search(r"\bbetween\s*\$?([\d,]+)\s*(?:and|to|-)\s*\$?([\d,]+)\b", q_low)
     if m_between:
         lo = int(str(m_between.group(1)).replace(",", ""))

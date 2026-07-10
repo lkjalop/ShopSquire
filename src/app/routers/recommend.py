@@ -6219,6 +6219,10 @@ def suggest(
         if _fresh_budget:
             constraints["budget_min"] = _fresh_budget.get("budget_min")
             constraints["budget_max"] = _fresh_budget.get("budget_max")
+            # GPT-5.5 #2: a HARD cap ("nothing over $2000") forbids the nearest-above fallback
+            # from surfacing over-budget products — the constraint stays hard.
+            if _fresh_budget.get("hard_cap"):
+                constraints["_hard_budget_cap"] = True
     except Exception:
         pass
     # R6 (2026-07-07): the LLM planner's SEMANTIC use-case inference feeds NQE — "for my startup"
@@ -8813,9 +8817,14 @@ def suggest(
                             jump_meta = {}
                             try:
                                 q_low_price = str(query_effective or query or "").lower()
-                                explicit_hard_cap = any(tok in q_low_price for tok in (" under ", " below ", " max ", " at most ", " no more than "))
+                                # Canonical hard-cap flag (set from budget_grammar, 2026-07-10) wins;
+                                # the token list is the legacy fallback for paths that didn't set it.
+                                explicit_hard_cap = bool(constraints.get("_hard_budget_cap")) or any(
+                                    tok in q_low_price for tok in
+                                    (" under ", " below ", " max ", " at most ", " no more than ",
+                                     "nothing over", "not above", "don't go over", "no higher than"))
                                 allow_nearest_viable_fallback = (
-                                    (budget_min_val is not None and budget_max_val is not None)
+                                    (budget_min_val is not None and budget_max_val is not None and not constraints.get("_hard_budget_cap"))
                                     or any(tok in q_low_price for tok in ("nearest", "closest", "widen", "broaden", "expand"))
                                     or not explicit_hard_cap
                                 )
