@@ -152,6 +152,21 @@ def test_materialize_is_reconciliation_with_retirement(db):
     assert is_sold(db, "el-6-11-2") is True         # manual declaration PRESERVED
 
 
+def test_alembic_ddl_matches_service_ddl():
+    """The migration's DDL must stay textually identical to the runtime ensure_tables DDL
+    (repo convention, same as catalog_entities) — drift here means prod and dev schemas fork."""
+    import importlib.util
+    from pathlib import Path
+    from src.app.services import taxonomy_registry as tr
+    mig_path = Path(tr.__file__).resolve().parents[3] / "alembic" / "versions" / "20260711_taxonomy_grounding.py"
+    spec = importlib.util.spec_from_file_location("mig", mig_path)
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+    service_ddl = [tr._CLASSIFICATION_DDL.strip(), tr._SOLD_DDL.strip(), *[i.strip() for i in tr._INDEXES]]
+    migration_ddl = [s.strip() for s in mig.TABLE_STATEMENTS]
+    assert migration_ddl == service_ddl
+
+
 def test_grounding_status_distinguishes_empty_from_error(db):
     from src.app.services.taxonomy_registry import grounding_status
     assert grounding_status(db) == "empty"           # tables exist, nothing granted

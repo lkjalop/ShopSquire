@@ -40,6 +40,10 @@ def is_ancestor(candidate: str, of: str) -> bool:
 
 
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tenant", default="default")
+    args = ap.parse_args()
     data = json.loads(LABELS_PATH.read_text(encoding="utf-8"))
     labels = {sku: d for sku, d in data["labels"].items()}
     for sku, d in labels.items():
@@ -50,9 +54,9 @@ def main() -> None:
         preds = {str(r[0]): {"node": str(r[1]), "source": str(r[2] or ""), "status": str(r[3] or "")}
                  for r in s.execute(text(
                      "SELECT sku, node_handle, source, status FROM product_classification "
-                     "WHERE tenant_id='default'")).fetchall()}
+                     "WHERE tenant_id=:t"), {"t": args.tenant}).fetchall()}
         sold = {str(r[0]): str(r[1] or "") for r in s.execute(text(
-            "SELECT node_handle, source FROM sold_taxonomy WHERE tenant_id='default'")).fetchall()}
+            "SELECT node_handle, source FROM sold_taxonomy WHERE tenant_id=:t"), {"t": args.tenant}).fetchall()}
     finally:
         s.close()
 
