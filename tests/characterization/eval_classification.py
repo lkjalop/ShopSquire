@@ -39,10 +39,32 @@ def is_ancestor(candidate: str, of: str) -> bool:
     return candidate in {a.handle for a in ancestors(of)}
 
 
+def _fresh_predictions(s, labels) -> dict:
+    """GPT-5.6 review-2: the persisted-row score is NO LONGER BLIND (it contains human
+    corrections → 100%). --fresh RE-RUNS the classifier live on each labeled product and
+    scores THAT — the true holdout number. ~114 model calls; slow but honest."""
+    from src.app.services.catalog_classifier import classify_text
+    from src.app.services.catalog_read_model import get_variant
+    out = {}
+    for sku in labels:
+        v = get_variant(s, sku, mode="legacy")
+        if v is None:
+            continue
+        cat = str((v.specs or {}).get("category") or (v.specs or {}).get("type") or "").replace("_", " ")
+        c = classify_text(" ".join(filter(None, [v.title, v.brand, v.product_type, cat])),
+                          existing_category=v.category or v.product_type or cat)
+        if c is not None:
+            out[sku] = {"node": c.node_handle, "source": c.source, "status": "fresh"}
+    return out
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--tenant", default="default")
+    ap.add_argument("--fresh", action="store_true",
+                    help="re-run the classifier live (true blind holdout) instead of scoring "
+                         "persisted rows (which contain human corrections -> not blind)")
     args = ap.parse_args()
     data = json.loads(LABELS_PATH.read_text(encoding="utf-8"))
     labels = {sku: d for sku, d in data["labels"].items()}
@@ -51,10 +73,14 @@ def main() -> None:
 
     s = sessionmaker(bind=get_engine())()
     try:
-        preds = {str(r[0]): {"node": str(r[1]), "source": str(r[2] or ""), "status": str(r[3] or "")}
-                 for r in s.execute(text(
-                     "SELECT sku, node_handle, source, status FROM product_classification "
-                     "WHERE tenant_id=:t"), {"t": args.tenant}).fetchall()}
+        if args.fresh:
+            print("--fresh: re-running classifier live (~114 model calls)...")
+            preds = _fresh_predictions(s, labels)
+        else:
+            preds = {str(r[0]): {"node": str(r[1]), "source": str(r[2] or ""), "status": str(r[3] or "")}
+                     for r in s.execute(text(
+                         "SELECT sku, node_handle, source, status FROM product_classification "
+                         "WHERE tenant_id=:t"), {"t": args.tenant}).fetchall()}
         sold = {str(r[0]): str(r[1] or "") for r in s.execute(text(
             "SELECT node_handle, source FROM sold_taxonomy WHERE tenant_id=:t"), {"t": args.tenant}).fetchall()}
     finally:
