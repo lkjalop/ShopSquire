@@ -1,0 +1,125 @@
+"""Typed turn envelope + unified core response (V2 Phase 4, step 1).
+
+TWO types replace the payload-dict soup that made suggest() unownable:
+  • TurnEnvelope  — everything a turn needs, typed, tenant-scoped, built ONCE at the edge.
+  • CoreResponse  — the ONE internal response shape. The four recorded /suggest contract
+    forks (full_pipeline / inventory_fast / claims / policy_faq) exist ONLY in
+    legacy_adapter.to_legacy() — internal code never branches on output shape again.
+
+Money is CENTS internally (the read-model's unit); the legacy edge speaks dollars — the
+conversion happens exactly once, in from_suggest_params / the adapter. Every response is
+traceable (trace_id/decision_id — the 4 UNIVERSAL contract fields) and carries its
+grounding status so degradation is explicit, never implied.
+"""
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+LANES = ("SEARCH", "FILTER", "COMPARE", "EXPLAIN", "SUPPORT_CLAIM", "CART_MUTATE",
+         "PROCUREMENT", "OFF_CATALOG", "POLICY_QUESTION", "INVENTORY")
+
+
+@dataclass(frozen=True)
+class TurnEnvelope:
+    """One turn's typed input. Frozen: stages derive, they never mutate the request."""
+    tenant_id: str
+    uid: str
+    query: str
+    trace_id: str
+    budget_min_cents: Optional[int] = None
+    budget_max_cents: Optional[int] = None
+    has_image: bool = False
+    source_ip: Optional[str] = None
+    session: Dict[str, Any] = field(default_factory=dict)   # prior shortlist/slots (read-only)
+
+    @classmethod
+    def from_suggest_params(cls, *, query: str, uid: str = "", tenant_id: str = "default",
+                            budget_min: Optional[float] = None, budget_max: Optional[float] = None,
+                            trace_id: Optional[str] = None, has_image: bool = False,
+                            source_ip: Optional[str] = None,
+                            session: Optional[Dict[str, Any]] = None) -> "TurnEnvelope":
+        """The /suggest edge speaks DOLLARS; internal is CENTS — converted here, once."""
+        to_cents = lambda v: int(round(float(v) * 100)) if v is not None else None  # noqa: E731
+        return cls(tenant_id=str(tenant_id or "default"), uid=str(uid or ""),
+                   query=str(query or "").strip(), trace_id=trace_id or str(uuid.uuid4()),
+                   budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
+                   has_image=bool(has_image), source_ip=source_ip, session=dict(session or {}))
+
+
+@dataclass
+class ProductCard:
+    """One recommended item — a projection of catalog_read_model.VariantView plus verdicts."""
+    sku: str
+    title: str = ""
+    price_cents: Optional[int] = None
+    currency: str = "USD"
+    brand: str = ""
+    image_url: str = ""
+    stock: Optional[int] = None
+    stock_source: Optional[str] = None
+    why: List[str] = field(default_factory=list)
+    fit: Optional[Dict[str, Any]] = None      # attribute_registry.evaluate_requirements output
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"sku": self.sku, "name": self.title, "price": (self.price_cents or 0) / 100.0,
+                "price_cents": self.price_cents, "currency": self.currency, "brand": self.brand,
+                "image_url": self.image_url, "stock": self.stock, "why": list(self.why),
+                "workload_fit": self.fit}
+
+
+@dataclass
+class CoreResponse:
+    """THE unified response. Invariants (enforced by finalize()):
+      • message is NEVER empty — the recovery-answer guarantee (kills the valorant
+        silent-zero known_wrong at the type level, not as a patch).
+      • off_catalog and non-empty products are mutually exclusive (honesty).
+      • grounding != 'grounded' must be visible (degraded flows from it)."""
+    envelope: TurnEnvelope
+    lane: str = "SEARCH"
+    message: str = ""
+    products: List[ProductCard] = field(default_factory=list)
+    off_catalog: Optional[Dict[str, Any]] = None       # {class,label,supplier_rfq_offer}
+    refusal_note: Optional[str] = None
+    clarify: List[Dict[str, Any]] = field(default_factory=list)
+    fit_summary: Optional[Dict[str, Any]] = None       # floors + per-product verdict counts
+    grounding: str = "grounded"                         # taxonomy_registry.grounding_status
+    degraded: bool = False
+    decision_id: str = ""
+    extras: Dict[str, Any] = field(default_factory=dict)  # stage breadcrumbs for the adapter
+
+    def finalize(self) -> "CoreResponse":
+        """Enforce the invariants; called once by the orchestrator before the adapter."""
+        if not self.decision_id:
+            self.decision_id = self.envelope.trace_id
+        if self.off_catalog:
+            self.products = []
+            # a message composed BEFORE the refusal decision ("Here are 2 options.") must not
+            # survive it — regenerate unless a stage explicitly composed refusal-aware prose
+            if not self.extras.get("refusal_message_composed"):
+                self.message = ""
+        if self.grounding == "error":
+            self.degraded = True
+        if not str(self.message or "").strip():
+            self.message = self._recovery_message()
+        return self
+
+    def _recovery_message(self) -> str:
+        """Deterministic never-empty floor. A model-grounded explanation normally overwrites
+        this; its absence must still leave the buyer with an honest, actionable sentence."""
+        if self.off_catalog:
+            label = str(self.off_catalog.get("label") or "that category")
+            return (f"Honest answer: we don't stock {label}. I can raise a supplier request "
+                    f"if you'd like us to source it.")
+        if self.refusal_note:
+            return self.refusal_note
+        if self.products:
+            return f"I found {len(self.products)} options that match your request."
+        if self.clarify:
+            return "I need one detail to get this right — see the question below."
+        if self.degraded:
+            return ("I couldn't verify our catalog just now, so I won't guess. "
+                    "Please try again in a moment.")
+        return ("No exact match in our catalog for that. The closest alternatives are shown "
+                "when available — or tell me what to relax (budget, brand, specs).")

@@ -71,6 +71,10 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "buyer_token", "human_review", "incident_id", "needs_human_review", "status",
     # policy/FAQ + clarify variants
     "availability", "fulfillment_options", "nqe_selection_applied",
+    # ── reviewed contract ADDITIONS (V2 recommendation_core, Phase 4) ──
+    # grounding_status: taxonomy grounding state (grounded|empty|error) — degradation made
+    # visible at the contract level instead of implied (added 2026-07-11 with legacy_adapter)
+    "grounding_status",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):
