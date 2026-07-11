@@ -56,8 +56,8 @@ def _fallback_metric(reason: str) -> None:
     try:
         from src.app.observability.metrics import record_core_fallback
         record_core_fallback(reason)
-    except Exception:
-        pass
+    except Exception as exc:   # observable, not silent (no-silent-except ratchet)
+        logger.debug("fallback metric skipped: %s", repr(exc)[:80])
 
 
 def _resolve_mode() -> tuple[str, int]:

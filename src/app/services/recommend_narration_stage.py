@@ -351,7 +351,7 @@ def build_narration_preamble(
         pass
 
     # C2 knowledge pool (Lane-3 curated domain evidence): citable facts the narrator may state
-    # (VRAM tiers, gaming floors) — platform-authored, so guard-legitimate by construction.
+    # (spec tiers, workload floors) — platform-authored, so guard-legitimate by construction.
     try:
         if query:
             from src.app.services.knowledge_pool import knowledge_note

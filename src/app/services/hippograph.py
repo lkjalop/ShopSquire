@@ -12,11 +12,14 @@ entities are *proposals* for agent context — they re-enter policy/escalation b
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.app.services.entity_resolution import resolve_brand, resolve_product, resolve_user
 from src.app.services.price_conversion import cents_to_dollars
+
+logger = logging.getLogger("shopsquire.hippograph")
 
 
 @dataclass
@@ -180,7 +183,8 @@ def project_catalog(
         try:
             sku = str((row.get("sku") if isinstance(row, dict) else row[0]) or "").strip()
             name = str((row.get("name") if isinstance(row, dict) else row[1]) or "").strip()
-        except Exception:
+        except Exception as _e:   # malformed catalog row — skip it, but observably (ratchet)
+            logger.debug("hippograph catalog-row skip: %s", repr(_e)[:100])
             continue
         if not sku:
             continue

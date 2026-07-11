@@ -354,8 +354,8 @@ def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None
         if _ans:
             payload["assistant_message"] = _ans
             payload["intent_kind"] = getattr(_plan, "intent", "knowledge")
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug("knowledge-answer inject skipped: %s", repr(_e)[:100])
 
 
 # P1 strangler: these answer-shaping helpers now live in recommend_response_finalizer
@@ -494,8 +494,8 @@ def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -
             except Exception:
                 pass
         timing["compound_ms"] = int((time.perf_counter() - compound_t0) * 1000)
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug("compound-answer stage skipped: %s", repr(_e)[:100])
     return payload
 
 
@@ -555,8 +555,8 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
             or ((payload.get("proposal") or {}).get("nlp") or {}).get("locale")
         )
         payload = localize_recommend_payload(payload, locale)
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug("localize_recommend_payload skipped: %s", repr(_e)[:100])
     # Run AFTER localize (which re-expands results) so these are the final word:
     # off-category exclusion -> never-empty formatter -> [N] dereference.
     payload = _exclude_off_category_in_payload(payload)  # drop off-TYPE (router/monitor…)
