@@ -91,6 +91,32 @@ def test_refusal_needs_the_sold_set_not_the_model(db):
     assert d3.lane == "SEARCH" and not d3.refusal_granted
 
 
+def test_wrongful_refusal_guard_spec_turns_never_platform_refused(db):
+    """Shadow census finding: fragmentary spec turns ('only ones with 16GB RAM or more')
+    mapped to unsold component nodes and got platform-refused. Requirements present +
+    model did NOT propose refusal -> never refuse; closest-match honesty instead."""
+    d = route_turn(db, _env("only ones with 16GB RAM or more"),
+                   llm_fn=_route_stub("FILTER", "el-7-12-3", {"ram_gb": [">=", 16]}))
+    assert d.lane != "OFF_CATALOG" and not d.refusal_granted
+    # but a model-PROPOSED refusal with requirements still refuses when the sold set grants
+    # it ('$80k rack-mount A100 servers' can carry specs AND deserve refusal)
+    d2 = route_turn(db, _env("five rack-mount A100 servers under $80k"),
+                    llm_fn=_route_stub("OFF_CATALOG", "el-6-2", {"gpu_vram_gb": [">=", 40]}))
+    assert d2.lane == "OFF_CATALOG" and d2.refusal_granted
+
+
+def test_sold_name_veto_blocks_refusal_when_query_names_sold_category(db):
+    """Census: 'laptop for fine-tuning LLMs' — numberless, model itself proposed refusal via
+    a datacenter mapping. The query NAMES 'laptop' (a sold category) → refusal vetoed by the
+    same sold set that grants refusals. Deterministic symmetry, no model opinion."""
+    d = route_turn(db, _env("laptop for fine-tuning small language models locally"),
+                   llm_fn=_route_stub("OFF_CATALOG", "el-6-2"))
+    assert d.lane != "OFF_CATALOG" and not d.refusal_granted
+    # and the veto does NOT protect things the store doesn't sell by name
+    d2 = route_turn(db, _env("do you sell forklifts?"), llm_fn=_route_stub("OFF_CATALOG", "bi-18"))
+    assert d2.refusal_granted
+
+
 # ── plan ──────────────────────────────────────────────────────────────────────
 
 def test_derived_plans_respect_refusal_grant():

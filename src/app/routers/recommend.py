@@ -4508,6 +4508,27 @@ def suggest(
         span.set_attribute("recommend.trace_id", trace_id)
     except Exception:
         pass
+    # ── V2 CORE DISPATCH (Phase 4 step 4) ─────────────────────────────────────
+    # RECOMMEND_CORE_MODE: off (default) | primary. 'primary' serves the turn from
+    # recommendation_core through the legacy adapter — same contract, one env flip back.
+    # Shadow deliberately does NOT run inline (a synchronous second brain doubles latency —
+    # the critique that killed the first router wiring); it lives in the offline replay
+    # runner (tests/characterization/shadow_replay.py). Any core failure falls through to
+    # legacy, recorded not swallowed.
+    _core_mode = str(os.getenv("RECOMMEND_CORE_MODE", "") or "").strip().lower()
+    if _core_mode == "primary":
+        try:
+            from src.app.services.recommendation_core.core import recommend_turn
+            from src.app.services.recommendation_core.envelope import TurnEnvelope
+            from src.app.services.recommendation_core.legacy_adapter import to_legacy
+            _env_v2 = TurnEnvelope.from_suggest_params(
+                query=query, uid=uid or "", budget_min=budget_min, budget_max=budget_max,
+                trace_id=trace_id, has_image=bool(image_labels or image_hash),
+                source_ip=(request.client.host if request and request.client else None))
+            return _with_trace(to_legacy(recommend_turn(db, _env_v2)), trace_id)
+        except Exception as _e_core:
+            _record_partial_failure("recommend_core_dispatch", _e_core, trace_id=trace_id)
+            # fall through to legacy — the flip back is always safe
     image_context = {"labels": [], "ocr": "", "hash": None, "intent": None, "product_identity": {}}
     fast_path_enabled = bool(fast_path)
     _plan_exclusions = []  # NEW-4: agnostic negation terms ("but not Apple") carried to constraints

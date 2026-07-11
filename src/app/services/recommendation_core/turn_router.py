@@ -68,6 +68,26 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
         return ""
 
 
+def _query_names_sold_category(db, envelope: TurnEnvelope) -> bool:
+    """Does the query contain a SOLD node's own name-token (plural-forgiving)?
+    'laptop for fine-tuning LLMs' names Laptops → sold → refusal vetoed;
+    'do you sell forklifts?' names nothing sold → veto does not apply."""
+    try:
+        from src.app.services.catalog_classifier import _plural_expand, _tokens
+        from src.app.services.taxonomy_registry import get_node, sold_nodes
+        sold = sold_nodes(db, tenant_id=envelope.tenant_id)
+        if not sold:
+            return False
+        q_toks = _plural_expand(set(_tokens(envelope.query)))
+        for handle in sold:
+            n = get_node(handle)
+            if n and (set(_tokens(n.name)) & q_toks):
+                return True
+        return False
+    except Exception:
+        return False  # veto is a safety refinement; its failure must not block routing
+
+
 @dataclass(frozen=True)
 class TurnDecision:
     lane: str = "SEARCH"
@@ -168,9 +188,29 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # model hedged the lane to SEARCH (live finding: it mapped forklifts→Material Handling
     # perfectly, then hedged — it cannot know what the store sells, so it shouldn't decide);
     # and a proposed OFF_CATALOG without a granted node is NEVER honored.
+    #
+    # WRONGFUL-REFUSAL GUARD (shadow census 2026-07-11: 'only ones with 16GB RAM or more'
+    # got refused): FILTER-lane turns are context-NARROWING fragments about a PRIOR subject
+    # — a platform-elevated refusal there rides a mis-mapped fragment, never grant it.
+    # (An earlier requirements-based proxy for this guard blocked CORRECT procurement
+    # refusals — 'five A100 servers' extracts count>=5 — the lane is the real signal.)
+    model_proposed_refusal = (lane == "OFF_CATALOG")
     refusal_granted = False
-    if node is not None and lane in ("SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG"):
-        refusal_granted = refusal_allowed(db, node.handle, tenant_id=envelope.tenant_id)
+    # PROCUREMENT is in the gate lanes deliberately (census: '$80k A100 servers' routed as
+    # PROCUREMENT — truthfully — and skipped honesty): procuring an UNSOLD category IS the
+    # off-catalog case, and the off-catalog answer already carries the supplier-RFQ offer,
+    # which is exactly the right procurement response.
+    if node is not None and lane in ("SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG",
+                                     "PROCUREMENT"):
+        if model_proposed_refusal or lane != "FILTER":
+            refusal_granted = refusal_allowed(db, node.handle, tenant_id=envelope.tenant_id)
+    # SOLD-NAME VETO (census: 'laptop for fine-tuning LLMs' — no numbers, model itself
+    # proposed refusal via datacenter-thinking; but the query NAMES 'laptop', a sold
+    # category). The sold set that GRANTS refusals also VETOES them: a query naming a sold
+    # category's own name-token can never be refused, whatever the model mapped. Symmetric,
+    # deterministic, grounded — no model opinion involved.
+    if refusal_granted and _query_names_sold_category(db, envelope):
+        refusal_granted = False
     if refusal_granted:
         lane = "OFF_CATALOG"
     elif lane == "OFF_CATALOG":
