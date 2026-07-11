@@ -37,6 +37,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 from src.app.security.commerce_request_guard import inspect_commerce_request
@@ -171,12 +172,23 @@ def dispatch_recommendation_core(
         # ── DISPATCH ───────────────────────────────────────────────────────────
         from src.app.services.recommendation_core.core import recommend_turn
         from src.app.services.recommendation_core.legacy_adapter import to_legacy
+        _t0 = time.perf_counter()
         core = recommend_turn(db, envelope)
+        _latency_ms = int((time.perf_counter() - _t0) * 1000)
 
         # ── LANE GATE (finding #6): non-core lanes fall through to legacy ───────
         if core.lane not in CANARY_LANES:
             logger.debug("core lane %s not canary-eligible — falling through to legacy", core.lane)
             return None
+
+        # ── SHARED POSTFLIGHT (roadmap item 1): session writeback + telemetry ──
+        # so multi-turn works (the slice the facade reads next turn) and the canary is
+        # observable. Best-effort — never changes the response the buyer already has.
+        try:
+            from src.app.services.recommendation_postflight import run_postflight
+            run_postflight(redis, envelope, core, latency_ms=_latency_ms)
+        except Exception as _e_pf:
+            logger.warning("postflight failed (non-fatal): %s", repr(_e_pf)[:120])
 
         return with_trace(to_legacy(core), trace_id)
     except Exception as exc:
