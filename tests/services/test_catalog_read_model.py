@@ -119,6 +119,16 @@ def test_coverage_report_quantifies_gap(db):
     assert rep["price_drift"][0] == {"sku": "LAP-1", "legacy": 169900, "canonical": 159900}
 
 
+def test_coverage_reports_unclassified_active(db):
+    """The census-3 root cause as a permanent metric: active SKUs without classification
+    rows are invisible to taxonomy retrieval — must be counted, never silently zero."""
+    rep = coverage_report(db)
+    assert rep["unclassified_active_count"] == 2   # both fixture SKUs unclassified
+    from src.app.services.taxonomy_registry import upsert_classification
+    upsert_classification(db, sku="LAP-1", node_handle="el-6-6", source="test")
+    assert coverage_report(db)["unclassified_active_count"] == 1
+
+
 def test_backfill_reaches_parity(db):
     stats = backfill_canonical_from_legacy(db, commit=False)
     assert stats["variants"] == 2 and stats["prices"] == 2

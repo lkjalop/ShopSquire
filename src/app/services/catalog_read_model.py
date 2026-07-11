@@ -322,6 +322,18 @@ def coverage_report(db, *, tenant_id: str = DEFAULT_TENANT, sample: int = 500) -
         "stock_drift": stock_drift[:25], "stock_drift_count": len(stock_drift),
         "read_failures": read_failures[:25], "read_failure_count": len(read_failures),
     })
+    # CLASSIFICATION FRESHNESS (census 3 root cause, 2026-07-12): active SKUs without a
+    # classification row are INVISIBLE to taxonomy-first retrieval — reactivated/new products
+    # must alarm here (>0 = run the onboarding classify), never silently vanish from V2.
+    try:
+        from src.app.services.taxonomy_registry import ensure_tables as _tax_tables
+        _tax_tables(db)
+        out["unclassified_active_count"] = int(db.execute(text(
+            "SELECT COUNT(*) FROM products p WHERE COALESCE(p.active,1)=1 AND p.sku NOT IN "
+            "(SELECT sku FROM product_classification WHERE tenant_id = :t)"),
+            {"t": tenant_id}).fetchone()[0])
+    except Exception:
+        out["unclassified_active_count"] = None  # unknown must not read as zero
     return out
 
 
