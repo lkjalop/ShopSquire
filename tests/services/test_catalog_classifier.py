@@ -46,13 +46,48 @@ def test_candidates_empty_on_no_signal():
 
 # ── crosswalk ─────────────────────────────────────────────────────────────────
 
-def test_existing_category_crosswalks_without_model():
-    calls = []
-    def spy(prompt, timeout):
-        calls.append(1)
-        return "{}"
-    c = classify_text("whatever text", existing_category="Laptops", llm_fn=spy)
-    assert c.source == "crosswalk" and c.node_handle == "el-6-6" and calls == []
+def test_crosswalk_is_fallback_when_model_fails():
+    # crosswalk is a PRIOR now, not a shortcut — the model IS consulted; on failure the
+    # merchant's own category stands deterministically
+    c = classify_text("whatever text", existing_category="Laptops", llm_fn=lambda p, t: "{}")
+    assert c.source == "crosswalk" and c.node_handle == "el-6-6"
+
+
+def test_model_refines_crosswalk_within_subtree_at_normal_conf():
+    # 'headset' crosswalks to el-2-2-7-2 (Headsets); the model refines to Gaming Headsets —
+    # a subtree refinement accepted at the normal floor (the 6-gaming-headsets holdout class)
+    c = classify_text("Logitech G325 Wireless Gaming Headset", existing_category="headset",
+                      llm_fn=_picker("el-2-2-7-2-2", 0.6))
+    assert c.source == "model" and c.node_handle == "el-2-2-7-2-2"
+
+
+def test_specificity_earned_with_es_plurals():
+    # 'Dress' must earn 'Dresses' (the +es class): the first inline plural copy missed this
+    # and snapped every dress to Clothing
+    c = classify_text("Linen Wrap Midi Dress", llm_fn=_picker("aa-1-4", 0.9))
+    assert c.node_handle == "aa-1-4"
+
+
+def test_specificity_must_be_earned():
+    # the model picks 'Portable Monitors' for a NON-portable monitor: parent is a candidate,
+    # 'portable' is not in the text -> snapped to Computer Monitors (the 8/10-monitors class)
+    c = classify_text("LG UltraGear 27\" FHD 144Hz Gaming Monitor", existing_category="monitor",
+                      llm_fn=_picker("el-17-1-1", 0.9))
+    assert c.node_handle == "el-17-1"
+    # but a genuinely portable monitor KEEPS the child — evidence present
+    c = classify_text("AOC 16T20 15.6\" FHD USB-C Portable Monitor", existing_category="monitor",
+                      llm_fn=_picker("el-17-1-1", 0.9))
+    assert c.node_handle == "el-17-1-1"
+
+
+def test_model_override_outside_prior_needs_strong_confidence():
+    # specs said 'laptop' but the product is an iMac (the live data-bug class): a pick
+    # OUTSIDE the crosswalk subtree is rejected at 0.6 (crosswalk stands) and accepted at 0.9
+    text = "Apple iMac with Retina 4.5K Display 24-inch Desktop Computer"
+    weak = classify_text(text, existing_category="laptop", llm_fn=_picker("el-6-3", 0.6))
+    assert weak.source == "crosswalk" and weak.node_handle == "el-6-6"
+    strong = classify_text(text, existing_category="laptop", llm_fn=_picker("el-6-3", 0.9))
+    assert strong.source == "model" and strong.node_handle == "el-6-3"
 
 
 def test_crosswalk_normalizes_singular_and_underscores():

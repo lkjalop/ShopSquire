@@ -44,6 +44,8 @@ logger = logging.getLogger("shopsquire.catalog_classifier")
 LLMFn = Callable[[str, float], str]
 TOP_K = int(os.getenv("CLASSIFIER_TOP_K", "12"))
 MODEL_CONFIDENCE_FLOOR = float(os.getenv("CLASSIFIER_CONFIDENCE_FLOOR", "0.3"))
+# contradicting a crosswalk prior (merchant's own category word) needs strong evidence
+OVERRIDE_CONFIDENCE_FLOOR = float(os.getenv("CLASSIFIER_OVERRIDE_FLOOR", "0.75"))
 
 _TOKEN_RE = re.compile(r"[a-z0-9]{2,}")
 # Words that describe commerce, not category — they'd otherwise dominate overlap scoring.
@@ -64,6 +66,15 @@ def _tokens(text: str) -> List[str]:
     return [t for t in _TOKEN_RE.findall(str(text or "").lower()) if t not in _STOP]
 
 
+def _plural_expand(toks: set) -> set:
+    """laptop↔laptops, dress↔dresses, box↔boxes — THE one plural expansion. Never inline a
+    second copy: the first inline copy missed +es and silently snapped every Dress to
+    Clothing (2026-07-11) — the duplicated-parser drift class, inside one file."""
+    return (toks | {t + "s" for t in toks} | {t + "es" for t in toks}
+            | {t[:-1] for t in toks if t.endswith("s") and len(t) > 3}
+            | {t[:-2] for t in toks if t.endswith("es") and len(t) > 4})
+
+
 @lru_cache(maxsize=1)
 def _node_token_index() -> Dict[str, frozenset]:
     """handle → token set of its full path, weighted implicitly by leaf-name via scoring."""
@@ -79,10 +90,7 @@ def candidate_nodes(text: str, *, top_k: int = TOP_K) -> List[Tuple[TaxonomyNode
     toks = set(_tokens(text))
     if not toks:
         return []
-    # singular/plural forgiveness both ways: laptop↔laptops, dress↔dresses, box↔boxes
-    expanded = (toks | {t + "s" for t in toks} | {t + "es" for t in toks}
-                | {t[:-1] for t in toks if t.endswith("s") and len(t) > 3}
-                | {t[:-2] for t in toks if t.endswith("es") and len(t) > 4})
+    expanded = _plural_expand(toks)
     scored: List[Tuple[TaxonomyNode, float]] = []
     nodes = _nodes()
     for handle, path_toks in _node_token_index().items():
@@ -160,6 +168,28 @@ def warmup(*, timeout: float = 240.0) -> bool:
     return bool(out.strip())
 
 
+def _earn_specificity(pick: str, allowed: set, text: str) -> str:
+    """SPECIFICITY MUST BE EARNED (holdout 2026-07-11: 8/10 monitors picked 'Portable
+    Monitors' despite an evidence-gated prompt — prompts ask, clamps enforce). When the pick's
+    PARENT is also a candidate, accept the child only if its distinguishing name tokens
+    (child name minus parent name, plural-forgiving) appear in the product text; otherwise
+    snap to the parent. Vertical-blind: 'Portable' Monitors, 'Gaming' Headsets, 'Whitening'
+    Tablets are all the same rule."""
+    from src.app.services.taxonomy_registry import parent_handle
+    parent = parent_handle(pick)
+    if not parent:
+        return pick
+    # the parent need not be in the candidate list: an ANCESTOR of an allowed pick is
+    # coarser-true by construction, so snapping upward is always clamp-safe
+    node, parent_node = get_node(pick), get_node(parent)
+    if node is None or parent_node is None:
+        return pick
+    distinguishing = set(_tokens(node.name)) - set(_tokens(parent_node.name))
+    if not distinguishing:
+        return pick
+    return pick if (distinguishing & _plural_expand(set(_tokens(text)))) else parent
+
+
 def _build_prompt(text: str, candidates: List[Tuple[TaxonomyNode, float]]) -> str:
     lines = "\n".join(f"  {n.handle} : {n.full_path}" for n, _ in candidates)
     return (
@@ -167,9 +197,12 @@ def _build_prompt(text: str, candidates: List[Tuple[TaxonomyNode, float]]) -> st
         "product, FROM THE CANDIDATE LIST ONLY.\n\n"
         f"PRODUCT: {str(text or '')[:300]}\n\n"
         f"CANDIDATES (handle : path):\n{lines}\n\n"
-        "Rules: choose the most SPECIFIC candidate that truly matches; if several fit, prefer "
-        "the deeper path; judge by what the product IS, not what it's used with (a laptop BAG "
-        "is a bag, not a laptop).\n"
+        "Rules:\n"
+        "- Judge by what the product IS, not what it's used with (a laptop BAG is a bag).\n"
+        "- Choose a more SPECIFIC candidate only when the product text ITSELF contains the "
+        "distinguishing evidence (e.g. 'gaming', 'portable', 'SSD', 'mesh'). When the text "
+        "does not distinguish between sibling candidates, choose the PARENT category — a "
+        "correct parent beats a guessed sibling.\n"
         'Return JSON: {"handle": "<one handle from the list>", "confidence": <0.0-1.0>}\n'
         "JSON:"
     )
@@ -180,22 +213,30 @@ def classify_text(text: str, *, existing_category: str = "",
     """Classify one product text. Returns None only when there is NO signal at all (no tokens,
     zero candidates) — every other path yields a proposal (model or lexical fallback)."""
     xw = _crosswalk(existing_category)
-    if xw is not None:
-        return Classification(sku="", node_handle=xw.handle, node_path=xw.full_path,
-                              confidence=0.95, source="crosswalk")
     cands = candidate_nodes(text)
     # An AMBIGUOUS merchant category ('monitor', 'tablet') couldn't crosswalk, but it must
     # still SEED candidates — 'Tablet Computers' was crowded out of the top-K by Wi-Fi token
     # noise on the first live run, and the clamp means the model can never pick a node that
     # isn't offered. Union the hint's own candidates in, best score wins on dedup.
+    merged: Dict[str, Tuple[TaxonomyNode, float]] = {n.handle: (n, s) for n, s in cands}
     if existing_category:
-        merged: Dict[str, Tuple[TaxonomyNode, float]] = {n.handle: (n, s) for n, s in cands}
         for n, s in candidate_nodes(existing_category, top_k=5):
             if n.handle not in merged or s > merged[n.handle][1]:
                 merged[n.handle] = (n, s)
-        cands = sorted(merged.values(), key=lambda p: (-p[1], p[0].handle))[:TOP_K + 5]
+    # CROSSWALK IS A PRIOR, NOT A SHORTCUT (holdout 2026-07-11: the early-return crosswalk
+    # caused 22/36 errors — 'headset' froze 6 GAMING headsets at the parent, 'hard_drive'
+    # froze 5 SSDs as Hard Drives, and specs.category=laptop froze an iMac as a laptop).
+    # Seed the crosswalk node + its CHILDREN as strong candidates and let the model refine.
+    if xw is not None:
+        from src.app.services.taxonomy_registry import children
+        merged[xw.handle] = (xw, max(merged.get(xw.handle, (xw, 0.0))[1], 99.0))
+        for child in children(xw.handle):
+            if child.handle not in merged:
+                merged[child.handle] = (child, 98.0)
+    cands = sorted(merged.values(), key=lambda p: (-p[1], p[0].handle))[:TOP_K + 8]
     if not cands:
-        return None
+        return (Classification(sku="", node_handle=xw.handle, node_path=xw.full_path,
+                               confidence=0.95, source="crosswalk") if xw else None)
     allowed = {n.handle for n, _ in cands}
     fn = llm_fn or _default_llm_fn
     try:
@@ -209,12 +250,23 @@ def classify_text(text: str, *, existing_category: str = "",
             conf = max(0.0, min(1.0, float(data.get("confidence") or 0.0)))
         except (TypeError, ValueError):
             conf = 0.0
-        # THE CLAMP: the pick must come from the candidate list, with usable confidence
+        # THE CLAMP, with a merchant-prior: the pick must come from the candidate list; when a
+        # crosswalk prior exists, a pick INSIDE its subtree (or the node itself) is a
+        # refinement accepted at the normal floor, while a pick OUTSIDE it contradicts the
+        # merchant's own word and needs strong evidence (>= OVERRIDE floor — how the model may
+        # say 'this "laptop" is an iMac' but not drift on a whim).
         if pick in allowed and conf >= MODEL_CONFIDENCE_FLOOR:
-            node = get_node(pick)
-            return Classification(sku="", node_handle=node.handle, node_path=node.full_path,
-                                  confidence=conf, source="model",
-                                  candidates=tuple(n.handle for n, _ in cands))
+            within_prior = xw is None or pick == xw.handle or pick.startswith(xw.handle + "-")
+            if within_prior or conf >= OVERRIDE_CONFIDENCE_FLOOR:
+                pick = _earn_specificity(pick, allowed, text)
+                node = get_node(pick)
+                return Classification(sku="", node_handle=node.handle, node_path=node.full_path,
+                                      confidence=conf, source="model",
+                                      candidates=tuple(n.handle for n, _ in cands))
+    if xw is not None:  # deterministic fallback: the merchant's own category, never a guess
+        return Classification(sku="", node_handle=xw.handle, node_path=xw.full_path,
+                              confidence=0.95, source="crosswalk",
+                              candidates=tuple(n.handle for n, _ in cands))
     best = cands[0][0]
     return Classification(sku="", node_handle=best.handle, node_path=best.full_path,
                           confidence=0.2, source="lexical_fallback",
@@ -233,9 +285,19 @@ def classify_catalog(db, *, tenant_id: str = "default", llm_fn: Optional[LLMFn] 
     # its own tenant. NOTE the legacy `products` table is tenant-less — single-tenant by
     # construction; only the canonical path can actually scope. Documented, not hidden.
     views = search_variants(db, limit=int(limit or 500), mode=mode, tenant_id=tenant_id)
+    # Re-classifying DEMOTES approved rows to 'proposed' (re-approval required by design) —
+    # a later materialize would then RETIRE their sold nodes. That must never be silent:
+    # count the approved rows this run will touch and surface it in the report.
+    try:
+        from sqlalchemy import text as _sql
+        demoting = int(db.execute(_sql(
+            "SELECT COUNT(*) FROM product_classification WHERE tenant_id=:t AND status='approved'"),
+            {"t": tenant_id}).fetchone()[0])
+    except Exception:
+        demoting = 0
     report: Dict[str, Any] = {"release": PINNED_RELEASE, "total": len(views), "classified": 0,
-                              "by_source": {}, "low_confidence": [], "unclassifiable": [],
-                              "rows": []}
+                              "demoting_approved": demoting, "by_source": {},
+                              "low_confidence": [], "unclassifiable": [], "rows": []}
     for v in views:
         # Categorical spec VALUES only — dumping the raw spec dict floods the tokens with
         # schema noise ('display inches', 'storage gb', 'full hd') that buried the true

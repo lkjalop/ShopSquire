@@ -44,6 +44,10 @@ def cmd_classify(args) -> None:
             else:
                 print("model UNAVAILABLE — proceeding LEXICAL-ONLY (all rows will need review)")
         report = classify_catalog(s, tenant_id=args.tenant, llm_fn=llm_fn, limit=args.limit)
+        if report.get("demoting_approved"):
+            print(f"WARNING: {report['demoting_approved']} previously-APPROVED rows demoted to "
+                  f"'proposed' — the sold set keeps its grants until you run approve (which "
+                  f"reconciles); do NOT materialize without re-approving.")
         print(f"classified {report['classified']}/{report['total']} "
               f"by_source={report['by_source']} low_confidence={len(report['low_confidence'])} "
               f"unclassifiable={report['unclassifiable']}")
