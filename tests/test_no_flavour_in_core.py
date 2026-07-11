@@ -37,6 +37,9 @@ _CORE_MODULES = [
     "src/app/services/recommendation_core/plan.py",
     "src/app/services/recommendation_core/ranking.py",
     "src/app/services/recommendation_core/legacy_adapter.py",
+    # cart-mutation resolver: model→closed-op-vocab→SKU-bind mechanism; generic device words only
+    # (_GENERIC_TOKENS), no brand/GPU/display literals — vertical-blind by construction.
+    "src/app/services/recommendation_core/cart_resolver.py",
     "src/app/services/recommendation_facade.py",
     "src/app/services/recommendation_postflight.py",
     # GRADUATED 2026-07-07 (baseline 4 -> 0): capability classes/verdicts, persona labels, spec-strength

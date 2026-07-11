@@ -33,6 +33,11 @@ class TurnEnvelope:
     has_image: bool = False
     source_ip: Optional[str] = None
     session: Dict[str, Any] = field(default_factory=dict)   # prior shortlist/slots (read-only)
+    # cart: the CURRENT cart lines [{sku,name,quantity}], read once at the facade ingress. The
+    # cart-mutation resolver binds the shopper's named targets ('the ThinkPad') to a REAL line
+    # by SKU — the model never invents a SKU. Empty on the no-cart path (search-only turns /
+    # offline replay). Read-only here; execution is the caller's job (plan, then act).
+    cart: List[Dict[str, Any]] = field(default_factory=list)
     # pre_gate: the SHARED commerce guard's verdict, run once at the facade ingress and passed
     # in — so the core reads the REAL guard (inspect_commerce_request) instead of its own
     # regex. None only on the no-facade path (offline replay / direct tests), where the core
@@ -45,6 +50,7 @@ class TurnEnvelope:
                             trace_id: Optional[str] = None, has_image: bool = False,
                             source_ip: Optional[str] = None,
                             session: Optional[Dict[str, Any]] = None,
+                            cart: Optional[List[Dict[str, Any]]] = None,
                             pre_gate: Optional[Dict[str, Any]] = None) -> "TurnEnvelope":
         """The /suggest edge speaks DOLLARS; internal is CENTS — converted here, once."""
         to_cents = lambda v: int(round(float(v) * 100)) if v is not None else None  # noqa: E731
@@ -52,7 +58,7 @@ class TurnEnvelope:
                    query=str(query or "").strip(), trace_id=trace_id or str(uuid.uuid4()),
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
                    has_image=bool(has_image), source_ip=source_ip, session=dict(session or {}),
-                   pre_gate=pre_gate)
+                   cart=list(cart or []), pre_gate=pre_gate)
 
 
 @dataclass
