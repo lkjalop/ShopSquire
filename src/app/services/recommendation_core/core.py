@@ -60,6 +60,22 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
 
     for step in plan.steps:
         _EXECUTORS[step](db, envelope, decision, resp, limit)
+
+    # gates (census bucket 1): a real thin text-gate check on every turn — fails closed
+    from src.app.services.recommendation_core.gates import evaluate_text_gates, slot_gap_clarify
+    gates = evaluate_text_gates(envelope.query)
+    resp.extras["gates"] = gates
+    if gates["policy_route"] != "allow":
+        resp.degraded = True
+
+    # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
+    if not resp.off_catalog and not resp.clarify:
+        q = slot_gap_clarify(
+            has_products=bool(resp.products),
+            budget_known=envelope.budget_max_cents is not None or envelope.budget_min_cents is not None,
+            has_requirements=bool(decision.requirements))
+        if q:
+            resp.clarify.append(q)
     return resp.finalize()
 
 

@@ -61,8 +61,16 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "needs_disambiguation": clarifying,
         "next_questions": core.clarify,
         "workload_fit": core.fit_summary,
-        "turn_intent": core.lane,
+        # v1 semantics: a budget-carrying search reads as FILTER (the recorded naming)
+        "turn_intent": ("FILTER" if core.lane == "SEARCH"
+                        and (core.envelope.budget_max_cents is not None
+                             or core.envelope.budget_min_cents is not None)
+                        else core.lane),
         "turn_type": f"{core.lane.lower()}_turn",
+        "security": {"policy_route": (core.extras.get("gates") or {}).get("policy_route"),
+                     "image_untrusted": (core.extras.get("gates") or {}).get("image_untrusted")},
+        "autonomy_tier": "caution",   # the platform-wide default posture; levers stay gated
+        "escalation": core.extras.get("escalation"),
         "grounding_status": core.grounding,   # contract ADDITION (visible in KNOWN_FIELDS review)
         # ── legacy-required CORE_FIELDS the core doesn't produce yet: HONEST inert
         # defaults, populated stage-by-stage as Phase 4 proceeds — never fabricated ──
