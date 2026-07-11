@@ -56,6 +56,48 @@ def test_inventory_item_to_sku_map():
     assert m == {"ii-1": "LAP-021", "ii-2": "LAP-022"}
 
 
+# ── T2 widening: the fields the old adapter dropped ─────────────────────────
+_RICH_PRODUCT = {
+    "id": 333, "title": "Trail Runner", "vendor": "Acme", "product_type": "Running Shoes",
+    "tags": "trail, waterproof , mens", "handle": "trail-runner", "status": "active",
+    "body_html": "<p>Grippy sole.</p>", "images": [{"src": "https://cdn/x.jpg"}],
+    "options": [{"name": "Color"}, {"name": "Size"}],
+    "variants": [
+        {"id": 9, "sku": "SHOE-1", "price": "129.00", "compare_at_price": "179.00",
+         "barcode": "9312345678907", "option1": "Black", "option2": "10", "grams": 640,
+         "inventory_item_id": "ii-9"},
+    ],
+}
+
+
+def test_product_attributes_carries_type_vendor_tags_options():
+    a = sh.product_attributes(_RICH_PRODUCT)
+    assert a["product_type"] == "Running Shoes" and a["vendor"] == "Acme"
+    assert a["tags"] == ["trail", "waterproof", "mens"]
+    assert a["options"] == ["Color", "Size"] and a["image_url"] == "https://cdn/x.jpg"
+
+
+def test_variant_attributes_maps_option_axes_and_barcode():
+    a = sh.variant_attributes(_RICH_PRODUCT["variants"][0], _RICH_PRODUCT)
+    assert a["options"] == {"Color": "Black", "Size": "10"}
+    assert a["barcode"] == "9312345678907" and a["grams"] == 640
+
+
+def test_compare_at_price_becomes_list_and_sale():
+    rows = sh.variants_to_prices(_RICH_PRODUCT)
+    assert rows == [{"sku": "SHOE-1", "list_cents": 17900, "sale_cents": 12900}]
+
+
+def test_rich_ingest_persists_brand_category_gtin(db):
+    from src.app.services import catalog_entities as ce
+    sh.ingest_shop_catalog(db, products=[_RICH_PRODUCT])
+    v = ce.variant_by_sku(db, "SHOE-1")
+    assert v["gtin"] == "9312345678907"
+    assert v["attributes"]["options"] == {"Color": "Black", "Size": "10"}
+    row = db.execute(text("SELECT brand, category FROM product WHERE id='shopify:333'")).fetchone()
+    assert (row[0], row[1]) == ("Acme", "Running Shoes")
+
+
 # ── end-to-end ingest ────────────────────────────────────────────────────────
 def test_ingest_writes_canonical_prices_and_stock(db):
     counts = sh.ingest_shop_catalog(db, products=_PRODUCTS, inventory_levels=_LEVELS,

@@ -107,6 +107,22 @@ def test_descendants_inherit_sold(db):
     assert is_sold(db, "el-7") is False      # Electronics Accessories: sibling, not covered
 
 
+def test_sells_within_is_the_refusal_gate(db):
+    """Per-product classification grants LEAVES; a parent-category query must not refuse."""
+    from src.app.services.taxonomy_registry import sells_within
+    add_sold_node(db, node_handle="hb-1-9-6-9-5")   # store sells only Vitamin D
+    assert is_sold(db, "hb-1-9-6") is False          # strict: parent not fully covered
+    assert sells_within(db, "hb-1-9-6") is True      # refusal gate: do NOT refuse vitamins
+    assert sells_within(db, "hb-1-9-6-9-5") is True  # the leaf itself
+    assert sells_within(db, "el-6-2") is False       # servers: no overlap → refusable
+    assert sells_within(db, "not-a-node") is None    # unknown → ungrounded, never refuse
+
+
+def test_sells_within_ungrounded_is_none(db):
+    from src.app.services.taxonomy_registry import sells_within
+    assert sells_within(db, "el-6-6") is None
+
+
 def test_approval_materializes_sold_set(db):
     upsert_classification(db, sku="LAP-1", node_handle="el-6-6", source="model", confidence=0.92)
     upsert_classification(db, sku="AUD-1", node_handle="el-13", source="model", confidence=0.88)

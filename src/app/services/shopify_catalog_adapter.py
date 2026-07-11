@@ -31,13 +31,60 @@ def price_to_cents(price: Any) -> Optional[int]:
 
 
 def variants_to_prices(product: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """A Shopify product → [{sku, list_cents}] for each variant carrying a sku + price."""
+    """A Shopify product → [{sku, list_cents, sale_cents}] per variant carrying a sku + price.
+    Shopify semantics: `price` is what the buyer pays NOW; `compare_at_price` is the original.
+    So compare_at present-and-higher → list=compare_at, sale=price; else list=price, no sale."""
     out: List[Dict[str, Any]] = []
     for v in (product or {}).get("variants") or []:
         sku = str((v or {}).get("sku") or "").strip()
         cents = price_to_cents((v or {}).get("price"))
-        if sku and cents is not None:
-            out.append({"sku": sku, "list_cents": cents})
+        if not sku or cents is None:
+            continue
+        compare_at = price_to_cents((v or {}).get("compare_at_price"))
+        if compare_at is not None and compare_at > cents:
+            out.append({"sku": sku, "list_cents": compare_at, "sale_cents": cents})
+        else:
+            out.append({"sku": sku, "list_cents": cents, "sale_cents": None})
+    return out
+
+
+def product_attributes(product: Dict[str, Any]) -> Dict[str, Any]:
+    """The T2 widening (2026-07-11): everything classification + retrieval need that the old
+    adapter dropped — product_type, vendor, tags, options (the VARIANT AXES), handle, image,
+    a description snippet, status. All into attributes_json per the flavour-in-data rule."""
+    p = product or {}
+    tags = p.get("tags")
+    if isinstance(tags, str):  # REST API returns a comma-joined string; GraphQL a list
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
+    body = str(p.get("body_html") or "")
+    images = p.get("images") or []
+    image_url = str((images[0] or {}).get("src") or "") if images else ""
+    return {
+        "product_type": str(p.get("product_type") or ""),
+        "vendor": str(p.get("vendor") or ""),
+        "tags": [str(t) for t in (tags or [])][:50],
+        "options": [str((o or {}).get("name") or "") for o in (p.get("options") or []) if (o or {}).get("name")],
+        "handle": str(p.get("handle") or ""),
+        "image_url": image_url,
+        "description_snippet": body[:500],
+        "shopify_status": str(p.get("status") or ""),
+    }
+
+
+def variant_attributes(variant: Dict[str, Any], product: Dict[str, Any]) -> Dict[str, Any]:
+    """Variant-level truth: the option VALUES matched to the product's option NAMES (the
+    category × variant axes — 'Color: Black', 'Size: 16in'), barcode/GTIN, weight."""
+    v, p = variant or {}, product or {}
+    names = [str((o or {}).get("name") or "") for o in (p.get("options") or [])]
+    values = [v.get("option1"), v.get("option2"), v.get("option3")]
+    options = {n: str(val) for n, val in zip(names, values) if n and val not in (None, "")}
+    out: Dict[str, Any] = {"options": options,
+                           "product_type": str(p.get("product_type") or "")}
+    if v.get("barcode"):
+        out["barcode"] = str(v.get("barcode"))
+    grams = v.get("grams")
+    if isinstance(grams, (int, float)):  # Shopify sends an integer; anything else isn't weight
+        out["grams"] = int(grams)
     return out
 
 
@@ -68,7 +115,9 @@ def ingest_shop_catalog(db, *, products: List[Dict[str, Any]],
             pid = str((product or {}).get("id") or "")
             if pid:
                 ce.upsert_product(db, product_id=f"shopify:{pid}", title=str((product or {}).get("title") or ""),
-                                  tenant_id=tenant_id)
+                                  brand=str((product or {}).get("vendor") or ""),
+                                  category=str((product or {}).get("product_type") or ""),
+                                  attributes=product_attributes(product), tenant_id=tenant_id)
                 ce.upsert_external_ref(db, platform=PLATFORM, entity_type="product", external_id=pid,
                                        entity_id=f"shopify:{pid}", tenant_id=tenant_id)
             for v in (product or {}).get("variants") or []:
@@ -76,12 +125,14 @@ def ingest_shop_catalog(db, *, products: List[Dict[str, Any]],
                 iid = str((v or {}).get("inventory_item_id") or "").strip()
                 if sku:
                     ce.upsert_variant(db, sku=sku, product_id=f"shopify:{pid}" if pid else "",
-                                      tenant_id=tenant_id)
+                                      gtin=str((v or {}).get("barcode") or ""),
+                                      attributes=variant_attributes(v, product), tenant_id=tenant_id)
                     if iid:  # so inventory_levels (keyed by inventory_item_id) resolve to a sku later
                         ce.upsert_external_ref(db, platform=PLATFORM, entity_type="inventory_item",
                                                external_id=iid, entity_id=sku, tenant_id=tenant_id)
             for row in variants_to_prices(product):
-                if cc.upsert_price(db, sku=row["sku"], list_cents=row["list_cents"], channel=channel,
+                if cc.upsert_price(db, sku=row["sku"], list_cents=row["list_cents"],
+                                   sale_cents=row.get("sale_cents"), channel=channel,
                                    currency=currency, source="shopify", tenant_id=tenant_id):
                     n_p += 1
         if inventory_levels:

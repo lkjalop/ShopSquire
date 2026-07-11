@@ -296,8 +296,9 @@ def sold_nodes(db, *, tenant_id: str = DEFAULT_TENANT) -> Optional[frozenset]:
 
 
 def is_sold(db, node_handle: str, *, tenant_id: str = DEFAULT_TENANT) -> Optional[bool]:
-    """Tri-state sellability (see module docstring). Only an explicit False may ever justify
-    an off-catalog refusal; None means UNGROUNDED — never refuse on None."""
+    """STRICT tri-state sellability: True when the node or an ancestor is granted (a granted
+    node covers its subtree). Deliberately does NOT look at descendants — use sells_within()
+    for refusal gating; this predicate answers "is everything AT this node covered?"."""
     node = get_node(node_handle)
     if node is None:
         return None
@@ -310,6 +311,24 @@ def is_sold(db, node_handle: str, *, tenant_id: str = DEFAULT_TENANT) -> Optiona
         if anc.handle in sold:
             return True
     return False
+
+
+def sells_within(db, node_handle: str, *, tenant_id: str = DEFAULT_TENANT) -> Optional[bool]:
+    """THE REFUSAL GATE (tri-state): does the tenant's sold set overlap this node's subtree
+    at all — node, ancestor, or ANY DESCENDANT? A store selling only 'Vitamin D' must not
+    refuse 'do you sell vitamins?' (parent query, children sold) — per-product classification
+    grants LEAVES, so parent-category queries need the descendant direction too. Refuse
+    off-catalog ONLY on an explicit False from THIS predicate; None = ungrounded, never refuse."""
+    node = get_node(node_handle)
+    if node is None:
+        return None
+    sold = sold_nodes(db, tenant_id=tenant_id)
+    if sold is None:
+        return None
+    if node.handle in sold or any(a.handle in sold for a in ancestors(node.handle)):
+        return True
+    prefix = node.handle + "-"
+    return any(h.startswith(prefix) for h in sold)
 
 
 def sold_summary(db, *, tenant_id: str = DEFAULT_TENANT) -> Dict[str, Any]:
