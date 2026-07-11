@@ -126,8 +126,35 @@ def test_sells_within_ungrounded_is_none(db):
 def test_approval_materializes_sold_set(db):
     upsert_classification(db, sku="LAP-1", node_handle="el-6-6", source="model", confidence=0.92)
     upsert_classification(db, sku="AUD-1", node_handle="el-13", source="model", confidence=0.88)
-    assert materialize_sold_taxonomy(db, commit=False) == 0  # nothing approved yet
+    assert materialize_sold_taxonomy(db, commit=False)["added"] == 0  # nothing approved yet
     approve_classification(db, sku="LAP-1", approved_by="merchant@demo")
-    assert materialize_sold_taxonomy(db, commit=False) == 1
+    assert materialize_sold_taxonomy(db, commit=False)["added"] == 1
     assert is_sold(db, "el-6-6") is True
     assert is_sold(db, "el-13") is False     # proposed-but-unapproved never grounds a sale
+
+
+def test_materialize_is_reconciliation_with_retirement(db):
+    """Reclassifying a product must RETIRE its old node from the sold set (GPT-5.6 #2) —
+    while manual/merchant grants survive untouched."""
+    upsert_classification(db, sku="PHM-1", node_handle="hb-3-12-14-13", source="model", confidence=0.95)
+    approve_classification(db, sku="PHM-1", approved_by="m@demo")
+    add_sold_node(db, node_handle="el-6-11-2", source="merchant_declaration")  # manual grant
+    r = materialize_sold_taxonomy(db, commit=False)
+    assert r["added"] == 1 and is_sold(db, "hb-3-12-14-13") is True
+    # human corrects the classification to the right node
+    upsert_classification(db, sku="PHM-1", node_handle="hb-1-16-1", source="human_correction",
+                          confidence=1.0, status="proposed")
+    approve_classification(db, sku="PHM-1", approved_by="m@demo")
+    r = materialize_sold_taxonomy(db, commit=False)
+    assert r["retired"] == 1 and r["added"] == 1
+    assert is_sold(db, "hb-3-12-14-13") is False   # stale grant GONE
+    assert is_sold(db, "hb-1-16-1") is True         # corrected node sold
+    assert is_sold(db, "el-6-11-2") is True         # manual declaration PRESERVED
+
+
+def test_grounding_status_distinguishes_empty_from_error(db):
+    from src.app.services.taxonomy_registry import grounding_status
+    assert grounding_status(db) == "empty"           # tables exist, nothing granted
+    add_sold_node(db, node_handle="el-6-6")
+    assert grounding_status(db) == "grounded"
+    assert grounding_status(None) == "error"         # infra failure is NOT 'ungrounded tenant'

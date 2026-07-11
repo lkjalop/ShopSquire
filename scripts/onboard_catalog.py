@@ -47,8 +47,14 @@ def cmd_classify(args) -> None:
         print(f"classified {report['classified']}/{report['total']} "
               f"by_source={report['by_source']} low_confidence={len(report['low_confidence'])} "
               f"unclassifiable={report['unclassifiable']}")
+        # Model confidence is NOT correctness evidence (GPT-5.6 finding #6: a 0.95-confident
+        # 'Whitening Tablets' for an antihistamine sailed through the old conf>=0.5 preselect).
+        # Default: NOTHING preselected — a human flips approve per row; --preapprove-conf is an
+        # explicit merchant policy opt-in, never a default.
+        thr = args.preapprove_conf
         approvals = [{"sku": r["sku"], "title": r["title"], "node": r["node"], "path": r["path"],
-                      "conf": r["conf"], "source": r["source"], "approve": r["conf"] >= 0.5}
+                      "conf": r["conf"], "source": r["source"],
+                      "approve": (thr is not None and r["conf"] >= thr)}
                      for r in report["rows"]]
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -119,6 +125,9 @@ def main() -> None:
     c.add_argument("--limit", type=int, default=500)
     c.add_argument("--out", default="tmp/approvals.json")
     c.add_argument("--no-model", action="store_true", help="lexical-only (no LLM calls)")
+    c.add_argument("--preapprove-conf", type=float, default=None,
+                   help="EXPLICIT merchant policy: preselect approve for rows at/above this "
+                        "confidence. Default: nothing preselected (confidence != correctness).")
     c.set_defaults(fn=cmd_classify)
     a = sub.add_parser("approve")
     a.add_argument("--file", required=True)

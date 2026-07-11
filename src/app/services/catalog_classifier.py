@@ -228,7 +228,11 @@ def classify_catalog(db, *, tenant_id: str = "default", llm_fn: Optional[LLMFn] 
     Product text = title + brand + specs keys (whatever exists). Returns a report; the
     approval step (T4) is deliberately separate — nothing here changes what sells."""
     from src.app.services.catalog_read_model import search_variants
-    views = search_variants(db, limit=int(limit or 500), mode=mode)
+    # tenant_id MUST flow into retrieval (GPT-5.6 finding #1, 2026-07-11): without it a
+    # non-default tenant classified the DEFAULT tenant's products and stored the rows under
+    # its own tenant. NOTE the legacy `products` table is tenant-less — single-tenant by
+    # construction; only the canonical path can actually scope. Documented, not hidden.
+    views = search_variants(db, limit=int(limit or 500), mode=mode, tenant_id=tenant_id)
     report: Dict[str, Any] = {"release": PINNED_RELEASE, "total": len(views), "classified": 0,
                               "by_source": {}, "low_confidence": [], "unclassifiable": [],
                               "rows": []}

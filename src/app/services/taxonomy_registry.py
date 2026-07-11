@@ -258,41 +258,85 @@ def add_sold_node(db, *, node_handle: str, source: str = "manual",
         return False
 
 
-def materialize_sold_taxonomy(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> int:
-    """Distinct APPROVED classification nodes → sold_taxonomy (the T4 approval consume step)."""
+def materialize_sold_taxonomy(db, *, tenant_id: str = DEFAULT_TENANT,
+                              commit: bool = True) -> Dict[str, int]:
+    """RECONCILIATION, not accumulation (GPT-5.6 finding #2, 2026-07-11): the
+    classification-derived sold set becomes EXACTLY the distinct nodes of currently-approved
+    classifications — nodes whose products were reclassified/retired are REMOVED, so a stale
+    grant can't keep a category sellable forever. Rows from other sources (manual,
+    merchant_declaration, demo_bootstrap) are preserved untouched; a node covered by BOTH
+    keeps its non-classification source. Returns {added, retired, kept}."""
+    out = {"added": 0, "retired": 0, "kept": 0}
     if db is None:
-        return 0
+        return out
     try:
         ensure_tables(db)
-        rows = db.execute(text(
+        t = str(tenant_id).strip() or DEFAULT_TENANT
+        approved = {str(r[0]) for r in db.execute(text(
             "SELECT DISTINCT node_handle FROM product_classification "
-            "WHERE tenant_id=:t AND status='approved'"),
-            {"t": str(tenant_id).strip() or DEFAULT_TENANT}).fetchall()
-        n = 0
-        for r in rows:
-            if add_sold_node(db, node_handle=str(r[0]), source="classification_approval",
-                             tenant_id=tenant_id):
-                n += 1
+            "WHERE tenant_id=:t AND status='approved'"), {"t": t}).fetchall()}
+        current = {str(r[0]): str(r[1] or "") for r in db.execute(text(
+            "SELECT node_handle, source FROM sold_taxonomy WHERE tenant_id=:t"),
+            {"t": t}).fetchall()}
+        for handle, source in current.items():
+            if source == "classification_approval" and handle not in approved:
+                db.execute(text(
+                    "DELETE FROM sold_taxonomy WHERE tenant_id=:t AND node_handle=:n "
+                    "AND source='classification_approval'"), {"t": t, "n": handle})
+                out["retired"] += 1
+        for handle in sorted(approved):
+            if handle in current:
+                out["kept"] += 1
+            elif add_sold_node(db, node_handle=handle, source="classification_approval",
+                               tenant_id=tenant_id):
+                out["added"] += 1
         if commit:
             db.commit()
-        return n
+        return out
     except Exception:
-        return 0
+        try:
+            db.rollback()  # half-applied reconciliation must not persist
+        except Exception:
+            pass
+        return {"added": 0, "retired": 0, "kept": 0, "error": 1}  # counts must not lie post-rollback
 
 
-def sold_nodes(db, *, tenant_id: str = DEFAULT_TENANT) -> Optional[frozenset]:
-    """The tenant's sold set, or None when it cannot be read / was never bootstrapped."""
+# Grounding statuses (GPT-5.6 finding #3, 2026-07-11): an infrastructure ERROR must be
+# distinguishable from a tenant that was never grounded (EMPTY) — both collapse to None in
+# is_sold/sells_within (never refuse on either), but the V2 router must serve a DEGRADED
+# catalog-verification response on ERROR instead of silently recommending as if healthy.
+GROUNDING_GROUNDED = "grounded"
+GROUNDING_EMPTY = "empty"
+GROUNDING_ERROR = "error"
+
+
+def _sold_set(db, tenant_id: str) -> tuple:
+    """(status, frozenset) — the one place the sold set is read; everything else derives."""
     if db is None:
-        return None
+        return (GROUNDING_ERROR, frozenset())
     try:
         ensure_tables(db)
         rows = db.execute(text(
             "SELECT node_handle FROM sold_taxonomy WHERE tenant_id=:t"),
             {"t": str(tenant_id).strip() or DEFAULT_TENANT}).fetchall()
         handles = frozenset(str(r[0]) for r in rows)
-        return handles if handles else None  # empty = ungrounded tenant, not "sells nothing"
-    except Exception:
-        return None
+        return (GROUNDING_GROUNDED, handles) if handles else (GROUNDING_EMPTY, frozenset())
+    except Exception as exc:
+        logger.warning("sold_taxonomy read FAILED (tenant=%s): %s — grounding=error, callers "
+                       "must degrade, not recommend-as-healthy", tenant_id, repr(exc)[:120])
+        return (GROUNDING_ERROR, frozenset())
+
+
+def grounding_status(db, *, tenant_id: str = DEFAULT_TENANT) -> str:
+    """'grounded' | 'empty' | 'error' — the router's degradation signal."""
+    return _sold_set(db, tenant_id)[0]
+
+
+def sold_nodes(db, *, tenant_id: str = DEFAULT_TENANT) -> Optional[frozenset]:
+    """The tenant's sold set, or None when EMPTY or ERROR (use grounding_status to tell
+    which — the behavioral difference belongs to the caller, the ambiguity must not)."""
+    status, handles = _sold_set(db, str(tenant_id))
+    return handles if status == GROUNDING_GROUNDED else None
 
 
 def is_sold(db, node_handle: str, *, tenant_id: str = DEFAULT_TENANT) -> Optional[bool]:

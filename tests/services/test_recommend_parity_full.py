@@ -102,6 +102,40 @@ def test_summarize_run_gates():
     assert not s["gates_pass"] and s["by_severity"]["BLOCKER"] == 1
 
 
+# ── known_wrong: expected changes must not read as regressions (GPT-5.6 #4) ──
+
+def test_fixing_a_known_wrong_is_not_a_blocker():
+    from src.app.services.recommend_parity_full import evaluate_case
+    v1_bug = _base()                                   # recorded: sells laptops to a forklift ask
+    v2_fix = _base(off_catalog={"class": "material_handling"}, products=[], results=[],
+                   assistant_message="Honest answer: we don't sell forklifts.")
+    expect = {"message_class": "off_catalog", "products_max": 0}
+    cases = [evaluate_case(_base(), _base()) for _ in range(50)]
+    cases.append(evaluate_case(v1_bug, v2_fix, known_wrong_expect=expect))
+    s = summarize_run(cases)
+    assert s["gates_pass"] and s["expected_changes"] == 1 and s["expected_changes_met"] == 1
+    assert s["by_severity"]["BLOCKER"] == 0            # the fix is NOT counted as a regression
+
+
+def test_missed_expectation_fails_the_run():
+    from src.app.services.recommend_parity_full import evaluate_case
+    v2_still_broken = _base()                          # v2 still sells laptops for forklifts
+    cases = [evaluate_case(_base(), _base()) for _ in range(50)]
+    cases.append(evaluate_case(_base(), v2_still_broken,
+                               known_wrong_expect={"message_class": "off_catalog"}))
+    s = summarize_run(cases)
+    assert not s["gates_pass"] and s["expected_changes_met"] == 0
+
+
+def test_expectation_met_vocabulary():
+    from src.app.services.recommend_parity_full import expectation_met
+    honest = _base(off_catalog={"class": "x"}, products=[], results=[])
+    assert expectation_met(honest, {"message_class": "off_catalog", "products_max": 0})
+    assert not expectation_met(honest, {"products_min": 1})
+    assert expectation_met(_base(), {"message_class_in": ["answer"], "nonempty_message": True})
+    assert not expectation_met(_base(assistant_message=""), {"nonempty_message": True})
+
+
 # ── contract validator ────────────────────────────────────────────────────────
 
 def test_validate_response_flags_missing_core_and_honesty():

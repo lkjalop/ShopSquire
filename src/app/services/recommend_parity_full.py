@@ -164,12 +164,47 @@ def diff_responses(v1: Dict[str, Any], v2: Dict[str, Any]) -> Dict[str, Any]:
             "dimensions": dims}
 
 
+def expectation_met(v2: Dict[str, Any], expect: Dict[str, Any]) -> bool:
+    """Machine-checkable known_wrong expectations (GPT-5.6 finding #4: without this, FIXING a
+    recorded bug scores as a BLOCKER regression). Supported assertions:
+      message_class: exact class · message_class_in: [classes] · products_min / products_max:
+      result-count bounds · nonempty_message: assistant_message must carry text."""
+    v2 = v2 or {}
+    n_products = len(v2.get("products") or [])
+    for key, want in (expect or {}).items():
+        if key == "message_class" and message_class(v2) != want:
+            return False
+        if key == "message_class_in" and message_class(v2) not in (want or []):
+            return False
+        if key == "products_min" and n_products < int(want):
+            return False
+        if key == "products_max" and n_products > int(want):
+            return False
+        if key == "nonempty_message" and bool(str(v2.get("assistant_message") or "").strip()) is not bool(want):
+            return False
+    return True
+
+
+def evaluate_case(v1: Dict[str, Any], v2: Dict[str, Any],
+                  known_wrong_expect: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """One corpus case → either a parity diff (normal case) or an expectation verdict
+    (known_wrong case, where v1 is the RECORDED BUG and divergence is the goal)."""
+    if known_wrong_expect:
+        return {"expected_change": True, "expectation_met": expectation_met(v2, known_wrong_expect),
+                "severity": "EXPECTED", "diff": diff_responses(v1, v2)}
+    return {"expected_change": False, **diff_responses(v1, v2)}
+
+
 def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Roll a shadow run's per-request diffs into the promotion-gate scorecard."""
-    n = max(1, len(diffs))
+    """Roll a shadow run's per-case results into the promotion-gate scorecard. Entries from
+    evaluate_case() with expected_change=True are scored on EXPECTATION (did v2 achieve the
+    desired fix?), not parity — and the run cannot pass with an expectation missed."""
+    expected = [d for d in diffs if d.get("expected_change")]
+    parity = [d for d in diffs if not d.get("expected_change")]
+    n = max(1, len(parity))
     by_sev: Dict[str, int] = {"BLOCKER": 0, "MAJOR": 0, "MINOR": 0, "INFO": 0}
     mc_match = ps_ok = gate_match = 0
-    for d in diffs:
+    for d in parity:
         by_sev[d.get("severity", "INFO")] = by_sev.get(d.get("severity", "INFO"), 0) + 1
         dims = d.get("dimensions", {})
         if dims.get("message_class", {}).get("match"):
@@ -179,12 +214,17 @@ def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
             ps_ok += 1
         if dims.get("gates", {}).get("match"):
             gate_match += 1
+    expected_met = sum(1 for d in expected if d.get("expectation_met"))
     return {
         "total": len(diffs),
+        "parity_cases": len(parity),
         "by_severity": by_sev,
         "message_class_match_rate": round(mc_match / n, 4),
         "product_set_ok_rate": round(ps_ok / n, 4),
         "gate_match_rate": round(gate_match / n, 4),
-        # roadmap Phase 5 promotion gates
-        "gates_pass": (by_sev["BLOCKER"] == 0 and mc_match / n >= 0.98 and ps_ok / n >= 0.9),
+        "expected_changes": len(expected),
+        "expected_changes_met": expected_met,
+        # roadmap Phase 5 promotion gates — parity on unchanged cases AND every known_wrong fixed
+        "gates_pass": (by_sev["BLOCKER"] == 0 and mc_match / n >= 0.98 and ps_ok / n >= 0.9
+                       and expected_met == len(expected)),
     }
