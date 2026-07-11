@@ -61,6 +61,17 @@ def test_model_requirements_merge_max():
     assert req["ram_gb"] == (">=", 8.0)                 # KB's 8 beats model's 4 (MAX)
 
 
+def test_op_aware_merge_never_inverts_a_ceiling():
+    # review #2: a shopper's '<=' ceiling must not be maxed into a KB '>=' floor
+    from src.app.services.recommendation_core.intent_resolver import _merge_max
+    assert _merge_max({"ram_gb": (">=", 16.0)}, {"ram_gb": ("<=", 8.0)})["ram_gb"] == ("<=", 8.0)
+    assert _merge_max({"ram_gb": (">=", 8.0)}, {"ram_gb": (">=", 16.0)})["ram_gb"] == (">=", 16.0)
+    assert _merge_max({"ram_gb": ("<=", 16.0)}, {"ram_gb": ("<=", 8.0)})["ram_gb"] == ("<=", 8.0)
+    # end to end: 'nothing over 8GB' on a university turn keeps the ceiling
+    r = resolve(["university"], model_requirements={"ram_gb": ("<=", 8.0)})
+    assert r["requirements"]["ram_gb"] == ("<=", 8.0)
+
+
 def test_empty_and_unknown_are_safe():
     assert resolve([])["requirements"] == {}
     assert resolve(["garbage", "also_garbage"])["use_cases"] == []

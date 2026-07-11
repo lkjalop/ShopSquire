@@ -105,6 +105,28 @@ def test_wrongful_refusal_guard_spec_turns_never_platform_refused(db):
     assert d2.lane == "OFF_CATALOG" and d2.refusal_granted
 
 
+def test_bare_software_purchase_still_refuses(db):
+    """review #4: a BARE purchase ask for unsold software (no capability verb/use-case/reqs)
+    must still get an honest refusal, not a blanket workload-strip to empty device search."""
+    from src.app.services.taxonomy_registry import add_sold_node
+    add_sold_node(db, node_handle="el-6-6")   # sells laptops, NOT software
+    d = route_turn(db, _env("do you sell photoshop licenses"),
+                   llm_fn=_route_stub("OFF_CATALOG", "so-1"))
+    # so-1 stands (no capability signal) → refusal gate grants (software not sold)
+    assert d.node_handle == "so-1" and d.refusal_granted and d.lane == "OFF_CATALOG"
+
+
+def test_budget_number_with_storage_unit_is_kept(db):
+    # review #3: '1TB laptop under $1000' — storage_gb 1000 is a REAL spec, not the price
+    d = route_turn(db, _env("1TB laptop under $1000", budget_max=1000),
+                   llm_fn=_route_stub("SEARCH", "el-6-6", {"storage_gb": [">=", 1000]}))
+    assert d.requirements.get("storage_gb") == (">=", 1000.0)
+    # but a bare budget bleed is still dropped
+    d2 = route_turn(db, _env("laptop under $1500", budget_max=1500),
+                    llm_fn=_route_stub("SEARCH", "el-6-6", {"storage_gb": [">=", 1500]}))
+    assert "storage_gb" not in d2.requirements
+
+
 def test_workload_vertical_node_never_refused(db):
     """GPT-5.6 review-3 #6 (valorant 2/3): the model correctly maps a game to a Software
     (so-*) node; that's a WORKLOAD, not a product gap. Never refuse; drop the content node so

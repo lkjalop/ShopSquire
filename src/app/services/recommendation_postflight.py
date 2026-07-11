@@ -94,8 +94,8 @@ def run_postflight(redis, envelope: TurnEnvelope, core: CoreResponse, *,
     out["session_written"] = write_session(redis, envelope, core)
     try:
         emit_telemetry(envelope, core, latency_ms=latency_ms)
-    except Exception:
-        pass
+    except Exception as exc:   # observable, not silent (no-silent-except ratchet)
+        logger.warning("telemetry emit failed (non-fatal): %s", repr(exc)[:120])
     if narrate and executor is not None and core.products:
         out["narration_job_id"] = _enqueue_narration(redis, envelope, core, executor)
     return out

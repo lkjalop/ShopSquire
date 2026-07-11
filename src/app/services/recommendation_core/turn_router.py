@@ -46,6 +46,23 @@ _ALLOWED_OPS = (">=", "<=", ">", "<", "==")
 # 'me', 'me-…'.
 import re as _re
 _WORKLOAD_RE = _re.compile(r"^(so|me)(-|$)")
+# a capability verb signals 'device to run/use X' (not 'buy X') — the purchase-vs-capability
+# disambiguator for software/media routes (review #4). Small, principled, vertical-blind.
+_CAPABILITY_VERB_RE = _re.compile(
+    r"\b(play|playing|run|running|edit|editing|render|rendering|stream|streaming|"
+    r"develop|development|train|training)\b|\bfor\s+\w", _re.IGNORECASE)
+
+
+def _number_has_size_unit(query: str, value: float) -> bool:
+    """Does the query state `value` next to a storage/memory unit? '1TB'→1000, '1000gb'→1000,
+    '16 gb'→16. Guards the budget-bleed clamp from dropping a GENUINE spec (review #3)."""
+    q = str(query or "").lower()
+    v = int(value) if float(value).is_integer() else value
+    tb = v / 1000 if v >= 1000 else None   # 1000 GB expressed as '1tb'
+    pats = [rf"\b{v}\s*(gb|tb|g|t)\b"]
+    if tb and float(tb).is_integer():
+        pats.append(rf"\b{int(tb)}\s*tb\b")
+    return any(_re.search(p, q) for p in pats)
 
 
 def _router_model() -> str:
@@ -203,11 +220,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             continue
         if d.bounds and not (d.bounds[0] <= float(thr) <= d.bounds[1]):
             continue
-        # BUDGET-BLEED GUARD (belt-and-suspenders to the prompt fix): drop a requirement whose
-        # value equals the stated budget dollar amount — that's a mis-parsed price, not a spec.
+        # BUDGET-BLEED GUARD (belt-and-suspenders to the prompt fix): drop a spec whose value
+        # equals the budget dollars — UNLESS the query actually states that number WITH a
+        # storage/memory unit (review #3: '1TB laptop under $1000' → storage_gb 1000 is REAL,
+        # not the price). Only drop the mis-parse, never a genuine explicit spec.
         budget_dollars = {c // 100 for c in (envelope.budget_min_cents, envelope.budget_max_cents)
                           if c is not None}
-        if float(thr) in budget_dollars and d.key in ("storage_gb", "ram_gb"):
+        if (float(thr) in budget_dollars and d.key in ("storage_gb", "ram_gb")
+                and not _number_has_size_unit(envelope.query, thr)):
             continue
         requirements[d.key] = (op, float(thr))
     # clamp 3b: use_cases — clamp each to a real KB key (normalize aliases; drop unknowns)
@@ -240,10 +260,18 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # use-case signal: never refuse, drop the content node so retrieval does DEVICE search,
     # keep the implied requirements (refresh_hz>=144). Vertical-blind: a forklift (bi) is NOT
     # a workload vertical and stays correctly refusable.
+    # CAPABILITY SIGNAL (review #4): only treat a software/media route as a WORKLOAD (device to
+    # run it) when the shopper expressed a capability — a use-case, extracted requirements, or a
+    # capability verb ('play/run/for/edit/render/stream/develop/train'). A BARE purchase ask
+    # ('do you sell Photoshop licenses?', 'do you stock PS5 games?') has none of these, so the
+    # software node STANDS and the refusal gate answers honestly ('we don't stock that + RFQ').
     if node is not None and _WORKLOAD_RE.match(node.handle):
-        node = None
-        if lane == "OFF_CATALOG":
-            lane = "SEARCH"
+        capability = bool(requirements) or bool(use_cases) or _CAPABILITY_VERB_RE.search(envelope.query)
+        if capability:
+            node = None
+            if lane == "OFF_CATALOG":
+                lane = "SEARCH"
+        # else: leave the software/media node in place → refusal gate decides honestly
 
     model_proposed_refusal = (lane == "OFF_CATALOG")
     refusal_granted = False

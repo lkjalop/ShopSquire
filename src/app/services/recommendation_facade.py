@@ -138,14 +138,17 @@ def dispatch_recommendation_core(
         return None
     tenant = tenant_id or "default"
 
-    # IMAGE turns → legacy (GPT-5.6 review-3 #5c22575.2): the image lane (quarantine, CV,
-    # vision identity) is not core-served yet; a text lane carrying an image must NOT be
-    # core-served either. Exclude BEFORE routing.
-    if image_labels or image_hash:
-        return None
-
+    # SHADOW enqueues EVERY turn (review #8): the shadow corpus must include image turns —
+    # excluding them here would overstate coverage when the image lane is later core-enabled.
+    # Enqueue is offline-diff only; it never serves.
     if mode == "shadow":
         _enqueue_shadow(redis, query=query, uid=uid, tenant_id=tenant, trace_id=trace_id)
+        return None
+
+    # IMAGE turns → legacy (review-3 #5c22575.2): the image lane (quarantine, CV, vision
+    # identity) is not core-SERVED yet; a text lane carrying an image must not be either.
+    # Excluded from SERVING (below), not from shadow (above).
+    if image_labels or image_hash:
         return None
     # canary bucket on tenant:uid (GPT-5.6 #5c22575.4) — same user in different tenants can
     # legitimately land different sides; anon users bucket by tenant.
@@ -179,6 +182,14 @@ def dispatch_recommendation_core(
         # ── LANE GATE (finding #6): non-core lanes fall through to legacy ───────
         if core.lane not in CANARY_LANES:
             logger.debug("core lane %s not canary-eligible — falling through to legacy", core.lane)
+            return None
+
+        # DEGRADED → legacy (review #5): a core turn that couldn't verify the catalog
+        # (grounding error / retrieval failure) must NOT serve a 'try again' apology to a
+        # canary buyer while a healthy legacy sits one return away. Honest degradation only
+        # falls back when it produced nothing — an off-catalog refusal is a real answer, keep it.
+        if core.grounding == "error" or (core.degraded and not core.products and not core.off_catalog):
+            logger.info("core degraded (grounding=%s) — falling through to legacy", core.grounding)
             return None
 
         # ── SHARED POSTFLIGHT (roadmap item 1): session writeback + telemetry ──

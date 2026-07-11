@@ -89,8 +89,22 @@ def _merge_max(a: Dict[str, Tuple[str, float]],
     for k, (op, thr) in b.items():
         if k not in out:
             out[k] = (op, thr)
+            continue
+        cur_op, cur_thr = out[k]
+        # OP-AWARE MERGE (review #2): '>=' floors take the HIGHER, '<=' ceilings take the
+        # LOWER. A floor+ceiling CONFLICT on one key ('nothing over 8GB' vs KB floor 16) can't
+        # be held in one (op,thr) slot — the INCOMING (b, which is the caller's later/more
+        # explicit source: model-stated reqs merge LAST) wins, so a shopper's stated ceiling
+        # is never silently inverted into a KB floor.
+        if op == cur_op:
+            if op in (">=", ">"):
+                out[k] = (op, max(cur_thr, thr))
+            elif op in ("<=", "<"):
+                out[k] = (op, min(cur_thr, thr))
+            else:  # ==
+                out[k] = (op, thr)
         else:
-            out[k] = (op, max(out[k][1], thr))   # same op family (all >=); take the higher floor
+            out[k] = (op, thr)   # op families differ → the incoming (explicit) constraint wins
     return out
 
 

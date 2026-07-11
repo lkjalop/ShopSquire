@@ -90,7 +90,12 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
             bundle.errors.append(f"taxonomy_lookup:{type(exc).__name__}")
     if variants:
         bundle.retrieval_mode = f"taxonomy:{node_handle}"
-    elif not bundle.errors:
+    else:
+        # TEXT FALLBACK always attempted (review #1): a taxonomy-leg ERROR must still fall
+        # through to text search — the old code did, and dropping it turned a transient
+        # product_classification blip into a buyer-visible 'couldn't verify catalog'. The
+        # taxonomy error is recorded either way; the turn only DEGRADES if BOTH legs fail.
+        text_errored = False
         try:
             variants = search_variants(
                 db, text_query=None if broad else (text_query or envelope.query or None),
@@ -99,7 +104,11 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
         except Exception as exc:
             _log.warning("text retrieval FAILED (tenant=%s): %s", tenant, repr(exc)[:120])
             bundle.errors.append(f"text_retrieval:{type(exc).__name__}")
+            text_errored = True
             variants = []
+        # a taxonomy error that the text leg RECOVERED from is no longer a turn error
+        if variants and not text_errored:
+            bundle.errors = [e for e in bundle.errors if not e.startswith("taxonomy_lookup")]
     if not bundle.retrieval_mode.startswith("taxonomy:"):
         bundle.retrieval_mode = mode or "default"
     bundle.total_before_budget = len(variants)
