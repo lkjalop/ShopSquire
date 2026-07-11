@@ -94,13 +94,56 @@ def _merge_max(a: Dict[str, Tuple[str, float]],
     return out
 
 
+def _legacy_min_to_fit(reqs: Dict[str, Any]) -> Dict[str, Tuple[str, float]]:
+    """Convert legacy match_game/software_requirements → fit requirements, using the MINIMUM
+    floors for retrieval (the min-vs-recommended P0 lesson: recommended floors zero the
+    catalog; recommended drives the fit VERDICT, not elimination)."""
+    out: Dict[str, Tuple[str, float]] = {}
+    if reqs.get("min_ram_gb"):
+        out["ram_gb"] = (">=", float(reqs["min_ram_gb"]))
+    if reqs.get("min_gpu_vram_gb"):
+        out["gpu_vram_gb"] = (">=", float(reqs["min_gpu_vram_gb"]))
+    if reqs.get("min_refresh_hz") and reqs["min_refresh_hz"] > 60:
+        out["refresh_hz"] = (">=", float(reqs["min_refresh_hz"]))
+    return out
+
+
+def _salvage_title_requirements(query: str) -> Dict[str, Any]:
+    """SALVAGE the proven legacy per-title requirement DBs (Steam-backed games + software
+    specs). 'valorant' gets valorant's floors, not the generic gaming profile — the
+    requirements-grounded loop, done by reuse. Recommended floors captured for the lagginess
+    verdict. Best-effort; the KB use-case profiles are the fallback."""
+    out: Dict[str, Any] = {"requirements": {}, "trace": {}}
+    try:
+        from src.app.flows.nqe import detect_games_in_text, detect_software_in_text
+        from src.app.services.use_case_advisor import (match_game_requirements,
+                                                       match_software_requirements)
+        games = detect_games_in_text(query or "")
+        software = detect_software_in_text(query or "")
+        if games:
+            gr = match_game_requirements(games)
+            out["requirements"] = _merge_max(out["requirements"], _legacy_min_to_fit(gr))
+            out["trace"]["games"] = {"matched": gr.get("games_matched", []), "tier": gr.get("tier"),
+                                     "recommended_ram_gb": gr.get("recommended_ram_gb"),
+                                     "recommended_gpu_vram_gb": gr.get("recommended_gpu_vram_gb")}
+        if software:
+            sr = match_software_requirements(software)
+            out["requirements"] = _merge_max(out["requirements"], _legacy_min_to_fit(sr))
+            out["trace"]["software"] = {"matched": sr.get("software_matched", []),
+                                        "recommended_ram_gb": sr.get("recommended_ram_gb"),
+                                        "recommended_gpu_vram_gb": sr.get("recommended_gpu_vram_gb")}
+    except Exception as exc:
+        logger.debug("title-requirements salvage skipped: %s", repr(exc)[:100])
+    return out
+
+
 def resolve(use_cases: Optional[List[str]],
-            model_requirements: Optional[Dict[str, Tuple[str, float]]] = None
-            ) -> Dict[str, Any]:
+            model_requirements: Optional[Dict[str, Tuple[str, float]]] = None,
+            query: Optional[str] = None) -> Dict[str, Any]:
     """The resolver. Returns:
-      requirements  — merged (KB profiles ∪ model-stated) by MAX; the fit stage consumes it.
+      requirements  — merged (KB profiles ∪ per-title game/software ∪ model-stated) by MAX.
       use_cases     — the resolved (normalized, real) use-case keys.
-      profile_trace — per-use-case requirement contribution (for the 'Why Recommended' tab).
+      profile_trace — per-use-case + per-title requirement contribution ('Why Recommended').
       persona_hint  — the primary use-case's nqe_persona (drives the use-case-specific clarify).
     Multi-intent falls out naturally: pass ['gaming','creative'] → the union by MAX."""
     resolved: List[str] = []
@@ -116,6 +159,10 @@ def resolve(use_cases: Optional[List[str]],
         profile_trace[uc] = {"requirements": {k: [op, thr] for k, (op, thr) in prof.items()},
                              "label": ((_kb().get("use_cases") or {}).get(uc) or {}).get("label", uc)}
         merged = _merge_max(merged, prof)
+    # SALVAGE: per-title (game/software) requirements from the proven legacy DBs, MAX-merged
+    title = _salvage_title_requirements(query) if query else {"requirements": {}, "trace": {}}
+    if title["requirements"]:
+        merged = _merge_max(merged, title["requirements"])
     # the model's explicitly-stated requirements ('144fps') merge in, MAX again
     if model_requirements:
         merged = _merge_max(merged, dict(model_requirements))
@@ -125,4 +172,5 @@ def resolve(use_cases: Optional[List[str]],
         persona_hint = ((_kb().get("use_cases") or {}).get(resolved[0]) or {}).get("nqe_persona")
 
     return {"requirements": merged, "use_cases": resolved,
-            "profile_trace": profile_trace, "persona_hint": persona_hint}
+            "profile_trace": profile_trace, "title_requirements": title["trace"],
+            "persona_hint": persona_hint}

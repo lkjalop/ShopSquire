@@ -52,7 +52,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # the hardware requirements and merges them (by MAX) with any the shopper stated explicitly.
     # This is what makes a CS student differ from an english major and 'for AutoCAD' carry real
     # floors — all from DATA, no new decision surface. Zero added latency (folded into routing).
-    intent = resolve_intent(list(decision.use_cases), dict(decision.requirements))
+    intent = resolve_intent(list(decision.use_cases), dict(decision.requirements),
+                            query=envelope.query)
     decision = dataclasses.replace(decision, requirements=intent["requirements"])
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
@@ -62,6 +63,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # the resolver's reasoning, surfaced for the 'Why Recommended' decision-trace tab
     resp.extras["intent"] = {"use_cases": intent["use_cases"],
                              "profiles": intent["profile_trace"],
+                             "title_requirements": intent.get("title_requirements") or {},
                              "persona_hint": intent["persona_hint"]}
     resp.extras["constraints_used"] = {
         "budget_min_cents": envelope.budget_min_cents,
