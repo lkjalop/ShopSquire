@@ -59,11 +59,18 @@ def build_index(*, path: Optional[Path] = None, batch: int = _BATCH) -> Optional
     nodes = _nodes()
     handles = sorted(nodes)
     vectors: List[List[float]] = []
+    import time
     for i in range(0, len(handles), batch):
         chunk = [nodes[h].full_path for h in handles[i:i + batch]]
-        got = _embed(chunk)
+        got = None
+        for attempt in range(3):  # Ollama's embed runner can get evicted under GPU pressure
+            got = _embed(chunk)   # mid-build (observed at 9,984/14,606) — retry with backoff
+            if got is not None:
+                break
+            time.sleep(5 * (attempt + 1))
         if got is None:
-            logger.error("index build aborted at %d/%d — embedder unavailable", i, len(handles))
+            logger.error("index build aborted at %d/%d — embedder unavailable after retries",
+                         i, len(handles))
             return None
         vectors.extend(got)
     arr = np.asarray(vectors, dtype="float32")
