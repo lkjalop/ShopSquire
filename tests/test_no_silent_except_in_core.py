@@ -35,6 +35,22 @@ _BASELINE = {
     # safe_stage's two inner guards (payload-merge + the trace sink) ARE the recorder — the one
     # place silence is legitimate.
     "src/app/services/safe_stage.py": 2,
+    # V2 recommendation_core — ENROLLED 2026-07-12 at 0 (all clean): the greenfield replacement
+    # for suggest() is now under the ratchet from the start, so it can NEVER accrue the legacy
+    # 183-swallow debt. Every degradation in these modules is logged (record_partial_failure /
+    # logger.warning), never a bare except: pass.
+    "src/app/services/recommendation_core/core.py": 0,
+    "src/app/services/recommendation_core/evidence.py": 0,
+    "src/app/services/recommendation_core/fit.py": 0,
+    "src/app/services/recommendation_core/gates.py": 0,
+    "src/app/services/recommendation_core/plan.py": 0,
+    "src/app/services/recommendation_core/ranking.py": 0,
+    "src/app/services/recommendation_core/envelope.py": 0,
+    "src/app/services/recommendation_core/legacy_adapter.py": 0,
+    "src/app/services/recommendation_core/intent_resolver.py": 0,
+    "src/app/services/recommendation_core/turn_router.py": 0,
+    "src/app/services/recommendation_facade.py": 0,
+    "src/app/services/recommendation_postflight.py": 0,
     # extracted/owned core modules — kept tight so new silent swallows can't sneak in.
     "src/app/services/recommend_utils.py": 2,
     "src/app/services/recommend_budget_advisor.py": 6,

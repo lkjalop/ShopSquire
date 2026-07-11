@@ -27,6 +27,18 @@ import pytest
 
 # Modules that are CORE (agnostic mechanism) and must contain zero laptop flavour.
 _CORE_MODULES = [
+    # V2 recommendation_core — ENROLLED 2026-07-12 while flavour-clean (vertical-blind
+    # mechanisms: typed envelope/adapter, retrieval, ranking, gates, plan, side-effects). The
+    # remaining V2 modules (intent_resolver, turn_router, core, fit, envelope) carry electronics
+    # spec-key tokens (refresh_hz in _SPEC_MAP, 'valorant' example comments) and enroll after the
+    # KB→attribute mapping moves to data — tracked in v2-code-review-findings-2026-07-12.
+    "src/app/services/recommendation_core/evidence.py",
+    "src/app/services/recommendation_core/gates.py",
+    "src/app/services/recommendation_core/plan.py",
+    "src/app/services/recommendation_core/ranking.py",
+    "src/app/services/recommendation_core/legacy_adapter.py",
+    "src/app/services/recommendation_facade.py",
+    "src/app/services/recommendation_postflight.py",
     # GRADUATED 2026-07-07 (baseline 4 -> 0): capability classes/verdicts, persona labels, spec-strength
     # tokens, brand fallbacks, budget-floor hints and step-up spec all moved to StoreProfile slots —
     # the advisor now reads named fields + profile vocabulary only.
