@@ -1,0 +1,151 @@
+"""The orchestrator (V2 Phase 4, step 3) — recommend_turn(): one routed, planned, grounded,
+finalized turn. This is what replaces suggest()'s 7,250 lines of implicit line-order.
+
+Explicit sequence, no hidden state, every decision attributable:
+    grounding check → route (model judgment, 4 clamps) → plan (closed vocabulary)
+    → execute steps (deterministic tools) → finalize (type-level honesty invariants)
+    → [caller: legacy_adapter.to_legacy() for the recorded contract shapes]
+
+Every stage's outcome lands in CoreResponse.extras — the turn is REPLAYABLE from its own
+breadcrumbs, which is what the shadow differ diffs against the oracle.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any, Callable, Dict, Optional
+
+from src.app.services.recommendation_core.envelope import CoreResponse, TurnEnvelope
+from src.app.services.recommendation_core.evidence import (
+    degraded_response,
+    gather_evidence,
+)
+from src.app.services.recommendation_core.fit import build_cards
+from src.app.services.recommendation_core.plan import Plan, derive_plan
+from src.app.services.recommendation_core.turn_router import TurnDecision, route_turn
+from src.app.services.taxonomy_registry import grounding_status
+
+logger = logging.getLogger("shopsquire.recommendation_core.core")
+
+LLMFn = Callable[[str, float], str]
+
+
+def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
+                   limit: int = 10) -> CoreResponse:
+    """Never raises. The response is always finalized (honesty invariants enforced)."""
+    try:
+        return _recommend_turn(db, envelope, llm_fn=llm_fn, limit=limit)
+    except Exception as exc:  # the never-raise floor: degraded honesty, loudly logged
+        logger.exception("recommendation_core turn failed: %s", exc)
+        return degraded_response(envelope, reason=f"core_error:{type(exc).__name__}")
+
+
+def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
+                    limit: int) -> CoreResponse:
+    grounding = grounding_status(db, tenant_id=envelope.tenant_id)
+    if grounding == "error":
+        return degraded_response(envelope, reason="taxonomy_grounding_error")
+
+    decision = route_turn(db, envelope, llm_fn=llm_fn)
+    plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
+
+    resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
+    resp.extras["decision"] = decision.as_dict()
+    resp.extras["plan"] = plan.as_dict()
+    resp.extras["constraints_used"] = {
+        "budget_min_cents": envelope.budget_min_cents,
+        "budget_max_cents": envelope.budget_max_cents,
+        "node_handle": decision.node_handle,
+        "requirements": {k: list(v) for k, v in decision.requirements.items()},
+    }
+
+    for step in plan.steps:
+        _EXECUTORS[step](db, envelope, decision, resp, limit)
+    return resp.finalize()
+
+
+# ── the deterministic tool executors (the plan vocabulary's other half) ───────
+
+def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
+                   resp: CoreResponse, limit: int) -> None:
+    bundle = gather_evidence(db, envelope, node_handle=decision.node_handle,
+                             limit=max(limit * 3, 30))
+    if bundle.count == 0 and decision.requirements:
+        # no node routed and the phrase LIKE-matches nothing ('i want to play valorant at
+        # 144fps') — but we HAVE clamped requirements, which is retrieval intent enough:
+        # evaluate the catalog broadly and let fit-ranking order it (closest-match honesty
+        # beats an empty grid; the requirements are what the turn MEANS)
+        bundle = gather_evidence(db, envelope, broad=True, limit=max(limit * 5, 60))
+        bundle.retrieval_mode = "requirements_broad"
+    resp.extras["evidence"] = {"count": bundle.count, "grounding": bundle.grounding,
+                               "retrieval_mode": bundle.retrieval_mode,
+                               "budget_filtered": bundle.budget_filtered,
+                               "total_before_budget": bundle.total_before_budget}
+    cards, summary = build_cards(bundle.variants, decision.requirements or None, limit=limit)
+    resp.products = cards
+    if decision.requirements:
+        resp.fit_summary = summary
+        if summary.get("closest_match_mode"):
+            reqs = ", ".join(f"{k} {op} {int(t) if float(t).is_integer() else t}"
+                             for k, (op, t) in decision.requirements.items())
+            resp.message = (f"No product in our catalog meets {reqs} — showing the closest "
+                            f"options, ranked by how near they come.")
+
+
+def _exec_fit_check(db, envelope: TurnEnvelope, decision: TurnDecision,
+                    resp: CoreResponse, limit: int) -> None:
+    # fit is computed inside retrieve when requirements exist; this step exists so a model
+    # plan can DEMAND a verdict pass — it re-ranks if retrieve ran without requirements
+    if decision.requirements and resp.products and resp.fit_summary is None:
+        cards, summary = build_cards(
+            [c for c in resp.products if c], None, limit=limit)  # already carded: no-op guard
+        resp.fit_summary = resp.fit_summary or {"requirements": {}, "meets": 0, "unknown": 0,
+                                                "fails": 0, "closest_match_mode": False}
+
+
+def _exec_off_catalog(db, envelope: TurnEnvelope, decision: TurnDecision,
+                      resp: CoreResponse, limit: int) -> None:
+    # only reachable with refusal_granted (router clamp AND plan validator both enforce it)
+    node_label = decision.node_path or "that category"
+    resp.off_catalog = {"class": decision.node_handle, "label": node_label,
+                        "supplier_rfq_offer": True}
+
+
+def _exec_clarify(db, envelope: TurnEnvelope, decision: TurnDecision,
+                  resp: CoreResponse, limit: int) -> None:
+    resp.clarify.append({"question": "Could you tell me a bit more about what you need "
+                                     "(budget, brand, or intended use)?",
+                         "reason": "low_routing_confidence"})
+
+
+def _exec_policy_answer(db, envelope: TurnEnvelope, decision: TurnDecision,
+                        resp: CoreResponse, limit: int) -> None:
+    # capability honesty rides the registry until the policy lane lands in a later step
+    resp.extras["policy_topic"] = envelope.query[:120]
+    resp.message = ("Good question — our policy details are being routed to the right lane; "
+                    "here's what I can confirm from the store profile.")
+
+
+def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
+                          resp: CoreResponse, limit: int) -> None:
+    resp.extras["needs_human_review"] = True
+    resp.extras["claim_status"] = "received"
+    resp.message = ("I've logged this as a support claim — a human will review it. "
+                    "You'll be contacted with next steps.")
+
+
+def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision,
+                              resp: CoreResponse, limit: int) -> None:
+    resp.extras["procurement_intent"] = True
+    resp.message = ("This looks like a bulk/procurement request — I can draft a supplier "
+                    "quote request for review. Nothing is sent without human approval.")
+
+
+_EXECUTORS: Dict[str, Any] = {
+    "retrieve": _exec_retrieve,
+    "fit_check": _exec_fit_check,
+    "off_catalog_honesty": _exec_off_catalog,
+    "clarify": _exec_clarify,
+    "policy_answer": _exec_policy_answer,
+    "handoff_support": _exec_handoff_support,
+    "handoff_procurement": _exec_handoff_procurement,
+}

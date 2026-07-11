@@ -36,21 +36,52 @@ class EvidenceBundle:
         return len(self.variants)
 
 
-def gather_evidence(db, envelope: TurnEnvelope, *, text_query: Optional[str] = None,
-                    category: Optional[str] = None, product_type: Optional[str] = None,
-                    limit: int = 50, mode: Optional[str] = None) -> EvidenceBundle:
+def _skus_for_node(db, node_handle: str, tenant_id: str, limit: int) -> List[str]:
+    """SKUs classified into the node's SUBTREE (product_classification is the retrieval
+    index — this is what per-product taxonomy truth is FOR)."""
+    try:
+        from sqlalchemy import text as _sql
+        rows = db.execute(_sql(
+            "SELECT sku FROM product_classification WHERE tenant_id=:t "
+            "AND (node_handle = :h OR node_handle LIKE :hp) LIMIT :lim"),
+            {"t": tenant_id, "h": node_handle, "hp": node_handle + "-%",
+             "lim": max(1, int(limit))}).fetchall()
+        return [str(r[0]) for r in rows]
+    except Exception:
+        return []
+
+
+def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = None,
+                    text_query: Optional[str] = None, category: Optional[str] = None,
+                    product_type: Optional[str] = None, limit: int = 50,
+                    mode: Optional[str] = None, broad: bool = False) -> EvidenceBundle:
     """Facade-only retrieval, tenant-scoped, budget applied in CENTS at the evidence edge
-    (one budget surface — never re-parsed downstream). Never raises; an empty bundle with
-    grounding='error' is the failure shape."""
+    (one budget surface — never re-parsed downstream). PRIMARY key: the routed TAXONOMY NODE
+    (subtree lookup over product_classification — the phrase 'a laptop with A100-like
+    performance' retrieves by el-6-6 membership, not by LIKE-matching marketing prose);
+    text search is the fallback when no node routed or the node is empty. Never raises;
+    an empty bundle with grounding='error' is the failure shape."""
     tenant = envelope.tenant_id
     bundle = EvidenceBundle(tenant_id=tenant, grounding=grounding_status(db, tenant_id=tenant))
-    try:
-        variants = search_variants(
-            db, text_query=text_query or (envelope.query or None), category=category,
-            product_type=product_type, limit=limit, tenant_id=tenant, mode=mode)
-    except Exception:
-        variants = []
-    bundle.retrieval_mode = mode or "default"
+    variants: List[VariantView] = []
+    if node_handle:
+        from src.app.services.catalog_read_model import get_variant
+        for sku in _skus_for_node(db, node_handle, tenant, limit):
+            v = get_variant(db, sku, tenant_id=tenant, mode=mode)
+            if v is not None and v.active:
+                variants.append(v)
+    if variants:
+        bundle.retrieval_mode = f"taxonomy:{node_handle}"
+    else:
+        try:
+            variants = search_variants(
+                db, text_query=None if broad else (text_query or envelope.query or None),
+                category=category, product_type=product_type, limit=limit,
+                tenant_id=tenant, mode=mode)
+        except Exception:
+            variants = []
+    if not bundle.retrieval_mode.startswith("taxonomy:"):
+        bundle.retrieval_mode = mode or "default"
     bundle.total_before_budget = len(variants)
     lo, hi = envelope.budget_min_cents, envelope.budget_max_cents
     if lo is not None or hi is not None:
