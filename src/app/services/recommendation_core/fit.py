@@ -48,8 +48,12 @@ def build_cards(variants: List[VariantView],
                 limit: int = 10) -> Tuple[List[ProductCard], Dict[str, Any]]:
     """(ranked cards, fit_summary). With no requirements: price-ranked cards, no verdicts.
     With requirements: tri-state per variant, honest ordering, closest-match when dry."""
+    from src.app.services.recommendation_core.ranking import rank as _rank
     defs = defs or defs_union(DEFAULT_VERTICALS)
-    scored: List[Tuple[int, int, int, ProductCard]] = []
+    # retrieval_order = the SKU order the evidence stage handed us (relevance signal for the
+    # ranker's stage 4); the ranker owns ORDERING, this stage owns VERDICTS.
+    retrieval_order = [v.sku for v in variants]
+    built: List[ProductCard] = []
     counts = {"meets": 0, "unknown": 0, "fails": 0}
     for v in variants:
         attrs = variant_attributes(v, defs)
@@ -60,7 +64,7 @@ def build_cards(variants: List[VariantView],
             verdict = evaluate_requirements(attrs, requirements)
             card.fit = verdict
             overall = verdict["overall"]
-            counts[{"meets": "meets", "unknown": "unknown", "fails": "fails"}[overall]] += 1
+            counts[overall] += 1
             failed = [k for k, val in verdict["per_key"].items() if val is False]
             if overall == "meets":
                 card.why.append(f"meets all {len(requirements)} requirements")
@@ -68,12 +72,8 @@ def build_cards(variants: List[VariantView],
                 card.why.append("unverified: " + ", ".join(verdict["unknown_keys"]))
             else:
                 card.why.append("below requirement: " + ", ".join(failed))
-            rank_group = {"meets": 0, "unknown": 1, "fails": 2}[overall]
-            scored.append((rank_group, len(failed), card.price_cents or 0, card))
-        else:
-            scored.append((0, 0, card.price_cents or 0, card))
-    scored.sort(key=lambda t: (t[0], t[1], t[2], t[3].sku))
-    cards = [c for _, _, _, c in scored[: max(1, int(limit))]]
+        built.append(card)
+    cards = _rank(built, retrieval_order=retrieval_order, limit=limit)
     summary: Dict[str, Any] = {
         "requirements": {k: f"{op} {thr}" for k, (op, thr) in (requirements or {}).items()},
         **counts,
