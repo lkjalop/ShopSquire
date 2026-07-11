@@ -24,14 +24,36 @@
       ],
       "budget_floor": 900,
       "budget_tiers": {
-        "entry": [900, 1300],
-        "mid": [1300, 1800],
-        "high": [1800, 2500],
-        "ultra": [2500, null]
+        "entry": [
+          900,
+          1300
+        ],
+        "mid": [
+          1300,
+          1800
+        ],
+        "high": [
+          1800,
+          2500
+        ],
+        "ultra": [
+          2500,
+          null
+        ]
       },
-      "emphasize_specs": ["gpu_model", "refresh_hz", "ram_gb"],
-      "nqe_must_ask": ["gpu_preference", "target_games", "budget"],
-      "nqe_skip": ["battery_priority"]
+      "emphasize_specs": [
+        "gpu_model",
+        "refresh_hz",
+        "ram_gb"
+      ],
+      "nqe_must_ask": [
+        "gpu_preference",
+        "target_games",
+        "budget"
+      ],
+      "nqe_skip": [
+        "battery_priority"
+      ]
     },
     "university": {
       "label": "University / Student",
@@ -50,14 +72,36 @@
       "exclusion_rules": [],
       "budget_floor": 400,
       "budget_tiers": {
-        "entry": [400, 700],
-        "mid": [700, 1100],
-        "high": [1100, 1600],
-        "ultra": [1600, null]
+        "entry": [
+          400,
+          700
+        ],
+        "mid": [
+          700,
+          1100
+        ],
+        "high": [
+          1100,
+          1600
+        ],
+        "ultra": [
+          1600,
+          null
+        ]
       },
-      "emphasize_specs": ["battery_hr", "weight_kg", "ram_gb"],
-      "nqe_must_ask": ["university_subject", "budget", "portability_priority"],
-      "nqe_skip": ["gpu_preference"]
+      "emphasize_specs": [
+        "battery_hr",
+        "weight_kg",
+        "ram_gb"
+      ],
+      "nqe_must_ask": [
+        "university_subject",
+        "budget",
+        "portability_priority"
+      ],
+      "nqe_skip": [
+        "gpu_preference"
+      ]
     },
     "engineering_student": {
       "label": "Engineering / Architecture Student",
@@ -78,14 +122,36 @@
       ],
       "budget_floor": 1000,
       "budget_tiers": {
-        "entry": [1000, 1500],
-        "mid": [1500, 2200],
-        "high": [2200, 3500],
-        "ultra": [3500, null]
+        "entry": [
+          1000,
+          1500
+        ],
+        "mid": [
+          1500,
+          2200
+        ],
+        "high": [
+          2200,
+          3500
+        ],
+        "ultra": [
+          3500,
+          null
+        ]
       },
-      "emphasize_specs": ["gpu_model", "ram_gb", "display_color_accuracy"],
-      "nqe_must_ask": ["software_requirements", "budget", "gpu_preference"],
-      "nqe_skip": ["gaming_depth"]
+      "emphasize_specs": [
+        "gpu_model",
+        "ram_gb",
+        "display_color_accuracy"
+      ],
+      "nqe_must_ask": [
+        "software_requirements",
+        "budget",
+        "gpu_preference"
+      ],
+      "nqe_skip": [
+        "gaming_depth"
+      ]
     },
     "creative": {
       "label": "Content Creator / Video Editor",
@@ -104,13 +170,34 @@
       "exclusion_rules": [],
       "budget_floor": 1100,
       "budget_tiers": {
-        "entry": [1100, 1600],
-        "mid": [1600, 2200],
-        "high": [2200, 3500],
-        "ultra": [3500, null]
+        "entry": [
+          1100,
+          1600
+        ],
+        "mid": [
+          1600,
+          2200
+        ],
+        "high": [
+          2200,
+          3500
+        ],
+        "ultra": [
+          3500,
+          null
+        ]
       },
-      "emphasize_specs": ["gpu_model", "display_color_accuracy", "ram_gb", "storage_gb"],
-      "nqe_must_ask": ["video_resolution", "software_requirements", "budget"],
+      "emphasize_specs": [
+        "gpu_model",
+        "display_color_accuracy",
+        "ram_gb",
+        "storage_gb"
+      ],
+      "nqe_must_ask": [
+        "video_resolution",
+        "software_requirements",
+        "budget"
+      ],
       "nqe_skip": []
     },
     "corporate": {
@@ -135,14 +222,37 @@
       ],
       "budget_floor": 600,
       "budget_tiers": {
-        "entry": [600, 1000],
-        "mid": [1000, 1500],
-        "high": [1500, 2500],
-        "ultra": [2500, null]
+        "entry": [
+          600,
+          1000
+        ],
+        "mid": [
+          1000,
+          1500
+        ],
+        "high": [
+          1500,
+          2500
+        ],
+        "ultra": [
+          2500,
+          null
+        ]
       },
-      "emphasize_specs": ["battery_hr", "weight_kg", "security_features"],
-      "nqe_must_ask": ["work_type", "it_management", "portability_priority"],
-      "nqe_skip": ["gaming_depth", "gpu_preference"]
+      "emphasize_specs": [
+        "battery_hr",
+        "weight_kg",
+        "security_features"
+      ],
+      "nqe_must_ask": [
+        "work_type",
+        "it_management",
+        "portability_priority"
+      ],
+      "nqe_skip": [
+        "gaming_depth",
+        "gpu_preference"
+      ]
     },
     "calls_productivity": {
       "label": "Calls / Video Conferencing / Productivity",
@@ -162,14 +272,37 @@
       "exclusion_rules": [],
       "budget_floor": 400,
       "budget_tiers": {
-        "entry": [400, 700],
-        "mid": [700, 1100],
-        "high": [1100, 1600],
-        "ultra": [1600, null]
+        "entry": [
+          400,
+          700
+        ],
+        "mid": [
+          700,
+          1100
+        ],
+        "high": [
+          1100,
+          1600
+        ],
+        "ultra": [
+          1600,
+          null
+        ]
       },
-      "emphasize_specs": ["webcam_quality", "battery_hr", "microphone"],
-      "nqe_must_ask": ["call_frequency", "budget", "home_office_vs_travel"],
-      "nqe_skip": ["gpu_preference", "gaming_depth"]
+      "emphasize_specs": [
+        "webcam_quality",
+        "battery_hr",
+        "microphone"
+      ],
+      "nqe_must_ask": [
+        "call_frequency",
+        "budget",
+        "home_office_vs_travel"
+      ],
+      "nqe_skip": [
+        "gpu_preference",
+        "gaming_depth"
+      ]
     },
     "ai_ml_workstation": {
       "label": "AI / ML / Data Science Workstation",
@@ -192,14 +325,118 @@
       ],
       "budget_floor": 1500,
       "budget_tiers": {
-        "entry": [1500, 2000],
-        "mid": [2000, 3000],
-        "high": [3000, 4500],
-        "ultra": [4500, null]
+        "entry": [
+          1500,
+          2000
+        ],
+        "mid": [
+          2000,
+          3000
+        ],
+        "high": [
+          3000,
+          4500
+        ],
+        "ultra": [
+          4500,
+          null
+        ]
       },
-      "emphasize_specs": ["gpu_model", "gpu_vram_gb", "ram_gb", "cuda_cores"],
-      "nqe_must_ask": ["model_size_target", "framework_preference", "budget"],
+      "emphasize_specs": [
+        "gpu_model",
+        "gpu_vram_gb",
+        "ram_gb",
+        "cuda_cores"
+      ],
+      "nqe_must_ask": [
+        "model_size_target",
+        "framework_preference",
+        "budget"
+      ],
       "nqe_skip": []
+    },
+    "general": {
+      "label": "General / Everyday Use",
+      "nqe_persona": "You are helping someone find a reliable everyday laptop or tablet for browsing, email, streaming and documents.",
+      "required_specs": {
+        "ram_gb_min": 8,
+        "storage_gb_min": 256
+      },
+      "soft_requirements": [
+        "Comfortable everyday performance",
+        "Good battery for all-day use",
+        "Portable and quiet"
+      ],
+      "exclusion_rules": [],
+      "budget_floor": 350,
+      "emphasize_specs": [
+        "battery_hr",
+        "weight_kg",
+        "price"
+      ],
+      "nqe_must_ask": [
+        "budget",
+        "portability_priority"
+      ],
+      "nqe_skip": [
+        "gpu_preference"
+      ]
+    },
+    "primary_school": {
+      "label": "Primary / Elementary School",
+      "nqe_persona": "You are helping a parent find a durable, affordable first laptop or tablet for a young child.",
+      "required_specs": {
+        "ram_gb_min": 4,
+        "storage_gb_min": 128
+      },
+      "soft_requirements": [
+        "Durable / rugged build",
+        "Simple and easy to use",
+        "Affordable",
+        "Parental-control friendly"
+      ],
+      "exclusion_rules": [],
+      "budget_floor": 250,
+      "emphasize_specs": [
+        "price",
+        "weight_kg",
+        "battery_hr"
+      ],
+      "nqe_must_ask": [
+        "budget"
+      ],
+      "nqe_skip": [
+        "gpu_preference"
+      ]
+    },
+    "high_school": {
+      "label": "High School Student",
+      "nqe_persona": "You are helping a high school student find a dependable laptop for homework, research and some creative apps.",
+      "required_specs": {
+        "ram_gb_min": 8,
+        "storage_gb_min": 256,
+        "battery_hr_min": 8
+      },
+      "soft_requirements": [
+        "All-day battery",
+        "Lightweight for a backpack",
+        "Good keyboard",
+        "Webcam for classes"
+      ],
+      "exclusion_rules": [],
+      "budget_floor": 300,
+      "emphasize_specs": [
+        "battery_hr",
+        "weight_kg",
+        "price"
+      ],
+      "nqe_must_ask": [
+        "budget",
+        "portability_priority"
+      ],
+      "nqe_skip": [
+        "gpu_preference"
+      ]
     }
   },
   "soft_requirement_weights": {
@@ -239,6 +476,28 @@
     "blender": "creative",
     "3d render": "creative",
     "davinci resolve": "creative",
-    "premiere pro": "creative"
+    "premiere pro": "creative",
+    "general": "general",
+    "everyday": "general",
+    "browsing": "general",
+    "web browsing": "general",
+    "basic": "general",
+    "home use": "general",
+    "family": "general",
+    "everyday use": "general",
+    "casual": "general",
+    "tablet": "general",
+    "netflix": "general",
+    "email": "general",
+    "primary school": "primary_school",
+    "elementary": "primary_school",
+    "elementary school": "primary_school",
+    "kid": "primary_school",
+    "child": "primary_school",
+    "for my son": "primary_school",
+    "for my daughter": "general",
+    "high school": "high_school",
+    "highschool": "high_school",
+    "secondary school": "high_school"
   }
 }
