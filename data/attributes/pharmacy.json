@@ -1,0 +1,35 @@
+{
+  "vertical": "pharmacy",
+  "attributes": {
+    "strength_mg": {
+      "role": "regulatory", "kind": "quantity", "unit": "mg", "bounds": [0.001, 5000],
+      "key_aliases": ["strength", "dose", "dosage", "dose_mg"],
+      "unit_aliases": {"mg": 1, "g": 1000, "mcg": 0.001, "ug": 0.001, "iu": 0.025},
+      "text_extract": true
+    },
+    "count": {
+      "role": "variant_axis", "kind": "quantity", "unit": "ct", "bounds": [1, 2000],
+      "key_aliases": ["tablets", "capsules", "pack_count", "pieces", "pack_size", "caps"],
+      "unit_aliases": {"ct": 1, "tablets": 1, "capsules": 1, "caps": 1, "pack": 1},
+      "text_extract": false
+    },
+    "volume_ml": {
+      "role": "variant_axis", "kind": "quantity", "unit": "ml", "bounds": [1, 5000],
+      "key_aliases": ["volume", "size_ml"],
+      "unit_aliases": {"ml": 1, "l": 1000, "litre": 1000, "liter": 1000},
+      "text_extract": true
+    },
+    "spf": {
+      "role": "regulatory", "kind": "quantity", "unit": "SPF", "bounds": [4, 110],
+      "key_aliases": ["sun_protection_factor"],
+      "unit_aliases": {"spf": 1},
+      "text_extract": true
+    },
+    "alcohol_pct": {
+      "role": "regulatory", "kind": "quantity", "unit": "%", "bounds": [0, 100],
+      "key_aliases": ["alcohol", "alcohol_percent"],
+      "unit_aliases": {"%": 1, "percent": 1, "pct": 1},
+      "text_extract": false
+    }
+  }
+}
