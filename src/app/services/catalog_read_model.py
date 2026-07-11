@@ -66,6 +66,14 @@ class VariantView:
     specs: Dict[str, Any] = field(default_factory=dict)
     attributes: Dict[str, Any] = field(default_factory=dict)
     stock: Optional[int] = None
+    # STOCK SYSTEM-OF-RECORD DECISION (2026-07-11, GPT-5.6 #9; 89/114 SKUs drift between the
+    # two stock tables): canonical inventory_level is the TARGET SoR (multi-location,
+    # reserved/available semantics — the only shape that prevents overselling); the legacy
+    # `inventory` table remains what legacy suggest() reads until its retirement. V2 reads
+    # availability ONLY through this facade in canonical mode. Every stock value carries
+    # provenance + freshness so parity divergences are attributable, never mysterious.
+    stock_source: Optional[str] = None      # "inventory_level" | "legacy_inventory"
+    stock_as_of: Optional[str] = None       # max(updated_at) of the contributing rows
     active: bool = True
     image_url: str = ""
     taxonomy_node_id: Optional[str] = None  # T1 slot — product_classification fills this
@@ -99,21 +107,29 @@ _LEGACY_COLS = ("p.sku, p.name, p.brand, p.category, p.product_type, p.price_cen
                 "p.currency, p.specs, p.attributes, p.active, p.image_url")
 
 
-def _legacy_stock(db, product_sku: str) -> Optional[int]:
+def _legacy_stock(db, product_sku: str) -> Tuple[Optional[int], Optional[str]]:
+    """(stock, as_of) from the legacy inventory table — what legacy suggest() sees."""
     try:
         row = db.execute(text(
-            "SELECT COALESCE(SUM(i.stock), 0) FROM inventory i "
+            "SELECT COALESCE(SUM(i.stock), 0), MAX(i.updated_at) FROM inventory i "
             "JOIN products p ON p.id = i.product_id WHERE p.sku = :s"), {"s": product_sku}).fetchone()
-        return int(row[0]) if row and row[0] is not None else None
+        if row and row[0] is not None:
+            return int(row[0]), (str(row[1]) if row[1] else None)
+        return None, None
     except Exception:
-        return None
+        return None, None
 
 
 def _legacy_get(db, sku: str) -> Optional[VariantView]:
     try:
         row = db.execute(text(
             f"SELECT {_LEGACY_COLS} FROM products p WHERE p.sku = :s LIMIT 1"), {"s": sku}).fetchone()
-        return _legacy_row_to_view(row, _legacy_stock(db, sku)) if row else None
+        if not row:
+            return None
+        stock, as_of = _legacy_stock(db, sku)
+        view = _legacy_row_to_view(row, stock)
+        return VariantView(**{**view.__dict__, "stock_source": "legacy_inventory" if stock is not None else None,
+                              "stock_as_of": as_of})
     except Exception:
         return None
 
@@ -162,16 +178,20 @@ def _canonical_get(db, sku: str, *, tenant_id: str = DEFAULT_TENANT) -> Optional
             "WHERE tenant_id = :t AND sku = :s AND channel = 'default' "
             "ORDER BY updated_at DESC LIMIT 1"), {"t": tenant_id, "s": sku}).fetchone()
         stock = db.execute(text(
-            "SELECT SUM(COALESCE(available, on_hand - reserved, on_hand)) FROM inventory_level "
-            "WHERE tenant_id = :t AND sku = :s"), {"t": tenant_id, "s": sku}).fetchone()
+            "SELECT SUM(COALESCE(available, on_hand - reserved, on_hand)), MAX(updated_at) "
+            "FROM inventory_level WHERE tenant_id = :t AND sku = :s"),
+            {"t": tenant_id, "s": sku}).fetchone()
         v_attrs, p_attrs = _loads(row[4]), _loads(row[5])
+        has_stock = stock and stock[0] is not None
         return VariantView(
             sku=str(row[0]), title=str(row[1]), brand=str(row[2]), category=str(row[3]),
             product_type=str(v_attrs.get("product_type") or p_attrs.get("product_type") or ""),
             price_cents=int(price[0]) if price and price[0] is not None else None,
             currency=str(price[1]) if price and price[1] else "AUD",
             specs=_loads(v_attrs.get("specs")) or v_attrs, attributes=p_attrs,
-            stock=int(stock[0]) if stock and stock[0] is not None else None,
+            stock=int(stock[0]) if has_stock else None,
+            stock_source="inventory_level" if has_stock else None,
+            stock_as_of=(str(stock[1]) if has_stock and stock[1] else None),
             active=(str(row[6] or "active") == "active"), source="canonical",
         )
     except Exception:

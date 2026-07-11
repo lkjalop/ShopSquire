@@ -63,6 +63,18 @@ def test_legacy_get_and_stock(db):
     assert isinstance(v, VariantView) and v.source == "legacy"
     assert v.title == "Dell G16 Gaming Laptop" and v.price_cents == 169900
     assert v.specs.get("ram_gb") == 16 and v.stock == 7
+    assert v.stock_source == "legacy_inventory" and v.stock_as_of  # provenance + freshness
+
+
+def test_canonical_stock_provenance(db):
+    _seed_canonical(db)
+    v = get_variant(db, "LAP-1", mode="canonical")
+    assert v.stock == 7 and v.stock_source == "inventory_level" and v.stock_as_of
+    # no stock rows -> provenance honestly absent, never fabricated
+    from src.app.services.catalog_entities import upsert_variant
+    upsert_variant(db, sku="NOSTOCK-1", product_id="p9")
+    v2 = get_variant(db, "NOSTOCK-1", mode="canonical")
+    assert v2.stock is None and v2.stock_source is None and v2.stock_as_of is None
 
 
 def test_legacy_search_filters(db):
