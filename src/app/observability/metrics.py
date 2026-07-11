@@ -1558,3 +1558,56 @@ def record_query_cluster_drift(cluster: str, model: str | None, ratio: float, wi
             query_cluster_drift_window_gauge.labels(cluster=cluster or "unknown", model=(model or "unknown"), window=window_label).set(float(ratio))
     except Exception:
         pass
+
+
+# ── V2 recommendation_core canary observability (M1.4) ──────────────────────────
+# postflight.emit_telemetry calls record_event("recommend_core_turn", {...}); the facade
+# calls record_core_fallback(reason) when a core-eligible turn falls through to legacy.
+recommend_core_turns_total = Counter(
+    "shopsquire_recommend_core_turns_total",
+    "V2 core turns served, by lane / grounding / degraded",
+    labelnames=["lane", "grounding", "degraded"],
+)
+recommend_core_latency_seconds = Histogram(
+    "shopsquire_recommend_core_latency_seconds",
+    "V2 core turn latency in seconds",
+    labelnames=["lane"],
+)
+recommend_core_products = Histogram(
+    "shopsquire_recommend_core_products",
+    "V2 core product count per turn (empty-rate = bucket 0)",
+    labelnames=["lane"],
+    buckets=(0, 1, 3, 5, 8, 10, 20),
+)
+recommend_core_fallback_total = Counter(
+    "shopsquire_recommend_core_fallback_total",
+    "V2 core -> legacy fall-throughs, by reason (lane gate / grounding / failure)",
+    labelnames=["reason"],
+)
+
+
+def record_event(name: str, fields: dict) -> None:
+    """Generic metrics sink for the V2 core (postflight). `name` selects the metric family;
+    unknown names are ignored. Best-effort, matching this module's convention."""
+    try:
+        if name == "recommend_core_turn":
+            lane = str(fields.get("lane") or "unknown")
+            recommend_core_turns_total.labels(
+                lane=lane,
+                grounding=str(fields.get("grounding") or "unknown"),
+                degraded=str(bool(fields.get("degraded"))).lower(),
+            ).inc()
+            recommend_core_latency_seconds.labels(lane=lane).observe(
+                float(fields.get("latency_ms") or 0) / 1000.0)
+            recommend_core_products.labels(lane=lane).observe(
+                float(fields.get("product_count") or 0))
+    except Exception:
+        pass
+
+
+def record_core_fallback(reason: str) -> None:
+    """Count a core-eligible turn that fell through to legacy (lane gate / grounding / failure)."""
+    try:
+        recommend_core_fallback_total.labels(reason=str(reason or "unknown")).inc()
+    except Exception:
+        pass

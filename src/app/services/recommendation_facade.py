@@ -51,6 +51,15 @@ _SHADOW_QUEUE_KEY = "shadow:core:queue"
 _SHADOW_QUEUE_MAX = 5000
 
 
+def _fallback_metric(reason: str) -> None:
+    """Count a core-eligible turn that fell through to legacy. Best-effort (metrics optional)."""
+    try:
+        from src.app.observability.metrics import record_core_fallback
+        record_core_fallback(reason)
+    except Exception:
+        pass
+
+
 def _resolve_mode() -> tuple[str, int]:
     """(mode, canary_pct). RECOMMEND_CORE_MODE = off | shadow | canary:<pct> | primary."""
     raw = str(os.getenv("RECOMMEND_CORE_MODE", "") or "").strip().lower()
@@ -182,6 +191,7 @@ def dispatch_recommendation_core(
         # ── LANE GATE (finding #6): non-core lanes fall through to legacy ───────
         if core.lane not in CANARY_LANES:
             logger.debug("core lane %s not canary-eligible — falling through to legacy", core.lane)
+            _fallback_metric(f"lane:{core.lane}")
             return None
 
         # DEGRADED → legacy (review #5): a core turn that couldn't verify the catalog
@@ -191,6 +201,7 @@ def dispatch_recommendation_core(
         if core.grounding in ("error", "empty") or (core.degraded and not core.products and not core.off_catalog):
             logger.info("core degraded (grounding=%s reason=%s) — falling through to legacy",
                         core.grounding, (core.extras or {}).get("degraded_reason"))
+            _fallback_metric(f"grounding:{core.grounding}")
             return None
 
         # ── FINALIZE FIRST, THEN POSTFLIGHT (review #3): with_trace (sanitize + trace
