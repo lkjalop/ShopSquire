@@ -204,7 +204,10 @@ def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
     evaluate_case() with expected_change=True are scored on EXPECTATION (did v2 achieve the
     desired fix?), not parity — and the run cannot pass with an expectation missed."""
     expected = [d for d in diffs if d.get("expected_change")]
-    parity = [d for d in diffs if not d.get("expected_change")]
+    # DELEGATED cases (facade-mode: non-core lanes the facade sends to legacy BY DESIGN) are
+    # neither parity nor expected-change — they're intended behaviour, excluded from the gate.
+    delegated = [d for d in diffs if d.get("delegated")]
+    parity = [d for d in diffs if not d.get("expected_change") and not d.get("delegated")]
     n = max(1, len(parity))
     by_sev: Dict[str, int] = {"BLOCKER": 0, "MAJOR": 0, "MINOR": 0, "INFO": 0}
     mc_match = ps_ok = gate_match = order_match = 0
@@ -224,6 +227,7 @@ def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "total": len(diffs),
         "parity_cases": len(parity),
+        "delegated_cases": len(delegated),
         "by_severity": by_sev,
         "message_class_match_rate": round(mc_match / n, 4),
         "product_set_membership_rate": round(ps_ok / n, 4),   # gate signal

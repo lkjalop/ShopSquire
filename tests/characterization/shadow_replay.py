@@ -40,9 +40,18 @@ CORPUS_DIR = REPO_ROOT / "tests" / "golden" / "suggest_corpus"
 BATTERY = REPO_ROOT / "tests" / "characterization" / "batteries" / "starter_battery.json"
 
 
+# the lanes the facade actually serves from the core; everything else is delegated to legacy
+# BY DESIGN, so in --facade-mode a non-core lane is scored as 'DELEGATED' (intended), not a
+# V2 parity failure (M1.3 — makes the census deployment-path faithful).
+_CANARY_LANES = frozenset({"SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG"})
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only")
+    ap.add_argument("--facade-mode", action="store_true",
+                    help="score non-core lanes as DELEGATED-to-legacy (intended), not V2 fail — "
+                         "reflects the real deployment path (facade lane gating)")
     args = ap.parse_args()
 
     expects = {c["id"]: (c.get("known_wrong") or {}).get("expect_v2")
@@ -65,7 +74,13 @@ def main() -> None:
                 shape = response_shape(v1)
                 v2 = to_legacy(core, shape=shape if shape in SHAPES else "full_pipeline")
                 expect = expects.get(case["id"]) if t["turn"] == 0 else None
-                r = evaluate_case(v1, v2, known_wrong_expect=expect)
+                # M1.3: in facade-mode, a non-core lane is DELEGATED to legacy by the real
+                # facade — score it as intended (delegated), not as a V2 parity failure.
+                if args.facade_mode and core.lane not in _CANARY_LANES:
+                    r = {"expected_change": False, "delegated": True, "severity": "DELEGATED",
+                         "dimensions": {}, "identical_outcome": True}
+                else:
+                    r = evaluate_case(v1, v2, known_wrong_expect=expect)
                 r["case_id"], r["turn"] = case["id"], t["turn"]
                 results.append(r)
                 d = (r.get("diff") or r).get("dimensions", {})
