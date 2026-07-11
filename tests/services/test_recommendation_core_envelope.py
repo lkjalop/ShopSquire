@@ -90,4 +90,4 @@ def test_universal_trace_fields_on_every_fork():
     for shape in ("full_pipeline", "inventory_fast", "claims", "policy_faq"):
         p = to_legacy(_core(), shape=shape)
         assert p["trace_id"] and p["decision_id"] and p["decision_trace_id"]
-        assert p["_trace_recommendation_persisted"] is True
+        assert p["_trace_recommendation_persisted"] is False  # honest: core does not persist yet

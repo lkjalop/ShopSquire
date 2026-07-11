@@ -47,7 +47,10 @@ def _skus_for_node(db, node_handle: str, tenant_id: str, limit: int) -> List[str
             {"t": tenant_id, "h": node_handle, "hp": node_handle + "-%",
              "lim": max(1, int(limit))}).fetchall()
         return [str(r[0]) for r in rows]
-    except Exception:
+    except Exception as exc:  # GPT-5.6 #9: a failed lookup must never read as 'no products'
+        import logging
+        logging.getLogger("shopsquire.recommendation_core.evidence").warning(
+            "taxonomy sku lookup FAILED (node=%s): %s", node_handle, repr(exc)[:120])
         return []
 
 
@@ -78,7 +81,10 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
                 db, text_query=None if broad else (text_query or envelope.query or None),
                 category=category, product_type=product_type, limit=limit,
                 tenant_id=tenant, mode=mode)
-        except Exception:
+        except Exception as exc:  # GPT-5.6 #9: typed ok|empty|error outcomes land with the facade
+            import logging
+            logging.getLogger("shopsquire.recommendation_core.evidence").warning(
+                "text retrieval FAILED (tenant=%s): %s", tenant, repr(exc)[:120])
             variants = []
     if not bundle.retrieval_mode.startswith("taxonomy:"):
         bundle.retrieval_mode = mode or "default"

@@ -4523,6 +4523,7 @@ def suggest(
             from src.app.services.recommendation_core.legacy_adapter import to_legacy
             _env_v2 = TurnEnvelope.from_suggest_params(
                 query=query, uid=uid or "", budget_min=budget_min, budget_max=budget_max,
+                tenant_id=tenant_id or "default",   # GPT-5.6 #3: tenant must reach the core
                 trace_id=trace_id, has_image=bool(image_labels or image_hash),
                 source_ip=(request.client.host if request and request.client else None))
             return _with_trace(to_legacy(recommend_turn(db, _env_v2)), trace_id)

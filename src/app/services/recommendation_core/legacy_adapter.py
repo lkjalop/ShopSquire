@@ -41,7 +41,11 @@ def _universal(core: CoreResponse) -> Dict[str, Any]:
         "trace_id": core.envelope.trace_id,
         "decision_id": core.decision_id,
         "decision_trace_id": core.envelope.trace_id,
-        "_trace_recommendation_persisted": True,
+        # GPT-5.6 blocking finding #2: this was True — a FABRICATED audit signal that made
+        # _with_trace() SKIP real persistence. False is the truth: the core does not persist
+        # its own trace yet; the caller's persistence block must run. Flips to True only
+        # when the facade owns persistence and actually did it.
+        "_trace_recommendation_persisted": False,
     }
 
 
