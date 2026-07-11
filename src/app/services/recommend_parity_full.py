@@ -121,10 +121,14 @@ def diff_responses(v1: Dict[str, Any], v2: Dict[str, Any]) -> Dict[str, Any]:
     dims["message_class"] = {"match": mc1 == mc2, "v1": mc1, "v2": mc2, "severity": "MAJOR"}
 
     ps = product_set_diff(v1, v2)
-    # tolerance: identical sets ideal; jaccard >= 0.9 with same top-3 counts as MINOR drift
-    ps["severity"] = "MAJOR" if (ps["jaccard"] < 0.9 or not ps["top3_match"]) else "MINOR"
-    ps_match = ps["match"]
-    dims["product_set"] = {**ps, "match": ps_match}
+    # GPT-5.6 review-2 ranking ruling: exact legacy top-3 ORDERING is a DIAGNOSTIC, not a gate
+    # (the lexicographic ranker is not built to reproduce v1's order). MEMBERSHIP is what
+    # gates — v2 must not drop products v1 showed or surface unauthorized ones. So severity
+    # keys on jaccard (membership) ONLY; top3_match is reported but never bumps severity.
+    ps["severity"] = "MAJOR" if ps["jaccard"] < 0.9 else "MINOR"
+    ps["order_matches_v1"] = ps.pop("top3_match")   # renamed: it's a diagnostic now
+    # "match" for gate purposes = membership within tolerance, NOT exact set/order equality
+    dims["product_set"] = {**ps, "match": ps["jaccard"] >= 0.9}
 
     dims["turn"] = {
         "match": (v1.get("turn_intent") == v2.get("turn_intent")
@@ -203,15 +207,17 @@ def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
     parity = [d for d in diffs if not d.get("expected_change")]
     n = max(1, len(parity))
     by_sev: Dict[str, int] = {"BLOCKER": 0, "MAJOR": 0, "MINOR": 0, "INFO": 0}
-    mc_match = ps_ok = gate_match = 0
+    mc_match = ps_ok = gate_match = order_match = 0
     for d in parity:
         by_sev[d.get("severity", "INFO")] = by_sev.get(d.get("severity", "INFO"), 0) + 1
         dims = d.get("dimensions", {})
         if dims.get("message_class", {}).get("match"):
             mc_match += 1
         ps = dims.get("product_set", {})
-        if ps.get("match") or (ps.get("jaccard", 0) >= 0.9 and ps.get("top3_match")):
+        if ps.get("jaccard", 0) >= 0.9:          # MEMBERSHIP (the gate), order-independent
             ps_ok += 1
+        if ps.get("order_matches_v1"):           # ORDERING (diagnostic only)
+            order_match += 1
         if dims.get("gates", {}).get("match"):
             gate_match += 1
     expected_met = sum(1 for d in expected if d.get("expectation_met"))
@@ -220,11 +226,15 @@ def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
         "parity_cases": len(parity),
         "by_severity": by_sev,
         "message_class_match_rate": round(mc_match / n, 4),
-        "product_set_ok_rate": round(ps_ok / n, 4),
+        "product_set_membership_rate": round(ps_ok / n, 4),   # gate signal
+        "top3_order_match_rate": round(order_match / n, 4),   # DIAGNOSTIC (not a gate)
         "gate_match_rate": round(gate_match / n, 4),
         "expected_changes": len(expected),
         "expected_changes_met": expected_met,
-        # roadmap Phase 5 promotion gates — parity on unchanged cases AND every known_wrong fixed
+        # Promotion gate (GPT-5.6 review-2 metric ruling): zero security/honesty BLOCKERs,
+        # message-class parity, product-set MEMBERSHIP (not ordering), every known_wrong fixed.
+        # Live outcome metrics (conversion, NDCG, latency) are a SEPARATE canary gate — they
+        # need traffic and cannot be computed offline.
         "gates_pass": (by_sev["BLOCKER"] == 0 and mc_match / n >= 0.98 and ps_ok / n >= 0.9
                        and expected_met == len(expected)),
     }

@@ -77,17 +77,28 @@ def test_dropped_refusal_is_blocker():
     assert d["severity"] == "BLOCKER"
 
 
-def test_product_drift_within_tolerance_is_minor():
+def test_product_drift_within_tolerance_is_clean():
     v1 = _base(products=[{"sku": s} for s in "ABCDEFGHIJ"])
-    v2 = _base(products=[{"sku": s} for s in "ABCDEFGHI"])  # same top-3, jaccard 0.9
+    v2 = _base(products=[{"sku": s} for s in "ABCDEFGHI"])  # jaccard 0.9 = membership tolerance
     d = diff_responses(v1, v2)
-    assert d["dimensions"]["product_set"]["severity"] == "MINOR"
-    assert d["severity"] == "MINOR"
+    assert d["dimensions"]["product_set"]["match"] is True   # within membership tolerance
+    assert d["severity"] == "INFO"                           # nothing else diverges
 
 
-def test_top_product_change_is_major():
+def test_reordering_same_set_is_diagnostic_not_major():
+    # GPT-5.6 ranking ruling: same MEMBERSHIP, different top-3 ORDER → MINOR (diagnostic),
+    # never a gate. order_matches_v1 records the divergence without bumping severity.
     v1 = _base(products=[{"sku": s} for s in ("A", "B", "C")])
     v2 = _base(products=[{"sku": s} for s in ("B", "A", "C")])
+    d = diff_responses(v1, v2)
+    ps = d["dimensions"]["product_set"]
+    assert ps["severity"] == "MINOR" and ps["match"] is True   # membership identical
+    assert ps["order_matches_v1"] is False                     # order differs (diagnostic)
+
+
+def test_membership_divergence_is_major():
+    v1 = _base(products=[{"sku": s} for s in ("A", "B", "C")])
+    v2 = _base(products=[{"sku": s} for s in ("A", "X", "Y")])  # dropped B,C; added X,Y
     d = diff_responses(v1, v2)
     assert d["dimensions"]["product_set"]["severity"] == "MAJOR"
 
