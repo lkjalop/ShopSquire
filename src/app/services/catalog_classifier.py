@@ -82,11 +82,37 @@ def _node_token_index() -> Dict[str, frozenset]:
 
 
 def candidate_nodes(text: str, *, top_k: int = TOP_K) -> List[Tuple[TaxonomyNode, float]]:
-    """Deterministic top-K taxonomy candidates for a product text. Leaf-name hits are
-    COVERAGE-weighted: fully matching 'Laptops' (1/1 tokens) beats partially matching
-    'Laptop Power Cords' (1/3) — otherwise deep accessory leaves outrank the true category
-    on their depth bonus. Path hits add support; depth only breaks ties.
-    Pure + cached index → fast enough to scan all 14,606 nodes per product."""
+    """Top-K taxonomy candidates for a product text: SEMANTIC (embedding index) + LEXICAL
+    (coverage-weighted token overlap), unioned. Embeddings fix what tokens can't reach —
+    'Ibuprofen 200mg' shares zero tokens with 'Pain Relief & Fever Reducers' — and the union
+    keeps lexical's exact-name strength. Index missing/Ollama down → lexical only, loudly
+    (taxonomy_embedding_index logs); the downstream clamp/prior/earn-specificity are
+    identical either way — only candidate SOURCING differs."""
+    lexical = _lexical_candidates(text, top_k=top_k)
+    semantic: List[Tuple[TaxonomyNode, float]] = []
+    try:
+        from src.app.services.taxonomy_embedding_index import semantic_top_k
+        ranked = semantic_top_k(text, top_k=top_k)
+        if ranked:
+            nodes = _nodes()
+            # cosine ∈ [0,1] → scaled to sit alongside lexical scores in the merged ranking
+            semantic = [(nodes[h], round(4.0 * s, 3)) for h, s in ranked if h in nodes]
+    except Exception as exc:  # semantic sourcing is an upgrade, never a dependency
+        logger.warning("semantic candidates unavailable: %s", repr(exc)[:120])
+    if not semantic:
+        return lexical
+    merged: Dict[str, Tuple[TaxonomyNode, float]] = {n.handle: (n, s) for n, s in lexical}
+    for n, s in semantic:
+        if n.handle not in merged or s > merged[n.handle][1]:
+            merged[n.handle] = (n, s)
+    return sorted(merged.values(), key=lambda p: (-p[1], p[0].handle))[: max(1, int(top_k) + 6)]
+
+
+def _lexical_candidates(text: str, *, top_k: int = TOP_K) -> List[Tuple[TaxonomyNode, float]]:
+    """Deterministic lexical candidates. Leaf-name hits are COVERAGE-weighted: fully matching
+    'Laptops' (1/1 tokens) beats partially matching 'Laptop Power Cords' (1/3) — otherwise
+    deep accessory leaves outrank the true category on their depth bonus. Path hits add
+    support; depth only breaks ties. Cached index → scans all 14,606 nodes per product."""
     toks = set(_tokens(text))
     if not toks:
         return []

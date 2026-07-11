@@ -128,3 +128,6 @@ pytest_run_out.txt
 backups/
 _boot_audit.db*
 tmp_browser_deepdive/
+
+# taxonomy embedding index — build artifact (scripts/build_taxonomy_embedding_index.py), ~45MB
+data/taxonomy/**/embeddings.npz
