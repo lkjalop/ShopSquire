@@ -39,9 +39,11 @@ def test_candidates_require_leaf_name_match():
     assert any(h.startswith("lb-") for h in handles)
 
 
-def test_candidates_empty_on_no_signal():
+def test_candidates_empty_on_empty_text():
     assert candidate_nodes("") == []
-    assert candidate_nodes("zzqx9 qqfw7") == []
+    # NOTE: garbage text may yield SEMANTIC candidates when the embedding index is present
+    # (cosine noise floors overlap real matches) — abstention is enforced in classify_text
+    # (semantic-only evidence requires an affirmative model pick), not by candidate emptiness
 
 
 # ── crosswalk ─────────────────────────────────────────────────────────────────
@@ -128,8 +130,11 @@ def test_low_confidence_model_pick_falls_back():
     assert c.source == "lexical_fallback"
 
 
-def test_no_signal_returns_none():
-    assert classify_text("zzqx9", llm_fn=_picker("el-6-6")) is None
+def test_garbage_with_failing_model_abstains():
+    # semantic-only evidence + no affirmative model pick -> None (unclassifiable), never
+    # a lexical_fallback onto the nearest semantic noise node
+    assert classify_text("zzqx9 qqfw7", llm_fn=lambda p, t: "") is None
+    assert classify_text("zzqx9", llm_fn=lambda p, t: "not json") is None
 
 
 # ── catalog sweep writes proposals only ───────────────────────────────────────

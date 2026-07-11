@@ -92,7 +92,11 @@ def candidate_nodes(text: str, *, top_k: int = TOP_K) -> List[Tuple[TaxonomyNode
     semantic: List[Tuple[TaxonomyNode, float]] = []
     try:
         from src.app.services.taxonomy_embedding_index import semantic_top_k
-        ranked = semantic_top_k(text, top_k=top_k)
+        # deeper K than lexical: cosine neighborhoods are noisier ('T7 Shield' pulls
+        # sporting-goods shields) but the clamp only needs the true node PRESENT, not first
+        # (measured: Paracetamol's true node ranks 20th — and NO cosine floor can help,
+        # garbage text scores HIGHER than real matches in this embedding space)
+        ranked = semantic_top_k(text, top_k=max(25, int(top_k)))
         if ranked:
             nodes = _nodes()
             # cosine ∈ [0,1] → scaled to sit alongside lexical scores in the merged ranking
@@ -105,7 +109,9 @@ def candidate_nodes(text: str, *, top_k: int = TOP_K) -> List[Tuple[TaxonomyNode
     for n, s in semantic:
         if n.handle not in merged or s > merged[n.handle][1]:
             merged[n.handle] = (n, s)
-    return sorted(merged.values(), key=lambda p: (-p[1], p[0].handle))[: max(1, int(top_k) + 6)]
+    # cap must not undo the deeper semantic K (a rank-21 true node was admitted by K=25 then
+    # cut by an 18-item cap on the first live probe) — ~26 candidate lines is still a cheap prompt
+    return sorted(merged.values(), key=lambda p: (-p[1], p[0].handle))[: max(int(top_k) + 6, 26)]
 
 
 def _lexical_candidates(text: str, *, top_k: int = TOP_K) -> List[Tuple[TaxonomyNode, float]]:
@@ -213,6 +219,12 @@ def _earn_specificity(pick: str, allowed: set, text: str) -> str:
     distinguishing = set(_tokens(node.name)) - set(_tokens(parent_node.name))
     if not distinguishing:
         return pick
+    # acronym counts as evidence: 'SSD' in the text earns 'Solid State Drives' (this clamp
+    # demoted a CORRECT 0.9-confidence SSD pick before the rule — abbreviations are how
+    # buyers actually write specs, and acronym-of-name is vertical-blind)
+    name_toks = _tokens(node.name)
+    if len(name_toks) >= 2:
+        distinguishing.add("".join(t[0] for t in name_toks))
     return pick if (distinguishing & _plural_expand(set(_tokens(text)))) else parent
 
 
@@ -254,11 +266,19 @@ def classify_text(text: str, *, existing_category: str = "",
     # froze 5 SSDs as Hard Drives, and specs.category=laptop froze an iMac as a laptop).
     # Seed the crosswalk node + its CHILDREN as strong candidates and let the model refine.
     if xw is not None:
-        from src.app.services.taxonomy_registry import children
+        from src.app.services.taxonomy_registry import children, parent_handle
         merged[xw.handle] = (xw, max(merged.get(xw.handle, (xw, 0.0))[1], 99.0))
         for child in children(xw.handle):
             if child.handle not in merged:
                 merged[child.handle] = (child, 98.0)
+        # SIBLINGS too (holdout: 'hard_drive' crosswalks to Hard Drives but 5 products were
+        # SSDs — a sibling under Storage Devices). The merchant's word locates the
+        # NEIGHBORHOOD; the true node is often a lateral, reachable only at override conf.
+        parent = parent_handle(xw.handle)
+        if parent:
+            for sib in children(parent):
+                if sib.handle not in merged:
+                    merged[sib.handle] = (sib, 97.0)
     cands = sorted(merged.values(), key=lambda p: (-p[1], p[0].handle))[:TOP_K + 8]
     if not cands:
         return (Classification(sku="", node_handle=xw.handle, node_path=xw.full_path,
@@ -293,6 +313,11 @@ def classify_text(text: str, *, existing_category: str = "",
         return Classification(sku="", node_handle=xw.handle, node_path=xw.full_path,
                               confidence=0.95, source="crosswalk",
                               candidates=tuple(n.handle for n, _ in cands))
+    # ABSTENTION GUARD: cosine floors can't separate noise from signal (garbage text scores
+    # HIGHER than true matches), so when the evidence is SEMANTIC-ONLY the model must pick
+    # affirmatively — falling back to the top semantic neighbor would enshrine noise.
+    if not _lexical_candidates(text, top_k=3):
+        return None
     best = cands[0][0]
     return Classification(sku="", node_handle=best.handle, node_path=best.full_path,
                           confidence=0.2, source="lexical_fallback",
