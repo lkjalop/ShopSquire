@@ -671,6 +671,78 @@ def clear_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_O
         }
 
 
+# ── Programmatic cart mutation (V2 cart milestone) ──────────────────────────────
+# The chat/recommend path resolves a natural-language cart edit into a typed, SKU-bound plan
+# (recommendation_core.cart_resolver). This applies that plan by REUSING the same guarded,
+# stock-gated route handlers the REST API uses — never a second copy of the stock/sourcing gate
+# (the duplicated-decision-surface class). Ops apply sequentially over the lock-free
+# read-modify-write cart, the frontend's proven pattern (parallel deletes race and drop a line).
+def apply_cart_ops(uid: str, ops, *, role: str, allow_sourcing: bool = False,
+                   carried_skus: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Execute a resolved cart plan. `ops` are duck-typed (.action / .target_skus / .quantity) so
+    this stays decoupled from the resolver's dataclass (no core→router import). Returns
+    {applied, rejected, cart}; a stock-gated set_quantity that the handler rejects lands in
+    `rejected` with the handler's own error, never a silent drop. Never raises for a per-op
+    failure — the buyer gets an honest partial result."""
+    applied: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+    carried = {str(s) for s in (carried_skus or [])}
+
+    def _remove(sku: str) -> None:
+        remove_item(sku=sku, uid=uid, role=role)
+        applied.append({"action": "remove_items", "sku": sku})
+
+    for op in (ops or []):
+        action = str(getattr(op, "action", "") or "")
+        targets = list(getattr(op, "target_skus", ()) or ())
+        try:
+            if action == "clear_all":
+                clear_cart(uid=uid, role=role)
+                applied.append({"action": "clear_all"})
+            elif action == "clear_previous":
+                # 'previous session' is caller-supplied context (the session-start snapshot lives
+                # in the frontend today). Without it we cannot safely decide which lines are
+                # carried, so we record it unresolved rather than guess-and-wipe.
+                if carried:
+                    _, items, _ = _get_or_create_cart(uid)
+                    for it in items:
+                        s = it.get("sku")
+                        if s and str(s) in carried:
+                            _remove(str(s))
+                else:
+                    rejected.append({"action": "clear_previous", "error": "no_carried_set"})
+            elif action == "remove_items":
+                for sku in targets:
+                    _remove(str(sku))
+            elif action == "keep_only":
+                keep = {str(s) for s in targets}
+                _, items, _ = _get_or_create_cart(uid)
+                for it in items:
+                    s = it.get("sku")
+                    if s and str(s) not in keep:
+                        _remove(str(s))
+            elif action == "set_quantity":
+                if not targets:
+                    continue
+                sku = str(targets[0])
+                qty = int(getattr(op, "quantity", 0) or 0)
+                payload = CartItemPayload(uid=uid, sku=sku, quantity=qty, allow_sourcing=allow_sourcing)
+                try:
+                    result = set_item_quantity(sku=sku, payload=payload, role=role)
+                    entry = {"action": "set_quantity", "sku": sku, "quantity": qty}
+                    if result.get("sourcing_required"):
+                        entry["sourcing"] = result.get("sourcing_shortfall")
+                    applied.append(entry)
+                except HTTPException as he:
+                    rejected.append({"action": "set_quantity", "sku": sku, "quantity": qty,
+                                     "error": he.detail})
+        except HTTPException as he:
+            rejected.append({"action": action, "error": he.detail})
+
+    _, items, _ = _get_or_create_cart(uid)
+    return {"applied": applied, "rejected": rejected, "cart": _hydrate(items)}
+
+
 # ── Voucher / Discount Code ────────────────────────────────────────────────────
 
 _VOUCHER_ENABLED = os.getenv("VOUCHER_ENDPOINT_ENABLED", "0").strip().lower() in ("1", "true", "yes")

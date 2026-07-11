@@ -4521,7 +4521,8 @@ def suggest(
             budget_min=budget_min, budget_max=budget_max, trace_id=trace_id,
             image_labels=image_labels, image_ocr=image_ocr_text, image_hash=image_hash,
             source_ip=(request.client.host if request and request.client else None),
-            request=request, with_trace=_with_trace, record_failure=_record_partial_failure)
+            request=request, role=role, with_trace=_with_trace,
+            record_failure=_record_partial_failure)
         if _core_payload is not None:
             return _core_payload
     except Exception as _e_facade:

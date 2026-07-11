@@ -102,6 +102,122 @@ def _enqueue_shadow(redis, *, query: str, uid: str, tenant_id: str, trace_id: st
         logger.debug("shadow enqueue skipped: %s", repr(exc)[:100])
 
 
+def _cart_serving_enabled() -> bool:
+    """Cart mutations EXECUTE only when this is explicitly on — shadow-first: the operator flips
+    it deliberately after reviewing resolved plans. Default off = the frontend regex still serves
+    (zero change), independent of the search-lane canary."""
+    return str(os.getenv("RECOMMEND_CART_SERVE", "") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _read_cart_slice(db, uid: str) -> List[Dict[str, Any]]:
+    """The shopper's current cart lines with DISPLAY NAMES (the resolver binds a named line by
+    name, so raw sku+qty lines aren't enough). Read-only: never creates a cart. Best-effort —
+    a read failure yields no cart, so the turn simply routes as a normal search."""
+    if not uid:
+        return []
+    try:
+        from sqlalchemy import text as _text
+        row = db.execute(_text("SELECT line_items FROM draft_orders WHERE customer_id = :uid "
+                               "AND status = 'draft' ORDER BY created_at DESC LIMIT 1"),
+                         {"uid": str(uid)}).fetchone()
+        raw = json.loads(row[0]) if row and row[0] else []
+        items = raw if isinstance(raw, list) else []
+        skus = [str(it.get("sku")) for it in items if isinstance(it, dict) and it.get("sku")]
+        if not skus:
+            return []
+        params = {f"s{i}": s for i, s in enumerate(skus)}
+        placeholders = ", ".join(f":{k}" for k in params)
+        names = {str(r[0]): str(r[1] or "") for r in db.execute(
+            _text(f"SELECT sku, name FROM products WHERE sku IN ({placeholders})"), params).fetchall()}
+        out: List[Dict[str, Any]] = []
+        for it in items:
+            if not isinstance(it, dict) or not it.get("sku"):
+                continue
+            sku = str(it["sku"])
+            out.append({"sku": sku, "name": names.get(sku, ""),
+                        "quantity": int(it.get("quantity") or 1)})
+        return out
+    except Exception as exc:
+        logger.debug("cart slice read skipped: %s", repr(exc)[:100])
+        return []
+
+
+def _cart_result_message(plan, result: Dict[str, Any]) -> str:
+    """Honest buyer-facing summary of what actually changed (applied), what didn't (rejected,
+    with the real stock reason), and what stayed ambiguous (asked, never wiped)."""
+    applied = result.get("applied", [])
+    rejected = result.get("rejected", [])
+    bits: List[str] = []
+    if any(a.get("action") == "clear_all" for a in applied):
+        bits.append("cleared your cart")
+    n_removed = sum(1 for a in applied if a.get("action") == "remove_items")
+    if n_removed:
+        bits.append(f"removed {n_removed} item{'s' if n_removed != 1 else ''}")
+    for a in applied:
+        if a.get("action") != "set_quantity":
+            continue
+        src = a.get("sourcing")
+        if src:
+            bits.append(f"set a line to {a.get('quantity')} ({src.get('available_now')} in stock "
+                        f"now, {src.get('shortfall')} to source)")
+        else:
+            bits.append(f"set a line to {a.get('quantity')}")
+    msg = ("🧹 Done — " + ", ".join(bits) + ".") if bits else "No cart change was needed."
+    if rejected:
+        err = rejected[0].get("error")
+        if isinstance(err, dict) and err.get("available") is not None:
+            msg += (f" One change couldn't be applied — only {err.get('available')} in stock; "
+                    f"say \"source the rest\" to order the shortfall.")
+        else:
+            msg += " One change couldn't be applied."
+    if getattr(plan, "ambiguous", None):
+        msg += (f" I couldn't match {', '.join(plan.ambiguous)} to a specific line — "
+                f"tell me which item you meant.")
+    return msg
+
+
+def _cart_clarify_message(plan) -> str:
+    return (f"I can edit your cart, but couldn't match {', '.join(plan.ambiguous)} to a specific "
+            f"item in it — which line did you mean? Name it and I'll make the change.")
+
+
+def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
+                         with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]],
+                         llm_fn=None) -> Optional[Dict[str, Any]]:
+    """Detect + serve a natural-language cart edit. Returns a finalized payload when the turn IS a
+    cart mutation, or None to fall through to product routing (empty plan = not a cart edit)."""
+    from src.app.services.recommendation_core.cart_resolver import resolve_cart_mutation
+    from src.app.services.recommendation_core.envelope import CoreResponse
+    from src.app.services.recommendation_core.legacy_adapter import to_legacy
+
+    plan = resolve_cart_mutation(envelope, llm_fn=llm_fn)
+    if plan.is_empty:
+        return None
+
+    # pure ambiguity with nothing safe to execute → ASK, never guess-then-wipe
+    if plan.needs_clarification and not plan.ops:
+        core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
+                            message=_cart_clarify_message(plan)).finalize()
+        payload = to_legacy(core)
+        payload["cart_mutation"] = {"applied": [], "rejected": [], "ambiguous": list(plan.ambiguous),
+                                    "needs_clarification": True}
+        payload["cart_updated"] = False
+        return with_trace(payload, envelope.trace_id)
+
+    # execute the bound ops, REUSING the guarded, stock-gated cart handlers
+    from src.app.routers.cart import apply_cart_ops
+    result = apply_cart_ops(envelope.uid, plan.ops, role=role, allow_sourcing=True)
+    core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
+                        message=_cart_result_message(plan, result)).finalize()
+    payload = to_legacy(core)
+    payload["cart_mutation"] = {"applied": result["applied"], "rejected": result["rejected"],
+                                "ambiguous": list(plan.ambiguous),
+                                "needs_clarification": bool(plan.ambiguous)}
+    payload["cart"] = result["cart"]
+    payload["cart_updated"] = True
+    return with_trace(payload, envelope.trace_id)
+
+
 def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
     """Best-effort immutable session slice, TENANT-SCOPED (GPT-5.6 #5c22575.3): the core's
     session namespace is session:{tenant}:{uid}:kv_state — never uid-alone (that would cross
@@ -138,6 +254,7 @@ def dispatch_recommendation_core(
     budget_min: Optional[float], budget_max: Optional[float], trace_id: str,
     image_labels: Optional[str] = None, image_hash: Optional[str] = None,
     image_ocr: Optional[str] = None, source_ip: Optional[str] = None, request: Any = None,
+    role: str = "",
     with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]],
     record_failure: Callable[..., Any],
 ) -> Optional[Dict[str, Any]]:
@@ -175,11 +292,24 @@ def dispatch_recommendation_core(
             return None
 
         session = _read_session_slice(redis, uid, tenant)
+        cart_slice = _read_cart_slice(db, uid) if _cart_serving_enabled() else []
         envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
             budget_max=budget_max, trace_id=trace_id,
             has_image=bool(image_labels or image_hash), source_ip=source_ip,
-            session=session, pre_gate=guard)
+            session=session, cart=cart_slice, pre_gate=guard)
+
+        # ── CART-MUTATION LANE (flag-gated, served) ─────────────────────────────
+        # A natural-language cart edit ('remove one item and set another to 20') is NOT a
+        # product search. When RECOMMEND_CART_SERVE is on and the shopper has a cart, resolve the
+        # edit to a typed, SKU-bound plan and execute it via the guarded cart handlers. Shadow-first
+        # (default off ⇒ frontend regex serves, zero change). Empty plan (not a cart edit) or any
+        # failure → fall through to product routing below.
+        if cart_slice:
+            cart_payload = _serve_cart_mutation(envelope, role=role, with_trace=with_trace)
+            if cart_payload is not None:
+                logger.info("core served CART_MUTATE (uid=%s)", uid or "anon")
+                return cart_payload
 
         # ── DISPATCH ───────────────────────────────────────────────────────────
         from src.app.services.recommendation_core.core import recommend_turn
