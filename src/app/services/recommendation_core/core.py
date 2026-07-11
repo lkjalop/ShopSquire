@@ -45,17 +45,30 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     if grounding == "error":
         return degraded_response(envelope, reason="taxonomy_grounding_error")
 
+    import dataclasses
+    from src.app.services.recommendation_core.intent_resolver import resolve as resolve_intent
     decision = route_turn(db, envelope, llm_fn=llm_fn)
+    # INTENT → REQUIREMENTS: the model NAMED the use-case(s); deterministic KB lookup supplies
+    # the hardware requirements and merges them (by MAX) with any the shopper stated explicitly.
+    # This is what makes a CS student differ from an english major and 'for AutoCAD' carry real
+    # floors — all from DATA, no new decision surface. Zero added latency (folded into routing).
+    intent = resolve_intent(list(decision.use_cases), dict(decision.requirements))
+    decision = dataclasses.replace(decision, requirements=intent["requirements"])
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
     resp.extras["decision"] = decision.as_dict()
     resp.extras["plan"] = plan.as_dict()
+    # the resolver's reasoning, surfaced for the 'Why Recommended' decision-trace tab
+    resp.extras["intent"] = {"use_cases": intent["use_cases"],
+                             "profiles": intent["profile_trace"],
+                             "persona_hint": intent["persona_hint"]}
     resp.extras["constraints_used"] = {
         "budget_min_cents": envelope.budget_min_cents,
         "budget_max_cents": envelope.budget_max_cents,
         "node_handle": decision.node_handle,
         "requirements": {k: list(v) for k, v in decision.requirements.items()},
+        "use_cases": intent["use_cases"],
     }
 
     for step in plan.steps:

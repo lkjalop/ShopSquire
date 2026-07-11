@@ -100,6 +100,7 @@ class TurnDecision:
     node_handle: Optional[str] = None            # clamped to offered candidates
     node_path: Optional[str] = None
     requirements: Dict[str, Tuple[str, float]] = field(default_factory=dict)  # key -> (op, thr)
+    use_cases: Tuple[str, ...] = ()              # model-classified, clamped to KB keys
     refusal_granted: bool = False                # sells_within()==False confirmed the refusal
     confidence: float = 0.0
     source: str = "model"                        # model | default
@@ -107,18 +108,29 @@ class TurnDecision:
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
                 "requirements": {k: list(v) for k, v in self.requirements.items()},
-                "refusal_granted": self.refusal_granted,
+                "use_cases": list(self.use_cases), "refusal_granted": self.refusal_granted,
                 "confidence": round(self.confidence, 3), "source": self.source}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
 
 
-def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str]) -> str:
+def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
+                  use_case_keys: List[str]) -> str:
     lines = "\n".join(f"  {n.handle} : {n.full_path}" for n, _ in cands) or "  (none)"
+    # BUDGET CONTEXT (budget-bleed structural fix): the price is stated to the model so it is
+    # NEVER parsed as a spec ('under $1500' → storage_gb>=1500 was the live bug). The platform
+    # already applies budget; the model must not return it as a requirement.
+    budget_note = ""
+    if envelope.budget_max_cents is not None or envelope.budget_min_cents is not None:
+        lo = f"${envelope.budget_min_cents//100}" if envelope.budget_min_cents else "any"
+        hi = f"${envelope.budget_max_cents//100}" if envelope.budget_max_cents else "any"
+        budget_note = (f"BUDGET: {lo}–{hi} (already applied by the platform — NEVER return a "
+                       f"price as a requirement/spec).\n")
     return (
         "You are the routing brain of a commerce assistant. Classify the shopper's message.\n\n"
-        f'MESSAGE: "{envelope.query[:400]}"\n\n'
+        f'MESSAGE: "{envelope.query[:400]}"\n'
+        f"{budget_note}\n"
         f"LANES (pick exactly one): {', '.join(LANES)}\n"
         f"CANDIDATE CATEGORIES (pick the handle that best matches WHAT THE SHOPPER WANTS, "
         f"from this list only, or null):\n{lines}\n\n"
@@ -130,11 +142,18 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str]) -> s
         "store sells; the platform verifies against the real sold list either way.\n"
         "- A game, app, or workload implies the DEVICE CATEGORY that runs it — a competitive "
         "shooter implies gaming laptops/computers: pick that handle, not null.\n"
-        "- Extract NUMERIC requirements the message states or clearly implies "
-        f"(keys ONLY from: {', '.join(sorted(req_keys))}; e.g. competitive shooters at high "
-        "fps imply a refresh_hz floor).\n"
+        "- USE_CASES: classify what the shopper will DO with it — pick 0, 1, or MORE from this "
+        f"list (a persona/task/game/software maps here): {', '.join(use_case_keys)}. "
+        "'CS student' + 'gaming' can BOTH apply; 'english essays' → university; 'AutoCAD' → "
+        "engineering_student; 'video editing/rendering' → creative; 'run/train models' → "
+        "ai_ml_workstation. The platform looks up each use-case's hardware requirements — you "
+        "only NAME them.\n"
+        "- Extract NUMERIC requirements the message EXPLICITLY states "
+        f"(keys ONLY from: {', '.join(sorted(req_keys))}; e.g. '144fps' → refresh_hz≥144). "
+        "Do NOT invent workload specs — that is what use_cases are for.\n"
         '- POLICY_QUESTION for services (payment plans, delivery, returns policy).\n\n'
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
+        '"use_cases": ["<key>", ...], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
         '"confidence": <0.0-1.0>}\nJSON:'
     )
@@ -152,9 +171,10 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         cands = []
     defs = defs_union(DEFAULT_VERTICALS)
     fit_keys = [k for k, d in defs.items() if d.kind == "quantity"]
+    from src.app.services.recommendation_core.intent_resolver import known_use_cases
     fn = llm_fn or _default_llm_fn
     try:
-        raw = fn(_build_prompt(envelope, cands, fit_keys), timeout)
+        raw = fn(_build_prompt(envelope, cands, fit_keys, known_use_cases()), timeout)
         data = json.loads(raw) if raw else None
     except Exception:
         data = None
@@ -183,7 +203,20 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             continue
         if d.bounds and not (d.bounds[0] <= float(thr) <= d.bounds[1]):
             continue
+        # BUDGET-BLEED GUARD (belt-and-suspenders to the prompt fix): drop a requirement whose
+        # value equals the stated budget dollar amount — that's a mis-parsed price, not a spec.
+        budget_dollars = {c // 100 for c in (envelope.budget_min_cents, envelope.budget_max_cents)
+                          if c is not None}
+        if float(thr) in budget_dollars and d.key in ("storage_gb", "ram_gb"):
+            continue
         requirements[d.key] = (op, float(thr))
+    # clamp 3b: use_cases — clamp each to a real KB key (normalize aliases; drop unknowns)
+    from src.app.services.recommendation_core.intent_resolver import normalize_use_case
+    use_cases: List[str] = []
+    for uc in (data.get("use_cases") or []):
+        n = normalize_use_case(str(uc))
+        if n and n not in use_cases:
+            use_cases.append(n)
     try:
         conf = max(0.0, min(1.0, float(data.get("confidence") or 0.0)))
     except (TypeError, ValueError):
@@ -236,5 +269,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
 
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
-                        requirements=requirements, refusal_granted=refusal_granted,
-                        confidence=conf, source="model")
+                        requirements=requirements, use_cases=tuple(use_cases),
+                        refusal_granted=refusal_granted, confidence=conf, source="model")
