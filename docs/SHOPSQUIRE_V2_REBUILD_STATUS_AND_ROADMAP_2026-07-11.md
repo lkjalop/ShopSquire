@@ -67,9 +67,24 @@ The ~1,250-line candidate filter/rank cascade (~30 in-place rewrites) · the NQE
 
 ---
 
+## 3.5 EXECUTED (post-GPT-5.6 re-eval, commits d77de9b → eb15b28)
+
+All nine findings verified in code, then fixed or resolved:
+- `d77de9b` — tenant propagation; sold-set RECONCILIATION with retirement (manual grants preserved, live-proven: 2 stale grants retired); `grounding_status()` ERROR|EMPTY|GROUNDED; **executable known_wrong** (`expect_v2` assertions; summarize_run requires every expected fix); approval preselect removed (confidence ≠ correctness).
+- `f667a53` — **attribute layer** (the named largest gap): data-driven defs for electronics/pharmacy/fashion, unit conversion, bounds (caught the live ram_gb=512 bug), unit-anchored name extraction with GB-ambiguity surfaced-never-assigned, tri-state `meets()`/`evaluate_requirements()`. Monitors 0→10/10 attributes from names alone; workload verdicts with zero legacy parsers.
+- `fcc15a8` — **labeled holdout**: all 114 hand-labeled (3 catalog data-bugs recorded); honest scorecard replaced the 98% coverage claim. Raw baseline: **63.2% exact**.
+- `c39b646` — alembic migration + DDL drift test. `6409505` — stock SoR decision (inventory_level = target SoR; provenance + freshness on every stock read; no cross-copying).
+- `eb15b28` — classifier v2, measured: crosswalk-as-prior (+ subtree refinement, ≥0.75 override outside) then earn-specificity clamp (child picks must cite evidence, else snap to parent). **63.2% → 74.6% exact / 85.1% lenient.** The one shared `_plural_expand` (its inline copy snapped Dresses to Clothing same-day — the drift class, caught by the holdout). Remaining classifier ledger: SSD/HDD sibling override, PHM lexical junk, 2 zero-token abstentions → cure = embedding candidates (nomic-embed-text installed; candidate-generator contract designed for the swap).
+
 ## 4. What REMAINS
 
 ### Phase 4 — `recommendation_core/` (the brain, 3–5 sessions)
+Work breakdown, in build order:
+1. **Envelope + adapter** (1 session): `recommendation_core/envelope.py` — the typed turn envelope + ONE unified response envelope; `legacy_adapter.py` emulating the four recorded contract forks so existing consumers see no change. Contract tests against `suggest_contract`.
+2. **Evidence + fit stages** (1 session): tenant-scoped retrieval via `catalog_read_model`, taxonomy grounding via `sells_within`/`grounding_status` (degrade on ERROR — never recommend-as-healthy), attribute/workload fit via `evaluate_requirements`. Reuses proven leaf services; NOT grown from recommend_pipeline (bounded fan-out reused as utility only; its fraud fail-open fixed on import).
+3. **The bounded brain** (1–2 sessions): `turn_router.py` (semantic router regrounded: model maps language → taxonomy handles from candidate top-K, `sells_within()==False` is the only refusal; VL-model-chain fixed) + `plan.py` (model proposes over the closed tool vocabulary; validator; deterministic default). Never-empty recovery answer.
+4. **Wiring** (0.5 session): chat calls the core in-process (HTTP hop dies); `/suggest` dispatches under `RECOMMEND_CORE_MODE` (default off).
+5. **Acceptance** (0.5 session): the 3 known_wrongs pass their `expect_v2` assertions AND `summarize_run` shows zero BLOCKERs on the 24 parity cases — the harness already exists and is tested.
 New package `src/app/services/recommendation_core/`:
 - `core.py` — grows out of `recommend_pipeline.py`: scatter (read-model search / vector / fraud / inventory / CV) → merge → conditional deepening → assemble. Explicit ordered stages over one typed context; emits the Phase-0 contract + side effects through the existing extracted stages. Never-empty recovery answer (kills the valorant silent-zero).
 - `turn_router.py` — `semantic_turn_router` regrounded: model maps language → taxonomy node handles chosen from candidate top-K; **deterministic `sells_within()` decides refusal** (False = refuse; None = never refuse); primary lane + sub-intents; fix the VL model chain.
