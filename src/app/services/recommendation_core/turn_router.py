@@ -40,6 +40,12 @@ logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
 LLMFn = Callable[[str, float], str]
 _ALLOWED_OPS = (">=", "<=", ">", "<", "==")
+# Software (so) and Media (me) are WORKLOAD/CONTENT verticals — you run/play them on a
+# device, you don't buy them AS the device. Routing here = a use-case signal, never a
+# product-gap refusal. Vertical-blind (no game/app names). Handle prefixes: 'so', 'so-…',
+# 'me', 'me-…'.
+import re as _re
+_WORKLOAD_RE = _re.compile(r"^(so|me)(-|$)")
 
 
 def _router_model() -> str:
@@ -194,6 +200,18 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # — a platform-elevated refusal there rides a mis-mapped fragment, never grant it.
     # (An earlier requirements-based proxy for this guard blocked CORRECT procurement
     # refusals — 'five A100 servers' extracts count>=5 — the lane is the real signal.)
+    # WORKLOAD-VERTICAL GUARD (GPT-5.6 review-3 #6, valorant 2/3 regression, STRUCTURAL not a
+    # game regex): the model correctly maps 'play valorant at 144fps' → so-3-1 (Software >
+    # Video Game Software). But Software (so) and Media (me) are things you RUN ON a device,
+    # not the device — the shopper named a WORKLOAD, not a product to buy. Routing there is a
+    # use-case signal: never refuse, drop the content node so retrieval does DEVICE search,
+    # keep the implied requirements (refresh_hz>=144). Vertical-blind: a forklift (bi) is NOT
+    # a workload vertical and stays correctly refusable.
+    if node is not None and _WORKLOAD_RE.match(node.handle):
+        node = None
+        if lane == "OFF_CATALOG":
+            lane = "SEARCH"
+
     model_proposed_refusal = (lane == "OFF_CATALOG")
     refusal_granted = False
     # PROCUREMENT is in the gate lanes deliberately (census: '$80k A100 servers' routed as

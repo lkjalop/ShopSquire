@@ -93,17 +93,17 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
                    resp: CoreResponse, limit: int) -> None:
     bundle = gather_evidence(db, envelope, node_handle=decision.node_handle,
                              limit=max(limit * 3, 30))
-    if bundle.count == 0 and decision.requirements:
-        # no node routed and the phrase LIKE-matches nothing ('i want to play valorant at
-        # 144fps') — but we HAVE clamped requirements, which is retrieval intent enough:
-        # evaluate the catalog broadly and let fit-ranking order it (closest-match honesty
-        # beats an empty grid; the requirements are what the turn MEANS)
+    # broad-retry ONLY on a valid empty (never on error — that would mask a failure): no node
+    # matched and the phrase LIKE-matches nothing ('play valorant at 144fps') but we HAVE
+    # clamped requirements = retrieval intent enough; rank the catalog by fit (closest-match
+    # honesty beats an empty grid).
+    if bundle.status == "empty" and decision.requirements:
         bundle = gather_evidence(db, envelope, broad=True, limit=max(limit * 5, 60))
         bundle.retrieval_mode = "requirements_broad"
-    resp.extras["evidence"] = {"count": bundle.count, "grounding": bundle.grounding,
-                               "retrieval_mode": bundle.retrieval_mode,
-                               "budget_filtered": bundle.budget_filtered,
-                               "total_before_budget": bundle.total_before_budget}
+    resp.extras["evidence"] = bundle.as_trace()
+    if bundle.status == "error":
+        resp.degraded = True         # a retrieval FAILURE degrades — never present as 'no match'
+        return
     cards, summary = build_cards(bundle.variants, decision.requirements or None, limit=limit)
     resp.products = cards
     if decision.requirements:

@@ -231,10 +231,13 @@ def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
         "gate_match_rate": round(gate_match / n, 4),
         "expected_changes": len(expected),
         "expected_changes_met": expected_met,
-        # Promotion gate (GPT-5.6 review-2 metric ruling): zero security/honesty BLOCKERs,
-        # message-class parity, product-set MEMBERSHIP (not ordering), every known_wrong fixed.
-        # Live outcome metrics (conversion, NDCG, latency) are a SEPARATE canary gate — they
-        # need traffic and cannot be computed offline.
-        "gates_pass": (by_sev["BLOCKER"] == 0 and mc_match / n >= 0.98 and ps_ok / n >= 0.9
+        # Promotion gate (GPT-5.6 review-3 answer #1): v1 product-set parity — BOTH membership
+        # and ordering — is a DIAGNOSTIC, not a gate. A tight top-10 v2 CANNOT reach 0.9
+        # jaccard against a 43-product v1 even when every v2 result is superior; the gate is
+        # structurally incompatible with tight sets. Offline gate = zero security/honesty
+        # BLOCKERs + message-class parity + every known_wrong fixed. The REAL quality gate
+        # (v2-intrinsic precision, recall@K, NDCG@K, empty-rate, diversity) lands in
+        # recommendation_core/quality.py; live outcomes (conversion) are a canary gate.
+        "gates_pass": (by_sev["BLOCKER"] == 0 and mc_match / n >= 0.98
                        and expected_met == len(expected)),
     }

@@ -105,6 +105,22 @@ def test_wrongful_refusal_guard_spec_turns_never_platform_refused(db):
     assert d2.lane == "OFF_CATALOG" and d2.refusal_granted
 
 
+def test_workload_vertical_node_never_refused(db):
+    """GPT-5.6 review-3 #6 (valorant 2/3): the model correctly maps a game to a Software
+    (so-*) node; that's a WORKLOAD, not a product gap. Never refuse; drop the content node so
+    retrieval does device search; keep requirements. Vertical-blind, no game regex."""
+    d = route_turn(db, _env("i want to play valorant at 144fps"),
+                   llm_fn=_route_stub("OFF_CATALOG", "so-3-1", {"refresh_hz": [">=", 144]}))
+    assert d.lane != "OFF_CATALOG" and not d.refusal_granted
+    assert d.node_handle is None                          # content node dropped -> device search
+    assert d.requirements == {"refresh_hz": (">=", 144.0)}  # workload requirement kept
+    # a Media (me-*) node behaves the same; a real product gap (forklift/bi) still refuses
+    d2 = route_turn(db, _env("stream movies"), llm_fn=_route_stub("SEARCH", "me-1"))
+    assert d2.node_handle is None
+    d3 = route_turn(db, _env("do you sell forklifts?"), llm_fn=_route_stub("OFF_CATALOG", "bi-18"))
+    assert d3.refusal_granted
+
+
 def test_sold_name_veto_blocks_refusal_when_query_names_sold_category(db):
     """Census: 'laptop for fine-tuning LLMs' — numberless, model itself proposed refusal via
     a datacenter mapping. The query NAMES 'laptop' (a sold category) → refusal vetoed by the

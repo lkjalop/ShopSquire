@@ -93,14 +93,16 @@ def _enqueue_shadow(redis, *, query: str, uid: str, tenant_id: str, trace_id: st
 
 
 def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
-    """Best-effort immutable session slice. Consumed by prior-subject resolution later; for
-    now it's populated so the envelope carries it and the wiring is proven end-to-end."""
+    """Best-effort immutable session slice, TENANT-SCOPED (GPT-5.6 #5c22575.3): the core's
+    session namespace is session:{tenant}:{uid}:kv_state — never uid-alone (that would cross
+    tenants). Consumed by prior-subject resolution later; populated now so the wiring is
+    proven end-to-end."""
     if redis is None or not uid:
         return {}
     try:
-        raw = redis.get(f"session:{uid}:kv_state")
+        raw = redis.get(f"session:{tenant_id}:{uid}:kv_state")
         data = json.loads(raw) if raw else {}
-        if not isinstance(data, dict):
+        if not isinstance(data, dict) or not data:
             return {}
         return {"prior_node": data.get("last_node_handle"),
                 "shortlist_skus": data.get("last_shortlist_skus") or [],
@@ -135,18 +137,28 @@ def dispatch_recommendation_core(
         return None
     tenant = tenant_id or "default"
 
+    # IMAGE turns → legacy (GPT-5.6 review-3 #5c22575.2): the image lane (quarantine, CV,
+    # vision identity) is not core-served yet; a text lane carrying an image must NOT be
+    # core-served either. Exclude BEFORE routing.
+    if image_labels or image_hash:
+        return None
+
     if mode == "shadow":
         _enqueue_shadow(redis, query=query, uid=uid, tenant_id=tenant, trace_id=trace_id)
         return None
-    if mode == "canary" and not _in_canary_bucket(uid or tenant, pct):
+    # canary bucket on tenant:uid (GPT-5.6 #5c22575.4) — same user in different tenants can
+    # legitimately land different sides; anon users bucket by tenant.
+    if mode == "canary" and not _in_canary_bucket(f"{tenant}:{uid or 'anon'}", pct):
         return None
 
     try:
         # ── PREFLIGHT: the real shared guard (finding #1/#10) ──────────────────
-        # Blocked input NEVER reaches the core: fall through so legacy's full block path
-        # (security event, request_id, SECURITY_BLOCK_MODE) runs — no duplication of it here.
+        # Require verdict==allow (GPT-5.6 #5c22575.1): 'review' and guard-failure ('review'
+        # fail-closed) fall through to legacy too — review semantics aren't implemented in the
+        # core, so a flagged query must never be core-served with products. Blocked/reviewed
+        # input reaches legacy's full guard path (security event, block payload).
         guard = _run_guard(query=query, uid=uid, image_labels=image_labels, image_ocr=image_ocr)
-        if str(guard.get("verdict")) == "block":
+        if str(guard.get("verdict")) != "allow":
             return None
 
         session = _read_session_slice(redis, uid, tenant)
