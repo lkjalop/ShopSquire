@@ -192,16 +192,17 @@ def dispatch_recommendation_core(
             logger.info("core degraded (grounding=%s) — falling through to legacy", core.grounding)
             return None
 
-        # ── SHARED POSTFLIGHT (roadmap item 1): session writeback + telemetry ──
-        # so multi-turn works (the slice the facade reads next turn) and the canary is
-        # observable. Best-effort — never changes the response the buyer already has.
+        # ── FINALIZE FIRST, THEN POSTFLIGHT (review #3): with_trace (sanitize + trace
+        # persistence) must SUCCEED before any session mutation. If it raises, the outer except
+        # returns None → legacy serves, and session state was NOT yet written by V2 — no
+        # split-brain where V2 mutated session but legacy answered.
+        payload = with_trace(to_legacy(core), trace_id)
         try:
             from src.app.services.recommendation_postflight import run_postflight
             run_postflight(redis, envelope, core, latency_ms=_latency_ms)
         except Exception as _e_pf:
             logger.warning("postflight failed (non-fatal): %s", repr(_e_pf)[:120])
-
-        return with_trace(to_legacy(core), trace_id)
+        return payload
     except Exception as exc:
         record_failure("recommend_core_dispatch", exc, trace_id=trace_id)
         return None   # legacy is always a safe fallback
