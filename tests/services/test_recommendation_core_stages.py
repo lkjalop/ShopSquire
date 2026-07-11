@@ -55,6 +55,31 @@ def test_gather_evidence_never_raises_and_degrades():
     assert resp.degraded and resp.products == [] and "won't guess" in resp.message
 
 
+def test_ungrounded_tenant_short_circuits_before_model(db):
+    # M1.1: an un-onboarded tenant (no sold_taxonomy) must degrade WITHOUT a model call and
+    # WITHOUT silent text-search garbage — grounding preserved as 'empty' for the facade/telemetry.
+    from src.app.services.recommendation_core.core import recommend_turn
+    called = {"model": False}
+    def spy(p, t):
+        called["model"] = True
+        return "{}"
+    r = recommend_turn(db, _env(), llm_fn=spy)   # db fixture has NO sold_taxonomy rows
+    assert r.grounding == "empty" and r.degraded and r.products == []
+    assert r.extras["degraded_reason"] == "catalog_not_onboarded"
+    assert called["model"] is False              # short-circuited before the ~7s router call
+
+
+def test_grounded_tenant_still_serves(db):
+    from src.app.services.recommendation_core.core import recommend_turn
+    from src.app.services.taxonomy_registry import add_sold_node
+    add_sold_node(db, node_handle="el-6-6")      # onboard the tenant
+    import json
+    r = recommend_turn(db, _env(query="laptop"),
+                       llm_fn=lambda p, t: json.dumps({"lane": "SEARCH", "handle": "el-6-6",
+                                                       "use_cases": [], "confidence": 0.9}))
+    assert r.grounding == "grounded" and not r.degraded   # grounded path unaffected by M1.1
+
+
 def test_refusal_allowed_only_on_explicit_false(db):
     from src.app.services.taxonomy_registry import add_sold_node
     assert refusal_allowed(db, "el-6-2") is False      # ungrounded tenant: None -> never refuse

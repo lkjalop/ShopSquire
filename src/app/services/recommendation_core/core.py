@@ -42,8 +42,14 @@ def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None
 def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                     limit: int) -> CoreResponse:
     grounding = grounding_status(db, tenant_id=envelope.tenant_id)
-    if grounding == "error":
-        return degraded_response(envelope, reason="taxonomy_grounding_error")
+    # M1.1 UNGROUNDED GUARD (clickthrough issue #1): the core hard-depends on the tenant's
+    # sold_taxonomy/classifications. An 'empty' tenant (never onboarded) would otherwise degrade
+    # SILENTLY — no refusals, arbitrary text-search retrieval, 'nothing meets'. Short-circuit
+    # BOTH here (before the ~7s model call), preserving the true grounding so the facade falls
+    # to legacy (canary/primary) and telemetry distinguishes infra-error from not-onboarded.
+    if grounding in ("error", "empty"):
+        reason = "taxonomy_grounding_error" if grounding == "error" else "catalog_not_onboarded"
+        return degraded_response(envelope, reason=reason, grounding=grounding)
 
     import dataclasses
     from src.app.services.recommendation_core.intent_resolver import resolve as resolve_intent

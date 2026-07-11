@@ -188,8 +188,9 @@ def dispatch_recommendation_core(
         # (grounding error / retrieval failure) must NOT serve a 'try again' apology to a
         # canary buyer while a healthy legacy sits one return away. Honest degradation only
         # falls back when it produced nothing — an off-catalog refusal is a real answer, keep it.
-        if core.grounding == "error" or (core.degraded and not core.products and not core.off_catalog):
-            logger.info("core degraded (grounding=%s) — falling through to legacy", core.grounding)
+        if core.grounding in ("error", "empty") or (core.degraded and not core.products and not core.off_catalog):
+            logger.info("core degraded (grounding=%s reason=%s) — falling through to legacy",
+                        core.grounding, (core.extras or {}).get("degraded_reason"))
             return None
 
         # ── FINALIZE FIRST, THEN POSTFLIGHT (review #3): with_trace (sanitize + trace

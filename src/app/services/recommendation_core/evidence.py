@@ -134,8 +134,11 @@ def refusal_allowed(db, node_handle: str, *, tenant_id: str = "default") -> bool
     return sells_within(db, node_handle, tenant_id=tenant_id) is False
 
 
-def degraded_response(envelope: TurnEnvelope, *, reason: str) -> CoreResponse:
-    """The ONLY way to answer a turn whose catalog verification failed: an honest degraded
-    envelope — no products, no guesses, reason recorded for the trace."""
-    return CoreResponse(envelope=envelope, lane="SEARCH", grounding="error", degraded=True,
+def degraded_response(envelope: TurnEnvelope, *, reason: str,
+                      grounding: str = "error") -> CoreResponse:
+    """The ONLY way to answer a turn whose catalog verification failed OR whose tenant is not
+    yet onboarded — an honest degraded envelope: no products, no guesses, reason recorded for
+    the trace. `grounding` is preserved (error vs empty) so telemetry/shadow can tell an
+    infra failure from an un-onboarded tenant."""
+    return CoreResponse(envelope=envelope, lane="SEARCH", grounding=grounding, degraded=True,
                         extras={"degraded_reason": reason}).finalize()
