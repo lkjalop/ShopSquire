@@ -61,9 +61,17 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     for step in plan.steps:
         _EXECUTORS[step](db, envelope, decision, resp, limit)
 
-    # gates (census bucket 1): a real thin text-gate check on every turn — fails closed
+    # gates: prefer the SHARED commerce guard's verdict (run once at the facade ingress) —
+    # the core does NOT own a second security regex (GPT-5.6 #10). The thin evaluate_text_gates
+    # is the NO-FACADE fallback only (offline replay / direct tests).
     from src.app.services.recommendation_core.gates import evaluate_text_gates, slot_gap_clarify
-    gates = evaluate_text_gates(envelope.query)
+    if envelope.pre_gate is not None:
+        pg = envelope.pre_gate
+        route = "allow" if str(pg.get("verdict") or "allow") == "allow" else "review"
+        gates = {"policy_route": route, "image_untrusted": bool(envelope.has_image),
+                 "injection_flagged": route != "allow", "source": "commerce_request_guard"}
+    else:
+        gates = evaluate_text_gates(envelope.query)
     resp.extras["gates"] = gates
     if gates["policy_route"] != "allow":
         resp.degraded = True

@@ -1,0 +1,172 @@
+"""Recommendation dispatch facade (V2 — GPT-5.6 review-2 finding #1, #4, #6, #10).
+
+THE LIVE DISPATCH BOUNDARY. The first core wiring returned from inside suggest() BEFORE the
+shared commerce guard, image security, and normal persistence — a proof-of-life, not a
+production boundary. This module is that boundary, built right:
+
+  preflight (SHARED, not duplicated)
+    → inspect_commerce_request  — the REAL guard (prompt-injection/XSS/SQLi/uid/sku); a
+      'block' verdict emits the security event and returns the same block payload legacy
+      does, so the core can never bypass it. Its verdict is passed into the envelope so the
+      core reads the real guard, not a second regex (finding #10).
+    → session slice             — best-effort read of the durable session (prior node,
+      constraints, shortlist, referents); populated now, consumed by prior-subject
+      resolution in a later step.
+  dispatch (mode ladder, finding #4)
+    → off      : return None → legacy serves (default; zero live change).
+    → shadow   : legacy serves; a durable job is enqueued for OFFLINE diffing (no inline
+                 second brain — that doubles latency, the critique that killed wiring #1).
+    → canary:N : stable per-user bucketing → N% to core, rest to legacy.
+    → primary  : core serves every CANARY-eligible lane.
+  lane gate (finding #6)
+    → only SEARCH/FILTER/COMPARE/EXPLAIN/OFF_CATALOG are core-served; cart, claims, policy,
+      inventory, procurement, and image turns fall through to legacy, which handles them
+      properly. (Cost: a non-core lane under canary/primary runs the router then falls
+      through — double work on a small traffic slice; safety over latency, documented.)
+  postflight
+    → the caller's with_trace() runs sanitization + REAL trace persistence (the persisted
+      flag is now honest — finding #2).
+
+Returns a finalized payload dict when the core owns the turn, or None to fall through to
+legacy. Never raises into the router: any failure records + returns None (legacy is always
+a safe fallback).
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+from typing import Any, Callable, Dict, List, Optional
+
+from src.app.security.commerce_request_guard import inspect_commerce_request
+from src.app.services.recommendation_core.envelope import TurnEnvelope
+
+logger = logging.getLogger("shopsquire.recommendation_facade")
+
+# the lanes the core is trusted to serve live; everything else → legacy (finding #6)
+CANARY_LANES = frozenset({"SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG"})
+_SHADOW_QUEUE_KEY = "shadow:core:queue"
+_SHADOW_QUEUE_MAX = 5000
+
+
+def _resolve_mode() -> tuple[str, int]:
+    """(mode, canary_pct). RECOMMEND_CORE_MODE = off | shadow | canary:<pct> | primary."""
+    raw = str(os.getenv("RECOMMEND_CORE_MODE", "") or "").strip().lower()
+    if raw.startswith("canary"):
+        pct = 0
+        if ":" in raw:
+            try:
+                pct = max(0, min(100, int(raw.split(":", 1)[1])))
+            except ValueError:
+                pct = 0
+        return "canary", pct
+    if raw in ("shadow", "primary", "off"):
+        return raw, 0
+    return "off", 0
+
+
+def _in_canary_bucket(key: str, pct: int) -> bool:
+    """Stable per-user/tenant bucketing: the same key always lands the same side of the split
+    (deterministic across turns — a user doesn't flip between engines mid-session)."""
+    if pct <= 0:
+        return False
+    if pct >= 100:
+        return True
+    h = int(hashlib.sha256(str(key or "anon").encode("utf-8")).hexdigest(), 16)
+    return (h % 100) < pct
+
+
+def _enqueue_shadow(redis, *, query: str, uid: str, tenant_id: str, trace_id: str) -> None:
+    """Durable shadow job (finding #4): legacy serves live; the offline worker/replay drains
+    this queue and diffs core vs the recorded/served response. Best-effort; capped so a
+    stalled drainer can't grow it unbounded."""
+    if redis is None:
+        return
+    try:
+        job = json.dumps({"query": query, "uid": uid, "tenant_id": tenant_id,
+                          "trace_id": trace_id})
+        redis.lpush(_SHADOW_QUEUE_KEY, job)
+        redis.ltrim(_SHADOW_QUEUE_KEY, 0, _SHADOW_QUEUE_MAX - 1)
+    except Exception as exc:
+        logger.debug("shadow enqueue skipped: %s", repr(exc)[:100])
+
+
+def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
+    """Best-effort immutable session slice. Consumed by prior-subject resolution later; for
+    now it's populated so the envelope carries it and the wiring is proven end-to-end."""
+    if redis is None or not uid:
+        return {}
+    try:
+        raw = redis.get(f"session:{uid}:kv_state")
+        data = json.loads(raw) if raw else {}
+        if not isinstance(data, dict):
+            return {}
+        return {"prior_node": data.get("last_node_handle"),
+                "shortlist_skus": data.get("last_shortlist_skus") or [],
+                "accepted_constraints": data.get("constraints") or {}}
+    except Exception:
+        return {}
+
+
+def _run_guard(*, query: str, uid: str, image_labels: Optional[str],
+               image_ocr: Optional[str]) -> Dict[str, Any]:
+    try:
+        return inspect_commerce_request(
+            surface="recommend.core", texts=[query, image_labels, image_ocr], uid=uid,
+            sku_values=[], quantity_values=[])
+    except Exception as exc:
+        logger.warning("commerce guard failed in facade — failing closed to review: %s",
+                       repr(exc)[:120])
+        return {"verdict": "review", "severity": "medium", "reasons": ["guard_error"]}
+
+
+def dispatch_recommendation_core(
+    db, redis, *, query: str, uid: str, tenant_id: Optional[str],
+    budget_min: Optional[float], budget_max: Optional[float], trace_id: str,
+    image_labels: Optional[str] = None, image_hash: Optional[str] = None,
+    image_ocr: Optional[str] = None, source_ip: Optional[str] = None, request: Any = None,
+    with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]],
+    record_failure: Callable[..., Any],
+) -> Optional[Dict[str, Any]]:
+    """See module docstring. Returns finalized payload if the core owns the turn, else None."""
+    mode, pct = _resolve_mode()
+    if mode == "off":
+        return None
+    tenant = tenant_id or "default"
+
+    if mode == "shadow":
+        _enqueue_shadow(redis, query=query, uid=uid, tenant_id=tenant, trace_id=trace_id)
+        return None
+    if mode == "canary" and not _in_canary_bucket(uid or tenant, pct):
+        return None
+
+    try:
+        # ── PREFLIGHT: the real shared guard (finding #1/#10) ──────────────────
+        # Blocked input NEVER reaches the core: fall through so legacy's full block path
+        # (security event, request_id, SECURITY_BLOCK_MODE) runs — no duplication of it here.
+        guard = _run_guard(query=query, uid=uid, image_labels=image_labels, image_ocr=image_ocr)
+        if str(guard.get("verdict")) == "block":
+            return None
+
+        session = _read_session_slice(redis, uid, tenant)
+        envelope = TurnEnvelope.from_suggest_params(
+            query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
+            budget_max=budget_max, trace_id=trace_id,
+            has_image=bool(image_labels or image_hash), source_ip=source_ip,
+            session=session, pre_gate=guard)
+
+        # ── DISPATCH ───────────────────────────────────────────────────────────
+        from src.app.services.recommendation_core.core import recommend_turn
+        from src.app.services.recommendation_core.legacy_adapter import to_legacy
+        core = recommend_turn(db, envelope)
+
+        # ── LANE GATE (finding #6): non-core lanes fall through to legacy ───────
+        if core.lane not in CANARY_LANES:
+            logger.debug("core lane %s not canary-eligible — falling through to legacy", core.lane)
+            return None
+
+        return with_trace(to_legacy(core), trace_id)
+    except Exception as exc:
+        record_failure("recommend_core_dispatch", exc, trace_id=trace_id)
+        return None   # legacy is always a safe fallback

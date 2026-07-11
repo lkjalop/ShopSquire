@@ -33,19 +33,26 @@ class TurnEnvelope:
     has_image: bool = False
     source_ip: Optional[str] = None
     session: Dict[str, Any] = field(default_factory=dict)   # prior shortlist/slots (read-only)
+    # pre_gate: the SHARED commerce guard's verdict, run once at the facade ingress and passed
+    # in — so the core reads the REAL guard (inspect_commerce_request) instead of its own
+    # regex. None only on the no-facade path (offline replay / direct tests), where the core
+    # falls back to its thin gate. Shape: {"policy_route","verdict","reasons",...}.
+    pre_gate: Optional[Dict[str, Any]] = None
 
     @classmethod
     def from_suggest_params(cls, *, query: str, uid: str = "", tenant_id: str = "default",
                             budget_min: Optional[float] = None, budget_max: Optional[float] = None,
                             trace_id: Optional[str] = None, has_image: bool = False,
                             source_ip: Optional[str] = None,
-                            session: Optional[Dict[str, Any]] = None) -> "TurnEnvelope":
+                            session: Optional[Dict[str, Any]] = None,
+                            pre_gate: Optional[Dict[str, Any]] = None) -> "TurnEnvelope":
         """The /suggest edge speaks DOLLARS; internal is CENTS — converted here, once."""
         to_cents = lambda v: int(round(float(v) * 100)) if v is not None else None  # noqa: E731
         return cls(tenant_id=str(tenant_id or "default"), uid=str(uid or ""),
                    query=str(query or "").strip(), trace_id=trace_id or str(uuid.uuid4()),
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
-                   has_image=bool(has_image), source_ip=source_ip, session=dict(session or {}))
+                   has_image=bool(has_image), source_ip=source_ip, session=dict(session or {}),
+                   pre_gate=pre_gate)
 
 
 @dataclass
