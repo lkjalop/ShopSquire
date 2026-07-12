@@ -1667,14 +1667,29 @@ export default function App() {
           chatPayload.confirmed_slots = confirmedSlots;
         }
 
+        // ONE idempotency key per send, shared by BOTH the stream and the /chat/query fallback
+        // (review-6 #11): a slow first turn + the fallback must not double-serve/double-resolve.
+        const idempotencyKey = ((globalThis as any).crypto?.randomUUID?.())
+          || `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const apiHeaders = {
           'Content-Type': 'application/json',
           ...csrfHeaders(),
           'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          'x-idempotency-key': idempotencyKey,
         };
+        // SSE deadlines (review-6 #11): the connect timeout only aborts if headers are slow; the
+        // body read loop needs its OWN idle + total deadlines or a hung server stalls forever
+        // (the `thinking` event arrives instantly, resolving fetch and clearing the old timer).
+        const _SSE_CONNECT_MS = 3500;   // headers not here in 3.5s → fall back to /chat/query
+        const _SSE_IDLE_MS = 20000;     // no chunk for 20s → server hung, abort → fallback
+        const _SSE_TOTAL_MS = 90000;    // whole-turn ceiling
         const tryStreamChat = async (): Promise<any | null> => {
           const ctl = new AbortController();
-          const t = setTimeout(() => ctl.abort(), 3500);
+          const connectTimer = setTimeout(() => ctl.abort(), _SSE_CONNECT_MS);
+          const totalTimer = setTimeout(() => ctl.abort(), _SSE_TOTAL_MS);
+          let idleTimer: ReturnType<typeof setTimeout> | null = null;
+          const armIdle = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = setTimeout(() => ctl.abort(), _SSE_IDLE_MS); };
+          const clearAll = () => { clearTimeout(connectTimer); clearTimeout(totalTimer); if (idleTimer) clearTimeout(idleTimer); };
           let resp: Response;
           try {
             resp = await fetch(apiUrl('/api/v1/chat/stream'), {
@@ -1685,16 +1700,19 @@ export default function App() {
               signal: ctl.signal,
             });
           } finally {
-            clearTimeout(t);
+            clearTimeout(connectTimer);   // headers arrived (or aborted) — idle/total now govern
           }
-          if (!resp.ok || !resp.body) return null;
+          if (!resp.ok || !resp.body) { clearAll(); return null; }
           const reader = resp.body.getReader();
           const decoder = new TextDecoder();
           let buffer = '';
           let answerPayload: any = null;
+          try {
+          armIdle();   // start the idle watch now that we're reading the body
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
+            armIdle();   // a chunk arrived — reset the idle deadline
             buffer += decoder.decode(value, { stream: true });
             buffer = buffer.replace(/\r\n/g, '\n');
             let splitIdx = buffer.indexOf('\n\n');
@@ -1728,6 +1746,9 @@ export default function App() {
             }
           }
           return answerPayload;
+          } finally {
+            clearAll();   // release idle + total deadlines whether we finished, threw, or aborted
+          }
         };
 
         let data: any = null;
@@ -1740,12 +1761,22 @@ export default function App() {
           }
         }
         if (!data) {
-          const r = await fetch(apiUrl('/api/v1/chat/query'), {
-            method: 'POST',
-            credentials: 'include',
-            headers: apiHeaders,
-            body: JSON.stringify(chatPayload),
-          });
+          // the fallback needs its own deadline too (review-6 #11) + the SAME idempotency key so
+          // the backend can dedupe a stream-then-fallback double submit.
+          const qctl = new AbortController();
+          const qTimer = setTimeout(() => qctl.abort(), _SSE_TOTAL_MS);
+          let r: Response;
+          try {
+            r = await fetch(apiUrl('/api/v1/chat/query'), {
+              method: 'POST',
+              credentials: 'include',
+              headers: apiHeaders,
+              body: JSON.stringify(chatPayload),
+              signal: qctl.signal,
+            });
+          } finally {
+            clearTimeout(qTimer);
+          }
           data = await safeJson(r);
           // Replay protection (409): a duplicate of the previous turn was held back. Show a calm retry
           // hint instead of the generic "Backend unavailable" panel (the detail is an object, not a string).
