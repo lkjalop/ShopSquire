@@ -28,7 +28,7 @@ jobs:
           pip install pytest
       - name: Ratchets — no-flavour + no-silent-except (the hygiene gates)
         run: pytest -q tests/test_no_flavour_in_core.py tests/test_no_silent_except_in_core.py
-      - name: V2 recommendation core — brain / stages / envelope / postflight / worker / facade
+      - name: V2 recommendation core — brain / stages / envelope / postflight / worker / facade / quality
         run: >
           pytest -q
           tests/services/test_recommendation_core_brain.py
@@ -38,6 +38,7 @@ jobs:
           tests/services/test_recommendation_shadow_worker.py
           tests/services/test_recommendation_facade.py
           tests/services/test_recommendation_facade_cart.py
+          tests/services/test_quality.py
           tests/characterization/test_replay_quality_meta.py
       - name: V2 cart lane — resolver / service / endpoint / idempotency
         run: >
