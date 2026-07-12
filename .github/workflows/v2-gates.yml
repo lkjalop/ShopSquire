@@ -47,3 +47,4 @@ jobs:
           tests/test_cart_mutations_endpoint.py
           tests/test_cart_mutation_plans_migration.py
           tests/test_chat_idempotency.py
+          tests/test_cart_tenant_isolation.py
