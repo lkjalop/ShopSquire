@@ -40,6 +40,7 @@ class EvidenceBundle:
     status: str = "ok"                          # ok | empty | error
     errors: List[str] = field(default_factory=list)
     latency_ms: int = 0
+    queries: int = 0                            # retrieval-leg DB round-trips (M2-B3: O(1) not O(N))
 
     @property
     def count(self) -> int:
@@ -49,16 +50,31 @@ class EvidenceBundle:
         return {"status": self.status, "grounding": self.grounding, "count": self.count,
                 "retrieval_mode": self.retrieval_mode, "errors": self.errors[:5],
                 "budget_filtered": self.budget_filtered,
-                "total_before_budget": self.total_before_budget, "latency_ms": self.latency_ms}
+                "total_before_budget": self.total_before_budget, "latency_ms": self.latency_ms,
+                "queries": self.queries}
+
+
+class _CountingDB:
+    """Counts retrieval-leg round-trips (M2-B3): the bundle records its own query cost so an
+    N+1 regression is a visible number in every trace, not a profiler session."""
+    def __init__(self, inner):
+        self._inner = inner
+        self.queries = 0
+
+    def execute(self, *a, **kw):
+        self.queries += 1
+        return self._inner.execute(*a, **kw)
 
 
 def _skus_for_node(db, node_handle: str, tenant_id: str, limit: int) -> List[str]:
     """SKUs classified into the node's SUBTREE (product_classification is the retrieval index).
-    Raises on DB error — the caller sets bundle.status='error' (never silently '[]')."""
+    ORDER BY sku (M2-B3): an unordered LIMIT page is engine-arbitrary — the candidate slate
+    must be deterministic across runs. Raises on DB error — the caller sets
+    bundle.status='error' (never silently '[]')."""
     from sqlalchemy import text as _sql
     rows = db.execute(_sql(
         "SELECT sku FROM product_classification WHERE tenant_id=:t "
-        "AND (node_handle = :h OR node_handle LIKE :hp) LIMIT :lim"),
+        "AND (node_handle = :h OR node_handle LIKE :hp) ORDER BY sku LIMIT :lim"),
         {"t": tenant_id, "h": node_handle, "hp": node_handle + "-%",
          "lim": max(1, int(limit))}).fetchall()
     return [str(r[0]) for r in rows]
@@ -77,17 +93,19 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
     tenant = envelope.tenant_id
     t0 = time.perf_counter()
     bundle = EvidenceBundle(tenant_id=tenant, grounding=grounding_status(db, tenant_id=tenant))
+    counted = _CountingDB(db)      # retrieval legs only; grounding/refusal reads not in scope
     variants: List[VariantView] = []
     if node_handle:
-        from src.app.services.catalog_read_model import get_variant
+        from src.app.services.catalog_read_model import get_variants
         try:
-            for sku in _skus_for_node(db, node_handle, tenant, limit):
-                v = get_variant(db, sku, tenant_id=tenant, mode=mode)
-                if v is not None and v.active:
-                    variants.append(v)
+            # BATCH (M2-B3): one sku-list query + one query per table — was ~3 × N per turn
+            skus = _skus_for_node(counted, node_handle, tenant, limit)
+            variants = [v for v in get_variants(counted, skus, tenant_id=tenant, mode=mode)
+                        if v.active]
         except Exception as exc:   # typed: a lookup FAILURE is 'error', not 'no products'
             _log.warning("taxonomy sku lookup FAILED (node=%s): %s", node_handle, repr(exc)[:120])
             bundle.errors.append(f"taxonomy_lookup:{type(exc).__name__}")
+            variants = []
     if variants:
         bundle.retrieval_mode = f"taxonomy:{node_handle}"
     else:
@@ -98,7 +116,7 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
         text_errored = False
         try:
             variants = search_variants(
-                db, text_query=None if broad else (text_query or envelope.query or None),
+                counted, text_query=None if broad else (text_query or envelope.query or None),
                 category=category, product_type=product_type, limit=limit,
                 tenant_id=tenant, mode=mode)
         except Exception as exc:
@@ -125,6 +143,7 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
     if bundle.errors and bundle.grounding != "error":
         bundle.grounding = "error"   # a retrieval failure degrades grounding — caller degrades
     bundle.latency_ms = int((time.perf_counter() - t0) * 1000)
+    bundle.queries = counted.queries
     return bundle
 
 

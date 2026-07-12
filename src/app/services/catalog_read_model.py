@@ -134,6 +134,38 @@ def _legacy_get(db, sku: str) -> Optional[VariantView]:
         return None
 
 
+def _legacy_get_many(db, skus: List[str]) -> List[VariantView]:
+    """BATCH legacy read (M2-B3): ONE products query + ONE grouped stock query for N SKUs —
+    replaces the per-SKU loop that cost ~3 queries × 30 SKUs per turn. Output preserves the
+    CALLER's sku order (the retrieval index's order = the deterministic contract). The stock
+    leg is best-effort (mirrors _legacy_get's swallow — product presence is authoritative,
+    stock enrichment is not); the PRODUCTS query raises so the caller can type the failure."""
+    if not skus:
+        return []
+    params: Dict[str, Any] = {f"s{i}": s for i, s in enumerate(skus)}
+    ph = ", ".join(f":{k}" for k in params)
+    rows = db.execute(text(
+        f"SELECT {_LEGACY_COLS} FROM products p WHERE p.sku IN ({ph})"), params).fetchall()
+    stock_map: Dict[str, Tuple[Optional[int], Optional[str]]] = {}
+    try:
+        srows = db.execute(text(
+            f"SELECT p.sku, COALESCE(SUM(i.stock), 0), MAX(i.updated_at) FROM products p "
+            f"LEFT JOIN inventory i ON i.product_id = p.id WHERE p.sku IN ({ph}) "
+            f"GROUP BY p.sku"), params).fetchall()
+        stock_map = {str(r[0]): (int(r[1]) if r[1] is not None else None,
+                                 str(r[2]) if r[2] else None) for r in srows}
+    except Exception as exc:
+        logger.debug("legacy batch stock enrichment skipped: %s", repr(exc)[:80])
+    by_sku: Dict[str, VariantView] = {}
+    for r in rows:
+        st, as_of = stock_map.get(str(r[0]), (None, None))
+        view = _legacy_row_to_view(r, st)
+        by_sku[str(r[0])] = VariantView(**{**view.__dict__,
+                                           "stock_source": "legacy_inventory" if st is not None else None,
+                                           "stock_as_of": as_of})
+    return [by_sku[s] for s in skus if s in by_sku]
+
+
 def _legacy_search(db, *, text_query: Optional[str], brand: Optional[str], category: Optional[str],
                    product_type: Optional[str], min_price_cents: Optional[int],
                    max_price_cents: Optional[int], limit: int) -> List[VariantView]:
@@ -198,6 +230,54 @@ def _canonical_get(db, sku: str, *, tenant_id: str = DEFAULT_TENANT) -> Optional
         return None
 
 
+def _canonical_get_many(db, skus: List[str], *, tenant_id: str = DEFAULT_TENANT) -> List[VariantView]:
+    """BATCH canonical read (M2-B3): ONE variant query + ONE price query + ONE stock query.
+    Latest-price-per-sku picked in Python (ORDER BY updated_at DESC, first seen wins — the
+    same row _canonical_get's per-sku LIMIT 1 selects). Price/stock legs best-effort; the
+    VARIANT query raises so the caller can type the failure. Preserves caller sku order."""
+    if not skus:
+        return []
+    params: Dict[str, Any] = {f"s{i}": s for i, s in enumerate(skus)}
+    ph = ", ".join(f":{k}" for k in params)
+    params["t"] = tenant_id
+    rows = db.execute(text(
+        "SELECT v.sku, COALESCE(pr.title,''), COALESCE(pr.brand,''), COALESCE(pr.category,''), "
+        "v.attributes_json, pr.attributes_json, v.status "
+        "FROM variant v LEFT JOIN product pr ON pr.id = v.product_id AND pr.tenant_id = v.tenant_id "
+        f"WHERE v.tenant_id = :t AND v.sku IN ({ph})"), params).fetchall()
+    price_map: Dict[str, Tuple[Optional[int], Optional[str]]] = {}
+    stock_map: Dict[str, Tuple[Optional[int], Optional[str]]] = {}
+    try:
+        for pr in db.execute(text(
+                "SELECT sku, COALESCE(sale_cents, list_cents), currency FROM price_book_entry "
+                f"WHERE tenant_id = :t AND channel = 'default' AND sku IN ({ph}) "
+                "ORDER BY updated_at DESC"), params).fetchall():
+            price_map.setdefault(str(pr[0]), (int(pr[1]) if pr[1] is not None else None,
+                                              str(pr[2]) if pr[2] else None))
+        for st in db.execute(text(
+                "SELECT sku, SUM(COALESCE(available, on_hand - reserved, on_hand)), MAX(updated_at) "
+                f"FROM inventory_level WHERE tenant_id = :t AND sku IN ({ph}) GROUP BY sku"),
+                params).fetchall():
+            stock_map[str(st[0])] = (int(st[1]) if st[1] is not None else None,
+                                     str(st[2]) if st[2] else None)
+    except Exception as exc:
+        logger.debug("canonical batch price/stock enrichment skipped: %s", repr(exc)[:80])
+    by_sku: Dict[str, VariantView] = {}
+    for row in rows:
+        sku = str(row[0])
+        v_attrs, p_attrs = _loads(row[4]), _loads(row[5])
+        price, currency = price_map.get(sku, (None, None))
+        stock, as_of = stock_map.get(sku, (None, None))
+        by_sku[sku] = VariantView(
+            sku=sku, title=str(row[1]), brand=str(row[2]), category=str(row[3]),
+            product_type=str(v_attrs.get("product_type") or p_attrs.get("product_type") or ""),
+            price_cents=price, currency=currency or "AUD",
+            specs=_loads(v_attrs.get("specs")) or v_attrs, attributes=p_attrs,
+            stock=stock, stock_source="inventory_level" if stock is not None else None,
+            stock_as_of=as_of, active=(str(row[6] or "active") == "active"), source="canonical")
+    return [by_sku[s] for s in skus if s in by_sku]
+
+
 def _canonical_search(db, *, text_query: Optional[str], brand: Optional[str], category: Optional[str],
                       product_type: Optional[str], min_price_cents: Optional[int],
                       max_price_cents: Optional[int], limit: int,
@@ -215,7 +295,9 @@ def _canonical_search(db, *, text_query: Optional[str], brand: Optional[str], ca
         rows = db.execute(text(
             "SELECT v.sku FROM variant v "
             "LEFT JOIN product pr ON pr.id = v.product_id AND pr.tenant_id = v.tenant_id "
-            f"WHERE {' AND '.join(clauses)} LIMIT :lim"), params).fetchall()
+            # ORDER BY before LIMIT (M2-B3): the candidate PAGE must be deterministic — an
+            # unordered LIMIT returns engine-arbitrary rows and shadow diffs chase ghosts.
+            f"WHERE {' AND '.join(clauses)} ORDER BY v.sku LIMIT :lim"), params).fetchall()
         out: List[VariantView] = []
         for r in rows:
             view = _canonical_get(db, str(r[0]), tenant_id=tenant_id)
@@ -247,6 +329,29 @@ def get_variant(db, sku: str, *, tenant_id: str = DEFAULT_TENANT,
         other = _canonical_get(db, sku, tenant_id=tenant_id)
         _log_divergence(sku, view, other)
     return view
+
+
+def get_variants(db, skus: List[str], *, tenant_id: str = DEFAULT_TENANT,
+                 mode: Optional[str] = None) -> List[VariantView]:
+    """BATCH facade read (M2-B3): one query per table instead of ~3 per SKU (the 90-query/turn
+    N+1 at the evidence stage). Preserves the caller's sku order; missing SKUs are absent, not
+    None-holes. dual mode reads legacy and logs a membership divergence against canonical."""
+    if db is None or not skus:
+        return []
+    sku_list = [str(s) for s in skus if s]
+    m = mode if mode in _MODES else read_model_mode()
+    if m == "canonical":
+        return _canonical_get_many(db, sku_list, tenant_id=tenant_id)
+    views = _legacy_get_many(db, sku_list)
+    if m == "dual":
+        try:
+            other = _canonical_get_many(db, sku_list, tenant_id=tenant_id)
+            if {v.sku for v in views} != {v.sku for v in other}:
+                logger.info("catalog_read_model dual batch divergence: legacy=%d canonical=%d",
+                            len(views), len(other))
+        except Exception as exc:
+            logger.debug("dual batch canonical leg failed: %s", repr(exc)[:80])
+    return views
 
 
 def search_variants(db, *, text_query: Optional[str] = None, brand: Optional[str] = None,
