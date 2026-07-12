@@ -152,3 +152,48 @@ def test_cart_serving_disabled_by_default(monkeypatch):
 def test_cart_serving_flag_on(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CART_SERVE", "1")
     assert F._cart_serving_enabled() is True
+
+
+# ── full dispatch: cart serves even with the SEARCH core off (independent flag) ──
+
+def test_dispatch_serves_cart_with_core_mode_off(wired, monkeypatch):
+    from sqlalchemy.orm import sessionmaker
+    import src.app.services.recommendation_core.cart_resolver as CR
+
+    monkeypatch.delenv("RECOMMEND_CORE_MODE", raising=False)   # search core OFF
+    monkeypatch.setenv("RECOMMEND_CART_SERVE", "1")            # cart lane ON
+    monkeypatch.setattr(CR, "_default_llm_fn",
+                        lambda p, t: json.dumps({"ops": [{"action": "clear_all"}]}))
+
+    uid = "u-dispatch-off"
+    _build_cart(uid)
+    db = sessionmaker(bind=wired)()
+    try:
+        payload = F.dispatch_recommendation_core(
+            db, None, query="please clear my cart", uid=uid, tenant_id="t1",
+            budget_min=None, budget_max=None, trace_id="tid-cart-1", role=ROLE_OWNER,
+            with_trace=lambda p, tid: p, record_failure=lambda *a, **k: None)
+    finally:
+        db.close()
+
+    assert payload is not None, "cart should serve with core mode off when RECOMMEND_CART_SERVE=1"
+    assert payload["cart_updated"] is True
+    assert payload["cart"]["items"] == []
+
+
+def test_dispatch_off_when_both_flags_off(wired, monkeypatch):
+    from sqlalchemy.orm import sessionmaker
+
+    monkeypatch.delenv("RECOMMEND_CORE_MODE", raising=False)
+    monkeypatch.delenv("RECOMMEND_CART_SERVE", raising=False)
+    uid = "u-dispatch-none"
+    _build_cart(uid)
+    db = sessionmaker(bind=wired)()
+    try:
+        payload = F.dispatch_recommendation_core(
+            db, None, query="clear my cart", uid=uid, tenant_id="t1",
+            budget_min=None, budget_max=None, trace_id="tid-cart-2", role=ROLE_OWNER,
+            with_trace=lambda p, tid: p, record_failure=lambda *a, **k: None)
+    finally:
+        db.close()
+    assert payload is None   # both off → zero change, legacy/frontend serves

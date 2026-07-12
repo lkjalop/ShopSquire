@@ -260,10 +260,42 @@ def dispatch_recommendation_core(
 ) -> Optional[Dict[str, Any]]:
     """See module docstring. Returns finalized payload if the core owns the turn, else None."""
     mode, pct = _resolve_mode()
-    if mode == "off":
+    cart_serve = _cart_serving_enabled()
+    if mode == "off" and not cart_serve:
         return None
     tenant = tenant_id or "default"
 
+    # ── CART-MUTATION LANE — served INDEPENDENTLY of the search mode ladder ──────
+    # Cart editing has its OWN flag (RECOMMEND_CART_SERVE) so it can go live without dragging the
+    # not-yet-canary-ready search core with it — this runs even when RECOMMEND_CORE_MODE=off. A
+    # natural-language cart edit ('remove one item and set another to 20') is not a product search;
+    # resolve it to a typed, SKU-bound plan and execute via the guarded cart handlers. A miss
+    # (empty plan / not a cart edit / failure) falls through to the search ladder below, which the
+    # frontend regex still backstops (parallel-run). Image turns never cart-serve.
+    _served_guard: Optional[Dict[str, Any]] = None
+    if cart_serve and not (image_labels or image_hash):
+        try:
+            _served_guard = _run_guard(query=query, uid=uid, image_labels=image_labels,
+                                       image_ocr=image_ocr)
+            if str(_served_guard.get("verdict")) == "allow":
+                cart_slice = _read_cart_slice(db, uid)
+                if cart_slice:
+                    envelope = TurnEnvelope.from_suggest_params(
+                        query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
+                        budget_max=budget_max, trace_id=trace_id, has_image=False,
+                        source_ip=source_ip, session=_read_session_slice(redis, uid, tenant),
+                        cart=cart_slice, pre_gate=_served_guard)
+                    cart_payload = _serve_cart_mutation(envelope, role=role, with_trace=with_trace)
+                    if cart_payload is not None:
+                        logger.info("core served CART_MUTATE (uid=%s)", uid or "anon")
+                        return cart_payload
+        except Exception as exc:
+            record_failure("recommend_cart_dispatch", exc, trace_id=trace_id)
+            _served_guard = None   # a guard from a failed cart attempt is not reused
+
+    # ── SEARCH-LANE MODE LADDER ─────────────────────────────────────────────────
+    if mode == "off":
+        return None
     # SHADOW enqueues EVERY turn (review #8): the shadow corpus must include image turns —
     # excluding them here would overstate coverage when the image lane is later core-enabled.
     # Enqueue is offline-diff only; it never serves.
@@ -273,7 +305,6 @@ def dispatch_recommendation_core(
 
     # IMAGE turns → legacy (review-3 #5c22575.2): the image lane (quarantine, CV, vision
     # identity) is not core-SERVED yet; a text lane carrying an image must not be either.
-    # Excluded from SERVING (below), not from shadow (above).
     if image_labels or image_hash:
         return None
     # canary bucket on tenant:uid (GPT-5.6 #5c22575.4) — same user in different tenants can
@@ -282,34 +313,21 @@ def dispatch_recommendation_core(
         return None
 
     try:
-        # ── PREFLIGHT: the real shared guard (finding #1/#10) ──────────────────
-        # Require verdict==allow (GPT-5.6 #5c22575.1): 'review' and guard-failure ('review'
-        # fail-closed) fall through to legacy too — review semantics aren't implemented in the
-        # core, so a flagged query must never be core-served with products. Blocked/reviewed
-        # input reaches legacy's full guard path (security event, block payload).
-        guard = _run_guard(query=query, uid=uid, image_labels=image_labels, image_ocr=image_ocr)
+        # ── PREFLIGHT: the real shared guard (finding #1/#10). Reuse the cart path's verdict if
+        # it already ran this turn (same query/uid); else run it now. Require verdict==allow
+        # (GPT-5.6 #5c22575.1): a flagged query must never be core-served with products.
+        guard = _served_guard or _run_guard(query=query, uid=uid, image_labels=image_labels,
+                                            image_ocr=image_ocr)
         if str(guard.get("verdict")) != "allow":
             return None
 
         session = _read_session_slice(redis, uid, tenant)
-        cart_slice = _read_cart_slice(db, uid) if _cart_serving_enabled() else []
+        # the search core is cart-blind; cart editing already ran above (parallel-run).
         envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
             budget_max=budget_max, trace_id=trace_id,
             has_image=bool(image_labels or image_hash), source_ip=source_ip,
-            session=session, cart=cart_slice, pre_gate=guard)
-
-        # ── CART-MUTATION LANE (flag-gated, served) ─────────────────────────────
-        # A natural-language cart edit ('remove one item and set another to 20') is NOT a
-        # product search. When RECOMMEND_CART_SERVE is on and the shopper has a cart, resolve the
-        # edit to a typed, SKU-bound plan and execute it via the guarded cart handlers. Shadow-first
-        # (default off ⇒ frontend regex serves, zero change). Empty plan (not a cart edit) or any
-        # failure → fall through to product routing below.
-        if cart_slice:
-            cart_payload = _serve_cart_mutation(envelope, role=role, with_trace=with_trace)
-            if cart_payload is not None:
-                logger.info("core served CART_MUTATE (uid=%s)", uid or "anon")
-                return cart_payload
+            session=session, pre_gate=guard)
 
         # ── DISPATCH ───────────────────────────────────────────────────────────
         from src.app.services.recommendation_core.core import recommend_turn
