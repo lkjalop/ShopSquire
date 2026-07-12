@@ -37,9 +37,14 @@ _CORE_MODULES = [
     "src/app/services/recommendation_core/plan.py",
     "src/app/services/recommendation_core/ranking.py",
     "src/app/services/recommendation_core/legacy_adapter.py",
-    # cart-mutation resolver: model→closed-op-vocab→SKU-bind mechanism; generic device words only
-    # (_GENERIC_TOKENS), no brand/GPU/display literals — vertical-blind by construction.
+    # cart-mutation resolver: model→closed-op-vocab→SKU-bind via per-cart document-frequency
+    # scoring — vertical-blind with ZERO vocabulary (C0 replaced the generic-token stoplist).
     "src/app/services/recommendation_core/cart_resolver.py",
+    # C1 cart-mutation boundary: contract + risk policy + hash (pure shapes), transactional
+    # service (sku/qty math), apply endpoint — no product vocabulary anywhere.
+    "src/app/domain/cart_mutation.py",
+    "src/app/services/cart_mutation_service.py",
+    "src/app/routers/cart_mutations.py",
     "src/app/services/recommendation_facade.py",
     "src/app/services/recommendation_postflight.py",
     # GRADUATED 2026-07-07 (baseline 4 -> 0): capability classes/verdicts, persona labels, spec-strength

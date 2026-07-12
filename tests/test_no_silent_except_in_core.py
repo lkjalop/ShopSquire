@@ -50,6 +50,11 @@ _BASELINE = {
     "src/app/services/recommendation_core/intent_resolver.py": 0,
     "src/app/services/recommendation_core/turn_router.py": 0,
     "src/app/services/recommendation_core/cart_resolver.py": 0,
+    # C1 cart-mutation boundary: typed contract + transactional service + apply endpoint —
+    # a financial mutation path is exactly where silence must be impossible.
+    "src/app/domain/cart_mutation.py": 0,
+    "src/app/services/cart_mutation_service.py": 0,
+    "src/app/routers/cart_mutations.py": 0,
     "src/app/services/recommendation_facade.py": 0,
     "src/app/services/recommendation_postflight.py": 0,
     # extracted/owned core modules — kept tight so new silent swallows can't sneak in.

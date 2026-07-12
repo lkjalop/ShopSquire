@@ -86,9 +86,10 @@ def _fixed_llm(obj):
 _IDENTITY_TRACE = lambda payload, tid: payload   # noqa: E731
 
 
-# ── the compound-edit screenshot, served end to end ──────────────────────────────
+# ── the compound-edit screenshot: confirm-tier → apply endpoint → executed ──────
 
-def test_serve_compound_edit(wired):
+def test_serve_compound_edit_confirms_then_applies(wired):
+    # C1: a compound plan is CONFIRM tier — nothing mutates until the card's apply call.
     uid = "u-facade-compound"
     _build_cart(uid)
     cart = [{"sku": "SKU-ENVY", "name": "HP Envy x360 14", "quantity": 1},
@@ -102,12 +103,19 @@ def test_serve_compound_edit(wired):
                                      role=ROLE_OWNER, with_trace=_IDENTITY_TRACE, llm_fn=llm)
     assert payload is not None
     assert payload["turn_intent"] == "CART_MUTATE"
-    assert payload["cart_updated"] is True
-    # cart actually mutated: only the IdeaPad remains, at qty 20
-    remaining = {it["sku"]: it["quantity"] for it in payload["cart"]["items"]}
-    assert remaining == {"SKU-IDEA": 20}
-    assert not payload["cart_mutation"]["rejected"]
-    assert "Done" in payload["assistant_message"]
+    assert payload["cart_updated"] is False                       # NOTHING executed yet
+    cm = payload["cart_mutation"]
+    assert cm["needs_confirmation"] is True and cm["risk"] == "confirm"
+    assert cm["plan_id"] and len(cm["ops"]) == 2
+    from src.app.routers.cart import _get_or_create_cart
+    _, items, _ = _get_or_create_cart(uid)
+    assert len(items) == 3                                        # cart untouched pre-confirm
+    # the confirmation card's apply → transactional service → the screenshot fix, executed
+    from src.app.services.cart_mutation_service import apply_plan
+    out = apply_plan(cm["plan_id"], tenant_id="t1", uid=uid)
+    assert out["status"] == "applied"
+    _, items, _ = _get_or_create_cart(uid)
+    assert {it["sku"]: it["quantity"] for it in items} == {"SKU-IDEA": 20}
 
 
 # ── non-cart intent falls through ────────────────────────────────────────────────
@@ -194,7 +202,8 @@ def test_mixed_ambiguity_suspends_whole_plan(wired):
 def test_all_rejected_reports_cart_not_updated(wired):
     # review-5 #9: qty 600 > handler line gate (500) → rejected → cart_updated must be False.
     uid = "u-allrej"
-    _build_cart(uid)
+    from src.app.routers.cart import CartItemPayload, add_item
+    add_item(CartItemPayload(uid=uid, sku="SKU-IDEA", quantity=1), role=ROLE_OWNER)
     cart = [{"sku": "SKU-IDEA", "name": "Lenovo IdeaPad Slim 3i", "quantity": 1}]
     payload = F._serve_cart_mutation(
         _env(uid, "set the ideapad to 600", cart), role=ROLE_OWNER, with_trace=_IDENTITY_TRACE,
@@ -286,8 +295,19 @@ def test_dispatch_serves_cart_with_core_mode_off(wired, monkeypatch):
         db.close()
 
     assert payload is not None, "cart should serve with core mode off when RECOMMEND_CART_SERVE=1"
-    assert payload["cart_updated"] is True
-    assert payload["cart"]["items"] == []
+    # clear_all is CONFIRM tier (C1): the turn returns a confirmation card, cart untouched
+    assert payload["cart_updated"] is False
+    cm = payload["cart_mutation"]
+    assert cm["needs_confirmation"] is True and cm["plan_id"]
+    from src.app.routers.cart import _get_or_create_cart
+    _, items, _ = _get_or_create_cart(uid)
+    assert len(items) == 3
+    # confirming applies it through the transactional service (undo-stashed)
+    from src.app.services.cart_mutation_service import apply_plan
+    out = apply_plan(cm["plan_id"], tenant_id="t1", uid=uid)
+    assert out["status"] == "applied"
+    _, items, _ = _get_or_create_cart(uid)
+    assert items == []
 
 
 def test_dispatch_off_when_both_flags_off(wired, monkeypatch):

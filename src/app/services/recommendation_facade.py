@@ -206,9 +206,29 @@ def _cart_clarify_message(plan) -> str:
             f"item in it — which line did you mean? Name it and I'll make the change.")
 
 
+def _cart_confirm_message(plan) -> str:
+    """The confirmation ask for a confirm-tier plan — states exactly what WILL happen; nothing
+    has happened yet."""
+    bits: List[str] = []
+    for op in plan.ops:
+        if op.action == "clear_all":
+            bits.append("empty your whole cart")
+        elif op.action == "clear_previous":
+            bits.append("remove the items carried over from your earlier session")
+        elif op.action == "keep_only":
+            bits.append(f"remove everything except {len(op.target_skus)} item(s)")
+        elif op.action == "remove_items":
+            bits.append(f"remove {len(op.target_skus)} item(s)")
+        elif op.action == "set_quantity":
+            bits.append(f"change a line to {op.quantity} unit(s)")
+    what = "; ".join(bits) or "apply that cart change"
+    return (f"Just to confirm before I touch your cart — you want me to: {what}. "
+            f"Nothing is changed yet; confirm and I'll apply it (undo stays available).")
+
+
 def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
                          with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]],
-                         llm_fn=None) -> Optional[Dict[str, Any]]:
+                         llm_fn=None, redis=None) -> Optional[Dict[str, Any]]:
     """Detect + serve a natural-language cart edit. Returns a finalized payload when the turn IS a
     cart mutation, or None to fall through to product routing (empty plan = not a cart edit)."""
     from src.app.services.recommendation_core.cart_resolver import resolve_cart_mutation
@@ -238,20 +258,46 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
                     plan.confidence, _MIN_EXEC_CONFIDENCE)
         return None
 
-    # execute the bound ops, REUSING the guarded, stock-gated cart handlers.
-    # allow_sourcing=False (review-5 #8): an NL quantity that exceeds stock is REJECTED with the
-    # honest stock message — it must not silently create sourcing lines. The explicit
-    # shortfall-consent flow ('source the remaining 45') arrives with C1's confirmation tier.
-    from src.app.routers.cart import apply_cart_ops
-    result = apply_cart_ops(envelope.uid, plan.ops, role=role, allow_sourcing=False)
+    # AUTHORIZE → EXECUTE via the C1 transactional boundary (review-5 #1/#3/#5): the plan is
+    # PERSISTED against the cart state it was resolved on, then policy decides from its SHAPE —
+    # auto (single-target reversible) applies now, all-or-nothing + idempotent + undo-stashed;
+    # everything else returns a confirmation card that applies via
+    # POST /cart/mutations/{plan_id}/apply. No inline mutation, no partial application, and a
+    # trace-finalization failure can no longer follow a mutation into legacy (the apply is the
+    # commit point; with_trace shapes a payload that reports what ALREADY durably happened).
+    from src.app.domain.cart_mutation import RISK_AUTO
+    from src.app.services.cart_mutation_service import apply_plan, propose_plan
+    prop = propose_plan(tenant_id=envelope.tenant_id, uid=envelope.uid, plan=plan,
+                        cart_items=envelope.cart, query=envelope.query,
+                        trace_id=envelope.trace_id)
+    if prop["risk"] != RISK_AUTO:
+        core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
+                            message=_cart_confirm_message(plan)).finalize()
+        payload = to_legacy(core)
+        payload["cart_mutation"] = {"applied": [], "rejected": [], "ambiguous": [],
+                                    "needs_clarification": False, "needs_confirmation": True,
+                                    "plan_id": prop["plan_id"], "risk": prop["risk"],
+                                    "ops": [o.as_dict() for o in plan.ops],
+                                    "expires_at": prop["expires_at"]}
+        payload["cart_updated"] = False
+        return with_trace(payload, envelope.trace_id)
+
+    outcome = apply_plan(prop["plan_id"], tenant_id=envelope.tenant_id, uid=envelope.uid,
+                         redis=redis)
+    applied = outcome.get("applied") or []
+    rejected = ([{"action": "plan", "error": outcome.get("error")}]
+                if outcome.get("status") == "rejected" else [])
+    result = {"applied": applied, "rejected": rejected}
     core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
                         message=_cart_result_message(plan, result)).finalize()
     payload = to_legacy(core)
-    payload["cart_mutation"] = {"applied": result["applied"], "rejected": result["rejected"],
-                                "ambiguous": [], "needs_clarification": False}
-    payload["cart"] = result["cart"]
-    # cart_updated must be the TRUTH (review-5 #9): all-ops-rejected means nothing changed.
-    payload["cart_updated"] = bool(result["applied"])
+    payload["cart_mutation"] = {"applied": applied, "rejected": rejected, "ambiguous": [],
+                                "needs_clarification": False, "plan_id": prop["plan_id"],
+                                "status": outcome.get("status")}
+    if outcome.get("cart") is not None:
+        payload["cart"] = outcome["cart"]
+    # cart_updated must be the TRUTH (review-5 #9): only an applied plan changed the cart.
+    payload["cart_updated"] = outcome.get("status") == "applied" and bool(applied)
     return with_trace(payload, envelope.trace_id)
 
 
@@ -322,7 +368,8 @@ def dispatch_recommendation_core(
                         budget_max=budget_max, trace_id=trace_id, has_image=False,
                         source_ip=source_ip, session=_read_session_slice(redis, uid, tenant),
                         cart=cart_slice, pre_gate=_served_guard)
-                    cart_payload = _serve_cart_mutation(envelope, role=role, with_trace=with_trace)
+                    cart_payload = _serve_cart_mutation(envelope, role=role,
+                                                        with_trace=with_trace, redis=redis)
                     if cart_payload is not None:
                         logger.info("core served CART_MUTATE (uid=%s)", uid or "anon")
                         return cart_payload

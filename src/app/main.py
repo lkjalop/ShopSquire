@@ -2184,6 +2184,8 @@ def create_app() -> FastAPI:
     except Exception:
         pass
     app.include_router(cart_router)
+    from src.app.routers.cart_mutations import router as cart_mutations_router
+    app.include_router(cart_mutations_router)   # C1: confirm-tier plan apply (V2 cart lane)
     app.include_router(privacy_router)
     app.include_router(auth_router)
     app.include_router(account_router)

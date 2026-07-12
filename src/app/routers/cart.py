@@ -53,6 +53,47 @@ class CartItemPayload(BaseModel):
 _MAX_LINE_QTY = 500
 
 
+def apply_quantity_line(items: List[Dict], sku: str, target: int, stock: int,
+                        allow_sourcing: bool) -> tuple[List[Dict], Optional[Dict], Optional[Dict]]:
+    """THE per-line quantity decision (C1): the PUT handler and the transactional mutation
+    service both call this — one decision surface, never two copies that drift. Pure over its
+    inputs. Returns (new_items, shortfall_meta, error): error is the handler's exact detail
+    shape (quantity_out_of_range / out_of_stock / insufficient_stock) or None on success."""
+    if target > _MAX_LINE_QTY:
+        return items, None, {"error": "quantity_out_of_range", "sku": sku,
+                             "requested": target, "max": _MAX_LINE_QTY}
+    shortfall_meta: Optional[Dict] = None
+    if target > 0 and stock < target:
+        if not allow_sourcing:
+            return items, None, {"error": "out_of_stock" if stock == 0 else "insufficient_stock",
+                                 "sku": sku, "available": stock, "requested": target}
+        shortfall_meta = {"available_now": int(stock), "shortfall": int(target - stock),
+                          "requested": int(target)}
+    if target <= 0:
+        return [it for it in items if it.get("sku") != sku], None, None
+    out = list(items)
+    found = False
+    for it in out:
+        if it.get("sku") == sku:
+            it["quantity"] = target
+            it["sourcing_required"] = bool(shortfall_meta)
+            if shortfall_meta:
+                it["shortfall"] = shortfall_meta["shortfall"]
+                it["available_now"] = shortfall_meta["available_now"]
+            else:
+                it.pop("shortfall", None); it.pop("available_now", None)
+            found = True
+            break
+    if not found:
+        line: Dict[str, Any] = {"sku": sku, "quantity": target,
+                                "sourcing_required": bool(shortfall_meta), "added_at": _now_ts()}
+        if shortfall_meta:
+            line["shortfall"] = shortfall_meta["shortfall"]
+            line["available_now"] = shortfall_meta["available_now"]
+        out.append(line)
+    return out, shortfall_meta, None
+
+
 def _now_ts() -> str:
     """UTC 'YYYY-MM-DD HH:MM:SS' — same format as draft_orders.updated_at, so per-line added_at and the
     cart's updated_at compare cleanly (see services/cart_ttl.py)."""
@@ -593,48 +634,22 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
     POST /items which INCREMENTS. qty<=0 removes the line. Stock-gated like add. Vertical-blind."""
     with tracer.start_as_current_span("cart.set_item_quantity"):
         target = int(payload.quantity or 0)
-        # Sanity ceiling — mirrors scatter_gather_guard's per-line 1..500 range. allow_sourcing lifts the
-        # STOCK gate, not this bound, so a single request can't push an unbounded qty into the cart.
-        if target > _MAX_LINE_QTY:
-            raise HTTPException(status_code=400, detail={
-                "error": "quantity_out_of_range", "sku": sku, "requested": target, "max": _MAX_LINE_QTY})
         signal = _guard_cart_request(surface="cart.set_item_quantity", uid=payload.uid,
                                      sku_values=[sku], quantity_values=[max(0, target)])
-        shortfall_meta: Optional[Dict[str, int]] = None
-        if target > 0:
-            stock = _get_stock_level(sku)
-            if stock < target:
-                if not payload.allow_sourcing:
-                    # normal retail path — the stock gate stands (out_of_stock when 0, else insufficient_stock).
-                    raise HTTPException(status_code=409, detail={
-                        "error": "out_of_stock" if stock == 0 else "insufficient_stock",
-                        "sku": sku, "available": stock, "requested": target})
-                # procurement amendment — let the line hold the full requested qty; the shortfall sources at
-                # confirm-cart. Metadata is durable on the line + echoed so the UI can say "X will be sourced".
-                shortfall_meta = {"available_now": int(stock), "shortfall": int(target - stock), "requested": int(target)}
+        # THE per-line decision lives in apply_quantity_line (shared with the C1 transactional
+        # mutation service — one decision surface). The handler translates its error dicts to
+        # the same HTTP statuses as before: 400 out-of-range, 409 stock. Validated BEFORE
+        # get-or-create so a rejected request never creates a phantom cart (its error paths
+        # are item-independent).
+        stock = _get_stock_level(sku) if target > 0 else 0
+        _, _, err = apply_quantity_line([], sku, target, stock, bool(payload.allow_sourcing))
+        if err is not None:
+            raise HTTPException(status_code=400 if err["error"] == "quantity_out_of_range" else 409,
+                                detail=err)
         cart_id, items, _ = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.set_item_quantity", signal=signal)
-        if target <= 0:
-            items = [it for it in items if it.get("sku") != sku]
-        else:
-            found = False
-            for it in items:
-                if it.get("sku") == sku:
-                    it["quantity"] = target
-                    it["sourcing_required"] = bool(shortfall_meta)
-                    if shortfall_meta:
-                        it["shortfall"] = shortfall_meta["shortfall"]
-                        it["available_now"] = shortfall_meta["available_now"]
-                    else:
-                        it.pop("shortfall", None); it.pop("available_now", None)
-                    found = True
-                    break
-            if not found:
-                line: Dict[str, Any] = {"sku": sku, "quantity": target, "sourcing_required": bool(shortfall_meta), "added_at": _now_ts()}
-                if shortfall_meta:
-                    line["shortfall"] = shortfall_meta["shortfall"]
-                    line["available_now"] = shortfall_meta["available_now"]
-                items.append(line)
+        items, shortfall_meta, _err2 = apply_quantity_line(
+            items, sku, target, stock, bool(payload.allow_sourcing))
         _save_cart(cart_id, items)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)

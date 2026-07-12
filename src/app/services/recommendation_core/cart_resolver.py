@@ -35,6 +35,11 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from src.app.domain.cart_mutation import (   # THE shared typed contract (C1) — re-exported
+    EMPTY_PLAN,
+    CartMutationPlan,
+    CartOp,
+)
 from src.app.services.catalog_classifier import _plural_expand, _tokens
 from src.app.services.recommendation_core.envelope import TurnEnvelope
 
@@ -57,46 +62,6 @@ _MAX_PROMPT_LINES = 40
 # (the duplicated-parser drift class). An over-limit set_quantity passes through and surfaces as
 # the handler's own quantity_out_of_range rejection, quoting the shopper's REAL number.
 _MAX_QTY_SANITY = 1_000_000
-
-
-@dataclass(frozen=True)
-class CartOp:
-    """One clamped, SKU-bound cart operation. target_skus are REAL cart lines (or empty for
-    whole-cart intents). quantity is set only for set_quantity."""
-    action: str
-    target_skus: Tuple[str, ...] = ()
-    quantity: Optional[int] = None
-
-    def as_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {"action": self.action, "target_skus": list(self.target_skus)}
-        if self.quantity is not None:
-            d["quantity"] = self.quantity
-        return d
-
-
-@dataclass(frozen=True)
-class CartMutationPlan:
-    """The typed result. `ops` are fully bound and safe to execute; `ambiguous` names could not
-    be bound to exactly one line — the caller must ASK, never wipe on a guess."""
-    ops: Tuple[CartOp, ...] = ()
-    ambiguous: Tuple[str, ...] = ()      # model-named targets code could not bind 1:1
-    confidence: float = 0.0
-    source: str = "default"              # model | default
-
-    @property
-    def is_empty(self) -> bool:
-        return not self.ops and not self.ambiguous
-
-    @property
-    def needs_clarification(self) -> bool:
-        return bool(self.ambiguous)
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {"ops": [o.as_dict() for o in self.ops], "ambiguous": list(self.ambiguous),
-                "confidence": round(self.confidence, 3), "source": self.source}
-
-
-EMPTY_PLAN = CartMutationPlan()
 
 
 def _resolver_model() -> str:
