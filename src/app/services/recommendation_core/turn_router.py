@@ -131,6 +131,9 @@ class TurnDecision:
     requested_product_node: Optional[str] = None   # the DEVICE to retrieve (== node_handle)
     workloads: Tuple[str, ...] = ()                # content/software nodes named as workloads
     relationship: str = "buy"                      # buy (named a product) | run_on (named a workload)
+    # SESSION (M3-C2): the prior turn's shortlist SKUs, carried so a COMPARE/EXPLAIN turn's
+    # referents ('the first one', 'those') resolve against what was last shown.
+    prior_shortlist: Tuple[str, ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -138,7 +141,8 @@ class TurnDecision:
                 "use_cases": list(self.use_cases), "refusal_granted": self.refusal_granted,
                 "confidence": round(self.confidence, 3), "source": self.source,
                 "requested_product_node": self.requested_product_node,
-                "workloads": list(self.workloads), "relationship": self.relationship}
+                "workloads": list(self.workloads), "relationship": self.relationship,
+                "prior_shortlist": list(self.prior_shortlist)}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -221,6 +225,20 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # this clamp: a refusal still requires sells_within()==False (clamp 4), and for SEARCH a
     # wrong-ish handle is only a retrieval hint. Candidates stay in the prompt as guidance.
     node = get_node(str(data.get("handle") or "").strip())
+    # SESSION CONSUMPTION (M3-C2): make multi-turn REAL. A CONTINUATION turn — the model
+    # classified it FILTER/COMPARE/EXPLAIN (narrowing / comparing / asking-about, not a fresh
+    # SEARCH) and named NO node of its own — is refining the PRIOR subject, so inherit the last
+    # turn's node: 'only the 16GB ones' filters the last search, 'why is the first one better'
+    # asks about the last shortlist. The MODEL's lane is the signal (no anaphora regex); the
+    # prior node was already sellability-checked last turn. Prior REQUIREMENTS are deliberately
+    # NOT auto-merged — that is the context-rot class (a gaming-era spec hard-filtering a later
+    # work-laptop turn); the fragment's own requirements still extract below.
+    session = envelope.session or {}
+    prior_shortlist = tuple(str(s) for s in (session.get("shortlist_skus") or [])[:12])
+    if node is None and lane in ("FILTER", "COMPARE", "EXPLAIN"):
+        pn = get_node(str(session.get("prior_node") or ""))
+        if pn is not None:
+            node = pn
     # clamp 3: requirements — known keys, known ops, numeric, within sanity bounds
     requirements: Dict[str, List[Tuple[str, float]]] = {}
     for key, spec in (data.get("requirements") or {}).items():
@@ -265,6 +283,12 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # — a platform-elevated refusal there rides a mis-mapped fragment, never grant it.
     # (An earlier requirements-based proxy for this guard blocked CORRECT procurement
     # refusals — 'five A100 servers' extracts count>=5 — the lane is the real signal.)
+    # C2-KEEP (M3-C2): session consumption now RESOLVES the multi-turn version (a FILTER
+    # continuation inherits the prior sold node above, so its refusal check passes anyway). But
+    # this guard is ALSO the COLD-START floor — a shopper's FIRST message being a bare filter
+    # fragment has no prior node to inherit, and refusing that mis-mapped fragment is still
+    # wrong. The guard is an independent invariant, not a pure session proxy → it STAYS
+    # (over-excision is the risk; ledger §8).
     # WORKLOAD-VERTICAL GUARD (GPT-5.6 review-3 #6, valorant 2/3 regression, STRUCTURAL not a
     # game regex): the model correctly maps 'play valorant at 144fps' → so-3-1 (Software >
     # Video Game Software). But Software (so) and Media (me) are things you RUN ON a device,
@@ -324,4 +348,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         requirements=requirements, use_cases=tuple(use_cases),
                         refusal_granted=refusal_granted, confidence=conf, source="model",
                         requested_product_node=(node.handle if node else None),
-                        workloads=tuple(workloads), relationship=relationship)
+                        workloads=tuple(workloads), relationship=relationship,
+                        prior_shortlist=prior_shortlist)

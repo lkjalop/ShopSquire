@@ -163,6 +163,50 @@ def test_bare_device_purchase_is_buy_relationship(db):
     assert d.node_handle == "el-6-11-2" and d.relationship == "buy" and d.workloads == ()
 
 
+# ── M3-C2: session consumption (multi-turn made real) ───────────────────────────
+
+def _env_session(query, session):
+    return TurnEnvelope.from_suggest_params(query=query, uid="u1", tenant_id="default",
+                                            session=session)
+
+
+def test_nodeless_filter_inherits_prior_node(db):
+    """'only the 16GB ones' (FILTER, no node of its own) refines the PRIOR search — inherits
+    the last turn's node instead of an empty grid. The model's lane is the signal."""
+    session = {"prior_node": "el-6-11-2", "shortlist_skus": ["LAP-1", "LAP-2"]}
+    d = route_turn(db, _env_session("only the 16GB ones", session),
+                   llm_fn=_route_stub("FILTER", None, {"ram_gb": [">=", 16]}))
+    assert d.node_handle == "el-6-11-2"                 # inherited prior subject
+    assert d.prior_shortlist == ("LAP-1", "LAP-2")
+    assert d.requirements == {"ram_gb": [(">=", 16.0)]}  # fragment's own req still applies
+
+
+def test_compare_explain_carry_prior_shortlist(db):
+    session = {"prior_node": "el-6-11-2", "shortlist_skus": ["LAP-1", "LAP-2"]}
+    d = route_turn(db, _env_session("why is the first one better", session),
+                   llm_fn=_route_stub("EXPLAIN", None))
+    assert d.prior_shortlist == ("LAP-1", "LAP-2")      # referents resolvable
+    assert d.node_handle == "el-6-11-2"
+
+
+def test_fresh_search_does_not_inherit_prior_node(db):
+    """A NEW search (not a narrowing lane) must NOT drag the prior subject in — context-rot
+    guard: only FILTER/COMPARE/EXPLAIN continuations inherit."""
+    session = {"prior_node": "el-6-11-2", "shortlist_skus": ["LAP-1"]}
+    d = route_turn(db, _env_session("show me monitors", session),
+                   llm_fn=_route_stub("SEARCH", None))
+    assert d.node_handle is None                        # fresh SEARCH, prior node NOT inherited
+    assert d.prior_shortlist == ("LAP-1",)             # shortlist still carried (referent-only)
+
+
+def test_cold_start_filter_fragment_still_never_refused(db):
+    """C2-KEEP: with NO session, a bare filter fragment mapped to an unsold component node is
+    the COLD-START floor the FILTER-guard protects — still never refused."""
+    d = route_turn(db, _env("only ones with 16GB RAM or more"),
+                   llm_fn=_route_stub("FILTER", "el-7-12-3", {"ram_gb": [">=", 16]}))
+    assert d.lane != "OFF_CATALOG" and not d.refusal_granted
+
+
 def test_sold_name_veto_blocks_refusal_when_query_names_sold_category(db):
     """Census: 'laptop for fine-tuning LLMs' — numberless, model itself proposed refusal via
     a datacenter mapping. The query NAMES 'laptop' (a sold category) → refusal vetoed by the
