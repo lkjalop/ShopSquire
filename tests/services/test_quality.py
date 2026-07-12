@@ -142,3 +142,45 @@ def test_summarize_run_requires_quality_when_supplied():
                _card("C", 1400, "carbon", "meets")]), labels=green_labels) for i in range(10)]
     ok = summarize_run(diffs, quality=summarize_quality(green_rows))
     assert ok["gates_pass"] is True
+
+
+# ── review-9 #2: server-side catalog authorization (the composite unauthorized gate) ──
+
+def _authz_db():
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    s = sessionmaker(bind=create_engine("sqlite://"))()
+    s.execute(text("CREATE TABLE products (id TEXT PRIMARY KEY, sku TEXT UNIQUE, name TEXT, "
+                   "price_cents INT, active INTEGER DEFAULT 1)"))
+    s.execute(text("INSERT INTO products (id, sku, name, price_cents, active) VALUES "
+                   "('p1','OK-1','Fine',1000,1), ('p2','INACT-1','Gone',1000,0), "
+                   "('p3','UNSOLD-1','Forklift',1000,1)"))
+    from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
+    add_sold_node(s, node_handle="el-6-6")               # grounded sold set = {Laptops}
+    upsert_classification(s, sku="OK-1", node_handle="el-6-6", source="t", status="approved")
+    # classified into Forklifts (bi-18): under a GROUNDED sold set, sells_within(bi-18) is
+    # False — the explicitly-unauthorized case, no separate setter needed
+    upsert_classification(s, sku="UNSOLD-1", node_handle="bi-18", source="t", status="approved")
+    s.commit()
+    return s
+
+
+def test_catalog_authorization_catches_phantom_inactive_and_unsold():
+    from src.app.services.recommendation_core.quality import catalog_authorization_violations
+    db = _authz_db()
+    assert catalog_authorization_violations(db, ["OK-1"]) == 0            # clean product
+    assert catalog_authorization_violations(db, ["PHANTOM-9"]) == 1       # not in catalog
+    assert catalog_authorization_violations(db, ["INACT-1"]) == 1         # inactive shown
+    assert catalog_authorization_violations(db, ["UNSOLD-1"]) == 1        # unsold-taxonomy node
+    assert catalog_authorization_violations(
+        db, ["OK-1", "PHANTOM-9", "INACT-1", "UNSOLD-1"]) == 3
+
+
+def test_composite_unauthorized_feeds_the_gate():
+    from src.app.services.recommendation_core.quality import evaluate_case_quality
+    row = evaluate_case_quality({"id": "c1", "budget_max": None},
+                                {"products": [{"sku": "A", "price": 10.0}]},
+                                catalog_violations=2)
+    assert row["payload_violations"] == 0
+    assert row["catalog_violations"] == 2
+    assert row["unauthorized"] == 2                       # server-side violations reach the gate

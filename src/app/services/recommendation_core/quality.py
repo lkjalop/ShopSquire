@@ -84,11 +84,50 @@ def ndcg_at_k(shown_skus: List[str], lab: Dict[str, int], k: int = 10) -> float:
 
 # ── per-case evaluation ──────────────────────────────────────────────────────────
 
+def catalog_authorization_violations(db, shown_skus: List[str], *,
+                                     tenant_id: str = "default") -> int:
+    """SERVER-SIDE authorization check (review-9 #2 — the payload check alone was narrower than
+    its name): each SHOWN sku must (a) exist in the catalog, (b) be active, and (c) not sit in a
+    taxonomy node the tenant EXPLICITLY does not sell (sells_within is False). An unclassified
+    product is NOT a violation (unclassified ≠ unauthorized — classification coverage is its own
+    metric). Returns the violation count; fail-open 0 only when the DB itself is unreadable
+    (an infra failure must not masquerade as a quality signal)."""
+    if not shown_skus or db is None:
+        return 0
+    try:
+        from sqlalchemy import text as _t
+        params = {f"s{i}": s for i, s in enumerate(shown_skus)}
+        ph = ", ".join(f":{k}" for k in params)
+        rows = db.execute(_t(f"SELECT sku, COALESCE(active,1) FROM products WHERE sku IN ({ph})"),
+                          params).fetchall()
+        found = {str(r[0]): bool(r[1]) for r in rows}
+        violations = sum(1 for s in shown_skus if s not in found)          # phantom sku
+        violations += sum(1 for s in shown_skus if found.get(s) is False)  # inactive shown
+        try:
+            from src.app.services.taxonomy_registry import sells_within
+            cls = db.execute(_t(
+                f"SELECT sku, node_handle FROM product_classification "
+                f"WHERE sku IN ({ph}) AND tenant_id = :t AND status = 'approved'"),
+                {**params, "t": str(tenant_id)}).fetchall()
+            for sku, node in cls:
+                if sells_within(db, str(node), tenant_id=str(tenant_id)) is False:
+                    violations += 1                                        # explicitly-unsold node
+        except Exception as exc:
+            logger.debug("sold-taxonomy authorization leg skipped: %s", repr(exc)[:80])
+        return violations
+    except Exception as exc:
+        logger.debug("catalog authorization check unavailable: %s", repr(exc)[:80])
+        return 0
+
+
 def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
-                          labels: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                          labels: Optional[Dict[str, Any]] = None,
+                          catalog_violations: int = 0) -> Dict[str, Any]:
     """One case's quality row. `case` needs: id; optional budget_max (dollars), expects_products
     (default True for SEARCH-ish cases; False for refusal/clarify-expected cases).
-    `response` is the v2 legacy-shape payload (products: [{sku, price, brand, workload_fit}])."""
+    `response` is the v2 legacy-shape payload (products: [{sku, price, brand, workload_fit}]).
+    catalog_violations = the SERVER-SIDE count from catalog_authorization_violations (the caller
+    holds the db); the gate's unauthorized_rate is the honest COMPOSITE of both checks."""
     products = [p for p in (response.get("products") or []) if isinstance(p, dict)]
     shown = [str(p.get("sku")) for p in products if p.get("sku")]
     expects = bool(case.get("expects_products", True))
@@ -96,12 +135,12 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
     row: Dict[str, Any] = {"case_id": str(case.get("id") or ""), "shown": len(shown),
                            "expects_products": expects, "empty": expects and not shown}
 
-    # budget/duplicate violations (review-6 #18 — HONEST scope: this metric checks the two
-    # things measurable from the payload — over-budget shown products and duplicate SKUs. It does
-    # NOT verify tenant / active-status / sold-taxonomy / catalog provenance; those are a
-    # per-product server-side authorization check tracked as a follow-up. A missing/unparseable
-    # price when a budget is set counts as a violation — an unverifiable price is not "in budget"
-    # (was silently treated as 0 and evaded the check).
+    # PAYLOAD violations (review-6 #18): over-budget shown products and duplicate SKUs — the two
+    # things measurable from the payload alone. Tenant/active/sold-taxonomy live in the SERVER-
+    # SIDE check (catalog_authorization_violations, review-9 #2) whose count arrives via
+    # catalog_violations; row["unauthorized"] is the honest composite of both. A missing/
+    # unparseable price when a budget is set counts as a violation — an unverifiable price is
+    # not "in budget" (was silently treated as 0 and evaded the check).
     violations = 0
     budget_max = case.get("budget_max")
     if budget_max is not None:
@@ -115,7 +154,9 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
                 violations += 1
     dupes = len(shown) - len(set(shown))
     violations += max(0, dupes)
-    row["unauthorized"] = violations   # key kept (gate threshold) — see honest scope above
+    row["payload_violations"] = violations
+    row["catalog_violations"] = max(0, int(catalog_violations))
+    row["unauthorized"] = violations + row["catalog_violations"]   # the composite the gate reads
 
     # constraint satisfaction over verdict-carrying products (fit rides each card)
     verdicts = [str((p.get("workload_fit") or {}).get("overall") or "")

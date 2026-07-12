@@ -241,6 +241,19 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
 
 # ── the deterministic tool executors (the plan vocabulary's other half) ───────
 
+def _preferred_values(resp: CoreResponse) -> Optional[Dict[str, float]]:
+    """The KB's RECOMMENDED values out of the resolver's full-fidelity constraints (review-9 #3
+    closes review-6 #20): {key: preferred} for the ranker's soft nearness stage. None when no
+    constraint carries one — ordering is then byte-identical to the pre-preference ranker."""
+    try:
+        cons = (resp.extras.get("intent") or {}).get("constraints") or {}
+        out = {k: float(c["preferred"]) for k, c in cons.items()
+               if isinstance(c, dict) and c.get("preferred") is not None}
+        return out or None
+    except Exception:
+        return None
+
+
 def _bind_compare_targets(variants, targets) -> Optional[list]:
     """R9.3 — bind each model-NAMED compare target ('dell g16') to a retrieved variant by
     distinctive-token overlap (the cart-resolver DF discipline: a token unique across the
@@ -299,7 +312,7 @@ def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision
             variants = pair
             resp.extras["compare_bound"] = [v.sku for v in pair]
     cards, summary = build_cards(variants, decision.requirements or None, limit=limit,
-                                 sort=decision.sort)
+                                 sort=decision.sort, preferred=_preferred_values(resp))
     resp.products = cards
     if decision.requirements:
         resp.fit_summary = summary
@@ -368,7 +381,7 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
             resp.message = f"Comparing {names}."
             resp.extras["compare_bound"] = [v.sku for v in pair]
     cards, summary = build_cards(variants, decision.requirements or None, limit=limit,
-                                 sort=decision.sort)
+                                 sort=decision.sort, preferred=_preferred_values(resp))
     resp.products = cards
     if decision.requirements:
         resp.fit_summary = summary

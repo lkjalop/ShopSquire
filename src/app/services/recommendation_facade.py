@@ -47,8 +47,10 @@ logger = logging.getLogger("shopsquire.recommendation_facade")
 
 # the lanes the core is trusted to serve live; everything else → legacy (finding #6)
 CANARY_LANES = frozenset({"SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG"})
-_SHADOW_QUEUE_KEY = "shadow:core:queue"
+_SHADOW_QUEUE_KEY = "shadow:core:queue"          # legacy list (fallback + migration drain)
+_SHADOW_STREAM_KEY = "shadow:core:stream"        # R10.4b: the durable path
 _SHADOW_QUEUE_MAX = 5000
+_SHADOW_STREAM_MAX = 10000
 
 
 def _fallback_metric(reason: str) -> None:
@@ -112,7 +114,23 @@ def _enqueue_shadow(redis, *, envelope: "TurnEnvelope", cart_only: bool = False)
             payload["cart"] = list(envelope.cart)
             if cart_only:
                 payload["cart_only"] = True
-        redis.lpush(_SHADOW_QUEUE_KEY, json.dumps(payload))
+        raw = json.dumps(payload)
+        # R10.4b DURABLE PATH: a Stream entry survives a worker crash mid-job (consumer-group
+        # pending + XAUTOCLAIM recovery) — the list's BRPOP-then-process lost the popped job on
+        # crash, and its LTRIM cap silently dropped the OLDEST jobs whenever the drainer
+        # stalled. approximate maxlen keeps the cap without the silent-loss semantics (trim
+        # pressure is visible in stream length, and 2× the list cap). List fallback preserved
+        # for clients without stream support (DummyRedis) + the worker drains BOTH during
+        # migration.
+        try:
+            redis.xadd(_SHADOW_STREAM_KEY, {"payload": raw},
+                       maxlen=_SHADOW_STREAM_MAX, approximate=True)
+            return
+        except (AttributeError, TypeError) as exc:
+            logger.debug("no stream support (%s) → legacy list", type(exc).__name__)
+        except Exception as exc:
+            logger.debug("shadow xadd failed (%s) — falling back to list", repr(exc)[:80])
+        redis.lpush(_SHADOW_QUEUE_KEY, raw)
         redis.ltrim(_SHADOW_QUEUE_KEY, 0, _SHADOW_QUEUE_MAX - 1)
     except Exception as exc:
         logger.debug("shadow enqueue skipped: %s", repr(exc)[:100])

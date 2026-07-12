@@ -29,6 +29,9 @@ from src.app.services.attribute_registry import (
 from src.app.services.catalog_read_model import VariantView
 from src.app.services.recommendation_core.envelope import ProductCard
 
+import logging
+_log = logging.getLogger("shopsquire.recommendation_core.fit")
+
 DEFAULT_VERTICALS = ("electronics", "pharmacy", "fashion")
 
 
@@ -47,24 +50,48 @@ def variant_attributes(view: VariantView,
     return attrs
 
 
+def _preferred_distance(attrs: Dict[str, Any], preferred: Dict[str, float]) -> float:
+    """Nearness to the KB's RECOMMENDED values (review-9 #3): per key, relative distance capped
+    at 1.0; an UNKNOWN attribute costs the full 1.0 (a product we can't verify never wins the
+    preference tiebreak over one we can). 0.0 = spot-on every preferred value."""
+    total = 0.0
+    for k, p in preferred.items():
+        try:
+            pv = float(p)
+        except (TypeError, ValueError):
+            _log.debug("unusable preferred value for %s: %r", k, p)
+            continue
+        a = attrs.get(k)
+        if isinstance(a, bool) or not isinstance(a, (int, float)):
+            total += 1.0
+        else:
+            total += min(1.0, abs(float(a) - pv) / max(abs(pv), 1.0))
+    return round(total, 4)
+
+
 def build_cards(variants: List[VariantView],
                 requirements: Optional[Dict[str, Any]] = None,
                 *, defs: Optional[Dict[str, AttributeDef]] = None,
-                limit: int = 10, sort: Optional[str] = None) -> Tuple[List[ProductCard], Dict[str, Any]]:
+                limit: int = 10, sort: Optional[str] = None,
+                preferred: Optional[Dict[str, float]] = None) -> Tuple[List[ProductCard], Dict[str, Any]]:
     """(ranked cards, fit_summary). With no requirements: price-ranked cards, no verdicts.
     With requirements: tri-state per variant, honest ordering, closest-match when dry.
     Requirements accept (op, thr) per key OR a predicate LIST [(op, thr), ...] (a RANGE —
     M2-B1); evaluate_requirements handles both. sort (R9.2, ranking.SORTS) applies the
-    shopper's explicit price preference within fit-truth tiers."""
+    shopper's explicit price preference within fit-truth tiers. preferred (review-9 #3) is the
+    KB's recommended values {key: value} — a SOFT nearness stage in the ranker, never a gate."""
     from src.app.services.recommendation_core.ranking import rank as _rank
     defs = defs or defs_union(DEFAULT_VERTICALS)
     # retrieval_order = the SKU order the evidence stage handed us (relevance signal for the
     # ranker's stage 4); the ranker owns ORDERING, this stage owns VERDICTS.
     retrieval_order = [v.sku for v in variants]
     built: List[ProductCard] = []
+    pref_dist: Dict[str, float] = {}
     counts = {"meets": 0, "unknown": 0, "fails": 0}
     for v in variants:
         attrs = variant_attributes(v, defs)
+        if preferred:
+            pref_dist[v.sku] = _preferred_distance(attrs, preferred)
         card = ProductCard(sku=v.sku, title=v.title, price_cents=v.price_cents,
                            currency=v.currency, brand=v.brand, image_url=v.image_url,
                            stock=v.stock, stock_source=v.stock_source)
@@ -81,7 +108,8 @@ def build_cards(variants: List[VariantView],
             else:
                 card.why.append("below requirement: " + ", ".join(failed))
         built.append(card)
-    cards = _rank(built, retrieval_order=retrieval_order, limit=limit, sort=sort)
+    cards = _rank(built, retrieval_order=retrieval_order, limit=limit, sort=sort,
+                  preferred_dist=(pref_dist or None))
     def _describe(spec) -> str:
         preds = spec if isinstance(spec, list) else [spec]
         return " and ".join(f"{op} {thr}" for op, thr in preds)

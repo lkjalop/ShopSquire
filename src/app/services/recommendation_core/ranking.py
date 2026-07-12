@@ -37,11 +37,16 @@ def _availability_rank(card: ProductCard) -> int:
 SORTS = ("price_asc", "price_desc")   # closed refinement-sort vocabulary (R9.2)
 
 
-def rank_key(card: ProductCard, *, relevance_rank: int = 0, sort: Optional[str] = None):
+def rank_key(card: ProductCard, *, relevance_rank: int = 0, sort: Optional[str] = None,
+             preferred_dist: float = 0.0):
     """The lexicographic sort key. Pure; identical inputs → identical key.
     R9.2: an explicit shopper sort ('show me cheaper ones') promotes PRICE above retrieval
     relevance — never above fit/availability truth: a failing cheap unit still ranks below
-    a meeting pricier one (stages 1-3 stay supreme)."""
+    a meeting pricier one (stages 1-3 stay supreme).
+    review-9 #3: preferred_dist (nearness to the KB's RECOMMENDED values, 0 = spot-on) is a
+    SOFT stage after fit/availability truth and after an explicit sort (a stated ask beats a
+    soft preference), before retrieval relevance/price. Lexicographic position GUARANTEES it
+    can never lift a product over one that fails a minimum requirement."""
     fit = card.fit or {}
     group = _FIT_GROUP.get(str(fit.get("overall") or "unknown"), 1) if card.fit else 0
     failed = sum(1 for v in (fit.get("per_key") or {}).values() if v is False)
@@ -49,17 +54,24 @@ def rank_key(card: ProductCard, *, relevance_rank: int = 0, sort: Optional[str] 
     if sort in SORTS:
         pkey = price if sort == "price_asc" else (
             -card.price_cents if card.price_cents is not None else 10**12)  # missing sinks both ways
-        return (group, failed, _availability_rank(card), pkey, relevance_rank, card.sku)
-    return (group, failed, _availability_rank(card), relevance_rank, price, card.sku)
+        return (group, failed, _availability_rank(card), pkey, preferred_dist,
+                relevance_rank, card.sku)
+    return (group, failed, _availability_rank(card), preferred_dist,
+            relevance_rank, price, card.sku)
 
 
 def rank(cards: List[ProductCard], *, retrieval_order: Optional[List[str]] = None,
-         limit: Optional[int] = None, sort: Optional[str] = None) -> List[ProductCard]:
+         limit: Optional[int] = None, sort: Optional[str] = None,
+         preferred_dist: Optional[Dict[str, float]] = None) -> List[ProductCard]:
     """Order cards lexicographically. retrieval_order is the SKU order the evidence stage
     returned (relevance signal); absent → relevance is neutral and other stages decide.
-    sort ∈ SORTS applies the shopper's explicit price preference (see rank_key)."""
+    sort ∈ SORTS applies the shopper's explicit price preference; preferred_dist maps
+    sku → nearness-to-recommended (0.0 when absent — ordering is then byte-identical to the
+    pre-preference ranker)."""
     rel: Dict[str, int] = {sku: i for i, sku in enumerate(retrieval_order or [])}
     default_rel = len(rel)   # SKUs not in the retrieval order sort after those that are
+    pd = preferred_dist or {}
     ordered = sorted(cards, key=lambda c: rank_key(c, relevance_rank=rel.get(c.sku, default_rel),
-                                                   sort=sort))
+                                                   sort=sort,
+                                                   preferred_dist=pd.get(c.sku, 0.0)))
     return ordered[: max(1, int(limit))] if limit else ordered

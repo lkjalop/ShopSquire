@@ -10,6 +10,9 @@ from typing import Any, Dict, List
 
 from sqlalchemy import text
 from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2
+
+import logging
+logger = logging.getLogger("shopsquire.checkout_upsell")
 from src.app.services.product_taxonomy import (
     ACCESSORY_FAMILIES,
     infer_accessory_slug,
@@ -230,8 +233,9 @@ def _user_family_history(db, uid: str | None, lookback_days: int = 180) -> dict[
             ),
             {"uid": user, "tenant": _ct(), "window_expr": f"-{max(1, int(lookback_days))} days"},
         ).fetchall()
-    except Exception:
-        rows = []
+    except Exception as exc:   # observable, not silent (review-9 #7): a dead DB must not read
+        logger.warning("upsell affinity history unavailable: %s", repr(exc)[:100])
+        rows = []              # as 'no purchase history'
     fam_counts: dict[str, float] = {}
     for r in rows or []:
         raw = r[0] if isinstance(r, (list, tuple)) else None
@@ -306,7 +310,8 @@ def _draft_order_lines(db, since_days: int = 90) -> list[list[dict]]:
             ),
             {"tenant": _ct(), "window_expr": f"-{max(1, int(since_days))} days"},
         ).fetchall()
-    except Exception:
+    except Exception as exc:   # observable, not silent (review-9 #7)
+        logger.warning("upsell co-occurrence window unavailable: %s", repr(exc)[:100])
         return []
     out: list[list[dict]] = []
     for r in rows or []:

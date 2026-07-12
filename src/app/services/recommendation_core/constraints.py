@@ -26,10 +26,10 @@ _UPPER_OPS = ("<=", "<")
 class RequirementConstraint:
     """One attribute's merged requirement: [lower, upper] with strictness, an optional
     preferred value (KB 'recommended'), and the provenance of every bound that contributed.
-    NOTE (review-6 #20): `preferred` is RECORDED but NOT yet consumed by ranking — a single
-    value is kept (first-wins) and no ranker reads it. Wiring `preferred` into the ranker (as a
-    soft nearness signal, clamped into [lower, upper]) is a tracked follow-up; until then it is
-    trace/telemetry only, never elimination."""
+    `preferred` is CONSUMED by ranking since review-9 #3 (closes review-6 #20): core extracts
+    it from the resolver's full-fidelity constraints and the ranker uses nearness-to-preferred
+    as a SOFT stage strictly below fit/availability truth and any explicit shopper sort —
+    a preference tiebreak, never elimination."""
     key: str
     lower: Optional[float] = None
     upper: Optional[float] = None

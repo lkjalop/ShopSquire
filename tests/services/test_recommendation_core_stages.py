@@ -206,3 +206,39 @@ def test_no_requirements_means_price_ranked_no_verdicts(db):
     cards, summary = build_cards(_views(db))
     assert [c.sku for c in cards] == ["LAP-3", "LAP-1", "LAP-2"]
     assert all(c.fit is None for c in cards) and summary["closest_match_mode"] is False
+
+
+def test_preferred_nearness_never_outranks_fit_truth():
+    """review-9 #3: preferred is a SOFT tiebreak — a FAILING product spot-on the preferred value
+    still ranks below a MEETING product far from it (lexicographic guarantee)."""
+    perfect_pref_but_fails = VariantView(sku="FAIL-PREF", title="Weak 16GB", price_cents=100000,
+                                         specs={"ram_gb": 16, "gpu_vram_gb": 2})
+    meets_far_from_pref = VariantView(sku="MEET-FAR", title="Big 64GB", price_cents=300000,
+                                      specs={"ram_gb": 64, "gpu_vram_gb": 8})
+    cards, _ = build_cards([perfect_pref_but_fails, meets_far_from_pref],
+                           {"gpu_vram_gb": (">=", 8)}, preferred={"ram_gb": 16.0})
+    assert [c.sku for c in cards] == ["MEET-FAR", "FAIL-PREF"]   # truth above preference
+
+
+def test_preferred_breaks_ties_within_meets_above_relevance():
+    """Among products that MEET, closer-to-recommended beats retrieval relevance."""
+    far = VariantView(sku="MEET-64", title="Big 64GB", price_cents=200000,
+                      specs={"ram_gb": 64, "gpu_vram_gb": 8})
+    near = VariantView(sku="MEET-16", title="Right 16GB", price_cents=200000,
+                       specs={"ram_gb": 16, "gpu_vram_gb": 8})
+    # retrieval order favors the FAR one; preference flips it
+    plain, _ = build_cards([far, near], {"gpu_vram_gb": (">=", 8)})
+    assert [c.sku for c in plain] == ["MEET-64", "MEET-16"]      # relevance order without pref
+    cards, _ = build_cards([far, near], {"gpu_vram_gb": (">=", 8)}, preferred={"ram_gb": 16.0})
+    assert [c.sku for c in cards] == ["MEET-16", "MEET-64"]      # nearness wins the tiebreak
+
+
+def test_explicit_sort_beats_preference():
+    """'show me cheaper ones' is a STATED ask — it outranks the soft KB preference."""
+    near_pricey = VariantView(sku="NEAR-PRICEY", title="Right 16GB", price_cents=300000,
+                              specs={"ram_gb": 16, "gpu_vram_gb": 8})
+    far_cheap = VariantView(sku="FAR-CHEAP", title="Big 64GB", price_cents=150000,
+                            specs={"ram_gb": 64, "gpu_vram_gb": 8})
+    cards, _ = build_cards([near_pricey, far_cheap], {"gpu_vram_gb": (">=", 8)},
+                           sort="price_asc", preferred={"ram_gb": 16.0})
+    assert [c.sku for c in cards] == ["FAR-CHEAP", "NEAR-PRICEY"]   # stated sort first
