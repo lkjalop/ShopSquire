@@ -171,6 +171,36 @@ def test_workload_reroutes_to_primary_sold_device(db):
     assert d3.refusal_granted and d3.relationship == "buy" and d3.workloads == ()
 
 
+def test_compare_named_units_narrows_to_exactly_those(db):
+    """R9.3 e2e (the compare_two_models case): 'compare the MSI Thin and the Acer Nitro' over
+    Computers narrows to EXACTLY those two, in named order — not the whole category."""
+    from sqlalchemy import text as _t
+    from src.app.services.taxonomy_registry import upsert_classification
+    db.execute(_t("INSERT INTO products (id, sku, name, price_cents, specs, brand) VALUES "
+                  "('p3','LAP-3','Acer Nitro 17in 144Hz Gaming Laptop',189900,"
+                  "'{\"ram_gb\": 16, \"gpu_vram_gb\": 8}','Acer')"))
+    upsert_classification(db, sku="LAP-3", node_handle="el-6-11-2", source="t", status="approved")
+    db.commit()
+    resp = recommend_turn(db, _env("compare the msi thin and the acer nitro"),
+                          llm_fn=_route_stub_ct("COMPARE", "el-6", ["msi thin", "acer nitro"]))
+    assert [p.sku for p in resp.products] == ["LAP-1", "LAP-3"]    # named order, LAP-2 excluded
+    assert resp.extras.get("compare_bound") == ["LAP-1", "LAP-3"]
+    assert "MSI Thin" in resp.message and "Acer Nitro" in resp.message
+
+
+def test_compare_unbindable_targets_keep_whole_slate(db):
+    """<2 targets bind ('the rolex') → the whole slate stands — never narrow to wrong units."""
+    resp = recommend_turn(db, _env("compare the msi thin and the rolex"),
+                          llm_fn=_route_stub_ct("COMPARE", "el-6", ["msi thin", "rolex"]))
+    assert len(resp.products) == 2                                  # full el-6 slate (LAP-1+LAP-2)
+    assert resp.extras.get("compare_bound") is None
+
+
+def _route_stub_ct(lane, handle, targets):
+    return lambda p, t: json.dumps({"lane": lane, "handle": handle, "requirements": {},
+                                    "confidence": 0.9, "compare_targets": targets})
+
+
 def test_explain_consumes_prior_shortlist(db):
     """R9.4 (review-6 #17 closed): 'why is the first one better for me?' retrieves EXACTLY the
     items shown last turn, in shown order, and explains the top pick from its fit verdicts —

@@ -184,6 +184,24 @@ def test_sort_price_asc_promotes_price_above_relevance_never_above_truth(db):
     assert [c.sku for c in sorted_cards] == ["MEET-CHEAP", "MEET-PRICEY", "FAIL-CHEAPEST"]
 
 
+def test_bind_compare_targets_df_discipline():
+    """R9.3 binding: a df==1 token identifies; a tie never binds; <2 bound → None (keep slate)."""
+    from src.app.services.recommendation_core.core import _bind_compare_targets
+    a = VariantView(sku="A", title="Dell G16 7630 16in Gaming Laptop")
+    b = VariantView(sku="B", title="Lenovo LOQ 15IRH8 Gaming Laptop")
+    c = VariantView(sku="C", title="ASUS ROG Strix G16-ish Gaming Laptop RTX")
+    slate = [a, b, c]
+    # 'g16' appears in A and C (df=2) but '7630'/'dell' are unique → binds A; 'lenovo' unique → B
+    pair = _bind_compare_targets(slate, ("dell g16", "lenovo legion"))
+    assert [v.sku for v in pair] == ["A", "B"]          # target order, LAP names bound
+    # only one target binds → None (never narrow a compare to a single unit)
+    assert _bind_compare_targets(slate, ("dell 7630", "rolex submariner")) is None
+    # ambiguous tie: twins share every token → target stays unbound → None
+    t1 = VariantView(sku="T1", title="Acme Box 500")
+    t2 = VariantView(sku="T2", title="Acme Box 500")
+    assert _bind_compare_targets([t1, t2, a], ("acme box", "dell g16")) is None
+
+
 def test_no_requirements_means_price_ranked_no_verdicts(db):
     cards, summary = build_cards(_views(db))
     assert [c.sku for c in cards] == ["LAP-3", "LAP-1", "LAP-2"]

@@ -241,6 +241,40 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
 
 # ── the deterministic tool executors (the plan vocabulary's other half) ───────
 
+def _bind_compare_targets(variants, targets) -> Optional[list]:
+    """R9.3 — bind each model-NAMED compare target ('dell g16') to a retrieved variant by
+    distinctive-token overlap (the cart-resolver DF discipline: a token unique across the
+    slate identifies; a tie never binds). Returns the bound variants in TARGET order only when
+    ≥2 DISTINCT units bound — anything less keeps the whole slate (a comparison narrowed to
+    the wrong or a single unit is worse than showing the category)."""
+    import re
+    tok = lambda s: set(re.findall(r"[a-z0-9]+", (s or "").lower()))
+    title_toks = {v.sku: tok(v.title) for v in variants}
+    df: Dict[str, int] = {}
+    for toks in title_toks.values():
+        for t in toks:
+            df[t] = df.get(t, 0) + 1
+    bound, seen = [], set()
+    for target in targets:
+        t_toks = tok(target)
+        scored = []
+        for v in variants:
+            overlap = t_toks & title_toks[v.sku]
+            unique_hits = sum(1 for x in overlap if df.get(x) == 1)   # df==1 identifies
+            if unique_hits:
+                scored.append((unique_hits, len(overlap), v))
+        if not scored:
+            continue
+        scored.sort(key=lambda s: (-s[0], -s[1]))
+        if len(scored) > 1 and scored[0][:2] == scored[1][:2]:
+            continue                                # tie = ambiguous → this target stays unbound
+        v = scored[0][2]
+        if v.sku not in seen:
+            seen.add(v.sku)
+            bound.append(v)
+    return bound if len(bound) >= 2 else None
+
+
 def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision,
                               resp: CoreResponse, limit: int) -> bool:
     """R9.4: retrieve the prior turn's SHOWN SKUs (subject continuity) and, for EXPLAIN,
@@ -258,6 +292,12 @@ def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision
         return False
     resp.extras["evidence"] = {"retrieval_mode": "prior_shortlist", "count": len(variants),
                                "skus": [v.sku for v in variants]}
+    # a NAMED compare over the shortlist ('the ROG vs the Katana') narrows the same way (R9.3)
+    if decision.lane == "COMPARE" and decision.compare_targets:
+        pair = _bind_compare_targets(variants, decision.compare_targets)
+        if pair:
+            variants = pair
+            resp.extras["compare_bound"] = [v.sku for v in pair]
     cards, summary = build_cards(variants, decision.requirements or None, limit=limit,
                                  sort=decision.sort)
     resp.products = cards
@@ -318,6 +358,15 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
         if not variants:
             resp.message = (f"None of the current options are from {decision.brand_filter} — "
                             f"tell me if another brand works, or widen the search.")
+    # COMPARE of NAMED units (R9.3): narrow to the products the shopper actually named — the
+    # compare_two_models case returned the whole category instead of the Dell G16 vs the Lenovo.
+    if decision.lane == "COMPARE" and decision.compare_targets:
+        pair = _bind_compare_targets(variants, decision.compare_targets)
+        if pair:
+            variants = pair
+            names = " vs ".join((v.title or v.sku)[:48] for v in pair)
+            resp.message = f"Comparing {names}."
+            resp.extras["compare_bound"] = [v.sku for v in pair]
     cards, summary = build_cards(variants, decision.requirements or None, limit=limit,
                                  sort=decision.sort)
     resp.products = cards

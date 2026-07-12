@@ -172,6 +172,11 @@ class TurnDecision:
     # fragment-drift override) — the turn is ABOUT the prior subject, so EXPLAIN/COMPARE may
     # consume prior_shortlist ('the first one' = the items actually shown last turn).
     subject_from_session: bool = False
+    # R9.3: the specific products the shopper NAMED in a compare ('the Dell G16 vs the Lenovo
+    # Legion') — model-named short strings; the CORE binds each to a retrieved variant by
+    # distinctive-token overlap and narrows only when ≥2 bind unambiguously (never guess a
+    # comparison down to the wrong units). Empty = whole-category compare.
+    compare_targets: Tuple[str, ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -182,7 +187,8 @@ class TurnDecision:
                 "workloads": list(self.workloads), "relationship": self.relationship,
                 "prior_shortlist": list(self.prior_shortlist),
                 "brand_filter": self.brand_filter, "sort": self.sort,
-                "subject_from_session": self.subject_from_session}
+                "subject_from_session": self.subject_from_session,
+                "compare_targets": list(self.compare_targets)}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -273,11 +279,15 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         "- REFINE: if the shopper narrows to a BRAND ('only Asus', 'a Dell one') set "
         "refine.brand; if they ask for cheaper/most affordable set refine.sort=\"price_asc\"; "
         "premium/high-end → \"price_desc\". Both null when the message says neither.\n"
+        "- COMPARE of SPECIFIC products ('the Dell G16 vs the Lenovo Legion'): list each named "
+        "product as a short name in compare_targets. Empty list when comparing a whole "
+        "category ('compare your gaming laptops').\n"
         '- POLICY_QUESTION for services (payment plans, delivery, returns policy).\n\n'
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
         '"use_cases": ["<key>", ...], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
         '"refine": {"brand": "<brand or null>", "sort": "price_asc|price_desc|null"}, '
+        '"compare_targets": ["<named product>", ...], '
         '"confidence": <0.0-1.0>}\nJSON:'
     )
 
@@ -398,6 +408,12 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     if sort not in SORTS:
         sort = None
     brand_filter = _clamp_brand(db, refine.get("brand"))
+    # compare_targets shape clamp (R9.3): short strings, ≤4 — the BINDING clamp (name → real
+    # retrieved variant, distinctive-token overlap) runs in the core where the slate exists.
+    raw_targets = data.get("compare_targets")
+    compare_targets = tuple(str(x).strip()[:60] for x in raw_targets
+                            if isinstance(x, str) and str(x).strip())[:4] \
+        if isinstance(raw_targets, (list, tuple)) else ()
 
     # clamp 4 — THE REFUSAL GATE, both directions. The model MAPS; the PLATFORM decides:
     # a purchase-ish turn whose routed node fails sells_within() is refused even if the
@@ -478,4 +494,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         workloads=tuple(workloads), relationship=relationship,
                         prior_shortlist=prior_shortlist,
                         brand_filter=brand_filter, sort=sort,
-                        subject_from_session=subject_from_session)
+                        subject_from_session=subject_from_session,
+                        compare_targets=compare_targets)
