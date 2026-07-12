@@ -7,24 +7,25 @@ from src.app.routers.chat import _idem_single_flight
 
 
 class _FakeRedis:
+    """ONE keyspace like real redis — the lock must be visible to get() for the
+    compare-and-delete release (R10.3) to be testable."""
     def __init__(self):
         self.store = {}
-        self.locks = {}
 
     def get(self, k):
         return self.store.get(k)
 
     def set(self, k, v, nx=False, ex=None):
-        if nx and k in self.locks:
+        if nx and k in self.store:
             return False
-        self.locks[k] = v
+        self.store[k] = v
         return True
 
     def setex(self, k, ttl, v):
         self.store[k] = v
 
     def delete(self, k):
-        self.locks.pop(k, None)
+        self.store.pop(k, None)
 
 
 def test_duplicate_returns_cached_without_reproducing():
@@ -44,6 +45,32 @@ def test_duplicate_returns_cached_without_reproducing():
     assert first == {"answer": 1}
     assert second == {"answer": 1}      # the cached result, not a fresh resolve
     assert calls["n"] == 1              # producer ran exactly ONCE
+
+
+def test_stale_producer_cannot_release_successors_lease():
+    """R10.3 (review-8 #8): a SLOW producer whose lease expired must not delete the SUCCESSOR's
+    lock on exit — release is compare-and-delete on the ownership token, so only the current
+    holder frees the lease (the unconditional delete opened a third concurrent production)."""
+    r = _FakeRedis()
+
+    async def producer():
+        # mid-production: our lease 'expires' and a successor claims the lock with ITS token
+        r.store["chat:idem:k9:lock"] = "successor-token"
+        return {"ok": True}
+
+    asyncio.run(_idem_single_flight(r, "chat:idem:k9", producer))
+    assert r.store.get("chat:idem:k9:lock") == "successor-token"   # lease survived our exit
+
+
+def test_owner_releases_its_own_lease():
+    """The normal path still cleans up: the owner's token matches → the lock is deleted."""
+    r = _FakeRedis()
+
+    async def producer():
+        return {"ok": True}
+
+    asyncio.run(_idem_single_flight(r, "chat:idem:k10", producer))
+    assert "chat:idem:k10:lock" not in r.store
 
 
 def test_distinct_keys_each_produce():

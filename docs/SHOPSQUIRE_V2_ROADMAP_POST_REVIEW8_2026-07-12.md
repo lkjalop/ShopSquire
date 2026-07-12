@@ -1,5 +1,12 @@
 # ShopSquire V2 — Detailed Roadmap after Review-8 (2026-07-12, HEAD f2732f7)
 
+> **STATUS UPDATE 2026-07-13 (HEAD b2bdb94): R8 DONE (except R8.3 labels = USER), R9 DONE
+> (all six items, live-validated), R10.1 DONE.** Label-free gate green on the stateful census
+> (constraint-sat ~78%, empty 1/21 where the 1 was a measurement phantom since fixed —
+> response_shape claims-artifact bug). Remaining work = R8.3 labels (USER, keys case_id:turn),
+> R10.2–R10.5 ops, R11 soak→canary. Details per item below; this header supersedes the
+> per-item status where they conflict.
+
 ## Where we are (measured, not asserted)
 Final qwen3:14b re-measurement (`--facade-mode --diagnose`) after ALL 5 fixes (incl. f2732f7):
 

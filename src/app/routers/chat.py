@@ -1251,6 +1251,10 @@ async def _idem_single_flight(redis, key: str, producer):
     idempotent via the plan CAS; this closes the resolve/serve side. Fail-open: a flaky redis
     never blocks a turn."""
     result_key, lock_key = key + ":result", key + ":lock"
+    token = str(uuid.uuid4())   # OWNERSHIP token (R10.3/review-8 #8): only the current lease
+    #                             holder may release — an unconditional delete let a slow
+    #                             producer (lease expired, successor claimed) delete the
+    #                             SUCCESSOR's lock, opening a third concurrent production.
     try:
         cached = redis.get(result_key)
     except Exception:
@@ -1261,7 +1265,7 @@ async def _idem_single_flight(redis, key: str, producer):
         except Exception:
             pass
     try:
-        claimed = bool(redis.set(lock_key, "1", nx=True, ex=90))
+        claimed = bool(redis.set(lock_key, token, nx=True, ex=90))
     except Exception:
         claimed = True   # redis unavailable → don't block; just run (degrade to today's behavior)
     if not claimed:
@@ -1277,7 +1281,7 @@ async def _idem_single_flight(redis, key: str, producer):
                 except Exception:
                     break
         try:
-            redis.set(lock_key, "1", ex=90)   # producer appears dead → take over
+            redis.set(lock_key, token, ex=90)   # producer appears dead → take over WITH our token
         except Exception:
             pass
     try:
@@ -1288,8 +1292,14 @@ async def _idem_single_flight(redis, key: str, producer):
             logger.debug("idem result cache skipped: %s", repr(_ce)[:80])
         return result
     finally:
+        # COMPARE-AND-DELETE: release only if the lock still carries OUR token. (get+delete has
+        # a tiny window vs a Lua CAD; it removes the whole failure class the unconditional
+        # delete had, and both redis clients here — real + Dummy — lack scripting.)
         try:
-            redis.delete(lock_key)
+            held = redis.get(lock_key)
+            held = held.decode() if isinstance(held, bytes) else held
+            if held == token:
+                redis.delete(lock_key)
         except Exception as _de:
             logger.debug("idem lock release skipped: %s", repr(_de)[:80])
 
