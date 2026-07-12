@@ -186,6 +186,28 @@ def test_workload_reroute_uses_declared_host_not_dominant_node(db):
     assert d.relationship == "run_on"
 
 
+def test_ungrounded_workload_reroutes_to_declared_host(db):
+    """review-8 pharmacy-bleed (2nd hole): the model returns node=None for a BARE workload ('i want
+    to play valorant' — no device word) but device requirements still resolve. core reroutes to the
+    declared host (Gaming Laptops) so retrieval is a REAL device leg — LAP-2 (el-6-11-2), never the
+    broad catalog search that returned 10 pharmacy SKUs in the live diagnose."""
+    resp = recommend_turn(db, _env("i want to play valorant at 144fps"),
+                          llm_fn=_route_stub("SEARCH", "not-a-node-99", {"gpu_vram_gb": [">=", 4]}))
+    dec = resp.extras.get("decision") or {}
+    assert dec.get("node_handle") == "el-6-11-2"        # rerouted to the declared gaming host
+    assert dec.get("relationship") == "run_on"
+    assert "LAP-2" in [p.sku for p in resp.products]    # a real device leg, not empty/broad-catalog
+
+
+def test_ungrounded_no_requirements_stays_empty(db):
+    """The reroute must NOT over-fire: node=None with NO requirements (an off-domain ask like a pizza
+    place) stays ungrounded — we never reroute a non-workload to the gaming host."""
+    resp = recommend_turn(db, _env("recommend a good pizza place near me"),
+                          llm_fn=_route_stub("SEARCH", "not-a-node-99"))
+    dec = resp.extras.get("decision") or {}
+    assert dec.get("node_handle") is None               # no requirements → no reroute
+
+
 def test_workload_reroute_is_none_when_ungrounded(db):
     """A run_on turn on an UNGROUNDED tenant has no device to reroute to → node None (broad
     search), never a crash and never a refusal."""

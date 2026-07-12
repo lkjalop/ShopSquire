@@ -58,6 +58,18 @@ def _is_workload_host_product(node_handle: Optional[str]) -> bool:
         return True
 
 
+def _first_workload_host_root() -> Optional[str]:
+    """A device-subtree root to scope a broad retry to when NO node routed but device requirements
+    exist (the safety net behind the ungrounded-workload reroute). Reads workload_host_roots."""
+    try:
+        from src.app.platform.store_profile import profile_slot
+        roots = profile_slot("workload_host_roots", default=None) or []
+        return str(roots[0]) if roots else None
+    except Exception as exc:
+        logger.debug("workload_host_roots lookup failed: %s", repr(exc)[:100])
+        return None
+
+
 def _vertical_root(node_handle: Optional[str]) -> Optional[str]:
     """The depth-0 taxonomy ancestor (vertical root) of a node — el-7-9-12-11 → el. Used to keep a
     broad retry INSIDE the requested product's vertical (electronics stays electronics; pharmacy is
@@ -119,6 +131,23 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             logger.info("dropped %d workload req(s) for non-host product %s: %s",
                         len(dropped), decision.requested_product_node, sorted(dropped))
     decision = dataclasses.replace(decision, requirements=resolved_reqs)
+    # UNGROUNDED-WORKLOAD REROUTE (review-8 pharmacy-bleed, 2nd hole): the router only reroutes a
+    # NAMED software/media node ('so-3-1') to a device host. But 'i want to play valorant at 144fps'
+    # (no device word) makes the model return node=None, and resolve_intent STILL detects the game
+    # and yields device floors. node=None + device requirements = an ungrounded device workload →
+    # reroute to the store's declared workload host so retrieval is a real device leg, never the
+    # broad catalog search that bled pharmacy. (Accessory queries had their floors dropped just
+    # above → requirements empty → this never fires for them.)
+    if decision.node_handle is None and decision.requirements:
+        from src.app.services.recommendation_core.turn_router import _reroute_host_node
+        host = _reroute_host_node(db, envelope, "run_on")
+        if host:
+            hn = get_node(host)
+            decision = dataclasses.replace(
+                decision, node_handle=host, node_path=(hn.full_path if hn else None),
+                requested_product_node=host, relationship="run_on")
+            logger.info("ungrounded-workload reroute → host %s (reqs=%s)", host,
+                        sorted(decision.requirements))
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
@@ -200,7 +229,9 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
         # pharmacy floated into an empty electronics-accessory node ('a mouse for gaming' → Hand
         # Sanitiser). Retrieve the vertical-root subtree instead — electronics stays electronics;
         # hb-* (pharmacy) can never appear. Only when no node routed do we fall to the old text leg.
-        vroot = _vertical_root(decision.node_handle)
+        # scope to the routed node's vertical; if no node routed (ungrounded workload the reroute
+        # couldn't ground either), fall to the store's workload-host root — NEVER the whole catalog.
+        vroot = _vertical_root(decision.node_handle) or _first_workload_host_root()
         if vroot:
             bundle = gather_evidence(db, envelope, node_handle=vroot, limit=max(limit * 5, 60))
             bundle.retrieval_mode = f"vertical_broad:{vroot}"
