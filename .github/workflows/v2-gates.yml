@@ -1,0 +1,49 @@
+# V2 GATES (R10.4) — the MANDATORY, fast, dependency-light job that must be green before any
+# canary work merges. Deliberately separate from the monolithic `pytest -q` job (which carries
+# playwright + integration surface and soft-fails installs): these suites are the two hygiene
+# RATCHETS + the V2 core/cart brains, they run in ~2 minutes, and there is no `|| true` anywhere
+# on their path — a red here blocks.
+name: V2 Gates (mandatory)
+
+on:
+  push:
+    branches: [ main, master, "wip/**" ]
+  pull_request:
+
+jobs:
+  v2-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies (hard-fail — a broken install must not read as green)
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry export -f requirements.txt --without-hashes -o requirements.txt
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Ratchets — no-flavour + no-silent-except (the hygiene gates)
+        run: pytest -q tests/test_no_flavour_in_core.py tests/test_no_silent_except_in_core.py
+      - name: V2 recommendation core — brain / stages / envelope / postflight / worker / facade
+        run: >
+          pytest -q
+          tests/services/test_recommendation_core_brain.py
+          tests/services/test_recommendation_core_stages.py
+          tests/services/test_recommendation_core_envelope.py
+          tests/services/test_recommendation_postflight.py
+          tests/services/test_recommendation_shadow_worker.py
+          tests/services/test_recommendation_facade.py
+          tests/services/test_recommendation_facade_cart.py
+          tests/characterization/test_replay_quality_meta.py
+      - name: V2 cart lane — resolver / service / endpoint / idempotency
+        run: >
+          pytest -q
+          tests/services/test_cart_resolver.py
+          tests/test_cart_mutation_service.py
+          tests/test_cart_mutations_endpoint.py
+          tests/test_cart_mutation_plans_migration.py
+          tests/test_chat_idempotency.py
