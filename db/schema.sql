@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS inventory (
 CREATE TABLE IF NOT EXISTS draft_orders (
   id TEXT PRIMARY KEY,
   customer_id TEXT REFERENCES customers(id),
+  tenant_id TEXT NOT NULL DEFAULT 'default',   -- R10.2: cart identity = (tenant_id, customer_id)
   line_items TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft',
   version INTEGER NOT NULL DEFAULT 0,          -- optimistic-concurrency token (P0.2 cart CAS)

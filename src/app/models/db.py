@@ -185,6 +185,7 @@ def _ensure_minimal_sqlite_tables(bind):
                     "CREATE TABLE IF NOT EXISTS draft_orders (\n"
                     "  id TEXT PRIMARY KEY,\n"
                     "  customer_id TEXT,\n"
+                    "  tenant_id TEXT NOT NULL DEFAULT 'default',\n"
                     "  line_items TEXT NOT NULL,\n"
                     "  status TEXT NOT NULL DEFAULT 'draft',\n"
                     "  version INTEGER NOT NULL DEFAULT 0,\n"
@@ -194,6 +195,21 @@ def _ensure_minimal_sqlite_tables(bind):
                 ))
                 try:
                     conn.execute(sql_text("ALTER TABLE orders ADD COLUMN guest_email TEXT"))
+                except Exception:
+                    pass
+                # R10.2 STEP 1 (additive, zero behavior change): cart identity becomes
+                # (tenant_id, customer_id). DEFAULT 'default' backfills every existing row =
+                # exactly today's single-tenant truth; reads/writes get tenant-scoped in the
+                # follow-up threading step (docs/SHOPSQUIRE_V2_TENANT_CART_SPEC), never here.
+                try:
+                    conn.execute(sql_text("ALTER TABLE draft_orders ADD COLUMN tenant_id TEXT "
+                                          "NOT NULL DEFAULT 'default'"))
+                except Exception:
+                    pass   # column already exists (fresh CREATE above includes it)
+                try:
+                    conn.execute(sql_text(
+                        "CREATE INDEX IF NOT EXISTS ix_draft_orders_tenant_customer_status "
+                        "ON draft_orders (tenant_id, customer_id, status)"))
                 except Exception:
                     pass
                 conn.execute(sql_text(
