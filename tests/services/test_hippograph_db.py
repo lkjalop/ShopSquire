@@ -61,10 +61,15 @@ def test_build_from_db_include_findings_projects_finding_nodes(db):
     # seed market_signal with recurring zero-result searches → inventory_demand_mismatch finding
     from src.app.services.market_signal import ensure_table as _ms_ensure
     _ms_ensure(db)
+    # NOTE (2026-07-12): detect_inventory_demand_mismatch was hardened against poisoning — it
+    # requires DISTINCT-user identity (uid_hash/session) per zero-result search and gates on
+    # >= min_unmet(3) distinct users. Seed 4 DISTINCT users so the finding legitimately surfaces
+    # (an anonymous-only seed can no longer, by design).
     for i in range(4):
         db.execute(text("INSERT INTO market_signal (id, signal_type, source, dedup_key, trust_score, "
                         "payload_json, occurred_at) VALUES (:id,'demand','search_events',:k,0.8,:pl,'2026-06-24T10:00:00')"),
-                   {"id": f"ms{i}", "k": f"ms{i}", "pl": '{"query": "framework 16", "result_count": 0}'})
+                   {"id": f"ms{i}", "k": f"ms{i}",
+                    "pl": '{"query": "framework 16", "result_count": 0, "uid_hash": "user-%d"}' % i})
     db.commit()
     base = build_from_db(db, include_findings=False)
     enriched = build_from_db(db, include_findings=True)

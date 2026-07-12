@@ -75,7 +75,18 @@ def propose_plan(*, tenant_id: str, uid: str, plan: CartMutationPlan,
     _ensure_plans_table()
     plan_id = f"cmp-{uuid.uuid4().hex[:16]}"
     risk = risk_tier(plan)
-    cart_hash = cart_content_hash(cart_items)
+    # ONE HASH NORMALIZATION (defect-hunt #8): hash the ACTUAL persisted cart (the same source
+    # apply_plan reads via _get_or_create_cart), not the facade's display slice — the slice
+    # defaults missing qty to 1 while draft_orders/cart_content_hash default to 0, so a
+    # zero/missing-qty line would false-fire the stale guard. cart_items is kept for signature
+    # stability but the hash is authoritative.
+    try:
+        from src.app.routers.cart import _get_or_create_cart
+        _, real_items, _ = _get_or_create_cart(uid)
+        cart_hash = cart_content_hash(real_items)
+    except Exception as exc:
+        logger.debug("propose real-cart hash fell back to passed slice: %s", repr(exc)[:80])
+        cart_hash = cart_content_hash(cart_items)
     expires_at = (_now() + timedelta(minutes=_PLAN_TTL_MINUTES)).strftime(_TS_FMT)
     with db_session() as db:
         db.execute(text(
@@ -197,70 +208,98 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
         _save_cart,
         apply_quantity_line,
     )
-    cart_id, items, _ = _get_or_create_cart(uid)
-    # STALE GUARD: the plan was proposed against a specific cart state; if a stepper, another
-    # tab, or another plan changed it since, refuse — never apply yesterday's plan to today's cart.
-    if cart_content_hash(items) != row["cart_hash"]:
-        _finish(plan_id, "stale_cart", {"reason": "cart_changed_since_proposal"})
-        return {"status": "stale_cart", "plan_id": plan_id}
+    # EVERYTHING after the CAS claim is guarded (defect-hunt #1): the plan is now 'applying'; a
+    # raise here must NOT leave it wedged in 'applying' forever, must NOT propagate (the endpoint
+    # + facade rely on "never raises"), and must NOT mutate-then-report-failure. On any
+    # exception we mark the plan 'error' (best-effort) and return a typed error.
+    try:
+        cart_id, items, _ = _get_or_create_cart(uid)
+        # STALE GUARD: the plan was proposed against a specific cart state; if a stepper, another
+        # tab, or another plan changed it since, refuse — never apply yesterday's plan to today's cart.
+        if cart_content_hash(items) != row["cart_hash"]:
+            _finish(plan_id, "stale_cart", {"reason": "cart_changed_since_proposal"})
+            return {"status": "stale_cart", "plan_id": plan_id}
 
-    plan = CartMutationPlan.from_dict(row["plan"])
-    prior_items = [dict(it) for it in items]
-    working = [dict(it) for it in items]
-    applied: List[Dict[str, Any]] = []
-    set_skus = [op.target_skus[0] for op in plan.ops
-                if op.action == "set_quantity" and op.target_skus]
-    stock_map = _batch_stock_levels(set_skus) if set_skus else {}
+        plan = CartMutationPlan.from_dict(row["plan"])
+        prior_items = [dict(it) for it in items]
+        working = [dict(it) for it in items]
+        applied: List[Dict[str, Any]] = []
+        set_skus = [op.target_skus[0] for op in plan.ops
+                    if op.action == "set_quantity" and op.target_skus]
+        stock_map = _batch_stock_levels(set_skus) if set_skus else {}
 
-    # ALL-OR-NOTHING: every op validates against the in-memory working copy; the FIRST failure
-    # aborts the whole plan with nothing saved (review-5 #5 — no partial application, ever).
-    for op in plan.ops:
-        if op.action == "clear_all":
-            working = []
-            applied.append({"action": "clear_all"})
-        elif op.action == "remove_items":
-            missing = [s for s in op.target_skus
-                       if not any(it.get("sku") == s for it in working)]
-            if missing:
-                _finish(plan_id, "rejected", {"error": "target_not_in_cart", "skus": missing})
+        # ALL-OR-NOTHING: every op validates against the in-memory working copy; the FIRST failure
+        # aborts the whole plan with nothing saved (review-5 #5 — no partial application, ever).
+        for op in plan.ops:
+            if op.action == "clear_all":
+                working = []
+                applied.append({"action": "clear_all"})
+            elif op.action == "remove_items":
+                missing = [s for s in op.target_skus
+                           if not any(it.get("sku") == s for it in working)]
+                if missing:
+                    _finish(plan_id, "rejected", {"error": "target_not_in_cart", "skus": missing})
+                    return {"status": "rejected", "plan_id": plan_id,
+                            "error": {"error": "target_not_in_cart", "skus": missing}}
+                working = [it for it in working if it.get("sku") not in set(op.target_skus)]
+                applied.append({"action": "remove_items", "skus": list(op.target_skus)})
+            elif op.action == "keep_only":
+                keep = set(op.target_skus)
+                working = [it for it in working if it.get("sku") in keep]
+                applied.append({"action": "keep_only", "skus": list(op.target_skus)})
+            elif op.action == "set_quantity":
+                sku = op.target_skus[0]
+                working, shortfall, err = apply_quantity_line(
+                    working, sku, int(op.quantity or 0), stock_map.get(sku, 0),
+                    allow_sourcing=False)   # sourcing consent is its own confirm flow (C1 follow-up)
+                if err is not None:
+                    _finish(plan_id, "rejected", {"error": err})
+                    return {"status": "rejected", "plan_id": plan_id, "error": err}
+                entry: Dict[str, Any] = {"action": "set_quantity", "sku": sku, "quantity": op.quantity}
+                if shortfall:
+                    entry["sourcing"] = shortfall
+                applied.append(entry)
+            elif op.action == "clear_previous":
+                # SERVER-authoritative carried set from per-line added_at (C2): lines older than the
+                # carried threshold are the earlier session's. Unknowable (no stamps) → reject the
+                # whole plan rather than guess-wipe; knowable-but-empty → honest no-op.
+                carried = _carried_skus(working)
+                if carried is None:
+                    _finish(plan_id, "rejected", {"error": "carried_set_unknown"})
+                    return {"status": "rejected", "plan_id": plan_id,
+                            "error": {"error": "carried_set_unknown"}}
+                working = [it for it in working if it.get("sku") not in set(carried)]
+                applied.append({"action": "clear_previous", "skus": carried})
+            else:
+                _finish(plan_id, "rejected", {"error": "unsupported_action", "action": op.action})
                 return {"status": "rejected", "plan_id": plan_id,
-                        "error": {"error": "target_not_in_cart", "skus": missing}}
-            working = [it for it in working if it.get("sku") not in set(op.target_skus)]
-            applied.append({"action": "remove_items", "skus": list(op.target_skus)})
-        elif op.action == "keep_only":
-            keep = set(op.target_skus)
-            working = [it for it in working if it.get("sku") in keep]
-            applied.append({"action": "keep_only", "skus": list(op.target_skus)})
-        elif op.action == "set_quantity":
-            sku = op.target_skus[0]
-            working, shortfall, err = apply_quantity_line(
-                working, sku, int(op.quantity or 0), stock_map.get(sku, 0),
-                allow_sourcing=False)   # sourcing consent is its own confirm flow (C1 follow-up)
-            if err is not None:
-                _finish(plan_id, "rejected", {"error": err})
-                return {"status": "rejected", "plan_id": plan_id, "error": err}
-            entry: Dict[str, Any] = {"action": "set_quantity", "sku": sku, "quantity": op.quantity}
-            if shortfall:
-                entry["sourcing"] = shortfall
-            applied.append(entry)
-        elif op.action == "clear_previous":
-            # SERVER-authoritative carried set from per-line added_at (C2): lines older than the
-            # carried threshold are the earlier session's. Unknowable (no stamps) → reject the
-            # whole plan rather than guess-wipe; knowable-but-empty → honest no-op.
-            carried = _carried_skus(working)
-            if carried is None:
-                _finish(plan_id, "rejected", {"error": "carried_set_unknown"})
-                return {"status": "rejected", "plan_id": plan_id,
-                        "error": {"error": "carried_set_unknown"}}
-            working = [it for it in working if it.get("sku") not in set(carried)]
-            applied.append({"action": "clear_previous", "skus": carried})
-        else:
-            _finish(plan_id, "rejected", {"error": "unsupported_action", "action": op.action})
-            return {"status": "rejected", "plan_id": plan_id,
-                    "error": {"error": "unsupported_action", "action": op.action}}
+                        "error": {"error": "unsupported_action", "action": op.action}}
 
-    _stash_undo(redis, uid, prior_items)
-    _save_cart(cart_id, working)          # ONE save = the atomic commit point
-    result = {"applied": applied, "cart": _hydrate(working)}
-    _finish(plan_id, "applied", {"applied": applied})
-    return {"status": "applied", "plan_id": plan_id, **result}
+        # TOCTOU NARROWING (defect-hunt #2): the guard hash was read at the top; re-verify against
+        # the CURRENT cart immediately before the write so a stepper/second-plan edit that landed
+        # during op validation is caught (refuse, don't clobber). The read→save window is now a
+        # few statements; the full cross-process fix (row lock / SELECT FOR UPDATE) is a Postgres
+        # follow-up tracked for review.
+        _, latest, _ = _get_or_create_cart(uid)
+        if cart_content_hash(latest) != row["cart_hash"]:
+            _finish(plan_id, "stale_cart", {"reason": "cart_changed_during_apply"})
+            return {"status": "stale_cart", "plan_id": plan_id}
+
+        _stash_undo(redis, uid, prior_items)
+        _save_cart(cart_id, working)          # ONE save = the atomic commit point
+        # mark applied ADJACENT to the commit so a raise in _hydrate below can't leave a
+        # durably-mutated cart stuck in 'applying' (defect-hunt #1 mutate-then-lie).
+        _finish(plan_id, "applied", {"applied": applied})
+        try:
+            hydrated = _hydrate(working)
+        except Exception as _he:
+            logger.debug("hydrate after apply failed (non-fatal): %s", repr(_he)[:80])
+            hydrated = {"items": working}
+        return {"status": "applied", "plan_id": plan_id, "applied": applied, "cart": hydrated}
+    except Exception as exc:
+        logger.warning("cart apply_plan failed (plan=%s): %s", plan_id, repr(exc)[:160])
+        try:
+            _finish(plan_id, "error", {"error": repr(exc)[:200]})
+        except Exception:
+            logger.error("could not mark plan %s error after apply failure", plan_id)
+        return {"status": "error", "plan_id": plan_id}

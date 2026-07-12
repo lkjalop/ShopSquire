@@ -141,17 +141,25 @@ def _record_metrics(row: Dict[str, Any]) -> None:
 def run(redis, db_factory, *, once: bool = False, max_jobs: Optional[int] = None) -> Dict[str, int]:
     """Drain loop. db_factory() → a fresh read Session per job (short-lived, no cross-job state).
     once=True processes whatever is queued then stops (for tests/CI)."""
+    import time as _time
     stats = {"processed": 0, "diffed": 0, "dead_lettered": 0, "errors": 0}
     while True:
         item = None
+        brpop_errored = False
         try:
             popped = redis.brpop(QUEUE_KEY, timeout=_BRPOP_TIMEOUT_S)
             item = popped[1] if popped else None
         except Exception as exc:
             logger.warning("brpop failed: %s", repr(exc)[:100])
+            brpop_errored = True
         if item is None:
             if once:
                 break
+            # BACKOFF (defect-hunt #4): a RAISING brpop (Redis down) gives no 5s block, so a bare
+            # `continue` busy-spins the CPU + floods the log until Redis returns. Sleep the same
+            # window brpop would have blocked, so a down Redis costs nothing.
+            if brpop_errored:
+                _time.sleep(_BRPOP_TIMEOUT_S)
             continue
         try:
             job = json.loads(item)

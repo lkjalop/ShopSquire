@@ -96,7 +96,9 @@ def test_ensure_supplier_coverage_is_idempotent(db):
     _seed_products(db, ["GAM-0002"])
     ensure_supplier_coverage(db)
     again = ensure_supplier_coverage(db)  # re-run inserts nothing
-    assert again == {"suppliers": 0, "products": 0, "domains": 0}
+    # subset assertion (robust to added keys like 'channels'): idempotency = every insert-count 0
+    assert again["suppliers"] == 0 and again["products"] == 0 and again["domains"] == 0
+    assert all(v == 0 for v in again.values())
 
 
 def test_ensure_supplier_coverage_routes_mixed_catalog_to_distinct_suppliers(db):

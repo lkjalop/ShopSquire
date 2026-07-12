@@ -284,20 +284,23 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
 
     outcome = apply_plan(prop["plan_id"], tenant_id=envelope.tenant_id, uid=envelope.uid,
                          redis=redis)
+    status = outcome.get("status")
     applied = outcome.get("applied") or []
     rejected = ([{"action": "plan", "error": outcome.get("error")}]
-                if outcome.get("status") == "rejected" else [])
+                if status in ("rejected", "error") else [])
     result = {"applied": applied, "rejected": rejected}
     core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
                         message=_cart_result_message(plan, result)).finalize()
     payload = to_legacy(core)
     payload["cart_mutation"] = {"applied": applied, "rejected": rejected, "ambiguous": [],
                                 "needs_clarification": False, "plan_id": prop["plan_id"],
-                                "status": outcome.get("status")}
+                                "status": status}
     if outcome.get("cart") is not None:
         payload["cart"] = outcome["cart"]
-    # cart_updated must be the TRUTH (review-5 #9): only an applied plan changed the cart.
-    payload["cart_updated"] = outcome.get("status") == "applied" and bool(applied)
+    # cart_updated must be the TRUTH (review-5 #9): the cart reflects the plan when it was
+    # applied now OR was already applied by an earlier (idempotent-replayed) submit
+    # (defect-hunt #7 — already_applied is a success, not a no-change).
+    payload["cart_updated"] = status in ("applied", "already_applied") and bool(applied)
     return with_trace(payload, envelope.trace_id)
 
 
