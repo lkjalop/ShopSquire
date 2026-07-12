@@ -78,6 +78,33 @@ def test_other_forks_detected_by_shape():
     assert response_shape(to_legacy(_core(products=[]), shape="policy_faq")) == "policy_faq"
 
 
+def test_envelope_wire_roundtrip_cents_exact():
+    """R10.1: a shadow job carries the FULL envelope; the worker must rebuild the SAME turn —
+    cents stay cents (never re-converted through dollars), session/cart/image intact."""
+    from src.app.services.recommendation_core.envelope import TurnEnvelope
+    env = TurnEnvelope.from_suggest_params(
+        query="gaming laptop", uid="u1", tenant_id="t1", budget_max=2499.99, has_image=True,
+        session={"prior_node": "el-6-11-2", "shortlist_skus": ["A"]},
+        cart=[{"sku": "A", "quantity": 2}])
+    back = TurnEnvelope.from_dict(env.to_dict())
+    assert back == env                                    # frozen dataclass equality = full fidelity
+    assert back.budget_max_cents == 249999                # cents-exact, no dollar re-round
+
+
+def test_shown_products_beat_stray_claims_artifacts():
+    """R10 census fix: the legacy kitchen-sink can mint incident_id + needs_human_review=True
+    on a PRODUCT turn (recorded live in compare_two_models, 15 products). A payload that SHOWS
+    products is a product response — else the replay projects V2 through the product-less
+    claims adapter and manufactures a phantom empty."""
+    kitchen_sink = {"products": [{"sku": "X"}], "incident_id": "abc",
+                    "needs_human_review": True, "assistant_message": "m"}
+    assert response_shape(kitchen_sink) == "full_pipeline"
+    # a REAL claims payload (no shown products) still classifies claims
+    assert response_shape({"incident_id": "abc", "needs_human_review": True}) == "claims"
+    # present-but-EMPTY products with claims signal = claims (nothing shown)
+    assert response_shape({"products": [], "needs_human_review": True}) == "claims"
+
+
 def test_adapter_output_diffs_cleanly_against_itself():
     # the differ must treat two identical-outcome adapter payloads as identical —
     # otherwise shadow would measure the adapter, not the core

@@ -87,23 +87,29 @@ def _in_canary_bucket(key: str, pct: int) -> bool:
     return (h % 100) < pct
 
 
-def _enqueue_shadow(redis, *, query: str, uid: str, tenant_id: str, trace_id: str,
-                    cart: Optional[List[Dict[str, Any]]] = None, cart_only: bool = False) -> None:
+def _enqueue_shadow(redis, *, envelope: "TurnEnvelope", cart_only: bool = False) -> None:
     """Durable shadow job (finding #4): legacy serves live; the offline worker/replay drains
     this queue and diffs core vs the recorded/served response. Best-effort; capped so a
     stalled drainer can't grow it unbounded.
 
-    cart / cart_only (C0 resolve-only): when the cart-lane ladder is in `shadow`, the job carries
-    the cart slice so the worker can resolve a CartMutationPlan OFFLINE (measured, never
-    executed). cart_only=True marks jobs enqueued solely for cart-plan resolution (the search
+    FULL-ENVELOPE jobs (R10.1/P1.1): the job carries envelope.to_dict() — budget, session,
+    image flag, cart — so the worker measures the SAME turn production saw (the old
+    query-only jobs silently measured budget-less, session-less turns). Top-level
+    query/uid/tenant_id/trace_id stay for queue observability + old-worker back-compat.
+    pre_gate is deliberately NOT run for shadow (no hot-path guard cost on a non-served
+    turn); the worker's core falls back to its thin gate, honestly recorded as such.
+
+    cart_only=True (C0 resolve-only): enqueued solely for cart-plan resolution (the search
     core is not in shadow) so the worker skips the search diff."""
     if redis is None:
         return
     try:
-        payload: Dict[str, Any] = {"query": query, "uid": uid, "tenant_id": tenant_id,
-                                   "trace_id": trace_id}
-        if cart:
-            payload["cart"] = cart
+        payload: Dict[str, Any] = {"query": envelope.query, "uid": envelope.uid,
+                                   "tenant_id": envelope.tenant_id,
+                                   "trace_id": envelope.trace_id,
+                                   "envelope": envelope.to_dict()}
+        if envelope.cart:
+            payload["cart"] = list(envelope.cart)
             if cart_only:
                 payload["cart_only"] = True
         redis.lpush(_SHADOW_QUEUE_KEY, json.dumps(payload))
@@ -401,8 +407,14 @@ def dispatch_recommendation_core(
         if cart_mode == "shadow" and uid and not (image_labels or image_hash):
             cart_slice = _read_cart_slice(db, uid)
         if mode == "shadow" or cart_slice:
-            _enqueue_shadow(redis, query=query, uid=uid, tenant_id=tenant, trace_id=trace_id,
-                            cart=(cart_slice or None), cart_only=(mode != "shadow"))
+            # FULL envelope in the job (R10.1/P1.1): budget/session/image ride along so the
+            # worker replays the turn production actually saw, not a query-only shadow of it.
+            shadow_env = TurnEnvelope.from_suggest_params(
+                query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
+                budget_max=budget_max, trace_id=trace_id,
+                has_image=bool(image_labels or image_hash), source_ip=source_ip,
+                session=_read_session_slice(redis, uid, tenant), cart=cart_slice)
+            _enqueue_shadow(redis, envelope=shadow_env, cart_only=(mode != "shadow"))
         if mode == "shadow":
             return None
 

@@ -48,6 +48,20 @@ def _v1_products_from_trace(db, trace_id: str) -> Optional[List[Dict[str, Any]]]
         return None
 
 
+def _job_envelope(job: Dict[str, Any]):
+    """THE job→envelope decision (R10.1/P1.1). New jobs carry the FULL envelope.to_dict()
+    (budget/session/image/cart — the turn production actually saw); old queued jobs fall back
+    to the top-level keys and measure budget-less/session-less, exactly as before."""
+    from src.app.services.recommendation_core.envelope import TurnEnvelope
+    if isinstance(job.get("envelope"), dict):
+        return TurnEnvelope.from_dict(job["envelope"])
+    return TurnEnvelope.from_suggest_params(
+        query=job.get("query", ""), uid=job.get("uid", ""),
+        tenant_id=job.get("tenant_id", "default"), budget_min=job.get("budget_min"),
+        budget_max=job.get("budget_max"), trace_id=job.get("trace_id"),
+        cart=job.get("cart") or [])
+
+
 def _resolve_cart_plan(job: Dict[str, Any], llm_fn=None) -> Optional[Dict[str, Any]]:
     """C0 resolve-only shadow: resolve the job's cart edit into a CartMutationPlan OFFLINE —
     measured, logged, NEVER executed. Returns the plan row (or None when the job carries no
@@ -57,10 +71,7 @@ def _resolve_cart_plan(job: Dict[str, Any], llm_fn=None) -> Optional[Dict[str, A
     if not cart:
         return None
     from src.app.services.recommendation_core.cart_resolver import resolve_cart_mutation
-    from src.app.services.recommendation_core.envelope import TurnEnvelope
-    env = TurnEnvelope.from_suggest_params(
-        query=job.get("query", ""), uid=job.get("uid", ""),
-        tenant_id=job.get("tenant_id", "default"), trace_id=job.get("trace_id"), cart=cart)
+    env = _job_envelope(job)
     t0 = time.perf_counter()
     plan = resolve_cart_mutation(env, llm_fn=llm_fn)
     row = {"trace_id": job.get("trace_id"), "kind": "cart_shadow_plan",
@@ -97,13 +108,9 @@ def process_job(db, job: Dict[str, Any], *, cart_llm_fn=None) -> Dict[str, Any]:
 
     from src.app.services.recommend_parity_full import diff_responses, evaluate_case, message_class
     from src.app.services.recommendation_core.core import recommend_turn
-    from src.app.services.recommendation_core.envelope import TurnEnvelope
     from src.app.services.recommendation_core.legacy_adapter import to_legacy
 
-    env = TurnEnvelope.from_suggest_params(
-        query=job.get("query", ""), uid=job.get("uid", ""),
-        tenant_id=job.get("tenant_id", "default"), budget_min=job.get("budget_min"),
-        budget_max=job.get("budget_max"), trace_id=job.get("trace_id"))
+    env = _job_envelope(job)
     t0 = time.perf_counter()
     core = recommend_turn(db, env)
     v2 = to_legacy(core)

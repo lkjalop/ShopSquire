@@ -60,6 +60,28 @@ class TurnEnvelope:
                    has_image=bool(has_image), source_ip=source_ip, session=dict(session or {}),
                    cart=list(cart or []), pre_gate=pre_gate)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Wire form for shadow jobs (R10.1/P1.1) — CENTS-exact, every field the core reads.
+        A shadow job that drops budget/session/image measures a DIFFERENT turn than production
+        served; this is the full-fidelity round-trip that closes that gap."""
+        return {"tenant_id": self.tenant_id, "uid": self.uid, "query": self.query,
+                "trace_id": self.trace_id, "budget_min_cents": self.budget_min_cents,
+                "budget_max_cents": self.budget_max_cents, "has_image": self.has_image,
+                "source_ip": self.source_ip, "session": dict(self.session),
+                "cart": list(self.cart), "pre_gate": self.pre_gate}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "TurnEnvelope":
+        """Inverse of to_dict — cents stay cents (never re-converted), unknown keys ignored."""
+        _int = lambda v: int(v) if v is not None else None  # noqa: E731
+        return cls(tenant_id=str(d.get("tenant_id") or "default"), uid=str(d.get("uid") or ""),
+                   query=str(d.get("query") or ""), trace_id=str(d.get("trace_id") or uuid.uuid4()),
+                   budget_min_cents=_int(d.get("budget_min_cents")),
+                   budget_max_cents=_int(d.get("budget_max_cents")),
+                   has_image=bool(d.get("has_image")), source_ip=d.get("source_ip"),
+                   session=dict(d.get("session") or {}), cart=list(d.get("cart") or []),
+                   pre_gate=d.get("pre_gate"))
+
 
 @dataclass
 class ProductCard:

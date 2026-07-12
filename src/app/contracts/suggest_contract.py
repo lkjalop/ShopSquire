@@ -132,11 +132,18 @@ class SuggestResponse(BaseModel):
 
 
 def response_shape(payload: Dict[str, Any]) -> str:
-    """Which of the observed /suggest contract forks this payload belongs to."""
+    """Which of the observed /suggest contract forks this payload belongs to.
+    ORDER MATTERS (R10 census fix): a payload that SHOWS products is a product response —
+    the legacy kitchen-sink can mint a claims artifact (incident_id, needs_human_review=True)
+    on a PRODUCT turn (recorded live: compare_two_models carried both + 15 products), and
+    classifying that 'claims' made the replay project V2 through the product-less claims
+    adapter → a phantom empty. Claims shape = claims signal WITHOUT shown products."""
     if not isinstance(payload, dict):
         return "invalid"
     if "recommendations" in payload and "inventory" in payload:
         return "inventory_fast"
+    if payload.get("products") or payload.get("results"):
+        return "full_pipeline"
     if "incident_id" in payload or "needs_human_review" in payload:
         return "claims"
     if "products" in payload or "results" in payload:
