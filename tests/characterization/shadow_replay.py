@@ -35,9 +35,24 @@ from src.app.services.recommend_parity_full import evaluate_case, message_class,
 from src.app.services.recommendation_core.core import recommend_turn
 from src.app.services.recommendation_core.envelope import TurnEnvelope
 from src.app.services.recommendation_core.legacy_adapter import SHAPES, to_legacy
+from src.app.services.recommendation_core.quality import (
+    evaluate_case_quality,
+    load_labels,
+    summarize_quality,
+)
 
 CORPUS_DIR = REPO_ROOT / "tests" / "golden" / "suggest_corpus"
 BATTERY = REPO_ROOT / "tests" / "characterization" / "batteries" / "starter_battery.json"
+
+
+def _quality_case(case_id: str, req: dict, core) -> dict:
+    """Case metadata the intrinsic quality gate needs (P1.2). A product-lane, non-refusal turn
+    EXPECTS products; a refusal/off-catalog turn does not. budget_max comes from the request."""
+    bmax = req.get("budget_max")
+    return {"id": case_id,
+            "budget_max": (float(bmax) if bmax not in (None, "") else None),
+            "expects_products": (core.lane in ("SEARCH", "FILTER", "COMPARE")
+                                 and not core.off_catalog)}
 
 
 # the lanes the facade actually serves from the core; everything else is delegated to legacy
@@ -57,8 +72,9 @@ def main() -> None:
     expects = {c["id"]: (c.get("known_wrong") or {}).get("expect_v2")
                for c in json.loads(BATTERY.read_text(encoding="utf-8"))}
 
+    labels = load_labels()   # sealed relevance labels (empty until filled — gate stays honest-red)
     s = sessionmaker(bind=get_engine())()
-    results, rows = [], []
+    results, rows, quality_rows = [], [], []
     t_start = time.monotonic()
     try:
         for f in sorted(CORPUS_DIR.glob("*.json")):
@@ -83,6 +99,11 @@ def main() -> None:
                     r = evaluate_case(v1, v2, known_wrong_expect=expect)
                 r["case_id"], r["turn"] = case["id"], t["turn"]
                 results.append(r)
+                # INTRINSIC QUALITY (P1.2): measure the SERVED turns (skip delegated lanes) so the
+                # scorecard carries a real quality block + gates_pass instead of quality:null.
+                if not r.get("delegated"):
+                    quality_rows.append(evaluate_case_quality(
+                        _quality_case(case["id"], req, core), v2, labels))
                 d = (r.get("diff") or r).get("dimensions", {})
                 mismatched = [k for k, v in d.items() if not v.get("match")]
                 rows.append((case["id"], t["turn"],
@@ -97,8 +118,13 @@ def main() -> None:
     print("-" * 140)
     for r in rows:
         print(f"{r[0]:<26}{r[1]:<2}{r[2]:<10}{r[3]:<34}{r[4]:<62}{r[5]}")
-    score = summarize_run(results)
+    # the quality block is now REAL (review-6 #1/#9): gates_pass requires it to be measured AND
+    # green; below the labeled-coverage floor it fails honestly (never quality:null → pass).
+    quality = summarize_quality(quality_rows) if quality_rows else None
+    score = summarize_run(results, quality=quality)
     print(f"\nSCORECARD ({time.monotonic()-t_start:.0f}s total): {json.dumps(score, indent=1)}")
+    if quality is not None and not quality["gates"]["pass"]:
+        print(f"QUALITY GATE: FAIL — {quality['gates']['failures']}")
 
 
 if __name__ == "__main__":
