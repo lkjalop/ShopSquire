@@ -35,6 +35,8 @@ _CORE_MODULES = [
     "src/app/services/recommendation_core/evidence.py",
     # M2-B1 requirement ranges: pure interval math + provenance — zero product vocabulary.
     "src/app/services/recommendation_core/constraints.py",
+    # M2-B2 intrinsic quality gate: SKUs/grades/cents metric math — zero product vocabulary.
+    "src/app/services/recommendation_core/quality.py",
     "src/app/services/recommendation_core/gates.py",
     "src/app/services/recommendation_core/plan.py",
     "src/app/services/recommendation_core/ranking.py",

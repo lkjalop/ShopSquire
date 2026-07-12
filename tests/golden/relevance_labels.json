@@ -1,0 +1,19 @@
+{
+  "_README": [
+    "SEALED relevance labels for the M2-B2 quality gate (recommendation_core/quality.py).",
+    "Grades: 2 = highly relevant, 1 = acceptable, 0 = explicitly irrelevant.",
+    "Labels are HUMAN-sealed ground truth, reviewed like the taxonomy — never model-invented.",
+    "Label against the demo catalog by running each case's query and grading the CANDIDATE",
+    "SLATE (not just what v2 showed — unlabeled shown SKUs count as NOT relevant).",
+    "split.dev cases may be inspected while tuning; split.test cases are the gate — the eval",
+    "must never train on the gate (classification_labels.json discipline).",
+    "The quality gate HONESTLY FAILS below labeled_coverage_min until this set is filled in."
+  ],
+  "version": 1,
+  "labeled_by": null,
+  "split": {
+    "dev": [],
+    "test": []
+  },
+  "cases": {}
+}

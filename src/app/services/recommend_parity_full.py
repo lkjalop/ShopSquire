@@ -199,10 +199,16 @@ def evaluate_case(v1: Dict[str, Any], v2: Dict[str, Any],
     return {"expected_change": False, **diff_responses(v1, v2)}
 
 
-def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
+def summarize_run(diffs: List[Dict[str, Any]],
+                  quality: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Roll a shadow run's per-case results into the promotion-gate scorecard. Entries from
     evaluate_case() with expected_change=True are scored on EXPECTATION (did v2 achieve the
-    desired fix?), not parity — and the run cannot pass with an expectation missed."""
+    desired fix?), not parity — and the run cannot pass with an expectation missed.
+
+    quality (M2-B2): the output of recommendation_core.quality.summarize_quality. When
+    provided, gates_pass ALSO requires its gate — parity+honesty alone can no longer promote
+    (the valorant lesson: 'passed' while returning zero products). quality_evaluated is
+    surfaced explicitly so a census run WITHOUT quality reads as unmeasured, never as green."""
     expected = [d for d in diffs if d.get("expected_change")]
     # DELEGATED cases (facade-mode: non-core lanes the facade sends to legacy BY DESIGN) are
     # neither parity nor expected-change — they're intended behaviour, excluded from the gate.
@@ -239,9 +245,13 @@ def summarize_run(diffs: List[Dict[str, Any]]) -> Dict[str, Any]:
         # and ordering — is a DIAGNOSTIC, not a gate. A tight top-10 v2 CANNOT reach 0.9
         # jaccard against a 43-product v1 even when every v2 result is superior; the gate is
         # structurally incompatible with tight sets. Offline gate = zero security/honesty
-        # BLOCKERs + message-class parity + every known_wrong fixed. The REAL quality gate
-        # (v2-intrinsic precision, recall@K, NDCG@K, empty-rate, diversity) lands in
-        # recommendation_core/quality.py; live outcomes (conversion) are a canary gate.
+        # BLOCKERs + message-class parity + every known_wrong fixed + (M2-B2) the INTRINSIC
+        # quality gate when supplied: precision@10/NDCG@10 on the sealed labels,
+        # constraint-satisfaction, empty-rate, unauthorized-rate, diversity. Canary requires
+        # quality_evaluated=True — a run that never measured quality cannot promote.
+        "quality": quality,
+        "quality_evaluated": quality is not None,
         "gates_pass": (by_sev["BLOCKER"] == 0 and mc_match / n >= 0.98
-                       and expected_met == len(expected)),
+                       and expected_met == len(expected)
+                       and (quality is None or bool((quality.get("gates") or {}).get("pass")))),
     }
