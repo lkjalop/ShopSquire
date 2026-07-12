@@ -82,7 +82,7 @@ def _propose(uid):
 def test_apply_endpoint_idempotent_double_submit(client):
     uid = "ep-user-1"
     prop = _propose(uid)
-    body = {"uid": uid, "tenant_id": "default"}
+    body = {"uid": uid}   # tenant comes from X-Tenant-Id header (default), not the body (#5)
     first = client.post(f"/api/v1/cart/mutations/{prop['plan_id']}/apply", json=body)
     assert first.status_code == 200, first.text
     assert first.json()["status"] == "applied"
@@ -96,16 +96,29 @@ def test_apply_endpoint_idempotent_double_submit(client):
 
 
 def test_apply_unknown_plan_404(client):
-    r = client.post("/api/v1/cart/mutations/cmp-nope/apply", json={"uid": "u", "tenant_id": "default"})
+    r = client.post("/api/v1/cart/mutations/cmp-nope/apply", json={"uid": "u"})
     assert r.status_code == 404
+
+
+def test_apply_wrong_tenant_header_forbidden(client):
+    # review-6 #5: a plan proposed under the default tenant cannot be applied by a request whose
+    # X-Tenant-Id header names a different tenant — and the tenant can't be forced via the body.
+    uid = "ep-user-tenant"
+    prop = _propose(uid)   # proposed under tenant 'default'
+    r = client.post(f"/api/v1/cart/mutations/{prop['plan_id']}/apply",
+                    json={"uid": uid}, headers={"X-Tenant-Id": "other-tenant"})
+    assert r.status_code == 403
+    # the cart was not mutated
+    cart = client.get("/api/v1/cart", params={"uid": uid}).json()
+    assert next(it for it in cart["items"] if it["sku"] == "SKU-EP")["quantity"] == 2
 
 
 def test_get_plan_scope_mismatch_reads_404(client):
     uid = "ep-user-2"
     prop = _propose(uid)
-    ok = client.get(f"/api/v1/cart/mutations/{prop['plan_id']}", params={"uid": uid, "tenant_id": "default"})
+    ok = client.get(f"/api/v1/cart/mutations/{prop['plan_id']}", params={"uid": uid})
     assert ok.status_code == 200 and ok.json()["risk"] == "auto"
-    other = client.get(f"/api/v1/cart/mutations/{prop['plan_id']}", params={"uid": "someone-else", "tenant_id": "default"})
+    other = client.get(f"/api/v1/cart/mutations/{prop['plan_id']}", params={"uid": "someone-else"})
     assert other.status_code == 404          # plan ids must not leak cart contents
 
 

@@ -6,9 +6,9 @@ service the auto tier uses (idempotent CAS, stale-cart guard, all-or-nothing, un
 GET exposes a plan for rendering the card. Role-gated identically to the cart REST surface."""
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from src.app.deps import get_redis
@@ -18,15 +18,24 @@ from src.app.services.cart_mutation_service import apply_plan, get_plan
 router = APIRouter(prefix="/api/v1/cart/mutations", tags=["cart-mutations"])
 
 
+def _tenant(header_value: Optional[str]) -> str:
+    """TENANT FROM THE REQUEST, NOT THE BODY (review-6 #5): the X-Tenant-Id header is the app-wide
+    tenant convention (main.py, store_profile_middleware, the recommend/suggest surface that
+    PROPOSED the plan). A client can no longer name an arbitrary tenant in the JSON body to probe
+    or apply another tenant's plan."""
+    return str(header_value or "default")
+
+
 class ApplyPayload(BaseModel):
     uid: str
-    tenant_id: str = "default"
+    # tenant_id REMOVED from the body (review-6 #5) — derived from X-Tenant-Id below.
 
 
 @router.post("/{plan_id}/apply")
 def apply_mutation(plan_id: str, payload: ApplyPayload, redis=Depends(get_redis),
+                   x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
                    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    out = apply_plan(plan_id, tenant_id=payload.tenant_id, uid=payload.uid, redis=redis)
+    out = apply_plan(plan_id, tenant_id=_tenant(x_tenant_id), uid=payload.uid, redis=redis)
     status = out.get("status")
     if status == "not_found":
         raise HTTPException(status_code=404, detail={"error": "plan_not_found", "plan_id": plan_id})
@@ -38,10 +47,11 @@ def apply_mutation(plan_id: str, payload: ApplyPayload, redis=Depends(get_redis)
 
 
 @router.get("/{plan_id}")
-def get_mutation(plan_id: str, uid: str, tenant_id: str = "default",
+def get_mutation(plan_id: str, uid: str,
+                 x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
                  role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     row = get_plan(plan_id)
-    if row is None or row["uid"] != str(uid or "") or row["tenant_id"] != str(tenant_id or "default"):
+    if row is None or row["uid"] != str(uid or "") or row["tenant_id"] != _tenant(x_tenant_id):
         # scope mismatch reads as absent — a plan id must not leak other shoppers' cart contents
         raise HTTPException(status_code=404, detail={"error": "plan_not_found", "plan_id": plan_id})
     return {"plan_id": row["plan_id"], "risk": row["risk"], "status": row["status"],
