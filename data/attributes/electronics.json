@@ -2,80 +2,252 @@
   "vertical": "electronics",
   "attributes": {
     "ram_gb": {
-      "role": "fit", "kind": "quantity", "unit": "GB", "bounds": [1, 256],
-      "key_aliases": ["ram", "memory", "system_memory", "ram_size"],
-      "unit_aliases": {"gb": 1, "gib": 1, "tb": 1024, "mb": 0.0009765625},
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "GB",
+      "bounds": [
+        1,
+        256
+      ],
+      "key_aliases": [
+        "ram",
+        "memory",
+        "system_memory",
+        "ram_size"
+      ],
+      "unit_aliases": {
+        "gb": 1,
+        "gib": 1,
+        "tb": 1024,
+        "mb": 0.0009765625
+      },
       "text_extract": true
     },
     "gpu_vram_gb": {
-      "role": "fit", "kind": "quantity", "unit": "GB", "bounds": [1, 96],
-      "key_aliases": ["vram", "vram_gb", "video_memory", "video_ram"],
-      "unit_aliases": {"gb": 1, "tb": 1024, "mb": 0.0009765625},
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "GB",
+      "bounds": [
+        0,
+        96
+      ],
+      "key_aliases": [
+        "vram",
+        "vram_gb",
+        "video_memory",
+        "video_ram"
+      ],
+      "unit_aliases": {
+        "gb": 1,
+        "tb": 1024,
+        "mb": 0.0009765625
+      },
       "text_extract": true
     },
     "storage_gb": {
-      "role": "variant_axis", "kind": "quantity", "unit": "GB", "bounds": [8, 65536],
-      "key_aliases": ["storage", "capacity", "ssd", "ssd_gb", "hdd_capacity", "disk"],
-      "unit_aliases": {"gb": 1, "tb": 1024, "mb": 0.0009765625},
+      "role": "variant_axis",
+      "kind": "quantity",
+      "unit": "GB",
+      "bounds": [
+        8,
+        65536
+      ],
+      "key_aliases": [
+        "storage",
+        "capacity",
+        "ssd",
+        "ssd_gb",
+        "hdd_capacity",
+        "disk"
+      ],
+      "unit_aliases": {
+        "gb": 1,
+        "tb": 1024,
+        "mb": 0.0009765625
+      },
       "text_extract": true
     },
     "refresh_hz": {
-      "role": "fit", "kind": "quantity", "unit": "Hz", "bounds": [30, 600],
-      "key_aliases": ["refresh", "refresh_rate", "refresh_rate_hz"],
-      "unit_aliases": {"hz": 1, "khz": 1000},
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "Hz",
+      "bounds": [
+        30,
+        600
+      ],
+      "key_aliases": [
+        "refresh",
+        "refresh_rate",
+        "refresh_rate_hz"
+      ],
+      "unit_aliases": {
+        "hz": 1,
+        "khz": 1000
+      },
       "text_extract": true
     },
     "display_in": {
-      "role": "variant_axis", "kind": "quantity", "unit": "in", "bounds": [4, 100],
-      "key_aliases": ["display_inches", "screen_size", "display_size", "screen_inches"],
-      "unit_aliases": {"in": 1, "inch": 1, "inches": 1, "\"": 1, "cm": 0.3937},
+      "role": "variant_axis",
+      "kind": "quantity",
+      "unit": "in",
+      "bounds": [
+        4,
+        100
+      ],
+      "key_aliases": [
+        "display_inches",
+        "screen_size",
+        "display_size",
+        "screen_inches"
+      ],
+      "unit_aliases": {
+        "in": 1,
+        "inch": 1,
+        "inches": 1,
+        "\"": 1,
+        "cm": 0.3937
+      },
       "text_extract": true
     },
     "battery_hours": {
-      "role": "fit", "kind": "quantity", "unit": "h", "bounds": [1, 72],
-      "key_aliases": ["battery", "battery_life", "battery_life_hours"],
-      "unit_aliases": {"h": 1, "hr": 1, "hrs": 1, "hours": 1, "hour": 1},
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "h",
+      "bounds": [
+        1,
+        72
+      ],
+      "key_aliases": [
+        "battery",
+        "battery_life",
+        "battery_life_hours"
+      ],
+      "unit_aliases": {
+        "h": 1,
+        "hr": 1,
+        "hrs": 1,
+        "hours": 1,
+        "hour": 1
+      },
       "text_extract": false
     },
     "weight_g": {
-      "role": "descriptive", "kind": "quantity", "unit": "g", "bounds": [1, 100000],
-      "key_aliases": ["grams", "weight", "weight_grams"],
-      "unit_aliases": {"g": 1, "kg": 1000, "grams": 1},
+      "role": "descriptive",
+      "kind": "quantity",
+      "unit": "g",
+      "bounds": [
+        1,
+        100000
+      ],
+      "key_aliases": [
+        "grams",
+        "weight",
+        "weight_grams"
+      ],
+      "unit_aliases": {
+        "g": 1,
+        "kg": 1000,
+        "grams": 1
+      },
       "text_extract": false
     },
     "gpu_model": {
-      "role": "fit", "kind": "text",
-      "key_aliases": ["gpu", "graphics", "graphics_card", "video_card"]
+      "role": "fit",
+      "kind": "text",
+      "key_aliases": [
+        "gpu",
+        "graphics",
+        "graphics_card",
+        "video_card"
+      ]
     },
     "cpu_model": {
-      "role": "fit", "kind": "text",
-      "key_aliases": ["cpu", "processor"]
+      "role": "fit",
+      "kind": "text",
+      "key_aliases": [
+        "cpu",
+        "processor"
+      ]
     },
     "gpu_discrete": {
-      "role": "fit", "kind": "boolean",
-      "key_aliases": ["discrete_gpu", "dedicated_gpu"]
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": [
+        "discrete_gpu",
+        "dedicated_gpu"
+      ]
     },
     "os": {
-      "role": "descriptive", "kind": "enum",
-      "key_aliases": ["operating_system"],
+      "role": "descriptive",
+      "kind": "enum",
+      "key_aliases": [
+        "operating_system"
+      ],
       "values": {
-        "Windows 11": ["win11", "windows11", "windows 11 home", "windows 11 pro"],
-        "macOS": ["mac os", "osx", "mac"],
-        "ChromeOS": ["chrome os"],
-        "Linux": ["ubuntu"],
+        "Windows 11": [
+          "win11",
+          "windows11",
+          "windows 11 home",
+          "windows 11 pro"
+        ],
+        "macOS": [
+          "mac os",
+          "osx",
+          "mac"
+        ],
+        "ChromeOS": [
+          "chrome os"
+        ],
+        "Linux": [
+          "ubuntu"
+        ],
         "Android": [],
-        "iPadOS": ["ipados", "ipad os"]
+        "iPadOS": [
+          "ipados",
+          "ipad os"
+        ]
       }
     },
     "wifi": {
-      "role": "descriptive", "kind": "enum",
-      "key_aliases": ["wi_fi", "wireless"],
+      "role": "descriptive",
+      "kind": "enum",
+      "key_aliases": [
+        "wi_fi",
+        "wireless"
+      ],
       "values": {
-        "Wi-Fi 5": ["wifi 5", "wifi5", "802.11ac"],
-        "Wi-Fi 6": ["wifi 6", "wifi6", "802.11ax"],
-        "Wi-Fi 6E": ["wifi 6e", "wifi6e"],
-        "Wi-Fi 7": ["wifi 7", "wifi7", "802.11be"]
+        "Wi-Fi 5": [
+          "wifi 5",
+          "wifi5",
+          "802.11ac"
+        ],
+        "Wi-Fi 6": [
+          "wifi 6",
+          "wifi6",
+          "802.11ax"
+        ],
+        "Wi-Fi 6E": [
+          "wifi 6e",
+          "wifi6e"
+        ],
+        "Wi-Fi 7": [
+          "wifi 7",
+          "wifi7",
+          "802.11be"
+        ]
       }
     }
-  }
+  },
+  "_derivations_comment": "review-8 #5: cross-key derivations run AFTER normalize+extract, fill ONLY missing target keys, and are clamped through the target's bounds. gpu_discrete=false ⇒ gpu_vram_gb=0 turns an integrated laptop from UNKNOWN into an honest FAIL on a game's VRAM floor (the 'why lenovo looks bad' screenshot).",
+  "derivations": [
+    {
+      "target": "gpu_vram_gb",
+      "set": 0,
+      "when": {
+        "gpu_discrete": false
+      },
+      "only_if_missing": true,
+      "provenance": "no discrete GPU (gpu_discrete=false) → 0 dedicated VRAM"
+    }
+  ]
 }

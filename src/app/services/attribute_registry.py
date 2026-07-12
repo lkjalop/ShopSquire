@@ -95,6 +95,72 @@ def defs_union(verticals: Tuple[str, ...]) -> Dict[str, AttributeDef]:
     return merged
 
 
+@lru_cache(maxsize=8)
+def load_derivations(vertical: str) -> Tuple[Dict[str, Any], ...]:
+    """Cross-key derivation rules for one vertical (review-8 #5). Each rule fills ONE target
+    attribute from OTHER already-normalized attributes — e.g. gpu_discrete=false ⇒ gpu_vram_gb=0.
+    A rule is kept only when its target and every `when` key name a REAL def for this vertical
+    (a derivation over an unknown attribute is a data bug, dropped with a warning — never a guess).
+    Shape: {target, set, when:{key:value,...}, only_if_missing:bool}."""
+    defs = load_defs(vertical)
+    if not defs:
+        return ()
+    path = _DATA_DIR / f"{str(vertical).strip().lower()}.json"
+    out: List[Dict[str, Any]] = []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        for r in (raw.get("derivations") or []):
+            target = str(r.get("target") or "")
+            when = r.get("when") or {}
+            if target not in defs or not isinstance(when, dict) or not when:
+                logger.warning("derivation over unknown/empty keys in %s — skipped: %r", vertical, r)
+                continue
+            if any(k not in defs for k in when):
+                logger.warning("derivation `when` names an unknown key in %s — skipped: %r", vertical, r)
+                continue
+            out.append({"target": target, "set": r.get("set"),
+                        "when": {str(k): v for k, v in when.items()},
+                        "only_if_missing": bool(r.get("only_if_missing", True))})
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        logger.warning("derivations unreadable for %s: %s", vertical, exc)
+    return tuple(out)
+
+
+def derivations_union(verticals: Tuple[str, ...]) -> Tuple[Dict[str, Any], ...]:
+    """Concatenated derivation rules across verticals, de-duplicated by (target, when)."""
+    seen = set()
+    merged: List[Dict[str, Any]] = []
+    for v in verticals:
+        for r in load_derivations(v):
+            key = (r["target"], tuple(sorted((k, str(val)) for k, val in r["when"].items())))
+            if key not in seen:
+                seen.add(key)
+                merged.append(r)
+    return tuple(merged)
+
+
+def apply_derivations(attrs: Dict[str, Any], derivations: Tuple[Dict[str, Any], ...],
+                      defs: Dict[str, AttributeDef]) -> Dict[str, Any]:
+    """Fill derivable target attributes IN PLACE from already-normalized attrs. Honesty rules,
+    same as extraction: (1) `only_if_missing` never overrides structured catalog data;
+    (2) a `when` key absent from attrs means NO evidence → the rule does not fire (we do not
+    infer 'discrete' from the mere absence of gpu_discrete); (3) the derived value is clamped
+    through the target def's normalizer — an out-of-bounds derived value is dropped, not stored."""
+    for r in derivations or ():
+        target = r["target"]
+        if r["only_if_missing"] and target in attrs:
+            continue
+        when = r["when"]
+        if any(k not in attrs or attrs[k] != v for k, v in when.items()):
+            continue
+        val = normalize_value(defs[target], r["set"]) if target in defs else None
+        if val is not None:
+            attrs[target] = val
+    return attrs
+
+
 def _key_index(defs: Dict[str, AttributeDef]) -> Dict[str, str]:
     idx: Dict[str, str] = {}
     for key, d in defs.items():

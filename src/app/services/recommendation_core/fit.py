@@ -19,7 +19,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.app.services.attribute_registry import (
     AttributeDef,
+    apply_derivations,
     defs_union,
+    derivations_union,
     evaluate_requirements,
     extract_quantities,
     normalize_specs,
@@ -33,12 +35,15 @@ DEFAULT_VERTICALS = ("electronics", "pharmacy", "fashion")
 def variant_attributes(view: VariantView,
                        defs: Optional[Dict[str, AttributeDef]] = None) -> Dict[str, Any]:
     """One variant's canonical attributes: normalized specs, backfilled by unit-anchored
-    title extraction (specs win on conflict — structured data outranks marketing copy)."""
+    title extraction (specs win on conflict — structured data outranks marketing copy), then
+    cross-key derivations (gpu_discrete=false ⇒ gpu_vram_gb=0 — fill-only-missing, so both the
+    specs and the extraction still outrank a derived value)."""
     defs = defs or defs_union(DEFAULT_VERTICALS)
     attrs, _dropped = normalize_specs(view.specs or {}, defs)
     extracted, _ambiguous = extract_quantities(view.title or "", defs)
     for k, v in extracted.items():
         attrs.setdefault(k, v)
+    apply_derivations(attrs, derivations_union(DEFAULT_VERTICALS), defs)
     return attrs
 
 

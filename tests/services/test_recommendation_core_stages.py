@@ -121,6 +121,30 @@ def test_variant_attributes_specs_win_title_backfills():
     assert attrs["display_in"] == 17                    # but the title fills gaps
 
 
+def test_integrated_gpu_derives_zero_vram_and_honestly_fails(db):
+    """review-8 #5: an integrated laptop (gpu_discrete=false, no vram spec) derives gpu_vram_gb=0
+    and FAILS a game's VRAM floor — an honest 'below requirement', not a wishy-washy 'unverified'.
+    A discrete laptop with real vram MEETS. The derivation only fills MISSING keys."""
+    integrated = VariantView(sku="IDEA", title="Lenovo IdeaPad 15 FHD Laptop", price_cents=90000,
+                             specs={"gpu_discrete": False})
+    discrete = VariantView(sku="LEGION", title="Lenovo Legion 15 Gaming Laptop", price_cents=190000,
+                           specs={"gpu_discrete": True, "gpu_vram_gb": 8})
+    assert variant_attributes(integrated)["gpu_vram_gb"] == 0        # derived: no discrete GPU ⇒ 0
+    assert variant_attributes(discrete)["gpu_vram_gb"] == 8          # explicit vram untouched
+    cards, summary = build_cards([discrete, integrated], {"gpu_vram_gb": (">=", 8)})
+    by_sku = {c.sku: c for c in cards}
+    assert by_sku["IDEA"].fit["overall"] == "fails"                  # honest fail, not "unknown"
+    assert by_sku["LEGION"].fit["overall"] == "meets"
+    assert [c.sku for c in cards] == ["LEGION", "IDEA"]              # meets ranks above fails
+
+
+def test_derivation_never_overrides_explicit_vram(db):
+    """An explicit catalog gpu_vram_gb wins even when gpu_discrete=false (contradictory catalog):
+    structured data outranks the derivation (only_if_missing)."""
+    v = VariantView(sku="ODD", title="Odd Laptop", specs={"gpu_discrete": False, "gpu_vram_gb": 6})
+    assert variant_attributes(v)["gpu_vram_gb"] == 6
+
+
 def test_no_requirements_means_price_ranked_no_verdicts(db):
     cards, summary = build_cards(_views(db))
     assert [c.sku for c in cards] == ["LAP-3", "LAP-1", "LAP-2"]
