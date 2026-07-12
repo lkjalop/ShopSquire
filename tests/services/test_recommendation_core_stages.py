@@ -167,6 +167,23 @@ def test_vertical_root_keeps_broad_retry_in_vertical():
     assert _vertical_root(None) is None
 
 
+def test_sort_price_asc_promotes_price_above_relevance_never_above_truth(db):
+    """R9.2 'show me cheaper ones': sort reorders by price WITHIN fit-truth tiers — the cheap
+    FAILING unit still ranks below meeting pricier ones; among meets, cheaper wins even when
+    retrieval relevance says otherwise."""
+    pricey = VariantView(sku="MEET-PRICEY", title="Big 32GB", price_cents=300000,
+                         specs={"ram_gb": 32})
+    cheap = VariantView(sku="MEET-CHEAP", title="Fine 16GB", price_cents=150000,
+                        specs={"ram_gb": 16})
+    cheapest_fail = VariantView(sku="FAIL-CHEAPEST", title="Weak 8GB", price_cents=90000,
+                                specs={"ram_gb": 8})
+    variants = [pricey, cheap, cheapest_fail]      # retrieval order: pricey most relevant
+    default_cards, _ = build_cards(variants, {"ram_gb": (">=", 16)})
+    assert [c.sku for c in default_cards] == ["MEET-PRICEY", "MEET-CHEAP", "FAIL-CHEAPEST"]
+    sorted_cards, _ = build_cards(variants, {"ram_gb": (">=", 16)}, sort="price_asc")
+    assert [c.sku for c in sorted_cards] == ["MEET-CHEAP", "MEET-PRICEY", "FAIL-CHEAPEST"]
+
+
 def test_no_requirements_means_price_ranked_no_verdicts(db):
     cards, summary = build_cards(_views(db))
     assert [c.sku for c in cards] == ["LAP-3", "LAP-1", "LAP-2"]

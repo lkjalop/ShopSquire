@@ -40,9 +40,10 @@ def db():
     s.close()
 
 
-def _route_stub(lane, handle, requirements=None, conf=0.9):
+def _route_stub(lane, handle, requirements=None, conf=0.9, refine=None):
     return lambda p, t: json.dumps({"lane": lane, "handle": handle,
-                                    "requirements": requirements or {}, "confidence": conf})
+                                    "requirements": requirements or {}, "confidence": conf,
+                                    **({"refine": refine} if refine else {})})
 
 
 def _env(q, **kw):
@@ -168,6 +169,55 @@ def test_workload_reroutes_to_primary_sold_device(db):
     # a real product gap (forklift/bi) is NOT a workload vertical → still refuses, buy relationship
     d3 = route_turn(db, _env("do you sell forklifts?"), llm_fn=_route_stub("OFF_CATALOG", "bi-18"))
     assert d3.refusal_granted and d3.relationship == "buy" and d3.workloads == ()
+
+
+def test_continuation_fragment_drift_keeps_prior_subject(db):
+    """R9.2 live finding: 'show me cheaper ONES' embedding-grounded to Swimwear > One-Pieces.
+    On a continuation lane, a model node UNRELATED to the prior subject is drift — prior wins;
+    a related node (narrowing to a child / widening to an ancestor) stands."""
+    sess = {"prior_node": "el-6-11-2"}
+    d = route_turn(db, _env("show me cheaper ones", session=sess),
+                   llm_fn=_route_stub("FILTER", "aa-1-20-22"))     # the swimwear drift
+    assert d.node_handle == "el-6-11-2"                            # prior subject kept
+    d2 = route_turn(db, _env("just the gaming computers", session={"prior_node": "el-6-11-2"}),
+                    llm_fn=_route_stub("FILTER", "el-6-11"))       # ancestor = widening, stands
+    assert d2.node_handle == "el-6-11"
+    d3 = route_turn(db, _env("office chairs actually", session=sess),
+                    llm_fn=_route_stub("SEARCH", "fr-7-7"))        # SEARCH = real pivot, untouched
+    assert d3.node_handle == "fr-7-7"
+
+
+def test_refine_clamps_brand_to_catalog_and_sort_to_vocabulary(db):
+    """R9.2 clamps: a model-named brand maps to the CATALOG's canonical casing; an invented
+    brand and an out-of-vocabulary sort are dropped, never guessed."""
+    d = route_turn(db, _env("only asus, cheapest first"),
+                   llm_fn=_route_stub("FILTER", "el-6-11-2",
+                                      refine={"brand": "asus", "sort": "price_asc"}))
+    assert d.brand_filter == "Asus" and d.sort == "price_asc"    # canonical casing from catalog
+    d2 = route_turn(db, _env("only rolex, alphabetical"),
+                    llm_fn=_route_stub("FILTER", "el-6-11-2",
+                                       refine={"brand": "Rolex", "sort": "alphabetical"}))
+    assert d2.brand_filter is None and d2.sort is None           # invented → dropped
+
+
+def test_filter_only_brand_narrows_to_that_brand(db):
+    """R9.2 e2e: 'only Asus' over Computers (el-6 holds MSI LAP-1 + Asus LAP-2 in its
+    subtree) returns ONLY the Asus unit."""
+    resp = recommend_turn(db, _env("only asus", session={"prior_node": "el-6"}),
+                          llm_fn=_route_stub("FILTER", None, refine={"brand": "asus"}))
+    skus = [p.sku for p in resp.products]
+    assert skus == ["LAP-2"]                                     # MSI LAP-1 filtered out
+
+
+def test_brand_filter_zero_match_is_honest_not_ignored(db):
+    """A brand filter that matches nothing shows an honest empty + message — NEVER the
+    unfiltered slate (a grid that silently ignored the filter is the answer-shape lie)."""
+    # MSI exists in the catalog (clamp passes) but not under Gaming Laptops (el-6-11-2 has
+    # only LAP-2/Asus classified) → zero matches within the node
+    resp = recommend_turn(db, _env("only msi gaming laptops", session={}),
+                          llm_fn=_route_stub("FILTER", "el-6-11-2", refine={"brand": "MSI"}))
+    assert resp.products == []
+    assert "MSI" in resp.message                                  # honest, names the brand
 
 
 def test_filter_continuation_inherits_budget_and_requirements(db):

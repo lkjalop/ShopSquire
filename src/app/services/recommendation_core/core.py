@@ -268,7 +268,18 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     if bundle.status == "error":
         resp.degraded = True         # a retrieval FAILURE degrades — never present as 'no match'
         return
-    cards, summary = build_cards(bundle.variants, decision.requirements or None, limit=limit)
+    variants = bundle.variants
+    # BRAND FILTER (R9.2 — 'only Asus'): clamped upstream to a REAL catalog brand, applied
+    # HONESTLY — zero matches shows an honest empty message, never the unfiltered slate (a
+    # grid that silently ignored the shopper's filter is the answer-shape lie).
+    if decision.brand_filter:
+        bl = decision.brand_filter.lower()
+        variants = [v for v in variants if (v.brand or "").strip().lower() == bl]
+        if not variants:
+            resp.message = (f"None of the current options are from {decision.brand_filter} — "
+                            f"tell me if another brand works, or widen the search.")
+    cards, summary = build_cards(variants, decision.requirements or None, limit=limit,
+                                 sort=decision.sort)
     resp.products = cards
     if decision.requirements:
         resp.fit_summary = summary

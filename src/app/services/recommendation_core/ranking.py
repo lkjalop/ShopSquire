@@ -34,20 +34,32 @@ def _availability_rank(card: ProductCard) -> int:
     return 0 if card.stock > 0 else 2
 
 
-def rank_key(card: ProductCard, *, relevance_rank: int = 0):
-    """The lexicographic sort key. Pure; identical inputs → identical key."""
+SORTS = ("price_asc", "price_desc")   # closed refinement-sort vocabulary (R9.2)
+
+
+def rank_key(card: ProductCard, *, relevance_rank: int = 0, sort: Optional[str] = None):
+    """The lexicographic sort key. Pure; identical inputs → identical key.
+    R9.2: an explicit shopper sort ('show me cheaper ones') promotes PRICE above retrieval
+    relevance — never above fit/availability truth: a failing cheap unit still ranks below
+    a meeting pricier one (stages 1-3 stay supreme)."""
     fit = card.fit or {}
     group = _FIT_GROUP.get(str(fit.get("overall") or "unknown"), 1) if card.fit else 0
     failed = sum(1 for v in (fit.get("per_key") or {}).values() if v is False)
     price = card.price_cents if card.price_cents is not None else 10**12  # missing price sinks
+    if sort in SORTS:
+        pkey = price if sort == "price_asc" else (
+            -card.price_cents if card.price_cents is not None else 10**12)  # missing sinks both ways
+        return (group, failed, _availability_rank(card), pkey, relevance_rank, card.sku)
     return (group, failed, _availability_rank(card), relevance_rank, price, card.sku)
 
 
 def rank(cards: List[ProductCard], *, retrieval_order: Optional[List[str]] = None,
-         limit: Optional[int] = None) -> List[ProductCard]:
+         limit: Optional[int] = None, sort: Optional[str] = None) -> List[ProductCard]:
     """Order cards lexicographically. retrieval_order is the SKU order the evidence stage
-    returned (relevance signal); absent → relevance is neutral and other stages decide."""
+    returned (relevance signal); absent → relevance is neutral and other stages decide.
+    sort ∈ SORTS applies the shopper's explicit price preference (see rank_key)."""
     rel: Dict[str, int] = {sku: i for i, sku in enumerate(retrieval_order or [])}
     default_rel = len(rel)   # SKUs not in the retrieval order sort after those that are
-    ordered = sorted(cards, key=lambda c: rank_key(c, relevance_rank=rel.get(c.sku, default_rel)))
+    ordered = sorted(cards, key=lambda c: rank_key(c, relevance_rank=rel.get(c.sku, default_rel),
+                                                   sort=sort))
     return ordered[: max(1, int(limit))] if limit else ordered

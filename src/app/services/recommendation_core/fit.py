@@ -50,11 +50,12 @@ def variant_attributes(view: VariantView,
 def build_cards(variants: List[VariantView],
                 requirements: Optional[Dict[str, Any]] = None,
                 *, defs: Optional[Dict[str, AttributeDef]] = None,
-                limit: int = 10) -> Tuple[List[ProductCard], Dict[str, Any]]:
+                limit: int = 10, sort: Optional[str] = None) -> Tuple[List[ProductCard], Dict[str, Any]]:
     """(ranked cards, fit_summary). With no requirements: price-ranked cards, no verdicts.
     With requirements: tri-state per variant, honest ordering, closest-match when dry.
     Requirements accept (op, thr) per key OR a predicate LIST [(op, thr), ...] (a RANGE —
-    M2-B1); evaluate_requirements handles both."""
+    M2-B1); evaluate_requirements handles both. sort (R9.2, ranking.SORTS) applies the
+    shopper's explicit price preference within fit-truth tiers."""
     from src.app.services.recommendation_core.ranking import rank as _rank
     defs = defs or defs_union(DEFAULT_VERTICALS)
     # retrieval_order = the SKU order the evidence stage handed us (relevance signal for the
@@ -80,7 +81,7 @@ def build_cards(variants: List[VariantView],
             else:
                 card.why.append("below requirement: " + ", ".join(failed))
         built.append(card)
-    cards = _rank(built, retrieval_order=retrieval_order, limit=limit)
+    cards = _rank(built, retrieval_order=retrieval_order, limit=limit, sort=sort)
     def _describe(spec) -> str:
         preds = spec if isinstance(spec, list) else [spec]
         return " and ".join(f"{op} {thr}" for op, thr in preds)

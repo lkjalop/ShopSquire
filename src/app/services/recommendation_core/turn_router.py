@@ -165,6 +165,11 @@ class TurnDecision:
     # retrieval/answer stage that reads prior_shortlist) is a tracked follow-up; today this is
     # trace metadata, honestly labelled so.
     prior_shortlist: Tuple[str, ...] = ()
+    # REFINEMENTS (R9.2 — the FILTER-executor slots): the model NAMES the narrowing, clamps
+    # keep it grounded — brand must be a REAL catalog brand (case-insensitive → canonical DB
+    # casing), sort ∈ ranking.SORTS. A miss drops the refinement, never invents one.
+    brand_filter: Optional[str] = None
+    sort: Optional[str] = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -173,10 +178,29 @@ class TurnDecision:
                 "confidence": round(self.confidence, 3), "source": self.source,
                 "requested_product_node": self.requested_product_node,
                 "workloads": list(self.workloads), "relationship": self.relationship,
-                "prior_shortlist": list(self.prior_shortlist)}
+                "prior_shortlist": list(self.prior_shortlist),
+                "brand_filter": self.brand_filter, "sort": self.sort}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
+
+
+def _clamp_brand(db, raw: Any) -> Optional[str]:
+    """Model-named brand → the CATALOG's canonical casing, or None. The clamp is the catalog
+    itself (distinct non-null brands) — an invented/unstocked brand is dropped, never guessed."""
+    b = str(raw or "").strip().lower()
+    if not b or db is None:
+        return None
+    try:
+        from sqlalchemy import text as _t
+        rows = db.execute(_t("SELECT DISTINCT brand FROM products "
+                             "WHERE brand IS NOT NULL AND brand != ''")).fetchall()
+        for (name,) in rows:
+            if str(name).strip().lower() == b:
+                return str(name)
+    except Exception as exc:
+        logger.debug("brand clamp lookup failed: %s", repr(exc)[:100])
+    return None
 
 
 def _stocked_handles(db, tenant_id: str, handles: List[str]) -> frozenset:
@@ -243,10 +267,14 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         "- Extract NUMERIC requirements the message EXPLICITLY states "
         f"(keys ONLY from: {', '.join(sorted(req_keys))}; e.g. '144fps' → refresh_hz≥144). "
         "Do NOT invent workload specs — that is what use_cases are for.\n"
+        "- REFINE: if the shopper narrows to a BRAND ('only Asus', 'a Dell one') set "
+        "refine.brand; if they ask for cheaper/most affordable set refine.sort=\"price_asc\"; "
+        "premium/high-end → \"price_desc\". Both null when the message says neither.\n"
         '- POLICY_QUESTION for services (payment plans, delivery, returns policy).\n\n'
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
         '"use_cases": ["<key>", ...], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
+        '"refine": {"brand": "<brand or null>", "sort": "price_asc|price_desc|null"}, '
         '"confidence": <0.0-1.0>}\nJSON:'
     )
 
@@ -295,10 +323,26 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # work-laptop turn); the fragment's own requirements still extract below.
     session = envelope.session or {}
     prior_shortlist = tuple(str(s) for s in (session.get("shortlist_skus") or [])[:12])
-    if node is None and lane in ("FILTER", "COMPARE", "EXPLAIN"):
+    if lane in ("FILTER", "COMPARE", "EXPLAIN"):
         pn = get_node(str(session.get("prior_node") or ""))
-        if pn is not None:
-            node = pn
+        if node is None:
+            if pn is not None:
+                node = pn
+        elif pn is not None:
+            # FRAGMENT-DRIFT GUARD (R9.2 live finding): 'show me cheaper ONES' embedding-matched
+            # Swimwear > One-Pieces — a continuation fragment that accidentally grounds to an
+            # UNRELATED node would silently pivot the whole subject ($45 swimsuits after a
+            # gaming-laptop turn). A CONTINUATION lane by definition refines the prior subject,
+            # so the model's node stands only when it is prior-RELATED: within the prior subtree
+            # (narrowing), an ancestor of it (widening), or the prior itself. Unrelated → the
+            # prior node wins. A genuine category pivot classifies as SEARCH, not FILTER, so
+            # this never blocks a real subject change.
+            h, p = node.handle, pn.handle
+            related = h == p or h.startswith(p + "-") or p.startswith(h + "-")
+            if not related:
+                logger.info("continuation fragment drifted (%s → %s); keeping prior subject",
+                            lane, node.handle)
+                node = pn
     # clamp 3: requirements — known keys, known ops, numeric, within sanity bounds
     requirements: Dict[str, List[Tuple[str, float]]] = {}
     for key, spec in (data.get("requirements") or {}).items():
@@ -332,6 +376,15 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         conf = max(0.0, min(1.0, float(data.get("confidence") or 0.0)))
     except (TypeError, ValueError):
         conf = 0.0
+
+    # REFINEMENTS clamp (R9.2): sort ∈ the closed ranking vocabulary; brand ∈ the catalog's
+    # real brands (canonical casing). A miss drops the refinement — never invent a narrowing.
+    from src.app.services.recommendation_core.ranking import SORTS
+    refine = data.get("refine") if isinstance(data.get("refine"), dict) else {}
+    sort = str(refine.get("sort") or "").strip().lower() or None
+    if sort not in SORTS:
+        sort = None
+    brand_filter = _clamp_brand(db, refine.get("brand"))
 
     # clamp 4 — THE REFUSAL GATE, both directions. The model MAPS; the PLATFORM decides:
     # a purchase-ish turn whose routed node fails sells_within() is refused even if the
@@ -410,4 +463,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         refusal_granted=refusal_granted, confidence=conf, source="model",
                         requested_product_node=(node.handle if node else None),
                         workloads=tuple(workloads), relationship=relationship,
-                        prior_shortlist=prior_shortlist)
+                        prior_shortlist=prior_shortlist,
+                        brand_filter=brand_filter, sort=sort)
