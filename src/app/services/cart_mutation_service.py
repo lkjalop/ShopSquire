@@ -59,11 +59,17 @@ def _ensure_plans_table() -> None:
                 risk        TEXT NOT NULL,
                 status      TEXT NOT NULL DEFAULT 'proposed',
                 cart_hash   TEXT NOT NULL,
+                cart_version INTEGER NOT NULL DEFAULT 0,
                 result      TEXT,
                 created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
                 expires_at  TEXT,
                 applied_at  TEXT
             )"""))
+        # additive column for pre-existing tables (runtime path until the P0.4 migration lands)
+        try:
+            db.execute(text("ALTER TABLE cart_mutation_plans ADD COLUMN cart_version INTEGER NOT NULL DEFAULT 0"))
+        except Exception as _alter_exc:   # already present (idempotent) — observable, not silent
+            logger.debug("cart_version column add skipped (present?): %s", repr(_alter_exc)[:80])
         db.commit()
 
 
@@ -75,29 +81,29 @@ def propose_plan(*, tenant_id: str, uid: str, plan: CartMutationPlan,
     _ensure_plans_table()
     plan_id = f"cmp-{uuid.uuid4().hex[:16]}"
     risk = risk_tier(plan)
-    # ONE HASH NORMALIZATION (defect-hunt #8): hash the ACTUAL persisted cart (the same source
-    # apply_plan reads via _get_or_create_cart), not the facade's display slice — the slice
-    # defaults missing qty to 1 while draft_orders/cart_content_hash default to 0, so a
-    # zero/missing-qty line would false-fire the stale guard. cart_items is kept for signature
-    # stability but the hash is authoritative.
+    # Read the ACTUAL persisted cart's version + hash (the same source apply reads) — the
+    # version is the atomic CAS token (P0.2); the hash is a redundant, human-legible guard.
+    from src.app.routers.cart import _load_cart_row
+    cart_version = 0
     try:
-        from src.app.routers.cart import _get_or_create_cart
-        _, real_items, _ = _get_or_create_cart(uid)
+        with db_session() as rdb:
+            _, real_items, cart_version = _load_cart_row(rdb, uid)
         cart_hash = cart_content_hash(real_items)
     except Exception as exc:
-        logger.debug("propose real-cart hash fell back to passed slice: %s", repr(exc)[:80])
+        logger.debug("propose real-cart read fell back to passed slice: %s", repr(exc)[:80])
         cart_hash = cart_content_hash(cart_items)
     expires_at = (_now() + timedelta(minutes=_PLAN_TTL_MINUTES)).strftime(_TS_FMT)
     with db_session() as db:
         db.execute(text(
             "INSERT INTO cart_mutation_plans (id, tenant_id, uid, trace_id, query, plan, risk, "
-            "status, cart_hash, expires_at) VALUES (:id, :t, :u, :tr, :q, :p, :r, 'proposed', "
-            ":h, :e)"),
+            "status, cart_hash, cart_version, expires_at) VALUES (:id, :t, :u, :tr, :q, :p, :r, "
+            "'proposed', :h, :cv, :e)"),
             {"id": plan_id, "t": str(tenant_id or "default"), "u": str(uid or ""),
              "tr": trace_id, "q": str(query or "")[:400], "p": json.dumps(plan.as_dict()),
-             "r": risk, "h": cart_hash, "e": expires_at})
+             "r": risk, "h": cart_hash, "cv": int(cart_version), "e": expires_at})
         db.commit()
-    return {"plan_id": plan_id, "risk": risk, "cart_hash": cart_hash, "expires_at": expires_at}
+    return {"plan_id": plan_id, "risk": risk, "cart_hash": cart_hash,
+            "cart_version": cart_version, "expires_at": expires_at}
 
 
 def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
@@ -105,7 +111,7 @@ def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
     with db_session() as db:
         row = db.execute(text(
             "SELECT id, tenant_id, uid, trace_id, query, plan, risk, status, cart_hash, result, "
-            "expires_at, applied_at FROM cart_mutation_plans WHERE id = :id"),
+            "expires_at, applied_at, cart_version FROM cart_mutation_plans WHERE id = :id"),
             {"id": str(plan_id or "")}).fetchone()
     if not row:
         return None
@@ -113,16 +119,21 @@ def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
             "query": row[4], "plan": json.loads(row[5]) if row[5] else {}, "risk": row[6],
             "status": row[7], "cart_hash": row[8],
             "result": json.loads(row[9]) if row[9] else None,
-            "expires_at": row[10], "applied_at": row[11]}
+            "expires_at": row[10], "applied_at": row[11], "cart_version": int(row[12] or 0)}
 
 
-def _finish(plan_id: str, status: str, result: Dict[str, Any]) -> None:
-    with db_session() as db:
-        db.execute(text(
-            "UPDATE cart_mutation_plans SET status = :s, result = :r, applied_at = :a "
-            "WHERE id = :id"),
-            {"s": status, "r": json.dumps(result), "a": _now().strftime(_TS_FMT), "id": plan_id})
-        db.commit()
+def _finish(plan_id: str, status: str, result: Dict[str, Any], *, db=None) -> None:
+    """Mark a plan terminal. With `db` (the transactional path) it runs on the caller's session
+    and does NOT commit — the caller's single commit is the atomic unit. Without it, own session."""
+    stmt = text("UPDATE cart_mutation_plans SET status = :s, result = :r, applied_at = :a "
+                "WHERE id = :id")
+    params = {"s": status, "r": json.dumps(result), "a": _now().strftime(_TS_FMT), "id": plan_id}
+    if db is not None:
+        db.execute(stmt, params)
+        return
+    with db_session() as own:
+        own.execute(stmt, params)
+        own.commit()
 
 
 _CARRIED_AGE_HOURS = 1.0   # mirrors cart-age labelling: a line idle >1h reads as carried
@@ -168,7 +179,15 @@ def _stash_undo(redis, uid: str, items: List[Dict[str, Any]]) -> None:
 def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[str, Any]:
     """Execute a proposed plan — the ONLY mutation path. Returns a dict whose `status` is one of:
     applied | already_applied | rejected | stale_cart | expired | not_found | forbidden |
-    conflict. Never raises; never partially applies."""
+    conflict | error. Never raises; never partially applies (P0.2: ONE atomic transaction).
+
+    Atomicity (review-6 #2/#3/#4): the status-claim CAS, the cart read, the versioned cart
+    write, and the plan-complete all run in ONE db_session and commit ONCE. Any raise before that
+    commit rolls the WHOLE thing back — status stays 'proposed', cart unchanged, plan retryable
+    (no wedge, no mutate-then-lie). Concurrency: the status CAS's row lock serializes concurrent
+    applies; the cart's version CAS serializes any concurrent writer (stepper / second plan) —
+    a writer that lands mid-apply bumps the version, our versioned UPDATE gets rowcount 0, and we
+    return stale_cart having written nothing (the lost-write is impossible, not just narrowed)."""
     row = get_plan(plan_id)
     if row is None:
         return {"status": "not_found", "plan_id": plan_id}
@@ -187,119 +206,119 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
         except ValueError as exc:
             logger.debug("unparseable expires_at on %s: %s", plan_id, repr(exc)[:80])
 
-    # IDEMPOTENCY CLAIM (CAS on status): exactly one caller wins; a concurrent double-submit
-    # (the SSE-abort/retry class, review-5 #6) loses the CAS and reads the stored result.
-    with db_session() as db:
-        claimed = db.execute(text(
-            "UPDATE cart_mutation_plans SET status = 'applying' "
-            "WHERE id = :id AND status = 'proposed'"), {"id": plan_id})
-        db.commit()
-        if getattr(claimed, "rowcount", 0) == 0:
-            after = get_plan(plan_id) or {}
-            if after.get("status") == "applied":
-                return {"status": "already_applied", "plan_id": plan_id, **(after.get("result") or {})}
-            return {"status": "conflict", "plan_id": plan_id,
-                    "current_status": after.get("status")}
-
     from src.app.routers.cart import (
         _batch_stock_levels,
-        _get_or_create_cart,
         _hydrate,
-        _save_cart,
+        _load_cart_row,
+        _save_cart_versioned,
         apply_quantity_line,
     )
-    # EVERYTHING after the CAS claim is guarded (defect-hunt #1): the plan is now 'applying'; a
-    # raise here must NOT leave it wedged in 'applying' forever, must NOT propagate (the endpoint
-    # + facade rely on "never raises"), and must NOT mutate-then-report-failure. On any
-    # exception we mark the plan 'error' (best-effort) and return a typed error.
+    plan = CartMutationPlan.from_dict(row["plan"])
+    proposed_version = int(row.get("cart_version") or 0)
+    # stock is ADVISORY — read outside the write transaction so the txn stays single-connection.
+    set_skus = [op.target_skus[0] for op in plan.ops
+                if op.action == "set_quantity" and op.target_skus]
+    stock_map = _batch_stock_levels(set_skus) if set_skus else {}
+    prior_items: List[Dict[str, Any]] = []
+    working: List[Dict[str, Any]] = []
+    applied: List[Dict[str, Any]] = []
+
     try:
-        cart_id, items, _ = _get_or_create_cart(uid)
-        # STALE GUARD: the plan was proposed against a specific cart state; if a stepper, another
-        # tab, or another plan changed it since, refuse — never apply yesterday's plan to today's cart.
-        if cart_content_hash(items) != row["cart_hash"]:
-            _finish(plan_id, "stale_cart", {"reason": "cart_changed_since_proposal"})
-            return {"status": "stale_cart", "plan_id": plan_id}
+        with db_session() as db:
+            # 1. IDEMPOTENCY CLAIM — the row lock serializes concurrent applies (uncommitted here).
+            claimed = db.execute(text(
+                "UPDATE cart_mutation_plans SET status = 'applying' "
+                "WHERE id = :id AND status = 'proposed'"), {"id": plan_id})
+            if getattr(claimed, "rowcount", 0) == 0:
+                cur = db.execute(text("SELECT status, result FROM cart_mutation_plans WHERE id = :id"),
+                                 {"id": plan_id}).fetchone()
+                st = cur[0] if cur else None
+                if st == "applied":
+                    res = json.loads(cur[1]) if cur and cur[1] else {}
+                    return {"status": "already_applied", "plan_id": plan_id, **res}
+                return {"status": "conflict", "plan_id": plan_id, "current_status": st}
 
-        plan = CartMutationPlan.from_dict(row["plan"])
-        prior_items = [dict(it) for it in items]
-        working = [dict(it) for it in items]
-        applied: List[Dict[str, Any]] = []
-        set_skus = [op.target_skus[0] for op in plan.ops
-                    if op.action == "set_quantity" and op.target_skus]
-        stock_map = _batch_stock_levels(set_skus) if set_skus else {}
+            # 2. READ the cart in the SAME txn; stale if the version moved since propose.
+            cart_id, items, version = _load_cart_row(db, uid)
+            if cart_id is None or version != proposed_version:
+                _finish(plan_id, "stale_cart", {"reason": "cart_changed_since_proposal"}, db=db)
+                db.commit()
+                return {"status": "stale_cart", "plan_id": plan_id}
 
-        # ALL-OR-NOTHING: every op validates against the in-memory working copy; the FIRST failure
-        # aborts the whole plan with nothing saved (review-5 #5 — no partial application, ever).
-        for op in plan.ops:
-            if op.action == "clear_all":
-                working = []
-                applied.append({"action": "clear_all"})
-            elif op.action == "remove_items":
-                missing = [s for s in op.target_skus
-                           if not any(it.get("sku") == s for it in working)]
-                if missing:
-                    _finish(plan_id, "rejected", {"error": "target_not_in_cart", "skus": missing})
+            prior_items = [dict(it) for it in items]
+            working = [dict(it) for it in items]
+
+            # 3. ALL-OR-NOTHING op validation into the in-memory working copy; the first failure
+            # commits the 'rejected' status and returns with the cart untouched (nothing saved).
+            for op in plan.ops:
+                if op.action == "clear_all":
+                    working = []
+                    applied.append({"action": "clear_all"})
+                elif op.action == "remove_items":
+                    missing = [s for s in op.target_skus
+                               if not any(it.get("sku") == s for it in working)]
+                    if missing:
+                        _finish(plan_id, "rejected", {"error": "target_not_in_cart", "skus": missing}, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id,
+                                "error": {"error": "target_not_in_cart", "skus": missing}}
+                    working = [it for it in working if it.get("sku") not in set(op.target_skus)]
+                    applied.append({"action": "remove_items", "skus": list(op.target_skus)})
+                elif op.action == "keep_only":
+                    keep = set(op.target_skus)
+                    working = [it for it in working if it.get("sku") in keep]
+                    applied.append({"action": "keep_only", "skus": list(op.target_skus)})
+                elif op.action == "set_quantity":
+                    sku = op.target_skus[0]
+                    working, shortfall, err = apply_quantity_line(
+                        working, sku, int(op.quantity or 0), stock_map.get(sku, 0),
+                        allow_sourcing=False)
+                    if err is not None:
+                        _finish(plan_id, "rejected", {"error": err}, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id, "error": err}
+                    entry: Dict[str, Any] = {"action": "set_quantity", "sku": sku, "quantity": op.quantity}
+                    if shortfall:
+                        entry["sourcing"] = shortfall
+                    applied.append(entry)
+                elif op.action == "clear_previous":
+                    carried = _carried_skus(working)
+                    if carried is None:
+                        _finish(plan_id, "rejected", {"error": "carried_set_unknown"}, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id,
+                                "error": {"error": "carried_set_unknown"}}
+                    working = [it for it in working if it.get("sku") not in set(carried)]
+                    applied.append({"action": "clear_previous", "skus": carried})
+                else:
+                    _finish(plan_id, "rejected", {"error": "unsupported_action", "action": op.action}, db=db)
+                    db.commit()
                     return {"status": "rejected", "plan_id": plan_id,
-                            "error": {"error": "target_not_in_cart", "skus": missing}}
-                working = [it for it in working if it.get("sku") not in set(op.target_skus)]
-                applied.append({"action": "remove_items", "skus": list(op.target_skus)})
-            elif op.action == "keep_only":
-                keep = set(op.target_skus)
-                working = [it for it in working if it.get("sku") in keep]
-                applied.append({"action": "keep_only", "skus": list(op.target_skus)})
-            elif op.action == "set_quantity":
-                sku = op.target_skus[0]
-                working, shortfall, err = apply_quantity_line(
-                    working, sku, int(op.quantity or 0), stock_map.get(sku, 0),
-                    allow_sourcing=False)   # sourcing consent is its own confirm flow (C1 follow-up)
-                if err is not None:
-                    _finish(plan_id, "rejected", {"error": err})
-                    return {"status": "rejected", "plan_id": plan_id, "error": err}
-                entry: Dict[str, Any] = {"action": "set_quantity", "sku": sku, "quantity": op.quantity}
-                if shortfall:
-                    entry["sourcing"] = shortfall
-                applied.append(entry)
-            elif op.action == "clear_previous":
-                # SERVER-authoritative carried set from per-line added_at (C2): lines older than the
-                # carried threshold are the earlier session's. Unknowable (no stamps) → reject the
-                # whole plan rather than guess-wipe; knowable-but-empty → honest no-op.
-                carried = _carried_skus(working)
-                if carried is None:
-                    _finish(plan_id, "rejected", {"error": "carried_set_unknown"})
-                    return {"status": "rejected", "plan_id": plan_id,
-                            "error": {"error": "carried_set_unknown"}}
-                working = [it for it in working if it.get("sku") not in set(carried)]
-                applied.append({"action": "clear_previous", "skus": carried})
-            else:
-                _finish(plan_id, "rejected", {"error": "unsupported_action", "action": op.action})
-                return {"status": "rejected", "plan_id": plan_id,
-                        "error": {"error": "unsupported_action", "action": op.action}}
+                            "error": {"error": "unsupported_action", "action": op.action}}
 
-        # TOCTOU NARROWING (defect-hunt #2): the guard hash was read at the top; re-verify against
-        # the CURRENT cart immediately before the write so a stepper/second-plan edit that landed
-        # during op validation is caught (refuse, don't clobber). The read→save window is now a
-        # few statements; the full cross-process fix (row lock / SELECT FOR UPDATE) is a Postgres
-        # follow-up tracked for review.
-        _, latest, _ = _get_or_create_cart(uid)
-        if cart_content_hash(latest) != row["cart_hash"]:
-            _finish(plan_id, "stale_cart", {"reason": "cart_changed_during_apply"})
-            return {"status": "stale_cart", "plan_id": plan_id}
-
-        _stash_undo(redis, uid, prior_items)
-        _save_cart(cart_id, working)          # ONE save = the atomic commit point
-        # mark applied ADJACENT to the commit so a raise in _hydrate below can't leave a
-        # durably-mutated cart stuck in 'applying' (defect-hunt #1 mutate-then-lie).
-        _finish(plan_id, "applied", {"applied": applied})
-        try:
-            hydrated = _hydrate(working)
-        except Exception as _he:
-            logger.debug("hydrate after apply failed (non-fatal): %s", repr(_he)[:80])
-            hydrated = {"items": working}
-        return {"status": "applied", "plan_id": plan_id, "applied": applied, "cart": hydrated}
+            # 4. VERSIONED CAS WRITE — succeeds only if no concurrent writer bumped the version
+            # during our op loop; rowcount 0 → stale, nothing written.
+            if not _save_cart_versioned(db, cart_id, working, version):
+                _finish(plan_id, "stale_cart", {"reason": "cart_changed_during_apply"}, db=db)
+                db.commit()
+                return {"status": "stale_cart", "plan_id": plan_id}
+            # 5. plan-complete + THE single commit: cart write and 'applied' status land together.
+            _finish(plan_id, "applied", {"applied": applied}, db=db)
+            db.commit()
     except Exception as exc:
-        logger.warning("cart apply_plan failed (plan=%s): %s", plan_id, repr(exc)[:160])
-        try:
-            _finish(plan_id, "error", {"error": repr(exc)[:200]})
-        except Exception:
-            logger.error("could not mark plan %s error after apply failure", plan_id)
+        # the transaction rolled back (nothing committed): status still 'proposed', cart
+        # unchanged, plan retryable. No wedge, no partial mutation.
+        logger.warning("cart apply_plan rolled back (plan=%s): %s", plan_id, repr(exc)[:160])
         return {"status": "error", "plan_id": plan_id}
+
+    # POST-COMMIT (best-effort, cannot affect state): undo snapshot (review-6 #4 — stash only a
+    # cart that DID change) + hydrate for the response.
+    _stash_undo(redis, uid, prior_items)
+    try:
+        with db_session() as rdb:
+            _, final_items, _ = _load_cart_row(rdb, uid)
+        hydrated = _hydrate(final_items)
+    except Exception as _he:
+        logger.debug("hydrate after apply failed (non-fatal): %s", repr(_he)[:80])
+        hydrated = {"items": working}
+    return {"status": "applied", "plan_id": plan_id, "applied": applied, "cart": hydrated}

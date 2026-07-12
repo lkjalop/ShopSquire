@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS draft_orders (
   customer_id TEXT REFERENCES customers(id),
   line_items TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft',
+  version INTEGER NOT NULL DEFAULT 0,          -- optimistic-concurrency token (P0.2 cart CAS)
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );

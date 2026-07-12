@@ -224,6 +224,71 @@ def test_unknown_plan_not_found(wired):
     assert S.apply_plan("cmp-nope", tenant_id="t1", uid="u")["status"] == "not_found"
 
 
+# ── P0.2: one-transaction versioned CAS (review-6 #2/#3/#4) ──────────────────────
+
+def _cart_version(uid):
+    from src.app.models.db import db_session
+    from src.app.routers.cart import _load_cart_row
+    with db_session() as db:
+        _, _, v = _load_cart_row(db, uid)
+    return v
+
+
+def test_apply_bumps_cart_version(wired):
+    uid = "u-ver"
+    _cart(uid, ("SKU-A", 1))
+    v0 = _cart_version(uid)
+    plan = CartMutationPlan(ops=(CartOp("set_quantity", ("SKU-A",), 4),), confidence=0.9)
+    prop = S.propose_plan(tenant_id="t1", uid=uid, plan=plan, cart_items=[])
+    assert S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid)["status"] == "applied"
+    assert _cart_version(uid) == v0 + 1        # the versioned CAS incremented the token
+
+
+def test_stepper_between_propose_and_apply_wins_no_lost_write(wired):
+    # THE lost-write case (review-6 #3): a stepper edit lands after propose; apply must refuse
+    # (stale), and the stepper's change must survive — never clobbered.
+    uid = "u-race"
+    _cart(uid, ("SKU-A", 1), ("SKU-B", 1))
+    plan = CartMutationPlan(ops=(CartOp("remove_items", ("SKU-A",)),), confidence=0.9)
+    prop = S.propose_plan(tenant_id="t1", uid=uid, plan=plan, cart_items=[])
+    # stepper bumps SKU-B to 5 (a direct handler write → version++)
+    from src.app.routers.cart import CartItemPayload, set_item_quantity
+    set_item_quantity("SKU-B", CartItemPayload(uid=uid, sku="SKU-B", quantity=5), role=ROLE_OWNER)
+    out = S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid)
+    assert out["status"] == "stale_cart"
+    assert _skus(uid) == {"SKU-A": 1, "SKU-B": 5}     # A NOT removed, stepper's 5 survives
+
+
+def test_midtransaction_raise_rolls_back_atomically(wired, monkeypatch):
+    # review-6 #2: a raise mid-apply must roll back EVERYTHING — cart unchanged AND the plan
+    # returns to 'proposed' (not wedged in 'applying'), so it stays retryable.
+    uid = "u-rollback"
+    _cart(uid, ("SKU-A", 2))
+    plan = CartMutationPlan(ops=(CartOp("set_quantity", ("SKU-A",), 5),), confidence=0.9)
+    prop = S.propose_plan(tenant_id="t1", uid=uid, plan=plan, cart_items=[])
+    import src.app.routers.cart as _cartmod
+    monkeypatch.setattr(_cartmod, "_save_cart_versioned",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    out = S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid)
+    assert out["status"] == "error"
+    assert _skus(uid) == {"SKU-A": 2}                 # cart unchanged (rolled back)
+    assert S.get_plan(prop["plan_id"])["status"] == "proposed"   # NOT wedged in 'applying'
+
+
+def test_stale_does_not_stash_undo(wired):
+    uid = "u-noundo"
+    _cart(uid, ("SKU-A", 1))
+    plan = CartMutationPlan(ops=(CartOp("clear_all"),), confidence=0.9)
+    prop = S.propose_plan(tenant_id="t1", uid=uid, plan=plan, cart_items=[])
+    from src.app.routers.cart import CartItemPayload, add_item
+    add_item(CartItemPayload(uid=uid, sku="SKU-B", quantity=1), role=ROLE_OWNER)  # version++
+    r = _Redis()
+    out = S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid, redis=r)
+    assert out["status"] == "stale_cart"
+    from src.app.routers.cart import _undo_key
+    assert _undo_key(uid) not in r.store              # nothing changed → no undo snapshot
+
+
 # ── clear_previous: SERVER-authoritative carried set from per-line added_at (C2) ─
 
 def test_clear_previous_removes_only_old_lines(wired):

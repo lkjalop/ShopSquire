@@ -134,12 +134,46 @@ def _get_or_create_cart(uid: str) -> tuple[str, List[Dict], Optional[str]]:
 
 
 def _save_cart(cart_id: str, items: List[Dict]) -> None:
+    # bump version on EVERY direct write (P0.2): the stepper/add/remove handlers increment the
+    # optimistic-concurrency token so a chat cart-plan's versioned CAS sees their edit and
+    # refuses rather than clobbering it.
     with db_session() as db:
         db.execute(
-            "UPDATE draft_orders SET line_items = :items, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
+            "UPDATE draft_orders SET line_items = :items, version = version + 1, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = :id",
             {"items": json.dumps(items), "id": cart_id},
         )
         db.commit()
+
+
+# ── transactional cart primitives (P0.2 — the ONE-transaction mutation path) ────
+# These take an INJECTED session and never commit — the caller (cart_mutation_service.apply_plan)
+# opens one db_session, does status-claim + read + versioned write + plan-complete, and commits
+# ONCE. Any raise before that commit rolls the whole thing back (status stays 'proposed', cart
+# unchanged) — atomic, no wedge, no mutate-then-lie, no lost write.
+def _load_cart_row(db, uid: str) -> tuple:
+    """(cart_id, items, version) for uid's draft cart via the given session; (None, [], 0) when
+    absent. Read-only — never creates a cart (a mutation of a non-existent cart is a no-op)."""
+    from sqlalchemy import text as _text
+    row = db.execute(_text(
+        "SELECT id, line_items, version FROM draft_orders "
+        "WHERE customer_id = :uid AND status = 'draft' ORDER BY created_at DESC LIMIT 1"),
+        {"uid": str(uid)}).fetchone()
+    if not row:
+        return None, [], 0
+    return row[0], _load_items(row[1]), int(row[2] or 0)
+
+
+def _save_cart_versioned(db, cart_id: str, items: List[Dict], expected_version: int) -> bool:
+    """Optimistic compare-and-swap via the given session (caller commits): writes only if the
+    cart's version is still `expected_version`, bumping it. rowcount 0 = a concurrent stepper or
+    plan won the race → the caller treats it as stale_cart and writes nothing."""
+    from sqlalchemy import text as _text
+    res = db.execute(_text(
+        "UPDATE draft_orders SET line_items = :items, version = version + 1, "
+        "updated_at = CURRENT_TIMESTAMP WHERE id = :id AND version = :v"),
+        {"items": json.dumps(items), "id": cart_id, "v": int(expected_version)})
+    return getattr(res, "rowcount", 0) == 1
 
 
 def _hydrate(items: List[Dict]) -> Dict:

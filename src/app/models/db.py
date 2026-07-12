@@ -187,6 +187,7 @@ def _ensure_minimal_sqlite_tables(bind):
                     "  customer_id TEXT,\n"
                     "  line_items TEXT NOT NULL,\n"
                     "  status TEXT NOT NULL DEFAULT 'draft',\n"
+                    "  version INTEGER NOT NULL DEFAULT 0,\n"
                     "  created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                     "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                     ")"
