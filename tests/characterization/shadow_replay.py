@@ -78,32 +78,54 @@ def _diagnose_case(case_id: str, turn: int, query: str, core, v2: dict) -> dict:
 
 
 def _aggregate_diagnosis(rows: list) -> dict:
-    """Roll the per-case fit detail into the decomposition of constraint-satisfaction."""
+    """Roll the per-case fit detail into the decomposition of constraint-satisfaction. Dominance
+    is judged at the PRODUCT-VERDICT level (review-8: key-occurrence totals aren't comparable —
+    one product contributes many unknown keys). Also flags likely price-bleed requirements and
+    all-unknown products (a wrong-category proxy — e.g. pharmacy in a laptop query)."""
     verdicts = {"meets": 0, "unknown": 0, "fails": 0}
     unknown_keys: dict = {}
     failed_keys: dict = {}
     empties = 0
+    all_unknown_products = 0        # every requirement unknown → probably WRONG CATEGORY
+    price_bleed_reqs = 0           # storage_gb/ram_gb requirement with a suspiciously price-like value
     for r in rows:
         if r.get("empty"):
             empties += 1
+        for k, spec in (r.get("requirements") or {}).items():
+            if k in ("storage_gb", "ram_gb"):
+                for op, thr in (spec if isinstance(spec, list) else [spec]):
+                    if float(thr) >= 1000:      # >=1000 GB RAM / >=1000GB with no unit smells like a price
+                        price_bleed_reqs += 1
         for p in r.get("products", []):
             ov = p.get("overall")
             if ov in verdicts:
                 verdicts[ov] += 1
+            per_key = p.get("per_key") or {}
+            if per_key and all(v is None for v in per_key.values()):
+                all_unknown_products += 1
             for k in (p.get("unknown_keys") or []):
                 unknown_keys[k] = unknown_keys.get(k, 0) + 1
-            for k, v in (p.get("per_key") or {}).items():
+            for k, v in per_key.items():
                 if v is False:
                     failed_keys[k] = failed_keys.get(k, 0) + 1
     tot = sum(verdicts.values())
+    # PRODUCT-level dominance — the comparable signal
+    read = ("RETRIEVAL/RANKING gap — more products FAIL a requirement than are UNKNOWN "
+            "(present but below the requirement)"
+            if verdicts["fails"] >= verdicts["unknown"]
+            else "DATA gap — more products are UNKNOWN than fail (missing catalog spec)")
+    if all_unknown_products > tot * 0.25:
+        read += " | WRONG-CATEGORY suspected (many all-unknown products — check reroute/retrieval)"
+    if price_bleed_reqs:
+        read += f" | {price_bleed_reqs} suspected PRICE-BLEED requirement(s)"
     return {"verdicts": verdicts, "verdict_total": tot,
             "constraint_sat": round(verdicts["meets"] / tot, 4) if tot else None,
+            "verdict_dominance": ("fails" if verdicts["fails"] >= verdicts["unknown"] else "unknown"),
+            "all_unknown_products": all_unknown_products,
+            "price_bleed_reqs": price_bleed_reqs,
             "top_unknown_keys": sorted(unknown_keys.items(), key=lambda x: -x[1])[:10],
             "top_failed_keys": sorted(failed_keys.items(), key=lambda x: -x[1])[:10],
-            "empty_cases": empties, "cases": len(rows),
-            "read": ("DATA gap — products lack the spec (unknown-dominated)"
-                     if sum(unknown_keys.values()) > sum(failed_keys.values())
-                     else "RETRIEVAL/RANKING gap — products present but below requirement (fails-dominated)")}
+            "empty_cases": empties, "cases": len(rows), "read": read}
 
 
 # the lanes the facade actually serves from the core; everything else is delegated to legacy
@@ -185,19 +207,34 @@ def main() -> None:
 
     if args.diagnose and diag_rows:
         agg = _aggregate_diagnosis(diag_rows)
+        # keyed by case_id:turn (review-8 #7) so follow-up turns don't collide with turn 0.
+        keyed = {f"{r['case_id']}:{r['turn']}": r for r in diag_rows}
         out = REPO_ROOT / "tmp" / "quality_diagnosis.json"
         out.parent.mkdir(exist_ok=True)
-        out.write_text(json.dumps({"summary": agg, "cases": diag_rows}, indent=1), encoding="utf-8")
-        print("\n── CONSTRAINT-SATISFACTION DIAGNOSIS ──────────────────────────────")
+        # WRITE the artifact FIRST (review-8: never lose the JSON to a console-encoding crash).
+        out.write_text(json.dumps({"summary": agg, "cases": keyed}, indent=1), encoding="utf-8")
         v = agg["verdicts"]
-        print(f"  shown products with a verdict: {agg['verdict_total']} "
-              f"(meets {v['meets']} / unknown {v['unknown']} / fails {v['fails']})")
-        print(f"  constraint_sat = meets/total = {agg['constraint_sat']}")
-        print(f"  empty cases (expected products, got 0): {agg['empty_cases']} / {agg['cases']}")
-        print(f"  top UNKNOWN keys (missing catalog spec?): {agg['top_unknown_keys']}")
-        print(f"  top FAILED keys (genuinely below req?):   {agg['top_failed_keys']}")
-        print(f"  READ: {agg['read']}")
-        print(f"  full per-product detail → {out}")
+        # ASCII-only output (review-8: Unicode box chars crashed under Windows CP1252).
+        lines = [
+            "",
+            "-- CONSTRAINT-SATISFACTION DIAGNOSIS -------------------------------",
+            f"  shown products with a verdict: {agg['verdict_total']} "
+            f"(meets {v['meets']} / unknown {v['unknown']} / fails {v['fails']})",
+            f"  constraint_sat = meets/total = {agg['constraint_sat']}  "
+            f"[verdict dominance: {agg['verdict_dominance']}]",
+            f"  all-unknown products (wrong-category proxy): {agg['all_unknown_products']}",
+            f"  suspected price-bleed requirements: {agg['price_bleed_reqs']}",
+            f"  empty cases (expected products, got 0): {agg['empty_cases']} / {agg['cases']}",
+            f"  top UNKNOWN keys (missing spec / wrong category): {agg['top_unknown_keys']}",
+            f"  top FAILED keys (present but below req):          {agg['top_failed_keys']}",
+            f"  READ: {agg['read']}",
+            f"  full per-product detail -> {out}",
+        ]
+        try:
+            print("\n".join(lines))
+        except Exception:
+            # last-resort ascii-scrub if the console is even narrower than CP1252
+            print("\n".join(s.encode("ascii", "replace").decode("ascii") for s in lines))
 
 
 if __name__ == "__main__":

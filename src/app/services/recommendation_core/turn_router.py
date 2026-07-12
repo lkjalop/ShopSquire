@@ -253,13 +253,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             continue
         if d.bounds and not (d.bounds[0] <= float(thr) <= d.bounds[1]):
             continue
-        # BUDGET-BLEED GUARD (belt-and-suspenders to the prompt fix): drop a spec whose value
-        # equals the budget dollars — UNLESS the query actually states that number WITH a
-        # storage/memory unit (review #3: '1TB laptop under $1000' → storage_gb 1000 is REAL,
-        # not the price). Only drop the mis-parse, never a genuine explicit spec.
-        budget_dollars = {c // 100 for c in (envelope.budget_min_cents, envelope.budget_max_cents)
-                          if c is not None}
-        if (float(thr) in budget_dollars and d.key in ("storage_gb", "ram_gb")
+        # BUDGET-BLEED GUARD (review-8 root-cause 1 — the 39.4% storage-fail class): a GB-unit
+        # spec (storage_gb / ram_gb / gpu_vram_gb) is only real when the query states that number
+        # WITH a size unit. '$1200-$1800' → storage_gb>=1200 was the live bug — the model reads a
+        # PRICE as a spec, and the old guard only caught it when a STRUCTURED budget happened to
+        # equal the value (empty for natural-language budgets like the corpus). Now: REQUIRE the
+        # unit unconditionally for these keys. '1TB laptop under $1000' → storage_gb 1000 stays
+        # (the query says '1tb'); '$1800' → storage_gb 1800 is dropped (no '1800gb' in the query).
+        if (d.key in ("storage_gb", "ram_gb", "gpu_vram_gb")
                 and not _number_has_size_unit(envelope.query, thr)):
             continue
         requirements[d.key] = [(op, float(thr))]

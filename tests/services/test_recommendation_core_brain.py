@@ -127,6 +127,29 @@ def test_budget_number_with_storage_unit_is_kept(db):
     assert "storage_gb" not in d2.requirements
 
 
+def test_budget_bleed_regression_battery(db):
+    """review-8 root-cause 1: a PRICE the model mis-reads as a GB spec must be dropped even with
+    a NATURAL-LANGUAGE budget (no structured envelope budget). Only a number the query states
+    WITH a size unit survives. These four are GPT-5.6's exact regression set."""
+    # $ values bled into storage_gb — all DROPPED (no size unit in the query)
+    for q, thr in [("laptop between $1200 and $1800", 1800),
+                   ("is $1800 enough for gaming?", 1800),
+                   ("gaming laptop under $2000", 2000)]:
+        d = route_turn(db, _env(q), llm_fn=_route_stub("SEARCH", "el-6-6", {"storage_gb": [">=", thr]}))
+        assert "storage_gb" not in d.requirements, f"price bled into storage_gb for: {q}"
+    # the ONLY one that keeps storage_gb — the query actually says '1TB'
+    d = route_turn(db, _env("1TB laptop under $1000"),
+                   llm_fn=_route_stub("SEARCH", "el-6-6", {"storage_gb": [">=", 1000]}))
+    assert d.requirements.get("storage_gb") == [(">=", 1000.0)]
+    # ram_gb without a unit is also dropped; with '16GB' it's kept
+    d = route_turn(db, _env("gaming laptop around $1600"),
+                   llm_fn=_route_stub("SEARCH", "el-6-6", {"ram_gb": [">=", 1600]}))
+    assert "ram_gb" not in d.requirements
+    d = route_turn(db, _env("laptop with 16GB RAM"),
+                   llm_fn=_route_stub("SEARCH", "el-6-6", {"ram_gb": [">=", 16]}))
+    assert d.requirements.get("ram_gb") == [(">=", 16.0)]
+
+
 def test_workload_reroutes_to_primary_sold_device(db):
     """M3-C1 (was: valorant 2/3): the model maps a game to a Software (so-*) node — a WORKLOAD,
     not a product gap. The OLD fix dropped the node to None → a broad LIKE-search that found
