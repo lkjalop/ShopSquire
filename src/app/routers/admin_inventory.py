@@ -760,7 +760,7 @@ def inventory_drift_check(
             except Exception:
                 pass
             try:
-                rows = db.execute(text("SELECT line_items FROM draft_orders ORDER BY created_at DESC LIMIT 800")).fetchall()
+                rows = db.execute(text("SELECT line_items, tenant_id FROM draft_orders ORDER BY created_at DESC LIMIT 800")).fetchall()
                 unknown = 0
                 for r in rows or []:
                     raw = r[0] if isinstance(r, (list, tuple)) else r[0]

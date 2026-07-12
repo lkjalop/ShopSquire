@@ -72,6 +72,17 @@ def wired():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _tenant_ctx():
+    """R10.2: plans here are proposed/applied as tenant 't1' — set the request ContextVar the
+    way the middleware does so the handler-built carts live under the SAME tenant (pre-R10.2
+    the mismatch was invisible because cart identity ignored tenant)."""
+    from src.app.platform.tenant_context import reset_active_tenant_id, set_active_tenant_id
+    tok = set_active_tenant_id("t1")
+    yield
+    reset_active_tenant_id(tok)
+
+
 def _cart(uid, *skus_qty):
     for sku, qty in skus_qty:
         add_item(CartItemPayload(uid=uid, sku=sku, quantity=qty), role=ROLE_OWNER)

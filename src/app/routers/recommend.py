@@ -109,6 +109,11 @@ _NARRATION_EXECUTOR = _futures.ThreadPoolExecutor(
     thread_name_prefix="narration_worker",
 )
 
+def __ct() -> str:  # R10.2 cart-identity tenant (lazy: avoids import cycles at module load)
+    from src.app.platform.tenant_context import current_tenant_id
+    return current_tenant_id()
+
+
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
 tracer = get_tracer("recommend-router")
 logger = logging.getLogger("shopsquire.recommend")
@@ -2569,9 +2574,10 @@ def _infer_account_warranty_status(uid: str | None) -> dict[str, Any]:
                 rows = db.execute(
                     text(
                         "SELECT line_items FROM draft_orders "
-                        "WHERE customer_id = :uid ORDER BY updated_at DESC LIMIT 3"
+                        "WHERE customer_id = :uid AND tenant_id = :t "
+                        "ORDER BY updated_at DESC LIMIT 3"
                     ),
-                    {"uid": user},
+                    {"uid": user, "t": __ct()},
                 ).fetchall()
                 for r in rows or []:
                     raw = str((r[0] if isinstance(r, (list, tuple)) else r.get("line_items")) or "")

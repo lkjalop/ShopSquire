@@ -9,6 +9,7 @@ from pydantic import BaseModel, EmailStr
 from src.app.models.db import db_session
 from src.app.routers.auth import _ensure_auth_tables, _user_from_token
 from src.app.services.account_purchases import order_tracking, unified_purchases
+from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2 merge guard
 
 
 router = APIRouter(prefix="/api/v1/account", tags=["account"])
@@ -147,8 +148,8 @@ def claim_order(token: str, payload: ClaimOrderPayload) -> Dict:
         )
         if order[3]:
             db.execute(
-                "UPDATE draft_orders SET customer_id = :uid WHERE id = :did",
-                {"uid": user_id, "did": order[3]},
+                "UPDATE draft_orders SET customer_id = :uid WHERE id = :did AND tenant_id = :t",
+                {"uid": user_id, "did": order[3], "t": _ct()},
             )
         db.execute(
             "INSERT INTO order_sessions (id, uid, order_id) VALUES (:id, :uid, :oid)",

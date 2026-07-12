@@ -147,17 +147,22 @@ def _cart_auto_apply_enabled() -> bool:
     return str(os.getenv("RECOMMEND_CART_AUTO_APPLY", "") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _read_cart_slice(db, uid: str) -> List[Dict[str, Any]]:
+def _read_cart_slice(db, uid: str, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """The shopper's current cart lines with DISPLAY NAMES (the resolver binds a named line by
     name, so raw sku+qty lines aren't enough). Read-only: never creates a cart. Best-effort —
-    a read failure yields no cart, so the turn simply routes as a normal search."""
+    a read failure yields no cart, so the turn simply routes as a normal search.
+    Tenant-scoped (R10.2): explicit arg → request ContextVar → 'default'."""
     if not uid:
         return []
     try:
         from sqlalchemy import text as _text
+        if not tenant_id:
+            from src.app.platform.tenant_context import current_tenant_id
+            tenant_id = current_tenant_id()
         row = db.execute(_text("SELECT line_items FROM draft_orders WHERE customer_id = :uid "
-                               "AND status = 'draft' ORDER BY created_at DESC LIMIT 1"),
-                         {"uid": str(uid)}).fetchone()
+                               "AND tenant_id = :t AND status = 'draft' "
+                               "ORDER BY created_at DESC LIMIT 1"),
+                         {"uid": str(uid), "t": str(tenant_id)}).fetchone()
         raw = json.loads(row[0]) if row and row[0] else []
         items = raw if isinstance(raw, list) else []
         skus = [str(it.get("sku")) for it in items if isinstance(it, dict) and it.get("sku")]
@@ -381,7 +386,7 @@ def dispatch_recommendation_core(
             _served_guard = _run_guard(query=query, uid=uid, image_labels=image_labels,
                                        image_ocr=image_ocr)
             if str(_served_guard.get("verdict")) == "allow":
-                cart_slice = _read_cart_slice(db, uid)
+                cart_slice = _read_cart_slice(db, uid, tenant_id=tenant)
                 if cart_slice:
                     envelope = TurnEnvelope.from_suggest_params(
                         query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
@@ -405,7 +410,7 @@ def dispatch_recommendation_core(
     if mode == "shadow" or cart_mode == "shadow":
         cart_slice: List[Dict[str, Any]] = []
         if cart_mode == "shadow" and uid and not (image_labels or image_hash):
-            cart_slice = _read_cart_slice(db, uid)
+            cart_slice = _read_cart_slice(db, uid, tenant_id=tenant)
         if mode == "shadow" or cart_slice:
             # FULL envelope in the job (R10.1/P1.1): budget/session/image ride along so the
             # worker replays the turn production actually saw, not a query-only shadow of it.

@@ -114,20 +114,35 @@ def _load_items(raw) -> List[Dict]:
     return []
 
 
-def _get_or_create_cart(uid: str) -> tuple[str, List[Dict], Optional[str]]:
+def _tenant(tenant_id: Optional[str] = None) -> str:
+    """Cart-identity tenant (R10.2): explicit arg (the mutation service passes the PLAN row's
+    tenant — the audited authority) → request ContextVar (X-Tenant-Id, set by the middleware)
+    → 'default'. The tenant boundary lives HERE, at lookup/create — writes keyed by cart_id
+    (a PK) need no second check."""
+    if tenant_id:
+        return str(tenant_id)
+    from src.app.platform.tenant_context import current_tenant_id
+    return current_tenant_id()
+
+
+def _get_or_create_cart(uid: str, tenant_id: Optional[str] = None) -> tuple[str, List[Dict], Optional[str]]:
     """Returns (cart_id, items, updated_at). updated_at is the last-touched timestamp used for cart-age
-    labelling; None for a brand-new empty cart (no meaningful age to report yet)."""
+    labelling; None for a brand-new empty cart (no meaningful age to report yet).
+    Cart identity = (tenant_id, customer_id) — same uid under another tenant is a DIFFERENT cart."""
+    t = _tenant(tenant_id)
     with db_session() as db:
         row = db.execute(
-            "SELECT id, line_items, updated_at FROM draft_orders WHERE customer_id = :uid AND status = 'draft' ORDER BY created_at DESC LIMIT 1",
-            {"uid": uid},
+            "SELECT id, line_items, updated_at FROM draft_orders WHERE customer_id = :uid "
+            "AND tenant_id = :t AND status = 'draft' ORDER BY created_at DESC LIMIT 1",
+            {"uid": uid, "t": t},
         ).fetchone()
         if row:
             return row[0], _load_items(row[1]), row[2]
         cart_id = str(uuid.uuid4())
         db.execute(
-            "INSERT INTO draft_orders (id, customer_id, line_items, status) VALUES (:id, :uid, :items, 'draft')",
-            {"id": cart_id, "uid": uid, "items": json.dumps([])},
+            "INSERT INTO draft_orders (id, customer_id, tenant_id, line_items, status) "
+            "VALUES (:id, :uid, :t, :items, 'draft')",
+            {"id": cart_id, "uid": uid, "t": t, "items": json.dumps([])},
         )
         db.commit()
         return cart_id, [], None
@@ -151,14 +166,16 @@ def _save_cart(cart_id: str, items: List[Dict]) -> None:
 # opens one db_session, does status-claim + read + versioned write + plan-complete, and commits
 # ONCE. Any raise before that commit rolls the whole thing back (status stays 'proposed', cart
 # unchanged) — atomic, no wedge, no mutate-then-lie, no lost write.
-def _load_cart_row(db, uid: str) -> tuple:
-    """(cart_id, items, version) for uid's draft cart via the given session; (None, [], 0) when
-    absent. Read-only — never creates a cart (a mutation of a non-existent cart is a no-op)."""
+def _load_cart_row(db, uid: str, tenant_id: Optional[str] = None) -> tuple:
+    """(cart_id, items, version) for (tenant, uid)'s draft cart via the given session;
+    (None, [], 0) when absent. Read-only — never creates a cart (a mutation of a non-existent
+    cart is a no-op). The mutation service passes the PLAN row's tenant explicitly."""
     from sqlalchemy import text as _text
     row = db.execute(_text(
         "SELECT id, line_items, version FROM draft_orders "
-        "WHERE customer_id = :uid AND status = 'draft' ORDER BY created_at DESC LIMIT 1"),
-        {"uid": str(uid)}).fetchone()
+        "WHERE customer_id = :uid AND tenant_id = :t AND status = 'draft' "
+        "ORDER BY created_at DESC LIMIT 1"),
+        {"uid": str(uid), "t": _tenant(tenant_id)}).fetchone()
     if not row:
         return None, [], 0
     return row[0], _load_items(row[1]), int(row[2] or 0)
@@ -226,7 +243,9 @@ def _cart_trace_id(cart_id: str) -> str:
 # ── Reload-durable UNDO: a cleared cart is stashed in Redis so "put them back" survives a page reload.
 # This is a SEPARATE snapshot (not a tombstone inside line_items), so it never touches the cart read paths.
 def _undo_key(uid: str) -> str:
-    return f"session:{str(uid or '').strip()}:cart_undo"
+    # R10.2: tenant-namespaced like the core session keys (facade:320 "never uid-alone") — a
+    # same-uid shopper in another tenant must never restore this tenant's cleared cart.
+    return f"session:{_tenant()}:{str(uid or '').strip()}:cart_undo"
 
 
 def _undo_ttl() -> int:
@@ -451,10 +470,10 @@ def _get_cart_sku_qty(uid: str, sku: str) -> int:
             row = db.execute(
                 _text(
                     "SELECT line_items FROM draft_orders "
-                    "WHERE customer_id = :uid AND status = 'draft' "
+                    "WHERE customer_id = :uid AND tenant_id = :t AND status = 'draft' "
                     "ORDER BY created_at DESC LIMIT 1"
                 ),
-                {"uid": str(uid)},
+                {"uid": str(uid), "t": _tenant()},
             ).fetchone()
         if not row:
             return 0

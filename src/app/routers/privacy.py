@@ -18,6 +18,8 @@ from src.app.services.memory import Memory
 from src.app.services.decision_log import log_trace_event
 
 
+from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2: erasure/export per tenant-controller
+
 router = APIRouter(prefix="/api/v1/privacy", tags=["privacy"])
 _PRIVACY_FALLBACK: Dict[str, str] = {}
 
@@ -287,7 +289,8 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
             )
             deleted["orders"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute(text("DELETE FROM draft_orders WHERE customer_id = :uid"), {"uid": uid})
+            res = db.execute(text("DELETE FROM draft_orders WHERE customer_id = :uid AND tenant_id = :t"),
+                             {"uid": uid, "t": _ct()})
             deleted["draft_orders"] = getattr(res, "rowcount", 0) or 0
 
             res = db.execute(text("DELETE FROM customers WHERE id = :uid"), {"uid": uid})
@@ -366,7 +369,8 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                 ).mappings().all()
                 export["orders"] = [dict(r) for r in rows]
 
-            rows = db.execute(text("SELECT * FROM draft_orders WHERE customer_id = :uid"), {"uid": uid}).mappings().all()
+            rows = db.execute(text("SELECT * FROM draft_orders WHERE customer_id = :uid AND tenant_id = :t"),
+                              {"uid": uid, "t": _ct()}).mappings().all()
             export["draft_orders"] = [dict(r) for r in rows]
 
             _where, params = _uid_patterns(uid, uid_hash)

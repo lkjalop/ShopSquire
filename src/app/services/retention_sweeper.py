@@ -54,7 +54,10 @@ def load_sweeper_config() -> Dict[str, int]:
 
 def _cutoff(now: datetime, seconds: int) -> str:
     """A 'YYYY-MM-DD HH:MM:SS' cutoff string — compares lexicographically against the TEXT timestamps
-    draft_orders.updated_at / chat_messages.created_at store (both UTC, same format)."""
+    draft_orders.updated_at / chat_messages.created_at store (both UTC, same format).
+
+    R10.2 NOTE: retention sweeps stay DELIBERATELY tenant-GLOBAL — stale-cart expiry is a
+    platform hygiene policy applied uniformly, not tenant data access. Do not scope."""
     return (now - timedelta(seconds=int(seconds))).strftime("%Y-%m-%d %H:%M:%S")
 
 

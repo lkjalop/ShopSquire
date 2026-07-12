@@ -66,7 +66,13 @@ class StoreProfileMiddleware:
             return
         pid = resolved.profile_id
         token = set_active_profile_id(pid)  # None → override cleared → env/default
+        # R10.2: the SAME task chain also carries the active TENANT (X-Tenant-Id → 'default')
+        # so data-layer helpers (cart/orders/privacy) read one authority via current_tenant_id()
+        # instead of each endpoint growing a Header param (missed endpoint = split-brain).
+        from src.app.platform.tenant_context import reset_active_tenant_id, set_active_tenant_id
+        t_token = set_active_tenant_id(tenant_id)
         try:
             await self.app(scope, receive, send)
         finally:
+            reset_active_tenant_id(t_token)
             reset_active_profile_id(token)

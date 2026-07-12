@@ -108,7 +108,7 @@ def propose_plan(*, tenant_id: str, uid: str, plan: CartMutationPlan,
     cart_version = 0
     try:
         with db_session() as rdb:
-            _, real_items, cart_version = _load_cart_row(rdb, uid)
+            _, real_items, cart_version = _load_cart_row(rdb, uid, tenant_id=tenant_id)
         cart_hash = cart_content_hash(real_items)
     except Exception as exc:
         logger.debug("propose real-cart read fell back to passed slice: %s", repr(exc)[:80])
@@ -260,7 +260,8 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
                 return {"status": "conflict", "plan_id": plan_id, "current_status": st}
 
             # 2. READ the cart in the SAME txn; stale if the version moved since propose.
-            cart_id, items, version = _load_cart_row(db, uid)
+            # tenant from the PLAN row (verified above) — the audited authority (R10.2).
+            cart_id, items, version = _load_cart_row(db, uid, tenant_id=tenant_id)
             if cart_id is None or version != proposed_version:
                 _finish(plan_id, "stale_cart", {"reason": "cart_changed_since_proposal"}, db=db)
                 db.commit()
@@ -337,7 +338,7 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
     _stash_undo(redis, uid, prior_items)
     try:
         with db_session() as rdb:
-            _, final_items, _ = _load_cart_row(rdb, uid)
+            _, final_items, _ = _load_cart_row(rdb, uid, tenant_id=tenant_id)
         hydrated = _hydrate(final_items)
     except Exception as _he:
         logger.debug("hydrate after apply failed (non-fatal): %s", repr(_he)[:80])

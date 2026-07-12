@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from sqlalchemy import text
+from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2
 from src.app.services.product_taxonomy import (
     ACCESSORY_FAMILIES,
     infer_accessory_slug,
@@ -221,12 +222,13 @@ def _user_family_history(db, uid: str | None, lookback_days: int = 180) -> dict[
                 SELECT line_items
                 FROM draft_orders
                 WHERE customer_id = :uid
+                  AND tenant_id = :tenant
                   AND datetime(created_at) >= datetime('now', :window_expr)
                 ORDER BY created_at DESC
                 LIMIT 150
                 """
             ),
-            {"uid": user, "window_expr": f"-{max(1, int(lookback_days))} days"},
+            {"uid": user, "tenant": _ct(), "window_expr": f"-{max(1, int(lookback_days))} days"},
         ).fetchall()
     except Exception:
         rows = []
@@ -298,10 +300,11 @@ def _draft_order_lines(db, since_days: int = 90) -> list[list[dict]]:
                 """
                 SELECT line_items
                 FROM draft_orders
-                WHERE datetime(created_at) >= datetime('now', :window_expr)
+                WHERE tenant_id = :tenant
+                  AND datetime(created_at) >= datetime('now', :window_expr)
                 """
             ),
-            {"window_expr": f"-{max(1, int(since_days))} days"},
+            {"tenant": _ct(), "window_expr": f"-{max(1, int(since_days))} days"},
         ).fetchall()
     except Exception:
         return []

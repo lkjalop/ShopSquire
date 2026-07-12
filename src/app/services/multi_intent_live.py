@@ -35,6 +35,7 @@ _FALLBACK_AMEND_CUE_RE = re.compile(
     r"swap|switch|replace)\b", re.I)  # swap/replace bind to the just-shown shortlist (2026-07-09)
 from src.app.services.multi_intent_planner import plan_turn
 from src.app.services.scatter_gather_guard import _matches_category
+from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2
 
 
 def _row_to_result(sku: str, name: str, price_cents: Any, specs: Any,
@@ -89,9 +90,9 @@ def _prior_lines_from_cart(db, uid: str, by_sku: Dict[str, Dict[str, Any]]) -> L
     its category from the catalog snapshot so the guard's context-survival + category checks have real data.
     Empty when there is no draft cart (a fresh single-intent turn — planner then adds nothing)."""
     row = db.execute(
-        _sql("SELECT line_items FROM draft_orders WHERE customer_id = :uid AND status = 'draft' "
-             "ORDER BY created_at DESC LIMIT 1"),
-        {"uid": str(uid)},
+        _sql("SELECT line_items FROM draft_orders WHERE customer_id = :uid AND tenant_id = :t "
+             "AND status = 'draft' ORDER BY created_at DESC LIMIT 1"),
+        {"uid": str(uid), "t": _ct()},
     ).fetchone()
     if not row:
         return []

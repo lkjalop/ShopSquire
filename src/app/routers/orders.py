@@ -197,9 +197,10 @@ def create_order_core(db, *, uid: str, items: list, customer_id: str | None = No
         # db is a SQLAlchemy Session provided by Depends(get_db)
         # Insert draft, order and session atomically
         with tracer.start_as_current_span("orders.db_write"):
+            from src.app.platform.tenant_context import current_tenant_id
             db.execute(
-                sql_text("INSERT INTO draft_orders (id, customer_id, line_items, status) VALUES (:id, :customer_id, :line_items, :status)"),
-                {"id": draft_id, "customer_id": customer_id, "line_items": json.dumps(line_items), "status": "draft"},
+                sql_text("INSERT INTO draft_orders (id, customer_id, tenant_id, line_items, status) VALUES (:id, :customer_id, :t, :line_items, :status)"),
+                {"id": draft_id, "customer_id": customer_id, "t": current_tenant_id(), "line_items": json.dumps(line_items), "status": "draft"},
             )
             db.execute(
                 sql_text(
