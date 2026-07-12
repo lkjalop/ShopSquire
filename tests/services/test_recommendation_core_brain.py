@@ -171,6 +171,32 @@ def test_workload_reroutes_to_primary_sold_device(db):
     assert d3.refusal_granted and d3.relationship == "buy" and d3.workloads == ()
 
 
+def test_explain_consumes_prior_shortlist(db):
+    """R9.4 (review-6 #17 closed): 'why is the first one better for me?' retrieves EXACTLY the
+    items shown last turn, in shown order, and explains the top pick from its fit verdicts —
+    never a fresh category sweep that may not contain 'the first one'."""
+    sess = {"prior_node": "el-6-11-2", "shortlist_skus": ["LAP-2", "LAP-1"],
+            "accepted_constraints": {"budget_max_cents": None,
+                                     "requirements": {"ram_gb": [[">=", 16]]}}}
+    resp = recommend_turn(db, _env("why is the first one better for me?", session=sess),
+                          llm_fn=_route_stub("EXPLAIN", None))
+    assert [p.sku for p in resp.products] == ["LAP-2", "LAP-1"]   # the SHOWN items, shown order
+    assert (resp.extras.get("evidence") or {}).get("retrieval_mode") == "prior_shortlist"
+    assert "Asus TUF" in resp.message                              # explains the ACTUAL top pick
+    d = resp.extras["decision"]
+    assert d["subject_from_session"] is True
+
+
+def test_compare_with_own_node_keeps_node_retrieval(db):
+    """A COMPARE that names its own subject ('compare X vs Y' fresh) is NOT a shortlist turn —
+    node retrieval stands; the shortlist path fires only for session-subject turns."""
+    sess = {"prior_node": "el-6-6", "shortlist_skus": ["LAP-1"]}
+    resp = recommend_turn(db, _env("compare the gaming laptops", session=sess),
+                          llm_fn=_route_stub("COMPARE", "el-6-11-2"))
+    assert (resp.extras.get("evidence") or {}).get("retrieval_mode") != "prior_shortlist"
+    assert [p.sku for p in resp.products] == ["LAP-2"]             # the node's own subtree
+
+
 def test_continuation_fragment_drift_keeps_prior_subject(db):
     """R9.2 live finding: 'show me cheaper ONES' embedding-grounded to Swimwear > One-Pieces.
     On a continuation lane, a model node UNRELATED to the prior subject is drift — prior wins;
@@ -185,6 +211,9 @@ def test_continuation_fragment_drift_keeps_prior_subject(db):
     d3 = route_turn(db, _env("office chairs actually", session=sess),
                     llm_fn=_route_stub("SEARCH", "fr-7-7"))        # SEARCH = real pivot, untouched
     assert d3.node_handle == "fr-7-7"
+    d4 = route_turn(db, _env("the gaming ones", session={"prior_node": "el-6-6"}),
+                    llm_fn=_route_stub("FILTER", "el-6-11-2"))     # same el-6 family = refinement
+    assert d4.node_handle == "el-6-11-2"                           # sibling-family jump stands
 
 
 def test_refine_clamps_brand_to_catalog_and_sort_to_vocabulary(db):

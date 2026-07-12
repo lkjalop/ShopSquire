@@ -159,17 +159,19 @@ class TurnDecision:
     requested_product_node: Optional[str] = None   # the DEVICE to retrieve (== node_handle)
     workloads: Tuple[str, ...] = ()                # content/software nodes named as workloads
     relationship: str = "buy"                      # buy (named a product) | run_on (named a workload)
-    # SESSION (M3-C2): the prior turn's shortlist SKUs. NOTE (review-6 #17): RECORDED for the
-    # trace and available to referent resolution, but NOT yet CONSUMED — no downstream stage
-    # maps 'the first one'/'those' onto these SKUs yet. Operational referent resolution (a
-    # retrieval/answer stage that reads prior_shortlist) is a tracked follow-up; today this is
-    # trace metadata, honestly labelled so.
+    # SESSION (M3-C2): the prior turn's shortlist SKUs. CONSUMED since R9.4 (review-6 #17
+    # closed): an EXPLAIN/COMPARE turn whose subject came from the session retrieves exactly
+    # these SKUs in shown order ('the first one' = cards[0] of what the shopper actually saw).
     prior_shortlist: Tuple[str, ...] = ()
     # REFINEMENTS (R9.2 — the FILTER-executor slots): the model NAMES the narrowing, clamps
     # keep it grounded — brand must be a REAL catalog brand (case-insensitive → canonical DB
     # casing), sort ∈ ranking.SORTS. A miss drops the refinement, never invents one.
     brand_filter: Optional[str] = None
     sort: Optional[str] = None
+    # R9.4: True when the routed node came from the SESSION (nodeless-continuation inherit or
+    # fragment-drift override) — the turn is ABOUT the prior subject, so EXPLAIN/COMPARE may
+    # consume prior_shortlist ('the first one' = the items actually shown last turn).
+    subject_from_session: bool = False
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -179,7 +181,8 @@ class TurnDecision:
                 "requested_product_node": self.requested_product_node,
                 "workloads": list(self.workloads), "relationship": self.relationship,
                 "prior_shortlist": list(self.prior_shortlist),
-                "brand_filter": self.brand_filter, "sort": self.sort}
+                "brand_filter": self.brand_filter, "sort": self.sort,
+                "subject_from_session": self.subject_from_session}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -323,26 +326,36 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # work-laptop turn); the fragment's own requirements still extract below.
     session = envelope.session or {}
     prior_shortlist = tuple(str(s) for s in (session.get("shortlist_skus") or [])[:12])
+    subject_from_session = False
     if lane in ("FILTER", "COMPARE", "EXPLAIN"):
         pn = get_node(str(session.get("prior_node") or ""))
         if node is None:
             if pn is not None:
                 node = pn
+                subject_from_session = True
         elif pn is not None:
             # FRAGMENT-DRIFT GUARD (R9.2 live finding): 'show me cheaper ONES' embedding-matched
             # Swimwear > One-Pieces — a continuation fragment that accidentally grounds to an
             # UNRELATED node would silently pivot the whole subject ($45 swimsuits after a
             # gaming-laptop turn). A CONTINUATION lane by definition refines the prior subject,
-            # so the model's node stands only when it is prior-RELATED: within the prior subtree
-            # (narrowing), an ancestor of it (widening), or the prior itself. Unrelated → the
-            # prior node wins. A genuine category pivot classifies as SEARCH, not FILTER, so
-            # this never blocks a real subject change.
+            # so the model's node stands only when it is prior-RELATED: ancestor/descendant OR
+            # the same depth-1 family (≥2 shared leading handle segments — Laptops→Gaming
+            # Laptops is a legitimate 'the gaming ones' refinement inside Computers; Swimwear
+            # shares nothing with Electronics). Unrelated → the prior node wins. A genuine
+            # category pivot classifies as SEARCH, not FILTER, so this never blocks it.
             h, p = node.handle, pn.handle
-            related = h == p or h.startswith(p + "-") or p.startswith(h + "-")
+            hs, ps = h.split("-"), p.split("-")
+            common = 0
+            for a, b in zip(hs, ps):
+                if a != b:
+                    break
+                common += 1
+            related = (h == p or h.startswith(p + "-") or p.startswith(h + "-") or common >= 2)
             if not related:
                 logger.info("continuation fragment drifted (%s → %s); keeping prior subject",
                             lane, node.handle)
                 node = pn
+                subject_from_session = True
     # clamp 3: requirements — known keys, known ops, numeric, within sanity bounds
     requirements: Dict[str, List[Tuple[str, float]]] = {}
     for key, spec in (data.get("requirements") or {}).items():
@@ -464,4 +477,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         requested_product_node=(node.handle if node else None),
                         workloads=tuple(workloads), relationship=relationship,
                         prior_shortlist=prior_shortlist,
-                        brand_filter=brand_filter, sort=sort)
+                        brand_filter=brand_filter, sort=sort,
+                        subject_from_session=subject_from_session)

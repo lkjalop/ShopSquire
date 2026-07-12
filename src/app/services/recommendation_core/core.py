@@ -241,8 +241,48 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
 
 # ── the deterministic tool executors (the plan vocabulary's other half) ───────
 
+def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision,
+                              resp: CoreResponse, limit: int) -> bool:
+    """R9.4: retrieve the prior turn's SHOWN SKUs (subject continuity) and, for EXPLAIN,
+    compose a deterministic explanation of the top pick from its fit verdicts — no prose
+    invention, only what the cards already carry. Returns False (fall back to node retrieval)
+    when the shortlist can't be loaded — degrading to category is better than empty."""
+    try:
+        from src.app.services.catalog_read_model import get_variants
+        variants = [v for v in get_variants(db, list(decision.prior_shortlist),
+                                            tenant_id=envelope.tenant_id) if v.active]
+    except Exception as exc:
+        logger.warning("prior-shortlist retrieval failed: %s", repr(exc)[:120])
+        return False
+    if not variants:
+        return False
+    resp.extras["evidence"] = {"retrieval_mode": "prior_shortlist", "count": len(variants),
+                               "skus": [v.sku for v in variants]}
+    cards, summary = build_cards(variants, decision.requirements or None, limit=limit,
+                                 sort=decision.sort)
+    resp.products = cards
+    if decision.requirements:
+        resp.fit_summary = summary
+    if cards:
+        # deterministic explanation for BOTH consuming lanes ('why is the first one better?'
+        # routes as EXPLAIN or COMPARE run-to-run) — only what the cards already carry.
+        top = cards[0]
+        why = "; ".join(top.why) if top.why else "it leads the shortlist on price and availability"
+        price = f" at ${top.price_cents / 100:,.0f}" if top.price_cents is not None else ""
+        resp.message = f"{top.title}{price} leads this shortlist: {why}."
+    return True
+
 def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
                    resp: CoreResponse, limit: int) -> None:
+    # R9.4 — SHORTLIST CONSUMPTION (review-6 #17 closed): an EXPLAIN/COMPARE turn whose subject
+    # came from the SESSION ('why is the first one better for me?') is about the items ACTUALLY
+    # SHOWN last turn — retrieve exactly those SKUs in their shown order, never a fresh category
+    # sweep that may not even contain 'the first one'. A turn that named its own node (a fresh
+    # 'compare X vs Y') keeps the normal node retrieval.
+    if (decision.lane in ("EXPLAIN", "COMPARE") and decision.subject_from_session
+            and decision.prior_shortlist):
+        if _retrieve_prior_shortlist(db, envelope, decision, resp, limit):
+            return
     bundle = gather_evidence(db, envelope, node_handle=decision.node_handle,
                              limit=max(limit * 3, 30))
     # broad-retry ONLY on a valid empty (never on error — that would mask a failure): no node

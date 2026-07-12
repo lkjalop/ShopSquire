@@ -186,12 +186,32 @@ def main() -> None:
             case = json.loads(f.read_text(encoding="utf-8"))
             if args.only and case["id"] != args.only:
                 continue
+            # STATEFUL REPLAY (R9.6 / P1.3): thread the session slice across a case's turns the
+            # way postflight→facade does in production — turn 1's 'why is the first one better?'
+            # now sees turn 0's shortlist/node/constraints instead of replaying stateless (the
+            # gap that made every multi-turn case measure only its fragments).
+            session: dict = {}
             for t in case["turns"]:
                 req, v1 = t["request"]["params"], t.get("response") or {}
+                bmax = req.get("budget_max")
                 envelope = TurnEnvelope.from_suggest_params(
-                    query=req.get("query", ""), uid=f"shadow-{case['id']}-{t['turn']}")
+                    query=req.get("query", ""), uid=f"shadow-{case['id']}-{t['turn']}",
+                    budget_max=(float(bmax) if bmax not in (None, "") else None),
+                    session=dict(session))
                 t0 = time.monotonic()
                 core = recommend_turn(s, envelope)
+                dec = _decision_slice(core) or {}
+                used = {}
+                try:
+                    used = core.extras.get("constraints_used") or {}
+                except Exception:
+                    pass
+                session = {"prior_node": dec.get("node_handle"),
+                           "shortlist_skus": [c.sku for c in (core.products or [])][:12],
+                           "accepted_constraints": {
+                               "budget_min_cents": used.get("budget_min_cents"),
+                               "budget_max_cents": used.get("budget_max_cents"),
+                               "requirements": used.get("requirements") or {}}}
                 shape = response_shape(v1)
                 v2 = to_legacy(core, shape=shape if shape in SHAPES else "full_pipeline")
                 expect = expects.get(case["id"]) if t["turn"] == 0 else None
@@ -207,8 +227,10 @@ def main() -> None:
                 # INTRINSIC QUALITY (P1.2): measure the SERVED turns (skip delegated lanes) so the
                 # scorecard carries a real quality block + gates_pass instead of quality:null.
                 if not r.get("delegated"):
+                    # quality/label rows are keyed case_id:turn (review-7 #3): case-only keys
+                    # collide a case's follow-up turns — relevance_labels.json uses these keys.
                     quality_rows.append(evaluate_case_quality(
-                        _quality_case(case["id"], req, core), v2, labels))
+                        _quality_case(f"{case['id']}:{t['turn']}", req, core), v2, labels))
                     if args.diagnose:
                         diag_rows.append(_diagnose_case(case["id"], t["turn"],
                                                         req.get("query", ""), core, v2))

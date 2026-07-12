@@ -7,7 +7,10 @@
     "SLATE (not just what v2 showed — unlabeled shown SKUs count as NOT relevant).",
     "split.dev cases may be inspected while tuning; split.test cases are the gate — the eval",
     "must never train on the gate (classification_labels.json discipline).",
-    "The quality gate HONESTLY FAILS below labeled_coverage_min until this set is filled in."
+    "The quality gate HONESTLY FAILS below labeled_coverage_min until this set is filled in.",
+    "KEYS (R9.6): cases are keyed '<case_id>:<turn>' (e.g. 'budget_band:0',",
+    "'explain_followup:1') — the stateful replay measures each TURN, and a follow-up turn's",
+    "relevant set differs from turn 0's. Split entries use the same keyed form."
   ],
   "version": 1,
   "labeled_by": null,
