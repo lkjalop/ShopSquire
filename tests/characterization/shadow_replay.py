@@ -45,14 +45,40 @@ CORPUS_DIR = REPO_ROOT / "tests" / "golden" / "suggest_corpus"
 BATTERY = REPO_ROOT / "tests" / "characterization" / "batteries" / "starter_battery.json"
 
 
+def _decision_slice(core):
+    """The routed decision breadcrumbs the metrics need (node + requirements). Returns None when
+    the breadcrumbs are ABSENT (degraded response) — callers must treat that differently from a
+    present decision whose node is None."""
+    try:
+        dec = core.extras.get("decision")
+        return dec if isinstance(dec, dict) else None
+    except Exception:
+        return None
+
+
+def _expects_products(core) -> bool:
+    """THE one expects-products decision (R8.1 — was duplicated in _quality_case/_diagnose_case).
+    A product-lane, non-refusal turn expects products — EXCEPT a turn the core could not ground
+    AT ALL (decision recorded, no routed node AND no resolved requirements): that is off-domain
+    ('pizza place near me') and its empty answer is HONESTY, not a failure. Bounded deliberately:
+    a NODE-ROUTED empty (accessory_bag → Laptop Sleeves) still counts, and MISSING breadcrumbs
+    (degraded response) count too — the exclusion fails CLOSED and can never mask a routing,
+    retrieval, or degradation miss; only a query the whole taxonomy has no home for."""
+    if core.lane not in ("SEARCH", "FILTER", "COMPARE") or core.off_catalog:
+        return False
+    dec = _decision_slice(core)
+    if dec is None:
+        return True   # no breadcrumbs = can't prove off-domain = count the empty
+    ungroundable = dec.get("node_handle") is None and not (dec.get("requirements") or {})
+    return not ungroundable
+
+
 def _quality_case(case_id: str, req: dict, core) -> dict:
-    """Case metadata the intrinsic quality gate needs (P1.2). A product-lane, non-refusal turn
-    EXPECTS products; a refusal/off-catalog turn does not. budget_max comes from the request."""
+    """Case metadata the intrinsic quality gate needs (P1.2). budget_max comes from the request."""
     bmax = req.get("budget_max")
     return {"id": case_id,
             "budget_max": (float(bmax) if bmax not in (None, "") else None),
-            "expects_products": (core.lane in ("SEARCH", "FILTER", "COMPARE")
-                                 and not core.off_catalog)}
+            "expects_products": _expects_products(core)}
 
 
 def _diagnose_case(case_id: str, turn: int, query: str, core, v2: dict) -> dict:
@@ -71,10 +97,13 @@ def _diagnose_case(case_id: str, turn: int, query: str, core, v2: dict) -> dict:
                          "overall": fit.get("overall"),
                          "per_key": fit.get("per_key") or {},
                          "unknown_keys": fit.get("unknown_keys") or []})
-    expects = core.lane in ("SEARCH", "FILTER", "COMPARE") and not core.off_catalog
+    dec = _decision_slice(core)
     return {"case_id": case_id, "turn": turn, "query": query[:140], "lane": core.lane,
+            # node_handle recorded (R8.4 gap: its absence cost a live probe round to recover
+            # routing when reading the empties)
+            "node_handle": dec.get("node_handle"), "node_path": dec.get("node_path"),
             "requirements": reqs, "products": products, "shown": len(products),
-            "empty": expects and not products}
+            "empty": _expects_products(core) and not products}
 
 
 def _aggregate_diagnosis(rows: list) -> dict:
