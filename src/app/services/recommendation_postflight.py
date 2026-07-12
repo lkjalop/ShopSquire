@@ -46,13 +46,17 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
     try:
         decision = core.extras.get("decision") or {}
         intent = core.extras.get("intent") or {}
+        # constraints persisted = what the turn USED (R9.1): constraints_used carries session-
+        # inherited budget/requirements, so a budget-less follow-up REFRESHES the remembered
+        # budget instead of wiping it (screenshot 30's loss point was exactly this overwrite).
+        used = core.extras.get("constraints_used") or {}
         slice_ = {
             "last_node_handle": decision.get("node_handle"),
             "last_shortlist_skus": [c.sku for c in core.products][:12],
             "constraints": {
-                "budget_min_cents": envelope.budget_min_cents,
-                "budget_max_cents": envelope.budget_max_cents,
-                "requirements": decision.get("requirements") or {},
+                "budget_min_cents": used.get("budget_min_cents", envelope.budget_min_cents),
+                "budget_max_cents": used.get("budget_max_cents", envelope.budget_max_cents),
+                "requirements": (used.get("requirements") or decision.get("requirements") or {}),
                 "use_cases": intent.get("use_cases") or [],
             },
             "last_lane": core.lane,

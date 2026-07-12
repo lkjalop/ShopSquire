@@ -41,6 +41,22 @@ def test_session_write_roundtrips_through_facade_reader():
     assert raw["constraints"]["budget_max_cents"] == 200000
 
 
+def test_followup_without_budget_refreshes_not_wipes():
+    """R9.1 (screenshot 30's loss point): T1 'show me cheaper' has NO envelope budget, but the
+    core inherited the session's — constraints_used carries what was USED, and the writeback
+    persists THAT, so the remembered budget survives the follow-up instead of being nulled."""
+    r = _Redis()
+    env = _env()                       # no budget on the follow-up envelope
+    core = _core(env)
+    core.extras["constraints_used"] = {"budget_min_cents": None, "budget_max_cents": 230000,
+                                       "requirements": {"ram_gb": [[">=", 16]]},
+                                       "budget_inherited": True}
+    assert write_session(r, env, core) is True
+    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    assert raw["constraints"]["budget_max_cents"] == 230000        # refreshed, not wiped
+    assert raw["constraints"]["requirements"] == {"ram_gb": [[">=", 16]]}
+
+
 def test_session_write_is_tenant_scoped():
     r = _Redis()
     env = _env()

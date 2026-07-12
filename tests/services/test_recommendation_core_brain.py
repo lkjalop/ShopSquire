@@ -170,6 +170,45 @@ def test_workload_reroutes_to_primary_sold_device(db):
     assert d3.refusal_granted and d3.relationship == "buy" and d3.workloads == ()
 
 
+def test_filter_continuation_inherits_budget_and_requirements(db):
+    """R9.1 (screenshot 30 budget-loss): 'show me cheaper ones' restates nothing — the session's
+    accepted constraints carry forward on a CONTINUATION lane, with provenance flags."""
+    session = {"prior_node": "el-6-11-2", "shortlist_skus": ["LAP-2"],
+               "accepted_constraints": {"budget_min_cents": None, "budget_max_cents": 230000,
+                                        "requirements": {"ram_gb": [[">=", 16]]}}}
+    resp = recommend_turn(db, _env("show me cheaper ones", session=session),
+                          llm_fn=_route_stub("FILTER", None))
+    cu = resp.extras["constraints_used"]
+    assert cu["budget_max_cents"] == 230000 and cu["budget_inherited"] is True
+    assert "ram_gb" in cu["requirements"] and cu["requirements_inherited"] is True
+    assert [p.sku for p in resp.products]           # still a real product turn (both under $2300)
+    assert all((p.fit or {}).get("overall") for p in resp.products)   # fit_check ran on inherited reqs
+
+
+def test_stated_constraints_beat_session(db):
+    """Adopt-if-absent: a budget/requirement stated THIS turn always wins over the session."""
+    session = {"prior_node": "el-6-11-2",
+               "accepted_constraints": {"budget_max_cents": 230000,
+                                        "requirements": {"ram_gb": [[">=", 16]]}}}
+    resp = recommend_turn(db, _env("only ones with 32GB RAM under $2000", budget_max=2000.0,
+                                   session=session),
+                          llm_fn=_route_stub("FILTER", None, {"ram_gb": [">=", 32]}))
+    cu = resp.extras["constraints_used"]
+    assert cu["budget_max_cents"] == 200000 and cu["budget_inherited"] is False
+    assert cu["requirements"]["ram_gb"] == [[">=", 32]] and cu["requirements_inherited"] is False
+
+
+def test_fresh_search_never_inherits_session_constraints(db):
+    """Context-rot guard: a NEW search resets — yesterday's budget must not haunt a new hunt."""
+    session = {"accepted_constraints": {"budget_max_cents": 230000,
+                                        "requirements": {"ram_gb": [[">=", 16]]}}}
+    resp = recommend_turn(db, _env("gaming laptop", session=session),
+                          llm_fn=_route_stub("SEARCH", "el-6-11-2"))
+    cu = resp.extras["constraints_used"]
+    assert cu["budget_max_cents"] is None and cu["budget_inherited"] is False
+    assert "ram_gb" not in (cu["requirements"] or {})
+
+
 def test_stocked_handles_within_contains_and_ungrounded(db):
     """R8.2 marker logic: WITHIN a sold subtree marks, a subtree CONTAINING a sold node marks
     (retrieval reads subtrees), unrelated taxonomy does not, and an ungrounded tenant marks

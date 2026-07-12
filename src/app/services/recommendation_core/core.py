@@ -148,6 +148,27 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 requested_product_node=host, relationship="run_on")
             logger.info("ungrounded-workload reroute → host %s (reqs=%s)", host,
                         sorted(decision.requirements))
+    # R9.1 CONTINUATION INHERITANCE (screenshot 30 — the budget-loss bug): a refinement turn
+    # ('show me cheaper ones') restates neither the budget nor the specs, so they vanished and
+    # the follow-up re-anchored to the whole catalog. On a CONTINUATION lane only (the same
+    # lanes whose nodeless turns inherit prior_node — M3-C2), adopt the session's accepted
+    # constraints ADOPT-IF-ABSENT: a budget/requirement the shopper states THIS turn always
+    # wins; a fresh SEARCH never inherits (context-rot guard, ledger §8). Runs BEFORE
+    # derive_plan so fit_check comes back for inherited requirements.
+    budget_inherited = requirements_inherited = False
+    if decision.lane in ("FILTER", "COMPARE", "EXPLAIN"):
+        acc = (envelope.session or {}).get("accepted_constraints") or {}
+        if envelope.budget_min_cents is None and envelope.budget_max_cents is None:
+            bmin, bmax = acc.get("budget_min_cents"), acc.get("budget_max_cents")
+            if bmin is not None or bmax is not None:
+                envelope = dataclasses.replace(envelope, budget_min_cents=bmin,
+                                               budget_max_cents=bmax)
+                budget_inherited = True
+        prior_reqs = acc.get("requirements") or {}
+        if not decision.requirements and isinstance(prior_reqs, dict) and prior_reqs:
+            decision = dataclasses.replace(decision, requirements=dict(prior_reqs))
+            requirements_inherited = True
+
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
@@ -167,6 +188,11 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "node_handle": decision.node_handle,
         "requirements": {k: [list(p) for p in v] for k, v in decision.requirements.items()},
         "use_cases": intent["use_cases"],
+        # provenance (R9.1): the trace must say when this turn's constraints came from the
+        # SESSION, not the message — and postflight persists what was USED, so a budget-less
+        # follow-up refreshes the remembered budget instead of wiping it.
+        "budget_inherited": budget_inherited,
+        "requirements_inherited": requirements_inherited,
     }
 
     for step in plan.steps:
