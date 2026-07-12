@@ -116,7 +116,9 @@ class TurnDecision:
     lane: str = "SEARCH"
     node_handle: Optional[str] = None            # clamped to offered candidates
     node_path: Optional[str] = None
-    requirements: Dict[str, Tuple[str, float]] = field(default_factory=dict)  # key -> (op, thr)
+    # key -> [(op, thr), ...] — a predicate LIST so a range (floor AND ceiling) is one value
+    # end-to-end (M2-B1); the router itself emits one predicate per key (the model's clamp).
+    requirements: Dict[str, List[Tuple[str, float]]] = field(default_factory=dict)
     use_cases: Tuple[str, ...] = ()              # model-classified, clamped to KB keys
     refusal_granted: bool = False                # sells_within()==False confirmed the refusal
     confidence: float = 0.0
@@ -124,7 +126,7 @@ class TurnDecision:
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
-                "requirements": {k: list(v) for k, v in self.requirements.items()},
+                "requirements": {k: [list(p) for p in v] for k, v in self.requirements.items()},
                 "use_cases": list(self.use_cases), "refusal_granted": self.refusal_granted,
                 "confidence": round(self.confidence, 3), "source": self.source}
 
@@ -210,7 +212,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # wrong-ish handle is only a retrieval hint. Candidates stay in the prompt as guidance.
     node = get_node(str(data.get("handle") or "").strip())
     # clamp 3: requirements — known keys, known ops, numeric, within sanity bounds
-    requirements: Dict[str, Tuple[str, float]] = {}
+    requirements: Dict[str, List[Tuple[str, float]]] = {}
     for key, spec in (data.get("requirements") or {}).items():
         d = defs.get(str(key))
         if d is None or d.kind != "quantity" or not isinstance(spec, (list, tuple)) or len(spec) != 2:
@@ -229,7 +231,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         if (float(thr) in budget_dollars and d.key in ("storage_gb", "ram_gb")
                 and not _number_has_size_unit(envelope.query, thr)):
             continue
-        requirements[d.key] = (op, float(thr))
+        requirements[d.key] = [(op, float(thr))]
     # clamp 3b: use_cases — clamp each to a real KB key (normalize aliases; drop unknowns)
     from src.app.services.recommendation_core.intent_resolver import normalize_use_case
     use_cases: List[str] = []

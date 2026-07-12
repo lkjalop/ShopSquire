@@ -33,6 +33,8 @@ _CORE_MODULES = [
     # spec-key tokens (refresh_hz in _SPEC_MAP, 'valorant' example comments) and enroll after the
     # KB→attribute mapping moves to data — tracked in v2-code-review-findings-2026-07-12.
     "src/app/services/recommendation_core/evidence.py",
+    # M2-B1 requirement ranges: pure interval math + provenance — zero product vocabulary.
+    "src/app/services/recommendation_core/constraints.py",
     "src/app/services/recommendation_core/gates.py",
     "src/app/services/recommendation_core/plan.py",
     "src/app/services/recommendation_core/ranking.py",

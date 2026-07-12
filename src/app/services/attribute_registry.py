@@ -230,12 +230,26 @@ def meets(attrs: Dict[str, Any], key: str, op: str, threshold: Any) -> Optional[
         return None
 
 
+def _meets_all(attrs: Dict[str, Any], key: str, preds) -> Optional[bool]:
+    """Tri-state over a predicate LIST (a range = floor + ceiling — M2-B1): False if any bound
+    fails, None if none fail but one is unknowable, True only when every bound holds."""
+    results = [meets(attrs, key, op, thr) for op, thr in preds]
+    if any(r is False for r in results):
+        return False
+    if any(r is None for r in results):
+        return None
+    return True if results else None
+
+
 def evaluate_requirements(attrs: Dict[str, Any],
-                          requirements: Dict[str, Tuple[str, Any]]) -> Dict[str, Any]:
-    """{key: (op, threshold)} → per-key tri-state + an overall verdict:
-    'fails' if anything is False; 'unknown' if nothing fails but something is None;
-    'meets' only when every requirement is affirmatively True."""
-    per_key = {k: meets(attrs, k, op, thr) for k, (op, thr) in (requirements or {}).items()}
+                          requirements: Dict[str, Any]) -> Dict[str, Any]:
+    """{key: (op, threshold)} OR {key: [(op, thr), ...]} (a RANGE, M2-B1) → per-key tri-state +
+    an overall verdict: 'fails' if anything is False; 'unknown' if nothing fails but something
+    is None; 'meets' only when every requirement is affirmatively True."""
+    per_key: Dict[str, Optional[bool]] = {}
+    for k, spec in (requirements or {}).items():
+        preds = spec if isinstance(spec, list) else [spec]
+        per_key[k] = _meets_all(attrs, k, preds)
     if any(v is False for v in per_key.values()):
         overall = "fails"
     elif any(v is None for v in per_key.values()):

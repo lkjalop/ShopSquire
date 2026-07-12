@@ -1,5 +1,9 @@
-"""The intent→requirements resolver: KB profiles, alias normalization, multi-intent MAX merge,
-and model-requirement merge — the unifying mechanism, deterministic and vertical-blind."""
+"""The intent→requirements resolver: KB profiles, alias normalization, multi-intent merge,
+and model-requirement merge — the unifying mechanism, deterministic and vertical-blind.
+
+M2-B1: requirements are now RANGES ({key: [(op, thr), ...]}) merged by INTERSECTION with
+provenance; a stated ceiling meeting a KB floor is a SURFACED CONFLICT, never a silent win
+for either side (the old one-slot incoming-wins rule is gone)."""
 from src.app.services.recommendation_core.intent_resolver import (
     known_use_cases,
     normalize_use_case,
@@ -22,60 +26,76 @@ def test_alias_normalization():
 def test_single_use_case_profile():
     r = resolve(["gaming"])
     req = r["requirements"]
-    assert req["ram_gb"] == (">=", 16.0) and req["refresh_hz"] == (">=", 144.0)
-    assert req["storage_gb"] == (">=", 512.0) and req["gpu_vram_gb"] == (">=", 4.0)  # gpu_tier discrete
+    assert req["ram_gb"] == [(">=", 16.0)] and req["refresh_hz"] == [(">=", 144.0)]
+    assert req["storage_gb"] == [(">=", 512.0)] and req["gpu_vram_gb"] == [(">=", 4.0)]  # gpu_tier discrete
     assert r["use_cases"] == ["gaming"] and r["persona_hint"]
+    # provenance rides every bound (the 'Why Recommended' trace)
+    assert r["constraints"]["ram_gb"]["provenance"] == ["use_case:gaming"]
 
 
 def test_persona_differentiation():
     # the census-5 failure: primary/english vs CS/engineering must produce DIFFERENT floors
     uni = resolve(["university"])["requirements"]
     eng = resolve(["engineering_student"])["requirements"]
-    assert uni["ram_gb"] == (">=", 8.0)                 # light academic
-    assert eng["ram_gb"] == (">=", 16.0)                # engineering is heavier
+    assert uni["ram_gb"] == [(">=", 8.0)]               # light academic
+    assert eng["ram_gb"] == [(">=", 16.0)]              # engineering is heavier
     assert "gpu_vram_gb" in eng and "gpu_vram_gb" not in uni
 
 
-def test_multi_intent_merges_by_max():
+def test_multi_intent_merges_most_demanding_floor():
     # 'gaming AND video editing' → the union, most-demanding floor per key
     r = resolve(["gaming", "creative"])
     req = r["requirements"]
-    assert req["ram_gb"] == (">=", 16.0)                # both want 16
-    assert req["refresh_hz"] == (">=", 144.0)           # from gaming
-    assert req["storage_gb"] == (">=", 512.0)
+    assert req["ram_gb"] == [(">=", 16.0)]              # both want 16
+    assert req["refresh_hz"] == [(">=", 144.0)]         # from gaming
+    assert req["storage_gb"] == [(">=", 512.0)]
     assert set(r["use_cases"]) == {"gaming", "creative"}
+    assert not r["conflicts"]                           # floors only → no conflict possible
 
 
 def test_ai_ml_is_most_demanding():
     req = resolve(["ai_ml_workstation"])["requirements"]
-    assert req["ram_gb"] == (">=", 32.0) and req["gpu_vram_gb"] == (">=", 8.0)
-    assert req["storage_gb"] == (">=", 1000.0)
+    assert req["ram_gb"] == [(">=", 32.0)] and req["gpu_vram_gb"] == [(">=", 8.0)]
+    assert req["storage_gb"] == [(">=", 1000.0)]
 
 
-def test_model_requirements_merge_max():
-    # model extracted '144fps' on a university turn → merges in, MAX
-    r = resolve(["university"], model_requirements={"refresh_hz": (">=", 144.0),
-                                                    "ram_gb": (">=", 4.0)})
+def test_model_requirements_merge():
+    # model extracted '144fps' on a university turn → merges in; floors intersect to the max
+    r = resolve(["university"], model_requirements={"refresh_hz": [(">=", 144.0)],
+                                                    "ram_gb": [(">=", 4.0)]})
     req = r["requirements"]
-    assert req["refresh_hz"] == (">=", 144.0)           # model's, kept
-    assert req["ram_gb"] == (">=", 8.0)                 # KB's 8 beats model's 4 (MAX)
+    assert req["refresh_hz"] == [(">=", 144.0)]         # model's, kept
+    assert req["ram_gb"] == [(">=", 8.0)]               # KB's 8 beats model's 4
+    assert set(r["constraints"]["ram_gb"]["provenance"]) == {"use_case:university", "stated"}
 
 
-def test_op_aware_merge_never_inverts_a_ceiling():
-    # review #2: a shopper's '<=' ceiling must not be maxed into a KB '>=' floor
-    from src.app.services.recommendation_core.intent_resolver import _merge_max
-    assert _merge_max({"ram_gb": (">=", 16.0)}, {"ram_gb": ("<=", 8.0)})["ram_gb"] == ("<=", 8.0)
-    assert _merge_max({"ram_gb": (">=", 8.0)}, {"ram_gb": (">=", 16.0)})["ram_gb"] == (">=", 16.0)
-    assert _merge_max({"ram_gb": ("<=", 16.0)}, {"ram_gb": ("<=", 8.0)})["ram_gb"] == ("<=", 8.0)
-    # end to end: 'nothing over 8GB' on a university turn keeps the ceiling
-    r = resolve(["university"], model_requirements={"ram_gb": ("<=", 8.0)})
-    assert r["requirements"]["ram_gb"] == ("<=", 8.0)
+def test_stated_ceiling_vs_kb_floor_is_a_surfaced_conflict():
+    """B1 acceptance (review-4 Q1 / spec B1): 'nothing over 8GB' on a university turn (KB floor
+    16 via engineering? university floor is 8) — use engineering_student (floor 16) so the
+    ceiling 8 CONFLICTS: surfaced in conflicts, EXCLUDED from gating, never inverted."""
+    r = resolve(["engineering_student"], model_requirements={"ram_gb": [("<=", 8.0)]})
+    keys = [c["key"] for c in r["conflicts"]]
+    assert "ram_gb" in keys
+    assert "ram_gb" not in r["requirements"]            # contradictions never gate
+    conflict = next(c for c in r["conflicts"] if c["key"] == "ram_gb")
+    assert conflict["lower"] == 16.0 and conflict["upper"] == 8.0
+    assert set(conflict["provenance"]) == {"use_case:engineering_student", "stated"}
+
+
+def test_compatible_ceiling_becomes_a_range():
+    # university floor 8 + stated ceiling 16 → ONE range, both bounds enforced (the shape the
+    # old one-slot physically couldn't hold)
+    r = resolve(["university"], model_requirements={"ram_gb": [("<=", 16.0)]})
+    assert r["requirements"]["ram_gb"] == [(">=", 8.0), ("<=", 16.0)]
+    assert not r["conflicts"]
 
 
 def test_empty_and_unknown_are_safe():
     assert resolve([])["requirements"] == {}
     assert resolve(["garbage", "also_garbage"])["use_cases"] == []
-    assert resolve(None, {"ram_gb": (">=", 16.0)})["requirements"] == {"ram_gb": (">=", 16.0)}
+    assert resolve(None, {"ram_gb": [(">=", 16.0)]})["requirements"] == {"ram_gb": [(">=", 16.0)]}
+    # legacy single-tuple shape still accepted at the boundary
+    assert resolve(None, {"ram_gb": (">=", 16.0)})["requirements"] == {"ram_gb": [(">=", 16.0)]}
 
 
 def test_profile_trace_for_why_recommended():

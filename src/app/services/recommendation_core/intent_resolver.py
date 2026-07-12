@@ -68,43 +68,22 @@ def normalize_use_case(raw: str) -> Optional[str]:
     return alias if alias in (kb.get("use_cases") or {}) else None
 
 
-def _profile_requirements(use_case: str) -> Dict[str, Tuple[str, float]]:
-    """One use-case's required_specs → {attr_key: (op, threshold)}."""
+def _profile_constraints(use_case: str):
+    """One use-case's required_specs → ConstraintMap, every bound provenance-tagged
+    'use_case:<key>' (M2-B1: ranges + provenance replace the (op,thr) one-slot)."""
+    from src.app.services.recommendation_core.constraints import from_op, merge
     specs = ((_kb().get("use_cases") or {}).get(use_case) or {}).get("required_specs") or {}
-    out: Dict[str, Tuple[str, float]] = {}
+    src = f"use_case:{use_case}"
+    out: Dict[str, Any] = {}
     for spec_key, val in specs.items():
+        c = None
         if spec_key in _SPEC_MAP and isinstance(val, (int, float)):
             attr, op = _SPEC_MAP[spec_key]
-            out[attr] = (op, float(val))
+            c = from_op(attr, op, float(val), src)
         elif spec_key == "gpu_tier" and str(val) in _GPU_TIER_VRAM:
-            out["gpu_vram_gb"] = (">=", float(_GPU_TIER_VRAM[str(val)]))
-    return out
-
-
-def _merge_max(a: Dict[str, Tuple[str, float]],
-               b: Dict[str, Tuple[str, float]]) -> Dict[str, Tuple[str, float]]:
-    """Merge two requirement maps by MAX threshold per key (most demanding wins — the safe
-    recommendation; a machine meeting the stricter floor meets both)."""
-    out = dict(a)
-    for k, (op, thr) in b.items():
-        if k not in out:
-            out[k] = (op, thr)
-            continue
-        cur_op, cur_thr = out[k]
-        # OP-AWARE MERGE (review #2): '>=' floors take the HIGHER, '<=' ceilings take the
-        # LOWER. A floor+ceiling CONFLICT on one key ('nothing over 8GB' vs KB floor 16) can't
-        # be held in one (op,thr) slot — the INCOMING (b, which is the caller's later/more
-        # explicit source: model-stated reqs merge LAST) wins, so a shopper's stated ceiling
-        # is never silently inverted into a KB floor.
-        if op == cur_op:
-            if op in (">=", ">"):
-                out[k] = (op, max(cur_thr, thr))
-            elif op in ("<=", "<"):
-                out[k] = (op, min(cur_thr, thr))
-            else:  # ==
-                out[k] = (op, thr)
-        else:
-            out[k] = (op, thr)   # op families differ → the incoming (explicit) constraint wins
+            c = from_op("gpu_vram_gb", ">=", float(_GPU_TIER_VRAM[str(val)]), src)
+        if c is not None:
+            out[c.key] = merge(out[c.key], c) if c.key in out else c
     return out
 
 
@@ -132,17 +111,20 @@ def _salvage_title_requirements(query: str) -> Dict[str, Any]:
         from src.app.flows.nqe import detect_games_in_text, detect_software_in_text
         from src.app.services.use_case_advisor import (match_game_requirements,
                                                        match_software_requirements)
+        from src.app.services.recommendation_core.constraints import from_op_map, merge_maps
         games = detect_games_in_text(query or "")
         software = detect_software_in_text(query or "")
         if games:
             gr = match_game_requirements(games)
-            out["requirements"] = _merge_max(out["requirements"], _legacy_min_to_fit(gr))
+            out["requirements"] = merge_maps(out["requirements"],
+                                             from_op_map(_legacy_min_to_fit(gr), "title:game"))
             out["trace"]["games"] = {"matched": gr.get("games_matched", []), "tier": gr.get("tier"),
                                      "recommended_ram_gb": gr.get("recommended_ram_gb"),
                                      "recommended_gpu_vram_gb": gr.get("recommended_gpu_vram_gb")}
         if software:
             sr = match_software_requirements(software)
-            out["requirements"] = _merge_max(out["requirements"], _legacy_min_to_fit(sr))
+            out["requirements"] = merge_maps(out["requirements"],
+                                             from_op_map(_legacy_min_to_fit(sr), "title:software"))
             out["trace"]["software"] = {"matched": sr.get("software_matched", []),
                                         "recommended_ram_gb": sr.get("recommended_ram_gb"),
                                         "recommended_gpu_vram_gb": sr.get("recommended_gpu_vram_gb")}
@@ -152,39 +134,47 @@ def _salvage_title_requirements(query: str) -> Dict[str, Any]:
 
 
 def resolve(use_cases: Optional[List[str]],
-            model_requirements: Optional[Dict[str, Tuple[str, float]]] = None,
+            model_requirements: Optional[Dict[str, Any]] = None,
             query: Optional[str] = None) -> Dict[str, Any]:
-    """The resolver. Returns:
-      requirements  — merged (KB profiles ∪ per-title game/software ∪ model-stated) by MAX.
-      use_cases     — the resolved (normalized, real) use-case keys.
-      profile_trace — per-use-case + per-title requirement contribution ('Why Recommended').
-      persona_hint  — the primary use-case's nqe_persona (drives the use-case-specific clarify).
-    Multi-intent falls out naturally: pass ['gaming','creative'] → the union by MAX."""
+    """The resolver (M2-B1: RANGES + provenance + surfaced conflicts). Returns:
+      requirements  — {key: [(op, thr), ...]} — KB profiles ∪ per-title ∪ model-stated merged
+                      by INTERSECTION (floors max, ceilings min; a floor AND a ceiling coexist
+                      as a range). CONFLICTED keys are EXCLUDED (contradictions never gate).
+      constraints   — {key: {lower, upper, preferred, provenance, conflict}} — full fidelity.
+      conflicts     — the surfaced empty-range keys ('nothing over 8GB' vs a KB floor of 16):
+                      clarify material, NEVER silently resolved in either side's favour.
+      use_cases / profile_trace / title_requirements / persona_hint — as before.
+    Multi-intent falls out naturally: ['gaming','creative'] → intersection of both profiles."""
+    from src.app.services.recommendation_core.constraints import (
+        as_dicts, conflicts as constraint_conflicts, from_op_map, merge_maps, project)
     resolved: List[str] = []
     for uc in (use_cases or []):
         n = normalize_use_case(uc)
         if n and n not in resolved:
             resolved.append(n)
 
-    merged: Dict[str, Tuple[str, float]] = {}
+    merged: Dict[str, Any] = {}
     profile_trace: Dict[str, Dict[str, Any]] = {}
     for uc in resolved:
-        prof = _profile_requirements(uc)
-        profile_trace[uc] = {"requirements": {k: [op, thr] for k, (op, thr) in prof.items()},
+        prof = _profile_constraints(uc)
+        profile_trace[uc] = {"requirements": {k: [list(p) for p in c.predicates()]
+                                              for k, c in prof.items()},
                              "label": ((_kb().get("use_cases") or {}).get(uc) or {}).get("label", uc)}
-        merged = _merge_max(merged, prof)
-    # SALVAGE: per-title (game/software) requirements from the proven legacy DBs, MAX-merged
+        merged = merge_maps(merged, prof)
+    # SALVAGE: per-title (game/software) requirements from the proven legacy DBs
     title = _salvage_title_requirements(query) if query else {"requirements": {}, "trace": {}}
     if title["requirements"]:
-        merged = _merge_max(merged, title["requirements"])
-    # the model's explicitly-stated requirements ('144fps') merge in, MAX again
+        merged = merge_maps(merged, title["requirements"])
+    # the model's explicitly-stated requirements ('144fps', 'nothing over 8GB') — provenance
+    # 'stated'; a stated ceiling meeting a KB floor becomes a RANGE or a surfaced conflict.
     if model_requirements:
-        merged = _merge_max(merged, dict(model_requirements))
+        merged = merge_maps(merged, from_op_map(dict(model_requirements), "stated"))
 
     persona_hint = None
     if resolved:
         persona_hint = ((_kb().get("use_cases") or {}).get(resolved[0]) or {}).get("nqe_persona")
 
-    return {"requirements": merged, "use_cases": resolved,
+    return {"requirements": project(merged), "constraints": as_dicts(merged),
+            "conflicts": constraint_conflicts(merged), "use_cases": resolved,
             "profile_trace": profile_trace, "title_requirements": title["trace"],
             "persona_hint": persona_hint}

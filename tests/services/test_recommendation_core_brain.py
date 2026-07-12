@@ -74,7 +74,7 @@ def test_router_clamps_requirements(db):
     d = route_turn(db, _env("laptop for gaming at 144fps"), llm_fn=_route_stub(
         "SEARCH", None, {"refresh_hz": [">=", 144], "invented_key": [">=", 5],
                          "ram_gb": ["~=", 16], "gpu_vram_gb": [">=", 9999]}))
-    assert d.requirements == {"refresh_hz": (">=", 144.0)}     # bad key/op/bounds all dropped
+    assert d.requirements == {"refresh_hz": [(">=", 144.0)]}   # bad key/op/bounds all dropped
 
 
 def test_refusal_needs_the_sold_set_not_the_model(db):
@@ -120,7 +120,7 @@ def test_budget_number_with_storage_unit_is_kept(db):
     # review #3: '1TB laptop under $1000' — storage_gb 1000 is a REAL spec, not the price
     d = route_turn(db, _env("1TB laptop under $1000", budget_max=1000),
                    llm_fn=_route_stub("SEARCH", "el-6-6", {"storage_gb": [">=", 1000]}))
-    assert d.requirements.get("storage_gb") == (">=", 1000.0)
+    assert d.requirements.get("storage_gb") == [(">=", 1000.0)]
     # but a bare budget bleed is still dropped
     d2 = route_turn(db, _env("laptop under $1500", budget_max=1500),
                     llm_fn=_route_stub("SEARCH", "el-6-6", {"storage_gb": [">=", 1500]}))
@@ -135,7 +135,7 @@ def test_workload_vertical_node_never_refused(db):
                    llm_fn=_route_stub("OFF_CATALOG", "so-3-1", {"refresh_hz": [">=", 144]}))
     assert d.lane != "OFF_CATALOG" and not d.refusal_granted
     assert d.node_handle is None                          # content node dropped -> device search
-    assert d.requirements == {"refresh_hz": (">=", 144.0)}  # workload requirement kept
+    assert d.requirements == {"refresh_hz": [(">=", 144.0)]}  # workload requirement kept
     # a Media (me-*) node behaves the same; a real product gap (forklift/bi) still refuses
     d2 = route_turn(db, _env("stream movies"), llm_fn=_route_stub("SEARCH", "me-1"))
     assert d2.node_handle is None

@@ -70,12 +70,15 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     resp.extras["intent"] = {"use_cases": intent["use_cases"],
                              "profiles": intent["profile_trace"],
                              "title_requirements": intent.get("title_requirements") or {},
-                             "persona_hint": intent["persona_hint"]}
+                             "persona_hint": intent["persona_hint"],
+                             # M2-B1: full-fidelity ranges + surfaced conflicts for the trace
+                             "constraints": intent.get("constraints") or {},
+                             "conflicts": intent.get("conflicts") or []}
     resp.extras["constraints_used"] = {
         "budget_min_cents": envelope.budget_min_cents,
         "budget_max_cents": envelope.budget_max_cents,
         "node_handle": decision.node_handle,
-        "requirements": {k: list(v) for k, v in decision.requirements.items()},
+        "requirements": {k: [list(p) for p in v] for k, v in decision.requirements.items()},
         "use_cases": intent["use_cases"],
     }
 
@@ -96,6 +99,21 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     resp.extras["gates"] = gates
     if gates["policy_route"] != "allow":
         resp.degraded = True
+
+    # M2-B1: a CONFLICTED requirement ('nothing over 8GB' stated vs a use-case floor of 16) is
+    # the SHOPPER'S call — surface the clarify; never silently pick a side.
+    if intent.get("conflicts") and not resp.off_catalog and not resp.clarify:
+        c0 = intent["conflicts"][0]
+        resp.clarify.append({
+            "id": f"conflict_{c0['key']}",
+            "text": (f"Quick check — part of your request needs {c0['key']} of at least "
+                     f"{c0['lower']:g}, but you also asked for at most {c0['upper']:g}. "
+                     f"Which matters more?"),
+            "goal": "resolve_requirement_conflict",
+            "options": [
+                {"id": "keep_floor", "label": f"At least {c0['lower']:g} (performance)"},
+                {"id": "keep_ceiling", "label": f"At most {c0['upper']:g} (my stated limit)"},
+            ]})
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
@@ -131,7 +149,8 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
         resp.fit_summary = summary
         if summary.get("closest_match_mode"):
             reqs = ", ".join(f"{k} {op} {int(t) if float(t).is_integer() else t}"
-                             for k, (op, t) in decision.requirements.items())
+                             for k, preds in decision.requirements.items()
+                             for (op, t) in preds)
             resp.message = (f"No product in our catalog meets {reqs} — showing the closest "
                             f"options, ranked by how near they come.")
 

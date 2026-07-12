@@ -48,6 +48,7 @@ _BASELINE = {
     "src/app/services/recommendation_core/envelope.py": 0,
     "src/app/services/recommendation_core/legacy_adapter.py": 0,
     "src/app/services/recommendation_core/intent_resolver.py": 0,
+    "src/app/services/recommendation_core/constraints.py": 0,
     "src/app/services/recommendation_core/turn_router.py": 0,
     "src/app/services/recommendation_core/cart_resolver.py": 0,
     # C1 cart-mutation boundary: typed contract + transactional service + apply endpoint —
