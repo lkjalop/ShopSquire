@@ -1,0 +1,216 @@
+{
+  "uid": "codex-delta-f299fa08",
+  "query": "i need help with 30 laptops for work? budget is 1900 to 2100? why?",
+  "steps": [
+    {
+      "name": "api_clear_cart"
+    },
+    {
+      "name": "nlp_clear_cart",
+      "acknowledged": true
+    },
+    {
+      "name": "bulk_query_answered",
+      "latency_ms": 7655,
+      "has_budget": false,
+      "has_market_or_availability": true
+    },
+    {
+      "name": "cart_after_add",
+      "has_qty_30": true,
+      "has_split": true,
+      "has_clear_previous": false,
+      "has_helper": true
+    },
+    {
+      "name": "after_confirm",
+      "has_confirmed": true,
+      "has_drafted_note": true,
+      "checkout_unlocked": true
+    },
+    {
+      "name": "procurement_tab",
+      "has_market_intel": true,
+      "has_event_rows": true,
+      "has_drafted_rfq": true,
+      "has_pref_channel": true,
+      "has_terms": true,
+      "has_body": true,
+      "has_audit": true,
+      "has_readonly": true,
+      "has_times": false
+    },
+    {
+      "name": "procurement_drilldown",
+      "row_count": 8,
+      "has_json_drill": true
+    }
+  ],
+  "responses": [
+    {
+      "url": "http://localhost:8080/api/v1/security/csp-report",
+      "status": 204
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/market/storefront-emphasis?inventory_position=balanced",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/consumer/ingest",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/security/csp-report",
+      "status": 204
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/market/storefront-emphasis?inventory_position=balanced",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:8080/api/v1/cart/clear?uid=codex-delta-f299fa08",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/cart/clear?uid=codex-delta-f299fa08",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/chat/stream",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/cart/items/LAP-69763798",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/consumer/ingest",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/cart/split-offer?uid=codex-delta-f299fa08",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/cart/split-offer?uid=codex-delta-f299fa08",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/recommend/checkout_upsell?uid=codex-delta-f299fa08&cart_skus=LAP-69763798&limit=4&query=i+need+help+with+30+laptops+for+work%3F+budget+is+1900+to+2100%3F+why%3F&persona=corporate",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/recommend/checkout_upsell?uid=codex-delta-f299fa08&cart_skus=LAP-69763798&limit=4&query=i+need+help+with+30+laptops+for+work%3F+budget+is+1900+to+2100%3F+why%3F&persona=corporate",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/cases/confirm-cart",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/cases/c0ba98ed-5249-4565-af49-16a7bb4cb121/commit",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/cases/by-trace/4f81a6c2-0859-4bc8-8bbf-0d621ec9021c",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/decisions/4f81a6c2-0859-4bc8-8bbf-0d621ec9021c",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/cases/by-trace/4f81a6c2-0859-4bc8-8bbf-0d621ec9021c",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/cases/c0ba98ed-5249-4565-af49-16a7bb4cb121/journey",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/cases/c0ba98ed-5249-4565-af49-16a7bb4cb121/journey",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/decisions/4f81a6c2-0859-4bc8-8bbf-0d621ec9021c/events/stream",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/cart/split-offer?uid=codex-delta-f299fa08",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/cases/by-trace/4f81a6c2-0859-4bc8-8bbf-0d621ec9021c/all?view=operator",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/fulfillment/cases/c0ba98ed-5249-4565-af49-16a7bb4cb121/journey",
+      "status": 200
+    },
+    {
+      "url": "http://localhost:8080/api/v1/security/csp-report",
+      "status": 204
+    },
+    {
+      "url": "http://127.0.0.1:8080/api/v1/cart?uid=codex-delta-f299fa08",
+      "status": 200
+    }
+  ],
+  "requests": [],
+  "visible_text_tail": "his decision \u00b7 c0ba98ed\ncase_opened \u2192 new \u00b7 system \u00b7 2026-07-06 06:37:21\navailability_assessed \u2192 availability assessed \u00b7 agent \u00b7 2026-07-06 06:37:21\nrequest_buyer_commitment \u2192 awaiting buyer commitment \u00b7 agent \u00b7 2026-07-06 06:37:21\nbuyer_committed \u2192 committed \u00b7 buyer \u00b7 2026-07-06 06:37:21\nexternal_message_drafted \u2192 quote drafted \u00b7 agent \u00b7 2026-07-06 06:37:21\n\ud83d\udcca Market Intelligence \u2014 4 active signals\nRecommended action: secure inventory ahead of demand\ndemand is trending up for this line \u2014 reorder ahead of the curve and raise its prominence\ndemand_forecast \u2014 Projected demand spike: ~151 next vs ~63 baseline.\nconversion_anomaly \u2014 Conversion-rate drop: 0.00 vs ~0.01 baseline.\ndemand_shift \u2014 Search demand slowdown: 54 vs ~63 baseline.\ninventory_demand_mismatch \u2014 Unmet demand: 'can i get help with 15 work laptops. budget is 1100 to 1400? which to get?' searched by 7 distinct users with no results (catalog gap).\nDeterministic finding\u2192action synthesis (no LLM) over the market-analysis engine's persisted findings \u2014 advisory only; the human decides at the send gate.\n\tAGENT\tEVENT\tMODE\tDETAIL\tWHEN\n\u25b8\tMarket_Intelligence_Agent\tmarket_intelligence_assessed\tdeterministic\tSKU LAP-69763798\t06:37:10\n\u25b8\tAlternatives_Agent\talternatives_generated\tdeterministic\tSKU LAP-69763798 \u00b7 options: transfer_from_network \u00b7 1 alternatives\t06:37:10\n\u25b8\tProcurement_Split_Agent\tprocurement_order_split\t\u2014\tProcurement_Split_Agent\t06:37:21\n\u25b8\tProcurement_Agent\tavailability_assessed\t\u2014\tProcurement_Agent\t06:37:21\n\u25b8\tProcurement_Agent\trequest_buyer_commitment\t\u2014\tProcurement_Agent\t06:37:21\n\u25b8\tSupplier_Selection_Agent\tsupplier_selected\tdeterministic\tcase c0ba98ed\t06:37:21\n\u25b8\tSupplier_Channel_Agent\tsupplier_channel_resolved\tdeterministic\tchannel: api \u00b7 \u2192 API integration \u00b7 case c0ba98ed\t06:37:21\n\u25b8\tProcurement_Agent\texternal_message_drafted\t\u2014\tProcurement_Agent\t06:37:21\n\ud83d\udce7 Drafted supplier RFQ \u2014 quote draftedhuman-gated \u00b7 not sent\nTo (supplier)\nSUP-CREATOR \u00b7 creatorfleet.example\nContact\nquotes@creatorfleet.example\nPreferred channel\napi \u00b7 API integration handoff\nWhy this channel\nSystem-to-system supplier \u2014 the PO is routed to the supplier REST API connector, not email.\nOrdering terms\nMOQ 10 \u00b7 7d lead \u00b7 min $7000 \u00b7 preferred \u00b7 breaks: 25\u21925%, 50\u219211%\nSubject\nRFQ \u2014 LAP-69763798 x 15 (ref c0ba98ed-5249-4565-af49-16a7bb4cb121)\nContent hash\nabe744a7d9b5f1736fa162a1480a563c\nSend gate\n[object Object]\nBody (a quote request \u2014 no price is ever stated to the supplier)\nHello CreatorFleet Wholesale,\n\nThank you for your continued partnership. We would like to request a quote for the following:\n\n- Item: Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050] \u2014 Display: 144Hz | RAM: 16GB | SSD: 512GB [LAP-69763798]\n- Quantity: 15\n- Required by: the stated deadline\n- Ship to: Australia \u2014 metro\n\nPlease include in your reply:\n- Unit price, including your best volume/tier pricing for 15 units\n- Lead time to dispatch\n- Required warranty/support: 3-year next-business-day onsite preferred\n- Your payment terms and minimum order quantity\n- How long the quote is valid (we require at least 14 days)\n\nWe are seeing elevated demand; a firm dispatch date would be appreciated.\n\nThis request does not constitute a purchase order.\n\nRegards,\nProcurement\n\ud83d\udd12 Read-only trace \u2014 this is the audit view. To change the supplier or edit the RFQ, an authorised operator does that in the admin console; any edit voids the prior approval and re-locks the send gate (GATE 2). Nothing is ever sent from here.\n\ud83e\uddfe Procurement audit trail (5 state transitions \u00b7 bitemporal)\nSTATE\tEVENT\tACTOR\tWHEN\nNEW\tcase_opened\trecommend\t2026-07-06 06:37:21\nAVAILABILITY ASSESSED\tavailability_assessed \u00b7 multi_line_order\tProcurement_Agent\t2026-07-06 06:37:21\nAWAITING BUYER COMMITMENT\trequest_buyer_commitment\tProcurement_Agent\t2026-07-06 06:37:21\nCOMMITTED\tbuyer_committed \u00b7 buyer_commitment\tcodex-delta-f299fa08\t2026-07-06 06:37:21\nQUOTE DRAFTED\texternal_message_drafted \u00b7 supplier_quote_drafted\tProcurement_Agent\t2026-07-06 06:37:21 \u00b7 current",
+  "cart": {
+    "cart_id": "d452de32-4534-43fa-ac23-1e59c34cae5b",
+    "items": [
+      {
+        "sku": "LAP-69763798",
+        "quantity": 30,
+        "price_cents": 191900,
+        "name": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]",
+        "specs": {
+          "category": "laptop",
+          "ram_gb": 16,
+          "storage_gb": 512,
+          "refresh_hz": 144,
+          "display_inches": 16,
+          "gpu": "GeForce RTX 4050",
+          "gpu_discrete": true,
+          "gaming_style": true,
+          "os": "Windows 11",
+          "wifi": "Wi-Fi 6",
+          "webcam": "HD webcam",
+          "docking": "Thunderbolt 4",
+          "use_case": "gaming"
+        },
+        "sourcing_required": true,
+        "shortfall": 15,
+        "available_now": 15
+      }
+    ],
+    "subtotal_cents": 5757000,
+    "currency": "USD",
+    "bundle_savings": {
+      "status": "progress",
+      "eligible": false,
+      "item_count": 30,
+      "distinct_item_count": 1,
+      "subtotal_cents": 5757000,
+      "laptop_subtotal_cents": 5757000,
+      "accessories_subtotal_cents": 0,
+      "applied_discount_percent": 0,
+      "requested_discount_percent": 0,
+      "discount_cents": 0,
+      "applied_discount_cents": 0,
+      "final_total_cents": 5757000,
+      "estimated_final_total_cents": 5757000,
+      "next_threshold_cents": 200000,
+      "amount_to_next_cents": 0,
+      "approval_required": false,
+      "approval_badge": null,
+      "policy_decision": "allow",
+      "policy_reasons": [],
+      "message": "Add a laptop and a compatible accessory to unlock bundle pricing."
+    },
+    "trace_id": "cart:d452de32-4534-43fa-ac23-1e59c34cae5b",
+    "decision_trace_id": "cart:d452de32-4534-43fa-ac23-1e59c34cae5b"
+  }
+}

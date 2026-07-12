@@ -1,0 +1,15 @@
+
+> shopsquire-frontend@0.1.0 dev
+> vite --config vite.config.ts --host 127.0.0.1 --port 5173
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m206[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+[2m11:08:37 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/DecisionTrace.tsx[22m
+[2m11:30:57 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/CartPanel.tsx[22m
+[2m11:31:20 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/CartPanel.tsx[22m
+[2m11:31:37 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/CartPanel.tsx[22m
+[2m11:33:45 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/CartPanel.tsx[22m
+[2m11:33:53 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/CartPanel.tsx[22m
+[2m11:34:51 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/CartPanel.tsx[22m

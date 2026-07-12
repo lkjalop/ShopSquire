@@ -1,0 +1,530 @@
+[
+  {
+    "label": "Q1_fit_conflict",
+    "query": "i need something for training llm models, is 3500 enough? if i go higher what then?",
+    "uid": "codex-battery-Q1_fit_conflict-e6e8a653d1",
+    "status_code": 200,
+    "latency_s": 7.786,
+    "assistant_head": "Yes, $3,500 covers these ai ml workstation options, with models starting from $1,799. Yes, $3,500 is a strong budget for ai ml workstation. You already have viable options from about $1,799. Honest note for model training: the in-budget picks carry 8GB GPU memory \u2014 good for smaller/quantized models and fine-tuning; sustained training of larger models wants 16GB+ GPU memory (or cloud GPUs). Going higher has a real payoff here: ~$4,499 steps up to 16GB GPU memory (HP OMEN MAX 16\"); ~$5,999 steps u",
+    "job_id": "3044874f4862422d90740a777bcf6c04",
+    "summary_pending": true,
+    "products_count": 5,
+    "off_catalog": false,
+    "workload_fit": true,
+    "trace_id": "b8e6a80f-5565-4435-b58b-82a6cf379a7a",
+    "intent": "SEARCH",
+    "polls": [
+      {
+        "t": 0.28,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.31,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.34,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "YES, $3,500 is enough for training LLMs. [1] has 8GB VRAM and 32GB RAM \u2014 enough to fine-tune 7B-param models and keep large datasets in memory. If you go higher, consider a desktop GPU with 24GB+ VRAM for larger models, as laptop GPUs max at 16GB.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "Q2_gpu_knowledge",
+    "query": "what's the real difference between an 8gb and 16gb gpu for AI work?",
+    "uid": "codex-battery-Q2_gpu_knowledge-3567d717a3",
+    "status_code": 200,
+    "latency_s": 1.231,
+    "assistant_head": "For your case, a practical budget band is $899-$5,999. Great news for your gaming setup \u2014 I've found 18 options that match your criteria.\n\nBest fits for gaming: Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050] ($1,919) and Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060] ($2,899).\n\nWant a detailed list or comparison?\n\n\ud83d\udcb0 Price range: $899 \u2013 $5,999 (median $1,899) across 18 results.",
+    "job_id": "c512141ac581434eb0720149b10fd13a",
+    "summary_pending": true,
+    "products_count": 18,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "f26309ee-29df-497a-b92e-6b3559624bd3",
+    "intent": "COMPARE",
+    "polls": [
+      {
+        "t": 0.03,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.06,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.09,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "For AI work, more VRAM (like 16GB vs. 8GB) allows handling larger models and datasets, improving training and inference performance. The 16GB GPU can manage bigger batches and more complex tasks without running out of memory. If you're working with large AI models, the 16GB option is better suited for your needs. I can show you relevant options in our inventory.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "Q3_valorant",
+    "query": "gaming laptop for valorant under 1900",
+    "uid": "codex-battery-Q3_valorant-ed7d49e1ed",
+    "status_code": 200,
+    "latency_s": 1.16,
+    "assistant_head": "For your case, a practical budget band is $1,199-$1,900. Great news for your gaming setup \u2014 I've found 7 options under $1,900.\n\nBest fits for gaming: Lenovo LOQ 15IRH8 ($1,199) and Dell G16 7630 ($1,699).\n\nWant a detailed list or comparison?\n\n\ud83d\udcb0 Price range: $1,199 \u2013 $1,899 (median $1,399) across 7 results.",
+    "job_id": "1abf3af6143742c69225604b3db43503",
+    "summary_pending": true,
+    "products_count": 7,
+    "off_catalog": false,
+    "workload_fit": true,
+    "trace_id": "1a8467f3-0f60-4a9d-9672-09c8f266a398",
+    "intent": "SEARCH",
+    "polls": [
+      {
+        "t": 0.03,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.06,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.09,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "YES, the Dell G16 7630 [2] is the best pick for Valorant under $1,900. Its RTX 4070 GPU delivers smooth 1080p gameplay at high settings, and the 240Hz display ensures responsive, lag-free action in fast-paced games like Valorant.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "Q4_finetune",
+    "query": "i want to fine tune a 7b model locally under 2500",
+    "uid": "codex-battery-Q4_finetune-40a2e69250",
+    "status_code": 200,
+    "latency_s": 5.258,
+    "assistant_head": "No, not currently in-catalog under $2,500. Closest alternatives are above that range. I can show best-value non-Apple options or set an Apple-only stock alert.",
+    "job_id": "c74a08e1d1704e39b4e3cdeefc642ea1",
+    "summary_pending": true,
+    "products_count": 0,
+    "off_catalog": false,
+    "workload_fit": true,
+    "trace_id": "0928e662-507e-47fc-ba5f-bbe45852c36a",
+    "intent": "SEARCH",
+    "polls": [
+      {
+        "t": 0.04,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.08,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.13,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "NO, none of these products can help with fine-tuning a 7B model locally. They\u2019re all basic hygiene or medication items, not AI hardware. For AI work, you\u2019d need a laptop with at least an 8GB GPU, like the [1] Hand Sanitiser 500ml (70% alcohol), but it lacks the required specs entirely.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "Q5_off_catalog",
+    "query": "i need 5 rack-mount GPU servers with A100s, budget 80k",
+    "uid": "codex-battery-Q5_off_catalog-366724f3ef",
+    "status_code": 200,
+    "latency_s": 3.664,
+    "assistant_head": "Honest answer: we don't stock rack-mount or datacenter GPU servers (A100/H100-class) in our catalog, and I won't pretend a laptop is a substitute. What I CAN do: send a request-for-quote to our suppliers for exactly what you described \u2014 you review the draft before anything is sent, and nothing is ordered without your confirmation. Since this is a $80,000 request (above our $20,000 threshold), I'll also bring a human account manager into the loop before anything is finalized.",
+    "job_id": null,
+    "summary_pending": false,
+    "products_count": 0,
+    "off_catalog": true,
+    "workload_fit": false,
+    "trace_id": "8ca8ac8c-d374-466b-8947-5ae56bc1cd0a",
+    "intent": "FILTER"
+  },
+  {
+    "label": "Q6_payment",
+    "query": "i want to spend around 25000 on machines for my team - do you offer payment plans?",
+    "uid": "codex-battery-Q6_payment-df978e50db",
+    "status_code": 200,
+    "latency_s": 6.446,
+    "assistant_head": "I've found 9 options under $25,000.\n\nBest fits here: Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050] ($1,919) and Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060] ($2,899).\n\nWant a detailed list or comparison?\n\n\ud83d\udcb0 Price range: $1,799 \u2013 $5,999 (median $3,499) across 9 results.",
+    "job_id": "f53ed4abfb774b49a32d6ea32d77648f",
+    "summary_pending": true,
+    "products_count": 9,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "ddfe7169-2eac-4bf7-a36e-dd482dec6b6f",
+    "intent": "SEARCH",
+    "polls": [
+      {
+        "t": 0.04,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.08,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.12,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "No, we do not offer payment plans, instalments, financing, leasing, or trade-in options. However, I can connect you with a human account manager to help finalize your order for multiple machines within your $25,000 budget. Let me know if you'd like that assistance.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "Q7_contradiction",
+    "query": "i need 12 dell laptops and a monitor and 2 headsets under 1500 total",
+    "uid": "codex-battery-Q7_contradiction-a4e6f1ac3f",
+    "status_code": 200,
+    "latency_s": 1.181,
+    "assistant_head": "For your case, a practical budget band is $629-$1,500. \u26a0\ufe0f That doesn't add up: 12 units at the cheapest match ($629) is $7,548 \u2014 over your $1,500 total. I can reduce the quantity, raise the total, or source cheaper units from a supplier.\n\nOn availability: all 2 are in stock now.\n\n\ud83d\udcb0 Price range: $629 \u2013 $1,399 (median $1,199) across 8 results.",
+    "job_id": null,
+    "summary_pending": false,
+    "products_count": 8,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "f79cb8af-b302-4c2f-a8c6-2e7ffa72d84e",
+    "intent": "SEARCH"
+  },
+  {
+    "label": "Q8_budget",
+    "query": "is 1800 enough for gaming?",
+    "uid": "codex-battery-Q8_budget-07ea9a7faf",
+    "status_code": 200,
+    "latency_s": 7.956,
+    "assistant_head": "Yes, $1,800 covers these gaming options, with models starting from $1,199.\n\nBest fits for gaming: Lenovo LOQ 15IRH8 ($1,199) and Dell G16 7630 ($1,699).\n\nWant a detailed list or comparison?\n\n\ud83d\udcb0 Price range: $1,199 \u2013 $1,799 (median $1,399) across 7 results.",
+    "job_id": "44b5a0d7aa174b4cb51316521b921f52",
+    "summary_pending": true,
+    "products_count": 7,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "65f64901-59fb-47ca-af2c-607c0840dfe9",
+    "intent": "SEARCH",
+    "polls": [
+      {
+        "t": 0.01,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.04,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.08,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "YES. The [2] Dell G16 7630 with an RTX 4070 runs most AAA games at 1080p high settings with smooth frame rates, and its 240Hz display keeps gameplay fluid. The [3] MSI Katana 15 offers similar performance at a lower price with a 144Hz screen. Both fit well under $1,800.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "Q9_support",
+    "query": "my laptop screen cracked - what are my repair or warranty options?",
+    "uid": "codex-battery-Q9_support-c68fe2797d",
+    "status_code": 200,
+    "latency_s": 4.662,
+    "assistant_head": "Fastest path: submit a clean photo now (1-2 min triage), then I can route to repair/return guidance. If urgent, I can open human support in this session. Physical screen damage (cracks, dead pixels, black lines) usually points to accidental damage rather than a manufacturing fault \u2014 but that's assessed, not assumed. Repairs: manufacturing faults are repaired free under warranty within a reasonable time. Please note (repair notice): repaired goods may be replaced with refurbished goods of the sam",
+    "job_id": null,
+    "summary_pending": false,
+    "products_count": 0,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "d33ec913-3792-4968-abba-49af8b16d1ab",
+    "intent": "SUPPORT_CLAIM"
+  },
+  {
+    "label": "PX_deficit",
+    "query": "i need 50 dell laptops but you only have a few in stock, am i ok waiting for a reorder?",
+    "uid": "codex-battery-PX_deficit-45f8a86474",
+    "status_code": 200,
+    "latency_s": 8.303,
+    "assistant_head": "I've found 43 options that match your criteria.\n\nBest fits here: Dell XPS 13 ($1,199) and Dell XPS 13 ($1,199).\n\nWant a detailed list or comparison?\n\nOn availability: 5 in stock now; the other 45 in ~7 days via supplier (a draft reorder is available on request).\n\n\ud83d\udcb0 Price range: $629 \u2013 $5,999 (median $1,299) across 43 results.",
+    "job_id": "af2aaada6b444da5b65900aee9731f76",
+    "summary_pending": true,
+    "products_count": 43,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "d14bfd75-bf92-4c64-b3ef-3accf67487ba",
+    "intent": "SEARCH",
+    "polls": [
+      {
+        "t": 0.07,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.12,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.15,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "Here are two Dell laptops: [1] Dell XPS 13 ($1,199) and [2] Dell XPS 13 ($1,199). Both are excellent for everyday use with sleek designs and reliable performance. For more power, consider [3] Dell DB16255 ($1,399), which has a fast Ryzen AI 7 processor and 1TB storage, ideal for heavy tasks.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "PX_false_only",
+    "query": "i need 50 laptops but only the ones with 16gb ram",
+    "uid": "codex-battery-PX_false_only-cf810a85de",
+    "status_code": 200,
+    "latency_s": 1.489,
+    "assistant_head": "I've found 8 options that match your criteria.\n\nBest fits here: Lenovo LOQ 15IRH8 ($1,199) and Dell G16 7630 ($1,699).\n\nWant a detailed list or comparison?\n\nOn availability: 14 in stock now; the other 36 in ~7 days via supplier (a draft reorder is available on request).\n\n\ud83d\udcb0 Price range: $1,099 \u2013 $1,699 (median $1,299) across 8 results.",
+    "job_id": "c1f4f031f83f473f9394eed2ec504b9a",
+    "summary_pending": true,
+    "products_count": 8,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "6d88feb1-8425-4f64-b3dd-83a26562d8f8",
+    "intent": "FILTER",
+    "polls": [
+      {
+        "t": 0.02,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.04,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.09,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "All three options have 16GB RAM. [1] offers a 144Hz display and RTX 4060 GPU at a lower price, while [2] has a faster 240Hz screen and RTX 4070 for better gaming performance. [3] balances price and power with an RTX 4070 and 144Hz display. Choose based on your need for screen speed or graphics power.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "PX_false_budget",
+    "query": "laptops for a team but nothing over $2000",
+    "uid": "codex-battery-PX_false_budget-d44a04f965",
+    "status_code": 200,
+    "latency_s": 1.227,
+    "assistant_head": "It depends. a practical budget band is $2,887-$5,999. It depends. a practical budget band is $2,887-$5,999. I've found 10 matches between $2,000 and $2,000.\n\nBest fits here: Apple MacBook Pro 14-inch with M4 Chip, 1TB/24GB (Silver)[2024] ($2,887) and Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060] ($2,899).\n\nWant a detailed list or comparison?\n\n\ud83d\udcb0 Price range: $2,887 \u2013 $5,999 (median $3,699) across 10 results.",
+    "job_id": "08cc022c96ea420f9b6b1b677cf13199",
+    "summary_pending": true,
+    "products_count": 10,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "c7c3e93f-bf86-40f1-9400-4f92c958da2f",
+    "intent": "SEARCH",
+    "polls": [
+      {
+        "t": 0.01,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 3.07,
+        "status": "pending",
+        "storage": "redis",
+        "has_msg": false,
+        "guard": null,
+        "violations": null
+      },
+      {
+        "t": 6.11,
+        "status": "done",
+        "storage": "redis",
+        "has_msg": true,
+        "guard": null,
+        "violations": null
+      }
+    ],
+    "narration_status": "done",
+    "narration_storage": "redis",
+    "narration_has_msg": true,
+    "narration_head": "NO, none of the laptops listed are under $2000. The first option [1] is the most budget-friendly at $2,887 and offers a fast processor, ample storage, and long battery life, making it great for mobile work.",
+    "guard": null,
+    "violations": null
+  },
+  {
+    "label": "PX_a100_laptop",
+    "query": "laptop with an A100-equivalent GPU",
+    "uid": "codex-battery-PX_a100_laptop-b51385bde5",
+    "status_code": 200,
+    "latency_s": 8.214,
+    "assistant_head": "Honest answer: we don't stock rack-mount or datacenter GPU servers (A100/H100-class) in our catalog, and I won't pretend a laptop is a substitute. What I CAN do: send a request-for-quote to our suppliers for exactly what you described \u2014 you review the draft before anything is sent, and nothing is ordered without your confirmation.",
+    "job_id": null,
+    "summary_pending": false,
+    "products_count": 0,
+    "off_catalog": true,
+    "workload_fit": false,
+    "trace_id": "0b227937-3a67-42a9-ba71-052bb047f1c1",
+    "intent": "FILTER"
+  },
+  {
+    "label": "PX_dark_mode",
+    "query": "switch to dark mode",
+    "uid": "codex-battery-PX_dark_mode-7b7d487481",
+    "status_code": 200,
+    "latency_s": 6.575,
+    "assistant_head": "No exact in-catalog match right now. I can show closest in-stock alternatives or widen constraints.",
+    "job_id": null,
+    "summary_pending": false,
+    "products_count": 0,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "753f7902-fc60-4b87-815a-c290d180b753",
+    "intent": "SEARCH"
+  },
+  {
+    "label": "PX_replace_battery",
+    "query": "replace the battery",
+    "uid": "codex-battery-PX_replace_battery-eb34f9f107",
+    "status_code": 200,
+    "latency_s": 0.507,
+    "assistant_head": "No exact in-catalog match right now. I can show closest in-stock alternatives or widen constraints.",
+    "job_id": null,
+    "summary_pending": false,
+    "products_count": 0,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "5e7448bf-f7cc-4759-b1cc-aaa864ac2ad0",
+    "intent": "SEARCH"
+  },
+  {
+    "label": "PX_swap_it",
+    "query": "swap it",
+    "uid": "codex-battery-PX_swap_it-d8da198f35",
+    "status_code": 200,
+    "latency_s": 0.396,
+    "assistant_head": "No exact in-catalog match right now. I can show closest in-stock alternatives or widen constraints.",
+    "job_id": null,
+    "summary_pending": false,
+    "products_count": 0,
+    "off_catalog": false,
+    "workload_fit": false,
+    "trace_id": "667c5f25-870c-4139-ab27-1bf3ababd113",
+    "intent": "SEARCH"
+  }
+]

@@ -2935,5 +2935,12 @@
         "pattern": "\\b(core|enterprise)\\s+(switch|router)\\b|firewall\\s+appliance|\\b48[- ]port\\b"
       }
     ]
+  },
+  "_capability_host_nodes_comment": "review-8 #3: a named WORKLOAD (play valorant / run AutoCAD) reroutes retrieval to the DEVICE that runs it. Declared here (node handles) so the reroute can never land on an accessory/pharmacy category (the 'most-classified sold node' bug). run_on = the device families that host software/media/game workloads.",
+  "capability_host_nodes": {
+    "run_on": [
+      "el-6-11-2",
+      "el-6-6"
+    ]
   }
 }

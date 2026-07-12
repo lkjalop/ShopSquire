@@ -34,9 +34,37 @@ from src.app.services.catalog_classifier import candidate_nodes
 from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
-from src.app.services.taxonomy_registry import get_node, primary_sold_node
+from src.app.services.taxonomy_registry import get_node, primary_sold_node, sells_within
 
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
+
+
+def _reroute_host_node(db, envelope: TurnEnvelope, relationship: str) -> Optional[str]:
+    """The DEVICE a named workload runs on (M3-C1 / review-8 #3). The OLD reroute target was
+    'most-classified sold node', which GPT-5.6 showed can be PHARMACY or accessories for a mixed
+    catalog ('play valorant' → 10 hand-sanitiser SKUs). Now: the store profile DECLARES the hosts
+    (capability_host_nodes[relationship], e.g. run_on → [Gaming Laptops, Laptops]); the model
+    picks the relationship, deterministic policy picks a device ONLY from declared hosts (clamped
+    to real + not-explicitly-unsold). Fall back to primary_sold_node ONLY when the profile
+    declares none — with a warning, since that fallback is the known-imperfect path."""
+    try:
+        from src.app.platform.store_profile import profile_slot
+        hosts = (profile_slot("capability_host_nodes", default={}) or {}).get(relationship) or []
+        for h in hosts:
+            n = get_node(str(h))
+            # require a GROUNDED, sellable host (is True, not just "not False"): on an ungrounded
+            # tenant sells_within is None → we do NOT confidently reroute (fall through to the
+            # primary_sold_node path, which itself returns None ungrounded → broad search).
+            if n is not None and sells_within(db, n.handle, tenant_id=envelope.tenant_id) is True:
+                return n.handle
+        if hosts:
+            logger.debug("declared capability hosts not sellable/grounded; trying primary_sold_node")
+    except Exception as exc:
+        logger.debug("capability_host_nodes lookup failed: %s", repr(exc)[:100])
+    host = primary_sold_node(db, tenant_id=envelope.tenant_id)
+    if host is not None:
+        logger.info("workload reroute used primary_sold_node fallback (no declared host): %s", host)
+    return host
 
 LLMFn = Callable[[str, float], str]
 _ALLOWED_OPS = (">=", "<=", ">", "<", "==")
@@ -319,8 +347,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         if capability:
             workloads.append(node.handle)
             relationship = "run_on"
-            primary = primary_sold_node(db, tenant_id=envelope.tenant_id)
-            node = get_node(primary) if primary else None   # reroute to the device (None only if ungrounded)
+            host = _reroute_host_node(db, envelope, "run_on")
+            node = get_node(host) if host else None   # reroute to the device (None only if ungrounded)
             if lane == "OFF_CATALOG":
                 lane = "SEARCH"
         # else: leave the software/media node in place → refusal gate decides honestly

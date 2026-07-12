@@ -1,0 +1,237 @@
+{
+  "aggregate": {
+    "n": 9,
+    "jobs": 0,
+    "swap_rate": null,
+    "reject_rate": null,
+    "error_rate": null,
+    "deterministic_only_rate": 1.0
+  },
+  "rows": [
+    {
+      "label": "Q1_fit_conflict",
+      "query": "i need something for training llm models, is 3500 enough? if i go higher what then?",
+      "uid": "g55-Q1_fit_conflict-0917eabc",
+      "status_code": 400,
+      "chat_latency_s": 1.11,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    },
+    {
+      "label": "Q2_knowledge",
+      "query": "what's the real difference between an 8gb and 16gb gpu for AI work?",
+      "uid": "g55-Q2_knowledge-59842aea",
+      "status_code": 400,
+      "chat_latency_s": 0.05,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    },
+    {
+      "label": "Q3_game_fit",
+      "query": "gaming laptop for valorant under 1900",
+      "uid": "g55-Q3_game_fit-38cddcba",
+      "status_code": 400,
+      "chat_latency_s": 0.07,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    },
+    {
+      "label": "Q4_ai_honesty",
+      "query": "i want to fine tune a 7b model locally under 2500",
+      "uid": "g55-Q4_ai_honesty-26e2d85e",
+      "status_code": 400,
+      "chat_latency_s": 0.13,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    },
+    {
+      "label": "Q5_off_catalog",
+      "query": "i need 5 rack-mount GPU servers with A100s, budget 80k",
+      "uid": "g55-Q5_off_catalog-e40c667d",
+      "status_code": 400,
+      "chat_latency_s": 0.13,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    },
+    {
+      "label": "Q6_capability",
+      "query": "i want to spend around 25000 on machines for my team - do you offer payment plans?",
+      "uid": "g55-Q6_capability-7c5dcc29",
+      "status_code": 400,
+      "chat_latency_s": 0.34,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    },
+    {
+      "label": "Q7_contradiction",
+      "query": "i need 12 dell laptops and a monitor and 2 headsets under 1500 total",
+      "uid": "g55-Q7_contradiction-f3567448",
+      "status_code": 400,
+      "chat_latency_s": 0.07,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    },
+    {
+      "label": "Q8_budget",
+      "query": "is 1800 enough for gaming?",
+      "uid": "g55-Q8_budget-7926966a",
+      "status_code": 400,
+      "chat_latency_s": 0.13,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    },
+    {
+      "label": "Q9_support",
+      "query": "my laptop screen cracked - what are my repair or warranty options?",
+      "uid": "g55-Q9_support-57554c36",
+      "status_code": 400,
+      "chat_latency_s": 0.14,
+      "got_job": false,
+      "job_id": null,
+      "swap_outcome": "no_job",
+      "swap_latency_s": null,
+      "guard": null,
+      "violations": null,
+      "products_count": 0,
+      "has_off_catalog": false,
+      "has_workload_fit": false,
+      "trace_id": null,
+      "deterministic_msg": "",
+      "swapped_prose": "",
+      "raw_keys": [
+        "detail"
+      ],
+      "poll": {
+        "status": "no_job"
+      }
+    }
+  ]
+}

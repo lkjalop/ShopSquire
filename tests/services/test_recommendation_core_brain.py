@@ -170,6 +170,22 @@ def test_workload_reroutes_to_primary_sold_device(db):
     assert d3.refusal_granted and d3.relationship == "buy" and d3.workloads == ()
 
 
+def test_workload_reroute_uses_declared_host_not_dominant_node(db):
+    """review-8 #3 (pharmacy reroute): the reroute target is the store-profile DECLARED
+    capability host (Gaming Laptops), NOT merely the most-classified sold node — so a workload
+    can never land on whatever category happens to dominate the catalog (pharmacy/accessories)."""
+    from src.app.services.taxonomy_registry import primary_sold_node, upsert_classification
+    # make el-6-6 (Laptops) dominate classification — 6 vs el-6-11-2's 1
+    for sku in ("X1", "X2", "X3", "X4", "X5"):
+        upsert_classification(db, sku=sku, node_handle="el-6-6", source="t", status="approved")
+    db.commit()
+    assert primary_sold_node(db) == "el-6-6"          # the dominant node
+    d = route_turn(db, _env("i want to play valorant at 144fps"),
+                   llm_fn=_route_stub("OFF_CATALOG", "so-3-1", {"refresh_hz": [">=", 144]}))
+    assert d.node_handle == "el-6-11-2"               # the DECLARED host wins over the dominant node
+    assert d.relationship == "run_on"
+
+
 def test_workload_reroute_is_none_when_ungrounded(db):
     """A run_on turn on an UNGROUNDED tenant has no device to reroute to → node None (broad
     search), never a crash and never a refusal."""
