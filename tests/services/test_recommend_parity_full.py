@@ -107,10 +107,13 @@ def test_membership_divergence_is_major():
 
 def test_summarize_run_gates():
     clean = [diff_responses(_base(), _base()) for _ in range(50)]
-    assert summarize_run(clean)["gates_pass"]
+    # parity/honesty gate = diagnostic_pass; gates_pass (promotion) additionally needs quality
+    # to have been measured (review-6 #1), which these parity-only runs do not supply.
+    assert summarize_run(clean)["diagnostic_pass"]
+    assert summarize_run(clean)["gates_pass"] is False   # no quality → not promotable
     blocked = clean + [diff_responses(_base(off_catalog={"class": "x"}, products=[], results=[]), _base())]
     s = summarize_run(blocked)
-    assert not s["gates_pass"] and s["by_severity"]["BLOCKER"] == 1
+    assert not s["diagnostic_pass"] and s["by_severity"]["BLOCKER"] == 1
 
 
 # ── known_wrong: expected changes must not read as regressions (GPT-5.6 #4) ──
@@ -124,7 +127,7 @@ def test_fixing_a_known_wrong_is_not_a_blocker():
     cases = [evaluate_case(_base(), _base()) for _ in range(50)]
     cases.append(evaluate_case(v1_bug, v2_fix, known_wrong_expect=expect))
     s = summarize_run(cases)
-    assert s["gates_pass"] and s["expected_changes"] == 1 and s["expected_changes_met"] == 1
+    assert s["diagnostic_pass"] and s["expected_changes"] == 1 and s["expected_changes_met"] == 1
     assert s["by_severity"]["BLOCKER"] == 0            # the fix is NOT counted as a regression
 
 
@@ -135,7 +138,7 @@ def test_missed_expectation_fails_the_run():
     cases.append(evaluate_case(_base(), v2_still_broken,
                                known_wrong_expect={"message_class": "off_catalog"}))
     s = summarize_run(cases)
-    assert not s["gates_pass"] and s["expected_changes_met"] == 0
+    assert not s["diagnostic_pass"] and s["expected_changes_met"] == 0
 
 
 def test_expectation_met_vocabulary():

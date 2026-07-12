@@ -96,20 +96,26 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
     row: Dict[str, Any] = {"case_id": str(case.get("id") or ""), "shown": len(shown),
                            "expects_products": expects, "empty": expects and not shown}
 
-    # unauthorized: over-budget shown products + duplicate SKUs (each is a served falsehood)
-    unauthorized = 0
+    # budget/duplicate violations (review-6 #18 — HONEST scope: this metric checks the two
+    # things measurable from the payload — over-budget shown products and duplicate SKUs. It does
+    # NOT verify tenant / active-status / sold-taxonomy / catalog provenance; those are a
+    # per-product server-side authorization check tracked as a follow-up. A missing/unparseable
+    # price when a budget is set counts as a violation — an unverifiable price is not "in budget"
+    # (was silently treated as 0 and evaded the check).
+    violations = 0
     budget_max = case.get("budget_max")
     if budget_max is not None:
         for p in products:
+            raw = p.get("price")
             try:
-                price = float(p.get("price") or 0)
+                price = float(raw) if raw is not None else None
             except (TypeError, ValueError):
-                price = 0.0
-            if price > float(budget_max) + 1e-9:
-                unauthorized += 1
+                price = None
+            if price is None or price > float(budget_max) + 1e-9:
+                violations += 1
     dupes = len(shown) - len(set(shown))
-    unauthorized += max(0, dupes)
-    row["unauthorized"] = unauthorized
+    violations += max(0, dupes)
+    row["unauthorized"] = violations   # key kept (gate threshold) — see honest scope above
 
     # constraint satisfaction over verdict-carrying products (fit rides each card)
     verdicts = [str((p.get("workload_fit") or {}).get("overall") or "")
@@ -150,7 +156,10 @@ def summarize_quality(rows: List[Dict[str, Any]],
                       if verdict_total else None)
     diversities = [r["diversity"] for r in rows if r.get("diversity") is not None]
     diversity = sum(diversities) / len(diversities) if diversities else None
-    labeled = [r for r in rows if r.get("labeled")]
+    # coverage arithmetic (review-6 #19): numerator and denominator must be the SAME population —
+    # labeled PRODUCT-EXPECTED cases over product-expected cases. Counting a labeled refusal case
+    # in the numerator inflated coverage.
+    labeled = [r for r in rows if r.get("labeled") and r.get("expects_products")]
     labeled_coverage = len(labeled) / n_exp
     precision = (sum(r["precision_at_10"] for r in labeled) / len(labeled)) if labeled else None
     ndcg = (sum(r["ndcg_at_10"] for r in labeled) / len(labeled)) if labeled else None

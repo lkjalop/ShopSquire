@@ -230,6 +230,8 @@ def summarize_run(diffs: List[Dict[str, Any]],
         if dims.get("gates", {}).get("match"):
             gate_match += 1
     expected_met = sum(1 for d in expected if d.get("expectation_met"))
+    _diagnostic_pass = (by_sev["BLOCKER"] == 0 and mc_match / n >= 0.98
+                        and expected_met == len(expected))
     return {
         "total": len(diffs),
         "parity_cases": len(parity),
@@ -251,7 +253,12 @@ def summarize_run(diffs: List[Dict[str, Any]],
         # quality_evaluated=True — a run that never measured quality cannot promote.
         "quality": quality,
         "quality_evaluated": quality is not None,
-        "gates_pass": (by_sev["BLOCKER"] == 0 and mc_match / n >= 0.98
-                       and expected_met == len(expected)
-                       and (quality is None or bool((quality.get("gates") or {}).get("pass")))),
+        # parity/honesty half — a run can be diagnostically clean without quality having run.
+        "diagnostic_pass": _diagnostic_pass,
+        # PROMOTION gate (review-6 #1): quality must have been MEASURED and passed. A run that
+        # never evaluated quality is NOT promotable — the old `quality is None or ...` let an
+        # unmeasured run report gates_pass=True, exactly the mute-layer class this gate exists
+        # to stop.
+        "gates_pass": (_diagnostic_pass and quality is not None
+                       and bool((quality.get("gates") or {}).get("pass"))),
     }

@@ -128,7 +128,9 @@ def test_summarize_run_requires_quality_when_supplied():
                                                "gates": {"match": True}}}
     diffs = [dict(diff) for _ in range(5)]
     base = summarize_run(diffs)
-    assert base["gates_pass"] is True and base["quality_evaluated"] is False
+    # review-6 #1: an unmeasured run is diagnostically clean but NOT promotable.
+    assert base["quality_evaluated"] is False
+    assert base["diagnostic_pass"] is True and base["gates_pass"] is False
     red_quality = summarize_quality(_good_rows())          # fails on labeled coverage
     gated = summarize_run(diffs, quality=red_quality)
     assert gated["quality_evaluated"] is True

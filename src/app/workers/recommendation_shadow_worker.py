@@ -133,8 +133,8 @@ def _record_metrics(row: Dict[str, Any]) -> None:
             "lane": row.get("lane"), "grounding": row.get("grounding"),
             "degraded": row.get("degraded"), "latency_ms": row.get("latency_ms"),
             "product_count": row.get("v2_products")})
-    except Exception:
-        pass
+    except Exception as exc:   # observable, not silent (review-6 #22) — a dead metrics sink
+        logger.debug("shadow metrics sink failed: %s", repr(exc)[:100])
     logger.info("shadow %s", json.dumps(row))
 
 
@@ -190,8 +190,8 @@ def _process_with_retry(redis, db_factory, job, raw, stats) -> Optional[Dict[str
             if db is not None:
                 try:
                     db.close()
-                except Exception:
-                    pass
+                except Exception as _ce:
+                    logger.debug("shadow db.close failed: %s", repr(_ce)[:80])
     stats["errors"] += 1
     _dead_letter(redis, raw, repr(last_exc)[:200] if last_exc else "unknown")
     stats["dead_lettered"] += 1

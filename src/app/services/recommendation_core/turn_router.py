@@ -131,8 +131,11 @@ class TurnDecision:
     requested_product_node: Optional[str] = None   # the DEVICE to retrieve (== node_handle)
     workloads: Tuple[str, ...] = ()                # content/software nodes named as workloads
     relationship: str = "buy"                      # buy (named a product) | run_on (named a workload)
-    # SESSION (M3-C2): the prior turn's shortlist SKUs, carried so a COMPARE/EXPLAIN turn's
-    # referents ('the first one', 'those') resolve against what was last shown.
+    # SESSION (M3-C2): the prior turn's shortlist SKUs. NOTE (review-6 #17): RECORDED for the
+    # trace and available to referent resolution, but NOT yet CONSUMED — no downstream stage
+    # maps 'the first one'/'those' onto these SKUs yet. Operational referent resolution (a
+    # retrieval/answer stage that reads prior_shortlist) is a tracked follow-up; today this is
+    # trace metadata, honestly labelled so.
     prior_shortlist: Tuple[str, ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:

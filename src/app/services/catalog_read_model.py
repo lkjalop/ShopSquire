@@ -298,11 +298,11 @@ def _canonical_search(db, *, text_query: Optional[str], brand: Optional[str], ca
             # ORDER BY before LIMIT (M2-B3): the candidate PAGE must be deterministic — an
             # unordered LIMIT returns engine-arbitrary rows and shadow diffs chase ghosts.
             f"WHERE {' AND '.join(clauses)} ORDER BY v.sku LIMIT :lim"), params).fetchall()
+        # BATCH the hydration (review-6 #21): the old code called _canonical_get per SKU (the
+        # same N+1 the taxonomy path already fixed). _canonical_get_many is one query per table.
+        skus = [str(r[0]) for r in rows]
         out: List[VariantView] = []
-        for r in rows:
-            view = _canonical_get(db, str(r[0]), tenant_id=tenant_id)
-            if view is None:
-                continue
+        for view in _canonical_get_many(db, skus, tenant_id=tenant_id):
             if product_type and view.product_type.lower() != str(product_type).lower():
                 continue
             if min_price_cents is not None and (view.price_cents is None or view.price_cents < min_price_cents):

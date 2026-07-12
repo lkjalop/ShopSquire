@@ -25,8 +25,11 @@ _UPPER_OPS = ("<=", "<")
 @dataclass(frozen=True)
 class RequirementConstraint:
     """One attribute's merged requirement: [lower, upper] with strictness, an optional
-    preferred value (KB 'recommended' — drives ranking, never elimination), and the
-    provenance of every bound that contributed."""
+    preferred value (KB 'recommended'), and the provenance of every bound that contributed.
+    NOTE (review-6 #20): `preferred` is RECORDED but NOT yet consumed by ranking — a single
+    value is kept (first-wins) and no ranker reads it. Wiring `preferred` into the ranker (as a
+    soft nearness signal, clamped into [lower, upper]) is a tracked follow-up; until then it is
+    trace/telemetry only, never elimination."""
     key: str
     lower: Optional[float] = None
     upper: Optional[float] = None

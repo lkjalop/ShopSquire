@@ -134,6 +134,13 @@ def _cart_mode() -> str:
 _MIN_EXEC_CONFIDENCE = 0.5
 
 
+def _cart_auto_apply_enabled() -> bool:
+    """Auto-apply a single reversible op WITHOUT a confirm click. OFF by default (review-6
+    #4/#13): confirmation-only until the measured false-positive rate on carted search turns is
+    low enough. Flip RECOMMEND_CART_AUTO_APPLY=1 only then."""
+    return str(os.getenv("RECOMMEND_CART_AUTO_APPLY", "") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _read_cart_slice(db, uid: str) -> List[Dict[str, Any]]:
     """The shopper's current cart lines with DISPLAY NAMES (the resolver binds a named line by
     name, so raw sku+qty lines aren't enough). Read-only: never creates a cart. Best-effort —
@@ -270,7 +277,11 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
     prop = propose_plan(tenant_id=envelope.tenant_id, uid=envelope.uid, plan=plan,
                         cart_items=envelope.cart, query=envelope.query,
                         trace_id=envelope.trace_id)
-    if prop["risk"] != RISK_AUTO:
+    # CONFIRMATION-ONLY BY DEFAULT (review-6 #4/#13): even the AUTO risk tier requires an explicit
+    # confirm during the soak — a model false positive (or a hostile cart-line name) must not
+    # remove/change a line without a human click. Auto-apply is a SEPARATE opt-in flipped ONLY
+    # after the measured false-positive rate on ordinary carted turns is acceptably low.
+    if prop["risk"] != RISK_AUTO or not _cart_auto_apply_enabled():
         core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
                             message=_cart_confirm_message(plan)).finalize()
         payload = to_legacy(core)

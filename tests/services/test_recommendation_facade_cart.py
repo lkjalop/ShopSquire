@@ -199,8 +199,27 @@ def test_mixed_ambiguity_suspends_whole_plan(wired):
     assert {it["sku"] for it in items} == {"SKU-ENVY", "SKU-TPAD", "SKU-IDEA"}   # Envy NOT removed
 
 
-def test_all_rejected_reports_cart_not_updated(wired):
+def test_single_op_is_confirmation_only_by_default(wired):
+    # review-6 #4/#13: an AUTO-tier single op is NOT auto-applied during the soak — it returns a
+    # confirmation card and the cart is untouched until the explicit apply.
+    uid = "u-confonly"
+    from src.app.routers.cart import CartItemPayload, add_item, _get_or_create_cart
+    add_item(CartItemPayload(uid=uid, sku="SKU-IDEA", quantity=1), role=ROLE_OWNER)
+    cart = [{"sku": "SKU-IDEA", "name": "Lenovo IdeaPad Slim 3i", "quantity": 1}]
+    payload = F._serve_cart_mutation(
+        _env(uid, "set the ideapad to 3", cart), role=ROLE_OWNER, with_trace=_IDENTITY_TRACE,
+        llm_fn=_fixed_llm({"ops": [{"action": "set_quantity", "targets": ["IdeaPad"], "quantity": 3}],
+                           "confidence": 0.9}))
+    assert payload["cart_updated"] is False
+    assert payload["cart_mutation"]["needs_confirmation"] is True and payload["cart_mutation"]["plan_id"]
+    _, items, _ = _get_or_create_cart(uid)
+    assert items[0]["quantity"] == 1                 # untouched until confirm
+
+
+def test_all_rejected_reports_cart_not_updated(wired, monkeypatch):
     # review-5 #9: qty 600 > handler line gate (500) → rejected → cart_updated must be False.
+    # auto-apply ON to exercise the apply-outcome path (default is confirmation-only, review-6 #4).
+    monkeypatch.setenv("RECOMMEND_CART_AUTO_APPLY", "1")
     uid = "u-allrej"
     from src.app.routers.cart import CartItemPayload, add_item
     add_item(CartItemPayload(uid=uid, sku="SKU-IDEA", quantity=1), role=ROLE_OWNER)
@@ -215,9 +234,10 @@ def test_all_rejected_reports_cart_not_updated(wired):
     assert payload["cart_mutation"]["rejected"][0]["error"]["error"] == "quantity_out_of_range"
 
 
-def test_nl_over_stock_rejected_not_sourced(wired):
+def test_nl_over_stock_rejected_not_sourced(wired, monkeypatch):
     # review-5 #8: allow_sourcing is OFF for NL edits — exceeding stock is an honest rejection,
     # never a silent sourcing line (explicit shortfall consent arrives with C1).
+    monkeypatch.setenv("RECOMMEND_CART_AUTO_APPLY", "1")   # exercise the apply path (review-6 #4)
     uid = "u-nosrc"
     from src.app.routers.cart import CartItemPayload, add_item, _get_or_create_cart
     # seed a scarce line via fixture products: SKU-ENVY has stock 100; use qty gate instead —

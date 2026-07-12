@@ -59,6 +59,8 @@ _BASELINE = {
     "src/app/routers/cart_mutations.py": 0,
     "src/app/services/recommendation_facade.py": 0,
     "src/app/services/recommendation_postflight.py": 0,
+    # the shadow worker — a measurement path; a swallowed failure there is unmeasured drift.
+    "src/app/workers/recommendation_shadow_worker.py": 0,
     # extracted/owned core modules — kept tight so new silent swallows can't sneak in.
     "src/app/services/recommend_utils.py": 2,
     "src/app/services/recommend_budget_advisor.py": 6,
