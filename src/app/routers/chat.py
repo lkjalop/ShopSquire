@@ -1890,6 +1890,36 @@ async def chat_query(
                 data = r.json()
             except Exception:
                 data = {}
+            # CART-MUTATION short-circuit (V2 cart lane): when RECOMMEND_CART_SERVE is on, the
+            # facade EXECUTES a natural-language cart edit and returns a cart_mutation payload.
+            # Return a MINIMAL cart response — the product/answer-quality/copywriting machinery
+            # below is irrelevant for a cart edit. The frontend refreshes the cart on cart_updated
+            # and renders assistant_message. (Streams too: chat_stream emits this result verbatim.)
+            if r.status_code == 200 and isinstance(data, dict) and data.get("cart_mutation") is not None:
+                _cart_tid = data.get("decision_trace_id") or data.get("decision_id") or data.get("trace_id")
+                _cart_msg = str(data.get("assistant_message") or data.get("message") or "").strip()
+                try:
+                    _cuid = _resolve_uid(payload, request)
+                    _store_chat_message(db, uid=_cuid, role="user", content=q, trace_id=_cart_tid)
+                    if _cart_msg:
+                        _store_chat_message(db, uid=_cuid, role="assistant", content=_cart_msg, trace_id=_cart_tid)
+                except Exception as _cm_exc:
+                    logger.debug("cart-mutation chat persist skipped: %s", repr(_cm_exc)[:100])
+                return {
+                    "products": [],
+                    "view_mode": "cards",
+                    "assistant_message": _cart_msg,
+                    "cart_mutation": data.get("cart_mutation"),
+                    "cart_updated": bool(data.get("cart_updated")),
+                    "cart": data.get("cart"),
+                    "turn_intent": "CART_MUTATE",
+                    "decision_trace_id": _cart_tid,
+                    "trace_id": _cart_tid,
+                    "next_questions": [],
+                    "blocked": False,
+                    "needs_human_review": False,
+                    "security_route": "allow",
+                }
             if r.status_code == 403 and isinstance(data, dict):
                 # Safety/policy blocks are a normal outcome; surface them as a friendly chat response.
                 blocked = data.get("detail") if isinstance(data.get("detail"), dict) else data
