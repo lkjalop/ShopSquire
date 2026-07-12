@@ -70,7 +70,28 @@ def _ensure_plans_table() -> None:
             db.execute(text("ALTER TABLE cart_mutation_plans ADD COLUMN cart_version INTEGER NOT NULL DEFAULT 0"))
         except Exception as _alter_exc:   # already present (idempotent) — observable, not silent
             logger.debug("cart_version column add skipped (present?): %s", repr(_alter_exc)[:80])
+        # indexes (parity with the 20260712_cart_mutation_plans migration — P0.4)
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_cmp_owner_status ON cart_mutation_plans(tenant_id, uid, status)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_cmp_expires ON cart_mutation_plans(expires_at)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_cmp_trace ON cart_mutation_plans(trace_id)"))
         db.commit()
+
+
+_TERMINAL_STATUSES = ("applied", "already_applied", "stale_cart", "expired", "rejected", "error")
+
+
+def cleanup_plans(*, older_than_days: int = 7) -> int:
+    """Retention (review-6 #6): delete TERMINAL plans older than the window (also redacts the
+    stored `query`). Returns the row count deleted. Run from a periodic job / worker tick."""
+    _ensure_plans_table()
+    cutoff = (_now() - timedelta(days=max(0, int(older_than_days)))).strftime(_TS_FMT)
+    ph = ", ".join(f"'{s}'" for s in _TERMINAL_STATUSES)
+    with db_session() as db:
+        res = db.execute(text(
+            f"DELETE FROM cart_mutation_plans WHERE status IN ({ph}) "
+            "AND COALESCE(applied_at, created_at) < :cut"), {"cut": cutoff})
+        db.commit()
+        return int(getattr(res, "rowcount", 0) or 0)
 
 
 def propose_plan(*, tenant_id: str, uid: str, plan: CartMutationPlan,
