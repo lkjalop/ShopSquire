@@ -145,6 +145,28 @@ def test_derivation_never_overrides_explicit_vram(db):
     assert variant_attributes(v)["gpu_vram_gb"] == 6
 
 
+def test_workload_host_gate_separates_devices_from_accessories():
+    """review-8 #4: a use-case/workload's device floors apply ONLY to a workload-host product.
+    A gaming laptop (under el-6 Computers) is a host; a mouse (el-7-*), a bag (lb-*), and a laptop
+    case (el-7-*) are not — so they never inherit gpu_vram_gb/ram_gb floors. Unknown/None node
+    fails OPEN (never silently drop a floor we're unsure about)."""
+    from src.app.services.recommendation_core.core import (_is_workload_host_product, _vertical_root)
+    assert _is_workload_host_product("el-6-11-2") is True     # Gaming Laptops — a device
+    assert _is_workload_host_product("el-7-9-12-11") is False  # Mice — an accessory
+    assert _is_workload_host_product("lb-15") is False         # Laptop Bags — an accessory
+    assert _is_workload_host_product("el-7-8-2-2") is False    # Laptop Hard Cases — an accessory
+    assert _is_workload_host_product(None) is True             # unknown → fail-open
+
+
+def test_vertical_root_keeps_broad_retry_in_vertical():
+    """The empty-node broad retry is scoped to the vertical root so it can never cross verticals
+    (electronics el-* vs pharmacy hb-*) — this is what killed the 'mouse → hand sanitiser' bleed."""
+    from src.app.services.recommendation_core.core import _vertical_root
+    assert _vertical_root("el-7-9-12-11") == "el"   # a mouse broadens within Electronics, not hb-*
+    assert _vertical_root("el-6-11-2") == "el"
+    assert _vertical_root(None) is None
+
+
 def test_no_requirements_means_price_ranked_no_verdicts(db):
     cards, summary = build_cards(_views(db))
     assert [c.sku for c in cards] == ["LAP-3", "LAP-1", "LAP-2"]

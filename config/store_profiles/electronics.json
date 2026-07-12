@@ -2942,5 +2942,9 @@
       "el-6-11-2",
       "el-6-6"
     ]
-  }
+  },
+  "_workload_host_roots_comment": "review-8 #4: the taxonomy subtree(s) whose products can HOST a software/game/media workload (Computers). A use-case/workload requirement (gpu_vram_gb, ram_gb, refresh_hz...) describes the DEVICE, so it only applies when the REQUESTED product is under one of these roots. 'a mouse for gaming' / 'a bag for my gaming laptop' are NOT devices → they must not inherit the laptop's floors (which also stopped the empty-node broad-retry pharmacy bleed). Distinct from capability_host_nodes: that names the specific reroute TARGET; this names the whole device family for the gate.",
+  "workload_host_roots": [
+    "el-6"
+  ]
 }

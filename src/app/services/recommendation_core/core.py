@@ -22,11 +22,55 @@ from src.app.services.recommendation_core.evidence import (
 from src.app.services.recommendation_core.fit import build_cards
 from src.app.services.recommendation_core.plan import Plan, derive_plan
 from src.app.services.recommendation_core.turn_router import TurnDecision, route_turn
-from src.app.services.taxonomy_registry import grounding_status
+from src.app.services.taxonomy_registry import ancestors, get_node, grounding_status
 
 logger = logging.getLogger("shopsquire.recommendation_core.core")
 
 LLMFn = Callable[[str, float], str]
+
+
+def _is_descendant_or_self(node_handle: str, root: str) -> bool:
+    """True when node_handle is root or a descendant of root (ancestry is string-encoded:
+    el-6-11-2 ⊂ el-6-11 ⊂ el-6)."""
+    if not node_handle or not root:
+        return False
+    if node_handle == root:
+        return True
+    return any(a.handle == root for a in ancestors(node_handle))
+
+
+def _is_workload_host_product(node_handle: Optional[str]) -> bool:
+    """review-8 #4: is the REQUESTED product a device that can host a workload? Only such products
+    inherit a use-case/workload's device floors. Reads the store profile's workload_host_roots
+    (Computers subtree); an accessory (mouse/bag/case) is not under it, so 'a mouse for gaming'
+    does NOT get gpu_vram_gb/ram_gb floors. Unknown node / no profile → treat as host (fail-open:
+    never DROP a floor we're unsure about; the broad-retry vertical scoping is the safety net)."""
+    if not node_handle:
+        return True
+    try:
+        from src.app.platform.store_profile import profile_slot
+        roots = profile_slot("workload_host_roots", default=None)
+        if not roots:
+            return True
+        return any(_is_descendant_or_self(node_handle, str(r)) for r in roots)
+    except Exception as exc:
+        logger.debug("workload_host_roots lookup failed: %s", repr(exc)[:100])
+        return True
+
+
+def _vertical_root(node_handle: Optional[str]) -> Optional[str]:
+    """The depth-0 taxonomy ancestor (vertical root) of a node — el-7-9-12-11 → el. Used to keep a
+    broad retry INSIDE the requested product's vertical (electronics stays electronics; pharmacy is
+    a different tree, hb-*) so an empty-node fallback can never bleed across verticals."""
+    node = get_node(node_handle) if node_handle else None
+    if node is None:
+        return None
+    if node.depth == 0:
+        return node.handle
+    for a in ancestors(node_handle):
+        if a.depth == 0:
+            return a.handle
+    return None
 
 
 def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
@@ -58,9 +102,23 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # the hardware requirements and merges them (by MAX) with any the shopper stated explicitly.
     # This is what makes a CS student differ from an english major and 'for AutoCAD' carry real
     # floors — all from DATA, no new decision surface. Zero added latency (folded into routing).
+    stated_keys = set(decision.requirements)   # what the SHOPPER explicitly asked for (pre-KB)
     intent = resolve_intent(list(decision.use_cases), dict(decision.requirements),
                             query=envelope.query)
-    decision = dataclasses.replace(decision, requirements=intent["requirements"])
+    resolved_reqs = intent["requirements"]
+    # review-8 #4 (accessory req-slot leak): a use-case/workload's device floors describe the
+    # DEVICE, not an accessory bought FOR it. If the requested product is not a workload-host
+    # device ('a mouse for gaming', 'a bag for my gaming laptop' route to accessory nodes), keep
+    # ONLY the shopper's explicitly-stated requirements and drop the KB/game/software-derived
+    # floors — which also keeps `decision.requirements` empty so the empty-node broad-retry (that
+    # bled pharmacy into a mouse query) never fires for accessories.
+    if not _is_workload_host_product(decision.requested_product_node):
+        dropped = {k: v for k, v in resolved_reqs.items() if k not in stated_keys}
+        if dropped:
+            resolved_reqs = {k: v for k, v in resolved_reqs.items() if k in stated_keys}
+            logger.info("dropped %d workload req(s) for non-host product %s: %s",
+                        len(dropped), decision.requested_product_node, sorted(dropped))
+    decision = dataclasses.replace(decision, requirements=resolved_reqs)
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
@@ -137,8 +195,18 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     # clamped requirements = retrieval intent enough; rank the catalog by fit (closest-match
     # honesty beats an empty grid).
     if bundle.status == "empty" and decision.requirements:
-        bundle = gather_evidence(db, envelope, broad=True, limit=max(limit * 5, 60))
-        bundle.retrieval_mode = "requirements_broad"
+        # SCOPE the broad retry to the requested product's VERTICAL (review-8, pharmacy-bleed): the
+        # old broad=True path text-searched the whole catalog ordered by price ASC, so cheap
+        # pharmacy floated into an empty electronics-accessory node ('a mouse for gaming' → Hand
+        # Sanitiser). Retrieve the vertical-root subtree instead — electronics stays electronics;
+        # hb-* (pharmacy) can never appear. Only when no node routed do we fall to the old text leg.
+        vroot = _vertical_root(decision.node_handle)
+        if vroot:
+            bundle = gather_evidence(db, envelope, node_handle=vroot, limit=max(limit * 5, 60))
+            bundle.retrieval_mode = f"vertical_broad:{vroot}"
+        else:
+            bundle = gather_evidence(db, envelope, broad=True, limit=max(limit * 5, 60))
+            bundle.retrieval_mode = "requirements_broad"
     resp.extras["evidence"] = bundle.as_trace()
     if bundle.status == "error":
         resp.degraded = True         # a retrieval FAILURE degrades — never present as 'no match'
