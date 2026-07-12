@@ -114,6 +114,32 @@ def _finish(plan_id: str, status: str, result: Dict[str, Any]) -> None:
         db.commit()
 
 
+_CARRIED_AGE_HOURS = 1.0   # mirrors cart-age labelling: a line idle >1h reads as carried
+
+
+def _carried_skus(items: List[Dict[str, Any]]) -> Optional[List[str]]:
+    """SERVER-authoritative carried set (C2): a line whose per-line added_at is older than the
+    carried threshold belongs to an earlier session — the same truth the cart-age label uses,
+    no frontend snapshot needed. Returns None when NO line carries a parseable added_at (old
+    carts) — the caller must refuse rather than guess (never guess-then-wipe)."""
+    any_stamp = False
+    carried: List[str] = []
+    cutoff = _now() - timedelta(hours=_CARRIED_AGE_HOURS)
+    for it in (items or []):
+        raw = str(it.get("added_at") or "")
+        if not raw:
+            continue
+        try:
+            stamp = datetime.strptime(raw[:19], _TS_FMT)
+        except ValueError as exc:
+            logger.debug("unparseable added_at on line %s: %s", it.get("sku"), repr(exc)[:60])
+            continue
+        any_stamp = True
+        if stamp < cutoff and it.get("sku"):
+            carried.append(str(it["sku"]))
+    return carried if any_stamp else None
+
+
 def _stash_undo(redis, uid: str, items: List[Dict[str, Any]]) -> None:
     """Snapshot the pre-mutation cart to the SAME key /undo restores from (review-5 gap: an NL
     clear was un-undoable while the button path stashed). Best-effort."""
@@ -217,9 +243,18 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
             if shortfall:
                 entry["sourcing"] = shortfall
             applied.append(entry)
+        elif op.action == "clear_previous":
+            # SERVER-authoritative carried set from per-line added_at (C2): lines older than the
+            # carried threshold are the earlier session's. Unknowable (no stamps) → reject the
+            # whole plan rather than guess-wipe; knowable-but-empty → honest no-op.
+            carried = _carried_skus(working)
+            if carried is None:
+                _finish(plan_id, "rejected", {"error": "carried_set_unknown"})
+                return {"status": "rejected", "plan_id": plan_id,
+                        "error": {"error": "carried_set_unknown"}}
+            working = [it for it in working if it.get("sku") not in set(carried)]
+            applied.append({"action": "clear_previous", "skus": carried})
         else:
-            # clear_previous needs the carried set — not executable server-side yet; the whole
-            # plan is rejected rather than a guess-wipe (never partial, never guessed).
             _finish(plan_id, "rejected", {"error": "unsupported_action", "action": op.action})
             return {"status": "rejected", "plan_id": plan_id,
                     "error": {"error": "unsupported_action", "action": op.action}}

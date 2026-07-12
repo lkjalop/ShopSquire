@@ -442,3 +442,22 @@ export async function clearCart(uid: string) {
   if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cart_clear_failed (${r.status})`);
   return j;
 }
+
+// V2 cart lane (C1/C2): apply a CONFIRM-tier mutation plan the assistant proposed. The backend
+// is idempotent (a double-submit returns already_applied) and stale-guarded (a cart that changed
+// since the proposal returns stale_cart) — every outcome is an honest 200-level status.
+export async function applyCartMutation(planId: string, uid: string, tenantId = 'default') {
+  const r = await fetch(apiUrl(`/api/v1/cart/mutations/${encodeURIComponent(planId)}/apply`), {
+    method: 'POST',
+    credentials: 'include',
+    headers: authHeaders({}, true),
+    body: JSON.stringify({ uid: uid || 'demo-user', tenant_id: tenantId }),
+  });
+  const j = await safeJson(r);
+  if (!r.ok || !j) {
+    const d = j && (j as any).detail;
+    const msg = typeof d === 'string' ? d : (d && (d.error || JSON.stringify(d))) || `cart_mutation_apply_failed (${r.status})`;
+    throw new Error(msg);
+  }
+  return j as { status: string; applied?: { action: string; sku?: string; skus?: string[]; quantity?: number }[]; cart?: any; error?: any };
+}

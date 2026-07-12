@@ -222,3 +222,38 @@ def test_clear_all_stashes_undo(wired):
 
 def test_unknown_plan_not_found(wired):
     assert S.apply_plan("cmp-nope", tenant_id="t1", uid="u")["status"] == "not_found"
+
+
+# ── clear_previous: SERVER-authoritative carried set from per-line added_at (C2) ─
+
+def test_clear_previous_removes_only_old_lines(wired):
+    uid = "u-prev-server"
+    _cart(uid, ("SKU-A", 1), ("SKU-B", 1))
+    # backdate SKU-A's added_at beyond the carried threshold (1h) — an earlier session's line
+    from datetime import datetime, timedelta
+    from src.app.routers.cart import _get_or_create_cart, _save_cart
+    cart_id, items, _ = _get_or_create_cart(uid)
+    for it in items:
+        if it["sku"] == "SKU-A":
+            it["added_at"] = (datetime.utcnow() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+    _save_cart(cart_id, items)
+    _, items, _ = _get_or_create_cart(uid)
+    plan = CartMutationPlan(ops=(CartOp("clear_previous"),), confidence=0.9)
+    prop = S.propose_plan(tenant_id="t1", uid=uid, plan=plan, cart_items=items)
+    out = S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid)
+    assert out["status"] == "applied"
+    assert out["applied"][0] == {"action": "clear_previous", "skus": ["SKU-A"]}
+    assert _skus(uid) == {"SKU-B": 1}          # this-session line kept
+
+
+def test_clear_previous_without_stamps_rejects_not_wipes(wired):
+    uid = "u-prev-nostamp"
+    from src.app.routers.cart import _get_or_create_cart, _save_cart
+    cart_id, _, _ = _get_or_create_cart(uid)
+    _save_cart(cart_id, [{"sku": "SKU-A", "quantity": 1}, {"sku": "SKU-B", "quantity": 2}])
+    _, items, _ = _get_or_create_cart(uid)
+    plan = CartMutationPlan(ops=(CartOp("clear_previous"),), confidence=0.9)
+    prop = S.propose_plan(tenant_id="t1", uid=uid, plan=plan, cart_items=items)
+    out = S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid)
+    assert out["status"] == "rejected" and out["error"]["error"] == "carried_set_unknown"
+    assert _skus(uid) == {"SKU-A": 1, "SKU-B": 2}   # never guess-then-wipe

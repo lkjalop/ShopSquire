@@ -10,7 +10,7 @@ import ExternalResearchPanel, { type ExternalResearchItem } from './components/E
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
-import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
+import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { procurementAwareTraceId } from './lib/trace';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
@@ -86,6 +86,10 @@ type ChatMessage = {
   agentStepsReadable?: string[];         // human-readable agent step summaries from ResponseNormalizer
   narrationJobId?: string;               // async-narration handoff: poll /narration/{id} → replace content
   undoClear?: { items: { sku: string; quantity: number; name?: string }[] };  // "Undo" chip after a clear → re-add these
+  undoServer?: boolean;                  // V2 cart lane: undo via the server-side snapshot (POST /cart/undo)
+  // V2 cart lane (C2): a CONFIRM-tier mutation plan — nothing has touched the cart yet; the
+  // Confirm button applies it via POST /cart/mutations/{plan_id}/apply (idempotent, stale-guarded).
+  cartConfirm?: { planId: string; ops: { action: string; target_skus?: string[]; quantity?: number }[]; expiresAt?: string };
   evidence?: any;                        // N1: evidence block from the orchestrator → source chips + Evidence tab
   webConsentPrompt?: { query: string };  // N3 Mode-B: consent chip — never auto-search on an imperative
 };
@@ -914,6 +918,67 @@ export default function App() {
       timestamp: new Date() }]);
   };
 
+  // V2 cart lane (C2): CONFIRM a proposed mutation plan → the transactional apply endpoint.
+  // Every backend outcome is honest and rendered as such: applied (refresh + undo chip),
+  // already_applied (a double-click / SSE retry — no second mutation happened), stale_cart
+  // (the cart changed since the proposal — never applied), expired / rejected.
+  const confirmCartPlan = async (msg: ChatMessage) => {
+    const plan = msg.cartConfirm;
+    if (!plan) return;
+    // consume the card first so a double-click can't fire twice from the UI side either
+    setMessages(prev => prev.map(m => m === msg ? { ...m, cartConfirm: undefined } : m));
+    try {
+      const out = await applyCartMutation(plan.planId, uid);
+      const status = String(out.status || '');
+      if (status === 'applied' || status === 'already_applied') {
+        const destructive = (out.applied || []).some((a) =>
+          ['clear_all', 'keep_only', 'remove_items', 'clear_previous'].includes(String(a.action)));
+        const refreshed = await getCart(uid).catch(() => null);
+        setCart(refreshed);
+        switchRightPanelMode('cart');
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: status === 'applied'
+            ? '🧹 Done — applied the change to your cart.'
+            : 'That change was already applied — your cart is up to date.',
+          ...(status === 'applied' && destructive ? { undoServer: true } : {}),
+          timestamp: new Date() }]);
+      } else if (status === 'stale_cart') {
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: 'Your cart changed since I proposed that, so I didn\'t apply it (safety first). Tell me again what you\'d like and I\'ll redo it against the current cart.',
+          timestamp: new Date() }]);
+      } else if (status === 'expired') {
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: 'That confirmation window expired, so nothing was changed. Ask again and I\'ll set it up fresh.',
+          timestamp: new Date() }]);
+      } else {
+        const err = (out as any)?.error?.error || status || 'not applied';
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: `I couldn't apply that (${err}) — nothing in your cart was changed.`,
+          timestamp: new Date() }]);
+      }
+    } catch (e: any) {
+      setMessages(prev => [...prev, { role: 'assistant' as const,
+        content: `I couldn't apply that change (${String(e?.message || e)}) — nothing in your cart was changed.`,
+        timestamp: new Date() }]);
+    }
+  };
+
+  // V2 cart lane: undo via the SERVER-side snapshot the transactional apply stashed
+  // (survives reload; the same /cart/undo the clear button uses).
+  const undoServerSnapshot = async (msg: ChatMessage) => {
+    setMessages(prev => prev.map(m => m === msg ? { ...m, undoServer: undefined } : m));
+    try {
+      await undoCartClear(uid);
+      const refreshed = await getCart(uid).catch(() => null);
+      setCart(refreshed);
+      setMessages(prev => [...prev, { role: 'assistant' as const,
+        content: '↩️ Restored your cart from before that change.', timestamp: new Date() }]);
+    } catch (e: any) {
+      setMessages(prev => [...prev, { role: 'assistant' as const,
+        content: `I couldn't restore the snapshot (${String(e?.message || e)}).`, timestamp: new Date() }]);
+    }
+  };
+
   // Snapshot the cart's SKUs on the FIRST cart read of the session: those are the "previous session"
   // items. Lets the cart offer "Clear previous (N)" — drop the carried-over items WITHOUT losing what
   // the buyer just added (the two-choice clear from the demo review). Empty first read → nothing is
@@ -1700,6 +1765,33 @@ export default function App() {
             throw new Error(detailStr);
           }
         }
+        // ── V2 CART LANE (C2): the backend resolved this turn as a CART MUTATION ──
+        // Covers both transports (chat_stream forwards chat_query's result verbatim). Three
+        // shapes: applied → refresh the cart panel (the stale-panel bug) + server-undo chip on
+        // destructive ops; needs_confirmation → render the confirm card (NOTHING has touched the
+        // cart; Confirm applies via POST /cart/mutations/{plan_id}/apply, idempotent + stale-
+        // guarded); needs_clarification → the ask IS the answer. Product machinery is skipped.
+        if (data && (data as any).cart_mutation) {
+          const cm = (data as any).cart_mutation;
+          const destructive = Array.isArray(cm.applied) && cm.applied.some((a: any) =>
+            ['clear_all', 'keep_only', 'remove_items', 'clear_previous'].includes(String(a.action)));
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: String(data.assistant_message || 'Cart update processed.'),
+            timestamp: new Date(),
+            ...(cm.needs_confirmation && cm.plan_id
+              ? { cartConfirm: { planId: String(cm.plan_id), ops: Array.isArray(cm.ops) ? cm.ops : [], expiresAt: cm.expires_at } }
+              : {}),
+            ...(data.cart_updated && destructive ? { undoServer: true } : {}),
+          }]);
+          setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || null));
+          if (data.cart_updated) {
+            await refreshCart();
+            switchRightPanelMode('cart');
+          }
+          return;
+        }
+
         const prods = (data.products || []) as Product[];
         // bulk-order carry-through: remember the conversation's requested unit count for the Add buttons
         {
@@ -2278,6 +2370,48 @@ export default function App() {
                           title="Put the cleared items back"
                         >
                           ↩️ Undo — restore {msg.undoClear.items.length} item(s)
+                        </button>
+                      </div>
+                    )}
+                    {msg.undoServer && (
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.filterBtn}
+                          onClick={() => { void undoServerSnapshot(msg); }}
+                          title="Restore the cart from before that change (server snapshot)"
+                        >
+                          ↩️ Undo that cart change
+                        </button>
+                      </div>
+                    )}
+                    {msg.cartConfirm && (
+                      /* V2 cart lane: CONFIRM-tier plan — nothing has touched the cart yet.
+                         Confirm applies via the idempotent, stale-guarded endpoint; Not now
+                         simply drops the card (the plan expires server-side on its own). */
+                      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className={styles.filterBtn}
+                          style={{ fontWeight: 600 }}
+                          onClick={() => { void confirmCartPlan(msg); }}
+                          title="Apply this cart change"
+                        >
+                          ✅ Confirm — apply to cart
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.filterBtn}
+                          onClick={() => {
+                            setMessages(prev => prev.map(m => m === msg
+                              ? { ...m, cartConfirm: undefined }
+                              : m));
+                            setMessages(prev => [...prev, { role: 'assistant' as const,
+                              content: 'Okay — I left your cart exactly as it was.', timestamp: new Date() }]);
+                          }}
+                          title="Don't apply — leave the cart unchanged"
+                        >
+                          ✋ Not now
                         </button>
                       </div>
                     )}
