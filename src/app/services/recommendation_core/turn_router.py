@@ -34,7 +34,7 @@ from src.app.services.catalog_classifier import candidate_nodes
 from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
-from src.app.services.taxonomy_registry import get_node, primary_sold_node, sells_within
+from src.app.services.taxonomy_registry import get_node, primary_sold_node, sells_within, sold_nodes
 
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
@@ -179,9 +179,33 @@ class TurnDecision:
 DEFAULT_DECISION = TurnDecision(source="default")
 
 
+def _stocked_handles(db, tenant_id: str, handles: List[str]) -> frozenset:
+    """Which candidate handles would actually retrieve catalog products (R8.2): the handle sits
+    WITHIN a sold subtree (an ancestor-or-self is granted) OR a sold node sits within ITS subtree
+    (retrieval reads the node's subtree, so it contains stock). Pure string-prefix over ONE
+    sold_nodes() read — ancestry is handle-encoded. Empty set when ungrounded: no markers beat
+    wrong markers. This is an ANNOTATION for the model's judgment, never a gate — the refusal
+    gate (sells_within) stays the authority."""
+    try:
+        sold = sold_nodes(db, tenant_id=tenant_id)
+    except Exception:
+        sold = None
+    if not sold:
+        return frozenset()
+    out = set()
+    for h in handles:
+        if any(h == s or h.startswith(s + "-") or s.startswith(h + "-") for s in sold):
+            out.add(h)
+    return frozenset(out)
+
+
 def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
-                  use_case_keys: List[str]) -> str:
-    lines = "\n".join(f"  {n.handle} : {n.full_path}" for n, _ in cands) or "  (none)"
+                  use_case_keys: List[str], stocked: frozenset = frozenset()) -> str:
+    # [in catalog] = platform truth beside each candidate (R8.2 — the bag→sleeve mis-ground:
+    # semantically interchangeable siblings need the sold signal to break the tie; without it the
+    # model guessed Laptop Sleeves (empty) over Laptop Bags (stocked, top-scored)).
+    lines = "\n".join(f"  {n.handle} : {n.full_path}{'  [in catalog]' if n.handle in stocked else ''}"
+                      for n, _ in cands) or "  (none)"
     # BUDGET CONTEXT (budget-bleed structural fix): the price is stated to the model so it is
     # NEVER parsed as a spec ('under $1500' → storage_gb>=1500 was the live bug). The platform
     # already applies budget; the model must not return it as a requirement.
@@ -204,6 +228,10 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         "performance' is a LAPTOP described by a spec).\n"
         "- OFF_CATALOG only when the wanted category is clearly not something this kind of "
         "store sells; the platform verifies against the real sold list either way.\n"
+        "- When SEVERAL candidates plausibly fit the same want (bag vs sleeve vs case), prefer "
+        "one marked [in catalog] — unmarked categories exist in the taxonomy but this store "
+        "does not stock them. If what the shopper wants is clearly an UNMARKED category, still "
+        "pick it (the platform answers honestly about stock).\n"
         "- A game, app, or workload implies the DEVICE CATEGORY that runs it — a competitive "
         "shooter implies gaming laptops/computers: pick that handle, not null.\n"
         "- USE_CASES: classify what the shopper will DO with it — pick 0, 1, or MORE from this "
@@ -237,8 +265,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     fit_keys = [k for k, d in defs.items() if d.kind == "quantity"]
     from src.app.services.recommendation_core.intent_resolver import known_use_cases
     fn = llm_fn or _default_llm_fn
+    stocked = _stocked_handles(db, envelope.tenant_id, [n.handle for n, _ in cands])
     try:
-        raw = fn(_build_prompt(envelope, cands, fit_keys, known_use_cases()), timeout)
+        raw = fn(_build_prompt(envelope, cands, fit_keys, known_use_cases(), stocked), timeout)
         data = json.loads(raw) if raw else None
     except Exception:
         data = None

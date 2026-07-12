@@ -170,6 +170,38 @@ def test_workload_reroutes_to_primary_sold_device(db):
     assert d3.refusal_granted and d3.relationship == "buy" and d3.workloads == ()
 
 
+def test_stocked_handles_within_contains_and_ungrounded(db):
+    """R8.2 marker logic: WITHIN a sold subtree marks, a subtree CONTAINING a sold node marks
+    (retrieval reads subtrees), unrelated taxonomy does not, and an ungrounded tenant marks
+    NOTHING (no markers beat wrong markers)."""
+    from src.app.services.recommendation_core.turn_router import _stocked_handles
+    got = _stocked_handles(db, "default", ["el-6-11-2-9", "el-6-11", "fr-7-7", "el-6-11-2"])
+    assert got == frozenset({"el-6-11-2-9", "el-6-11", "el-6-11-2"})   # fr-7-7 unmarked
+    s2 = sessionmaker(bind=create_engine("sqlite://"))()               # ungrounded: no sold set
+    assert _stocked_handles(s2, "default", ["el-6-11-2"]) == frozenset()
+    s2.close()
+
+
+def test_router_prompt_marks_sold_candidates(db):
+    """R8.2 (bag→sleeve mis-ground): candidates the store stocks carry [in catalog] in the
+    routing prompt — platform truth beside the model's judgment; taxonomy-only siblings do not."""
+    seen = {}
+    def capture(prompt, timeout):
+        seen["p"] = prompt
+        return json.dumps({"lane": "SEARCH", "handle": "el-6-11-2",
+                           "requirements": {}, "confidence": 0.9})
+    route_turn(db, _env("gaming laptop"), llm_fn=capture)
+    marked, unmarked = [], []
+    for line in seen["p"].splitlines():
+        t = line.strip()
+        if " : " in t and (t.startswith("el-") or t.startswith("fr-") or t.startswith("so-")
+                           or t.startswith("lb-") or t.startswith("sg-") or t.startswith("ae-")):
+            (marked if "[in catalog]" in t else unmarked).append(t.split(" : ")[0].strip())
+    assert any(h.startswith("el-6") for h in marked)          # the sold subtree is marked
+    assert unmarked                                            # taxonomy-only candidates are not
+    assert not any(h.startswith("fr-") or h.startswith("so-") for h in marked)  # never mismarked
+
+
 def test_workload_reroute_uses_declared_host_not_dominant_node(db):
     """review-8 #3 (pharmacy reroute): the reroute target is the store-profile DECLARED
     capability host (Gaming Laptops), NOT merely the most-classified sold node — so a workload
