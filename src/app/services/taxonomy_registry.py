@@ -375,6 +375,43 @@ def sells_within(db, node_handle: str, *, tenant_id: str = DEFAULT_TENANT) -> Op
     return any(h.startswith(prefix) for h in sold)
 
 
+def primary_sold_node(db, *, tenant_id: str = DEFAULT_TENANT) -> Optional[str]:
+    """The tenant's DOMINANT sold DEVICE node — the sold node with the most approved
+    product_classification rows (Laptops for the demo). This is the reroute target when a
+    shopper names a WORKLOAD ('play valorant') rather than a device (M3-C1): the store's
+    primary device category is what runs it. Deterministic tie-break by handle; None when
+    ungrounded. Vertical-blind — 'most-classified sold node' is furniture/pharma-agnostic.
+
+    A granted node need not itself carry classifications (a coarse 'el-6-6' grant can cover
+    per-leaf classifications under it), so a row is counted toward a sold node when the row's
+    handle is that node OR sits in its subtree; the granted node with the largest covered
+    count wins."""
+    sold = sold_nodes(db, tenant_id=tenant_id)
+    if not sold:
+        return None
+    from sqlalchemy import text as _sql
+    try:
+        rows = db.execute(_sql(
+            "SELECT node_handle, COUNT(*) AS n FROM product_classification "
+            "WHERE tenant_id=:t AND status='approved' GROUP BY node_handle"),
+            {"t": str(tenant_id)}).fetchall()
+    except Exception as exc:
+        logger.debug("primary_sold_node count failed: %s", repr(exc)[:100])
+        return None
+    counts: Dict[str, int] = {}
+    for handle, n in rows:
+        h = str(handle)
+        for granted in sold:
+            if h == granted or h.startswith(granted + "-"):
+                counts[granted] = counts.get(granted, 0) + int(n or 0)
+    if not counts:
+        # granted but nothing classified under any grant → the lexically-first sold node,
+        # a stable deterministic fallback (never a guess between equals).
+        return sorted(sold)[0]
+    # max count, tie-break by handle (deterministic)
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+
 def sold_summary(db, *, tenant_id: str = DEFAULT_TENANT) -> Dict[str, Any]:
     """Human/debug view of the tenant's grounding: the sold nodes with their full paths."""
     sold = sold_nodes(db, tenant_id=tenant_id)

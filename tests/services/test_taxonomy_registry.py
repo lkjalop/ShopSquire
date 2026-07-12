@@ -15,6 +15,7 @@ from src.app.services.taxonomy_registry import (
     materialize_sold_taxonomy,
     node_count,
     parent_handle,
+    primary_sold_node,
     search_nodes,
     sold_nodes,
     upsert_classification,
@@ -26,6 +27,32 @@ def db():
     s = sessionmaker(bind=create_engine("sqlite://"))()
     yield s
     s.close()
+
+
+# ── primary_sold_node: the M3-C1 workload reroute target ──────────────────────
+
+def test_primary_sold_node_is_most_classified(db):
+    add_sold_node(db, node_handle="el-6-6")       # Laptops
+    add_sold_node(db, node_handle="el-9-3")       # (some accessory)
+    # 3 laptops, 1 accessory → Laptops dominates
+    for sku in ("A", "B", "C"):
+        upsert_classification(db, sku=sku, node_handle="el-6-6", source="t", status="approved")
+    upsert_classification(db, sku="D", node_handle="el-9-3", source="t", status="approved")
+    db.commit()
+    assert primary_sold_node(db) == "el-6-6"
+
+
+def test_primary_sold_node_counts_subtree_under_a_coarse_grant(db):
+    add_sold_node(db, node_handle="el-6-6")        # coarse grant
+    # per-leaf classifications SIT UNDER the grant → counted toward it
+    upsert_classification(db, sku="A", node_handle="el-6-6-1", source="t", status="approved")
+    upsert_classification(db, sku="B", node_handle="el-6-6-2", source="t", status="approved")
+    db.commit()
+    assert primary_sold_node(db) == "el-6-6"
+
+
+def test_primary_sold_node_none_when_ungrounded(db):
+    assert primary_sold_node(db) is None           # no sold set → no reroute target
 
 
 # ── pinned release integrity (drift tests — rerun on every release upgrade) ──

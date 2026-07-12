@@ -34,7 +34,7 @@ from src.app.services.catalog_classifier import candidate_nodes
 from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
-from src.app.services.taxonomy_registry import get_node
+from src.app.services.taxonomy_registry import get_node, primary_sold_node
 
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
@@ -123,12 +123,22 @@ class TurnDecision:
     refusal_granted: bool = False                # sells_within()==False confirmed the refusal
     confidence: float = 0.0
     source: str = "model"                        # model | default
+    # TWO-SLOT INTENT (M3-C1): the shopper's message carries a DEVICE they want to buy and,
+    # separately, WORKLOADS they'll run on it. 'play valorant on a laptop' = device Laptops +
+    # workload Video-Game-Software, relationship run_on. Derived deterministically from the
+    # routed node's vertical (so-/me- = a workload, not a device); node_handle stays the
+    # retrieval target (rerouted to the device for a run_on turn).
+    requested_product_node: Optional[str] = None   # the DEVICE to retrieve (== node_handle)
+    workloads: Tuple[str, ...] = ()                # content/software nodes named as workloads
+    relationship: str = "buy"                      # buy (named a product) | run_on (named a workload)
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
                 "requirements": {k: [list(p) for p in v] for k, v in self.requirements.items()},
                 "use_cases": list(self.use_cases), "refusal_granted": self.refusal_granted,
-                "confidence": round(self.confidence, 3), "source": self.source}
+                "confidence": round(self.confidence, 3), "source": self.source,
+                "requested_product_node": self.requested_product_node,
+                "workloads": list(self.workloads), "relationship": self.relationship}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -267,10 +277,22 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # capability verb ('play/run/for/edit/render/stream/develop/train'). A BARE purchase ask
     # ('do you sell Photoshop licenses?', 'do you stock PS5 games?') has none of these, so the
     # software node STANDS and the refusal gate answers honestly ('we don't stock that + RFQ').
+    # TWO-SLOT REROUTE (M3-C1): the OLD code set node=None here, losing the device category —
+    # 'play valorant at 144fps' then did a broad LIKE-search on the prose ('nothing meets'),
+    # while 'gaming laptop for valorant' worked. The named workload IS a use-case signal; the
+    # device that runs it is the store's PRIMARY SOLD category. Record the workload
+    # (relationship=run_on) and REROUTE retrieval to that device node — a real catalog leg, not
+    # a broad miss. Vertical-blind: the reroute target is 'most-classified sold node', furniture/
+    # pharma-agnostic; a forklift (bi) is not a workload vertical and never reaches here.
+    workloads: List[str] = []
+    relationship = "buy"
     if node is not None and _WORKLOAD_RE.match(node.handle):
         capability = bool(requirements) or bool(use_cases) or _CAPABILITY_VERB_RE.search(envelope.query)
         if capability:
-            node = None
+            workloads.append(node.handle)
+            relationship = "run_on"
+            primary = primary_sold_node(db, tenant_id=envelope.tenant_id)
+            node = get_node(primary) if primary else None   # reroute to the device (None only if ungrounded)
             if lane == "OFF_CATALOG":
                 lane = "SEARCH"
         # else: leave the software/media node in place → refusal gate decides honestly
@@ -300,4 +322,6 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
                         requirements=requirements, use_cases=tuple(use_cases),
-                        refusal_granted=refusal_granted, confidence=conf, source="model")
+                        refusal_granted=refusal_granted, confidence=conf, source="model",
+                        requested_product_node=(node.handle if node else None),
+                        workloads=tuple(workloads), relationship=relationship)
