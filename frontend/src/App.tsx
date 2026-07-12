@@ -1675,7 +1675,8 @@ export default function App() {
           'Content-Type': 'application/json',
           ...csrfHeaders(),
           'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
-          'x-idempotency-key': idempotencyKey,
+          // canonical header the backend single-flight reads (review-7 P0 — name now matches)
+          'Idempotency-Key': idempotencyKey,
         };
         // SSE deadlines (review-6 #11): the connect timeout only aborts if headers are slow; the
         // body read loop needs its OWN idle + total deadlines or a hung server stalls forever

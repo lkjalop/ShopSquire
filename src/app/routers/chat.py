@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -1242,6 +1243,57 @@ def _persist_chat_structured_state(
     mem.set_product_memory_bank(uid, bank)
 
 
+async def _idem_single_flight(redis, key: str, producer):
+    """SINGLE-FLIGHT over an Idempotency-Key (review-7 P0): the first request produces the result
+    and caches it; a concurrent DUPLICATE — the stream-timeout → /chat/query fallback carrying the
+    SAME key — WAITS for and returns that cached result instead of resolving the model a second
+    time (which would duplicate proposals, traces, and chat persistence). Cart apply was already
+    idempotent via the plan CAS; this closes the resolve/serve side. Fail-open: a flaky redis
+    never blocks a turn."""
+    result_key, lock_key = key + ":result", key + ":lock"
+    try:
+        cached = redis.get(result_key)
+    except Exception:
+        cached = None
+    if cached:
+        try:
+            return json.loads(cached)
+        except Exception:
+            pass
+    try:
+        claimed = bool(redis.set(lock_key, "1", nx=True, ex=90))
+    except Exception:
+        claimed = True   # redis unavailable → don't block; just run (degrade to today's behavior)
+    if not claimed:
+        for _ in range(40):          # ~20s: poll for the in-flight producer's result
+            await asyncio.sleep(0.5)
+            try:
+                cached = redis.get(result_key)
+            except Exception:
+                cached = None
+            if cached:
+                try:
+                    return json.loads(cached)
+                except Exception:
+                    break
+        try:
+            redis.set(lock_key, "1", ex=90)   # producer appears dead → take over
+        except Exception:
+            pass
+    try:
+        result = await producer()
+        try:
+            redis.setex(result_key, 120, json.dumps(result, default=str))
+        except Exception as _ce:
+            logger.debug("idem result cache skipped: %s", repr(_ce)[:80])
+        return result
+    finally:
+        try:
+            redis.delete(lock_key)
+        except Exception as _de:
+            logger.debug("idem lock release skipped: %s", repr(_de)[:80])
+
+
 @router.post("/query")
 async def chat_query(
     request: Request,
@@ -1250,6 +1302,19 @@ async def chat_query(
     db=Depends(get_db),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
+    """Single-flight entry (review-7 P0). Idempotency-Key rides both /chat/stream and this
+    fallback; when present, the second in-flight duplicate returns the first's cached result
+    rather than double-resolving. No key (or no redis) → straight through."""
+    idem = (request.headers.get("Idempotency-Key") or request.headers.get("idempotency-key")
+            or (payload or {}).get("idempotency_key"))
+    if not idem or redis is None:
+        return await _chat_query_impl(request, payload, redis, db, role)
+    return await _idem_single_flight(
+        redis, f"chat:idem:{str(idem)[:128]}",
+        lambda: _chat_query_impl(request, payload, redis, db, role))
+
+
+async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str) -> Dict:
     """Chat query wrapper that delegates to recommendation endpoint and
     returns a canonical UI-friendly shape.
 
