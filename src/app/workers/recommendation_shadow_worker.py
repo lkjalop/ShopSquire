@@ -48,9 +48,53 @@ def _v1_products_from_trace(db, trace_id: str) -> Optional[List[Dict[str, Any]]]
         return None
 
 
-def process_job(db, job: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_cart_plan(job: Dict[str, Any], llm_fn=None) -> Optional[Dict[str, Any]]:
+    """C0 resolve-only shadow: resolve the job's cart edit into a CartMutationPlan OFFLINE —
+    measured, logged, NEVER executed. Returns the plan row (or None when the job carries no
+    cart). The plan is written to the decision trace (event cart_shadow_plan) so the phrasing
+    corpus is reviewable in the Decision Trace UI before any serving decision."""
+    cart = job.get("cart")
+    if not cart:
+        return None
+    from src.app.services.recommendation_core.cart_resolver import resolve_cart_mutation
+    from src.app.services.recommendation_core.envelope import TurnEnvelope
+    env = TurnEnvelope.from_suggest_params(
+        query=job.get("query", ""), uid=job.get("uid", ""),
+        tenant_id=job.get("tenant_id", "default"), trace_id=job.get("trace_id"), cart=cart)
+    t0 = time.perf_counter()
+    plan = resolve_cart_mutation(env, llm_fn=llm_fn)
+    row = {"trace_id": job.get("trace_id"), "kind": "cart_shadow_plan",
+           "outcome": ("ambiguous" if plan.needs_clarification
+                       else ("ops" if plan.ops else "empty")),
+           "plan": plan.as_dict(), "latency_ms": int((time.perf_counter() - t0) * 1000)}
+    try:
+        from src.app.observability.metrics import record_cart_shadow
+        record_cart_shadow(row["outcome"])
+    except Exception as exc:
+        logger.debug("cart shadow metric skipped: %s", repr(exc)[:80])
+    try:
+        from src.app.services.decision_log import log_trace_event
+        log_trace_event(trace_id=job.get("trace_id"), event_type="cart_shadow_plan",
+                        source_type="worker", source_id="recommendation_shadow_worker",
+                        target_type="cart", target_id=None,
+                        payload={"query": str(job.get("query", ""))[:300], **row["plan"],
+                                 "outcome": row["outcome"], "executed": False})
+    except Exception as exc:
+        logger.debug("cart shadow trace event skipped: %s", repr(exc)[:80])
+    logger.info("cart shadow %s", json.dumps(row))
+    return row
+
+
+def process_job(db, job: Dict[str, Any], *, cart_llm_fn=None) -> Dict[str, Any]:
     """Run V2 for one shadow job, diff against V1-from-trace, return the scorecard row.
-    Pure except for the read-only DB + metrics; never raises (caller handles retry)."""
+    Pure except for the read-only DB + metrics; never raises (caller handles retry).
+    Jobs carrying a cart slice also get a resolve-only cart plan (C0); cart_only jobs
+    (enqueued solely for cart measurement) skip the search diff entirely."""
+    cart_row = _resolve_cart_plan(job, llm_fn=cart_llm_fn)
+    if job.get("cart_only"):
+        return cart_row or {"trace_id": job.get("trace_id"), "kind": "cart_shadow_plan",
+                            "outcome": "empty", "diffed": False}
+
     from src.app.services.recommend_parity_full import diff_responses, evaluate_case, message_class
     from src.app.services.recommendation_core.core import recommend_turn
     from src.app.services.recommendation_core.envelope import TurnEnvelope

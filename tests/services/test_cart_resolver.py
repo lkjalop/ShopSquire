@@ -113,11 +113,29 @@ def test_set_quantity_zero_collapses_to_remove():
     assert plan.ops[0].action == "remove_items" and plan.ops[0].target_skus == ("LAP-IDEAP3I9",)
 
 
-def test_set_quantity_clamped_to_ceiling():
+def test_set_quantity_overflow_dropped_not_clamped():
+    # beyond the pure overflow sanity bound the op is dropped — NEVER silently rewritten to a
+    # number the shopper didn't say (the old 100k clamp misquoted intent).
     plan = resolve_cart_mutation(
         _env("set the IdeaPad to 999999999"),
         llm_fn=_fixed_llm({"ops": [{"action": "set_quantity", "targets": ["IdeaPad"], "quantity": 999999999}]}))
-    assert plan.ops[0].action == "set_quantity" and plan.ops[0].quantity == 100_000
+    assert plan.is_empty
+
+
+def test_set_quantity_above_line_gate_passes_through():
+    # 600 > cart.py._MAX_LINE_QTY (500) but within sanity: the op is KEPT with the shopper's real
+    # number — the handler is the ONE authoritative quantity gate and rejects it honestly.
+    plan = resolve_cart_mutation(
+        _env("set the IdeaPad to 600"),
+        llm_fn=_fixed_llm({"ops": [{"action": "set_quantity", "targets": ["IdeaPad"], "quantity": 600}]}))
+    assert plan.ops[0].quantity == 600
+
+
+def test_fractional_quantity_dropped_not_truncated():
+    plan = resolve_cart_mutation(
+        _env("set the IdeaPad to 2.9"),
+        llm_fn=_fixed_llm({"ops": [{"action": "set_quantity", "targets": ["IdeaPad"], "quantity": 2.9}]}))
+    assert plan.is_empty      # 2.9 is not a cart quantity; never silently becomes 2
 
 
 def test_set_quantity_without_number_is_dropped():
@@ -157,3 +175,55 @@ def test_direct_sku_reference_binds():
         _env("remove LAP-HPENVY01"),
         llm_fn=_fixed_llm({"ops": [{"action": "remove_items", "targets": ["LAP-HPENVY01"]}]}))
     assert plan.ops[0].target_skus == ("LAP-HPENVY01",)
+
+
+# ── C0 hardening: caps + DF scoring (GPT-5.6 review-5 #9/#10) ───────────────────
+
+def test_ops_capped_runaway_model_output():
+    plan = resolve_cart_mutation(
+        _env("clear my cart"),
+        llm_fn=_fixed_llm({"ops": [{"action": "clear_all"}] * 50}))
+    assert len(plan.ops) <= 8      # 50-op response truncated, never iterated in full
+
+
+def test_targets_capped_per_op():
+    targets = [f"item {i}" for i in range(30)]
+    plan = resolve_cart_mutation(
+        _env("remove a bunch of things"),
+        llm_fn=_fixed_llm({"ops": [{"action": "remove_items", "targets": targets}]}))
+    # nothing binds (no such items) — but only the first 12 were even considered
+    assert len(plan.ambiguous) <= 12
+
+
+def test_prompt_lines_capped():
+    from src.app.services.recommendation_core.cart_resolver import _build_prompt
+    big_cart = [{"sku": f"S-{i}", "name": f"Product {i}", "quantity": 1} for i in range(45)]
+    prompt = _build_prompt(_env("clear it", cart=big_cart),
+                           [{"sku": f"S-{i}", "name": f"Product {i}", "quantity": 1} for i in range(45)])
+    assert "and 5 more lines" in prompt
+    assert "[39]" in prompt and "[40]" not in prompt
+
+
+def test_df_single_line_cart_generic_name_binds():
+    # DF scoring (replaces the electronics stoplist): with ONE laptop in the cart, 'the laptop'
+    # is unambiguous — a single-line cart keeps all its tokens as identifiers.
+    cart = [{"sku": "LAP-ONLY", "name": "Lenovo IdeaPad Slim 3i Laptop", "quantity": 1}]
+    plan = resolve_cart_mutation(
+        _env("remove the laptop", cart=cart),
+        llm_fn=_fixed_llm({"ops": [{"action": "remove_items", "targets": ["the laptop"]}]}))
+    assert plan.ops and plan.ops[0].target_skus == ("LAP-ONLY",)
+
+
+def test_df_shared_token_is_not_distinctive_any_vertical():
+    # vertical-blind proof: works for a pharmacy cart with zero electronics vocabulary —
+    # 'tablets' appears in both lines (df=2) so it cannot bind; 'ibuprofen' (df=1) can.
+    cart = [{"sku": "MED-1", "name": "Ibuprofen 200mg Tablets", "quantity": 1},
+            {"sku": "MED-2", "name": "Paracetamol 500mg Tablets", "quantity": 1}]
+    ambiguous = resolve_cart_mutation(
+        _env("remove the tablets", cart=cart),
+        llm_fn=_fixed_llm({"ops": [{"action": "remove_items", "targets": ["the tablets"]}]}))
+    assert ambiguous.ops == () and "the tablets" in ambiguous.ambiguous
+    bound = resolve_cart_mutation(
+        _env("remove the ibuprofen", cart=cart),
+        llm_fn=_fixed_llm({"ops": [{"action": "remove_items", "targets": ["the ibuprofen"]}]}))
+    assert bound.ops and bound.ops[0].target_skus == ("MED-1",)

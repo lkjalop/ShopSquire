@@ -142,16 +142,125 @@ def test_ambiguous_target_asks_and_does_not_mutate(wired):
     assert {it["sku"] for it in items} == {"SKU-ENVY", "SKU-TPAD", "SKU-IDEA"}
 
 
-# ── the flag gate ────────────────────────────────────────────────────────────────
+# ── the flag ladder (off | shadow | on) ─────────────────────────────────────────
 
-def test_cart_serving_disabled_by_default(monkeypatch):
+def test_cart_mode_off_by_default(monkeypatch):
     monkeypatch.delenv("RECOMMEND_CART_SERVE", raising=False)
-    assert F._cart_serving_enabled() is False
+    assert F._cart_mode() == "off"
 
 
-def test_cart_serving_flag_on(monkeypatch):
+def test_cart_mode_on(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CART_SERVE", "1")
-    assert F._cart_serving_enabled() is True
+    assert F._cart_mode() == "on"
+
+
+def test_cart_mode_shadow(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CART_SERVE", "shadow")
+    assert F._cart_mode() == "shadow"
+
+
+# ── C0 gates: confidence floor, mixed-ambiguity suspension, cart_updated truth ──
+
+def test_low_confidence_plan_falls_through(wired):
+    uid = "u-lowconf"
+    _build_cart(uid)
+    cart = [{"sku": "SKU-IDEA", "name": "Lenovo IdeaPad Slim 3i", "quantity": 1}]
+    payload = F._serve_cart_mutation(
+        _env(uid, "clear my cart", cart), role=ROLE_OWNER, with_trace=_IDENTITY_TRACE,
+        llm_fn=_fixed_llm({"ops": [{"action": "clear_all"}], "confidence": 0.2}))
+    assert payload is None    # below the exec floor → legacy/frontend serves (parallel-run net)
+
+
+def test_mixed_ambiguity_suspends_whole_plan(wired):
+    # review-5 #2: 'remove A and the Dell' with the Dell unbound must NOT remove A first.
+    uid = "u-mixed"
+    _build_cart(uid)
+    cart = [{"sku": "SKU-ENVY", "name": "HP Envy x360 14", "quantity": 1},
+            {"sku": "SKU-IDEA", "name": "Lenovo IdeaPad Slim 3i", "quantity": 1}]
+    payload = F._serve_cart_mutation(
+        _env(uid, "remove the envy and the dell", cart), role=ROLE_OWNER,
+        with_trace=_IDENTITY_TRACE,
+        llm_fn=_fixed_llm({"ops": [{"action": "remove_items", "targets": ["HP Envy", "the Dell"]}],
+                           "confidence": 0.9}))
+    assert payload is not None
+    assert payload["cart_updated"] is False
+    assert payload["cart_mutation"]["applied"] == []          # NOTHING executed
+    assert "the Dell" in payload["cart_mutation"]["ambiguous"]
+    from src.app.routers.cart import _get_or_create_cart
+    _, items, _ = _get_or_create_cart(uid)
+    assert {it["sku"] for it in items} == {"SKU-ENVY", "SKU-TPAD", "SKU-IDEA"}   # Envy NOT removed
+
+
+def test_all_rejected_reports_cart_not_updated(wired):
+    # review-5 #9: qty 600 > handler line gate (500) → rejected → cart_updated must be False.
+    uid = "u-allrej"
+    _build_cart(uid)
+    cart = [{"sku": "SKU-IDEA", "name": "Lenovo IdeaPad Slim 3i", "quantity": 1}]
+    payload = F._serve_cart_mutation(
+        _env(uid, "set the ideapad to 600", cart), role=ROLE_OWNER, with_trace=_IDENTITY_TRACE,
+        llm_fn=_fixed_llm({"ops": [{"action": "set_quantity", "targets": ["IdeaPad"], "quantity": 600}],
+                           "confidence": 0.9}))
+    assert payload is not None
+    assert payload["cart_updated"] is False
+    assert payload["cart_mutation"]["rejected"]
+    assert payload["cart_mutation"]["rejected"][0]["error"]["error"] == "quantity_out_of_range"
+
+
+def test_nl_over_stock_rejected_not_sourced(wired):
+    # review-5 #8: allow_sourcing is OFF for NL edits — exceeding stock is an honest rejection,
+    # never a silent sourcing line (explicit shortfall consent arrives with C1).
+    uid = "u-nosrc"
+    from src.app.routers.cart import CartItemPayload, add_item, _get_or_create_cart
+    # seed a scarce line via fixture products: SKU-ENVY has stock 100; use qty gate instead —
+    # build a one-line cart and ask beyond available stock (fixture stock is 100 → ask 300).
+    add_item(CartItemPayload(uid=uid, sku="SKU-ENVY", quantity=1), role=ROLE_OWNER)
+    cart = [{"sku": "SKU-ENVY", "name": "HP Envy x360 14", "quantity": 1}]
+    payload = F._serve_cart_mutation(
+        _env(uid, "set the envy to 300", cart), role=ROLE_OWNER, with_trace=_IDENTITY_TRACE,
+        llm_fn=_fixed_llm({"ops": [{"action": "set_quantity", "targets": ["HP Envy"], "quantity": 300}],
+                           "confidence": 0.9}))
+    assert payload["cart_updated"] is False
+    err = payload["cart_mutation"]["rejected"][0]["error"]
+    assert err["error"] in ("insufficient_stock", "out_of_stock")
+    _, items, _ = _get_or_create_cart(uid)
+    assert items[0]["quantity"] == 1 and not items[0].get("sourcing_required")
+
+
+# ── resolve-only shadow dispatch (C0) ────────────────────────────────────────────
+
+class _CaptureRedis:
+    def __init__(self): self.pushed = []
+    def lpush(self, k, v): self.pushed.append((k, v))
+    def ltrim(self, k, a, b): pass
+    def get(self, k): return None
+
+
+def test_dispatch_shadow_mode_enqueues_cart_never_executes(wired, monkeypatch):
+    from sqlalchemy.orm import sessionmaker
+    monkeypatch.delenv("RECOMMEND_CORE_MODE", raising=False)     # search core OFF
+    monkeypatch.setenv("RECOMMEND_CART_SERVE", "shadow")         # resolve-only
+    uid = "u-shadow-cart"
+    _build_cart(uid)
+    r = _CaptureRedis()
+    db = sessionmaker(bind=wired)()
+    try:
+        payload = F.dispatch_recommendation_core(
+            db, r, query="clear my cart", uid=uid, tenant_id="t1",
+            budget_min=None, budget_max=None, trace_id="tid-shadow-1", role=ROLE_OWNER,
+            with_trace=lambda p, tid: p, record_failure=lambda *a, **k: None)
+    finally:
+        db.close()
+    assert payload is None                     # NOTHING served — legacy/frontend answers
+    assert len(r.pushed) == 1
+    import json as _json
+    job = _json.loads(r.pushed[0][1])
+    assert job["cart_only"] is True
+    assert {l["sku"] for l in job["cart"]} == {"SKU-ENVY", "SKU-TPAD", "SKU-IDEA"}
+    assert job["trace_id"] == "tid-shadow-1"
+    # and the cart was NOT touched
+    from src.app.routers.cart import _get_or_create_cart
+    _, items, _ = _get_or_create_cart(uid)
+    assert len(items) == 3
 
 
 # ── full dispatch: cart serves even with the SEARCH core off (independent flag) ──
@@ -163,7 +272,7 @@ def test_dispatch_serves_cart_with_core_mode_off(wired, monkeypatch):
     monkeypatch.delenv("RECOMMEND_CORE_MODE", raising=False)   # search core OFF
     monkeypatch.setenv("RECOMMEND_CART_SERVE", "1")            # cart lane ON
     monkeypatch.setattr(CR, "_default_llm_fn",
-                        lambda p, t: json.dumps({"ops": [{"action": "clear_all"}]}))
+                        lambda p, t: json.dumps({"ops": [{"action": "clear_all"}], "confidence": 0.9}))
 
     uid = "u-dispatch-off"
     _build_cart(uid)

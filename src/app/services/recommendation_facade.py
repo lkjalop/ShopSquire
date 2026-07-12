@@ -87,26 +87,51 @@ def _in_canary_bucket(key: str, pct: int) -> bool:
     return (h % 100) < pct
 
 
-def _enqueue_shadow(redis, *, query: str, uid: str, tenant_id: str, trace_id: str) -> None:
+def _enqueue_shadow(redis, *, query: str, uid: str, tenant_id: str, trace_id: str,
+                    cart: Optional[List[Dict[str, Any]]] = None, cart_only: bool = False) -> None:
     """Durable shadow job (finding #4): legacy serves live; the offline worker/replay drains
     this queue and diffs core vs the recorded/served response. Best-effort; capped so a
-    stalled drainer can't grow it unbounded."""
+    stalled drainer can't grow it unbounded.
+
+    cart / cart_only (C0 resolve-only): when the cart-lane ladder is in `shadow`, the job carries
+    the cart slice so the worker can resolve a CartMutationPlan OFFLINE (measured, never
+    executed). cart_only=True marks jobs enqueued solely for cart-plan resolution (the search
+    core is not in shadow) so the worker skips the search diff."""
     if redis is None:
         return
     try:
-        job = json.dumps({"query": query, "uid": uid, "tenant_id": tenant_id,
-                          "trace_id": trace_id})
-        redis.lpush(_SHADOW_QUEUE_KEY, job)
+        payload: Dict[str, Any] = {"query": query, "uid": uid, "tenant_id": tenant_id,
+                                   "trace_id": trace_id}
+        if cart:
+            payload["cart"] = cart
+            if cart_only:
+                payload["cart_only"] = True
+        redis.lpush(_SHADOW_QUEUE_KEY, json.dumps(payload))
         redis.ltrim(_SHADOW_QUEUE_KEY, 0, _SHADOW_QUEUE_MAX - 1)
     except Exception as exc:
         logger.debug("shadow enqueue skipped: %s", repr(exc)[:100])
 
 
-def _cart_serving_enabled() -> bool:
-    """Cart mutations EXECUTE only when this is explicitly on — shadow-first: the operator flips
-    it deliberately after reviewing resolved plans. Default off = the frontend regex still serves
-    (zero change), independent of the search-lane canary."""
-    return str(os.getenv("RECOMMEND_CART_SERVE", "") or "").strip().lower() in ("1", "true", "yes", "on")
+def _cart_mode() -> str:
+    """RECOMMEND_CART_SERVE = off (default) | shadow | on — the cart lane's OWN ladder,
+    independent of the search-core mode (GPT-5.6 review-5, answer #1):
+      off    — zero change; the frontend regex serves cart edits.
+      shadow — RESOLVE-ONLY: turns with a cart are enqueued (with the cart slice) for the
+               offline worker to resolve into plans — measured, logged, NEVER executed, zero
+               added latency on the hot path. The soak that must precede serving.
+      on     — inline serve (C1 gates: confidence floor now; risk-tiered confirmation to come).
+    """
+    raw = str(os.getenv("RECOMMEND_CART_SERVE", "") or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return "on"
+    if raw == "shadow":
+        return "shadow"
+    return "off"
+
+
+# below this, a model-resolved plan with executable ops is NOT served inline — the turn falls
+# through to legacy/frontend (parallel-run net). Asking a clarification is safe at any confidence.
+_MIN_EXEC_CONFIDENCE = 0.5
 
 
 def _read_cart_slice(db, uid: str) -> List[Dict[str, Any]]:
@@ -194,8 +219,10 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
     if plan.is_empty:
         return None
 
-    # pure ambiguity with nothing safe to execute → ASK, never guess-then-wipe
-    if plan.needs_clarification and not plan.ops:
+    # ANY AMBIGUITY SUSPENDS THE WHOLE PLAN (review-5 #2): 'remove A and B' with B ambiguous
+    # must NOT remove A and then ask — partial application of a compound instruction is a
+    # mutation the shopper never approved. Ask about the unresolved names; execute nothing.
+    if plan.needs_clarification:
         core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
                             message=_cart_clarify_message(plan)).finalize()
         payload = to_legacy(core)
@@ -204,17 +231,27 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
         payload["cart_updated"] = False
         return with_trace(payload, envelope.trace_id)
 
-    # execute the bound ops, REUSING the guarded, stock-gated cart handlers
+    # CONFIDENCE FLOOR (review-5 #9): a low-confidence plan with executable ops is not served —
+    # fall through to legacy/frontend (parallel-run net catches it; shadow measures it).
+    if plan.confidence < _MIN_EXEC_CONFIDENCE:
+        logger.info("cart plan below exec confidence (%.2f < %.2f) — falling through",
+                    plan.confidence, _MIN_EXEC_CONFIDENCE)
+        return None
+
+    # execute the bound ops, REUSING the guarded, stock-gated cart handlers.
+    # allow_sourcing=False (review-5 #8): an NL quantity that exceeds stock is REJECTED with the
+    # honest stock message — it must not silently create sourcing lines. The explicit
+    # shortfall-consent flow ('source the remaining 45') arrives with C1's confirmation tier.
     from src.app.routers.cart import apply_cart_ops
-    result = apply_cart_ops(envelope.uid, plan.ops, role=role, allow_sourcing=True)
+    result = apply_cart_ops(envelope.uid, plan.ops, role=role, allow_sourcing=False)
     core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
                         message=_cart_result_message(plan, result)).finalize()
     payload = to_legacy(core)
     payload["cart_mutation"] = {"applied": result["applied"], "rejected": result["rejected"],
-                                "ambiguous": list(plan.ambiguous),
-                                "needs_clarification": bool(plan.ambiguous)}
+                                "ambiguous": [], "needs_clarification": False}
     payload["cart"] = result["cart"]
-    payload["cart_updated"] = True
+    # cart_updated must be the TRUTH (review-5 #9): all-ops-rejected means nothing changed.
+    payload["cart_updated"] = bool(result["applied"])
     return with_trace(payload, envelope.trace_id)
 
 
@@ -260,20 +297,20 @@ def dispatch_recommendation_core(
 ) -> Optional[Dict[str, Any]]:
     """See module docstring. Returns finalized payload if the core owns the turn, else None."""
     mode, pct = _resolve_mode()
-    cart_serve = _cart_serving_enabled()
-    if mode == "off" and not cart_serve:
+    cart_mode = _cart_mode()
+    if mode == "off" and cart_mode == "off":
         return None
     tenant = tenant_id or "default"
 
-    # ── CART-MUTATION LANE — served INDEPENDENTLY of the search mode ladder ──────
-    # Cart editing has its OWN flag (RECOMMEND_CART_SERVE) so it can go live without dragging the
-    # not-yet-canary-ready search core with it — this runs even when RECOMMEND_CORE_MODE=off. A
-    # natural-language cart edit ('remove one item and set another to 20') is not a product search;
+    # ── CART-MUTATION LANE — its OWN ladder, independent of the search mode ──────
+    # RECOMMEND_CART_SERVE=on: inline serve (below). =shadow: RESOLVE-ONLY — handled at the
+    # shadow enqueue point further down (zero hot-path latency, zero execution). A natural-
+    # language cart edit ('remove one item and set another to 20') is not a product search;
     # resolve it to a typed, SKU-bound plan and execute via the guarded cart handlers. A miss
-    # (empty plan / not a cart edit / failure) falls through to the search ladder below, which the
-    # frontend regex still backstops (parallel-run). Image turns never cart-serve.
+    # (empty plan / low confidence / ambiguity-ask / failure) falls through to the search ladder,
+    # which the frontend regex still backstops (parallel-run). Image turns never cart-serve.
     _served_guard: Optional[Dict[str, Any]] = None
-    if cart_serve and not (image_labels or image_hash):
+    if cart_mode == "on" and not (image_labels or image_hash):
         try:
             _served_guard = _run_guard(query=query, uid=uid, image_labels=image_labels,
                                        image_ocr=image_ocr)
@@ -293,14 +330,23 @@ def dispatch_recommendation_core(
             record_failure("recommend_cart_dispatch", exc, trace_id=trace_id)
             _served_guard = None   # a guard from a failed cart attempt is not reused
 
+    # ── SHADOW ENQUEUE (search shadow and/or cart resolve-only, ONE enqueue per turn) ──
+    # Search shadow enqueues EVERY turn (review #8: image turns included — excluding them would
+    # overstate coverage). Cart resolve-only (cart_mode==shadow) attaches the cart slice so the
+    # worker resolves a plan OFFLINE — measured, never executed, no hot-path model call
+    # (review-5 #6: the inline-12s/SSE-abort duplication concern doesn't exist in this mode).
+    if mode == "shadow" or cart_mode == "shadow":
+        cart_slice: List[Dict[str, Any]] = []
+        if cart_mode == "shadow" and uid and not (image_labels or image_hash):
+            cart_slice = _read_cart_slice(db, uid)
+        if mode == "shadow" or cart_slice:
+            _enqueue_shadow(redis, query=query, uid=uid, tenant_id=tenant, trace_id=trace_id,
+                            cart=(cart_slice or None), cart_only=(mode != "shadow"))
+        if mode == "shadow":
+            return None
+
     # ── SEARCH-LANE MODE LADDER ─────────────────────────────────────────────────
     if mode == "off":
-        return None
-    # SHADOW enqueues EVERY turn (review #8): the shadow corpus must include image turns —
-    # excluding them here would overstate coverage when the image lane is later core-enabled.
-    # Enqueue is offline-diff only; it never serves.
-    if mode == "shadow":
-        _enqueue_shadow(redis, query=query, uid=uid, tenant_id=tenant, trace_id=trace_id)
         return None
 
     # IMAGE turns → legacy (review-3 #5c22575.2): the image lane (quarantine, CV, vision

@@ -1611,3 +1611,21 @@ def record_core_fallback(reason: str) -> None:
         recommend_core_fallback_total.labels(reason=str(reason or "unknown")).inc()
     except Exception:
         pass
+
+
+# ── V2 cart lane — resolve-only shadow (C0) ─────────────────────────────────────
+# The shadow worker resolves CartMutationPlans OFFLINE (never executes) and records the
+# outcome mix here: how often a turn with a cart is a cart edit at all (vs empty), how often
+# it's fully bound vs needs-clarification. This corpus gates the C1 serving decision.
+recommend_cart_shadow_total = Counter(
+    "shopsquire_recommend_cart_shadow_plans_total",
+    "Offline-resolved cart-mutation plans, by outcome (empty / ops / ambiguous)",
+    labelnames=["outcome"],
+)
+
+
+def record_cart_shadow(outcome: str) -> None:
+    try:
+        recommend_cart_shadow_total.labels(outcome=str(outcome or "unknown")).inc()
+    except Exception:
+        pass

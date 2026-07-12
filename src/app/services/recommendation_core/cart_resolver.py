@@ -46,14 +46,17 @@ LLMFn = Callable[[str, float], str]
 _ACTIONS = frozenset({"clear_all", "clear_previous", "remove_items", "set_quantity", "keep_only"})
 # actions that target specific named lines (vs. whole-cart intents)
 _TARGETED = frozenset({"remove_items", "set_quantity", "keep_only"})
-_MAX_QTY = 100_000            # a sane ceiling; the stock/authorization gate is the caller's job
-# generic device words carry no distinguishing power between two laptop lines — a name that
-# overlaps a cart line ONLY on these is not a real match (prevents 'the laptop' binding one of
-# three laptops at random). Vertical-light: extend as new vertials are cart-served.
-_GENERIC_TOKENS = frozenset({
-    "laptop", "laptops", "computer", "computers", "pc", "pcs", "unit", "units", "item", "items",
-    "product", "products", "device", "devices", "machine", "one", "ones", "model", "gb", "tb",
-})
+# BOUNDS (GPT-5.6 review-5 #9): a cart edit is a handful of changes, never a script. The model's
+# output is capped BEFORE any op is considered; a runaway/hostile 500-op response is truncated,
+# not iterated. Prompt lines are capped so a huge cart cannot balloon the prompt.
+_MAX_OPS = 8
+_MAX_TARGETS_PER_OP = 12
+_MAX_PROMPT_LINES = 40
+# Quantity: pure overflow sanity ONLY. cart.py._MAX_LINE_QTY (500) is THE per-line quantity gate
+# — one authoritative bound; mirroring it here would be a second copy of a decision surface
+# (the duplicated-parser drift class). An over-limit set_quantity passes through and surfaces as
+# the handler's own quantity_out_of_range rejection, quoting the shopper's REAL number.
+_MAX_QTY_SANITY = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -141,13 +144,30 @@ def _cart_lines(envelope: TurnEnvelope) -> List[Dict[str, Any]]:
     return out
 
 
-def _distinctive(toks: set) -> set:
-    """Tokens that actually distinguish one cart line from another: drop generic device words
-    and 1-char noise. 'the acme pro x1' → {acme, pro, x1}, not {product}."""
-    return {t for t in toks if len(t) > 1 and t not in _GENERIC_TOKENS}
+def _line_token_index(lines: List[Dict[str, Any]]) -> List[Tuple[str, set]]:
+    """(sku, expanded-token-set) per cart line — computed once per resolve."""
+    return [(ln["sku"], {t for t in _plural_expand(set(_tokens(ln["name"]))) if len(t) > 1})
+            for ln in lines]
 
 
-def _bind_name_to_sku(name: str, lines: List[Dict[str, Any]]) -> Optional[str]:
+def _distinctive_index(index: List[Tuple[str, set]]) -> List[Tuple[str, set]]:
+    """Per-cart DOCUMENT-FREQUENCY scoring (GPT-5.6 review-5 #10 — replaces the electronics
+    stoplist): a token appearing in MORE THAN ONE line's name cannot uniquely identify a line
+    ('laptop' in an all-laptop cart, 'tablets' in a pharmacy cart), while a token unique to one
+    line is a real identifier. Vertical-blind with ZERO vocabulary — works unchanged for
+    furniture, clothing, medicine, groceries. A single-line cart keeps all its tokens: 'the
+    laptop' with one laptop in the cart is unambiguous and binds."""
+    if len(index) <= 1:
+        return index
+    df: Dict[str, int] = {}
+    for _, toks in index:
+        for t in toks:
+            df[t] = df.get(t, 0) + 1
+    return [(sku, {t for t in toks if df[t] == 1}) for sku, toks in index]
+
+
+def _bind_name_to_sku(name: str, lines: List[Dict[str, Any]],
+                      distinctive: Optional[List[Tuple[str, set]]] = None) -> Optional[str]:
     """Resolve a model-named target to exactly one cart line's SKU by distinctive-token overlap.
     Returns the SKU on a clear single winner; None when nothing matches OR two lines tie (the
     ambiguous case — ASK, never guess). A bare SKU that names a line directly also binds."""
@@ -158,15 +178,16 @@ def _bind_name_to_sku(name: str, lines: List[Dict[str, Any]]) -> Optional[str]:
     for ln in lines:
         if ln["sku"].lower() == name_l:
             return ln["sku"]
-    name_toks = _distinctive(_plural_expand(set(_tokens(name))))
+    name_toks = {t for t in _plural_expand(set(_tokens(name))) if len(t) > 1}
     if not name_toks:
         return None
+    if distinctive is None:
+        distinctive = _distinctive_index(_line_token_index(lines))
     scored: List[Tuple[int, str]] = []
-    for ln in lines:
-        line_toks = _distinctive(_plural_expand(set(_tokens(ln["name"]))))
+    for sku, line_toks in distinctive:
         overlap = len(name_toks & line_toks)
         if overlap:
-            scored.append((overlap, ln["sku"]))
+            scored.append((overlap, sku))
     if not scored:
         return None
     scored.sort(key=lambda t: t[0], reverse=True)
@@ -176,9 +197,12 @@ def _bind_name_to_sku(name: str, lines: List[Dict[str, Any]]) -> Optional[str]:
 
 
 def _build_prompt(envelope: TurnEnvelope, lines: List[Dict[str, Any]]) -> str:
+    shown = lines[:_MAX_PROMPT_LINES]
     cart_lines = "\n".join(
-        f"  [{i}] {ln['name'] or ln['sku']}  (qty {ln['quantity']})" for i, ln in enumerate(lines)
+        f"  [{i}] {ln['name'] or ln['sku']}  (qty {ln['quantity']})" for i, ln in enumerate(shown)
     ) or "  (cart is empty)"
+    if len(lines) > _MAX_PROMPT_LINES:
+        cart_lines += f"\n  … and {len(lines) - _MAX_PROMPT_LINES} more lines (refer to them by name)"
     return (
         "You edit a shopping cart. Translate the shopper's message into cart operations over "
         "the lines below. Refer to a line by its NAME as shown — never invent products not in "
@@ -220,7 +244,10 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
     try:
         raw = fn(_build_prompt(envelope, lines), timeout)
         data = json.loads(raw) if raw else None
-    except Exception:
+    except Exception as exc:
+        # observable, not invisible (review-5 #9): a parse/model failure means the lane is dark
+        # for this turn — the caller falls through, but ops must be able to see how often.
+        logger.debug("cart resolver model/parse failure → empty plan: %s", repr(exc)[:100])
         data = None
     if not isinstance(data, dict):
         return EMPTY_PLAN
@@ -230,9 +257,14 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
     except (TypeError, ValueError):
         conf = 0.0
 
+    raw_ops = data.get("ops") or []
+    if isinstance(raw_ops, list) and len(raw_ops) > _MAX_OPS:
+        logger.debug("cart resolver ops capped: %d → %d", len(raw_ops), _MAX_OPS)
+        raw_ops = raw_ops[:_MAX_OPS]
+    distinctive = _distinctive_index(_line_token_index(lines))
     ops: List[CartOp] = []
     ambiguous: List[str] = []
-    for raw_op in (data.get("ops") or []):
+    for raw_op in raw_ops:
         if not isinstance(raw_op, dict):
             continue
         action = str(raw_op.get("action") or "").strip().lower()
@@ -249,24 +281,30 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
         if isinstance(raw_targets, str):
             raw_targets = [raw_targets]
         bound: List[str] = []
-        for t in raw_targets:
+        for t in raw_targets[:_MAX_TARGETS_PER_OP]:
             t_str = str(t or "").strip()
             if not t_str:
                 continue
-            sku = _bind_name_to_sku(t_str, lines)
+            sku = _bind_name_to_sku(t_str, lines, distinctive)
             if sku is None:
                 ambiguous.append(t_str)
             elif sku not in bound:
                 bound.append(sku)
 
         if action == "set_quantity":
-            # exactly one bound target + a clamped integer quantity. Guarded (not try/except:
-            # continue) so this stays a zero-silent-swallow module: a set_quantity with no
-            # numeric quantity is simply not actionable and is skipped.
+            # exactly one bound target + an INTEGER quantity. Guarded (not try/except: continue)
+            # so this stays a zero-silent-swallow module. A fractional quantity (2.9) is NOT a
+            # cart quantity — dropped, never silently truncated to 2 (review-5 #9). Values above
+            # the sanity ceiling are dropped; the real per-line gate (cart.py._MAX_LINE_QTY=500)
+            # stays authoritative and rejects with the shopper's true number.
             qraw = raw_op.get("quantity")
             if isinstance(qraw, bool) or not isinstance(qraw, (int, float)):
                 continue
-            qty = max(0, min(_MAX_QTY, int(qraw)))
+            if isinstance(qraw, float) and not qraw.is_integer():
+                continue
+            qty = int(qraw)
+            if qty < 0 or qty > _MAX_QTY_SANITY:
+                continue
             if len(bound) != 1:
                 continue                      # zero or multiple targets → surfaced via `ambiguous`
             if qty == 0:

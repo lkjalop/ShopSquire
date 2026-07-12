@@ -81,3 +81,43 @@ def test_v1_products_from_trace():
     prods = W._v1_products_from_trace(db, "tr-1")
     assert prods == [{"sku": "LAP-1", "name": "Dell Laptop"}]
     assert W._v1_products_from_trace(db, "missing") is None
+
+
+# ── C0 resolve-only cart shadow: plans resolved OFFLINE, never executed ──────────
+
+_CART = [{"sku": "LAP-1", "name": "Dell Laptop", "quantity": 2}]
+
+
+def _cart_llm(obj):
+    return lambda _p, _t: json.dumps(obj)
+
+
+def test_cart_only_job_resolves_plan_without_search_diff():
+    db = _grounded_db()
+    row = W.process_job(
+        db, {"query": "clear my cart", "uid": "u", "tenant_id": "default",
+             "trace_id": "tr-cart-1", "cart": _CART, "cart_only": True},
+        cart_llm_fn=_cart_llm({"ops": [{"action": "clear_all"}], "confidence": 0.9}))
+    assert row["kind"] == "cart_shadow_plan"
+    assert row["outcome"] == "ops"
+    assert row["plan"]["ops"] == [{"action": "clear_all", "target_skus": []}]
+    assert row.get("diffed") is not True     # no search diff on a cart-only job
+
+
+def test_cart_only_job_non_cart_query_scores_empty():
+    db = _grounded_db()
+    row = W.process_job(
+        db, {"query": "show me gaming laptops", "uid": "u", "tenant_id": "default",
+             "trace_id": "tr-cart-2", "cart": _CART, "cart_only": True},
+        cart_llm_fn=_cart_llm({"ops": []}))
+    assert row["outcome"] == "empty"         # the measurement: this turn was NOT a cart edit
+
+
+def test_cart_job_with_search_shadow_does_both():
+    db = _grounded_db()
+    row = W.process_job(
+        db, {"query": "laptop", "uid": "u", "tenant_id": "default",
+             "trace_id": "tr-1", "cart": _CART},
+        cart_llm_fn=_cart_llm({"ops": [], "confidence": 0.0}))
+    # search diff still runs (tr-1 has a V1 trace) — cart resolution rides alongside
+    assert row["diffed"] is True
