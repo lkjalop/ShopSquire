@@ -228,6 +228,16 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 {"id": "keep_ceiling", "label": f"At most {c0['upper']:g} (my stated limit)"},
             ]})
 
+    # BUDGET × CAPABILITY (Phase 1a — the "smart moment"): state the catalog-derived capability
+    # floor, confirm within budget, or offer an honest tradeoff when budget < floor. Runs AFTER
+    # the conflict clarify (a stated-requirement conflict outranks it) and BEFORE slot-gap so its
+    # tradeoff clarify wins that slot. Never raises — the products already stand on their own; the
+    # whole core is gated by RECOMMEND_CORE_MODE at the facade, so this is off in prod until flip.
+    try:
+        _apply_capability_budget(db, envelope, decision, resp, limit)
+    except Exception as exc:
+        logger.warning("capability-budget stage skipped: %s", repr(exc)[:120])
+
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
         q = slot_gap_clarify(
@@ -252,6 +262,105 @@ def _preferred_values(resp: CoreResponse) -> Optional[Dict[str, float]]:
         return out or None
     except Exception:
         return None
+
+
+def _capability_phrase(decision: TurnDecision) -> str:
+    """A short human name for the asserted capability — the use-case the model named
+    ('drawing', 'gaming') if there is one, else the resolved requirement keys. Used only for
+    buyer-facing prose (the floor/tradeoff message), never for a decision."""
+    ucs = list(getattr(decision, "use_cases", None) or [])
+    if ucs:
+        return str(ucs[0]).replace("_", " ")
+    keys = list((decision.requirements or {}).keys())
+    return ", ".join(k.replace("_", " ") for k in keys[:3]) or "your use case"
+
+
+def _budget_free_floor(db, envelope: TurnEnvelope, decision: TurnDecision,
+                       limit: int) -> Optional[int]:
+    """The capability floor IGNORING budget — the cheapest catalog product (in the routed node)
+    that MEETS the requirements, even if it sits above the shopper's ceiling. gather_evidence
+    hard-filters budget at the evidence edge, so an above-budget match is otherwise invisible;
+    this is what lets 'nothing at $900 — the real floor is $1199' be honest instead of an empty
+    grid. Cold path (fires only when nothing in-budget meets). Generous candidate cap because the
+    slate is sku-ordered and attributes aren't in SQL (a pure MIN() query waits on Phase 4 typed
+    price columns)."""
+    import dataclasses
+    free_env = dataclasses.replace(envelope, budget_min_cents=None, budget_max_cents=None)
+    bundle = gather_evidence(db, free_env, node_handle=decision.node_handle,
+                             limit=max(limit * 20, 200))
+    if bundle.status != "ok" or not bundle.variants:
+        return None
+    _, summary = build_cards(bundle.variants, decision.requirements or None, limit=1)
+    return summary.get("capability_floor_cents")
+
+
+def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
+                             resp: CoreResponse, limit: int) -> None:
+    """Phase 1a — the budget × capability 'smart moment'. Using the capability FLOOR (cheapest
+    catalog product that MEETS the resolved requirements — DERIVED, never a stored number),
+    branch on the shopper's budget: state the floor (no budget), confirm within budget, or offer
+    an honest tradeoff when budget < floor (never a silent empty/mismatch). No-op unless a real
+    capability was asserted on a product-search lane and the turn isn't degraded/off-catalog.
+    Reads decision.requirements (the authoritative merged predicates)."""
+    if decision.lane not in ("SEARCH", "FILTER"):
+        return
+    if not decision.requirements or resp.off_catalog or resp.degraded:
+        return
+    fs = resp.fit_summary or {}
+    bmax = envelope.budget_max_cents
+    meets_in_budget = int(fs.get("meets") or 0)
+    floor = fs.get("capability_floor_cents")     # cheapest MEETS within the retrieved (budget) set
+    probed = False
+    # budget < floor case: nothing in-budget meets, but a ceiling was set → probe the true floor
+    if floor is None and bmax is not None and decision.node_handle:
+        floor = _budget_free_floor(db, envelope, decision, limit)
+        probed = True
+
+    cap: Dict[str, Any] = {"floor_cents": floor, "budget_max_cents": bmax,
+                           "meets_in_budget": meets_in_budget, "probed_budget_free": probed,
+                           "requirements": fs.get("requirements") or {}}
+    phrase = _capability_phrase(decision)
+
+    if floor is None:
+        # nothing in the catalog meets — a genuine closest-match (already messaged by retrieve)
+        cap["verdict"] = "no_catalog_match"
+    elif bmax is None:
+        cap["verdict"] = "floor_stated"
+        shown_meets = [c.price_cents for c in resp.products if c.price_cents is not None
+                       and (c.fit or {}).get("overall") == "meets"]
+        top = max(shown_meets, default=floor)
+        if top > floor:
+            resp.message = (f"These all handle {phrase} — they start at ${floor / 100:,.0f} "
+                            f"and go up to ${top / 100:,.0f} for more headroom.")
+        else:
+            resp.message = f"These all handle {phrase}, starting at ${floor / 100:,.0f}."
+    elif floor <= bmax:
+        cap["verdict"] = "within_budget"
+        if not str(resp.message or "").strip():
+            resp.message = (f"The best fit for {phrase} starts at ${floor / 100:,.0f}, within "
+                            f"your ${bmax / 100:,.0f} budget.")
+    else:
+        cap["verdict"] = "below_budget"
+        if resp.products:
+            resp.message = (f"Nothing at ${bmax / 100:,.0f} fully meets what {phrase} needs — the "
+                            f"cheapest that does is ${floor / 100:,.0f}. Showing the closest in "
+                            f"your budget below.")
+        else:
+            resp.message = (f"I don't have anything at ${bmax / 100:,.0f} that meets what {phrase} "
+                            f"needs — the cheapest that does is ${floor / 100:,.0f}.")
+        # one structured tradeoff, only if no higher-priority clarify already claimed the slot
+        if not resp.clarify:
+            resp.clarify.append({
+                "id": "capability_budget_tradeoff",
+                "text": (f"Your budget is ${bmax / 100:,.0f}, but the floor for {phrase} is "
+                         f"${floor / 100:,.0f}. How would you like to proceed?"),
+                "goal": "resolve_budget_capability_gap",
+                "options": [
+                    {"id": "stretch", "label": f"Stretch to ${floor / 100:,.0f} for the real fit"},
+                    {"id": "relax", "label": "Relax a requirement (I'll show what changes)"},
+                    {"id": "closest", "label": "Just show the closest in my budget"},
+                ]})
+    resp.extras["capability"] = cap
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:

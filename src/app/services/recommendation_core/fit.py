@@ -93,6 +93,10 @@ def build_cards(variants: List[VariantView],
     built: List[ProductCard] = []
     pref_dist: Dict[str, float] = {}
     counts = {"meets": 0, "unknown": 0, "fails": 0}
+    # capability floor (Phase 1a): the cheapest product in THIS candidate set that MEETS the
+    # requirements — the honest "starts at $X for this capability", DERIVED from the real catalog,
+    # never a stored number. Computed in the verdict pass (no extra iteration).
+    floor_cents: Optional[int] = None
     for v in variants:
         attrs = variant_attributes(v, defs)
         if preferred:
@@ -105,6 +109,8 @@ def build_cards(variants: List[VariantView],
             card.fit = verdict
             overall = verdict["overall"]
             counts[overall] += 1
+            if overall == "meets" and v.price_cents is not None:
+                floor_cents = v.price_cents if floor_cents is None else min(floor_cents, v.price_cents)
             failed = [k for k, val in verdict["per_key"].items() if val is False]
             if overall == "meets":
                 card.why.append(f"meets all {len(requirements)} requirements")
@@ -122,6 +128,7 @@ def build_cards(variants: List[VariantView],
     summary: Dict[str, Any] = {
         "requirements": {k: _describe(spec) for k, spec in (requirements or {}).items()},
         **counts,
+        "capability_floor_cents": floor_cents,   # cheapest MEETS in this candidate set (Phase 1a)
         "closest_match_mode": bool(requirements) and counts["meets"] == 0 and bool(cards),
     }
     return cards, summary
