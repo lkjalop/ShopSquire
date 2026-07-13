@@ -45,7 +45,13 @@ from src.app.services.recommendation_core.envelope import TurnEnvelope
 
 logger = logging.getLogger("shopsquire.recommendation_facade")
 
-# the lanes the core is trusted to serve live; everything else → legacy (finding #6)
+# the lanes the core is trusted to serve live; everything else → legacy (finding #6).
+# PROCUREMENT is DELIBERATELY excluded (review-10 P1b decision): the V2 lane is ADVISE-ONLY today
+# (bulk economics + a 'draft a quote for review' offer, nothing sent) while legacy owns the mature
+# RFQ machinery (PR→CASE→PO, draft-quote, human-gated fanout). Serving V2 PROCUREMENT would REGRESS
+# the buy-side, so it falls through to legacy until a V2-advises→legacy-executes bridge exists. The
+# smart bulk-economics moment demos via the core-direct path, not the canary. Likewise CART_MUTATE
+# has its OWN ladder (RECOMMEND_CART_SERVE) and INVENTORY/SUPPORT/POLICY/image stay legacy.
 CANARY_LANES = frozenset({"SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG"})
 _SHADOW_QUEUE_KEY = "shadow:core:queue"          # legacy list (fallback + migration drain)
 _SHADOW_STREAM_KEY = "shadow:core:stream"        # R10.4b: the durable path
