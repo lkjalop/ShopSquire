@@ -149,6 +149,21 @@ try:
           f"severity={sev.get('severity')} remedies={sev.get('remedy_options')}")
 except Exception as exc:
     check("returns flow", False, f"setup error: {exc}")
+finally:
+    # TEARDOWN (review-10 E2E isolation): the returns probe injects a servable 'E2E Test Laptop'
+    # into `products` (active=1) — legacy suggest() reads that table, so leaving it behind leaks a
+    # fake $1999 laptop into recommendation results on the next run (GPT-5.6 soak caught it). Remove
+    # the injected product + this run's committed test orders so the sweep is self-cleaning.
+    try:
+        from src.app.models.db import db_session
+        from sqlalchemy import text as _t
+        with db_session() as db:
+            db.execute(_t("DELETE FROM products WHERE sku=:s"), {"s": rsku})
+            db.execute(_t("DELETE FROM orders WHERE customer_id=:u"), {"u": ruid})
+            db.execute(_t("DELETE FROM draft_orders WHERE customer_id=:u"), {"u": ruid})
+            db.commit()
+    except Exception as _te:
+        print(f"  [warn] E2E teardown skipped: {_te}")
 
 # ── 8. IMAGE PERMUTATIONS ──────────────────────────────────────────────────────
 section("8. IMAGE PERMUTATIONS (off-domain / damage / support)")
