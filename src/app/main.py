@@ -1725,6 +1725,18 @@ def create_app() -> FastAPI:
         app.include_router(connectors_admin_router)
     except Exception:
         pass
+    # P2: two fully-built admin routers were never included → their endpoints 404'd. Register them
+    # (case cockpit: /api/v1/admin/cases/{id}/cockpit+/tags; decision time-travel: /admin/decisions/asof).
+    try:
+        from src.app.routers.case_cockpit import router as case_cockpit_router
+        app.include_router(case_cockpit_router)
+    except Exception as e:
+        logging.getLogger("shopsquire.startup").exception("failed to include case_cockpit router: %s", e)
+    try:
+        from src.app.routers.decision_time_travel import router as decision_time_travel_router
+        app.include_router(decision_time_travel_router)
+    except Exception as e:
+        logging.getLogger("shopsquire.startup").exception("failed to include decision_time_travel router: %s", e)
     app.include_router(incident_router)
     app.include_router(metrics_router)
     app.include_router(sla_router)

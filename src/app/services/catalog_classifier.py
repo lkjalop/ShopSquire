@@ -166,7 +166,7 @@ def _classifier_model() -> str:
 
 
 def _default_llm_fn(prompt: str, timeout: float) -> str:
-    """Same local-Ollama call shape as llm_planner/semantic_turn_router. Failures are LOGGED —
+    """Same local-Ollama call shape as llm_planner / recommendation_core.turn_router. Failures are LOGGED —
     a cold model timing out on every call must read as 112 warnings in the run output, never
     as a silent all-lexical sweep (the mute-layer class; it happened on this module's first
     live run, 2026-07-11: 15s timeout < qwen3:14b cold-load → 112/112 fallback, zero errors
