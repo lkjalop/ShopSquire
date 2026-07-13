@@ -47,35 +47,60 @@ def list_variants(vertical: str, coarse: str) -> List[str]:
 
 
 def resolve(vertical: str, coarse: str, variant: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """A coarse use-case (+ optional variant) → the merged, resolved knowledge, or None when the
-    coarse key is unknown. Merge rule: variant fields OVERRIDE the baseline; budget_floor is the
-    variant's if it declares one, else the coarse floor. An unknown variant falls back to the
-    coarse baseline (never invents specs)."""
+    """A coarse use-case (+ optional variant) → merged CAPABILITY REQUIREMENTS, or None when the
+    coarse key is unknown. Merge: variant requirements ADD/OVERRIDE the baseline (per-attribute);
+    budget_band_hint is the variant's if present else the coarse hint. The `requirements` are the
+    knowledge; the PRICE is not here — call derive_price_floor() to ground it in the catalog."""
     uc = (load_use_cases(vertical).get("use_cases") or {}).get(str(coarse))
     if not isinstance(uc, dict):
         return None
-    specs: Dict[str, Any] = dict(uc.get("baseline") or {})
-    budget_floor = uc.get("budget_floor")
+    reqs: Dict[str, Any] = dict(uc.get("requirements") or {})
+    band = uc.get("budget_band_hint")
     resolved_variant = None
     vmap = uc.get("variants") or {}
     if variant and str(variant) in vmap:
         resolved_variant = str(variant)
-        vspec = vmap[resolved_variant] or {}
-        for k, v in vspec.items():
-            if k in ("note", "budget_floor"):
-                continue
-            specs[k] = v                                   # variant overrides baseline
-        if vspec.get("budget_floor") is not None:
-            budget_floor = vspec["budget_floor"]
+        v = vmap[resolved_variant] or {}
+        for k, pred in (v.get("requirements") or {}).items():
+            reqs[k] = pred                                 # variant tightens/overrides per-attribute
+        if v.get("budget_band_hint") is not None:
+            band = v["budget_band_hint"]
     out: Dict[str, Any] = {
         "vertical": str(vertical), "use_case": str(coarse), "variant": resolved_variant,
-        "label": uc.get("label"), "specs": specs, "budget_floor": budget_floor,
+        "label": uc.get("label"), "requirements": reqs, "budget_band_hint": band,
         "host_nodes": uc.get("host_nodes") or (load_use_cases(vertical).get("host_nodes") or []),
         "keywords": uc.get("keywords") or [],
     }
     if uc.get("content_advisory"):
         out["content_advisory"] = uc["content_advisory"]
     return out
+
+
+def derive_price_floor(vertical: str, coarse: str, variant: Optional[str],
+                       candidates: List[Any], *, defs: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    """The SMART floor (not a stored number): the CHEAPEST price_cents among `candidates`
+    (VariantViews from the routed catalog node) that MEETS the use-case's capability requirements.
+    None when nothing in stock meets them — honest ('we can't quote a floor for a capability we
+    don't carry'), never a hardcoded guess. Self-correcting: it tracks real prices, and a shopper's
+    brand/form preference (filtered candidates) escalates it naturally (a Mac-only set floors at the
+    Mac price — no hardcoded premium)."""
+    r = resolve(vertical, coarse, variant)
+    reqs = (r or {}).get("requirements") or {}
+    if not reqs or not candidates:
+        return None
+    from src.app.services.attribute_registry import defs_union, evaluate_requirements
+    from src.app.services.recommendation_core.fit import variant_attributes
+    defs = defs or defs_union((vertical,))
+    pred = {k: (v[0], v[1]) for k, v in reqs.items() if isinstance(v, (list, tuple)) and len(v) == 2}
+    floor: Optional[int] = None
+    for c in candidates:
+        price = getattr(c, "price_cents", None)
+        if price is None:
+            continue
+        attrs = variant_attributes(c, defs)
+        if evaluate_requirements(attrs, pred).get("overall") == "meets":
+            floor = int(price) if floor is None else min(floor, int(price))
+    return floor
 
 
 def content_advisory(vertical: str, coarse: str) -> Optional[Dict[str, Any]]:

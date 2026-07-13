@@ -236,6 +236,84 @@
           "802.11be"
         ]
       }
+    },
+    "form_factor": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": [
+        "form",
+        "chassis",
+        "convertible",
+        "2in1"
+      ],
+      "text_extract": true,
+      "values": {
+        "convertible": [
+          "2-in-1",
+          "2 in 1",
+          "x360",
+          "yoga",
+          "flip",
+          "spin",
+          "convertible",
+          "360"
+        ],
+        "detachable": [
+          "detachable",
+          "surface pro",
+          "surface go",
+          "tablet pc"
+        ],
+        "tablet": [
+          "tablet",
+          "ipad"
+        ],
+        "clamshell": [
+          "clamshell",
+          "traditional laptop"
+        ]
+      }
+    },
+    "touchscreen": {
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": [
+        "touch",
+        "touch_screen",
+        "touch_display"
+      ],
+      "text_extract": true,
+      "true_markers": [
+        "touchscreen",
+        "touch screen",
+        "touch display",
+        "2-in-1",
+        "x360",
+        "yoga",
+        "surface pro",
+        "tablet",
+        "ipad",
+        "detachable"
+      ]
+    },
+    "stylus_support": {
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": [
+        "stylus",
+        "pen",
+        "pen_support",
+        "active_pen"
+      ],
+      "text_extract": true,
+      "true_markers": [
+        "stylus",
+        "active pen",
+        "surface pen",
+        "s pen",
+        "wacom",
+        "pen support"
+      ]
     }
   },
   "_derivations_comment": "review-8 #5: cross-key derivations run AFTER normalize+extract, fill ONLY missing target keys, and are clamped through the target's bounds. gpu_discrete=false ⇒ gpu_vram_gb=0 turns an integrated laptop from UNKNOWN into an honest FAIL on a game's VRAM floor (the 'why lenovo looks bad' screenshot).",

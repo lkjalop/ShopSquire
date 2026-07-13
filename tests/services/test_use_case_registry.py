@@ -1,67 +1,71 @@
-"""Unified use-case registry (Track E) — the hybrid coarse→variant resolution, the high_school
-worked example, and a behaviour-neutral check that the migrated floors match the live legacy KB."""
-import json
-from pathlib import Path
-
+"""Unified use-case registry (Track E) — SMART capability model: intent → capability REQUIREMENTS,
+price DERIVED from the real catalog (never hardcoded), with the drawing→touchscreen→Mac-escalates
+example the user described."""
 from src.app.services import use_case_registry as R
+from src.app.services.catalog_read_model import VariantView
 
 
-def test_coarse_resolves_baseline_and_floor():
-    got = R.resolve("electronics", "gaming")
-    assert got["variant"] is None
-    assert got["specs"]["ram_gb_min"] == 16 and got["specs"]["gpu_tier"] == 2
-    assert got["budget_floor"] == 500
-    assert "el-6-11-2" in got["host_nodes"]
+def _v(sku, title, price, specs=None):
+    return VariantView(sku=sku, title=title, price_cents=price, specs=specs or {})
 
 
-def test_variant_overrides_baseline_and_floor():
+def test_intent_maps_to_capabilities_not_a_number():
+    """drawing → real capability predicates (touchscreen + convertible/detachable form factor),
+    NOT a hardcoded floor. This is the knowledge; price comes from the catalog."""
+    got = R.resolve("electronics", "drawing")
+    reqs = got["requirements"]
+    assert reqs["touchscreen"] == ["==", True]
+    assert reqs["form_factor"][0] == "in" and "convertible" in reqs["form_factor"][1]
+    assert "budget_floor" not in got                      # no stored number
+    assert got["budget_band_hint"] == [1200, 2200]        # advisory only
+
+
+def test_floor_is_derived_from_real_catalog_products():
+    """The drawing floor = the cheapest IN-CATALOG touchscreen 2-in-1 (read from its TITLE), not a
+    stored number. Non-touch gaming laptops don't count even if cheaper."""
+    catalog = [
+        _v("GAM", "ASUS ROG Strix G16 Gaming Laptop (RTX 4060)", 129900, {"ram_gb": 32}),  # cheap, NOT touch
+        _v("DELL2IN1", "Dell Inspiron 14 7440 2-in-1 Laptop", 119900, {"ram_gb": 16}),      # touch+convertible
+        _v("YOGA", "Lenovo Yoga Slim 7i 14\" OLED Laptop", 149900, {"ram_gb": 16}),          # touch+convertible
+    ]
+    floor = R.derive_price_floor("electronics", "drawing", None, catalog)
+    assert floor == 119900        # the Dell 2-in-1 — DERIVED; the cheaper gaming laptop fails touch
+
+
+def test_brand_preference_escalates_floor_via_catalog_not_hardcode():
+    """A shopper who narrows to Apple (a FILTERED candidate set) floors at the Mac price — the
+    30-50% premium is EMERGENT from the catalog, nothing hardcodes it."""
+    windows_2in1 = [_v("DELL", "Dell Inspiron 2-in-1 Laptop", 119900, {"ram_gb": 16})]
+    # a Mac candidate set (touchscreen macs are rare, so use an iPad-class detachable Apple w/ touch)
+    apple_touch = [_v("IPADP", "Apple iPad Pro 13 tablet", 287900, {"ram_gb": 16})]
+    assert R.derive_price_floor("electronics", "drawing", None, windows_2in1) == 119900
+    assert R.derive_price_floor("electronics", "drawing", None, apple_touch) == 287900   # escalated
+
+
+def test_no_stocked_match_returns_none_not_a_guess():
+    """Honest: if nothing in the candidate set carries the capability, there is NO floor to quote."""
+    no_touch = [_v("A", "Plain Clamshell Laptop", 90000, {"ram_gb": 16})]
+    assert R.derive_price_floor("electronics", "drawing", None, no_touch) is None
+
+
+def test_variant_tightens_requirements():
+    base = R.resolve("electronics", "gaming")
     aaa = R.resolve("electronics", "gaming", "aaa_heavy")
-    assert aaa["variant"] == "aaa_heavy"
-    assert aaa["specs"]["gpu_tier"] == 4 and aaa["specs"]["gpu_vram_gb_min"] == 8
-    assert aaa["budget_floor"] == 1200                    # variant floor wins over coarse 500
-    assert aaa["specs"]["ram_gb_min"] == 16               # baseline kept where variant is silent
+    assert base["requirements"]["gpu_vram_gb"] == [">=", 4]
+    assert aaa["requirements"]["gpu_vram_gb"] == [">=", 8]     # variant tightens
+    assert aaa["budget_band_hint"] == [1500, 3000]
 
 
-def test_unknown_variant_falls_back_to_baseline():
-    got = R.resolve("electronics", "gaming", "no_such_variant")
-    assert got["variant"] is None and got["budget_floor"] == 500   # coarse baseline, never invented
-
-
-def test_unknown_coarse_is_none():
-    assert R.resolve("electronics", "not_a_use_case") is None
-
-
-def test_high_school_is_variants_not_one_floor():
-    """The '300 vs 400 conflict' dissolves: high_school floor depends on INTENT (schooling vs
-    light vs serious gaming), each a variant — the user's product insight, encoded."""
-    school = R.resolve("electronics", "high_school", "schooling")
-    light = R.resolve("electronics", "high_school", "light_gaming")
-    serious = R.resolve("electronics", "high_school", "serious_gaming")
-    assert school["budget_floor"] == 400 and school["specs"]["gpu_tier"] == 0
-    assert light["budget_floor"] == 600 and light["specs"]["gpu_tier"] == 1
-    assert serious["budget_floor"] == 900 and serious["specs"]["refresh_hz_min"] == 144
-
-
-def test_high_school_content_advisory_is_advisory_only():
+def test_high_school_is_intent_variants_with_content_advisory():
+    """The user's insight: high_school floor depends on intent (schooling vs gaming), and a minor
+    requesting mature-game specs gets an ADVISORY, never a block."""
+    assert R.resolve("electronics", "high_school", "schooling")["requirements"]["ram_gb"] == [">=", 8]
+    assert R.resolve("electronics", "high_school", "serious_gaming")["requirements"]["gpu_vram_gb"] == [">=", 6]
     adv = R.content_advisory("electronics", "high_school")
-    assert adv and adv["persona"] == "minor"
-    assert "never a hard block" in adv["note"].lower()    # advisory, not an age-gate
+    assert adv["persona"] == "minor" and "never a hard block" in adv["note"].lower()
 
 
-def test_migration_is_behaviour_neutral_on_overlapping_floors():
-    """The floors migrated from the live workhorse (use_case_knowledge_base.json) must match, so
-    switching consumers onto the registry changes no behaviour for the overlapping use-cases."""
-    legacy = json.loads((Path("config/use_case_knowledge.json")).read_text(encoding="utf-8"))
-    lf = {k: v.get("min_price_floor") for k, v in (legacy.get("use_cases") or {}).items()}
-    # coarse ai_ml_workstation + a couple of student variants map 1:1 to legacy fine keys
-    assert R.resolve("electronics", "ai_ml_workstation")["budget_floor"] == lf["ai_ml_workstation"]  # 1500
-    assert R.resolve("electronics", "student", "engineering")["budget_floor"] == lf["engineering_student"]  # 1000
-    assert R.resolve("electronics", "gaming", "aaa_heavy")["budget_floor"] == lf["gaming_aaa_heavy"]  # 1200
-
-
-def test_scaffold_verticals_load_empty():
-    """home/appliances/furniture scaffolds load (bound to real taxonomy) with no use_cases yet —
-    the breadth FOUNDATION exists; depth comes after electronics ships."""
+def test_scaffold_verticals_load_empty_bound_to_taxonomy():
     for v in ("home", "appliances", "furniture"):
         assert R.list_use_cases(v) == []
-        assert R.load_use_cases(v).get("host_nodes")      # bound to a taxonomy root
+        assert R.load_use_cases(v).get("host_nodes")

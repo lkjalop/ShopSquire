@@ -23,6 +23,7 @@ from src.app.services.attribute_registry import (
     defs_union,
     derivations_union,
     evaluate_requirements,
+    extract_categoricals,
     extract_quantities,
     normalize_specs,
 )
@@ -45,6 +46,10 @@ def variant_attributes(view: VariantView,
     attrs, _dropped = normalize_specs(view.specs or {}, defs)
     extracted, _ambiguous = extract_quantities(view.title or "", defs)
     for k, v in extracted.items():
+        attrs.setdefault(k, v)
+    # CAPABILITY signals from the title (form_factor / touchscreen / stylus) — makes the platform
+    # SMART about drawing/creative/convertible intents against real products; specs still win.
+    for k, v in extract_categoricals(view.title or "", defs).items():
         attrs.setdefault(k, v)
     apply_derivations(attrs, derivations_union(DEFAULT_VERTICALS), defs)
     return attrs

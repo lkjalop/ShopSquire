@@ -51,6 +51,7 @@ class AttributeDef:
     key_aliases: Tuple[str, ...] = ()
     unit_aliases: Dict[str, float] = field(default_factory=dict)   # alias -> multiplier to canonical
     enum_values: Dict[str, Tuple[str, ...]] = field(default_factory=dict)  # canonical -> aliases
+    true_markers: Tuple[str, ...] = ()   # boolean: phrases in title/specs that imply True
     text_extract: bool = False
 
 
@@ -77,6 +78,7 @@ def load_defs(vertical: str) -> Dict[str, AttributeDef]:
                 unit_aliases={str(k).lower(): float(v) for k, v in (d.get("unit_aliases") or {}).items()},
                 enum_values={str(c): tuple(str(a).lower() for a in al)
                              for c, al in (d.get("values") or {}).items()},
+                true_markers=tuple(str(m).lower() for m in d.get("true_markers") or ()),
                 text_extract=bool(d.get("text_extract")),
             )
     except FileNotFoundError:
@@ -274,6 +276,44 @@ def extract_quantities(text: str, defs: Dict[str, AttributeDef]) -> Tuple[Dict[s
         # keep the MAX per key: '120Hz ... up to 165Hz' should read as the panel's capability
         assigned[keys[0]] = max(assigned.get(keys[0], 0.0), round(canon_val, 4))
     return assigned, ambiguous
+
+
+def extract_categoricals(text: str, defs: Dict[str, AttributeDef]) -> Dict[str, Any]:
+    """ENUM + BOOLEAN attributes read from free text (the product TITLE) — the capability signals
+    that make the platform SMART about form-factor / touch / stylus without structured specs. A
+    laptop titled 'HP Envy x360 2-in-1' yields form_factor='convertible' + touchscreen=True from the
+    declared aliases/true_markers; a title with no marker yields nothing (never a guess). Word/
+    phrase-boundary matched so 'yoga' in 'Yoga Slim' matches but not inside another word."""
+    low = f" {str(text or '').lower()} "
+    out: Dict[str, Any] = {}
+    for key, d in defs.items():
+        if not d.text_extract or d.kind not in ("enum", "boolean"):
+            continue
+        if d.kind == "enum":
+            for canonical, aliases in d.enum_values.items():
+                if any(_phrase_in(low, a) for a in aliases) or _phrase_in(low, canonical.lower()):
+                    out[key] = canonical           # first canonical whose alias appears wins
+                    break
+        else:  # boolean
+            if any(_phrase_in(low, m) for m in d.true_markers):
+                out[key] = True                    # only POSITIVE markers assert; absence ≠ False
+    return out
+
+
+def _phrase_in(haystack_padded: str, needle: str) -> bool:
+    """Whitespace/boundary-aware substring: 'x360' matches 'x360' as a token; a hyphen/space in the
+    needle ('2-in-1') is matched literally; short alnum needles require a boundary to avoid
+    'go' matching 'good'."""
+    n = str(needle or "").strip().lower()
+    if not n:
+        return False
+    if n in haystack_padded:
+        # accept if bounded by non-alnum on both sides (padded string has leading/trailing spaces)
+        i = haystack_padded.find(n)
+        left = haystack_padded[i - 1] if i > 0 else " "
+        right = haystack_padded[i + len(n)] if i + len(n) < len(haystack_padded) else " "
+        return not (left.isalnum() or right.isalnum())
+    return False
 
 
 # ── tri-state requirement evaluation (what the Phase-4 fit stage consumes) ────
