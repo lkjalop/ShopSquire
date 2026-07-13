@@ -128,6 +128,10 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
 
     import dataclasses
     from src.app.services.recommendation_core.intent_resolver import resolve as resolve_intent
+    # time the whole DECIDE phase (the ~7s router model call + KB intent resolution + reroute +
+    # continuation inheritance) — this is the turn's dominant latency, so the canary can attribute
+    # the p50 to the model call vs the deterministic stages (P1 instrumentation).
+    _t_route = time.perf_counter()
     decision = route_turn(db, envelope, llm_fn=llm_fn)
     # INTENT → REQUIREMENTS: the model NAMED the use-case(s); deterministic KB lookup supplies
     # the hardware requirements and merges them (by MAX) with any the shopper stated explicitly.
@@ -210,6 +214,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
+    resp.record_stage("route+intent", status="ok",
+                      latency_ms=(time.perf_counter() - _t_route) * 1000.0,
+                      won_message=False, source=decision.source)
     resp.extras["decision"] = decision.as_dict()
     if requested_quantity is not None:
         resp.extras["requested_quantity"] = requested_quantity
