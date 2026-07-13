@@ -170,10 +170,25 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             decision = dataclasses.replace(decision, requirements=dict(prior_reqs))
             requirements_inherited = True
 
+    # COUNT is a QUANTITY signal (bulk order), NOT a per-product fit predicate — a single unit can
+    # never 'meet count>=20'. Extract it for the bulk-economics stage and STRIP it so it never
+    # pollutes fit / closest-match / the shelf on any lane (live-caught: '20 laptops … 12GB vram'
+    # showed 'No product meets count>=20, …').
+    requested_quantity = None
+    if "count" in decision.requirements:
+        _reqs = dict(decision.requirements)
+        for _op, _thr in (_reqs.pop("count") or []):
+            if _op in (">=", ">", "==") and isinstance(_thr, (int, float)) and not isinstance(_thr, bool):
+                requested_quantity = int(_thr)
+                break
+        decision = dataclasses.replace(decision, requirements=_reqs)
+
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
     resp.extras["decision"] = decision.as_dict()
+    if requested_quantity is not None:
+        resp.extras["requested_quantity"] = requested_quantity
     resp.extras["plan"] = plan.as_dict()
     # the resolver's reasoning, surfaced for the 'Why Recommended' decision-trace tab
     resp.extras["intent"] = {"use_cases": intent["use_cases"],
@@ -262,6 +277,13 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         _maybe_complement_offer(db, envelope, decision, resp)
     except Exception as exc:
         logger.warning("complement-offer stage skipped: %s", repr(exc)[:120])
+
+    # BULK ECONOMICS (Phase 1f): 'N units for X, $T total' → ÷units viability + tradeoff menu
+    # (increase budget / reduce units / bundle-fit / payment plan). Overrides the procurement stub.
+    try:
+        _maybe_bulk_economics(db, envelope, decision, resp)
+    except Exception as exc:
+        logger.warning("bulk-economics stage skipped: %s", repr(exc)[:120])
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
@@ -625,6 +647,94 @@ def _maybe_complement_offer(db, envelope: TurnEnvelope, decision: TurnDecision,
             offers.append(offer)
     if offers:
         resp.extras["complement_offers"] = offers
+
+
+def _parse_total_budget(envelope: TurnEnvelope) -> Optional[int]:
+    """Total budget in CENTS for a bulk ask: the edge-parsed envelope budget if present, else the
+    largest $-amount / 4+digit number stated ('total of $16000', '$19000 budget')."""
+    if envelope.budget_max_cents:
+        return envelope.budget_max_cents
+    import re
+    nums = []
+    for m in re.finditer(r"\$\s?([\d,]{3,})|\b(\d{4,})\b", envelope.query or ""):
+        raw = (m.group(1) or m.group(2) or "").replace(",", "")
+        if raw.isdigit():
+            nums.append(int(raw))
+    return max(nums) * 100 if nums else None
+
+
+def _bundle_floor(db, envelope: TurnEnvelope, decision: TurnDecision, vertical: Optional[str],
+                  variants: list, reqs: Dict[str, Any]) -> Optional[int]:
+    """The cheaper HYBRID per-unit floor: cheapest laptop meeting the requirements MINUS the
+    on-device pen capability (touchscreen/form_factor) + the cheapest stocked complement (graphics
+    tablet). What can make a bulk order fit when the touchscreen floor can't."""
+    from src.app.services.recommendation_core.fit import build_cards
+    non_device = {k: v for k, v in reqs.items() if k not in ("touchscreen", "form_factor")}
+    _, s = build_cards(variants, non_device or None, limit=1)
+    laptop = s.get("capability_floor_cents")
+    if not laptop or not vertical:
+        return None
+    import dataclasses
+    from src.app.services import use_case_registry as R
+    from src.app.services.taxonomy_registry import sells_within
+    free = dataclasses.replace(envelope, budget_min_cents=None, budget_max_cents=None)
+    comp = None
+    for uc in (decision.use_cases or ()):
+        for c in R.complements(vertical, uc):
+            node = c.get("node")
+            if node and sells_within(db, node, tenant_id=envelope.tenant_id) is True:
+                prices = [v.price_cents for v in gather_evidence(db, free, node_handle=node, limit=8).variants
+                          if v.price_cents is not None]
+                if prices:
+                    comp = min(prices) if comp is None else min(comp, min(prices))
+    return (laptop + comp) if comp else None
+
+
+def _bulk_message(econ: Dict[str, Any], decision: TurnDecision) -> str:
+    q, floor, total = econ["quantity"], econ["floor_cents"], econ.get("total_cents")
+    uc = (list(getattr(decision, "use_cases", None) or ["your use case"]))[0].replace("_", " ")
+    if econ["verdict"] == "unsized":
+        return (f"For {q} units for {uc}, the per-unit floor is ${floor / 100:,.0f} — about "
+                f"${econ['needed_cents'] / 100:,.0f} total. Tell me your budget and I'll size it.")
+    if econ["verdict"] == "fits":
+        return (f"Good news — {q} units for {uc} fit your ${total / 100:,.0f}: about "
+                f"${econ['needed_cents'] / 100:,.0f} total at ${floor / 100:,.0f} each.")
+    parts = [f"{q} units for {uc} need about ${econ['needed_cents'] / 100:,.0f} "
+             f"(${floor / 100:,.0f} each), over your ${total / 100:,.0f}. Options:"]
+    parts += ["• " + t["label"] for t in econ["tradeoffs"]]
+    return " ".join(parts)
+
+
+def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
+                          resp: CoreResponse) -> None:
+    """Phase 1f — bulk-order economics: quantity (from the extracted `count`) + total budget → the
+    ÷units viability + the tradeoff menu (increase budget / reduce units / bundle-fit / payment
+    plan), reusing the capability floor and the complement bundle. Strips `count` from the fit
+    requirements (a quantity signal, not a per-product predicate). Never blocks; degrades silently
+    if it can't size. Fires whenever a quantity ≥ 2 is detected (bulk), any lane."""
+    if resp.off_catalog or resp.degraded or not decision.node_handle:
+        return
+    quantity = resp.extras.get("requested_quantity")   # count stripped upstream (never in fit reqs)
+    if not quantity or quantity < 2:
+        return
+    reqs = dict(decision.requirements or {})
+    import dataclasses
+    from src.app.services.recommendation_core.bulk import assess_bulk
+    from src.app.services.recommendation_core.fit import build_cards
+    free = dataclasses.replace(envelope, budget_min_cents=None, budget_max_cents=None)
+    variants = gather_evidence(db, free, node_handle=decision.node_handle, limit=200).variants
+    if not variants:
+        return
+    floor = build_cards(variants, reqs or None, limit=1)[1].get("capability_floor_cents")
+    if not floor:
+        return
+    vertical = _vertical_name(decision.node_handle)
+    econ = assess_bulk(quantity, _parse_total_budget(envelope), floor,
+                       bundle_floor_cents=_bundle_floor(db, envelope, decision, vertical, variants, reqs))
+    if not econ:
+        return
+    resp.extras["bulk"] = econ
+    resp.message = _bulk_message(econ, decision)
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:
