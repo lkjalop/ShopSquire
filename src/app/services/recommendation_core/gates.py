@@ -15,11 +15,10 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-# the same marker families the platform's injection scanners key on — a THIN first gate,
-# not a replacement for the security battery (which joins with the image lane)
-_INJECTION_RE = re.compile(
-    r"ignore (all|previous|prior) (instructions|rules)|system prompt|<\s*script|"
-    r"you are now|jailbreak|do anything now", re.IGNORECASE)
+# P1-3: the SHARED injection markers — the same source of truth the legacy commerce guard and the
+# narration guard use, so no surface admits an attack string another blocks. A THIN first gate, not a
+# replacement for the security battery (which joins with the image lane).
+from src.app.security.injection_patterns import INJECTION_RE as _INJECTION_RE
 
 
 def evaluate_text_gates(query: str) -> Dict[str, Any]:

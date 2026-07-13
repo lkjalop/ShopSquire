@@ -20,12 +20,9 @@ _SQLI_PATTERNS = (
     re.compile(r"(?i)['\"`;]\s*--"),
 )
 
-_PROMPT_INJECTION_PATTERNS = (
-    re.compile(r"(?i)\bignore\s+(all|previous|prior)\b"),
-    re.compile(r"(?i)\boverride\s+system\b"),
-    re.compile(r"(?i)\bdeveloper\s+mode\b"),
-    re.compile(r"(?i)\bjailbreak\b"),
-)
+# P1-3: shared source of truth so this guard, the V2 core gate, and the narration guard can't drift
+# (each previously admitted a different attack string). Union of all three families, calibrated.
+from src.app.security.injection_patterns import INJECTION_PATTERNS as _PROMPT_INJECTION_PATTERNS
 
 _SKU_PAT = re.compile(r"^[A-Z0-9][A-Z0-9_-]{2,63}$", re.IGNORECASE)
 _UID_PAT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]{1,127}$")

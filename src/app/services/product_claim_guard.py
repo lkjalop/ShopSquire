@@ -72,10 +72,8 @@ def reset_vocab_cache() -> None:
 
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-_INJECTION_RE = re.compile(
-    r"\b(ignore (all )?previous|disregard .{0,20}instruction|system prompt|do anything now)\b",
-    re.IGNORECASE,
-)
+# P1-3: shared injection markers (same source as the commerce guard + V2 gate) — no drift.
+from src.app.security.injection_patterns import INJECTION_RE as _INJECTION_RE
 _PRICE_RE = re.compile(r"\$\s?(\d[\d,]*)(?:\.\d+)?")
 _PERFORMANCE_CLAIM_RE = re.compile(
     r"\b(?:\d{2,3}\+?\s*fps|frames per second|high settings|ultra settings|ray tracing|4k gaming)\b",
