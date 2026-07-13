@@ -213,6 +213,21 @@ def check_transfer(
     v = copy.copy(verdict)
     v.data_categories = list(data_categories or [])
 
+    # DPA ENFORCEMENT (P1-2): signed_dpa was previously only LOGGED, never enforced — so PII could be
+    # transferred to a cloud provider (openai/anthropic) with an UNSIGNED DPA. A cross-border transfer
+    # that carries declared PII now requires a signed DPA; fail CLOSED (block) until it is executed.
+    # On-premise providers (ollama_local/local) transfer nothing, so they are exempt. NOTE: this gates
+    # on DECLARED data_categories — a caller that sends PII without declaring it still needs to pass
+    # categories for the gate to fire (the transfer contract).
+    _cross_border = v.mechanism not in (TransferMechanism.ON_PREMISE, TransferMechanism.BLOCKED)
+    if v.allowed and _cross_border and v.data_categories and not v.signed_dpa:
+        v.allowed = False
+        v.notes = (f"BLOCKED (P1-2): PII transfer to '{key}' requires a signed DPA before production "
+                   f"use (categories={v.data_categories}). Execute the DPA, then set "
+                   f"signed_dpa=True + dpa_date on the provider's ResidencyVerdict.")
+        logger.warning("data_residency PII_transfer_blocked_no_dpa provider=%s categories=%s mechanism=%s",
+                       key, v.data_categories, v.mechanism)
+
     if not v.allowed:
         logger.warning(
             "data_residency transfer_blocked provider=%s mechanism=%s notes=%s",

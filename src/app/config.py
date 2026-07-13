@@ -445,11 +445,20 @@ def load_feature_flags(path: str) -> dict:
             if not isinstance(loaded, dict):
                 return defaults
             merged = _deep_merge(defaults, loaded)
-            # In non-production, ensure decision logs are enabled unless explicitly overridden.
+            # DECISION-AUDIT DEFAULT (P1-1): the bitemporal decision log is the product differentiator,
+            # so it defaults ON in EVERY environment when the env var is unset — previously it was
+            # forced on only in NON-production, so a real prod deploy silently fell to the shipped
+            # flag (false) and the audit trail was dark exactly where it matters (dev could never
+            # catch it). Operators disable explicitly with DECISION_LOG_WRITES_ENABLED=0 (e.g. a
+            # compliance hold until the DPA is signed — see policy/data_residency.py / P1-2).
             try:
                 if os.getenv("DECISION_LOG_WRITES_ENABLED") is None:
-                    if get_settings().app_env.lower() not in ("production", "prod"):
-                        merged["DECISION_LOG_WRITES_ENABLED"] = True
+                    merged["DECISION_LOG_WRITES_ENABLED"] = True
+                    if get_settings().app_env.lower() in ("production", "prod"):
+                        import logging
+                        logging.getLogger("shopsquire.config").info(
+                            "DECISION_LOG_WRITES_ENABLED defaulted ON in production (audit differentiator); "
+                            "set DECISION_LOG_WRITES_ENABLED=0 to disable deliberately.")
             except Exception:
                 import logging
 
