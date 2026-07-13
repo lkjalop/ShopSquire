@@ -597,7 +597,22 @@ def _maybe_complement_offer(db, envelope: TurnEnvelope, decision: TurnDecision,
                      "stocked": stocked}
             if stocked:
                 offer["mode"] = "bundle"
-                offer["prompt"] = f"Pair it with a {offer['label']} to complete your setup."
+                # retrieve the complement's cheapest in-catalog price for a concrete framing +
+                # the STANDALONE path ('already have a computer? just the tablet') — the
+                # complement-as-primary inversion for a lower budget / existing device.
+                import dataclasses
+                from src.app.services.recommendation_core.evidence import gather_evidence
+                free = dataclasses.replace(envelope, budget_min_cents=None, budget_max_cents=None)
+                prices = [v.price_cents for v in gather_evidence(db, free, node_handle=node, limit=8).variants
+                          if v.price_cents is not None]
+                frm = f" (from ${min(prices) / 100:,.0f})" if prices else ""
+                offer["from_cents"] = min(prices) if prices else None
+                offer["prompt"] = (f"Pair your laptop with a {offer['label']}{frm} for pen input — "
+                                   f"or, if you already have a computer, a {offer['label']} alone "
+                                   f"does the job (no new laptop needed).")
+                offer["options"] = [
+                    {"id": "add_bundle", "label": f"Add a {offer['label']}{frm} to my laptop"},
+                    {"id": "standalone", "label": f"Just the {offer['label']}{frm} — I have a computer"}]
             else:
                 offer["mode"] = "source"
                 offer["supplier_rfq_offer"] = True

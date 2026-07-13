@@ -40,13 +40,14 @@ def test_unstocked_complement_offers_to_source(monkeypatch):
     assert "creative" in offers[0]["tags"]
 
 
-def test_stocked_complement_becomes_bundle(monkeypatch):
+def test_stocked_complement_becomes_bundle_with_standalone(monkeypatch):
     monkeypatch.setattr(TR, "sells_within", lambda db, h, tenant_id="default": True)    # stocked
     resp = CoreResponse(envelope=_env(), lane="SEARCH")
-    core._maybe_complement_offer(None, _env(), _decision(), resp)
+    core._maybe_complement_offer(None, _env(), _decision(), resp)   # db=None → no price, still bundle
     off = resp.extras["complement_offers"][0]
     assert off["mode"] == "bundle" and off.get("supplier_rfq_offer") is None
-    assert "options" not in off        # a bundle-upsell doesn't ask the willing-to-wait question
+    # bundle-with-your-laptop OR standalone (the complement-as-primary path for an existing device)
+    assert {o["id"] for o in off["options"]} == {"add_bundle", "standalone"}
 
 
 def test_no_declared_complement_no_offer(monkeypatch):
