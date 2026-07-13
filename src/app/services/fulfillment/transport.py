@@ -21,6 +21,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
+# D8: bound the real SMTP connect/read so a stalled MX can't hang the send (env-overridable).
+_SMTP_TIMEOUT_S = float(os.getenv("FULFILLMENT_SMTP_TIMEOUT_SEC", "15") or 15)
+
 
 @dataclass(frozen=True)
 class SendResult:
@@ -69,9 +72,12 @@ class SmtpTransport:
             msg.set_content(body)
             factory = self._client_factory
             if factory is None:
+                # D8 (Track A hang): real smtplib.SMTP with NO timeout can block indefinitely on a
+                # stalled MX. Bound the connect/read. Injected factories (tests) manage their own.
                 import smtplib
-                factory = smtplib.SMTP
-            client = factory(self.host, self.port)
+                client = smtplib.SMTP(self.host, self.port, timeout=_SMTP_TIMEOUT_S)
+            else:
+                client = factory(self.host, self.port)
             if self.user:
                 client.starttls()
                 client.login(self.user, self.password)

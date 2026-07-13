@@ -17,12 +17,15 @@ Vertical-blind; best-effort; never raises into a caller.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import uuid
 from typing import Any, Dict, List, Optional
 
 from src.app.services.fulfillment import workflow
+
+_log = logging.getLogger("shopsquire.fulfillment.external_comms")
 from src.app.services.fulfillment.domain import Actor, ActorType
 
 
@@ -127,8 +130,13 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
     try:
         from src.app.services.fulfillment.outbound_integrity import scan_outbound_supplier_message
         _integrity = scan_outbound_supplier_message(subject, body, recipient=recipient)
-    except Exception:
-        _integrity = {"action": "allow", "findings": [], "categories": []}
+    except Exception as _scan_exc:
+        # D6 FAIL-CLOSED: if the outbound content scanner can't run, we CANNOT prove the message is
+        # safe to relay to a supplier — hold for review, never default to allow (the old fail-OPEN
+        # let an unscanned/poisoned payload transmit on any scanner error).
+        _log.error("outbound integrity scan FAILED — holding for review (fail-closed): %s",
+                   repr(_scan_exc)[:120])
+        _integrity = {"action": "review", "findings": ["scan_unavailable"], "categories": []}
     if _integrity.get("action") in ("block", "review"):
         try:
             from src.app.services.decision_log import log_trace_event as _lte

@@ -787,8 +787,13 @@ def _case_spend_cents(db, case_id: str) -> Optional[int]:
     return None
 
 
+# D7 (budget cap bypass): the previous tuple listed "PO_PROPOSED"/"PO_ISSUED" which are NOT states
+# in domain.py — so cases sitting in PROCUREMENT_APPROVAL_REQUIRED / PROCUREMENT_IN_PROGRESS were
+# NOT counted as committed spend, and the cumulative budget cap could be bypassed (two cases each
+# under the cap but jointly over). Use the REAL post-approval states.
 _COMMITTED_SPEND_STATES = ("APPROVED_TO_SEND", "QUOTE_SENT", "QUOTE_RECEIVED", "QUOTE_VALIDATED",
-                           "PO_PROPOSED", "PO_ISSUED", "READY_TO_SHIP", "PARTIALLY_READY", "COMPLETED")
+                           "OPTIONS_READY", "SELECTED", "PROCUREMENT_APPROVAL_REQUIRED",
+                           "PROCUREMENT_IN_PROGRESS", "READY_TO_SHIP", "PARTIALLY_READY", "COMPLETED")
 
 
 def _category_committed_cents(db, category: str, *, exclude_case_id: str) -> int:
