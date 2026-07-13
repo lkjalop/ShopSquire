@@ -144,6 +144,22 @@ def test_adapter_passes_shelf_capability_advisories_to_payload():
     assert payload["assumption"]["use_case"] == "gaming"
 
 
+def test_relaxation_options_discovers_the_conflict():
+    """1f: when nothing meets ALL requirements, the catalog reveals which one to relax — no
+    hardcoded 'touchscreen conflicts with GPU' rule. A touchscreen 2-in-1 (no dGPU) + a gaming
+    laptop (dGPU, no touch) → neither has both, so relaxing EITHER yields a match."""
+    from src.app.services.recommendation_core.fit import relaxation_options
+    twoinone = VariantView(sku="2IN1", title="Dell 2-in-1 Laptop", price_cents=119900,
+                           specs={"ram_gb": 16, "gpu_discrete": False})
+    gaming = VariantView(sku="GAME", title="ASUS ROG Gaming Laptop", price_cents=189900,
+                         specs={"ram_gb": 16, "gpu_discrete": True, "gpu_vram_gb": 12})
+    req = {"touchscreen": [("==", True)], "gpu_vram_gb": [(">=", 12)], "ram_gb": [(">=", 16)]}
+    opts = relaxation_options([twoinone, gaming], req)
+    keys = {o["key"] for o in opts}
+    assert "gpu_vram_gb" in keys and "touchscreen" in keys   # relax either → a match exists
+    assert all(o["count"] >= 1 for o in opts)
+
+
 def test_closest_match_message_handles_enum_requirement():
     """Live-caught regression: an enum ('in', [list]) threshold in closest_match_mode crashed the
     message builder (float() on a list). build_cards' summary formats it safely; _exec_retrieve

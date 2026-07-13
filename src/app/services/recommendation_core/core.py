@@ -863,12 +863,29 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     if decision.requirements:
         resp.fit_summary = summary
         if summary.get("closest_match_mode"):
-            # reuse build_cards' SAFE requirement descriptions — an enum predicate
-            # ('form_factor', "in", [list]) has a LIST threshold that a numeric formatter
-            # (float(t)) crashes on (live-caught with the drawing→touchscreen floor).
+            # reuse build_cards' SAFE requirement descriptions — an enum predicate has a LIST
+            # threshold that a numeric formatter (float(t)) crashes on (live-caught).
             reqs = ", ".join(f"{k} {d}" for k, d in (summary.get("requirements") or {}).items())
-            resp.message = (f"No product in our catalog meets {reqs} — showing the closest "
-                            f"options, ranked by how near they come.")
+            # CAPABILITY-CONFLICT narration (1f): discover from the CATALOG which requirement, if
+            # relaxed, would match — the intelligent 'why' + tradeoff (no touchscreen 2-in-1 has a
+            # 12GB discrete GPU). Data-derived, not a hardcoded 'X conflicts with Y' rule.
+            from src.app.services.recommendation_core.fit import relaxation_options
+            opts = relaxation_options(variants, decision.requirements)
+            if opts:
+                _lbl = {"touchscreen": "the touchscreen", "gpu_vram_gb": "the discrete GPU",
+                        "form_factor": "the 2-in-1/tablet form", "ram_gb": "the RAM",
+                        "storage_gb": "the storage", "refresh_hz": "the high refresh rate"}
+
+                def _lab(o):
+                    return _lbl.get(o["key"], o["key"].replace("_", " "))
+                tail = (f", or {opts[1]['count']} if you relax {_lab(opts[1])}"
+                        if len(opts) >= 2 else "")
+                resp.message = (f"No single product has all of {reqs} together — {opts[0]['count']} "
+                                f"match if you relax {_lab(opts[0])}{tail}. Which matters more?")
+                resp.extras["capability_conflict"] = {"requirements": reqs, "relax_options": opts}
+            else:
+                resp.message = (f"No product in our catalog meets {reqs} — showing the closest "
+                                f"options, ranked by how near they come.")
 
 
 def _exec_fit_check(db, envelope: TurnEnvelope, decision: TurnDecision,

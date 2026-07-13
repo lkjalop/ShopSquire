@@ -157,6 +157,30 @@ def build_cards(variants: List[VariantView],
     return cards, summary
 
 
+def relaxation_options(variants: List[VariantView], requirements: Optional[Dict[str, Any]],
+                       *, defs: Optional[Dict[str, AttributeDef]] = None) -> List[Dict[str, Any]]:
+    """When NOTHING meets all requirements (closest-match), which SINGLE requirement — if relaxed —
+    would yield matches? The catalog-DERIVED capability-conflict analysis: drop each requirement,
+    count how many candidates then MEET. Returns [{key, count}] sorted by count desc. NO hardcoded
+    'touchscreen conflicts with GPU' rule — the conflict is discovered from the catalog, so it
+    generalizes to any pair (lightweight vs GPU, 2-in-1 vs discrete-GPU, …). Bounded: attributes
+    computed once per candidate."""
+    if not requirements or len(requirements) < 2 or not variants:
+        return []
+    defs = defs or defs_union(DEFAULT_VERTICALS)
+    attrs_list = [variant_attributes(v, defs) for v in variants]
+    out: List[Dict[str, Any]] = []
+    for drop in list(requirements):
+        reduced = {k: v for k, v in requirements.items() if k != drop}
+        if not reduced:
+            continue
+        n = sum(1 for a in attrs_list
+                if evaluate_requirements(a, reduced).get("overall") == "meets")
+        if n > 0:
+            out.append({"key": drop, "count": n})
+    return sorted(out, key=lambda x: -x["count"])
+
+
 def assess_intent_fit(candidate: VariantView, requirements: Optional[Dict[str, Any]],
                       *, defs: Optional[Dict[str, AttributeDef]] = None,
                       alternatives: Optional[List[VariantView]] = None) -> Dict[str, Any]:

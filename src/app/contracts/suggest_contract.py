@@ -82,6 +82,8 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     # complement_offers: declared complements (drawing → graphics tablet) as bundle-upsell (stocked)
     # or source-it supplier-RFQ offers (not stocked) — the unstocked-complement trust play (1d.4).
     "complement_offers",
+    # capability_conflict: the catalog-derived 'these requirements can't coexist; relax X or Y' (1f).
+    "capability_conflict",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):
