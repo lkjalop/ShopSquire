@@ -238,6 +238,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     except Exception as exc:
         logger.warning("capability-budget stage skipped: %s", repr(exc)[:120])
 
+    # SHELF (Phase 1b): partition the ranked cards into the 3-band right-side panel contract
+    # (best_fit / stretch-or-more-capable / preference). Reads the capability banner set above;
+    # never raises — the flat products already stand on their own.
+    try:
+        _build_shelf(db, envelope, decision, resp, limit)
+    except Exception as exc:
+        logger.warning("shelf stage skipped: %s", repr(exc)[:120])
+
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
         q = slot_gap_clarify(
@@ -275,23 +283,30 @@ def _capability_phrase(decision: TurnDecision) -> str:
     return ", ".join(k.replace("_", " ") for k in keys[:3]) or "your use case"
 
 
-def _budget_free_floor(db, envelope: TurnEnvelope, decision: TurnDecision,
-                       limit: int) -> Optional[int]:
-    """The capability floor IGNORING budget — the cheapest catalog product (in the routed node)
-    that MEETS the requirements, even if it sits above the shopper's ceiling. gather_evidence
-    hard-filters budget at the evidence edge, so an above-budget match is otherwise invisible;
-    this is what lets 'nothing at $900 — the real floor is $1199' be honest instead of an empty
-    grid. Cold path (fires only when nothing in-budget meets). Generous candidate cap because the
-    slate is sku-ordered and attributes aren't in SQL (a pure MIN() query waits on Phase 4 typed
-    price columns)."""
+def _budget_free_cards(db, envelope: TurnEnvelope, decision: TurnDecision, limit: int) -> list:
+    """Ranked cards for the routed node IGNORING budget — the above-budget stretch/premium set is
+    otherwise invisible (gather_evidence hard-filters budget at the evidence edge). This is what
+    lets 'nothing at $900 — the real floor is $1199' be honest instead of an empty grid, and what
+    fills the shelf's stretch band. Cold path (only when nothing in-budget meets). Generous
+    candidate cap because the slate is sku-ordered and attributes aren't in SQL (a paged MIN()
+    query waits on Phase 4 typed price columns). [] on empty/error."""
     import dataclasses
     free_env = dataclasses.replace(envelope, budget_min_cents=None, budget_max_cents=None)
-    bundle = gather_evidence(db, free_env, node_handle=decision.node_handle,
-                             limit=max(limit * 20, 200))
+    n = max(limit * 20, 200)
+    bundle = gather_evidence(db, free_env, node_handle=decision.node_handle, limit=n)
     if bundle.status != "ok" or not bundle.variants:
-        return None
-    _, summary = build_cards(bundle.variants, decision.requirements or None, limit=1)
-    return summary.get("capability_floor_cents")
+        return []
+    cards, _ = build_cards(bundle.variants, decision.requirements or None, limit=n)
+    return cards
+
+
+def _budget_free_floor(db, envelope: TurnEnvelope, decision: TurnDecision,
+                       limit: int) -> Optional[int]:
+    """The capability floor IGNORING budget — cheapest node product that MEETS, even above the
+    shopper's ceiling (the honest 'the real floor is $1199')."""
+    prices = [c.price_cents for c in _budget_free_cards(db, envelope, decision, limit)
+              if c.price_cents is not None and (c.fit or {}).get("overall") == "meets"]
+    return min(prices) if prices else None
 
 
 def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
@@ -361,6 +376,90 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
                     {"id": "closest", "label": "Just show the closest in my budget"},
                 ]})
     resp.extras["capability"] = cap
+
+
+def _band(band_id: str, label: str, basis: str, cards: list) -> Dict[str, Any]:
+    """One shelf band, self-describing so the frontend renders it blind: skus + full card dicts
+    (each carries its honest fit verdict chip) + the reason it exists."""
+    return {"id": band_id, "label": label, "basis": basis,
+            "skus": [c.sku for c in cards], "cards": [c.as_dict() for c in cards]}
+
+
+def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
+                 resp: CoreResponse, limit: int) -> None:
+    """Phase 1b — the 3-band right-side shelf: a PARTITION of the ranked cards (no new model call,
+    vertical-blind), the presentation contract the panel renders.
+      band 1 best_fit  — the top-3 answer to intent+budget (meets-in-budget, else the closest,
+                         labeled honestly);
+      band 2 stretch / more_capable — meets NOT in band 1. below_budget → the above-budget meets
+                         to stretch to (cheapest = the floor); within/no-budget → 'more capable' =
+                         capability HEADROOM (exceeds a requirement), never merely pricier;
+      band 3 preference — a stated brand/variant preference, OMITTED when none was expressed.
+    Adaptive (empty bands dropped), deduped (a product in exactly one band, priority 1>2>3),
+    every card keeps its honest fit verdict. Runs after the capability banner; never raises."""
+    if decision.lane not in ("SEARCH", "FILTER"):
+        return
+    if not decision.requirements or resp.off_catalog or resp.degraded:
+        return
+    cap = resp.extras.get("capability") or {}
+    verdict = cap.get("verdict")
+    floor = cap.get("floor_cents")
+    bmax = envelope.budget_max_cents
+    meets = lambda c: (c.fit or {}).get("overall") == "meets"          # noqa: E731
+    margin = lambda c: len((c.fit or {}).get("exceeds") or [])         # noqa: E731
+
+    in_budget = list(resp.products)          # already ranked; budget-filtered (or full if no bmax)
+    above_budget: list = []
+    if verdict == "below_budget" and decision.node_handle:
+        # the stretch story lives ABOVE the ceiling — reuse the budget-free node set
+        in_ids = {c.sku for c in in_budget}
+        above_budget = [c for c in _budget_free_cards(db, envelope, decision, limit)
+                        if c.sku not in in_ids and (c.price_cents or 0) > (bmax or 0)]
+    universe = in_budget + above_budget
+    used: set = set()
+    bands: list = []
+
+    # band 1 — best fit for intent+budget (meets-in-budget, else the honest closest)
+    meets_in = [c for c in in_budget if meets(c)]
+    band1 = (meets_in or in_budget)[:3]
+    used.update(c.sku for c in band1)
+    if band1:
+        bands.append(_band("best_fit", "Best fit for you", "intent+budget", band1))
+
+    # band 2 — stretch (below budget) OR more-capable headroom (within / no budget)
+    rest_meets = [c for c in universe if c.sku not in used and meets(c)]
+    if verdict == "below_budget":
+        rest_meets.sort(key=lambda c: (c.price_cents or 0))            # cheapest stretch = the floor
+        band2 = rest_meets[:3]
+        label = (f"Meets your needs — stretch from ${floor / 100:,.0f}"
+                 if floor else "Meets your needs (stretch)")
+        band2_id, basis = "stretch", "meets_stretch"
+    else:
+        headroom = [c for c in rest_meets if margin(c) > 0]            # HEADROOM, not just pricier
+        headroom.sort(key=lambda c: (-margin(c), c.price_cents or 0))
+        band2 = headroom[:3]
+        band2_id, label, basis = "more_capable", "More capable", "capability_headroom"
+    used.update(c.sku for c in band2)
+    if band2:
+        bands.append(_band(band2_id, label, basis, band2))
+
+    # band 3 — brand/variant/spec preference (only when a signal was expressed)
+    pref = getattr(decision, "preferred_brand", None) or getattr(decision, "brand_filter", None)
+    if pref:
+        p = str(pref).strip().lower()
+        pool = [c for c in universe if c.sku not in used and (c.brand or "").strip().lower() == p]
+        pool.sort(key=lambda c: (0 if meets(c) else 1, c.price_cents or 0))
+        band3 = pool[:3]
+        used.update(c.sku for c in band3)
+        if band3:
+            bands.append(_band("preference", f"If you prefer {str(pref).strip().title()}",
+                               f"brand:{p}", band3))
+
+    resp.extras["shelf"] = {
+        "banner": {"kind": verdict or ("within_budget" if bmax else "floor_stated"),
+                   "text": resp.message, "floor_cents": floor, "budget_max_cents": bmax},
+        "bands": bands,
+    }
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:

@@ -74,6 +74,28 @@ def _preferred_distance(attrs: Dict[str, Any], preferred: Dict[str, float]) -> f
     return round(total, 4)
 
 
+def _exceeds_keys(attrs: Dict[str, Any], requirements: Dict[str, Any]) -> List[str]:
+    """Keys where the product STRICTLY exceeds a lower-bound requirement (a >= / > floor) — the
+    capability HEADROOM that makes a product 'more capable' rather than merely pricier (Phase 1b
+    band 2). Booleans and non-numeric attrs never count as headroom (a touchscreen isn't 'more'
+    touch); a pricier same-spec product exceeds nothing and is correctly NOT more capable."""
+    out: List[str] = []
+    for k, spec in (requirements or {}).items():
+        a = attrs.get(k)
+        if isinstance(a, bool) or not isinstance(a, (int, float)):
+            continue
+        preds = spec if isinstance(spec, list) else [spec]
+        for pred in preds:
+            if not (isinstance(pred, (list, tuple)) and len(pred) == 2):
+                continue                       # malformed predicate — skip it, visibly, no swallow
+            op, thr = pred
+            if (op in (">=", ">") and isinstance(thr, (int, float)) and not isinstance(thr, bool)
+                    and float(a) > float(thr)):
+                out.append(k)
+                break
+    return out
+
+
 def build_cards(variants: List[VariantView],
                 requirements: Optional[Dict[str, Any]] = None,
                 *, defs: Optional[Dict[str, AttributeDef]] = None,
@@ -106,6 +128,7 @@ def build_cards(variants: List[VariantView],
                            stock=v.stock, stock_source=v.stock_source)
         if requirements:
             verdict = evaluate_requirements(attrs, requirements)
+            verdict["exceeds"] = _exceeds_keys(attrs, requirements)   # capability headroom (Phase 1b)
             card.fit = verdict
             overall = verdict["overall"]
             counts[overall] += 1
