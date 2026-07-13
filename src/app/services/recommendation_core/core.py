@@ -319,6 +319,41 @@ def _capability_phrase(decision: TurnDecision) -> str:
     return ", ".join(k.replace("_", " ") for k in keys[:3]) or "your use case"
 
 
+def _capability_scope_nodes(decision: TurnDecision) -> list:
+    """The node(s) to compute the capability FLOOR over. When the routed product is a workload
+    HOST (a device), use the store's DECLARED device host union (capability_host_nodes[run_on] =
+    [Laptops, Gaming Laptops]) so the floor spans the whole device FAMILY, not just the routed leaf
+    — a GPU/creative intent routed to 'Laptops' must still see 'Gaming Laptops' (else the floor
+    inflates: $4894 vs the real $1919). DATA-DRIVEN (the profile declares the union); no hardcoded
+    'GPU → Gaming Laptops' rule. Accessories (non-host) stay scoped to their own node."""
+    node = decision.node_handle
+    if not node:
+        return []
+    if not _is_workload_host_product(node):
+        return [node]
+    try:
+        from src.app.platform.store_profile import profile_slot
+        hosts = (profile_slot("capability_host_nodes", default={}) or {}).get("run_on") or []
+        return list(dict.fromkeys([node] + [str(h) for h in hosts]))
+    except Exception as exc:
+        logger.debug("capability host union lookup failed: %s", repr(exc)[:100])
+        return [node]
+
+
+def _gather_scope_variants(db, free_env: TurnEnvelope, decision: TurnDecision, limit: int) -> list:
+    """Union of variants across the capability-scope nodes (device host family), dedup by sku."""
+    n = max(limit * 20, 200)
+    variants, seen = [], set()
+    for node in _capability_scope_nodes(decision):
+        b = gather_evidence(db, free_env, node_handle=node, limit=n)
+        if b.status == "ok":
+            for v in b.variants:
+                if v.sku not in seen:
+                    seen.add(v.sku)
+                    variants.append(v)
+    return variants
+
+
 def _budget_free_cards(db, envelope: TurnEnvelope, decision: TurnDecision, limit: int) -> list:
     """Ranked cards for the routed node IGNORING budget — the above-budget stretch/premium set is
     otherwise invisible (gather_evidence hard-filters budget at the evidence edge). This is what
@@ -329,10 +364,9 @@ def _budget_free_cards(db, envelope: TurnEnvelope, decision: TurnDecision, limit
     import dataclasses
     free_env = dataclasses.replace(envelope, budget_min_cents=None, budget_max_cents=None)
     n = max(limit * 20, 200)
-    bundle = gather_evidence(db, free_env, node_handle=decision.node_handle, limit=n)
-    if bundle.status != "ok" or not bundle.variants:
+    variants = _gather_scope_variants(db, free_env, decision, limit)   # device host FAMILY, not just the leaf
+    if not variants:
         return []
-    variants = bundle.variants
     # HONESTY (review finding #1): a HARD brand filter must not leak off-brand products into the
     # floor/stretch — 'only Dell, $900' must never quote a Lenovo as 'the cheapest that meets'.
     bf = getattr(decision, "brand_filter", None)
@@ -709,7 +743,7 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
     from src.app.services.recommendation_core.bulk import assess_bulk
     from src.app.services.recommendation_core.fit import build_cards
     free = dataclasses.replace(envelope, budget_min_cents=None, budget_max_cents=None)
-    variants = gather_evidence(db, free, node_handle=decision.node_handle, limit=200).variants
+    variants = _gather_scope_variants(db, free, decision, 10)   # device host FAMILY (Laptops + Gaming)
     if not variants:
         return
     floor = build_cards(variants, reqs or None, limit=1)[1].get("capability_floor_cents")

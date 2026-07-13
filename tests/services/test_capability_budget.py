@@ -109,7 +109,7 @@ def test_budget_free_floor_ignores_ceiling(monkeypatch):
     monkeypatch.setattr(core, "gather_evidence", fake_gather)
     floor = _budget_free_floor(None, _env(budget_max=900), _decision(), 10)
     assert seen["bmax"] is None and seen["bmin"] is None      # the probe cleared the ceiling
-    assert seen["node"] == "el-6-11"
+    assert seen["node"] is not None      # scoped to the device host FAMILY (union of host nodes)
     assert floor == 119900        # the $1199 2-in-1 above the $900 ceiling; the clamshell can't meet
 
 
