@@ -104,6 +104,40 @@ class ProductCard:
                 "workload_fit": self.fit}
 
 
+class MsgPriority:
+    """Explicit priority ladder for the primary buyer message (V2 review-10 P0.5). Replaces the
+    old execution-order-wins mutation: a stage states WHERE its prose sits in the hierarchy, not
+    when it happens to run, so inserting or reordering a stage can no longer silently change which
+    sentence the buyer reads. Higher wins; ties go to the later caller (matches the previous
+    last-writer-wins within a tier). Values mirror the behaviour the sequential mutation produced."""
+    CAPABILITY_WITHIN_BUDGET = 5    # guarded fill-only confirm — loses to any lane-base message
+    LANE_BASE = 10                  # a lane executor's base prose (search/filter/explain/compare/…)
+    CAPABILITY_STATEMENT = 20       # floor-stated / below-budget tradeoff — overrides lane base
+    BULK_VERDICT = 50               # bulk fits / over-budget menu
+    BULK_SCOPE_CLARIFY = 60         # per-unit-vs-total ambiguity — must be asked before anything
+    REFUSAL = 100                   # off-catalog honesty (composed refusal-aware prose)
+
+
+@dataclass
+class StageResult:
+    """One core stage's typed outcome (V2 review-10 P0.5). Carries the operational breadcrumb the
+    canary needs — status / latency / retrieval count — so per-stage cost is measurable instead of
+    hidden inside a monolithic turn. The message it may have claimed lives on CoreResponse.message
+    (via set_message); this record is telemetry, never the source of the prose."""
+    stage: str
+    status: str = "ok"              # ok | clarify | conflict | skipped | error
+    latency_ms: float = 0.0
+    retrieval_count: int = 0
+    won_message: bool = False       # did this stage claim the primary-message slot?
+    data: Dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"stage": self.stage, "status": self.status,
+                "latency_ms": round(self.latency_ms, 1),
+                "retrieval_count": self.retrieval_count, "won_message": self.won_message,
+                **({"data": self.data} if self.data else {})}
+
+
 @dataclass
 class CoreResponse:
     """THE unified response. Invariants (enforced by finalize()):
@@ -123,17 +157,43 @@ class CoreResponse:
     degraded: bool = False
     decision_id: str = ""
     extras: Dict[str, Any] = field(default_factory=dict)  # stage breadcrumbs for the adapter
+    stage_results: List[StageResult] = field(default_factory=list)  # P0.5 per-stage telemetry
+    # highest message priority claimed so far (P0.5). -1 = unclaimed; not a constructor concern.
+    _msg_priority: int = field(default=-1, repr=False)
+
+    def set_message(self, text: str, priority: int) -> bool:
+        """Claim the primary-message slot IFF priority >= the highest claimed so far. This is the
+        composer: a stage declares its priority (MsgPriority.*), never relies on running last. An
+        empty/blank text never claims. Returns True if it won the slot (so a stage can record it)."""
+        if not str(text or "").strip():
+            return False
+        if priority >= self._msg_priority:
+            self.message = text
+            self._msg_priority = priority
+            return True
+        return False
+
+    def record_stage(self, stage: str, *, status: str = "ok", latency_ms: float = 0.0,
+                     retrieval_count: int = 0, won_message: bool = False,
+                     **data: Any) -> None:
+        """Append one stage's operational breadcrumb. Additive — never touches the message."""
+        self.stage_results.append(StageResult(
+            stage=stage, status=status, latency_ms=latency_ms, retrieval_count=retrieval_count,
+            won_message=won_message, data=dict(data)))
 
     def finalize(self) -> "CoreResponse":
         """Enforce the invariants; called once by the orchestrator before the adapter."""
         if not self.decision_id:
             self.decision_id = self.envelope.trace_id
+        if self.stage_results:
+            self.extras["stage_results"] = [s.as_dict() for s in self.stage_results]
         if self.off_catalog:
             self.products = []
             # a message composed BEFORE the refusal decision ("Here are 2 options.") must not
             # survive it — regenerate unless a stage explicitly composed refusal-aware prose
             if not self.extras.get("refusal_message_composed"):
                 self.message = ""
+                self._msg_priority = -1
         if self.grounding == "error":
             self.degraded = True
         if not str(self.message or "").strip():

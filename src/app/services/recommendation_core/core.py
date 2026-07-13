@@ -12,9 +12,10 @@ breadcrumbs, which is what the shadow differ diffs against the oracle.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Callable, Dict, Optional
 
-from src.app.services.recommendation_core.envelope import CoreResponse, TurnEnvelope
+from src.app.services.recommendation_core.envelope import CoreResponse, MsgPriority, TurnEnvelope
 from src.app.services.recommendation_core.evidence import (
     degraded_response,
     gather_evidence,
@@ -83,6 +84,24 @@ def _vertical_root(node_handle: Optional[str]) -> Optional[str]:
         if a.depth == 0:
             return a.handle
     return None
+
+
+def _run_stage(resp: CoreResponse, name: str, fn: Callable[[], None]) -> None:
+    """Run one guarded post-retrieval stage (P0.5): time it, record a telemetry breadcrumb, and
+    swallow-but-log any failure — a stage failure must never break the turn (the products already
+    stand on their own). won_message is inferred from whether the message-priority slot advanced,
+    so the trace shows exactly which stage authored the buyer's sentence."""
+    t0 = time.perf_counter()
+    prio_before = resp._msg_priority
+    status = "ok"
+    try:
+        fn()
+    except Exception as exc:
+        status = "error"
+        logger.warning("%s stage skipped: %s", name, repr(exc)[:120])
+    resp.record_stage(name, status=status,
+                      latency_ms=(time.perf_counter() - t0) * 1000.0,
+                      won_message=resp._msg_priority > prio_before)
 
 
 def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
@@ -216,8 +235,16 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "requirements_inherited": requirements_inherited,
     }
 
+    # plan executors are the turn's MAIN work (retrieve / fit / compare / handoff); time the whole
+    # planned sequence as one 'plan' breadcrumb, with the retrieval count the evidence leg recorded.
+    _t_plan = time.perf_counter()
+    _prio_before = resp._msg_priority
     for step in plan.steps:
         _EXECUTORS[step](db, envelope, decision, resp, limit)
+    resp.record_stage("plan:" + "+".join(plan.steps), status="ok",
+                      latency_ms=(time.perf_counter() - _t_plan) * 1000.0,
+                      retrieval_count=int((resp.extras.get("evidence") or {}).get("count") or 0),
+                      won_message=resp._msg_priority > _prio_before)
 
     # gates: prefer the SHARED commerce guard's verdict (run once at the facade ingress) —
     # the core does NOT own a second security regex (GPT-5.6 #10). The thin evaluate_text_gates
@@ -249,46 +276,26 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 {"id": "keep_ceiling", "label": f"At most {c0['upper']:g} (my stated limit)"},
             ]})
 
-    # BUDGET × CAPABILITY (Phase 1a — the "smart moment"): state the catalog-derived capability
-    # floor, confirm within budget, or offer an honest tradeoff when budget < floor. Runs AFTER
-    # the conflict clarify (a stated-requirement conflict outranks it) and BEFORE slot-gap so its
-    # tradeoff clarify wins that slot. Never raises — the products already stand on their own; the
-    # whole core is gated by RECOMMEND_CORE_MODE at the facade, so this is off in prod until flip.
-    try:
-        _apply_capability_budget(db, envelope, decision, resp, limit)
-    except Exception as exc:
-        logger.warning("capability-budget stage skipped: %s", repr(exc)[:120])
-
-    # SHELF (Phase 1b): partition the ranked cards into the 3-band right-side panel contract
-    # (best_fit / stretch-or-more-capable / preference). Reads the capability banner set above;
-    # never raises — the flat products already stand on their own.
-    try:
-        _build_shelf(db, envelope, decision, resp, limit)
-    except Exception as exc:
-        logger.warning("shelf stage skipped: %s", repr(exc)[:120])
-
-    # VARIANT CLARIFIER (Phase 1c): one question only when a variant materially moves the floor and
-    # the shopper hasn't anchored it — else a stated assumption; content-advisory surfaces, never
-    # blocks. Runs before slot-gap so a specific variant ask outranks the generic "tell me more".
-    try:
-        _maybe_variant_clarify(envelope, decision, resp)
-    except Exception as exc:
-        logger.warning("variant-clarify stage skipped: %s", repr(exc)[:120])
-
-    # COMPLEMENT OFFER (Phase 1d.4): a declared complement (drawing → graphics tablet) becomes a
-    # bundle-upsell if stocked, else a source-it supplier-RFQ offer — one declaration, stock picks
-    # the branch. Never blocks, never auto-sends.
-    try:
-        _maybe_complement_offer(db, envelope, decision, resp)
-    except Exception as exc:
-        logger.warning("complement-offer stage skipped: %s", repr(exc)[:120])
-
-    # BULK ECONOMICS (Phase 1f): 'N units for X, $T total' → ÷units viability + tradeoff menu
-    # (increase budget / reduce units / bundle-fit / payment plan). Overrides the procurement stub.
-    try:
-        _maybe_bulk_economics(db, envelope, decision, resp)
-    except Exception as exc:
-        logger.warning("bulk-economics stage skipped: %s", repr(exc)[:120])
+    # POST-RETRIEVAL STAGES (P0.5): each is guarded + timed + telemetry-recorded by _run_stage —
+    # a stage failure is logged and skipped, never fatal (the products already stand on their own;
+    # the whole core is gated by RECOMMEND_CORE_MODE at the facade, off in prod until flip). Message
+    # priority is EXPLICIT (MsgPriority via set_message), so this order sets EXECUTION order, not
+    # which sentence the buyer reads — reordering can no longer silently steal the message.
+    #   capability-budget (1a) — floor / within-budget confirm / below-budget tradeoff, after the
+    #     conflict clarify (stated-requirement conflict outranks) and before slot-gap.
+    #   shelf (1b)           — partition ranked cards into the 3-band panel; reads the capability banner.
+    #   variant-clarify (1c) — one question when a variant materially moves the floor; else assumption.
+    #   complement-offer (1d.4) — declared complement → bundle-upsell if stocked, else source-it RFQ.
+    #   bulk-economics (1f)  — 'N units, $T total' → ÷units viability + tradeoff menu.
+    _run_stage(resp, "capability_budget",
+               lambda: _apply_capability_budget(db, envelope, decision, resp, limit))
+    _run_stage(resp, "shelf", lambda: _build_shelf(db, envelope, decision, resp, limit))
+    _run_stage(resp, "variant_clarify",
+               lambda: _maybe_variant_clarify(envelope, decision, resp))
+    _run_stage(resp, "complement_offer",
+               lambda: _maybe_complement_offer(db, envelope, decision, resp))
+    _run_stage(resp, "bulk_economics",
+               lambda: _maybe_bulk_economics(db, envelope, decision, resp))
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
@@ -441,24 +448,28 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
                        and (c.fit or {}).get("overall") == "meets"]
         top = max(shown_meets, default=floor)
         if top > floor:
-            resp.message = (f"These all handle {phrase} — they start at ${floor / 100:,.0f} "
-                            f"and go up to ${top / 100:,.0f} for more headroom.")
+            resp.set_message((f"These all handle {phrase} — they start at ${floor / 100:,.0f} "
+                              f"and go up to ${top / 100:,.0f} for more headroom."),
+                             MsgPriority.CAPABILITY_STATEMENT)
         else:
-            resp.message = f"These all handle {phrase}, starting at ${floor / 100:,.0f}."
+            resp.set_message(f"These all handle {phrase}, starting at ${floor / 100:,.0f}.",
+                             MsgPriority.CAPABILITY_STATEMENT)
     elif floor <= bmax:
         cap["verdict"] = "within_budget"
-        if not str(resp.message or "").strip():
-            resp.message = (f"The best fit for {phrase} starts at ${floor / 100:,.0f}, within "
-                            f"your ${bmax / 100:,.0f} budget.")
+        # fill-only: a lane-base message (closest-match / compare) outranks this confirm — the
+        # CAPABILITY_WITHIN_BUDGET priority (< LANE_BASE) reproduces the old `if not message` guard.
+        resp.set_message((f"The best fit for {phrase} starts at ${floor / 100:,.0f}, within "
+                          f"your ${bmax / 100:,.0f} budget."), MsgPriority.CAPABILITY_WITHIN_BUDGET)
     else:
         cap["verdict"] = "below_budget"
         if resp.products:
-            resp.message = (f"Nothing at ${bmax / 100:,.0f} fully meets what {phrase} needs — the "
-                            f"cheapest that does is ${floor / 100:,.0f}. Showing the closest in "
-                            f"your budget below.")
+            resp.set_message((f"Nothing at ${bmax / 100:,.0f} fully meets what {phrase} needs — the "
+                              f"cheapest that does is ${floor / 100:,.0f}. Showing the closest in "
+                              f"your budget below."), MsgPriority.CAPABILITY_STATEMENT)
         else:
-            resp.message = (f"I don't have anything at ${bmax / 100:,.0f} that meets what {phrase} "
-                            f"needs — the cheapest that does is ${floor / 100:,.0f}.")
+            resp.set_message((f"I don't have anything at ${bmax / 100:,.0f} that meets what {phrase} "
+                              f"needs — the cheapest that does is ${floor / 100:,.0f}."),
+                             MsgPriority.CAPABILITY_STATEMENT)
         # one structured tradeoff, only if no higher-priority clarify already claimed the slot
         if not resp.clarify:
             resp.clarify.append({
@@ -792,15 +803,15 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
         # a budget was stated but we can't tell per-unit vs total — ASK, never guess the arithmetic
         per = f"${(envelope.budget_max_cents or 0) / 100:,.0f}"
         econ["scope_ambiguous"] = True
-        resp.message = (f"For {quantity} units — is {per} your budget PER LAPTOP, or the TOTAL for "
-                        f"all {quantity}? That changes the math.")
+        resp.set_message((f"For {quantity} units — is {per} your budget PER LAPTOP, or the TOTAL for "
+                          f"all {quantity}? That changes the math."), MsgPriority.BULK_SCOPE_CLARIFY)
         if not resp.clarify:
             resp.clarify.append({"id": "budget_scope", "goal": "resolve_budget_scope",
                                  "text": f"Is {per} per laptop, or the total for all {quantity}?",
                                  "options": [{"id": "per_unit", "label": f"{per} per laptop"},
                                              {"id": "total", "label": f"{per} total for all {quantity}"}]})
     else:
-        resp.message = _bulk_message(econ, decision)
+        resp.set_message(_bulk_message(econ, decision), MsgPriority.BULK_VERDICT)
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:
@@ -871,7 +882,7 @@ def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision
         top = cards[0]
         why = "; ".join(top.why) if top.why else "it leads the shortlist on price and availability"
         price = f" at ${top.price_cents / 100:,.0f}" if top.price_cents is not None else ""
-        resp.message = f"{top.title}{price} leads this shortlist: {why}."
+        resp.set_message(f"{top.title}{price} leads this shortlist: {why}.", MsgPriority.LANE_BASE)
     return True
 
 def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
@@ -918,8 +929,9 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
         bl = decision.brand_filter.lower()
         variants = [v for v in variants if (v.brand or "").strip().lower() == bl]
         if not variants:
-            resp.message = (f"None of the current options are from {decision.brand_filter} — "
-                            f"tell me if another brand works, or widen the search.")
+            resp.set_message((f"None of the current options are from {decision.brand_filter} — "
+                              f"tell me if another brand works, or widen the search."),
+                             MsgPriority.LANE_BASE)
     # brand EXCLUSION ('but not Apple') — subtract the excluded brand from the shown slate
     if decision.exclude_brand:
         xb = decision.exclude_brand.strip().lower()
@@ -931,7 +943,7 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
         if pair:
             variants = pair
             names = " vs ".join((v.title or v.sku)[:48] for v in pair)
-            resp.message = f"Comparing {names}."
+            resp.set_message(f"Comparing {names}.", MsgPriority.LANE_BASE)
             resp.extras["compare_bound"] = [v.sku for v in pair]
     cards, summary = build_cards(variants, decision.requirements or None, limit=limit,
                                  sort=decision.sort, preferred=_preferred_values(resp))
@@ -956,12 +968,13 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
                     return _lbl.get(o["key"], o["key"].replace("_", " "))
                 tail = (f", or {opts[1]['count']} if you relax {_lab(opts[1])}"
                         if len(opts) >= 2 else "")
-                resp.message = (f"No single product has all of {reqs} together — {opts[0]['count']} "
-                                f"match if you relax {_lab(opts[0])}{tail}. Which matters more?")
+                resp.set_message((f"No single product has all of {reqs} together — {opts[0]['count']} "
+                                  f"match if you relax {_lab(opts[0])}{tail}. Which matters more?"),
+                                 MsgPriority.LANE_BASE)
                 resp.extras["capability_conflict"] = {"requirements": reqs, "relax_options": opts}
             else:
-                resp.message = (f"No product in our catalog meets {reqs} — showing the closest "
-                                f"options, ranked by how near they come.")
+                resp.set_message((f"No product in our catalog meets {reqs} — showing the closest "
+                                  f"options, ranked by how near they come."), MsgPriority.LANE_BASE)
 
 
 def _exec_fit_check(db, envelope: TurnEnvelope, decision: TurnDecision,
@@ -994,8 +1007,8 @@ def _exec_policy_answer(db, envelope: TurnEnvelope, decision: TurnDecision,
                         resp: CoreResponse, limit: int) -> None:
     # capability honesty rides the registry until the policy lane lands in a later step
     resp.extras["policy_topic"] = envelope.query[:120]
-    resp.message = ("Good question — our policy details are being routed to the right lane; "
-                    "here's what I can confirm from the store profile.")
+    resp.set_message(("Good question — our policy details are being routed to the right lane; "
+                      "here's what I can confirm from the store profile."), MsgPriority.LANE_BASE)
 
 
 def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
@@ -1004,15 +1017,16 @@ def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
     # review-10: 'received' + 'I've logged this' FALSELY implies a persisted claim — nothing is
     # filed here yet. Be honest until an idempotent handoff returns a real claim ID + audit event.
     resp.extras["claim_status"] = "pending_handoff"
-    resp.message = ("I'll pass this to a human to review — nothing is filed automatically yet. "
-                    "You'll be contacted with next steps.")
+    resp.set_message(("I'll pass this to a human to review — nothing is filed automatically yet. "
+                      "You'll be contacted with next steps."), MsgPriority.LANE_BASE)
 
 
 def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision,
                               resp: CoreResponse, limit: int) -> None:
     resp.extras["procurement_intent"] = True
-    resp.message = ("This looks like a bulk/procurement request — I can draft a supplier "
-                    "quote request for review. Nothing is sent without human approval.")
+    resp.set_message(("This looks like a bulk/procurement request — I can draft a supplier "
+                      "quote request for review. Nothing is sent without human approval."),
+                     MsgPriority.LANE_BASE)
 
 
 _EXECUTORS: Dict[str, Any] = {
