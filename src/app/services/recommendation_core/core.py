@@ -255,6 +255,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     except Exception as exc:
         logger.warning("variant-clarify stage skipped: %s", repr(exc)[:120])
 
+    # COMPLEMENT OFFER (Phase 1d.4): a declared complement (drawing → graphics tablet) becomes a
+    # bundle-upsell if stocked, else a source-it supplier-RFQ offer — one declaration, stock picks
+    # the branch. Never blocks, never auto-sends.
+    try:
+        _maybe_complement_offer(db, envelope, decision, resp)
+    except Exception as exc:
+        logger.warning("complement-offer stage skipped: %s", repr(exc)[:120])
+
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
         q = slot_gap_clarify(
@@ -556,6 +564,52 @@ def _maybe_variant_clarify(envelope: TurnEnvelope, decision: TurnDecision,
             "text": f"For {uc.replace('_', ' ')}, which level fits? It changes the pick and the price.",
             "options": opts})
         return
+
+
+def _maybe_complement_offer(db, envelope: TurnEnvelope, decision: TurnDecision,
+                            resp: CoreResponse) -> None:
+    """Phase 1d.4 — the unstocked-complement trust play. A use-case can declare COMPLEMENTS
+    (drawing → a graphics tablet for pen input). ONE declaration, two behaviours, picked by STOCK
+    TRUTH (sells_within):
+      • stocked   → bundle-upsell ('pair it with a …');
+      • NOT stocked → a SOURCE-IT offer (supplier RFQ, human-approved) + a willing-to-wait CTA —
+        turning a catalog gap into an honest alternative + a procurement trigger + a demand signal.
+    Never blocks; NEVER auto-sends (the human-only-send invariant holds). No-op off the product
+    lanes / on a degraded or off-catalog turn / when no complement is declared."""
+    if decision.lane not in ("SEARCH", "FILTER") or resp.off_catalog or resp.degraded:
+        return
+    vertical = _vertical_name(decision.node_handle)
+    if not vertical:
+        return
+    from src.app.services import use_case_registry as R
+    from src.app.services.taxonomy_registry import get_node, sells_within
+    offers: list = []
+    seen: set = set()
+    for uc in (decision.use_cases or ()):
+        for comp in R.complements(vertical, uc):
+            key, node = comp.get("key"), comp.get("node")
+            if not key or key in seen or not node or get_node(node) is None:
+                continue
+            seen.add(key)
+            stocked = sells_within(db, node, tenant_id=envelope.tenant_id) is True
+            offer = {"key": key, "label": comp.get("label") or key, "node": node,
+                     "reason": comp.get("reason"), "tags": comp.get("tags") or [],
+                     "stocked": stocked}
+            if stocked:
+                offer["mode"] = "bundle"
+                offer["prompt"] = f"Pair it with a {offer['label']} to complete your setup."
+            else:
+                offer["mode"] = "source"
+                offer["supplier_rfq_offer"] = True
+                offer["prompt"] = (f"{offer['reason'] or offer['label'].capitalize()}. We don't "
+                                   f"stock {offer['label']}s yet — I can raise a supplier request "
+                                   f"(nothing is sent without human approval). Willing to wait?")
+                offer["options"] = [
+                    {"id": "source_it", "label": f"Yes — draft a supplier request for a {offer['label']}"},
+                    {"id": "in_catalog", "label": "No — show me what does the job in stock"}]
+            offers.append(offer)
+    if offers:
+        resp.extras["complement_offers"] = offers
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:

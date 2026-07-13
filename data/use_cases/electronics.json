@@ -33,6 +33,11 @@
       "requirements": {"form_factor": ["in", ["convertible", "detachable", "tablet"]], "touchscreen": ["==", true], "ram_gb": [">=", 16]},
       "budget_band_hint": [1200, 2200],
       "note": "touchscreen 2-in-1/detachable for pen input; FLOOR derived from the cheapest such in-catalog product. Escalates naturally when the shopper prefers a Surface/Mac (brand filter + catalog price), no hardcoded premium.",
+      "complements": [
+        {"key": "graphics_tablet", "node": "el-7-9-12-7", "label": "graphics tablet",
+         "reason": "a pen tablet (e.g. Wacom Intuos) adds precise pen input — the drawing capability itself, without paying for a touchscreen laptop; often the better tool for serious illustration",
+         "tags": ["creative", "student", "hobby"]}
+      ],
       "variants": {
         "pen_precision": {"requirements": {"stylus_support": ["==", true], "gpu_vram_gb": [">=", 4]}, "budget_band_hint": [1500, 2500], "note": "active-pen + dGPU for heavier illustration/painting"}
       }
@@ -42,6 +47,11 @@
       "keywords": ["content creator", "video editing", "rendering", "photo editing", "creative", "music production", "premiere", "davinci"],
       "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 4]},
       "budget_band_hint": [1000, 2500],
+      "complements": [
+        {"key": "graphics_tablet", "node": "el-7-9-12-7", "label": "graphics tablet",
+         "reason": "a pen tablet gives precise input for illustration, photo retouching and design work",
+         "tags": ["creative", "student", "hobby"]}
+      ],
       "variants": {
         "video_4k":       {"requirements": {"ram_gb": [">=", 32], "gpu_vram_gb": [">=", 6]}, "budget_band_hint": [1800, 3500]},
         "music_production":{"requirements": {"ram_gb": [">=", 16]}, "budget_band_hint": [800, 1800]}

@@ -117,6 +117,16 @@ def derive_price_floor(vertical: str, coarse: str, variant: Optional[str],
     return floor
 
 
+def complements(vertical: str, coarse: str) -> List[Dict[str, Any]]:
+    """The complementary products a use-case pairs with (Phase 1d.4) — e.g. drawing → a graphics
+    tablet for pen input. Each declares {key, node (taxonomy handle to stock-check), label, reason,
+    tags}. ONE declaration drives two behaviours downstream: bundle-upsell if the node is stocked,
+    source-it (supplier RFQ) if not — stock truth picks the branch."""
+    uc = (load_use_cases(vertical).get("use_cases") or {}).get(str(coarse)) or {}
+    out = uc.get("complements")
+    return out if isinstance(out, list) else []
+
+
 def content_advisory(vertical: str, coarse: str) -> Optional[Dict[str, Any]]:
     """The advisory (if any) for a coarse use-case — e.g. a minor persona requesting mature-rated
     game specs. ADVISORY: the caller surfaces a clarification, never a hard block."""

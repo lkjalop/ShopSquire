@@ -79,6 +79,9 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     # shelf = the 3-band right-side panel; capability = the floor/budget banner; advisories =
     # non-blocking notes (e.g. minor content-advisory); assumption = the stated variant assumption.
     "shelf", "capability", "advisories", "assumption",
+    # complement_offers: declared complements (drawing → graphics tablet) as bundle-upsell (stocked)
+    # or source-it supplier-RFQ offers (not stocked) — the unstocked-complement trust play (1d.4).
+    "complement_offers",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):
