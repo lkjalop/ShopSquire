@@ -957,6 +957,15 @@ def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(
                 if not verdict["ok"]:
                     raise HTTPException(status_code=403, detail={"error": "approval_tier_insufficient", **verdict})
             if _budget_gate_enabled():
+                # KNOWN RACE (P0-1g, budget gate is flag-off by default): committed-spend is a SUM
+                # over OTHER cases and the commit is a transition on THIS case, so two concurrent
+                # same-category approvals each exclude the other, each pass the cap, and cumulative
+                # spend can breach it. The correct fix is a CATEGORY-level lock spanning this
+                # check + the approval_granted transition (SELECT ... FOR UPDATE on a per-category
+                # budget row, or a Postgres advisory lock) — deliberately NOT the permanent
+                # slot-reservation used for refunds, which would block the category forever. Left as
+                # a documented limitation until the gate is enabled + real category locking lands;
+                # human-paced approvals make live occurrence unlikely in the meantime.
                 from src.app.services.fulfillment.budget_gate import budget_status
                 committed = _category_committed_cents(db, _category, exclude_case_id=case_id)
                 b = budget_status(_spend, category=_category, committed_cents=committed)

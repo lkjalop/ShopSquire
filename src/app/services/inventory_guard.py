@@ -149,6 +149,19 @@ def release_inventory_for_order(db, *, order_id: str) -> Dict[str, Any]:
             skipped += 1
             continue
         try:
+            # CAS CLAIM FIRST (P0-1e): flip the reservation reserved→released atomically and only
+            # credit stock if WE won the claim. Two concurrent releases of the same order would
+            # otherwise both pass the read-time `status == 'reserved'` check and both add the qty
+            # back → inventory inflated → oversell. The reservation row is the lock (mirrors the
+            # reserve CAS on `inventory.stock` above).
+            claim = db.execute(
+                text("UPDATE inventory_reservations SET status = 'released', "
+                     "updated_at = CURRENT_TIMESTAMP WHERE id = :id AND status = 'reserved'"),
+                {"id": rid},
+            )
+            if int(getattr(claim, "rowcount", 0) or 0) <= 0:
+                skipped += 1        # a concurrent release already claimed it — do NOT double-credit
+                continue
             inv = db.execute(
                 text(
                     """
@@ -167,10 +180,6 @@ def release_inventory_for_order(db, *, order_id: str) -> Dict[str, Any]:
                     text("UPDATE inventory SET stock = stock + :qty, updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
                     {"id": str(inv[0]), "qty": qty},
                 )
-            db.execute(
-                text("UPDATE inventory_reservations SET status = 'released', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
-                {"id": rid},
-            )
             released += 1
         except Exception:
             skipped += 1

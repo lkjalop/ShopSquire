@@ -13,7 +13,7 @@ def test_payment_intent_idempotency(tmp_path, monkeypatch):
     monkeypatch.setattr(
         StripeClient,
         "create_payment_intent",
-        lambda self, amount_cents, currency="USD", metadata=None: {
+        lambda self, amount_cents, currency="USD", metadata=None, idempotency_key=None: {
             "id": "pi_mock_123",
             "amount": amount_cents,
             "currency": currency,

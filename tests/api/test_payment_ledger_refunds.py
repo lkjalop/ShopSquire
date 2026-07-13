@@ -104,7 +104,7 @@ def test_refund_two_step_then_settlement_reconciles(client):
         state = refund_state(db, "ORD-L1")
     assert st == "returned"
     assert state == {"captured_cents": 50000, "requested_cents": 20000, "approved_cents": 20000,
-                     "settled_cents": 20000, "open_request": False}
+                     "settled_cents": 20000, "open_request": False, "requests": 1, "approvals": 1}
 
 
 def test_refund_guards(client):

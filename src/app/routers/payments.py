@@ -190,7 +190,9 @@ def create_intent(
             raise HTTPException(status_code=code, detail={"message": detail, "security": risk})
         if not _idempotent("payment_intent", idempotency_key):
             raise HTTPException(status_code=409, detail="Duplicate payment intent")
-        out = client.create_payment_intent(amount_cents, currency)
+        # pass the key to Stripe too (P0-1d): provider-level guard so even a retry that slips past
+        # the server dedup can't mint a second intent.
+        out = client.create_payment_intent(amount_cents, currency, idempotency_key=idempotency_key)
         if isinstance(out, dict):
             out["security"] = risk
             out["pci_scope"] = "tokenized_provider_managed"
@@ -271,9 +273,32 @@ def checkout_initiate(
         raise HTTPException(status_code=code, detail={
             "message": "mfa_stepup_required" if code == 401 else "manual_review_required", "security": risk})
 
+    # IDEMPOTENCY FIRST (P0-1b): reserve BEFORE creating the order/intent — otherwise a duplicate
+    # submit leaves a second order row + double-reserved inventory behind before the (previously
+    # post-order) check could fire. Key precedence: explicit client Idempotency-Key header → the
+    # passed-in order_id → a stable, WINDOWED signature of the cart (uid+items+amount) so a
+    # header-less double-submit dedups while a genuine later re-purchase of the same cart is not
+    # permanently blocked. _idempotent fails CLOSED on DB error (409, no order, no charge).
+    order_id = (body.order_id or "").strip() or None
+    _hdr_key = (request.headers.get("Idempotency-Key") or "").strip()
+    if _hdr_key:
+        _idem_key = _hdr_key
+    elif order_id:
+        _idem_key = f"co:{order_id}"
+    elif body.items:
+        import hashlib as _hl
+        import time as _t
+        _sig = json.dumps({"uid": body.uid, "items": body.items, "amt": amount_cents,
+                           "cur": currency}, sort_keys=True, default=str)
+        _win = int(_t.time() // 600)   # 10-min idempotency window for the header-less cart path
+        _idem_key = "co:auto:" + _hl.sha256(f"{_sig}|{_win}".encode("utf-8")).hexdigest()[:40]
+    else:
+        _idem_key = None
+    if _idem_key and not _idempotent("checkout_initiate", _idem_key):
+        raise HTTPException(status_code=409, detail="Duplicate checkout initiation")
+
     # P0-A: no order_id but cart lines present → create the REAL order row server-side.
     # The server-priced total wins over the client-sent amount (never trust client pricing).
-    order_id = (body.order_id or "").strip() or None
     if order_id is None and body.items:
         from src.app.routers.orders import create_order_core
         with db_session() as _odb:
@@ -287,11 +312,6 @@ def checkout_initiate(
         if created.get("total_cents"):
             amount_cents = int(created["total_cents"])
 
-    # Idempotency (fail-closed, same as /intent): one initiate per order / explicit key.
-    _idem_key = (request.headers.get("Idempotency-Key") or "").strip() or (f"co:{order_id}" if order_id else None)
-    if _idem_key and not _idempotent("checkout_initiate", _idem_key):
-        raise HTTPException(status_code=409, detail="Duplicate checkout initiation")
-
     stripe_live = (
         settings.stripe_api_key
         and settings.stripe_api_key.startswith("sk_")
@@ -302,7 +322,9 @@ def checkout_initiate(
     if stripe_live:
         try:
             client = StripeClient(settings.stripe_api_key)
-            intent = client.create_payment_intent(amount_cents, currency)
+            # P0-1d: provider-level idempotency — reuse the same key the server dedup reserved, so a
+            # retry that reaches Stripe returns the same intent instead of a second charge.
+            intent = client.create_payment_intent(amount_cents, currency, idempotency_key=_idem_key)
             if isinstance(intent, dict):
                 stripe_intent_id = intent.get("id") or f"pi_{secrets.token_hex(8)}"
                 # Link the Stripe intent to the internal order so the webhook can
@@ -547,13 +569,19 @@ def refund_approve(
     role: str = Depends(require_role([ROLE_OWNER])),  # HUMAN owner only — the GATE-2 invariant
 ) -> Dict:
     from src.app.services.payment_ledger import (KIND_REFUND_APPROVED, KIND_REFUND_REQUESTED,
-                                                 ledger_for_order, record_txn)
+                                                 ledger_for_order, record_txn, reserve_refund_slot)
     with db_session() as db:
         events = ledger_for_order(db, order_id)
         requests = [e for e in events if e["kind"] == KIND_REFUND_REQUESTED]
         approvals = [e for e in events if e["kind"] == KIND_REFUND_APPROVED]
         if len(requests) <= len(approvals):
             raise HTTPException(status_code=409, detail="no_open_refund_request")
+        # ATOMIC slot lock (P0-1f): the count check above is check-then-act — two concurrent
+        # approvals of the same open request both pass and both append REFUND_APPROVED (double
+        # refund authorization). Reserve the (order, approval-index) slot; rides this transaction
+        # so a failed ledger write releases it. The live-Stripe path is also key-guarded below.
+        if not reserve_refund_slot(db, f"refund:appr:{order_id}:{len(approvals)}"):
+            raise HTTPException(status_code=409, detail="refund_approval_in_progress")
         open_req = requests[len(approvals)]
         _amount = open_req.get("amount_cents")
         _currency = open_req.get("currency") or "USD"

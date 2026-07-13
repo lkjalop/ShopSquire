@@ -53,29 +53,81 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         except Exception:
             pass
 
-        # Check DB table next
+        # Ensure the dedup table exists (schema shared with payments._idempotent).
         try:
             with db_session() as db:
-                row = db.execute(
-                    "SELECT response_status, response_body, created_at FROM idempotency_keys WHERE key = :k AND fingerprint = :fp",
-                    {"k": key, "fp": fingerprint},
-                ).fetchone()
-                if row:
-                    try:
-                        resp_body = json.loads(row[1]) if isinstance(row[1], str) else (row[1] or {})
-                    except Exception:
-                        resp_body = row[1] or {}
-                    status = int(row[0] or 200)
-                    try:
-                        cache[key] = {"fingerprint": fingerprint, "body": resp_body, "status": status, "ts": now}
-                    except Exception:
-                        pass
-                    return ORJSONResponse(resp_body, status_code=status)
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS idempotency_keys "
+                    "(key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, response_status INT, "
+                    "response_body TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+                )
+                db.commit()
         except Exception:
             pass
 
-        # Process request and store response
-        response = await call_next(request)
+        # ATOMIC RESERVE-OR-REPLAY (P0-1a): one INSERT ... ON CONFLICT DO NOTHING is the lock, so two
+        # concurrent duplicates can't both proceed (the old SELECT-then-process was check-then-act —
+        # both missed the SELECT, both ran the side effect). rowcount==1 → we own the key. rowcount==0
+        # → someone else holds it. DB error → we can't dedup; fall through and process WITHOUT dedup
+        # (this is defense-in-depth — money endpoints carry their own atomic guard — so availability
+        # wins over a hard block when the store is down).
+        reserve = "error"
+        try:
+            with db_session() as db:
+                res = db.execute(
+                    "INSERT INTO idempotency_keys (key, fingerprint, response_status, response_body) "
+                    "VALUES (:k, :fp, NULL, NULL) ON CONFLICT (key) DO NOTHING",
+                    {"k": key, "fp": fingerprint},
+                )
+                db.commit()
+                reserve = "won" if int(getattr(res, "rowcount", 0) or 0) == 1 else "exists"
+        except Exception:
+            reserve = "error"
+
+        if reserve == "exists":
+            # another request already holds this key — replay its completed response, else reject the
+            # in-flight duplicate (fail-CLOSED: never run the side effect twice).
+            row = None
+            try:
+                with db_session() as db:
+                    row = db.execute(
+                        "SELECT response_status, response_body FROM idempotency_keys WHERE key = :k",
+                        {"k": key},
+                    ).fetchone()
+            except Exception:
+                row = None
+            if row is not None and row[0] is not None:
+                try:
+                    resp_body = json.loads(row[1]) if isinstance(row[1], str) else (row[1] or {})
+                except Exception:
+                    resp_body = row[1] or {}
+                status = int(row[0] or 200)
+                try:
+                    cache[key] = {"fingerprint": fingerprint, "body": resp_body, "status": status, "ts": now}
+                except Exception:
+                    pass
+                return ORJSONResponse(resp_body, status_code=status)
+            return ORJSONResponse({"detail": "duplicate request in progress"}, status_code=409)
+
+        if reserve == "error":
+            # store unavailable → cannot dedup; process without the guard (see note above)
+            return await call_next(request)
+
+        # reserve == "won": process EXACTLY once. On failure, RELEASE the reservation so the client
+        # can retry — a burned in-flight row would otherwise 409 forever (there is no DB TTL sweep).
+        try:
+            response = await call_next(request)
+        except Exception:
+            try:
+                with db_session() as db:
+                    db.execute(
+                        "DELETE FROM idempotency_keys WHERE key = :k AND response_status IS NULL",
+                        {"k": key},
+                    )
+                    db.commit()
+            except Exception:
+                pass
+            raise
         try:
             status = int(getattr(response, "status_code", 200))
         except Exception:
@@ -90,11 +142,12 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         if resp_payload is None:
             resp_payload = {"status": status}
 
-        # Persist best-effort
+        # Complete the reserved row with the real response (UPDATE, not INSERT — we already own it).
         try:
             with db_session() as db:
                 db.execute(
-                    "INSERT INTO idempotency_keys (key, fingerprint, response_status, response_body) VALUES (:k, :fp, :st, :rb) ON CONFLICT (key) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, response_status = EXCLUDED.response_status, response_body = EXCLUDED.response_body",
+                    "UPDATE idempotency_keys SET fingerprint = :fp, response_status = :st, "
+                    "response_body = :rb WHERE key = :k",
                     {"k": key, "fp": fingerprint, "st": status, "rb": json.dumps(resp_payload, ensure_ascii=False)},
                 )
                 try:

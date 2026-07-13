@@ -97,6 +97,38 @@ def record_txn(db, *, order_id: str, kind: str, intent_id: Optional[str] = None,
         raise
 
 
+def reserve_refund_slot(db, token: str) -> bool:
+    """Atomic single-winner lock for a refund request/approval slot (P0-1f). The refund rail's
+    'one open request' and 'one approval per request' invariants were enforced by counting the
+    ledger then appending — check-then-act, so two concurrent refunds could both pass and both
+    append (double open request → double approval → double refund). This reserves a UNIQUE(key)
+    row so exactly one caller wins a given (order, count) slot.
+
+    Does NOT commit — it rides the CALLER'S transaction so the reservation and the ledger append
+    commit together: if the append fails and the session rolls back, the slot is released (never a
+    permanently-burned key). INSERT ... ON CONFLICT DO NOTHING is concurrency-safe (the second txn
+    blocks on the row until the first commits, then sees it → rowcount 0). Fail-CLOSED: on DB error
+    we return False (reject) — for money-OUT, blocking is the safe direction."""
+    if db is None or not str(token or "").strip():
+        return False
+    try:
+        db.execute(text(
+            "CREATE TABLE IF NOT EXISTS idempotency_keys "
+            "(key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, response_status INT, "
+            "response_body TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"))
+        res = db.execute(text(
+            "INSERT INTO idempotency_keys (key, fingerprint) VALUES (:k, 'refund_slot') "
+            "ON CONFLICT (key) DO NOTHING"), {"k": str(token)})
+        return int(getattr(res, "rowcount", 0) or 0) == 1
+    except Exception as exc:
+        _log.warning("refund slot reservation failed (failing closed) token=%s: %s", token, repr(exc)[:120])
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return False
+
+
 def ledger_for_order(db, order_id: str, *, tenant_id: str = DEFAULT_TENANT, limit: int = 100) -> List[Dict[str, Any]]:
     """All ledger events for one order, oldest first. Best-effort; never raises."""
     if db is None or not order_id:
@@ -120,7 +152,7 @@ def refund_state(db, order_id: str, *, tenant_id: str = DEFAULT_TENANT) -> Dict[
     open_request is True when a refund_requested has no matching approval yet (one open at a time —
     the governed two-step). Best-effort; empty/zeroed on failure."""
     out = {"captured_cents": 0, "requested_cents": 0, "approved_cents": 0, "settled_cents": 0,
-           "open_request": False}
+           "open_request": False, "requests": 0, "approvals": 0}
     events = ledger_for_order(db, order_id, tenant_id=tenant_id)
     requests = approvals = 0
     for e in events:
@@ -137,4 +169,5 @@ def refund_state(db, order_id: str, *, tenant_id: str = DEFAULT_TENANT) -> Dict[
         elif k == KIND_REFUND_SETTLED:
             out["settled_cents"] += amt
     out["open_request"] = requests > approvals
+    out["requests"], out["approvals"] = requests, approvals   # counts for the P0-1f slot lock
     return out

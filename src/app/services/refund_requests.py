@@ -36,7 +36,8 @@ def create_refund_request(
     rejected — the claim's asserted value may legitimately exceed what is still refundable. The HTTP path
     keeps clamp=False (strict 422) so merchant input errors stay loud.
     """
-    from src.app.services.payment_ledger import KIND_REFUND_REQUESTED, record_txn, refund_state
+    from src.app.services.payment_ledger import (KIND_REFUND_REQUESTED, record_txn,
+                                                 refund_state, reserve_refund_slot)
 
     row = db.execute(
         text("SELECT status, total_cents, currency FROM orders WHERE id = :o LIMIT 1"),
@@ -59,6 +60,12 @@ def create_refund_request(
     if amount <= 0 or amount > refundable:
         return {"ok": False, "error": "invalid_refund_amount", "order_id": order_id,
                 "refundable_cents": refundable}
+
+    # ATOMIC slot lock (P0-1f): the open_request check above is check-then-act — two concurrent
+    # opens both see open_request=False and both append. Reserve the (order, request-count) slot so
+    # exactly one wins; a later legitimate request (after this one resolves) gets a fresh count.
+    if not reserve_refund_slot(db, f"refund:req:{order_id}:{state['requests']}"):
+        return {"ok": False, "error": "refund_request_already_open", "order_id": order_id}
 
     record_txn(db, order_id=order_id, kind=KIND_REFUND_REQUESTED, amount_cents=amount,
                currency=str(row[2] or "USD"), actor_type=actor_type, actor_id=actor_id,

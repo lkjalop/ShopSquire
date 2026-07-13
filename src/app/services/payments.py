@@ -12,15 +12,20 @@ class StripeClient:
         self.stripe = stripe
         self.supply_chain = SupplyChainMonitor()
 
-    def create_payment_intent(self, amount_cents: int, currency: str = "USD", metadata: Optional[Dict] = None) -> Dict:
+    def create_payment_intent(self, amount_cents: int, currency: str = "USD", metadata: Optional[Dict] = None,
+                              idempotency_key: Optional[str] = None) -> Dict:
         try:
             self.supply_chain.check_endpoint_integrity("stripe")
         except Exception:
             pass
+        # idempotency_key (P0-1d): provider-level double-charge guard — a retry with the same key
+        # returns the SAME intent from Stripe instead of minting a second one. Mirrors create_refund.
+        kwargs: Dict = {"idempotency_key": idempotency_key} if idempotency_key else {}
         intent = self.stripe.PaymentIntent.create(
             amount=int(amount_cents),
             currency=currency.lower(),
             metadata=metadata or {},
+            **kwargs,
         )
         try:
             log_agent_security_event(

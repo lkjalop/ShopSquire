@@ -48,6 +48,12 @@ def create_intent(
             code = 401 if risk.get("action") == "step_up_mfa" else 202
             detail = "mfa_stepup_required" if code == 401 else "manual_review_required"
             raise HTTPException(status_code=code, detail={"message": detail, "security": risk})
+        # server-side dedup (P0-1d parity with the Stripe /intent path): reject a retry that carries
+        # the same idempotency_key BEFORE calling the provider — the payload key below is the
+        # provider-level guard, this is the server-level one. _idempotent fails CLOSED on DB error.
+        from src.app.routers.payments import _idempotent
+        if not _idempotent("afterpay_intent", idempotency_key):
+            raise HTTPException(status_code=409, detail="Duplicate payment intent")
         base_url = os.getenv("AFTERPAY_API_BASE_URL", "").strip()
         api_key = os.getenv("AFTERPAY_API_KEY", "").strip()
         if not (base_url and api_key):
