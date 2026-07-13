@@ -155,3 +155,41 @@ def build_cards(variants: List[VariantView],
         "closest_match_mode": bool(requirements) and counts["meets"] == 0 and bool(cards),
     }
     return cards, summary
+
+
+def assess_intent_fit(candidate: VariantView, requirements: Optional[Dict[str, Any]],
+                      *, defs: Optional[Dict[str, AttributeDef]] = None,
+                      alternatives: Optional[List[VariantView]] = None) -> Dict[str, Any]:
+    """Phase 1d.3 — does a product the shopper is ADDING/SWAPPING INTO the cart still meet the
+    intent they expressed earlier? Returns a SOFT advisory (never a block): the fit verdict of
+    `candidate` against the session's remembered `requirements`, a human sentence, and — when it
+    is not a clean meet — up to 3 CLOSER alternatives (ranked by the same fit honesty). This is
+    the cart-side twin of the shelf: the 'call-out' IS the fit verdict (data-driven, from the
+    attribute registry), the alternatives are the ranked closest — no brittle rules. Empty
+    requirements → no opinion (verdict 'none'); the caller surfaces the message and lets the
+    shopper proceed either way."""
+    if not requirements:
+        return {"verdict": "none", "advisory": False, "sku": candidate.sku}
+    defs = defs or defs_union(DEFAULT_VERTICALS)
+    verdict = evaluate_requirements(variant_attributes(candidate, defs), requirements)
+    overall = verdict["overall"]
+    out: Dict[str, Any] = {"verdict": overall, "per_key": verdict["per_key"],
+                           "sku": candidate.sku, "advisory": overall != "meets"}
+    title = candidate.title or candidate.sku
+    if overall == "meets":
+        out["message"] = f"{title} still meets what you asked for — good swap."
+        return out
+    if overall == "fails":
+        failed = [k for k, v in verdict["per_key"].items() if v is False]
+        out["message"] = (f"Heads up — {title} doesn't match your original ask on "
+                          f"{', '.join(failed)}. Want it anyway, or shall I show closer options?")
+    else:  # unknown — can't confirm, don't assert a failure
+        out["message"] = (f"Note — I can't verify {title} on "
+                          f"{', '.join(verdict.get('unknown_keys') or [])}. Add it anyway, or see "
+                          f"options I can confirm?")
+    if alternatives:
+        alt_cards, _ = build_cards(alternatives, requirements, limit=4)
+        out["alternatives"] = [{"sku": c.sku, "title": c.title, "price_cents": c.price_cents,
+                                "fit": (c.fit or {}).get("overall")}
+                               for c in alt_cards if c.sku != candidate.sku][:3]
+    return out

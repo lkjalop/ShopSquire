@@ -168,6 +168,10 @@ class TurnDecision:
     # casing), sort ∈ ranking.SORTS. A miss drops the refinement, never invents one.
     brand_filter: Optional[str] = None
     sort: Optional[str] = None
+    # SOFT brand preference (Phase 1d) — distinct from the HARD brand_filter above: 'ideally a Mac'
+    # must NOT remove non-Apple options, it should surface an Apple 'preference' band on the shelf.
+    # Clamped to a real catalog brand; nulled when it equals a hard brand_filter (already narrowed).
+    preferred_brand: Optional[str] = None
     # R9.4: True when the routed node came from the SESSION (nodeless-continuation inherit or
     # fragment-drift override) — the turn is ABOUT the prior subject, so EXPLAIN/COMPARE may
     # consume prior_shortlist ('the first one' = the items actually shown last turn).
@@ -187,6 +191,7 @@ class TurnDecision:
                 "workloads": list(self.workloads), "relationship": self.relationship,
                 "prior_shortlist": list(self.prior_shortlist),
                 "brand_filter": self.brand_filter, "sort": self.sort,
+                "preferred_brand": self.preferred_brand,
                 "subject_from_session": self.subject_from_session,
                 "compare_targets": list(self.compare_targets)}
 
@@ -276,9 +281,10 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         "- Extract NUMERIC requirements the message EXPLICITLY states "
         f"(keys ONLY from: {', '.join(sorted(req_keys))}; e.g. '144fps' → refresh_hz≥144). "
         "Do NOT invent workload specs — that is what use_cases are for.\n"
-        "- REFINE: if the shopper narrows to a BRAND ('only Asus', 'a Dell one') set "
-        "refine.brand; if they ask for cheaper/most affordable set refine.sort=\"price_asc\"; "
-        "premium/high-end → \"price_desc\". Both null when the message says neither.\n"
+        "- REFINE: a HARD brand narrowing ('only Asus', 'just Dell') → refine.brand; a SOFT brand "
+        "preference ('ideally a Mac', 'I'd prefer Lenovo') → refine.prefer_brand (keeps other "
+        "options, just surfaces that brand). cheaper/most affordable → refine.sort=\"price_asc\"; "
+        "premium/high-end → \"price_desc\". null when the message says none.\n"
         "- COMPARE of SPECIFIC products ('the Dell G16 vs the Lenovo Legion'): list each named "
         "product as a short name in compare_targets. Empty list when comparing a whole "
         "category ('compare your gaming laptops').\n"
@@ -286,7 +292,8 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
         '"use_cases": ["<key>", ...], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
-        '"refine": {"brand": "<brand or null>", "sort": "price_asc|price_desc|null"}, '
+        '"refine": {"brand": "<hard-filter brand or null>", '
+        '"prefer_brand": "<soft-preference brand or null>", "sort": "price_asc|price_desc|null"}, '
         '"compare_targets": ["<named product>", ...], '
         '"confidence": <0.0-1.0>}\nJSON:'
     )
@@ -408,6 +415,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     if sort not in SORTS:
         sort = None
     brand_filter = _clamp_brand(db, refine.get("brand"))
+    preferred_brand = _clamp_brand(db, refine.get("prefer_brand"))
+    if preferred_brand and preferred_brand == brand_filter:
+        preferred_brand = None      # a hard filter already narrows to it — no separate soft band
     # compare_targets shape clamp (R9.3): short strings, ≤4 — the BINDING clamp (name → real
     # retrieved variant, distinctive-token overlap) runs in the core where the slate exists.
     raw_targets = data.get("compare_targets")
@@ -493,6 +503,6 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         requested_product_node=(node.handle if node else None),
                         workloads=tuple(workloads), relationship=relationship,
                         prior_shortlist=prior_shortlist,
-                        brand_filter=brand_filter, sort=sort,
+                        brand_filter=brand_filter, sort=sort, preferred_brand=preferred_brand,
                         subject_from_session=subject_from_session,
                         compare_targets=compare_targets)
