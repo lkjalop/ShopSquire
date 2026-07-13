@@ -14,7 +14,7 @@ def test_over_budget_offers_the_menu():
     assert e["per_unit_cents"] == 80_000             # $16,000 / 20 = $800/unit
     assert e["units_affordable"] == 14               # 1,600,000 // 112,400
     ids = {t["id"] for t in e["tradeoffs"]}
-    assert {"increase_budget", "reduce_units", "payment_plan"} <= ids
+    assert {"increase_budget", "reduce_units", "financing_review"} <= ids
 
 
 def test_bundle_makes_it_fit():
@@ -32,3 +32,23 @@ def test_unsized_without_budget():
 def test_no_quantity_or_floor_returns_none():
     assert assess_bulk(0, 1_600_000, 100_000) is None
     assert assess_bulk(20, 1_600_000, None) is None
+
+
+def test_resolve_bulk_total_never_treats_per_unit_as_total():
+    """Review-10 P0 arithmetic-safety: budget_scope decides; a per-unit budget is NEVER a total."""
+    from types import SimpleNamespace
+    from src.app.services.recommendation_core.core import _resolve_bulk_total
+    from src.app.services.recommendation_core.envelope import TurnEnvelope
+
+    def env(bmax):
+        return TurnEnvelope.from_suggest_params(query="x", uid="u", tenant_id="default", budget_max=bmax)
+
+    def dec(scope, total=None):
+        return SimpleNamespace(budget_scope=scope, total_budget_cents=total)
+
+    # env() takes DOLLARS (from_suggest_params converts →cents); expectations are in CENTS.
+    assert _resolve_bulk_total(dec("unknown", total=1_600_000), env(None), 20) == (1_600_000, False)  # explicit total wins
+    assert _resolve_bulk_total(dec("per_unit"), env(1900), 25) == (190_000 * 25, False)   # $1900 each × 25
+    assert _resolve_bulk_total(dec("total"), env(16000), 20) == (1_600_000, False)        # $16000 tagged total
+    assert _resolve_bulk_total(dec("unknown"), env(16000), 20) == (None, True)            # AMBIGUOUS → ask
+    assert _resolve_bulk_total(dec("unknown"), env(None), 20) == (None, False)            # no budget → unsized

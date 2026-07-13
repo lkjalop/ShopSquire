@@ -45,6 +45,7 @@ def assess_bulk(quantity: Optional[int], total_cents: Optional[int], floor_cents
                             f"~${b_needed / 100:,.0f}") if b_fits else
                            (f"Bundle path: {total_cents // bundle_floor_cents} units in "
                             f"${total_cents / 100:,.0f}, or ~${b_needed / 100:,.0f} for all {quantity}")})
-    t.append({"id": "payment_plan",
-              "label": f"Spread it — a payment plan across the ~${needed / 100:,.0f}"})
+    # review-10: don't ASSERT a payment plan exists (no tenant financing policy) — offer to check.
+    t.append({"id": "financing_review",
+              "label": f"Request a financing review for the ~${needed / 100:,.0f}"})
     return out

@@ -647,6 +647,10 @@ def _maybe_complement_offer(db, envelope: TurnEnvelope, decision: TurnDecision,
             key, node = comp.get("key"), comp.get("node")
             if not key or key in seen or not node or get_node(node) is None:
                 continue
+            # SELF-COMPLEMENT suppression (review-10): don't offer 'pair with a graphics tablet'
+            # when the shopper is ALREADY shopping the graphics-tablet node (or a descendant).
+            if _is_descendant_or_self(decision.node_handle, node):
+                continue
             seen.add(key)
             stocked = sells_within(db, node, tenant_id=envelope.tenant_id) is True
             offer = {"key": key, "label": comp.get("label") or key, "node": node,
@@ -726,6 +730,26 @@ def _bulk_message(econ: Dict[str, Any], decision: TurnDecision) -> str:
     return " ".join(parts)
 
 
+def _resolve_bulk_total(decision: TurnDecision, envelope: TurnEnvelope,
+                        quantity: int) -> tuple:
+    """The whole-order budget in CENTS, respecting budget_scope — returns (total, ambiguous).
+    NEVER reinterprets a PER-UNIT budget as a total (review-10 P0 arithmetic-safety):
+      • an explicit model total_budget wins;
+      • a stated envelope budget tagged per_unit → × quantity; tagged total → as-is;
+      • a stated-but-UNTAGGED budget → (None, True): ASK, don't guess the math."""
+    if decision.total_budget_cents:
+        return decision.total_budget_cents, False
+    b = envelope.budget_max_cents
+    if not b:
+        return None, False
+    scope = getattr(decision, "budget_scope", "unknown")
+    if scope == "total":
+        return b, False
+    if scope == "per_unit":
+        return b * quantity, False
+    return None, True     # a budget was stated but scope is unknown → ambiguous, ask
+
+
 def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
                           resp: CoreResponse) -> None:
     """Phase 1f — bulk-order economics: quantity (from the extracted `count`) + total budget → the
@@ -750,15 +774,25 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
     if not floor:
         return
     vertical = _vertical_name(decision.node_handle)
-    # total budget is MODEL-JUDGED (decision.total_budget_cents, clamped) — a budget STATED this
-    # turn wins; else the edge/inherited per-order budget on the envelope.
-    total = decision.total_budget_cents or envelope.budget_max_cents
+    total, scope_ambiguous = _resolve_bulk_total(decision, envelope, quantity)   # P0: scope-safe
     econ = assess_bulk(quantity, total, floor,
                        bundle_floor_cents=_bundle_floor(db, envelope, decision, vertical, variants, reqs))
     if not econ:
         return
     resp.extras["bulk"] = econ
-    resp.message = _bulk_message(econ, decision)
+    if scope_ambiguous:
+        # a budget was stated but we can't tell per-unit vs total — ASK, never guess the arithmetic
+        per = f"${(envelope.budget_max_cents or 0) / 100:,.0f}"
+        econ["scope_ambiguous"] = True
+        resp.message = (f"For {quantity} units — is {per} your budget PER LAPTOP, or the TOTAL for "
+                        f"all {quantity}? That changes the math.")
+        if not resp.clarify:
+            resp.clarify.append({"id": "budget_scope", "goal": "resolve_budget_scope",
+                                 "text": f"Is {per} per laptop, or the total for all {quantity}?",
+                                 "options": [{"id": "per_unit", "label": f"{per} per laptop"},
+                                             {"id": "total", "label": f"{per} total for all {quantity}"}]})
+    else:
+        resp.message = _bulk_message(econ, decision)
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:
@@ -959,8 +993,10 @@ def _exec_policy_answer(db, envelope: TurnEnvelope, decision: TurnDecision,
 def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
                           resp: CoreResponse, limit: int) -> None:
     resp.extras["needs_human_review"] = True
-    resp.extras["claim_status"] = "received"
-    resp.message = ("I've logged this as a support claim — a human will review it. "
+    # review-10: 'received' + 'I've logged this' FALSELY implies a persisted claim — nothing is
+    # filed here yet. Be honest until an idempotent handoff returns a real claim ID + audit event.
+    resp.extras["claim_status"] = "pending_handoff"
+    resp.message = ("I'll pass this to a human to review — nothing is filed automatically yet. "
                     "You'll be contacted with next steps.")
 
 

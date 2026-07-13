@@ -190,6 +190,9 @@ class TurnDecision:
     # (distinct from the per-unit budget the platform already applies at retrieval).
     quantity: Optional[int] = None
     total_budget_cents: Optional[int] = None
+    # per_unit | total | unknown — whether a STATED budget is per-item or the whole-order total.
+    # NEVER reinterpret a per-unit budget as a total (the arithmetic-safety invariant, review-10 P0).
+    budget_scope: str = "unknown"
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -203,7 +206,8 @@ class TurnDecision:
                 "preferred_brand": self.preferred_brand, "exclude_brand": self.exclude_brand,
                 "subject_from_session": self.subject_from_session,
                 "compare_targets": list(self.compare_targets),
-                "quantity": self.quantity, "total_budget_cents": self.total_budget_cents}
+                "quantity": self.quantity, "total_budget_cents": self.total_budget_cents,
+                "budget_scope": self.budget_scope}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -322,7 +326,9 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         "- BULK: if the shopper wants MULTIPLE units ('20 laptops', 'about 20', 'for 6 people') set "
         "quantity to that whole number. If they state a TOTAL budget for the whole order ('$16000 "
         "total', 'budget is $19000') set total_budget to that dollar amount. Do NOT put the count "
-        "in requirements. Both null for a single item / no stated budget.\n"
+        "in requirements. When ANY budget is stated, set budget_scope: 'per_unit' ($X each / per "
+        "laptop) or 'total' ($X for the whole order); null when unclear. quantity/total_budget null "
+        "for a single item / no stated budget.\n"
         '- POLICY_QUESTION for services (payment plans, delivery, returns policy).\n\n'
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
         '"use_cases": ["<key>", ...], '
@@ -331,6 +337,8 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         '"prefer_brand": "<soft-preference brand or null>", '
         '"exclude_brand": "<brand to EXCLUDE or null>", "sort": "price_asc|price_desc|null"}, '
         '"compare_targets": ["<named product>", ...], '
+        '"quantity": <positive integer or null>, "total_budget": <dollars or null>, '
+        '"budget_scope": "per_unit|total|null", '
         '"confidence": <0.0-1.0>}\nJSON:'
     )
 
@@ -476,21 +484,27 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # BULK clamp (model-judged, replaces the regex): quantity a positive int within sane bounds;
     # total_budget dollars → cents within bounds. Whatever the model returns is BOUNDED (this clamp
     # IS the model-agnosticism — a weak/foreign model can't break it); a miss → None (ask/inherit).
+    import math as _math
     quantity = None
     _qv = data.get("quantity")
-    if isinstance(_qv, (int, float)) and not isinstance(_qv, bool) and 1 <= int(_qv) <= 100_000:
+    if (isinstance(_qv, (int, float)) and not isinstance(_qv, bool) and _math.isfinite(_qv)
+            and float(_qv).is_integer() and 1 <= int(_qv) <= 100_000):   # finite + integral (P0.7)
         quantity = int(_qv)
     if quantity is None:
-        # graceful + model-agnostic: a model that put the count in `requirements` (a common habit)
-        # is still honored — we read the MODEL's output flexibly (not a regex on the query).
+        # graceful + model-agnostic: honor a count the model put in `requirements` (a common habit).
+        # Validate the OPERATOR (P0.7) — not a regex on the query, just reading the model flexibly.
         _cnt = (data.get("requirements") or {}).get("count")
-        if isinstance(_cnt, (list, tuple)) and len(_cnt) == 2 and isinstance(_cnt[1], (int, float)) \
-                and not isinstance(_cnt[1], bool) and 1 <= int(_cnt[1]) <= 100_000:
+        if (isinstance(_cnt, (list, tuple)) and len(_cnt) == 2 and str(_cnt[0]) in _ALLOWED_OPS
+                and isinstance(_cnt[1], (int, float)) and not isinstance(_cnt[1], bool)
+                and _math.isfinite(_cnt[1]) and 1 <= int(_cnt[1]) <= 100_000):
             quantity = int(_cnt[1])
     total_budget_cents = None
     _tb = data.get("total_budget")
-    if isinstance(_tb, (int, float)) and not isinstance(_tb, bool) and 1 <= float(_tb) <= 100_000_000:
+    if (isinstance(_tb, (int, float)) and not isinstance(_tb, bool) and _math.isfinite(_tb)
+            and 1 <= float(_tb) <= 100_000_000):
         total_budget_cents = int(round(float(_tb) * 100))
+    _bs = str(data.get("budget_scope") or "").strip().lower()
+    budget_scope = _bs if _bs in ("per_unit", "total") else "unknown"
 
     # clamp 4 — THE REFUSAL GATE, both directions. The model MAPS; the PLATFORM decides:
     # a purchase-ish turn whose routed node fails sells_within() is refused even if the
@@ -574,4 +588,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         exclude_brand=exclude_brand,
                         subject_from_session=subject_from_session,
                         compare_targets=compare_targets,
-                        quantity=quantity, total_budget_cents=total_budget_cents)
+                        quantity=quantity, total_budget_cents=total_budget_cents,
+                        budget_scope=budget_scope)
