@@ -75,6 +75,10 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     # grounding_status: taxonomy grounding state (grounded|empty|error) — degradation made
     # visible at the contract level instead of implied (added 2026-07-11 with legacy_adapter)
     "grounding_status",
+    # V2 recommendation_core presentation surfaces (Phase 1a-1d, added 2026-07-13 with the shelf):
+    # shelf = the 3-band right-side panel; capability = the floor/budget banner; advisories =
+    # non-blocking notes (e.g. minor content-advisory); assumption = the stated variant assumption.
+    "shelf", "capability", "advisories", "assumption",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):

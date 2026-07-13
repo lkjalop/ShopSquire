@@ -304,7 +304,16 @@ def _budget_free_cards(db, envelope: TurnEnvelope, decision: TurnDecision, limit
     bundle = gather_evidence(db, free_env, node_handle=decision.node_handle, limit=n)
     if bundle.status != "ok" or not bundle.variants:
         return []
-    cards, _ = build_cards(bundle.variants, decision.requirements or None, limit=n)
+    variants = bundle.variants
+    # HONESTY (review finding #1): a HARD brand filter must not leak off-brand products into the
+    # floor/stretch — 'only Dell, $900' must never quote a Lenovo as 'the cheapest that meets'.
+    bf = getattr(decision, "brand_filter", None)
+    if bf:
+        blf = str(bf).strip().lower()
+        variants = [v for v in variants if (v.brand or "").strip().lower() == blf]
+        if not variants:
+            return []
+    cards, _ = build_cards(variants, decision.requirements or None, limit=n)
     return cards
 
 
@@ -335,8 +344,13 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
     floor = fs.get("capability_floor_cents")     # cheapest MEETS within the retrieved (budget) set
     probed = False
     # budget < floor case: nothing in-budget meets, but a ceiling was set → probe the true floor
+    # ONCE and memoize the cards on resp so the shelf reuses them (review finding #2: no 2nd retrieval).
     if floor is None and bmax is not None and decision.node_handle:
-        floor = _budget_free_floor(db, envelope, decision, limit)
+        bf_cards = _budget_free_cards(db, envelope, decision, limit)
+        resp._bf_cards = bf_cards
+        meets_prices = [c.price_cents for c in bf_cards if c.price_cents is not None
+                        and (c.fit or {}).get("overall") == "meets"]
+        floor = min(meets_prices) if meets_prices else None
         probed = True
 
     cap: Dict[str, Any] = {"floor_cents": floor, "budget_max_cents": bmax,
@@ -419,9 +433,13 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
     in_budget = list(resp.products)          # already ranked; budget-filtered (or full if no bmax)
     above_budget: list = []
     if verdict == "below_budget" and decision.node_handle:
-        # the stretch story lives ABOVE the ceiling — reuse the budget-free node set
+        # the stretch story lives ABOVE the ceiling — REUSE the budget-free set the floor probe
+        # already fetched (memoized on resp); only fetch if it isn't there (review finding #2).
+        bf_cards = getattr(resp, "_bf_cards", None)
+        if bf_cards is None:
+            bf_cards = _budget_free_cards(db, envelope, decision, limit)
         in_ids = {c.sku for c in in_budget}
-        above_budget = [c for c in _budget_free_cards(db, envelope, decision, limit)
+        above_budget = [c for c in bf_cards
                         if c.sku not in in_ids and (c.price_cents or 0) > (bmax or 0)]
     universe = in_budget + above_budget
     used: set = set()

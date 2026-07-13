@@ -65,6 +65,13 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "needs_disambiguation": clarifying,
         "next_questions": core.clarify,
         "workload_fit": core.fit_summary,
+        # V2 recommendation-core presentation surfaces (Phase 1a-1d) — additive; the frontend
+        # renders the 3-band shelf, the capability banner, advisories, and the stated assumption.
+        # Absent (None/[]) on the legacy path, so old consumers are unaffected.
+        "shelf": core.extras.get("shelf"),
+        "capability": core.extras.get("capability"),
+        "advisories": core.extras.get("advisories", []),
+        "assumption": core.extras.get("assumption"),
         # v1 semantics: a budget-carrying search reads as FILTER (the recorded naming)
         "turn_intent": ("FILTER" if core.lane == "SEARCH"
                         and (core.envelope.budget_max_cents is not None

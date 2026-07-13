@@ -128,6 +128,22 @@ def test_adaptive_single_band_when_thin():
 
 # ── guards: no shelf off the product lanes / degraded / no requirements ──────────
 
+def test_adapter_passes_shelf_capability_advisories_to_payload():
+    """The frontend seam: to_legacy() must carry the V2 presentation surfaces to the payload —
+    otherwise the shelf brain is built but invisible to the UI (the backend→frontend gap)."""
+    from src.app.services.recommendation_core.legacy_adapter import to_legacy
+    resp = CoreResponse(envelope=_env(budget_max=2000), lane="SEARCH")
+    resp.extras["shelf"] = {"banner": {"kind": "within_budget"}, "bands": [{"id": "best_fit"}]}
+    resp.extras["capability"] = {"verdict": "within_budget", "floor_cents": 119900}
+    resp.extras["advisories"] = [{"persona": "minor"}]
+    resp.extras["assumption"] = {"use_case": "gaming", "variant": None}
+    payload = to_legacy(resp)
+    assert payload["shelf"]["bands"][0]["id"] == "best_fit"
+    assert payload["capability"]["floor_cents"] == 119900
+    assert payload["advisories"][0]["persona"] == "minor"
+    assert payload["assumption"]["use_case"] == "gaming"
+
+
 def test_shelf_guards_no_op():
     env = _env(budget_max=900)
     r = CoreResponse(envelope=env, lane="SEARCH", degraded=True)

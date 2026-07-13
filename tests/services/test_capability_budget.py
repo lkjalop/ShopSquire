@@ -74,8 +74,10 @@ def test_within_budget_confirms_floor():
 # ── budget < floor → honest tradeoff, never empty (the drawing $900 case) ───────
 
 def test_below_budget_offers_tradeoff(monkeypatch):
-    # nothing at $900 meets → the branch probes the budget-free floor and offers the tradeoff
-    monkeypatch.setattr(core, "_budget_free_floor", lambda *a, **k: 119900)
+    # nothing at $900 meets → the branch probes the budget-free cards and offers the tradeoff
+    monkeypatch.setattr(core, "_budget_free_cards",
+                        lambda *a, **k: [ProductCard(sku="DELL", title="Dell 2-in-1",
+                                                     price_cents=119900, fit={"overall": "meets"})])
     env = _env(budget_max=900)
     resp = CoreResponse(envelope=env, lane="SEARCH")
     resp.products = [ProductCard(sku="CLAM", title="Clamshell", price_cents=65000, fit={"overall": "fails"})]
@@ -109,6 +111,23 @@ def test_budget_free_floor_ignores_ceiling(monkeypatch):
     assert seen["bmax"] is None and seen["bmin"] is None      # the probe cleared the ceiling
     assert seen["node"] == "el-6-11"
     assert floor == 119900        # the $1199 2-in-1 above the $900 ceiling; the clamshell can't meet
+
+
+def test_budget_free_probe_respects_hard_brand_filter(monkeypatch):
+    """Review finding #1: on a HARD 'only Dell' filter the budget-free floor must be an in-BRAND
+    product — never leak a cheaper off-brand one into 'the cheapest that meets is $X'."""
+    def fake_gather(db, env, *, node_handle=None, limit=50):
+        b = EvidenceBundle(status="ok")
+        b.variants = [
+            VariantView(sku="LENOVO", title="Lenovo 14 2-in-1 Laptop", price_cents=99900,
+                        specs={"ram_gb": 16}, brand="Lenovo"),    # cheaper, meets, but OFF-brand
+            VariantView(sku="DELL", title="Dell Inspiron 14 2-in-1 Laptop", price_cents=139900,
+                        specs={"ram_gb": 16}, brand="Dell"),
+        ]
+        return b
+    monkeypatch.setattr(core, "gather_evidence", fake_gather)
+    floor = _budget_free_floor(None, _env(budget_max=900), _decision(brand_filter="Dell"), 10)
+    assert floor == 139900        # the Dell, NOT the cheaper off-brand Lenovo
 
 
 # ── guards: no-op off the product lanes / degraded / no requirements ─────────────
