@@ -193,6 +193,9 @@ class TurnDecision:
     # per_unit | total | unknown — whether a STATED budget is per-item or the whole-order total.
     # NEVER reinterpret a per-unit budget as a total (the arithmetic-safety invariant, review-10 P0).
     budget_scope: str = "unknown"
+    # continue | switch | uncertain (review-10 P0.2) — the model's LANE-INDEPENDENT continuation
+    # signal; drives prior-subject inheritance and suppresses fragment-drift on an explicit switch.
+    subject_action: str = "uncertain"
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -207,7 +210,7 @@ class TurnDecision:
                 "subject_from_session": self.subject_from_session,
                 "compare_targets": list(self.compare_targets),
                 "quantity": self.quantity, "total_budget_cents": self.total_budget_cents,
-                "budget_scope": self.budget_scope}
+                "budget_scope": self.budget_scope, "subject_action": self.subject_action}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -266,7 +269,9 @@ def _prior_context_block(prior: Optional[Dict[str, Any]]) -> str:
         f"that order (a quantity, a budget, a brand, a spec, 'how many', 'what about', 'actually "
         f"…'), classify it in the SAME category and keep the use-case — do NOT jump to a different "
         f"product just because a word matches. Only pick a DIFFERENT category if the shopper "
-        f"clearly starts a new search.\n\n")
+        f"clearly starts a new search. Set subject_action: 'continue' if this message refines the "
+        f"PRIOR subject (adds a spec/quantity/budget, 'also', 'the class needs', 'make it N'), "
+        f"'switch' if it is a genuinely new product search, 'uncertain' if unclear.\n\n")
 
 
 def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
@@ -339,6 +344,7 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         '"compare_targets": ["<named product>", ...], '
         '"quantity": <positive integer or null>, "total_budget": <dollars or null>, '
         '"budget_scope": "per_unit|total|null", '
+        '"subject_action": "continue|switch|uncertain|null", '
         '"confidence": <0.0-1.0>}\nJSON:'
     )
 
@@ -353,6 +359,15 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         cands = candidate_nodes(envelope.query)
     except Exception:
         cands = []
+    # SUBJECT CONTINUITY (review-10 P0.2): inject the PRIOR node as a LEGAL candidate so a
+    # subject-dropping follow-up ('I also want Minecraft', 'the class needs 10 of them') can STAY
+    # on it — prompt-context alone let the model drift to a stray-word match (toy food / school
+    # bags). The clamp still requires a registry-real handle; this only makes the active subject
+    # OFFERABLE. The model still decides continue vs switch (subject_action + the prompt guidance).
+    _prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
+    if _prior is not None and all(n.handle != _prior.handle for n, _ in cands):
+        _top = max((sc for _, sc in cands), default=3.0)
+        cands = [(_prior, _top + 0.5)] + cands
     defs = defs_union(DEFAULT_VERTICALS)
     fit_keys = [k for k, d in defs.items() if d.kind == "quantity"]
     from src.app.services.recommendation_core.intent_resolver import known_use_cases
@@ -397,7 +412,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     session = envelope.session or {}
     prior_shortlist = tuple(str(s) for s in (session.get("shortlist_skus") or [])[:12])
     subject_from_session = False
-    if lane in ("FILTER", "COMPARE", "EXPLAIN"):
+    # SUBJECT ACTION (review-10 P0.2): the model's LANE-INDEPENDENT continue/switch signal. A
+    # 'continue' triggers prior-subject inheritance on ANY lane (not just FILTER/COMPARE/EXPLAIN);
+    # an explicit 'switch' suppresses the fragment-drift override (the shopper started fresh).
+    _sa = str(data.get("subject_action") or "").strip().lower()
+    subject_action = _sa if _sa in ("continue", "switch", "uncertain") else "uncertain"
+    _continues = subject_action == "continue" or (
+        subject_action != "switch" and lane in ("FILTER", "COMPARE", "EXPLAIN"))
+    if _continues:
         pn = get_node(str(session.get("prior_node") or ""))
         if node is None:
             if pn is not None:
@@ -577,6 +599,13 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     elif lane == "OFF_CATALOG":
         lane = "SEARCH"       # ungrounded/unknown/actually-sold → NEVER refuse
 
+    # CART-vs-PROCUREMENT (review-10 P0.3): a cart mutation with NO active cart is invalid — the
+    # model mis-proposed the lane ('reduce the order to 15' AMENDS a procurement journey, it does
+    # not mutate a cart that isn't there). Downgrade to a continuation (FILTER inherits the prior
+    # bulk/brand state) when there's a prior subject, else SEARCH. Never mutate an absent cart.
+    if lane == "CART_MUTATE" and not (envelope.cart or []):
+        lane = "FILTER" if (envelope.session or {}).get("prior_node") else "SEARCH"
+
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
                         requirements=requirements, use_cases=tuple(use_cases),
@@ -589,4 +618,4 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         subject_from_session=subject_from_session,
                         compare_targets=compare_targets,
                         quantity=quantity, total_budget_cents=total_budget_cents,
-                        budget_scope=budget_scope)
+                        budget_scope=budget_scope, subject_action=subject_action)

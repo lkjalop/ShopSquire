@@ -63,6 +63,11 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
                 # accepted_constraints verbatim).
                 "quantity": decision.get("quantity"),
                 "total_budget_cents": decision.get("total_budget_cents"),
+                # brand constraints (review-10 P0.6) — so 'now show me cheaper ones' keeps the
+                # 'only Asus' / 'not Apple' the shopper set on a prior turn.
+                "brand_filter": decision.get("brand_filter"),
+                "exclude_brand": decision.get("exclude_brand"),
+                "preferred_brand": decision.get("preferred_brand"),
             },
             "last_lane": core.lane,
             "ts": int(time.time()),

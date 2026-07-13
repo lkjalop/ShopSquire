@@ -175,6 +175,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             decision = dataclasses.replace(decision, quantity=int(acc["quantity"]))
         if decision.total_budget_cents is None and acc.get("total_budget_cents"):
             decision = dataclasses.replace(decision, total_budget_cents=int(acc["total_budget_cents"]))
+        # BRAND continuation (review-10 P0.6): inherit brand constraints when THIS turn didn't set
+        # one ('show me cheaper ones' keeps the prior 'only Asus' / 'not Apple'); stated wins.
+        if decision.brand_filter is None and acc.get("brand_filter"):
+            decision = dataclasses.replace(decision, brand_filter=str(acc["brand_filter"]))
+        if decision.exclude_brand is None and acc.get("exclude_brand"):
+            decision = dataclasses.replace(decision, exclude_brand=str(acc["exclude_brand"]))
+        if decision.preferred_brand is None and acc.get("preferred_brand"):
+            decision = dataclasses.replace(decision, preferred_brand=str(acc["preferred_brand"]))
 
     # quantity is MODEL-JUDGED now (decision.quantity, clamped in the router) — no count-in-fit hack;
     # the router also excludes `count` from requirements, so nothing pollutes fit/closest-match.
