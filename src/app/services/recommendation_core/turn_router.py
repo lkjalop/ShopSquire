@@ -181,6 +181,12 @@ class TurnDecision:
     # distinctive-token overlap and narrows only when ≥2 bind unambiguously (never guess a
     # comparison down to the wrong units). Empty = whole-category compare.
     compare_targets: Tuple[str, ...] = ()
+    # BULK (Phase 1f — model-judged, not regex): the shopper's ORDER SIZE and TOTAL budget for a
+    # bulk/procurement ask ('20 laptops … $16000 total'). Model EXTRACTS; the clamp bounds them to
+    # sane values. quantity is a count, not a fit predicate; total_budget is the whole-order budget
+    # (distinct from the per-unit budget the platform already applies at retrieval).
+    quantity: Optional[int] = None
+    total_budget_cents: Optional[int] = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -193,7 +199,8 @@ class TurnDecision:
                 "brand_filter": self.brand_filter, "sort": self.sort,
                 "preferred_brand": self.preferred_brand,
                 "subject_from_session": self.subject_from_session,
-                "compare_targets": list(self.compare_targets)}
+                "compare_targets": list(self.compare_targets),
+                "quantity": self.quantity, "total_budget_cents": self.total_budget_cents}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -237,8 +244,27 @@ def _stocked_handles(db, tenant_id: str, handles: List[str]) -> frozenset:
     return frozenset(out)
 
 
+def _prior_context_block(prior: Optional[Dict[str, Any]]) -> str:
+    """Multi-turn context (context-rot fix): show the classifier the PRIOR subject so a
+    subject-dropping follow-up ('only 6 people, $19000', 'how many can I get?') stays in the same
+    category instead of mis-routing on a stray word ('drawing class' → Art & Crafts). Model-judged:
+    the model still decides continuation vs a genuinely new search; deterministic clamps unchanged."""
+    if not prior or not prior.get("node_path"):
+        return ""
+    ucs = ", ".join(prior.get("use_cases") or []) or "general use"
+    bud = f", budget ~${prior['budget_max_cents'] // 100:,}" if prior.get("budget_max_cents") else ""
+    return (
+        f"PRIOR TURN (the shopper is CONTINUING this conversation): they were shopping for "
+        f"\"{prior['node_path']}\" for use-case(s) \"{ucs}\"{bud}. If the CURRENT message refines "
+        f"that order (a quantity, a budget, a brand, a spec, 'how many', 'what about', 'actually "
+        f"…'), classify it in the SAME category and keep the use-case — do NOT jump to a different "
+        f"product just because a word matches. Only pick a DIFFERENT category if the shopper "
+        f"clearly starts a new search.\n\n")
+
+
 def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
-                  use_case_keys: List[str], stocked: frozenset = frozenset()) -> str:
+                  use_case_keys: List[str], stocked: frozenset = frozenset(),
+                  prior: Optional[Dict[str, Any]] = None) -> str:
     # [in catalog] = platform truth beside each candidate (R8.2 — the bag→sleeve mis-ground:
     # semantically interchangeable siblings need the sold signal to break the tie; without it the
     # model guessed Laptop Sleeves (empty) over Laptop Bags (stocked, top-scored)).
@@ -255,6 +281,7 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
                        f"price as a requirement/spec).\n")
     return (
         "You are the routing brain of a commerce assistant. Classify the shopper's message.\n\n"
+        f"{_prior_context_block(prior)}"
         f'MESSAGE: "{envelope.query[:400]}"\n'
         f"{budget_note}\n"
         f"LANES (pick exactly one): {', '.join(LANES)}\n"
@@ -288,6 +315,10 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         "- COMPARE of SPECIFIC products ('the Dell G16 vs the Lenovo Legion'): list each named "
         "product as a short name in compare_targets. Empty list when comparing a whole "
         "category ('compare your gaming laptops').\n"
+        "- BULK: if the shopper wants MULTIPLE units ('20 laptops', 'about 20', 'for 6 people') set "
+        "quantity to that whole number. If they state a TOTAL budget for the whole order ('$16000 "
+        "total', 'budget is $19000') set total_budget to that dollar amount. Do NOT put the count "
+        "in requirements. Both null for a single item / no stated budget.\n"
         '- POLICY_QUESTION for services (payment plans, delivery, returns policy).\n\n'
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
         '"use_cases": ["<key>", ...], '
@@ -314,8 +345,17 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     from src.app.services.recommendation_core.intent_resolver import known_use_cases
     fn = llm_fn or _default_llm_fn
     stocked = _stocked_handles(db, envelope.tenant_id, [n.handle for n, _ in cands])
+    # MULTI-TURN CONTEXT (context-rot fix): the PRIOR subject, shown to the classifier so a
+    # subject-dropping follow-up stays in-category (persisted last turn; remapped by the facade).
+    prior = None
+    _sess = envelope.session or {}
+    _pn = get_node(str(_sess.get("prior_node") or ""))
+    if _pn is not None:
+        _acc = _sess.get("accepted_constraints") or {}
+        prior = {"node_path": _pn.full_path, "use_cases": _acc.get("use_cases") or [],
+                 "budget_max_cents": _acc.get("budget_max_cents")}
     try:
-        raw = fn(_build_prompt(envelope, cands, fit_keys, known_use_cases(), stocked), timeout)
+        raw = fn(_build_prompt(envelope, cands, fit_keys, known_use_cases(), stocked, prior), timeout)
         data = json.loads(raw) if raw else None
     except Exception:
         data = None
@@ -376,6 +416,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # clamp 3: requirements — known keys, known ops, numeric, within sanity bounds
     requirements: Dict[str, List[Tuple[str, float]]] = {}
     for key, spec in (data.get("requirements") or {}).items():
+        if str(key) == "count":
+            continue   # count is a QUANTITY signal → the `quantity` field, NEVER a per-product fit predicate
         d = defs.get(str(key))
         if d is None or d.kind != "quantity" or not isinstance(spec, (list, tuple)) or len(spec) != 2:
             continue
@@ -424,6 +466,25 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     compare_targets = tuple(str(x).strip()[:60] for x in raw_targets
                             if isinstance(x, str) and str(x).strip())[:4] \
         if isinstance(raw_targets, (list, tuple)) else ()
+
+    # BULK clamp (model-judged, replaces the regex): quantity a positive int within sane bounds;
+    # total_budget dollars → cents within bounds. Whatever the model returns is BOUNDED (this clamp
+    # IS the model-agnosticism — a weak/foreign model can't break it); a miss → None (ask/inherit).
+    quantity = None
+    _qv = data.get("quantity")
+    if isinstance(_qv, (int, float)) and not isinstance(_qv, bool) and 1 <= int(_qv) <= 100_000:
+        quantity = int(_qv)
+    if quantity is None:
+        # graceful + model-agnostic: a model that put the count in `requirements` (a common habit)
+        # is still honored — we read the MODEL's output flexibly (not a regex on the query).
+        _cnt = (data.get("requirements") or {}).get("count")
+        if isinstance(_cnt, (list, tuple)) and len(_cnt) == 2 and isinstance(_cnt[1], (int, float)) \
+                and not isinstance(_cnt[1], bool) and 1 <= int(_cnt[1]) <= 100_000:
+            quantity = int(_cnt[1])
+    total_budget_cents = None
+    _tb = data.get("total_budget")
+    if isinstance(_tb, (int, float)) and not isinstance(_tb, bool) and 1 <= float(_tb) <= 100_000_000:
+        total_budget_cents = int(round(float(_tb) * 100))
 
     # clamp 4 — THE REFUSAL GATE, both directions. The model MAPS; the PLATFORM decides:
     # a purchase-ish turn whose routed node fails sells_within() is refused even if the
@@ -505,4 +566,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         prior_shortlist=prior_shortlist,
                         brand_filter=brand_filter, sort=sort, preferred_brand=preferred_brand,
                         subject_from_session=subject_from_session,
-                        compare_targets=compare_targets)
+                        compare_targets=compare_targets,
+                        quantity=quantity, total_budget_cents=total_budget_cents)

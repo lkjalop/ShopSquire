@@ -169,19 +169,16 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         if not decision.requirements and isinstance(prior_reqs, dict) and prior_reqs:
             decision = dataclasses.replace(decision, requirements=dict(prior_reqs))
             requirements_inherited = True
+        # BULK continuation: inherit quantity + total budget when THIS turn didn't state them
+        # ('how many can I get?' keeps the prior 6 units + $19k); a stated value this turn wins.
+        if decision.quantity is None and acc.get("quantity"):
+            decision = dataclasses.replace(decision, quantity=int(acc["quantity"]))
+        if decision.total_budget_cents is None and acc.get("total_budget_cents"):
+            decision = dataclasses.replace(decision, total_budget_cents=int(acc["total_budget_cents"]))
 
-    # COUNT is a QUANTITY signal (bulk order), NOT a per-product fit predicate — a single unit can
-    # never 'meet count>=20'. Extract it for the bulk-economics stage and STRIP it so it never
-    # pollutes fit / closest-match / the shelf on any lane (live-caught: '20 laptops … 12GB vram'
-    # showed 'No product meets count>=20, …').
-    requested_quantity = None
-    if "count" in decision.requirements:
-        _reqs = dict(decision.requirements)
-        for _op, _thr in (_reqs.pop("count") or []):
-            if _op in (">=", ">", "==") and isinstance(_thr, (int, float)) and not isinstance(_thr, bool):
-                requested_quantity = int(_thr)
-                break
-        decision = dataclasses.replace(decision, requirements=_reqs)
+    # quantity is MODEL-JUDGED now (decision.quantity, clamped in the router) — no count-in-fit hack;
+    # the router also excludes `count` from requirements, so nothing pollutes fit/closest-match.
+    requested_quantity = decision.quantity
 
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
@@ -649,20 +646,6 @@ def _maybe_complement_offer(db, envelope: TurnEnvelope, decision: TurnDecision,
         resp.extras["complement_offers"] = offers
 
 
-def _parse_total_budget(envelope: TurnEnvelope) -> Optional[int]:
-    """Total budget in CENTS for a bulk ask: the edge-parsed envelope budget if present, else the
-    largest $-amount / 4+digit number stated ('total of $16000', '$19000 budget')."""
-    if envelope.budget_max_cents:
-        return envelope.budget_max_cents
-    import re
-    nums = []
-    for m in re.finditer(r"\$\s?([\d,]{3,})|\b(\d{4,})\b", envelope.query or ""):
-        raw = (m.group(1) or m.group(2) or "").replace(",", "")
-        if raw.isdigit():
-            nums.append(int(raw))
-    return max(nums) * 100 if nums else None
-
-
 def _bundle_floor(db, envelope: TurnEnvelope, decision: TurnDecision, vertical: Optional[str],
                   variants: list, reqs: Dict[str, Any]) -> Optional[int]:
     """The cheaper HYBRID per-unit floor: cheapest laptop meeting the requirements MINUS the
@@ -729,7 +712,10 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
     if not floor:
         return
     vertical = _vertical_name(decision.node_handle)
-    econ = assess_bulk(quantity, _parse_total_budget(envelope), floor,
+    # total budget is MODEL-JUDGED (decision.total_budget_cents, clamped) — a budget STATED this
+    # turn wins; else the edge/inherited per-order budget on the envelope.
+    total = decision.total_budget_cents or envelope.budget_max_cents
+    econ = assess_bulk(quantity, total, floor,
                        bundle_floor_cents=_bundle_floor(db, envelope, decision, vertical, variants, reqs))
     if not econ:
         return

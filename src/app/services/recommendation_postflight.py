@@ -58,6 +58,11 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
                 "budget_max_cents": used.get("budget_max_cents", envelope.budget_max_cents),
                 "requirements": (used.get("requirements") or decision.get("requirements") or {}),
                 "use_cases": intent.get("use_cases") or [],
+                # bulk state (Phase 1f) — so a follow-up 'how many can I get?' inherits the order
+                # size + total budget the shopper set earlier (the facade maps this into
+                # accepted_constraints verbatim).
+                "quantity": decision.get("quantity"),
+                "total_budget_cents": decision.get("total_budget_cents"),
             },
             "last_lane": core.lane,
             "ts": int(time.time()),
