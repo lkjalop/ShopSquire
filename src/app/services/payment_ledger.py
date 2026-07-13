@@ -12,8 +12,11 @@ into a request path. Idempotent table creation (SQLite + Postgres portable).
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
+
+_log = logging.getLogger("shopsquire.payment_ledger")
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -63,7 +66,13 @@ def record_txn(db, *, order_id: str, kind: str, intent_id: Optional[str] = None,
                amount_cents: Optional[int] = None, currency: str = "USD", provider: str = "",
                actor_type: str = "", actor_id: str = "", reason: str = "",
                tenant_id: str = DEFAULT_TENANT, commit: bool = False) -> Optional[str]:
-    """Append one payment event. Returns the row id, or None. Best-effort; never raises."""
+    """Append one payment event → returns the row id. FAIL-CLOSED (Track A A2): the payment ledger
+    is the source of truth for the refund fold, so a lost write = under-counted refunds =
+    double-refund/reconciliation risk. This therefore RAISES on write failure (was silently
+    'best-effort; never raises') so the money action fails rather than proceeding un-recorded.
+    Callers that are genuinely best-effort (intent-created, dispatch-queued) already wrap the
+    call; the refund-approval path (which was NOT wrapped) now correctly fails closed — no ledger
+    record, no refund executed."""
     if db is None or not str(order_id or "").strip() or not str(kind or "").strip():
         return None
     try:
@@ -82,8 +91,10 @@ def record_txn(db, *, order_id: str, kind: str, intent_id: Optional[str] = None,
         if commit:
             db.commit()
         return tid
-    except Exception:
-        return None
+    except Exception as exc:
+        _log.error("payment ledger write FAILED (failing closed) order=%s kind=%s: %s",
+                   order_id, kind, repr(exc)[:160])
+        raise
 
 
 def ledger_for_order(db, order_id: str, *, tenant_id: str = DEFAULT_TENANT, limit: int = 100) -> List[Dict[str, Any]]:

@@ -357,7 +357,11 @@ class FraudScorer:
                 if not row:
                     return False, 0, False
                 return True, int(row[0] or 0), bool(row[1] or 0)
-        except Exception:
+        except Exception as exc:
+            # LOUD, not silent (Track A A4): a DB error here is indistinguishable from 'image never
+            # seen' at the tuple contract, so we cannot fail-closed without changing callers — but
+            # it must at least ALERT so a fraud-hash-table outage is visible, not a clean 0.
+            logger.error("fraud check_phash FAILED (treated as not-seen — ALERT): %s", repr(exc)[:120])
             return False, 0, False
 
     def upsert_phash(self, phash: Optional[str], case_id: Optional[str]) -> None:

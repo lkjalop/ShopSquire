@@ -25,7 +25,9 @@ from src.app.security.iam import log_iam_event, check_bruteforce, check_impossib
 from src.app.observability.tracing import get_tracer
 from src.app.services.pii_crypto import encrypt_pii, pii_hash
 import httpx
+import logging
 
+logger = logging.getLogger("shopsquire.auth")
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -63,8 +65,11 @@ def _is_https_request(request: Request | None) -> bool:
         if proto:
             return proto == "https"
         return str(request.url.scheme).lower() == "https"
-    except Exception:
-        return False
+    except Exception as exc:
+        # FAIL-SECURE (Track A A5): if we can't determine the scheme, assume HTTPS so the session
+        # cookie KEEPS its Secure flag — never downgrade a cookie to plaintext-eligible on error.
+        logger.warning("scheme detection failed — assuming https (keep Secure cookie): %s", repr(exc)[:80])
+        return True
 
 
 def _set_session_cookie(resp: Response, token: str, request: Request | None) -> None:
@@ -298,8 +303,12 @@ def _is_forced_reauth(user_id: str | None = None, email: str | None = None) -> b
                 ).fetchone()
                 if row:
                     return True
-    except Exception:
-        return False
+    except Exception as exc:
+        # FAIL-CLOSED (Track A A1): if we can't read the forced-reauth flags, we CANNOT prove the
+        # user isn't flagged — require reauth rather than silently let a flagged user through. A DB
+        # outage costs friction (everyone reauths), never a security bypass. Loud so it's visible.
+        logger.error("forced-reauth check FAILED — failing closed (require reauth): %s", repr(exc)[:120])
+        return True
     return False
 
 
