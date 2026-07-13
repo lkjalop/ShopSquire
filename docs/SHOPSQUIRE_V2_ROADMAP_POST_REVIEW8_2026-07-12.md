@@ -1,11 +1,14 @@
 # ShopSquire V2 — Detailed Roadmap after Review-8 (2026-07-12, HEAD f2732f7)
 
-> **STATUS UPDATE 2026-07-13 (HEAD b2bdb94): R8 DONE (except R8.3 labels = USER), R9 DONE
-> (all six items, live-validated), R10.1 DONE.** Label-free gate green on the stateful census
-> (constraint-sat ~78%, empty 1/21 where the 1 was a measurement phantom since fixed —
-> response_shape claims-artifact bug). Remaining work = R8.3 labels (USER, keys case_id:turn),
-> R10.2–R10.5 ops, R11 soak→canary. Details per item below; this header supersedes the
-> per-item status where they conflict.
+> **STATUS UPDATE 2026-07-13 (post-review-9): R8 DONE (except R8.3 labels = USER), R9 DONE
+> (all six), R10 DONE (10.1–10.4b), REVIEW-9 + FOLLOWUP FIXES DONE.** Label-free gate green
+> (constraint-sat ~78%, empty 0/21, unauthorized 0, diversity ~73%). Since this doc was written:
+> R9.1–R9.6, R10.1 (envelope-in-jobs + phantom-empty fix), R10.2 (tenant-cart identity, both
+> steps), R10.3 (lease CAD), R10.4a (mandatory CI), R10.4b (Redis Streams worker), and the
+> review-9 delta (composite authorization + fail-closed measured flag + classification-coverage
+> gate + preferred-value ranking + logged degradation) all landed. **Remaining = R8.3 labels
+> (USER), one real-Redis integration test, R11 soak→canary→primary→retire legacy.** This header
+> supersedes every per-item status below where they conflict — the body is kept for the WHY.
 
 ## Where we are (measured, not asserted)
 Final qwen3:14b re-measurement (`--facade-mode --diagnose`) after ALL 5 fixes (incl. f2732f7):

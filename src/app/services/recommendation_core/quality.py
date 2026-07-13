@@ -38,6 +38,8 @@ DEFAULT_THRESHOLDS: Dict[str, float] = {
     "unauthorized_rate_max": 0.0,          # over-budget/duplicate SKUs shown: NEVER acceptable
     "diversity_min": 0.30,                 # distinct-brand share in shown sets (degenerate-slate guard)
     "labeled_coverage_min": 0.30,          # share of product-expected cases carrying labels
+    "classified_shown_rate_min": 0.98,     # review-9-followup #A3: shown products carrying an
+    #                                        approved classification (onboarding coverage gate)
 }
 
 
@@ -84,16 +86,22 @@ def ndcg_at_k(shown_skus: List[str], lab: Dict[str, int], k: int = 10) -> float:
 
 # ── per-case evaluation ──────────────────────────────────────────────────────────
 
-def catalog_authorization_violations(db, shown_skus: List[str], *,
-                                     tenant_id: str = "default") -> int:
-    """SERVER-SIDE authorization check (review-9 #2 — the payload check alone was narrower than
-    its name): each SHOWN sku must (a) exist in the catalog, (b) be active, and (c) not sit in a
-    taxonomy node the tenant EXPLICITLY does not sell (sells_within is False). An unclassified
-    product is NOT a violation (unclassified ≠ unauthorized — classification coverage is its own
-    metric). Returns the violation count; fail-open 0 only when the DB itself is unreadable
-    (an infra failure must not masquerade as a quality signal)."""
-    if not shown_skus or db is None:
-        return 0
+def catalog_authorization(db, shown_skus: List[str], *,
+                          tenant_id: str = "default") -> Dict[str, Any]:
+    """SERVER-SIDE authorization + classification-coverage check (review-9 #2, review-9-followup
+    #A1/#A3). Each SHOWN sku must (a) exist, (b) be active, (c) not sit in a taxonomy node the
+    tenant EXPLICITLY does not sell. Returns:
+      {violations, measured, shown, classified} where
+      - measured=False when the DB read FAILS — a broken measurement must FAIL the gate, never
+        read as clean (the promotion-gate honesty rule; fail-CLOSED, not fail-open);
+      - classified = count of shown skus with an approved classification (coverage is a SEPARATE
+        gate — an unclassified but real+active product is NOT an authorization violation)."""
+    out = {"violations": 0, "measured": True, "shown": len(shown_skus), "classified": 0}
+    if not shown_skus:
+        return out
+    if db is None:
+        out["measured"] = False
+        return out
     try:
         from sqlalchemy import text as _t
         params = {f"s{i}": s for i, s in enumerate(shown_skus)}
@@ -101,39 +109,53 @@ def catalog_authorization_violations(db, shown_skus: List[str], *,
         rows = db.execute(_t(f"SELECT sku, COALESCE(active,1) FROM products WHERE sku IN ({ph})"),
                           params).fetchall()
         found = {str(r[0]): bool(r[1]) for r in rows}
-        violations = sum(1 for s in shown_skus if s not in found)          # phantom sku
-        violations += sum(1 for s in shown_skus if found.get(s) is False)  # inactive shown
-        try:
-            from src.app.services.taxonomy_registry import sells_within
-            cls = db.execute(_t(
-                f"SELECT sku, node_handle FROM product_classification "
-                f"WHERE sku IN ({ph}) AND tenant_id = :t AND status = 'approved'"),
-                {**params, "t": str(tenant_id)}).fetchall()
-            for sku, node in cls:
-                if sells_within(db, str(node), tenant_id=str(tenant_id)) is False:
-                    violations += 1                                        # explicitly-unsold node
-        except Exception as exc:
-            logger.debug("sold-taxonomy authorization leg skipped: %s", repr(exc)[:80])
-        return violations
+        v = sum(1 for s in shown_skus if s not in found)          # phantom sku
+        v += sum(1 for s in shown_skus if found.get(s) is False)  # inactive shown
+        from src.app.services.taxonomy_registry import sells_within
+        cls = db.execute(_t(
+            f"SELECT sku, node_handle FROM product_classification "
+            f"WHERE sku IN ({ph}) AND tenant_id = :t AND status = 'approved'"),
+            {**params, "t": str(tenant_id)}).fetchall()
+        classified = {str(sku) for sku, _ in cls}
+        for sku, node in cls:
+            if sells_within(db, str(node), tenant_id=str(tenant_id)) is False:
+                v += 1                                             # explicitly-unsold node
+        out["violations"] = v
+        out["classified"] = len(classified & set(shown_skus))
+        return out
     except Exception as exc:
-        logger.debug("catalog authorization check unavailable: %s", repr(exc)[:80])
-        return 0
+        logger.debug("catalog authorization UNREADABLE (gate must fail-closed): %s", repr(exc)[:80])
+        out["measured"] = False
+        return out
+
+
+def catalog_authorization_violations(db, shown_skus: List[str], *,
+                                     tenant_id: str = "default") -> int:
+    """Back-compat shim (count only). Prefer catalog_authorization() for the measured flag."""
+    return catalog_authorization(db, shown_skus, tenant_id=tenant_id)["violations"]
 
 
 def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
                           labels: Optional[Dict[str, Any]] = None,
+                          catalog: Optional[Dict[str, Any]] = None,
                           catalog_violations: int = 0) -> Dict[str, Any]:
     """One case's quality row. `case` needs: id; optional budget_max (dollars), expects_products
     (default True for SEARCH-ish cases; False for refusal/clarify-expected cases).
     `response` is the v2 legacy-shape payload (products: [{sku, price, brand, workload_fit}]).
-    catalog_violations = the SERVER-SIDE count from catalog_authorization_violations (the caller
-    holds the db); the gate's unauthorized_rate is the honest COMPOSITE of both checks."""
+    catalog = the SERVER-SIDE authorization result from catalog_authorization() (the caller holds
+    the db): {violations, measured, shown, classified}. `catalog_violations` is the legacy
+    count-only arg (still honored). unauthorized_rate is the honest COMPOSITE of payload + server
+    checks; an UNMEASURED authorization (catalog.measured=False) fails the gate."""
     products = [p for p in (response.get("products") or []) if isinstance(p, dict)]
     shown = [str(p.get("sku")) for p in products if p.get("sku")]
     expects = bool(case.get("expects_products", True))
+    cat = catalog or {"violations": catalog_violations, "measured": True,
+                      "shown": len(shown), "classified": len(shown)}
 
     row: Dict[str, Any] = {"case_id": str(case.get("id") or ""), "shown": len(shown),
-                           "expects_products": expects, "empty": expects and not shown}
+                           "expects_products": expects, "empty": expects and not shown,
+                           "catalog_measured": bool(cat.get("measured", True)),
+                           "shown_classified": int(cat.get("classified", 0))}
 
     # PAYLOAD violations (review-6 #18): over-budget shown products and duplicate SKUs — the two
     # things measurable from the payload alone. Tenant/active/sold-taxonomy live in the SERVER-
@@ -155,7 +177,7 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
     dupes = len(shown) - len(set(shown))
     violations += max(0, dupes)
     row["payload_violations"] = violations
-    row["catalog_violations"] = max(0, int(catalog_violations))
+    row["catalog_violations"] = max(0, int(cat.get("violations", catalog_violations)))
     row["unauthorized"] = violations + row["catalog_violations"]   # the composite the gate reads
 
     # constraint satisfaction over verdict-carrying products (fit rides each card)
@@ -197,6 +219,13 @@ def summarize_quality(rows: List[Dict[str, Any]],
                       if verdict_total else None)
     diversities = [r["diversity"] for r in rows if r.get("diversity") is not None]
     diversity = sum(diversities) / len(diversities) if diversities else None
+    # SERVER-SIDE authorization honesty (review-9-followup #A1): if ANY shown-slate authorization
+    # was UNMEASURED (DB unreadable), the gate must fail — a broken check can't read as clean.
+    authz_unmeasured = sum(1 for r in rows if r.get("shown", 0) and r.get("catalog_measured") is False)
+    # classification coverage (review-9-followup #A3): a SEPARATE gate from authorization —
+    # of shown products, the share carrying an approved classification (unclassified ≠ unauthorized).
+    classified_shown = sum(r.get("shown_classified", 0) for r in rows)
+    classified_shown_rate = (classified_shown / shown_total) if shown_total else None
     # coverage arithmetic (review-6 #19): numerator and denominator must be the SAME population —
     # labeled PRODUCT-EXPECTED cases over product-expected cases. Counting a labeled refusal case
     # in the numerator inflated coverage.
@@ -210,6 +239,12 @@ def summarize_quality(rows: List[Dict[str, Any]],
         failures.append(f"empty_rate {empty_rate:.3f} > {th['empty_rate_max']}")
     if unauthorized_rate > th["unauthorized_rate_max"]:
         failures.append(f"unauthorized_rate {unauthorized_rate:.4f} > {th['unauthorized_rate_max']}")
+    if authz_unmeasured:
+        failures.append(f"catalog_authorization UNMEASURED on {authz_unmeasured} case(s) "
+                        f"(a broken authorization check fails the gate, never reads clean)")
+    if classified_shown_rate is not None and classified_shown_rate < th["classified_shown_rate_min"]:
+        failures.append(f"classified_shown_rate {classified_shown_rate:.3f} < "
+                        f"{th['classified_shown_rate_min']} (onboarding coverage gap)")
     if constraint_sat is not None and constraint_sat < th["constraint_satisfaction_min"]:
         failures.append(f"constraint_satisfaction {constraint_sat:.3f} < {th['constraint_satisfaction_min']}")
     if diversity is not None and diversity < th["diversity_min"]:
@@ -230,5 +265,8 @@ def summarize_quality(rows: List[Dict[str, Any]],
             "labeled_cases": len(labeled), "labeled_coverage": round(labeled_coverage, 4),
             "precision_at_10": (round(precision, 4) if precision is not None else None),
             "ndcg_at_10": (round(ndcg, 4) if ndcg is not None else None),
+            "authz_unmeasured_cases": authz_unmeasured,
+            "classified_shown_rate": (round(classified_shown_rate, 4)
+                                      if classified_shown_rate is not None else None),
             "thresholds": th,
             "gates": {"pass": not failures, "failures": failures}}

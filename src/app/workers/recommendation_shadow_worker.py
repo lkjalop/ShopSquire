@@ -26,10 +26,19 @@ STREAM_KEY = "shadow:core:stream"                  # R10.4b durable path
 GROUP = "shadow-workers"
 DEADLETTER_KEY = "shadow:core:deadletter"          # legacy list DLQ (fallback)
 DEADLETTER_STREAM = "shadow:core:deadletter:stream"
+_ATTEMPT_PREFIX = "shadow:core:attempt:"           # review-9-followup #4: attempt counter,
+_DONE_PREFIX = "shadow:core:done:"                 # #5: idempotency marker — both independent
+_KEY_TTL_S = 6 * 3600                               # of XPENDING (which can be unreadable)
 _MAX_RETRIES = 3
 _BRPOP_TIMEOUT_S = 5
 _CLAIM_IDLE_MS = 60_000    # a pending entry idle >60s = its consumer died → reclaim it
-_MAX_DELIVERIES = 4        # redeliveries beyond this = poison (crashes the worker each time)
+_MAX_DELIVERIES = 4        # deliveries beyond this = poison (crashes the worker each time)
+_MAX_CLAIM_PER_CYCLE = 8   # bound the reclaim batch so a stale backlog can't starve new work
+_MAX_NEW_PER_CYCLE = 8
+
+# typed per-job outcomes (review-9-followup #2): only PROCESSED/DEAD_LETTERED/DUPLICATE may be
+# ACKed; RETRY leaves the entry pending for redelivery (durable output was NOT guaranteed).
+_PROCESSED, _DEAD_LETTERED, _DUPLICATE, _RETRY = "PROCESSED", "DEAD_LETTERED", "DUPLICATE", "RETRY"
 
 
 def _v1_products_from_trace(db, trace_id: str) -> Optional[List[Dict[str, Any]]]:
@@ -121,11 +130,21 @@ def process_job(db, job: Dict[str, Any], *, cart_llm_fn=None) -> Dict[str, Any]:
     v2 = to_legacy(core)
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
+    # SERVER-SIDE authorization on the SOAK path (review-9-followup #A2): the SAME evaluator the
+    # offline gate uses, so soak metrics and the promotion gate agree. A shown product that is
+    # phantom/inactive/unsold, or an UNMEASURED check, surfaces in the soak, not just the replay.
+    from src.app.services.recommendation_core.quality import catalog_authorization
+    shown_skus = [str(p.get("sku")) for p in (v2.get("products") or [])
+                  if isinstance(p, dict) and p.get("sku")]
+    authz = catalog_authorization(db, shown_skus, tenant_id=env.tenant_id)
+
     v1_products = _v1_products_from_trace(db, job.get("trace_id"))
     row: Dict[str, Any] = {
         "trace_id": job.get("trace_id"), "lane": core.lane, "grounding": core.grounding,
         "v2_products": len(core.products), "v2_class": message_class(v2),
         "degraded": bool(core.degraded), "latency_ms": latency_ms, "diffed": False,
+        "authz_violations": authz["violations"], "authz_measured": authz["measured"],
+        "shown_classified": authz["classified"],
     }
     if v1_products is not None:
         v1 = {"products": v1_products, "results": v1_products, "assistant_message": "v1"}
@@ -144,7 +163,10 @@ def _record_metrics(row: Dict[str, Any]) -> None:
         record_event("recommend_core_turn", {
             "lane": row.get("lane"), "grounding": row.get("grounding"),
             "degraded": row.get("degraded"), "latency_ms": row.get("latency_ms"),
-            "product_count": row.get("v2_products")})
+            "product_count": row.get("v2_products"),
+            "authz_violations": row.get("authz_violations"),
+            "authz_measured": row.get("authz_measured"),
+            "shown_classified": row.get("shown_classified")})
     except Exception as exc:   # observable, not silent (review-6 #22) — a dead metrics sink
         logger.debug("shadow metrics sink failed: %s", repr(exc)[:100])
     logger.info("shadow %s", json.dumps(row))
@@ -177,57 +199,71 @@ def _stream_payload(fields) -> Optional[str]:
 
 
 def _read_stream_batch(redis, consumer: str, *, block_ms: int) -> List[tuple]:
-    """[(msg_id, payload_json)] — stale pending entries FIRST (a dead consumer's unacked work,
-    reclaimed via XAUTOCLAIM after _CLAIM_IDLE_MS; poison beyond _MAX_DELIVERIES is dead-lettered
-    + acked here), then new entries (XREADGROUP '>'). At-least-once: nothing is removed from the
-    stream until the processor ACKs it — a crash mid-job leaves the entry pending for reclaim,
-    which is the loss mode the BRPOP list could not survive."""
+    """[(msg_id, payload_json_or_None)] — a BOUNDED batch of reclaimed stale pending entries
+    (dead-consumer recovery via XAUTOCLAIM after _CLAIM_IDLE_MS, capped at _MAX_CLAIM_PER_CYCLE
+    so a large stale backlog can't STARVE new work — review-9-followup stream-Q1) PLUS a bounded
+    batch of new entries. payload is None for a MALFORMED entry (no `payload` field) — the caller
+    dead-letters it (review-9-followup #3), never silently skips it into an eternal pending loop.
+    At-least-once: nothing leaves the stream until the processor ACKs (+XDELs) it."""
     out: List[tuple] = []
     try:
-        # 1. reclaim stale pending (dead-consumer recovery)
         try:
-            res = redis.xautoclaim(STREAM_KEY, GROUP, consumer,
-                                   min_idle_time=_CLAIM_IDLE_MS, start_id="0-0", count=10)
+            res = redis.xautoclaim(STREAM_KEY, GROUP, consumer, min_idle_time=_CLAIM_IDLE_MS,
+                                   start_id="0-0", count=_MAX_CLAIM_PER_CYCLE)
             claimed = res[1] if isinstance(res, (list, tuple)) and len(res) >= 2 else []
         except AttributeError:
             claimed = []                   # pre-6.2 server/client: skip recovery, never crash
         except Exception as exc:
             logger.debug("xautoclaim skipped: %s", repr(exc)[:80])
             claimed = []
-        for msg_id, fields in claimed or []:
-            payload = _stream_payload(fields)
-            deliveries = _delivery_count(redis, msg_id)
-            if deliveries is not None and deliveries > _MAX_DELIVERIES:
-                _dead_letter(redis, payload or "", f"poison_redelivered_{deliveries}x")
-                redis.xack(STREAM_KEY, GROUP, msg_id)
-                continue
-            if payload is not None:
-                out.append((msg_id, payload))
-        if out:
-            return out
-        # 2. new entries
-        res = redis.xreadgroup(GROUP, consumer, {STREAM_KEY: ">"}, count=1, block=block_ms)
+        for msg_id, fields in (claimed or [])[:_MAX_CLAIM_PER_CYCLE]:
+            out.append((msg_id, _stream_payload(fields)))   # None payload handled downstream
+        # ALWAYS also read new (never early-return on claimed — that's the starvation bug)
+        res = redis.xreadgroup(GROUP, consumer, {STREAM_KEY: ">"},
+                               count=_MAX_NEW_PER_CYCLE, block=(0 if out else block_ms))
         for _stream, entries in res or []:
             for msg_id, fields in entries:
-                payload = _stream_payload(fields)
-                if payload is not None:
-                    out.append((msg_id, payload))
+                out.append((msg_id, _stream_payload(fields)))
     except Exception as exc:
         logger.debug("stream read failed: %s", repr(exc)[:80])
     return out
 
 
-def _delivery_count(redis, msg_id) -> Optional[int]:
-    """Delivery count for one pending entry (poison detection). None = can't tell (fail open —
-    a reclaim loop without counts still converges via the DLQ on repeated failure)."""
+def _attempts(redis, key: str) -> int:
+    """Deliveries of this job, tracked in a Redis counter INDEPENDENT of XPENDING (review-9-
+    followup #4: XPENDING metadata can be unreadable → the old poison check never converged and a
+    worker-crashing payload reclaimed forever). INCR is atomic; TTL bounds the keyspace. 1 on the
+    first delivery. On a redis error we return _MAX_DELIVERIES+1 → treat unreadable attempt state
+    as 'assume poison', NOT infinite retry permission."""
     try:
-        pend = redis.xpending_range(STREAM_KEY, GROUP, min=msg_id, max=msg_id, count=1)
-        if pend:
-            p = pend[0]
-            return int(p.get("times_delivered") if isinstance(p, dict) else p[3])
+        n = int(redis.incr(_ATTEMPT_PREFIX + key))
+        if n == 1:
+            try:
+                redis.expire(_ATTEMPT_PREFIX + key, _KEY_TTL_S)
+            except Exception as exc:
+                logger.debug("attempt-key TTL set skipped: %s", repr(exc)[:60])
+        return n
+    except AttributeError:
+        return 1   # client can't track attempts (DummyRedis / no INCR) — no poison detection,
+        #            process once; a client without INCR also has no redelivery to converge on
     except Exception as exc:
-        logger.debug("xpending delivery count unavailable: %s", repr(exc)[:80])
-    return None
+        logger.warning("attempt counter unreadable (%s) — treating as poison, not infinite retry",
+                       repr(exc)[:80])
+        return _MAX_DELIVERIES + 1   # real infra error on a real client = degraded, assume poison
+
+
+def _is_done(redis, key: str) -> bool:
+    try:
+        return bool(redis.get(_DONE_PREFIX + key))
+    except Exception:
+        return False
+
+
+def _mark_done(redis, key: str) -> None:
+    try:
+        redis.setex(_DONE_PREFIX + key, _KEY_TTL_S, "1")
+    except Exception as exc:
+        logger.debug("done-marker set skipped: %s", repr(exc)[:80])
 
 
 def run(redis, db_factory, *, once: bool = False, max_jobs: Optional[int] = None,
@@ -235,31 +271,31 @@ def run(redis, db_factory, *, once: bool = False, max_jobs: Optional[int] = None
     """Drain loop. db_factory() → a fresh read Session per job (short-lived, no cross-job state).
     once=True processes whatever is queued then stops (for tests/CI).
 
-    R10.4b: the STREAM is the primary source (consumer group, ack-after-process, XAUTOCLAIM
-    recovery of a dead consumer's pending work — zero loss on worker crash). The legacy LIST is
-    still drained every cycle: clients without stream support enqueue there, and jobs queued
-    before the upgrade must not strand."""
+    R10.4b: the STREAM is the primary source (consumer group; a job leaves the stream only when
+    ACKed AND XDELed AFTER a durable outcome — process succeeded, or dead-lettered durably;
+    otherwise it stays pending for XAUTOCLAIM recovery = zero loss on worker crash). Idempotency
+    (a `done` marker) makes duplicate delivery a no-op. The legacy LIST is still drained every
+    cycle for stream-less clients + pre-upgrade jobs."""
     import time as _time
-    stats = {"processed": 0, "diffed": 0, "dead_lettered": 0, "errors": 0}
+    stats = {"processed": 0, "diffed": 0, "dead_lettered": 0, "errors": 0, "duplicate": 0}
     streams = _ensure_group(redis)
     while True:
         worked = False
         # ── stream leg (durable) ─────────────────────────────────────────────
         if streams:
-            for msg_id, item in _read_stream_batch(
+            for msg_id, payload in _read_stream_batch(
                     redis, consumer, block_ms=0 if once else _BRPOP_TIMEOUT_S * 1000):
                 worked = True
-                _handle_raw(redis, db_factory, item, stats)
-                try:
-                    redis.xack(STREAM_KEY, GROUP, msg_id)   # ACK only after process/dead-letter
-                except Exception as exc:
-                    logger.warning("xack failed (job may redeliver — at-least-once): %s",
-                                   repr(exc)[:80])
+                key = msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id)
+                outcome = _handle_one(redis, db_factory, payload, key, stats)
+                if outcome != _RETRY:                # PROCESSED / DEAD_LETTERED / DUPLICATE
+                    _ack_and_del(redis, msg_id)
+                # RETRY → leave pending: durable output was NOT guaranteed, reclaim later
                 if max_jobs and stats["processed"] >= max_jobs:
                     return stats
         # ── legacy list leg (fallback + migration) ───────────────────────────
-        # non-blocking rpop sweep first — NEVER brpop(timeout=0), which in redis-py blocks
-        # FOREVER (the hang class); block 5s only when this whole cycle found no work.
+        # non-blocking rpop first — NEVER brpop(timeout=0), which in redis-py blocks FOREVER
+        # (the hang class); block 5s only when this whole cycle found no work.
         item = None
         brpop_errored = False
         try:
@@ -276,7 +312,8 @@ def run(redis, db_factory, *, once: bool = False, max_jobs: Optional[int] = None
         if item is not None:
             worked = True
             item = item.decode() if isinstance(item, bytes) else item
-            _handle_raw(redis, db_factory, item, stats)
+            # list jobs have no msg_id → dedup/attempt key from the payload content
+            _handle_one(redis, db_factory, item, _payload_key(item), stats)
         if max_jobs and stats["processed"] >= max_jobs:
             break
         if not worked:
@@ -289,27 +326,83 @@ def run(redis, db_factory, *, once: bool = False, max_jobs: Optional[int] = None
     return stats
 
 
-def _handle_raw(redis, db_factory, item: str, stats: Dict[str, int]) -> None:
-    """One raw job payload → parse, process-with-retry, count. Shared by both legs."""
+def _ack_and_del(redis, msg_id) -> None:
+    """ACK then XDEL — removes the entry from the group PEL and the stream. XDEL-after-ack keeps
+    the stream self-cleaning (only un-acked work remains) so NO length-trim is needed on the
+    active input stream (review-9-followup #1: MAXLEN could trim un-processed pending work)."""
     try:
-        job = json.loads(item)
-    except Exception:
-        _dead_letter(redis, item, "unparseable")
-        stats["dead_lettered"] += 1
+        redis.xack(STREAM_KEY, GROUP, msg_id)
+    except Exception as exc:
+        logger.warning("xack failed (job may redeliver — idempotent on replay): %s", repr(exc)[:80])
         return
-    row = _process_with_retry(redis, db_factory, job, item, stats)
-    if row and row.get("diffed"):
-        stats["diffed"] += 1
-    stats["processed"] += 1
+    try:
+        redis.xdel(STREAM_KEY, msg_id)
+    except Exception as exc:
+        logger.debug("xdel skipped (acked, harmless): %s", repr(exc)[:80])
 
 
-def _process_with_retry(redis, db_factory, job, raw, stats) -> Optional[Dict[str, Any]]:
+def _payload_key(raw: str) -> str:
+    import hashlib
+    return "l-" + hashlib.sha256((raw or "").encode("utf-8")).hexdigest()[:24]
+
+
+def _handle_one(redis, db_factory, payload: Optional[str], key: str,
+                stats: Dict[str, int]) -> str:
+    """One job → a TYPED outcome (review-9-followup #2). ACK is the CALLER's job, gated on this:
+      PROCESSED     — ran to completion (marked done, idempotent on replay)
+      DEAD_LETTERED — durably recorded in the DLQ (only returned when the DLQ WRITE SUCCEEDED)
+      DUPLICATE     — already done (at-least-once redelivery) → ack, no re-processing/re-counting
+      RETRY         — durable output NOT guaranteed (DLQ write failed) → do NOT ack, reclaim later
+    """
+    # idempotency (review-9-followup #5): a redelivered job never double-processes / double-counts
+    if _is_done(redis, key):
+        stats["duplicate"] += 1
+        return _DUPLICATE
+    # malformed stream entry (no payload field) — dead-letter, never eternally-pending (#3)
+    if payload is None:
+        if _dead_letter(redis, "", "malformed_stream_entry"):
+            _mark_done(redis, key)
+            stats["dead_lettered"] += 1
+            return _DEAD_LETTERED
+        return _RETRY
+    # poison by attempt COUNT (independent of XPENDING — #4): converges even if pending metadata
+    # is unreadable, because the counter is bumped every delivery from either leg.
+    attempts = _attempts(redis, key)
+    if attempts > _MAX_DELIVERIES:
+        if _dead_letter(redis, payload, f"poison_delivered_{attempts}x"):
+            _mark_done(redis, key)
+            stats["dead_lettered"] += 1
+            return _DEAD_LETTERED
+        return _RETRY
+    try:
+        job = json.loads(payload)
+    except Exception:
+        if _dead_letter(redis, payload, "unparseable"):
+            _mark_done(redis, key)
+            stats["dead_lettered"] += 1
+            return _DEAD_LETTERED
+        return _RETRY
+    row, outcome = _process_with_retry(redis, db_factory, job, payload, stats)
+    if outcome == _PROCESSED:
+        if row and row.get("diffed"):
+            stats["diffed"] += 1
+        stats["processed"] += 1
+        _mark_done(redis, key)
+    elif outcome == _DEAD_LETTERED:
+        _mark_done(redis, key)
+    return outcome
+
+
+def _process_with_retry(redis, db_factory, job, raw, stats):
+    """Returns (row_or_None, outcome). On success: (row, PROCESSED). On exhausted retries: the
+    DLQ write decides — (None, DEAD_LETTERED) if it persisted, else (None, RETRY) so the source
+    entry stays pending rather than vanishing un-recorded (review-9-followup #2)."""
     last_exc = None
     for attempt in range(_MAX_RETRIES):
         db = None
         try:
             db = db_factory()
-            return process_job(db, job)
+            return process_job(db, job), _PROCESSED
         except Exception as exc:
             last_exc = exc
             logger.warning("shadow job attempt %d failed: %s", attempt + 1, repr(exc)[:120])
@@ -320,24 +413,28 @@ def _process_with_retry(redis, db_factory, job, raw, stats) -> Optional[Dict[str
                 except Exception as _ce:
                     logger.debug("shadow db.close failed: %s", repr(_ce)[:80])
     stats["errors"] += 1
-    _dead_letter(redis, raw, repr(last_exc)[:200] if last_exc else "unknown")
-    stats["dead_lettered"] += 1
-    return None
+    if _dead_letter(redis, raw, repr(last_exc)[:200] if last_exc else "unknown"):
+        stats["dead_lettered"] += 1
+        return None, _DEAD_LETTERED
+    return None, _RETRY
 
 
-def _dead_letter(redis, raw, reason: str) -> None:
+def _dead_letter(redis, raw, reason: str) -> bool:
+    """Durably record a failed/poison/malformed job. Returns True only when the write SUCCEEDED
+    (the caller uses this to decide whether the source entry may be ACKed — #2). DLQ is a stream
+    (XRANGE-replayable); list fallback for stream-less clients."""
     entry = json.dumps({"raw": raw if isinstance(raw, str) else str(raw), "reason": reason})
     try:
-        # R10.4b: DLQ is a stream (durable, XRANGE-replayable); list fallback for clients
-        # without stream support — same degradation ladder as the producer.
         try:
-            redis.xadd(DEADLETTER_STREAM, {"entry": entry}, maxlen=2000, approximate=True)
-            return
+            redis.xadd(DEADLETTER_STREAM, {"entry": entry}, maxlen=5000, approximate=True)
+            return True
         except (AttributeError, TypeError) as exc:
             logger.debug("no stream DLQ support (%s) → list", type(exc).__name__)
         redis.lpush(DEADLETTER_KEY, entry)
+        return True
     except Exception as exc:
-        logger.error("dead-letter push failed: %s", repr(exc)[:100])
+        logger.error("dead-letter push FAILED (job stays pending for retry): %s", repr(exc)[:100])
+        return False
 
 
 def _default_db_factory():

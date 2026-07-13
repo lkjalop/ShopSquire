@@ -69,3 +69,27 @@ the delta for any swallow the ratchet's regex missed (it only scans enrolled _CO
 - 5 Streams durability proofs incl. crash-before-ack → XAUTOCLAIM reclaim → zero loss.
 - Both ratchets green (no-flavour, no-silent-except @ baseline 0).
 - 9 review cycles, zero finding ever reopened (falsifiable death-spiral check still holds).
+
+---
+
+## FOLLOW-UP (2026-07-13, post-review-9 assessment) — all 5 stream + 2 authz findings CONFIRMED and FIXED
+The review above CORRECTLY caught real defects in this delta. Corrections landed:
+- **CORRECTION to my "zero-loss" claim:** it was too strong. Crash-recovery IS zero-loss
+  (XAUTOCLAIM), but the ORIGINAL delta had: approximate MAXLEN that could trim un-acked pending
+  work (#1), ACK before durable DLQ (#2), malformed entries eternally pending (#3),
+  poison-non-convergence when XPENDING unreadable (#4), and duplicate processing (#5). All real.
+- **#1 fixed:** MAXLEN dropped from the active input stream; worker XDELs each entry AFTER a
+  durable outcome (self-cleaning, length ≈ live backlog; XLEN is the soak backpressure signal).
+- **#2 fixed:** typed outcome (PROCESSED/DEAD_LETTERED/DUPLICATE/RETRY); ACK only on the first
+  three, and DEAD_LETTERED only when the DLQ write SUCCEEDED — a failed DLQ write → RETRY (stays
+  pending). `_dead_letter` now returns bool.
+- **#3 fixed:** malformed entry (no payload / trimmed) → DLQ + ack, never skipped.
+- **#4 fixed:** poison detection uses a Redis attempt COUNTER independent of XPENDING; unreadable
+  attempt state on a real client → assume poison, not infinite retry.
+- **#5 fixed:** idempotency `done` marker per job — redelivery is a no-op (no re-process/re-count).
+- **Starvation (stream-Q1) fixed:** bounded reclaim batch + ALWAYS also read new each cycle.
+- **Authz #A1 fixed:** `catalog_authorization()` returns `{violations, measured, classified}`;
+  UNMEASURED (db unreadable) → gate FAILS closed. **#A2:** the SAME evaluator runs in `process_job`
+  soak metrics (one source of truth). **#A3:** `classified_shown_rate` is a SEPARATE gate (≥0.98).
+- **STILL OPEN (correctly deferred):** a REAL-redis integration test (fakes are simulations) —
+  next; UNKNOWN=1.0 penalty tuning (needs labels); category-chain completion (onboarding increment).

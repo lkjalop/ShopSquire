@@ -1,6 +1,12 @@
 # R10.2 — Tenant-Cart Identity Threading Spec (2026-07-13)
 
-**STEP 1 LANDED (this commit): `draft_orders.tenant_id TEXT NOT NULL DEFAULT 'default'`** —
+> **STATUS 2026-07-13: STEP 1 AND STEP 2 BOTH LANDED.** Step 1 = `6852876` (column). Step 2 =
+> `72addbc` (threading, ContextVar, isolation suite). The declared cart scope is COMPLETE. What
+> remains is the *separate* platform debt (orders/returns tenant identity) called out at the
+> bottom — that is NOT part of this spec's cart scope. This header supersedes the "pending"
+> language below.
+
+**STEP 1 LANDED: `draft_orders.tenant_id TEXT NOT NULL DEFAULT 'default'`** —
 schema.sql + models/db.py guarded ALTER + alembic `20260713_draft_orders_tenant` + index
 `(tenant_id, customer_id, status)`. Additive, zero behavior change; every existing row backfills
 to `'default'` (today's single-tenant truth).

@@ -116,15 +116,14 @@ def _enqueue_shadow(redis, *, envelope: "TurnEnvelope", cart_only: bool = False)
                 payload["cart_only"] = True
         raw = json.dumps(payload)
         # R10.4b DURABLE PATH: a Stream entry survives a worker crash mid-job (consumer-group
-        # pending + XAUTOCLAIM recovery) — the list's BRPOP-then-process lost the popped job on
-        # crash, and its LTRIM cap silently dropped the OLDEST jobs whenever the drainer
-        # stalled. approximate maxlen keeps the cap without the silent-loss semantics (trim
-        # pressure is visible in stream length, and 2× the list cap). List fallback preserved
-        # for clients without stream support (DummyRedis) + the worker drains BOTH during
-        # migration.
+        # pending + XAUTOCLAIM recovery). NO MAXLEN on the active input stream (review-9-followup
+        # #1: approximate MAXLEN can trim entries still in the group's pending list — un-processed
+        # work would be lost, contradicting zero-loss). The worker XDELs each entry AFTER a
+        # durable outcome, so the stream stays self-cleaning (length ≈ live backlog); XLEN is the
+        # backpressure signal the soak watches. List fallback (with its cap) is for stream-less
+        # clients (DummyRedis) only — that cap is acceptable because the list path is best-effort.
         try:
-            redis.xadd(_SHADOW_STREAM_KEY, {"payload": raw},
-                       maxlen=_SHADOW_STREAM_MAX, approximate=True)
+            redis.xadd(_SHADOW_STREAM_KEY, {"payload": raw})
             return
         except (AttributeError, TypeError) as exc:
             logger.debug("no stream support (%s) → legacy list", type(exc).__name__)

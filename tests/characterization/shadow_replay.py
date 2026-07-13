@@ -36,7 +36,7 @@ from src.app.services.recommendation_core.core import recommend_turn
 from src.app.services.recommendation_core.envelope import TurnEnvelope
 from src.app.services.recommendation_core.legacy_adapter import SHAPES, to_legacy
 from src.app.services.recommendation_core.quality import (
-    catalog_authorization_violations,
+    catalog_authorization,
     evaluate_case_quality,
     load_labels,
     summarize_quality,
@@ -230,15 +230,16 @@ def main() -> None:
                 if not r.get("delegated"):
                     # quality/label rows are keyed case_id:turn (review-7 #3): case-only keys
                     # collide a case's follow-up turns — relevance_labels.json uses these keys.
-                    # SERVER-SIDE authorization (review-9 #2): every shown sku verified against
-                    # the catalog (exists/active/not-explicitly-unsold) — the payload check
-                    # alone was narrower than 'unauthorized' implied.
+                    # SERVER-SIDE authorization (review-9 #2 + followup #A1/#A2/#A3): every shown
+                    # sku verified against the catalog (exists/active/not-explicitly-unsold), with
+                    # a MEASURED flag so a broken read fails the gate, and classification coverage.
+                    # SAME evaluator the soak worker uses (one authorization source of truth).
                     shown = [str(p.get("sku")) for p in (v2.get("products") or [])
                              if isinstance(p, dict) and p.get("sku")]
-                    cav = catalog_authorization_violations(s, shown, tenant_id="default")
+                    authz = catalog_authorization(s, shown, tenant_id="default")
                     quality_rows.append(evaluate_case_quality(
                         _quality_case(f"{case['id']}:{t['turn']}", req, core), v2, labels,
-                        catalog_violations=cav))
+                        catalog=authz))
                     if args.diagnose:
                         diag_rows.append(_diagnose_case(case["id"], t["turn"],
                                                         req.get("query", ""), core, v2))

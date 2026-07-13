@@ -184,3 +184,33 @@ def test_composite_unauthorized_feeds_the_gate():
     assert row["payload_violations"] == 0
     assert row["catalog_violations"] == 2
     assert row["unauthorized"] == 2                       # server-side violations reach the gate
+
+
+def test_authorization_unmeasured_fails_gate_closed():
+    """review-9-followup #A1: a broken authorization read (db None / unreadable) must FAIL the
+    gate, never read as clean. catalog_authorization reports measured=False → summarize fails."""
+    from src.app.services.recommendation_core.quality import (catalog_authorization,
+                                                              evaluate_case_quality, summarize_quality)
+    res = catalog_authorization(None, ["A"])          # no db → unmeasured
+    assert res["measured"] is False
+    row = evaluate_case_quality({"id": "c1"}, {"products": [{"sku": "A", "price": 1.0}]},
+                                catalog=res)
+    assert row["catalog_measured"] is False
+    g = summarize_quality([row])
+    assert g["gates"]["pass"] is False
+    assert any("UNMEASURED" in f for f in g["gates"]["failures"])
+
+
+def test_classification_coverage_is_a_separate_gate():
+    """review-9-followup #A3: unclassified-but-active products aren't unauthorized, but LOW
+    classification coverage fails its OWN gate (onboarding gap), distinct from authorization."""
+    from src.app.services.recommendation_core.quality import (evaluate_case_quality,
+                                                              summarize_quality)
+    # 2 shown, 0 classified, 0 authz violations, measured → coverage 0 < 0.98 fails, authz clean
+    cat = {"violations": 0, "measured": True, "shown": 2, "classified": 0}
+    row = evaluate_case_quality({"id": "c1"},
+                                {"products": [{"sku": "A", "price": 1.0}, {"sku": "B", "price": 1.0}]},
+                                catalog=cat)
+    assert row["unauthorized"] == 0                    # coverage gap is NOT an authz violation
+    g = summarize_quality([row])
+    assert any("classified_shown_rate" in f for f in g["gates"]["failures"])
