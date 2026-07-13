@@ -1,0 +1,114 @@
+{
+  "_schema": [
+    "UNIFIED use-case registry (Track E consolidation) — HYBRID namespace: a COARSE use-case",
+    "carries a `baseline` spec + `budget_floor`, and optional fine `variants` that OVERRIDE the",
+    "baseline (DRY: define common specs once, refine per variant). This replaces the 4 drifting",
+    "files (config/use_case_kb.json, use_case_knowledge_base.json, use_case_knowledge.json,",
+    "data/use_case_kb.json) with ONE source per vertical, bound to taxonomy host nodes.",
+    "Resolution: resolve(coarse, variant?) = baseline <- variant override; budget_floor = variant",
+    "floor if present else coarse floor. `content_advisory` is ADVISORY ONLY (surface a note/",
+    "clarification, never a hard block — the store sells hardware, not game content).",
+    "Values migrated to match the current live workhorse (use_case_knowledge_base.json) so the",
+    "switch is behaviour-neutral; new granularity (variants) is additive."
+  ],
+  "vertical": "electronics",
+  "version": "1.0",
+  "host_nodes": ["el-6"],
+  "use_cases": {
+    "gaming": {
+      "label": "Gaming",
+      "keywords": ["game", "gaming", "fps", "esports", "play"],
+      "host_nodes": ["el-6-11-2", "el-6-11-1"],
+      "baseline": {"ram_gb_min": 16, "storage_gb_min": 512, "gpu_tier": 2},
+      "budget_floor": 500,
+      "variants": {
+        "light":       {"budget_floor": 500,  "gpu_tier": 1, "note": "Roblox/Minecraft-class, integrated or entry dGPU"},
+        "casual":      {"budget_floor": 600,  "gpu_tier": 2, "refresh_hz_min": 60},
+        "competitive": {"budget_floor": 900,  "gpu_tier": 3, "refresh_hz_min": 144},
+        "aaa_heavy":   {"budget_floor": 1200, "gpu_tier": 4, "gpu_vram_gb_min": 8, "ram_gb_min": 16}
+      }
+    },
+    "student": {
+      "label": "Student",
+      "keywords": ["student", "study", "school", "notes", "essays"],
+      "baseline": {"ram_gb_min": 8, "storage_gb_min": 256},
+      "budget_floor": 400,
+      "variants": {
+        "note_taking":     {"budget_floor": 350},
+        "university":      {"budget_floor": 400, "ram_gb_min": 16},
+        "computer_science":{"budget_floor": 600, "ram_gb_min": 16, "storage_gb_min": 512},
+        "engineering":     {"budget_floor": 1000, "ram_gb_min": 16, "gpu_tier": 2, "note": "CAD/simulation"},
+        "architecture":    {"budget_floor": 1000, "ram_gb_min": 16, "gpu_tier": 2},
+        "data_science":    {"budget_floor": 900, "ram_gb_min": 16, "gpu_tier": 2},
+        "design":          {"budget_floor": 700, "ram_gb_min": 16},
+        "medical":         {"budget_floor": 500},
+        "law":             {"budget_floor": 400}
+      }
+    },
+    "high_school": {
+      "label": "High school student",
+      "keywords": ["high school", "highschool", "year 10", "year 11", "year 12", "teenager"],
+      "baseline": {"ram_gb_min": 8, "storage_gb_min": 256},
+      "budget_floor": 400,
+      "variants": {
+        "schooling":      {"budget_floor": 400, "gpu_tier": 0, "note": "pure schooling — office/browser/notes"},
+        "light_gaming":   {"budget_floor": 600, "gpu_tier": 1, "note": "Roblox/Minecraft-class alongside schoolwork"},
+        "serious_gaming": {"budget_floor": 900, "gpu_tier": 3, "refresh_hz_min": 144, "note": "GPU-intensive titles"}
+      },
+      "content_advisory": {
+        "persona": "minor",
+        "note": "A minor requesting specs for a mature-rated (M / 18+) title implies a GPU floor for that title, but SURFACE an age/content clarification ('this runs <game>; note it is rated <rating>') — ADVISORY ONLY, never a hard block; the store sells hardware, not game content."
+      }
+    },
+    "primary_school": {
+      "label": "Primary school",
+      "keywords": ["primary school", "kids", "child", "elementary"],
+      "baseline": {"ram_gb_min": 8, "storage_gb_min": 128},
+      "budget_floor": 250,
+      "variants": {}
+    },
+    "creative": {
+      "label": "Content creator / creative",
+      "keywords": ["content creator", "video editing", "rendering", "photo editing", "creative", "music production"],
+      "baseline": {"ram_gb_min": 16, "storage_gb_min": 512, "gpu_tier": 2},
+      "budget_floor": 900,
+      "variants": {
+        "content_creator": {"budget_floor": 900},
+        "music_production": {"budget_floor": 800, "gpu_tier": 1}
+      }
+    },
+    "ai_ml_workstation": {
+      "label": "AI / ML workstation",
+      "keywords": ["ai", "ml", "machine learning", "fine-tune", "train models", "llm", "deep learning"],
+      "host_nodes": ["el-6-11-2"],
+      "baseline": {"ram_gb_min": 32, "storage_gb_min": 1024, "gpu_tier": 4, "gpu_vram_gb_min": 8},
+      "budget_floor": 1500,
+      "variants": {}
+    },
+    "office": {
+      "label": "Office / business",
+      "keywords": ["office", "business", "corporate", "productivity", "spreadsheets", "email"],
+      "baseline": {"ram_gb_min": 8, "storage_gb_min": 256},
+      "budget_floor": 350,
+      "variants": {
+        "general":  {"budget_floor": 350},
+        "finance":  {"budget_floor": 500, "ram_gb_min": 16},
+        "executive":{"budget_floor": 600, "ram_gb_min": 16, "note": "premium/portable"}
+      }
+    },
+    "calls_productivity": {
+      "label": "Calls & everyday productivity",
+      "keywords": ["calls", "zoom", "teams", "webcam", "productivity"],
+      "baseline": {"ram_gb_min": 8, "storage_gb_min": 256},
+      "budget_floor": 400,
+      "variants": {}
+    },
+    "general": {
+      "label": "General use",
+      "keywords": ["general", "everyday", "browsing", "basic"],
+      "baseline": {"ram_gb_min": 8, "storage_gb_min": 256},
+      "budget_floor": 350,
+      "variants": {}
+    }
+  }
+}

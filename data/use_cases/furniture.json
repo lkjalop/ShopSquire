@@ -1,0 +1,14 @@
+{
+  "_schema": [
+    "SCAFFOLD (Track E, breadth foundation) — same hybrid shape as electronics.json.",
+    "Populate use_cases AFTER electronics is proven in prod (depth-first). Bound to the",
+    "pinned Shopify taxonomy nodes below — do NOT invent a parallel category tree."
+  ],
+  "vertical": "furniture",
+  "version": "0.1-scaffold",
+  "host_nodes": [
+    "fr"
+  ],
+  "_taxonomy_note": "Furniture (fr-*) — scaffold; dining/lounge/bedroom/outdoor are fr-* subnodes",
+  "use_cases": {}
+}

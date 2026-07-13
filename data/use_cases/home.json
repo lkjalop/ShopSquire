@@ -1,0 +1,14 @@
+{
+  "_schema": [
+    "SCAFFOLD (Track E, breadth foundation) — same hybrid shape as electronics.json.",
+    "Populate use_cases AFTER electronics is proven in prod (depth-first). Bound to the",
+    "pinned Shopify taxonomy nodes below — do NOT invent a parallel category tree."
+  ],
+  "vertical": "home",
+  "version": "0.1-scaffold",
+  "host_nodes": [
+    "hg"
+  ],
+  "_taxonomy_note": "Home & Garden (hg-*) — scaffold; populate after electronics ships",
+  "use_cases": {}
+}
