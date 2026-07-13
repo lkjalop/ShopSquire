@@ -246,6 +246,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     except Exception as exc:
         logger.warning("shelf stage skipped: %s", repr(exc)[:120])
 
+    # VARIANT CLARIFIER (Phase 1c): one question only when a variant materially moves the floor and
+    # the shopper hasn't anchored it — else a stated assumption; content-advisory surfaces, never
+    # blocks. Runs before slot-gap so a specific variant ask outranks the generic "tell me more".
+    try:
+        _maybe_variant_clarify(envelope, decision, resp)
+    except Exception as exc:
+        logger.warning("variant-clarify stage skipped: %s", repr(exc)[:120])
+
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
         q = slot_gap_clarify(
@@ -460,6 +468,75 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
                    "text": resp.message, "floor_cents": floor, "budget_max_cents": bmax},
         "bands": bands,
     }
+
+
+_VERTICAL_BY_ROOT = {"el": "electronics", "hg": "home", "fr": "furniture", "ap": "appliances"}
+_VARIANT_SPREAD_MIN = 0.20            # material relative low-end spread across a use-case's variants
+_VARIANT_SPREAD_MIN_DOLLARS = 250     # …or this absolute low-end gap (band hints are DOLLARS)
+
+
+def _vertical_name(node_handle: Optional[str]) -> Optional[str]:
+    """Registry vertical name (electronics/home/…) for a node's vertical root (el → electronics).
+    Mirrors the registry files' host_nodes; None when unmapped (no clarify rather than a guess)."""
+    return _VERTICAL_BY_ROOT.get(_vertical_root(node_handle) or "")
+
+
+def _maybe_variant_clarify(envelope: TurnEnvelope, decision: TurnDecision,
+                           resp: CoreResponse) -> None:
+    """Phase 1c — ONE variant question, only when it materially moves the floor AND the shopper
+    hasn't anchored it. A use-case whose variants' band hints (from use_case_registry) spread
+    materially is ambiguous: with NO budget we ask (options labeled by their band); with a budget
+    the capability-floor logic already picks the tier, so we state an assumption instead of nagging;
+    if the query already names a variant we pin it silently. Content-advisory (a minor requesting
+    mature-game specs) surfaces as a note, NEVER a block. Additive — reads the smart KB for the
+    ASK decision only; the recommendation's requirements still come from the live resolver."""
+    if decision.lane != "SEARCH" or resp.clarify or resp.off_catalog or resp.degraded:
+        return
+    vertical = _vertical_name(decision.node_handle)
+    if not vertical:
+        return
+    import re
+    from src.app.services import use_case_registry as R
+    qtokens = set(re.findall(r"[a-z0-9]+", (envelope.query or "").lower()))
+    for uc in list(getattr(decision, "use_cases", None) or []):
+        adv = R.content_advisory(vertical, uc)
+        if adv:
+            resp.extras.setdefault("advisories", []).append(adv)      # surface, never block
+        named = R.list_variants(vertical, uc)
+        if not named:
+            continue
+        choices = [("base", R.resolve(vertical, uc, None) or {})]
+        choices += [(v, R.resolve(vertical, uc, v) or {}) for v in named]
+        lows = [c[1]["budget_band_hint"][0] for c in choices
+                if isinstance(c[1].get("budget_band_hint"), (list, tuple)) and c[1]["budget_band_hint"]]
+        if len(lows) < 2:
+            continue
+        gap = max(lows) - min(lows)
+        if gap < _VARIANT_SPREAD_MIN_DOLLARS and gap / max(min(lows), 1) < _VARIANT_SPREAD_MIN:
+            continue                              # variants don't move the floor enough to ask
+        pinned = next((v for v in named if set(v.split("_")) & qtokens), None)
+        if pinned:                                # the query already named a level → pin it silently
+            resp.extras["assumption"] = {"use_case": uc, "variant": pinned,
+                                         "note": f"Assuming {pinned.replace('_', ' ')} — say if not."}
+            return
+        if envelope.budget_max_cents is not None or envelope.budget_min_cents is not None:
+            resp.extras["assumption"] = {           # the budget picks the tier — state, don't ask
+                "use_case": uc, "variant": None,
+                "note": f"Your budget picks the {uc.replace('_', ' ')} level — tell me if you meant "
+                        f"a different one."}
+            return
+        opts = []
+        for vid, r in choices:
+            b = r.get("budget_band_hint")
+            lbl = ("standard " + uc.replace("_", " ")) if vid == "base" else vid.replace("_", " ")
+            if isinstance(b, (list, tuple)) and b:
+                lbl += f" — from ~${int(b[0]):,}"
+            opts.append({"id": vid, "label": lbl})
+        resp.clarify.append({
+            "id": f"variant_{uc}", "goal": "pick_use_case_variant",
+            "text": f"For {uc.replace('_', ' ')}, which level fits? It changes the pick and the price.",
+            "options": opts})
+        return
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:
