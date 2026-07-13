@@ -46,6 +46,16 @@ def test_soft_preferred_brand_is_not_a_hard_filter(db):
     assert d.brand_filter is None           # soft preference does NOT become a hard filter
 
 
+def test_brand_negation_extracted_and_clamped(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+    add_sold_node(db, node_handle="el-6-6")
+    # 'a laptop but not Apple' → exclude_brand, clamped to the catalog's canonical casing
+    d = route_turn(db, _env("a laptop but not apple"),
+                   llm_fn=_stub(brand=None, prefer_brand=None, exclude_brand="apple", sort=None))
+    assert d.exclude_brand == "Apple"
+    assert d.brand_filter is None and d.preferred_brand is None   # exclusion ≠ inclusion
+
+
 def test_hard_filter_suppresses_duplicate_soft_band(db):
     from src.app.services.taxonomy_registry import add_sold_node
     add_sold_node(db, node_handle="el-6-6")

@@ -172,6 +172,9 @@ class TurnDecision:
     # must NOT remove non-Apple options, it should surface an Apple 'preference' band on the shelf.
     # Clamped to a real catalog brand; nulled when it equals a hard brand_filter (already narrowed).
     preferred_brand: Optional[str] = None
+    # brand EXCLUSION ('a gaming laptop but NOT Apple') — the negation slot the V2 core was missing;
+    # clamped to a real catalog brand, subtracted at retrieval AND from the capability floor.
+    exclude_brand: Optional[str] = None
     # R9.4: True when the routed node came from the SESSION (nodeless-continuation inherit or
     # fragment-drift override) — the turn is ABOUT the prior subject, so EXPLAIN/COMPARE may
     # consume prior_shortlist ('the first one' = the items actually shown last turn).
@@ -197,7 +200,7 @@ class TurnDecision:
                 "workloads": list(self.workloads), "relationship": self.relationship,
                 "prior_shortlist": list(self.prior_shortlist),
                 "brand_filter": self.brand_filter, "sort": self.sort,
-                "preferred_brand": self.preferred_brand,
+                "preferred_brand": self.preferred_brand, "exclude_brand": self.exclude_brand,
                 "subject_from_session": self.subject_from_session,
                 "compare_targets": list(self.compare_targets),
                 "quantity": self.quantity, "total_budget_cents": self.total_budget_cents}
@@ -310,7 +313,8 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         "Do NOT invent workload specs — that is what use_cases are for.\n"
         "- REFINE: a HARD brand narrowing ('only Asus', 'just Dell') → refine.brand; a SOFT brand "
         "preference ('ideally a Mac', 'I'd prefer Lenovo') → refine.prefer_brand (keeps other "
-        "options, just surfaces that brand). cheaper/most affordable → refine.sort=\"price_asc\"; "
+        "options, just surfaces that brand); a brand EXCLUSION ('but not Apple', 'anything except "
+        "HP') → refine.exclude_brand. cheaper/most affordable → refine.sort=\"price_asc\"; "
         "premium/high-end → \"price_desc\". null when the message says none.\n"
         "- COMPARE of SPECIFIC products ('the Dell G16 vs the Lenovo Legion'): list each named "
         "product as a short name in compare_targets. Empty list when comparing a whole "
@@ -324,7 +328,8 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         '"use_cases": ["<key>", ...], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
         '"refine": {"brand": "<hard-filter brand or null>", '
-        '"prefer_brand": "<soft-preference brand or null>", "sort": "price_asc|price_desc|null"}, '
+        '"prefer_brand": "<soft-preference brand or null>", '
+        '"exclude_brand": "<brand to EXCLUDE or null>", "sort": "price_asc|price_desc|null"}, '
         '"compare_targets": ["<named product>", ...], '
         '"confidence": <0.0-1.0>}\nJSON:'
     )
@@ -460,6 +465,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     preferred_brand = _clamp_brand(db, refine.get("prefer_brand"))
     if preferred_brand and preferred_brand == brand_filter:
         preferred_brand = None      # a hard filter already narrows to it — no separate soft band
+    exclude_brand = _clamp_brand(db, refine.get("exclude_brand"))   # negation ('not Apple')
     # compare_targets shape clamp (R9.3): short strings, ≤4 — the BINDING clamp (name → real
     # retrieved variant, distinctive-token overlap) runs in the core where the slate exists.
     raw_targets = data.get("compare_targets")
@@ -565,6 +571,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         workloads=tuple(workloads), relationship=relationship,
                         prior_shortlist=prior_shortlist,
                         brand_filter=brand_filter, sort=sort, preferred_brand=preferred_brand,
+                        exclude_brand=exclude_brand,
                         subject_from_session=subject_from_session,
                         compare_targets=compare_targets,
                         quantity=quantity, total_budget_cents=total_budget_cents)

@@ -341,6 +341,10 @@ def _budget_free_cards(db, envelope: TurnEnvelope, decision: TurnDecision, limit
         variants = [v for v in variants if (v.brand or "").strip().lower() == blf]
         if not variants:
             return []
+    xb = getattr(decision, "exclude_brand", None)
+    if xb:
+        xbl = str(xb).strip().lower()
+        variants = [v for v in variants if (v.brand or "").strip().lower() != xbl]
     cards, _ = build_cards(variants, decision.requirements or None, limit=n)
     return cards
 
@@ -840,6 +844,10 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
         if not variants:
             resp.message = (f"None of the current options are from {decision.brand_filter} — "
                             f"tell me if another brand works, or widen the search.")
+    # brand EXCLUSION ('but not Apple') — subtract the excluded brand from the shown slate
+    if decision.exclude_brand:
+        xb = decision.exclude_brand.strip().lower()
+        variants = [v for v in variants if (v.brand or "").strip().lower() != xb]
     # COMPARE of NAMED units (R9.3): narrow to the products the shopper actually named — the
     # compare_two_models case returned the whole category instead of the Dell G16 vs the Lenovo.
     if decision.lane == "COMPARE" and decision.compare_targets:
