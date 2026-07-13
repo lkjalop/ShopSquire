@@ -116,7 +116,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # floors — all from DATA, no new decision surface. Zero added latency (folded into routing).
     stated_keys = set(decision.requirements)   # what the SHOPPER explicitly asked for (pre-KB)
     intent = resolve_intent(list(decision.use_cases), dict(decision.requirements),
-                            query=envelope.query)
+                            query=envelope.query,
+                            vertical=_vertical_name(decision.node_handle))
     resolved_reqs = intent["requirements"]
     # review-8 #4 (accessory req-slot leak): a use-case/workload's device floors describe the
     # DEVICE, not an accessory bought FOR it. If the requested product is not a workload-host
@@ -689,9 +690,10 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     if decision.requirements:
         resp.fit_summary = summary
         if summary.get("closest_match_mode"):
-            reqs = ", ".join(f"{k} {op} {int(t) if float(t).is_integer() else t}"
-                             for k, preds in decision.requirements.items()
-                             for (op, t) in preds)
+            # reuse build_cards' SAFE requirement descriptions — an enum predicate
+            # ('form_factor', "in", [list]) has a LIST threshold that a numeric formatter
+            # (float(t)) crashes on (live-caught with the drawing→touchscreen floor).
+            reqs = ", ".join(f"{k} {d}" for k, d in (summary.get("requirements") or {}).items())
             resp.message = (f"No product in our catalog meets {reqs} — showing the closest "
                             f"options, ranked by how near they come.")
 

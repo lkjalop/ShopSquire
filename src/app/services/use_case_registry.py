@@ -37,8 +37,22 @@ def load_use_cases(vertical: str) -> Dict[str, Any]:
         return {}
 
 
+_VERTICALS = ("electronics", "home", "appliances", "furniture")
+
+
 def list_use_cases(vertical: str) -> List[str]:
     return sorted((load_use_cases(vertical).get("use_cases") or {}).keys())
+
+
+@lru_cache(maxsize=1)
+def all_use_case_keys() -> frozenset:
+    """Every use-case key across the populated verticals — the vocabulary the router adds to its
+    closed use-case list so a smart intent ('drawing', 'creative') is classifiable at all. Cached;
+    the scaffolded verticals contribute nothing until their JSON gains use_cases."""
+    keys: set = set()
+    for v in _VERTICALS:
+        keys.update(list_use_cases(v))
+    return frozenset(keys)
 
 
 def list_variants(vertical: str, coarse: str) -> List[str]:

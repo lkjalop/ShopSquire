@@ -53,16 +53,28 @@ def _kb() -> Dict[str, Any]:
         return {"use_cases": {}, "use_case_aliases": {}}
 
 
+def _registry_keys() -> frozenset:
+    """The new use_case_registry's use-case vocabulary (partial KB step 3) — additive to the
+    legacy KB so smart intents (drawing/creative) are classifiable at all and their capability
+    predicates injectable. Best-effort; never breaks routing if the registry is unreadable."""
+    try:
+        from src.app.services import use_case_registry as R
+        return R.all_use_case_keys()
+    except Exception as exc:
+        logger.debug("registry use-case keys unavailable: %s", repr(exc)[:100])
+        return frozenset()
+
+
 def known_use_cases() -> List[str]:
-    """The closed vocabulary the router clamps the model to."""
-    return sorted((_kb().get("use_cases") or {}).keys())
+    """The closed vocabulary the router clamps the model to — legacy KB ∪ the new registry."""
+    return sorted(set((_kb().get("use_cases") or {}).keys()) | set(_registry_keys()))
 
 
 def normalize_use_case(raw: str) -> Optional[str]:
-    """Map a model-returned key or alias to a real KB use_case, or None (dropped)."""
+    """Map a model-returned key or alias to a real use_case (legacy KB or registry), or None."""
     kb = _kb()
     key = str(raw or "").strip().lower().replace(" ", "_")
-    if key in (kb.get("use_cases") or {}):
+    if key in (kb.get("use_cases") or {}) or key in _registry_keys():
         return key
     alias = (kb.get("use_case_aliases") or {}).get(str(raw or "").strip().lower())
     return alias if alias in (kb.get("use_cases") or {}) else None
@@ -133,9 +145,35 @@ def _salvage_title_requirements(query: str) -> Dict[str, Any]:
     return out
 
 
+def _inject_registry_capabilities(reqs: Dict[str, Any], use_cases: List[str],
+                                  vertical: Optional[str]) -> Dict[str, Any]:
+    """Partial KB step 3: inject the new registry's capability predicates — boolean/enum like
+    touchscreen/form_factor, which the NUMERIC constraint machinery and the legacy KB can't
+    express and the router's quantity-only extraction can't emit — for the routed vertical +
+    use-cases. MERGE-not-override: a key already set by legacy/stated/title WINS; the registry
+    only FILLS gaps. This is what makes 'laptop for drawing' carry a touchscreen/form-factor
+    floor on the LIVE path (not just in unit tests). vertical=None (ungrounded) → no injection."""
+    if not vertical or not use_cases:
+        return reqs
+    try:
+        from src.app.services import use_case_registry as R
+    except Exception:
+        return reqs
+    out = dict(reqs)
+    for uc in use_cases:
+        r = R.resolve(vertical, uc)
+        for k, pred in ((r or {}).get("requirements") or {}).items():
+            if k in out:
+                continue                       # legacy/stated/title already set it — don't override
+            if isinstance(pred, (list, tuple)) and len(pred) == 2:
+                out[k] = [(pred[0], pred[1])]   # registry [op, value] → decision [(op, value)]
+    return out
+
+
 def resolve(use_cases: Optional[List[str]],
             model_requirements: Optional[Dict[str, Any]] = None,
-            query: Optional[str] = None) -> Dict[str, Any]:
+            query: Optional[str] = None,
+            vertical: Optional[str] = None) -> Dict[str, Any]:
     """The resolver (M2-B1: RANGES + provenance + surfaced conflicts). Returns:
       requirements  — {key: [(op, thr), ...]} — KB profiles ∪ per-title ∪ model-stated merged
                       by INTERSECTION (floors max, ceilings min; a floor AND a ceiling coexist
@@ -174,7 +212,10 @@ def resolve(use_cases: Optional[List[str]],
     if resolved:
         persona_hint = ((_kb().get("use_cases") or {}).get(resolved[0]) or {}).get("nqe_persona")
 
-    return {"requirements": project(merged), "constraints": as_dicts(merged),
+    # inject the registry's boolean/enum capability predicates AFTER the numeric projection
+    # (they can't ride the constraint machinery); MERGE-not-override, so legacy/stated/title win.
+    final_reqs = _inject_registry_capabilities(project(merged), resolved, vertical)
+    return {"requirements": final_reqs, "constraints": as_dicts(merged),
             "conflicts": constraint_conflicts(merged), "use_cases": resolved,
             "profile_trace": profile_trace, "title_requirements": title["trace"],
             "persona_hint": persona_hint}

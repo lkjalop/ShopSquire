@@ -144,6 +144,19 @@ def test_adapter_passes_shelf_capability_advisories_to_payload():
     assert payload["assumption"]["use_case"] == "gaming"
 
 
+def test_closest_match_message_handles_enum_requirement():
+    """Live-caught regression: an enum ('in', [list]) threshold in closest_match_mode crashed the
+    message builder (float() on a list). build_cards' summary formats it safely; _exec_retrieve
+    now uses that summary instead of a numeric-only formatter."""
+    v = VariantView(sku="CLAM", title="Plain Clamshell Laptop", price_cents=90000, specs={"ram_gb": 16})
+    reqs = {"form_factor": [("in", ["convertible", "detachable", "tablet"])],
+            "touchscreen": [("==", True)]}
+    _, summary = build_cards([v], reqs)
+    assert summary["closest_match_mode"] is True
+    msg = ", ".join(f"{k} {d}" for k, d in summary["requirements"].items())   # the fixed path
+    assert "form_factor" in msg and "touchscreen" in msg                      # formats, no crash
+
+
 def test_shelf_guards_no_op():
     env = _env(budget_max=900)
     r = CoreResponse(envelope=env, lane="SEARCH", degraded=True)

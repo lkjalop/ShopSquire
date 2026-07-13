@@ -242,3 +242,18 @@ def test_explicit_sort_beats_preference():
     cards, _ = build_cards([near_pricey, far_cheap], {"gpu_vram_gb": (">=", 8)},
                            sort="price_asc", preferred={"ram_gb": 16.0})
     assert [c.sku for c in cards] == ["FAR-CHEAP", "NEAR-PRICEY"]   # stated sort first
+
+
+def test_drawing_injects_registry_touchscreen_into_live_decision(db):
+    """Partial KB step 3 wired end-to-end: a LIVE 'drawing' turn carries the registry's
+    touchscreen/form_factor floor in the decision — the marquee capability actually fires on the
+    live path, not just in isolated resolver units."""
+    from src.app.services.recommendation_core.core import recommend_turn
+    from src.app.services.taxonomy_registry import add_sold_node
+    add_sold_node(db, node_handle="el-6-6")
+    import json
+    r = recommend_turn(db, _env(query="a laptop for drawing"),
+                       llm_fn=lambda p, t: json.dumps({"lane": "SEARCH", "handle": "el-6-6",
+                                                       "use_cases": ["drawing"], "confidence": 0.9}))
+    reqs = r.extras["constraints_used"]["requirements"]
+    assert "touchscreen" in reqs and "form_factor" in reqs
