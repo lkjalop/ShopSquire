@@ -27,10 +27,19 @@ def test_committed_spend_reduces_remaining(monkeypatch):
     assert s["within_budget"] is False and s["remaining_cents"] == 100000
 
 
-def test_bad_input_is_safe(monkeypatch):
+def test_bad_input_fails_closed_when_cap_configured(monkeypatch):
+    # P0-2: unparseable spend with a cap CONFIGURED must fail CLOSED (reject) — coercing to 0 and
+    # passing was the fail-open bug (an unverifiable spend silently under-counted the budget).
     monkeypatch.setattr(budget_gate, "_cap_for", lambda category: 1000000)
     s = budget_gate.budget_status("oops", category="office", committed_cents=None)
-    assert s["spend_cents"] == 0 and s["within_budget"] is True
+    assert s["within_budget"] is False and s["reason"] == "unparseable_budget_input_fail_closed"
+
+
+def test_bad_input_harmless_when_no_cap(monkeypatch):
+    # no cap configured → nothing to breach → bad input is genuinely harmless (allow)
+    monkeypatch.setattr(budget_gate, "_cap_for", lambda category: None)
+    s = budget_gate.budget_status("oops", category="office", committed_cents=None)
+    assert s["within_budget"] is True and s["reason"] == "no_budget_cap_configured"
 
 
 def test_cumulative_two_cases_breach_one_cap(monkeypatch):

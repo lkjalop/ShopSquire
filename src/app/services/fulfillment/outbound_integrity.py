@@ -63,15 +63,23 @@ def scan_outbound_supplier_message(subject: str, body: str, *, recipient: str = 
     # 1) Data leaving — SECRETS hard-block; only high-sensitivity PII (cards / identity numbers)
     # flags, since a legitimate RFQ carries dates + a ship-to address the broad PII scan mis-flags.
     secret_hits = 0
+    scan_failed = False
     try:
         from src.app.security.dlp_export import dlp_scrub_text
         _, secret_hits = dlp_scrub_text(blob)
     except Exception:
-        secret_hits = 0
+        # P0-2: the secret scanner raising must NOT default to 'allow' — an unscanned message could
+        # carry a credential. FAIL CLOSED (block) so a bug/outage in the DLP scanner can never let a
+        # secret egress to a supplier. (Was `secret_hits = 0` → action could resolve to allow.)
+        scan_failed = True
     sensitive_pii = _sensitive_pii_hits(blob)
     dlp = {"secret_hits": int(secret_hits), "sensitive_pii_hits": int(sensitive_pii),
-           "action": ("block" if secret_hits else ("review" if sensitive_pii else "allow"))}
-    if secret_hits:
+           "scan_failed": scan_failed,
+           "action": ("block" if (secret_hits or scan_failed) else ("review" if sensitive_pii else "allow"))}
+    if scan_failed:
+        findings.append("secret_scan_failed_fail_closed")
+        categories.append("data_leak")
+    elif secret_hits:
         findings.append("secret_in_outbound_body")
         categories.append("data_leak")
     elif sensitive_pii:
@@ -90,8 +98,9 @@ def scan_outbound_supplier_message(subject: str, body: str, *, recipient: str = 
     if _QR_HINT_RE.search(blob):
         findings.append("relayed_qr_reference"); categories.append("relay_link")
 
-    # Decide: any secret leaving OR any injected executable payload → BLOCK; links/sensitive-PII/QR → REVIEW.
-    if secret_hits or relay_block:
+    # Decide: any secret leaving OR a failed secret scan OR any injected executable payload → BLOCK
+    # (fail-closed on scan error); links/sensitive-PII/QR → REVIEW.
+    if secret_hits or scan_failed or relay_block:
         action = "block"
     elif findings:
         action = "review"

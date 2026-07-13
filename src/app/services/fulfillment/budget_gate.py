@@ -49,18 +49,19 @@ def budget_status(spend_cents: Any, *, category: str = "default", committed_cent
     """Whether a spend fits the category's remaining budget. Returns
     {within_budget, cap_cents, committed_cents, spend_cents, remaining_cents, category, reason}. A cap of
     None = no limit configured → within_budget True. Pure; never raises."""
-    try:
-        spend = max(0, int(spend_cents or 0))
-    except (TypeError, ValueError):
-        spend = 0
-    try:
-        committed = max(0, int(committed_cents or 0))
-    except (TypeError, ValueError):
-        committed = 0
     cap = _cap_for(category)
     if cap is None:
-        return {"within_budget": True, "cap_cents": None, "committed_cents": committed, "spend_cents": spend,
+        # no limit configured → nothing to breach; bad input is harmless here
+        return {"within_budget": True, "cap_cents": None, "committed_cents": None, "spend_cents": None,
                 "remaining_cents": None, "category": category, "reason": "no_budget_cap_configured"}
+    # P0-2: a cap IS configured — a malformed spend/committed must NOT coerce to 0 (that under-counts
+    # the budget and lets an unverifiable spend pass as within-budget). Fail CLOSED: reject.
+    try:
+        spend = max(0, int(spend_cents or 0))
+        committed = max(0, int(committed_cents or 0))
+    except (TypeError, ValueError):
+        return {"within_budget": False, "cap_cents": cap, "committed_cents": None, "spend_cents": None,
+                "remaining_cents": 0, "category": category, "reason": "unparseable_budget_input_fail_closed"}
     remaining_before = cap - committed
     within = (committed + spend) <= cap
     return {"within_budget": within, "cap_cents": cap, "committed_cents": committed, "spend_cents": spend,

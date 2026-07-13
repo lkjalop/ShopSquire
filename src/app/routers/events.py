@@ -42,9 +42,12 @@ def _idempotent(path: str, key: str | None) -> bool:
             try:
                 return bool(getattr(res, "rowcount", 0))
             except Exception:
-                return True
+                return True   # insert+commit succeeded; can't read rowcount → treat as first-seen
         except Exception:
-            return True
+            # P0-2: cannot verify idempotency (DB error) → do NOT default to first-seen (that
+            # reprocesses a retried webhook). Re-raise so the endpoint 5xxs and the sender RETRIES
+            # once the store recovers and dedup works — better than a silent double-process.
+            raise
 
 
 @router.post("/order_placed")

@@ -259,7 +259,10 @@ def _abac_tenant_allow(role: str, tenant_id: str | None) -> bool:
             return True
         return str(tenant_id or "") in [str(x) for x in allowed]
     except Exception:
-        return True
+        # P0-2: a CONFIGURED but malformed allowlist must not silently become allow-all — that
+        # disables the tenant restriction the operator set. Fail CLOSED (deny) so a broken config is
+        # a loud denial, never a silent cross-tenant hole. (Empty/unset allowlist above allows all.)
+        return False
 
 
 def _parse_mfa_verified_at(value: str | None) -> float | None:

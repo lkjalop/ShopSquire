@@ -86,6 +86,10 @@ def _create_engine_with_fallback(url: str):
         pool_recycle=int(os.getenv("DB_POOL_RECYCLE_SEC", "1800")),
         pool_timeout=int(os.getenv("DB_POOL_TIMEOUT_SEC", "30")),
         connect_args={
+            # P0-3: bound the CONNECT phase too — statement_timeout only caps query EXECUTION, so a
+            # down/wedged Postgres would otherwise stall every new connection (and pool_pre_ping
+            # reconnect) on the OS TCP timeout (~tens of seconds), fail-slow on every request.
+            "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT_SEC", "5")),
             "options": (
                 f"-c statement_timeout={os.getenv('DB_STATEMENT_TIMEOUT_MS', '30000')}"
                 f" -c idle_in_transaction_session_timeout={os.getenv('DB_IDLE_TX_TIMEOUT_MS', '60000')}"

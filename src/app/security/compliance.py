@@ -46,19 +46,24 @@ class ComplianceMiddleware:
         # PCI DSS 4.0.1 Req 4.2.1 — in production, TLS on the payment surface is ASSERTED, not
         # observed: a payment request that is neither https nor proxy-forwarded-as-https is
         # rejected (override with REQUIRE_TLS_FOR_PAYMENTS=0 only deliberately). Dev stays open.
+        # P0-2: decide THEN send — never wrap the whole gate in `except: pass` (that let a plaintext
+        # payment request proceed if determining/sending the reject threw). If we cannot determine
+        # TLS status, fail CLOSED on the payment surface in prod: reject rather than silently allow.
         try:
             env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
             enforce_tls = str(os.getenv("REQUIRE_TLS_FOR_PAYMENTS", "1")).lower() in ("1", "true", "yes")
-            if (env in ("production", "prod") and enforce_tls
-                    and path.startswith("/api/v1/payments")
-                    and not https_hint and str(scope.get("scheme") or "").lower() != "https"):
-                resp = Response(
-                    content=json.dumps({"detail": "tls_required", "message": "Payment endpoints require TLS"}),
-                    status_code=403, media_type="application/json")
-                await resp(scope, receive, send)
-                return
+            _tls_ok = https_hint or str(scope.get("scheme") or "").lower() == "https"
+            _reject_tls = (env in ("production", "prod") and enforce_tls
+                           and path.startswith("/api/v1/payments") and not _tls_ok)
         except Exception:
-            pass
+            _reject_tls = (str(os.getenv("APP_ENV", "local") or "local").strip().lower() in ("production", "prod")
+                           and str(path or "").startswith("/api/v1/payments"))
+        if _reject_tls:
+            resp = Response(
+                content=json.dumps({"detail": "tls_required", "message": "Payment endpoints require TLS"}),
+                status_code=403, media_type="application/json")
+            await resp(scope, receive, send)
+            return
         # Detect PCI patterns on payment endpoints
         downstream_receive = receive
         try:

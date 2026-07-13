@@ -95,7 +95,10 @@ def scan_outbound_content_dlp(subject: str, body: str) -> Dict[str, Any]:
         _, secret_hits = dlp_scrub_text(blob)
         _, pii_hits = dlp_scrub_pii(blob)
     except Exception:
-        return {"secret_hits": 0, "pii_hits": 0, "action": "allow", "categories": []}
+        # P0-2: a scanner error must not default to 'allow' — unscanned outbound mail could carry a
+        # secret/PII. Fail CLOSED toward human review (not silent-allow, not block-all).
+        return {"secret_hits": 0, "pii_hits": 0, "action": "review",
+                "categories": ["scan_failed"], "scan_failed": True}
     categories: List[str] = []
     if secret_hits:
         categories.append("secret")
