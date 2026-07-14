@@ -40,6 +40,9 @@ DEFAULT_THRESHOLDS: Dict[str, float] = {
     "labeled_coverage_min": 0.30,          # share of product-expected cases carrying labels
     "classified_shown_rate_min": 0.98,     # review-9-followup #A3: shown products carrying an
     #                                        approved classification (onboarding coverage gate)
+    "p95_latency_ms_max": 8000.0,          # V2 (GPT-5.6 review-11b): reliability gate — the replay
+    "timeout_rate_max": 0.01,              #   had 34-35s cases + a model timeout; promotion needs p95
+    #                                        under 8s and model-timeout/fallback under 1%.
 }
 
 
@@ -193,7 +196,9 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
                           labels: Optional[Dict[str, Any]] = None,
                           catalog: Optional[Dict[str, Any]] = None,
                           catalog_violations: int = 0,
-                          split: Optional[str] = None) -> Dict[str, Any]:
+                          split: Optional[str] = None,
+                          latency_ms: Optional[float] = None,
+                          timed_out: bool = False) -> Dict[str, Any]:
     """One case's quality row. `case` needs: id; optional budget_max (dollars), expects_products
     (default True for SEARCH-ish cases; False for refusal/clarify-expected cases).
     `response` is the v2 legacy-shape payload (products: [{sku, price, brand, workload_fit}]).
@@ -210,7 +215,9 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
     row: Dict[str, Any] = {"case_id": str(case.get("id") or ""), "shown": len(shown),
                            "expects_products": expects, "empty": expects and not shown,
                            "catalog_measured": bool(cat.get("measured", True)),
-                           "shown_classified": int(cat.get("classified", 0))}
+                           "shown_classified": int(cat.get("classified", 0)),
+                           "latency_ms": (float(latency_ms) if latency_ms is not None else None),
+                           "timed_out": bool(timed_out)}
 
     # PAYLOAD violations (review-6 #18): over-budget shown products and duplicate SKUs — the two
     # things measurable from the payload alone. Tenant/active/sold-taxonomy live in the SERVER-
@@ -289,6 +296,10 @@ def summarize_quality(rows: List[Dict[str, Any]],
     labeled_coverage = len(labeled) / n_exp
     precision = (sum(r["precision_at_10"] for r in labeled) / len(labeled)) if labeled else None
     ndcg = (sum(r["ndcg_at_10"] for r in labeled) / len(labeled)) if labeled else None
+    # V2 reliability (GPT-5.6): p95 latency + model-timeout rate over the run.
+    lats = sorted(float(r["latency_ms"]) for r in rows if r.get("latency_ms") is not None)
+    p95_latency = lats[max(0, math.ceil(0.95 * len(lats)) - 1)] if lats else None
+    timeout_rate = (sum(1 for r in rows if r.get("timed_out")) / len(rows)) if rows else 0.0
 
     failures: List[str] = []
     if empty_rate > th["empty_rate_max"]:
@@ -305,6 +316,10 @@ def summarize_quality(rows: List[Dict[str, Any]],
         failures.append(f"constraint_satisfaction {constraint_sat:.3f} < {th['constraint_satisfaction_min']}")
     if diversity is not None and diversity < th["diversity_min"]:
         failures.append(f"diversity {diversity:.3f} < {th['diversity_min']}")
+    if p95_latency is not None and p95_latency > th["p95_latency_ms_max"]:
+        failures.append(f"p95_latency {p95_latency:.0f}ms > {th['p95_latency_ms_max']:.0f}ms")
+    if timeout_rate > th["timeout_rate_max"]:
+        failures.append(f"timeout_rate {timeout_rate:.3f} > {th['timeout_rate_max']}")
     if labeled_coverage < th["labeled_coverage_min"]:
         failures.append(f"labeled_coverage {labeled_coverage:.3f} < {th['labeled_coverage_min']} "
                         f"(relevance UNMEASURED is a failure, not a pass)")
@@ -324,5 +339,7 @@ def summarize_quality(rows: List[Dict[str, Any]],
             "authz_unmeasured_cases": authz_unmeasured,
             "classified_shown_rate": (round(classified_shown_rate, 4)
                                       if classified_shown_rate is not None else None),
+            "p95_latency_ms": (round(p95_latency, 1) if p95_latency is not None else None),
+            "timeout_rate": round(timeout_rate, 4),
             "thresholds": th,
             "gates": {"pass": not failures, "failures": failures}}

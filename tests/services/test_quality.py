@@ -256,3 +256,21 @@ def test_evaluate_case_quality_split_gates_labeling():
     assert evaluate_case_quality(case, resp, labels=labels, split="test")["labeled"] is False
     # gating on dev → labeled True
     assert evaluate_case_quality(case, resp, labels=labels, split="dev")["labeled"] is True
+
+
+def test_latency_and_timeout_gates():
+    from src.app.services.recommendation_core.quality import summarize_quality
+    def row(lat, to=False):
+        return {"case_id": "c", "shown": 1, "expects_products": True, "empty": False,
+                "catalog_measured": True, "unauthorized": 0, "verdict_count": 0,
+                "latency_ms": lat, "timed_out": to}
+    # p95 well under 8s + no timeouts → those gates pass (label coverage still fails, but not latency)
+    fast = summarize_quality([row(1000)] * 10)
+    assert not any("p95_latency" in f for f in fast["gates"]["failures"])
+    assert fast["p95_latency_ms"] == 1000
+    # a slow tail (>8s at p95) → latency gate fires
+    slow = summarize_quality([row(1000)] * 5 + [row(35000)] * 5)
+    assert any("p95_latency" in f for f in slow["gates"]["failures"])
+    # a model timeout above the rate → timeout gate fires
+    to = summarize_quality([row(1000)] * 8 + [row(1000, to=True)] * 2)
+    assert to["timeout_rate"] == 0.2 and any("timeout_rate" in f for f in to["gates"]["failures"])
