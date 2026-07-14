@@ -66,3 +66,25 @@ def test_webhook_dev_without_secret_still_processes(monkeypatch):
     payload = {"type": "payment_intent.succeeded", "data": {"object": {"id": "pi_dev"}}}
     r = client.post("/api/v1/payments/webhook", data=json.dumps(payload))
     assert r.status_code == 200, r.text
+
+
+def test_webhook_dedups_repeat_event_delivery(monkeypatch, tmp_path):
+    # M4: Stripe retries delivery — the same event.id must be processed ONCE (no double ledger /
+    # inventory / settlement). Dev path (no secret) processes raw JSON; assert the 2nd is a duplicate.
+    import src.app.models.db as db_module
+    from sqlalchemy import create_engine
+    monkeypatch.setattr(payments, "_is_non_dev_env", lambda _env: False)
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'evt.sqlite'}", future=True)
+    original = db_module.engine
+    db_module.set_engine(engine)
+    try:
+        client = _client()
+        evt = {"id": "evt_dedup_1", "type": "payment_intent.payment_failed",
+               "data": {"object": {"id": "pi_none"}}}
+        r1 = client.post("/api/v1/payments/webhook", data=json.dumps(evt))
+        r2 = client.post("/api/v1/payments/webhook", data=json.dumps(evt))
+        assert r1.status_code == 200 and not r1.json().get("duplicate")
+        assert r2.status_code == 200 and r2.json().get("duplicate") is True
+    finally:
+        db_module.set_engine(original)

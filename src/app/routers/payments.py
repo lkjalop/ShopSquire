@@ -501,6 +501,28 @@ async def stripe_webhook(request: Request) -> Dict:
     data_obj = (event.get("data") or {}).get("object") or {}
     intent_id = str(data_obj.get("id") or "").strip()
 
+    # M4 (GPT-5.6 #5): process each Stripe event EXACTLY once. Stripe retries delivery, so without a
+    # dedup a repeat can double-apply a ledger append / inventory release / settlement. Persist the
+    # event.id under a unique key BEFORE handling; a duplicate returns early. Fail-CLOSED on store
+    # error (skip) rather than risk a double-apply.
+    _event_id = str(event.get("id") or "").strip()
+    if _event_id:
+        try:
+            with db_session() as _edb:
+                _edb.execute(text(
+                    "CREATE TABLE IF NOT EXISTS stripe_events (event_id TEXT PRIMARY KEY, "
+                    "type TEXT, processed_at TEXT DEFAULT CURRENT_TIMESTAMP)"))
+                _seen = _edb.execute(text(
+                    "INSERT INTO stripe_events (event_id, type) VALUES (:i,:t) "
+                    "ON CONFLICT (event_id) DO NOTHING"), {"i": _event_id, "t": event_type})
+                _edb.commit()
+                if int(getattr(_seen, "rowcount", 0) or 0) == 0:
+                    _log.info("stripe_webhook: duplicate event %s (%s) skipped", _event_id, event_type)
+                    return {"received": True, "duplicate": True, "event_id": _event_id}
+        except Exception as _eex:
+            _log.error("stripe_webhook: event dedup store error (skipping to avoid double-apply): %s", _eex)
+            return {"received": True, "dedup_unavailable": True}
+
     if event_type == "payment_intent.succeeded" and intent_id:
         with db_session() as _db:
             result = _db.execute(
