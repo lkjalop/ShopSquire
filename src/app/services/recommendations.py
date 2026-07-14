@@ -2203,13 +2203,24 @@ class RecommendationService:
         }
 
     def maybe_llm_rerank(self, uid: str, candidates: List[Dict[str, Any]], constraints: Dict[str, Any], use_llm: bool = False) -> List[Dict[str, Any]]:
+        # `last_rerank_mode` records what ACTUALLY ran so the caller can report decision_mode
+        # truthfully — a swallowed LLM failure must not be labelled "agent_rerank" (it fell back
+        # to deterministic ranking). Callers read getattr(service, "last_rerank_mode", "rules").
         if not use_llm:
+            self.last_rerank_mode = "rules"
             return self.rerank_candidates(candidates, constraints)
         try:
             from src.app.services.llm import LLMOrchestrator
             llm = LLMOrchestrator()
-            return llm.rerank_with_budget(uid, candidates, constraints) or candidates
+            result = llm.rerank_with_budget(uid, candidates, constraints)
+            if result:
+                self.last_rerank_mode = "llm"
+                return result
+            # LLM returned nothing → raw candidate order; not an LLM rerank.
+            self.last_rerank_mode = "llm_empty_fallback"
+            return candidates
         except Exception:
+            self.last_rerank_mode = "rules_fallback"
             return self.rerank_candidates(candidates, constraints)
 
     def log_decision(

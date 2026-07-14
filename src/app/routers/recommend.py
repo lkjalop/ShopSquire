@@ -9646,11 +9646,16 @@ def suggest(
         if use_rules or simulate:
             ranked = candidates
             scored = baseline_scored
+            _rerank_mode = "rules"
         else:
             with tracer.start_as_current_span("recommend.rerank_llm"):
                 ranked = service.maybe_llm_rerank(uid, candidates, constraints, use_llm=use_llm)
+            # Truthful mode: only "llm" means the model actually reranked; a swallowed failure
+            # falls back to rules/passthrough and must NOT be reported as agent_rerank.
+            _rerank_mode = getattr(service, "last_rerank_mode", "rules")
             with tracer.start_as_current_span("recommend.rerank_post"):
                 scored = service.rerank_candidates_with_factors(ranked, constraints)
+        _agent_reranked = (_rerank_mode == "llm")
         from src.app.services.query_decomposer import decompose as _decompose_for_ranking
         _ranking_plan = _decompose_for_ranking(query)
         scored = _apply_use_case_rank_adjustments(
@@ -9780,12 +9785,13 @@ def suggest(
                 _pos_human.append(f"{_specs['ram_gb']}GB RAM")
         _per_sku_rationale[_sku] = _pos_human or ["strong match for your criteria"]
     proposal = {
-        "decision_mode": "rules" if use_rules or simulate else "agent_rerank",
+        "decision_mode": "agent_rerank" if _agent_reranked else "rules",
         "ranked_skus": [c["sku"] for c in ranked],
-        "rationale": (ollama_meta.get("intent_summary") or "Reranked within candidate set based on inferred intent and constraints.") if not use_rules else "Rule-based ranking by spec fit and stock.",
+        "rationale": (ollama_meta.get("intent_summary") or "Reranked within candidate set based on inferred intent and constraints.") if _agent_reranked else "Rule-based ranking by spec fit and stock.",
         "per_sku_rationale": _per_sku_rationale,
         "factor_telemetry": {
-            "decision_mode": "rules" if use_rules or simulate else "agent_rerank",
+            "decision_mode": "agent_rerank" if _agent_reranked else "rules",
+            "rerank_mode": _rerank_mode,  # precise: llm | rules | rules_fallback | llm_empty_fallback
             "window_precision": "na",
             "context_multipliers": "default",
             "factor_rankings": [],
