@@ -344,6 +344,37 @@ async def triage(
     except Exception:
         pass
 
+    # Bound the VLM/OCR cost: reject decode-bombs and downscale a COPY for the model pass.
+    # `content` (full-res) is preserved for the steg/forensic LSB analysis below, which is
+    # fast (numpy) and MUST see untouched pixels. Without this a 2-24 MP photo hangs the VLM
+    # for minutes — a trivial DoS and a functional gap on normal e-commerce image sizes.
+    vlm_content = content
+    downscale_meta: Dict[str, Any] = {}
+    try:
+        from src.app.services.image_downscale import bound_image_for_vlm
+        _bound = bound_image_for_vlm(content)
+        if bool(_bound.get("reject")):
+            _m = _bound.get("meta") or {}
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "error": "image_too_large",
+                    "reason": _bound.get("reason"),
+                    "message": (
+                        "This image is too large to process safely. Please upload a smaller "
+                        "product photo (under 30 MP / 25 MB)."
+                    ),
+                    "image": {"megapixels": _m.get("megapixels"), "bytes": _m.get("bytes")},
+                },
+            )
+        vlm_content = _bound.get("bytes") or content
+        downscale_meta = _bound.get("meta") or {}
+        downscale_meta["downscaled"] = bool(_bound.get("downscaled"))
+    except HTTPException:
+        raise
+    except Exception:
+        vlm_content = content
+
     labels = []
     extracted_text = ""
     product_identity = None
@@ -354,7 +385,7 @@ async def triage(
             provider = ManagedCVProvider()
             provider_name = provider.provider
             labels, extracted_text, product_identity = await provider.get_labels_and_text(
-                content, mode="visual_search",
+                vlm_content, mode="visual_search",
             )
             ocr_meta = dict(getattr(provider, "last_ocr_meta", {}) or {})
         except Exception:
@@ -405,6 +436,7 @@ async def triage(
         "is_product_photo": _is_product_photo(labels, _damage_score),
         "image_hash": _compute_image_hash(content),
         "ingest_gate": gate,
+        "vlm_input": downscale_meta,  # {megapixels, bytes, downscaled, downscaled_to?} — the model saw this
     }
 
     # P4: Always surface product identity — decoupled from security flags.
