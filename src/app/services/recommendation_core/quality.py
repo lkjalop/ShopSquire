@@ -44,23 +44,77 @@ DEFAULT_THRESHOLDS: Dict[str, float] = {
 
 
 def load_labels(path: Optional[Path] = None) -> Dict[str, Any]:
-    """The sealed relevance-label set: {case_id: {sku: grade}} with a dev/test split.
-    Grades: 2 = highly relevant, 1 = acceptable, 0 = irrelevant (explicit negative)."""
+    """The sealed relevance-label set. Schema (validated):
+        {"cases": {"<case:turn>": {"labels": {"<sku>": grade0-2}}}, "split": {"dev": [...], "test": [...]}}
+    Grades: 2 = highly relevant, 1 = acceptable, 0 = irrelevant. A malformed file is reported LOUDLY
+    (the gate then fails on zero coverage) rather than silently treated as 'no labels'."""
     p = path or _LABELS_PATH
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
     except Exception as exc:
         logger.debug("relevance labels unavailable (%s): %s", p, repr(exc)[:80])
         return {}
+    if not isinstance(data, dict):
+        return {}
+    problems = validate_labels(data)
+    if problems:
+        logger.warning("relevance_labels.json has %d schema problem(s): %s",
+                       len(problems), "; ".join(problems[:6]))
+    return data
 
 
-def case_labels(labels: Dict[str, Any], case_id: str) -> Optional[Dict[str, int]]:
+def validate_labels(labels: Dict[str, Any]) -> List[str]:
+    """Structural validation → list of problems (empty = clean). Grades must be 0/1/2; every split
+    key must reference a real case; a case in a split must carry labels. Enforces the ONE schema."""
+    problems: List[str] = []
+    cases = labels.get("cases")
+    if cases is not None and not isinstance(cases, dict):
+        return ["'cases' must be an object"]
+    cases = cases or {}
+    for cid, entry in cases.items():
+        lab = (entry or {}).get("labels") if isinstance(entry, dict) else None
+        if not isinstance(lab, dict) or not lab:
+            problems.append(f"case '{cid}': missing 'labels' object")
+            continue
+        for sku, grade in lab.items():
+            try:
+                if int(grade) not in (0, 1, 2):
+                    problems.append(f"case '{cid}' sku '{sku}': grade {grade} not in 0..2")
+            except (TypeError, ValueError):
+                problems.append(f"case '{cid}' sku '{sku}': grade {grade!r} not an int")
+    split = labels.get("split") or {}
+    if not isinstance(split, dict):
+        problems.append("'split' must be an object with 'dev'/'test' key lists")
+    else:
+        for name in ("dev", "test"):
+            for cid in (split.get(name) or []):
+                if str(cid) not in cases:
+                    problems.append(f"split.{name} references unknown case '{cid}'")
+    return problems
+
+
+def _split_keys(labels: Dict[str, Any], split: Optional[str]) -> Optional[set]:
+    """The set of case keys in `split` ('dev'|'test'), or None to accept ALL labeled cases."""
+    if not split:
+        return None
+    return {str(k) for k in ((labels.get("split") or {}).get(split) or [])}
+
+
+def case_labels(labels: Dict[str, Any], case_id: str,
+                split: Optional[str] = None) -> Optional[Dict[str, int]]:
+    """Graded labels for a case — but ONLY if it belongs to `split` when one is given (so a `dev`
+    label can never leak into the sealed `test` gate). split=None keeps the all-cases behaviour."""
+    keys = _split_keys(labels, split)
+    if keys is not None and str(case_id) not in keys:
+        return None
     entry = ((labels.get("cases") or {}).get(str(case_id)) or {})
     lab = entry.get("labels")
     if not isinstance(lab, dict) or not lab:
         return None
-    return {str(k): int(v) for k, v in lab.items()}
+    try:
+        return {str(k): int(v) for k, v in lab.items()}
+    except (TypeError, ValueError):
+        return None
 
 
 # ── labeled metrics ──────────────────────────────────────────────────────────────
@@ -138,7 +192,8 @@ def catalog_authorization_violations(db, shown_skus: List[str], *,
 def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
                           labels: Optional[Dict[str, Any]] = None,
                           catalog: Optional[Dict[str, Any]] = None,
-                          catalog_violations: int = 0) -> Dict[str, Any]:
+                          catalog_violations: int = 0,
+                          split: Optional[str] = None) -> Dict[str, Any]:
     """One case's quality row. `case` needs: id; optional budget_max (dollars), expects_products
     (default True for SEARCH-ish cases; False for refusal/clarify-expected cases).
     `response` is the v2 legacy-shape payload (products: [{sku, price, brand, workload_fit}]).
@@ -191,8 +246,9 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
     brands = [str(p.get("brand") or "").lower() for p in products if p.get("brand")]
     row["diversity"] = round(len(set(brands)) / len(brands), 4) if brands else None
 
-    # labeled metrics, only where the sealed set covers this case
-    lab = case_labels(labels or {}, row["case_id"]) if labels else None
+    # labeled metrics, only where the sealed set covers this case IN THE GATED SPLIT (dev labels
+    # never leak into the test gate — GPT-5.6 review-11b: the split was previously not enforced).
+    lab = case_labels(labels or {}, row["case_id"], split=split) if labels else None
     row["labeled"] = lab is not None
     if lab is not None:
         row["precision_at_10"] = round(precision_at_k(shown, lab), 4)

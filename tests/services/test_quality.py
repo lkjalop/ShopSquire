@@ -214,3 +214,45 @@ def test_classification_coverage_is_a_separate_gate():
     assert row["unauthorized"] == 0                    # coverage gap is NOT an authz violation
     g = summarize_quality([row])
     assert any("classified_shown_rate" in f for f in g["gates"]["failures"])
+
+
+# ── dev/test split enforcement (GPT-5.6 review-11b: the split was never enforced) ──────────────
+
+def test_case_labels_honors_split():
+    from src.app.services.recommendation_core.quality import case_labels
+    labels = {
+        "cases": {"c1:0": {"labels": {"SKU-A": 2}}, "c2:0": {"labels": {"SKU-B": 1}}},
+        "split": {"dev": ["c1:0"], "test": ["c2:0"]},
+    }
+    # split=None → any labeled case
+    assert case_labels(labels, "c1:0") == {"SKU-A": 2}
+    # gating on test → the dev case is NOT visible (no leak into the sealed gate)
+    assert case_labels(labels, "c1:0", split="test") is None
+    assert case_labels(labels, "c2:0", split="test") == {"SKU-B": 1}
+    # gating on dev → only dev
+    assert case_labels(labels, "c1:0", split="dev") == {"SKU-A": 2}
+    assert case_labels(labels, "c2:0", split="dev") is None
+
+
+def test_validate_labels_catches_schema_problems():
+    from src.app.services.recommendation_core.quality import validate_labels
+    assert validate_labels({"cases": {}, "split": {"dev": [], "test": []}}) == []
+    probs = validate_labels({
+        "cases": {"c1:0": {"labels": {"SKU-A": 5}},      # grade out of range
+                  "c2:0": {}},                            # missing labels
+        "split": {"test": ["c9:0"]},                      # unknown case ref
+    })
+    assert any("0..2" in p for p in probs)
+    assert any("missing 'labels'" in p for p in probs)
+    assert any("unknown case" in p for p in probs)
+
+
+def test_evaluate_case_quality_split_gates_labeling():
+    from src.app.services.recommendation_core.quality import evaluate_case_quality
+    labels = {"cases": {"c1:0": {"labels": {"SKU-A": 2}}}, "split": {"dev": ["c1:0"], "test": []}}
+    case = {"id": "c1:0", "expects_products": True}
+    resp = {"products": [{"sku": "SKU-A", "price": 100, "brand": "X"}]}
+    # gating on test → c1 (a dev case) is NOT labeled → row.labeled False
+    assert evaluate_case_quality(case, resp, labels=labels, split="test")["labeled"] is False
+    # gating on dev → labeled True
+    assert evaluate_case_quality(case, resp, labels=labels, split="dev")["labeled"] is True
