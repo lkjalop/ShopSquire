@@ -111,10 +111,15 @@ slate. Best practice: GPT-5.6 as one annotator, a human as the second for the **
 2. For each case: run the query against the **demo catalog** and grade the **CANDIDATE SLATE** (the
    retrievable set for that query — NOT only what V2 showed; an unlabeled shown SKU counts as NOT
    relevant). Grades: **2 = highly relevant, 1 = acceptable, 0 = explicitly irrelevant.**
-3. Write into `tests/golden/relevance_labels.json`:
-   `"cases": {"<case_id>:<turn>": {"<SKU>": <grade>, …}, …}`, set `"labeled_by"`, and populate
-   `"split": {"dev": [...keys...], "test": [...keys...]}`. **Discipline:** the eval must NEVER train
-   on the test split; keep dev for tuning, test as the sealed gate (mirror `classification_labels.json`).
+3. Write into `tests/golden/relevance_labels.json` in the schema the loader ACTUALLY reads
+   (`quality.py:58` reads `entry.get("labels")` — CORRECTED, my earlier `{case:turn:{sku:grade}}` was
+   wrong): `"cases": {"<case_id>:<turn>": {"labels": {"<SKU>": <grade>, …}}, …}`, set `"labeled_by"`,
+   populate `"split": {"dev": [...keys...], "test": [...keys...]}`. **PREREQUISITE (GPT-5.6):** the
+   evaluator currently AGGREGATES all labeled rows (`quality.py:232`) and does NOT enforce the
+   dev/test split — fix the loader to honor an explicit `dev`|sealed-`test` split BEFORE mass
+   labeling, and store catalog-snapshot hash + taxonomy version + annotators for reproducibility.
+   **Discipline:** never train on the test split; GPT-5.6 may produce dev/weak labels, but the sealed
+   test labels require human review.
 4. **Target:** `labeled_coverage ≥ 0.30` to open the gate; higher is better. Grade honestly — the
    gate is designed to FAIL until real labels exist, so partial/low-effort labels just move the
    failure, they don't unblock promotion.
