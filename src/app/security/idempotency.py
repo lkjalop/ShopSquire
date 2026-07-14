@@ -15,6 +15,17 @@ from src.app.models.db import db_session
 
 _log = logging.getLogger("shopsquire.idempotency")
 
+# Paths where a duplicate side effect is a MONEY/safety event — there the middleware fails CLOSED
+# (503) if the idempotency store is unavailable. Everywhere else it degrades to process-WITHOUT-dedup
+# so a flaky store can't take down every idempotent write (P1 review: availability coupling). The
+# money endpoints additionally carry their own atomic `_idempotent` guard, so this is defence in depth.
+_CRITICAL_PREFIXES = tuple(
+    p.strip() for p in os.getenv(
+        "IDEMPOTENCY_CRITICAL_PREFIXES",
+        "/api/v1/payments,/api/v1/orders,/api/v1/refunds,/api/v1/checkout,/api/v1/fulfillment",
+    ).split(",") if p.strip()
+)
+
 
 class IdempotencyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
@@ -24,6 +35,10 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             self.ttl = int(os.getenv("IDEMPOTENCY_TTL_SECONDS", "86400"))
         except Exception:
             self.ttl = 86400
+        try:
+            self.cache_max = max(64, int(os.getenv("IDEMPOTENCY_CACHE_MAX", "2048")))
+        except Exception:
+            self.cache_max = 2048
 
     async def dispatch(self, request: Request, call_next):
         method = request.method.upper()
@@ -33,18 +48,21 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         if not key:
             return await call_next(request)
 
+        path = request.url.path
+        critical = any(path.startswith(p) for p in _CRITICAL_PREFIXES)
+
         try:
             body = await request.body()
         except Exception:
             body = b""
-        fp_source = f"{method}|{request.url.path}|{hashlib.sha256(body).hexdigest()}"
+        fp_source = f"{method}|{path}|{hashlib.sha256(body).hexdigest()}"
         fingerprint = hashlib.sha256(fp_source.encode("utf-8")).hexdigest()
-        storage_key = f"http:{method}:{request.url.path}:{key}"
-
+        storage_key = f"http:{method}:{path}:{key}"
         now = time.time()
-        cache = self.cache
+
+        # in-memory fast path (fingerprint-checked)
         try:
-            entry = cache.get(storage_key)
+            entry = self.cache.get(storage_key)
             if entry and (now - float(entry.get("ts", 0))) < self.ttl:
                 if entry.get("fingerprint") != fingerprint:
                     return self._conflict()
@@ -52,6 +70,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         except Exception:
             pass
 
+        # ── store availability: fail CLOSED on money paths, degrade (no dedup) elsewhere ──
         try:
             with db_session() as db:
                 db.execute(
@@ -62,7 +81,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 db.commit()
         except Exception as exc:
             _log.error("idempotency_table_unavailable", exc_info=exc)
-            return self._unavailable()
+            return self._unavailable() if critical else await call_next(request)
 
         try:
             with db_session() as db:
@@ -75,7 +94,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 reserve_won = int(getattr(result, "rowcount", 0) or 0) == 1
         except Exception as exc:
             _log.error("idempotency_reservation_failed", exc_info=exc)
-            return self._unavailable()
+            return self._unavailable() if critical else await call_next(request)
 
         if not reserve_won:
             try:
@@ -87,41 +106,45 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                     ).fetchone()
             except Exception as exc:
                 _log.error("idempotency_replay_read_failed", exc_info=exc)
-                return self._unavailable()
+                return self._unavailable() if critical else await call_next(request)
             if row is not None and str(row[0] or "") != fingerprint:
                 return self._conflict()
             if row is not None and row[1] is not None:
-                try:
-                    replay_body = json.loads(row[2]) if isinstance(row[2], str) else (row[2] or {})
-                except Exception:
-                    replay_body = row[2] or {}
+                replay_body = self._decode_body(row[2])
                 status = int(row[1] or 200)
-                cache[storage_key] = {
-                    "fingerprint": fingerprint,
-                    "body": replay_body,
-                    "status": status,
-                    "ts": now,
-                }
+                self._cache_put(storage_key, {
+                    "fingerprint": fingerprint, "body": replay_body, "status": status, "ts": now,
+                })
                 return ORJSONResponse(replay_body, status_code=status)
             return ORJSONResponse({"detail": "duplicate request in progress"}, status_code=409)
 
+        # ── we own the key: execute EXACTLY once ──
         try:
             response = await call_next(request)
         except Exception:
+            # the side effect did NOT complete (call_next raised) → release so a retry can proceed.
             self._release(storage_key)
             raise
 
+        # From here the side effect HAS completed. Invariant: NEVER release (a retry must never
+        # re-execute) and ALWAYS return the real response to this client — persisting it is
+        # best-effort. (P1 review: fixes capture-fail→re-execute and commit-fail→client-503.)
         status = int(getattr(response, "status_code", 200))
         try:
             if getattr(response, "body", None) is not None:
                 raw_body = bytes(response.body)
             else:
                 raw_body = b"".join([chunk async for chunk in response.body_iterator])
-            response_body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
         except Exception as exc:
-            self._release(storage_key)
             _log.error("idempotency_response_capture_failed", exc_info=exc)
-            return ORJSONResponse({"detail": "idempotent response could not be recorded"}, status_code=503)
+            raw_body = b""
+        try:
+            parsed = json.loads(raw_body.decode("utf-8")) if raw_body else None
+        except Exception:
+            parsed = None
+        # store JSON when we have it; else a sentinel so a cross-process replay is deterministic
+        # (the side effect already ran) rather than a re-execution.
+        replay_body = parsed if parsed is not None else {"detail": "request already processed"}
 
         try:
             with db_session() as db:
@@ -132,20 +155,21 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                         "key": storage_key,
                         "fingerprint": fingerprint,
                         "status": status,
-                        "body": json.dumps(response_body, ensure_ascii=False),
+                        "body": json.dumps(replay_body, ensure_ascii=False),
                     },
                 )
                 db.commit()
         except Exception as exc:
+            # persist failed but the side effect happened: do NOT release, do NOT 503 — return the
+            # real response. Cross-process retries during the outage get 409-in-progress until the
+            # store recovers (safe: no double execution).
             _log.error("idempotency_response_commit_failed", exc_info=exc)
-            return ORJSONResponse({"detail": "idempotent response could not be committed"}, status_code=503)
 
-        cache[storage_key] = {
-            "fingerprint": fingerprint,
-            "body": response_body,
-            "status": status,
-            "ts": now,
-        }
+        self._cache_put(storage_key, {
+            "fingerprint": fingerprint, "body": replay_body, "status": status, "ts": now,
+        })
+        if not raw_body:
+            return ORJSONResponse(replay_body, status_code=status)
         headers = dict(response.headers)
         headers.pop("content-length", None)
         return Response(
@@ -155,6 +179,24 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             media_type=getattr(response, "media_type", None),
             background=getattr(response, "background", None),
         )
+
+    def _cache_put(self, storage_key: str, entry: dict) -> None:
+        """Bounded in-memory cache (P1 review: was unbounded). Evicts the oldest ~10% by ts when full."""
+        cache = self.cache
+        cache[storage_key] = entry
+        if len(cache) > self.cache_max:
+            try:
+                for stale in sorted(cache, key=lambda k: cache[k].get("ts", 0))[: max(1, self.cache_max // 10)]:
+                    cache.pop(stale, None)
+            except Exception:
+                cache.clear()
+
+    @staticmethod
+    def _decode_body(value):
+        try:
+            return json.loads(value) if isinstance(value, str) else (value or {})
+        except Exception:
+            return value or {}
 
     @staticmethod
     def _conflict() -> ORJSONResponse:
