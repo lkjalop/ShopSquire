@@ -64,6 +64,9 @@ jobs:
       PGDATABASE: shopsquire_test
       PGPORT: 5432
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shopsquire_test
+      # Activates tests/chaos/test_money_concurrency_postgres.py — the threaded money-race suite that
+      # SQLite cannot model (it skips without this). Uses its own throwaway schemas on the same PG.
+      TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/shopsquire_test
       SPLUNK_HEC_URL: ${{ secrets.SPLUNK_HEC_URL }}
       SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
     steps:

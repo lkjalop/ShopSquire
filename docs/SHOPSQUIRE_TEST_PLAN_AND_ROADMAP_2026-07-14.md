@@ -103,11 +103,9 @@ CONFIRMED money-path or fail-closed defect fixed before Phase 1. **~0.5 day to t
 *(2026-07-14b increment did most of this: PG threaded races ✅, required idempotency keys ✅,
 atomic order/inventory + 503 ✅, refund balance guard ✅, sold-taxonomy materialization ✅.)*
 Remaining:
-1. **Idempotency-middleware hardening** (NEW — from the increment review): (a) scope the
-   store-unavailable **503 to money paths** vs. blocking *all* idempotent writes; (b) resolve the
-   two "side-effect done, response unrecorded" edges — capture-fail→release→**re-execute** and
-   commit-fail→**stuck 409-in-progress** (no TTL cleanup); (c) bound `self.cache` (LRU); (d) don't
-   buffer streaming responses. → `idempotency.py`.
+1. ~~**Idempotency-middleware hardening**~~ ✅ DONE (`7c835f2`): money-scoped 503, never-re-execute
+   after a completed side effect (both edges closed), bounded cache. +3 tests. (Streaming-buffer is
+   a P2, left — keyed streaming responses are not a real usage today.)
 2. **CI must provision Postgres** so `test_money_concurrency_postgres.py` actually gates (it skips
    without `TEST_POSTGRES_URL` — the money-race fixes have no automated coverage otherwise).
 3. **Full-repo pytest run** — the middleware touches every idempotent write; ~72 more green post-
