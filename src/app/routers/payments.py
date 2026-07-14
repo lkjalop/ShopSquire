@@ -490,16 +490,35 @@ async def stripe_webhook(request: Request) -> Dict:
 
     elif event_type == "payment_intent.payment_failed" and intent_id:
         with db_session() as _db:
-            _db.execute(
+            _res = _db.execute(
                 text(
                     "UPDATE orders SET status = 'payment_failed', updated_at = CURRENT_TIMESTAMP "
                     "WHERE stripe_intent_id = :iid AND status = 'created'"
                 ),
                 {"iid": intent_id},
             )
+            _won = int(getattr(_res, "rowcount", 0) or 0) > 0
+            # #4: a failed payment must RELEASE the inventory the order reserved at creation — else
+            # stock stays locked forever (phantom stockout). Atomic with the status flip; only on the
+            # winning transition (idempotent anyway — release CAS-claims the reservations).
+            if _won:
+                _oid = _db.execute(
+                    text("SELECT id FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
+                    {"iid": intent_id}).scalar()
+                if _oid:
+                    try:
+                        from src.app.services.inventory_guard import release_inventory_for_order
+                        release_inventory_for_order(_db, order_id=str(_oid))
+                    except Exception as _rex:
+                        _log.warning("stripe_webhook: inventory release after failed payment %s: %s",
+                                     intent_id, _rex)
             _db.commit()
-        _log.warning("stripe_webhook: payment_failed for intent %s", intent_id)
-        _ledger_txn_for_intent(intent_id, "payment_failed")
+        # #5 (this path): record the failure ONCE — the created→payment_failed CAS updates 0 rows on
+        # a DUPLICATE webhook delivery, so gating the ledger append on the win dedups repeat delivery
+        # (a repeated append would corrupt the refund/settlement fold).
+        if _won:
+            _log.warning("stripe_webhook: payment_failed for intent %s", intent_id)
+            _ledger_txn_for_intent(intent_id, "payment_failed")
 
     elif event_type == "charge.refunded" and intent_id:
         # charge.refunded carries payment_intent field, not id
