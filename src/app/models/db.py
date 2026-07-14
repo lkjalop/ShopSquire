@@ -1013,6 +1013,10 @@ def _ensure_minimal_sqlite_tables(bind):
                     "ALTER TABLE idempotency_keys ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''",
                     "ALTER TABLE idempotency_keys ADD COLUMN response_status INT",
                     "ALTER TABLE idempotency_keys ADD COLUMN response_body TEXT",
+                    # M2 lease/reclaim columns
+                    "ALTER TABLE idempotency_keys ADD COLUMN owner_token TEXT",
+                    "ALTER TABLE idempotency_keys ADD COLUMN lease_expires_at REAL",
+                    "ALTER TABLE idempotency_keys ADD COLUMN updated_at TEXT",
                 ):
                     try:
                         conn.execute(sql_text(statement))

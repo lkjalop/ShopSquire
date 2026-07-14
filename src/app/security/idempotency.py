@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import time
+import uuid
 
 from fastapi import Request
 from fastapi.responses import ORJSONResponse
@@ -39,6 +40,13 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             self.cache_max = max(64, int(os.getenv("IDEMPOTENCY_CACHE_MAX", "2048")))
         except Exception:
             self.cache_max = 2048
+        # M2: an in-progress reservation carries a LEASE. A retry that finds a reserved-but-unfinished
+        # row waits until the lease expires (owner presumed dead) before RECLAIMING it — instead of
+        # blocking at 409 forever. Long enough that a live owner is never reclaimed mid-flight.
+        try:
+            self.lease_sec = max(5.0, float(os.getenv("IDEMPOTENCY_LEASE_SEC", "45")))
+        except Exception:
+            self.lease_sec = 45.0
 
     async def dispatch(self, request: Request, call_next):
         method = request.method.upper()
@@ -82,25 +90,41 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         except Exception:
             pass
 
+        owner = uuid.uuid4().hex
+        lease_until = now + self.lease_sec
+
         # ── store availability: fail CLOSED on money paths, degrade (no dedup) elsewhere ──
         try:
             with db_session() as db:
                 db.execute(
                     "CREATE TABLE IF NOT EXISTS idempotency_keys "
                     "(key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, response_status INT, "
-                    "response_body TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+                    "response_body TEXT, owner_token TEXT, lease_expires_at REAL, "
+                    "created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT)"
                 )
+                # M2 columns on a PRE-EXISTING table (best-effort; already-exists → ignored)
+                for _alter in ("ALTER TABLE idempotency_keys ADD COLUMN owner_token TEXT",
+                               "ALTER TABLE idempotency_keys ADD COLUMN lease_expires_at REAL",
+                               "ALTER TABLE idempotency_keys ADD COLUMN updated_at TEXT"):
+                    try:
+                        db.execute(_alter)
+                    except Exception:
+                        pass
                 db.commit()
         except Exception as exc:
             _log.error("idempotency_table_unavailable", exc_info=exc)
             return self._unavailable() if critical else await call_next(request)
 
+        # ATOMIC RESERVE with a LEASE (M2): the row carries owner_token + lease_expires_at so a dead
+        # owner's in-progress reservation can be RECLAIMED after the lease, not blocked at 409 forever.
         try:
             with db_session() as db:
                 result = db.execute(
-                    "INSERT INTO idempotency_keys (key, fingerprint, response_status, response_body) "
-                    "VALUES (:key, :fingerprint, NULL, NULL) ON CONFLICT (key) DO NOTHING",
-                    {"key": storage_key, "fingerprint": fingerprint},
+                    "INSERT INTO idempotency_keys (key, fingerprint, response_status, response_body, "
+                    "owner_token, lease_expires_at, updated_at) "
+                    "VALUES (:key, :fingerprint, NULL, NULL, :owner, :lease, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (key) DO NOTHING",
+                    {"key": storage_key, "fingerprint": fingerprint, "owner": owner, "lease": lease_until},
                 )
                 db.commit()
                 reserve_won = int(getattr(result, "rowcount", 0) or 0) == 1
@@ -112,30 +136,56 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             try:
                 with db_session() as db:
                     row = db.execute(
-                        "SELECT fingerprint, response_status, response_body "
+                        "SELECT fingerprint, response_status, response_body, owner_token, lease_expires_at "
                         "FROM idempotency_keys WHERE key = :key",
                         {"key": storage_key},
                     ).fetchone()
             except Exception as exc:
                 _log.error("idempotency_replay_read_failed", exc_info=exc)
                 return self._unavailable() if critical else await call_next(request)
-            if row is not None and str(row[0] or "") != fingerprint:
+            if row is None:
+                return self._in_progress()                     # vanished mid-flight → safe reject
+            if str(row[0] or "") != fingerprint:
                 return self._conflict()
-            if row is not None and row[1] is not None:
+            if row[1] is not None:
                 replay_body = self._decode_body(row[2])
                 status = int(row[1] or 200)
                 self._cache_put(storage_key, {
                     "fingerprint": fingerprint, "body": replay_body, "status": status, "ts": now,
                 })
                 return ORJSONResponse(replay_body, status_code=status)
-            return ORJSONResponse({"detail": "duplicate request in progress"}, status_code=409)
+            # IN-PROGRESS: reclaim ONLY if the owner's lease has expired (owner presumed dead). A live
+            # lease → 409. Money double-exec on reclaim is backstopped by the endpoint's own _idempotent.
+            old_owner = str(row[3] or "")
+            lease_expires = row[4]
+            if lease_expires is not None and float(lease_expires) >= now:
+                return self._in_progress()
+            try:
+                with db_session() as db:
+                    claim = db.execute(
+                        "UPDATE idempotency_keys SET owner_token = :owner, lease_expires_at = :lease, "
+                        "updated_at = CURRENT_TIMESTAMP "
+                        "WHERE key = :key AND response_status IS NULL AND owner_token = :old",
+                        {"owner": owner, "lease": lease_until, "key": storage_key, "old": old_owner},
+                    )
+                    db.commit()
+                    reserve_won = int(getattr(claim, "rowcount", 0) or 0) == 1
+            except Exception as exc:
+                _log.error("idempotency_reclaim_failed", exc_info=exc)
+                return self._unavailable() if critical else await call_next(request)
+            if not reserve_won:
+                return self._in_progress()                     # another request reclaimed first
 
-        # ── we own the key: execute EXACTLY once ──
+        # ── we own (or reclaimed) the key: execute EXACTLY once ──
         try:
             response = await call_next(request)
         except Exception:
-            # the side effect did NOT complete (call_next raised) → release so a retry can proceed.
-            self._release(storage_key)
+            # M2: on a MONEY/critical path do NOT blind-DELETE — an exception after a partial commit
+            # would let a retry double-execute. Leave the reservation; its LEASE expires and a retry
+            # reclaims (bounded, never permanent 409, never instant double-exec). Non-critical paths
+            # release for immediate retry (no money side effect).
+            if not critical:
+                self._release(storage_key)
             raise
 
         # From here the side effect HAS completed. Invariant: NEVER release (a retry must never
@@ -219,6 +269,10 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
     @staticmethod
     def _unavailable() -> ORJSONResponse:
         return ORJSONResponse({"detail": "idempotency store unavailable"}, status_code=503)
+
+    @staticmethod
+    def _in_progress() -> ORJSONResponse:
+        return ORJSONResponse({"detail": "duplicate request in progress"}, status_code=409)
 
     @staticmethod
     def _release(storage_key: str) -> None:

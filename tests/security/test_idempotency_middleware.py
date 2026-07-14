@@ -131,3 +131,42 @@ def test_query_param_change_is_a_conflict_not_a_replay(tmp_path):
         assert y.status_code == 409                                       # different request, same key
     finally:
         db_module.set_engine(original)
+
+
+def test_lease_reclaim_kills_409_forever(tmp_path):
+    # M2: a critical-path request whose owner "dies" mid-flight leaves the reservation; a retry gets
+    # 409 while the lease is live, then RECLAIMS + executes once the lease expires (not 409 forever).
+    import src.app.models.db as db_module
+    from fastapi import FastAPI, Request
+    from sqlalchemy import text as _text
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'lease.sqlite'}", future=True)
+    original = db_module.engine
+    db_module.set_engine(engine)
+    calls = {"n": 0}
+    app = FastAPI()
+    app.add_middleware(IdempotencyMiddleware)
+
+    @app.post("/api/v1/payments/charge")
+    def charge(request: Request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("owner died mid-flight")
+        return {"ok": True, "n": calls["n"]}
+
+    client = TestClient(app, raise_server_exceptions=False)
+    hdrs = {"Idempotency-Key": "K", "x-api-key": "A"}
+    try:
+        r1 = client.post("/api/v1/payments/charge", headers=hdrs)
+        assert r1.status_code == 500 and calls["n"] == 1          # owner died; reservation LEFT (critical)
+
+        r2 = client.post("/api/v1/payments/charge", headers=hdrs)
+        assert r2.status_code == 409 and calls["n"] == 1          # live lease → in-progress, not re-run
+
+        with db_module.db_session() as db:                        # expire the lease (owner dead)
+            db.execute(_text("UPDATE idempotency_keys SET lease_expires_at = 0"))
+            db.commit()
+
+        r3 = client.post("/api/v1/payments/charge", headers=hdrs)
+        assert r3.status_code == 200 and r3.json()["ok"] and calls["n"] == 2   # RECLAIMED + executed
+    finally:
+        db_module.set_engine(original)
