@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -62,6 +63,17 @@ _MAX_PROMPT_LINES = 40
 # (the duplicated-parser drift class). An over-limit set_quantity passes through and surfaces as
 # the handler's own quantity_out_of_range rejection, quoting the shopper's REAL number.
 _MAX_QTY_SANITY = 1_000_000
+
+# WHOLE-CART AUTHORIZATION (Track C / GPT-5.6 review-11b): a destructive whole-cart op must be backed
+# by the SHOPPER'S OWN WORDS, not just the model's action — an emptied cart from a hallucinated
+# clear_all, or a keep_only that silently drops everything else, is unrecoverable. The keep-intent
+# check also catches the keep_only-vs-set_quantity misread ('make the Lenovo 15' carries no
+# keep-intent word → the model's keep_only is rejected, we ASK, we never wipe the cart).
+_CLEAR_INTENT = re.compile(
+    r"\b(clear|empty|wipe|reset|remove (everything|all|it all)|delete (everything|all)|"
+    r"get rid of (everything|all)|start over|scrap it all)\b", re.IGNORECASE)
+_KEEP_INTENT = re.compile(
+    r"\b(keep|only|just|except|all but|everything but|nothing but|leave (only|just))\b", re.IGNORECASE)
 
 
 def _resolver_model() -> str:
@@ -241,8 +253,12 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
         if action not in _ACTIONS:
             continue
 
-        # whole-cart intents carry no targets to bind
+        # whole-cart intents carry no targets to bind. Track C: a destructive clear must be backed by
+        # the shopper's own clear-intent words — never execute a model-hallucinated empty-the-cart.
         if action in ("clear_all", "clear_previous"):
+            if not _CLEAR_INTENT.search(envelope.query or ""):
+                ambiguous.append("clear the whole cart")   # surface for confirmation, don't auto-wipe
+                continue
             ops.append(CartOp(action=action))
             continue
 
@@ -291,6 +307,14 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
                 ops.append(CartOp(action="remove_items", target_skus=(bound[0],)))
             else:
                 ops.append(CartOp(action="set_quantity", target_skus=(bound[0],), quantity=qty))
+            continue
+
+        # keep_only is destructive (it removes every OTHER line) — require the shopper's keep-intent
+        # words (Track C). This also catches the keep_only-vs-set_quantity misread ('make the Lenovo
+        # 15' has no keep-intent word → the model's keep_only is rejected → we ASK, never wipe).
+        if action == "keep_only" and not _KEEP_INTENT.search(envelope.query or ""):
+            ambiguous.append("keep only " + (", ".join(
+                ln["name"] for ln in lines if ln["sku"] in set(bound)) or "the named items"))
             continue
 
         # remove_items / keep_only: apply the bound targets; unbound names already recorded

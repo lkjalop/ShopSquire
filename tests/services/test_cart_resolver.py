@@ -264,3 +264,34 @@ def test_uniquely_matching_brand_binds():
                                     "targets": ["HP Envy x360"]}], "confidence": 0.9}))
     assert not plan.ambiguous
     assert [(o.action, o.target_skus) for o in plan.ops] == [("remove_items", ("LAP-HPENVY01",))]
+
+
+# ── Track C: whole-cart op authorization by the shopper's OWN words ─────────────────────────────
+
+def test_clear_all_requires_shopper_clear_intent():
+    # model hallucinates clear_all but the shopper never asked to clear → do NOT wipe; ASK.
+    plan = resolve_cart_mutation(
+        _env("what's the cheapest laptop?"),
+        llm_fn=_fixed_llm({"ops": [{"action": "clear_all"}], "confidence": 0.9}))
+    assert not plan.ops and plan.ambiguous          # surfaced for confirmation, not executed
+    # a real clear intent → executed
+    plan2 = resolve_cart_mutation(
+        _env("clear my cart"),
+        llm_fn=_fixed_llm({"ops": [{"action": "clear_all"}], "confidence": 0.9}))
+    assert [o.action for o in plan2.ops] == ["clear_all"] and not plan2.ambiguous
+
+
+def test_keep_only_without_keep_intent_is_rejected_catches_misclassification():
+    # the case-B misread: 'make the Lenovo 15' → model returns keep_only, dropping the number. No
+    # keep-intent word → reject the destructive keep_only and ASK (never silently wipe the rest).
+    plan = resolve_cart_mutation(
+        _env("make the Lenovo IdeaPad 15"),
+        llm_fn=_fixed_llm({"ops": [{"action": "keep_only", "targets": ["Lenovo IdeaPad Slim 3i"]}],
+                           "confidence": 0.9}))
+    assert not plan.ops and plan.ambiguous
+    # a genuine keep-only → executed
+    plan2 = resolve_cart_mutation(
+        _env("keep only the IdeaPad"),
+        llm_fn=_fixed_llm({"ops": [{"action": "keep_only", "targets": ["Lenovo IdeaPad Slim 3i"]}],
+                           "confidence": 0.9}))
+    assert [(o.action, o.target_skus) for o in plan2.ops] == [("keep_only", ("LAP-IDEAP3I9",))]
