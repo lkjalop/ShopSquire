@@ -53,7 +53,11 @@ def create_refund_request(
     if state["open_request"]:
         return {"ok": False, "error": "refund_request_already_open", "order_id": order_id}
 
-    refundable = int(state["captured_cents"] or row[1] or 0) - int(state["settled_cents"] or 0)
+    # Approved refunds are already authorized exposure even if the provider settlement webhook
+    # has not arrived yet. Subtracting only settled value allowed a second request to reserve the
+    # same captured funds in the approval-to-settlement window.
+    authorized = max(int(state["approved_cents"] or 0), int(state["settled_cents"] or 0))
+    refundable = int(state["captured_cents"] or row[1] or 0) - authorized
     amount = int(amount_cents) if amount_cents is not None else refundable
     if clamp and amount > refundable:
         amount = refundable

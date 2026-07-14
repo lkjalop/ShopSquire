@@ -89,9 +89,10 @@ to legacy*. Deleting recommend.py deletes their handler. So before archive, each
 This is the single biggest archive blocker and it's a decision, not just code: *which lanes move to
 V2, which get extracted to a thin legacy shim?*
 
-### Blocker 2 — parity is unproven + the parity oracle is disabled
-V2 has never served a live buyer turn. The 95-test parity oracle that would guard the flip is
-**disabled by `test_recommend.py` engine-aliasing** (deep-dive tech-debt finding). Re-enable it, get
+### Blocker 2 — contract/safety characterization is incomplete
+V2 has never served a live buyer turn. `tests/test_recommend.py` is legacy endpoint
+characterization, not a legacy-equals-V2 parity oracle; its two xfails do not disable V2 evaluation.
+Promotion must use the V2 contract/safety suites plus labeled relevance and shadow replay. Get
 it green (legacy≡V2 on the served lanes), before trusting the cutover.
 
 ### Blocker 3 — the chat loopback hop
@@ -106,7 +107,7 @@ one thing that decides whether V2 is safe to promote.
 ### The archive SEQUENCE (proposed — ask GPT-5.6 to critique/reorder)
 1. **Extract the non-canary lanes** (cart/support/policy/inventory) from recommend.py into standalone
    modules; keep PROCUREMENT on a thin legacy shim (advise-only V2 + legacy RFQ).
-2. **Re-enable the parity oracle**; get legacy≡V2 green on the 5 canary lanes.
+2. **Complete contract/safety characterization** on the 5 canary lanes; keep product-set parity as a diagnostic only.
 3. **Kill the loopback hop** → direct facade call (Phase-4).
 4. **USER labels** → freeze the contract → minimal UI on the typed StageResult shapes.
 5. **Canary ladder:** shadow → 1% → 5% → 25% → 50% → 100%, per-lane gates + auto-rollback on a
@@ -138,8 +139,8 @@ The gate (`5196e74`) catches "legacy refuses a SOLD category." The reverse — "
 category V2 refuses" (forklifts) — is the intended allowlist-is-stricter behavior, deferred. **To do
 in the canary ladder:** wire the shadow differ to record refusal-verdict disagreements on live
 traffic, so the real divergence rate is measured before the flip (not just the synthetic gate). The
-demo DB's sold set is an `aa-*` namespace while the registry is `el-*` — **reconcile that** so the
-gate's real-data loop actually runs instead of skipping.
+demo DB must materialize its approved sold nodes before startup so the gate's real-data loop runs.
+The `aa-*`, `el-*`, `hb-*`, and `lb-*` prefixes are valid Shopify vertical roots, not namespace drift.
 
 ---
 

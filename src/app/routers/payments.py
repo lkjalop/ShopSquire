@@ -154,6 +154,11 @@ def create_intent(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
     with tracer.start_as_current_span("payments.create_intent"):
+        idempotency_key = (
+            str(idempotency_key or request.headers.get("Idempotency-Key") or "").strip() or None
+        )
+        if not idempotency_key:
+            raise HTTPException(status_code=400, detail="Idempotency-Key is required for payment intents")
         flags = _ff_get_flags()
         assert_autonomy_allowed(
             "payments",
@@ -210,6 +215,7 @@ class _CheckoutInitiateBody(BaseModel):
     shipping_address: str | None = None
     cart_id: str | None = None
     order_id: str | None = None  # internal order ID from POST /api/v1/orders/create
+    checkout_attempt_id: str | None = None
     # P0-A bridge: the checkout page sends the cart lines so a REAL order row is created
     # server-side (server-priced), making the webhook's created→paid transition reachable.
     uid: str | None = None
@@ -255,6 +261,9 @@ def checkout_initiate(
 
     # P0-B gate parity: the PUBLIC route gets the same transaction firewall + idempotency the
     # merchant /intent enforces (it previously had the LEAST protection of any payment route).
+    _request_idempotency_key = str(
+        request.headers.get("Idempotency-Key") or body.checkout_attempt_id or ""
+    ).strip() or None
     risk = evaluate_transaction_firewall(
         provider="stripe",
         uid=str(body.uid or "public_checkout"),
@@ -262,7 +271,7 @@ def checkout_initiate(
         currency=currency,
         description=None,
         request_ip=(request.client.host if request and request.client else None),
-        idempotency_key=(request.headers.get("Idempotency-Key") or None),
+        idempotency_key=_request_idempotency_key,
         tenant_id=None,
         trace_id=None,
     )
@@ -279,19 +288,22 @@ def checkout_initiate(
     # passed-in order_id → a stable, WINDOWED signature of the cart (uid+items+amount) so a
     # header-less double-submit dedups while a genuine later re-purchase of the same cart is not
     # permanently blocked. _idempotent fails CLOSED on DB error (409, no order, no charge).
+    # A checkout attempt must have a stable client or order identity. Time windows and client
+    # prices are intentionally excluded from idempotency keys.
     order_id = (body.order_id or "").strip() or None
     _hdr_key = (request.headers.get("Idempotency-Key") or "").strip()
+    _body_key = str(body.checkout_attempt_id or "").strip()
     if _hdr_key:
         _idem_key = _hdr_key
+    elif _body_key:
+        _idem_key = _body_key
     elif order_id:
         _idem_key = f"co:{order_id}"
     elif body.items:
-        import hashlib as _hl
-        import time as _t
-        _sig = json.dumps({"uid": body.uid, "items": body.items, "amt": amount_cents,
-                           "cur": currency}, sort_keys=True, default=str)
-        _win = int(_t.time() // 600)   # 10-min idempotency window for the header-less cart path
-        _idem_key = "co:auto:" + _hl.sha256(f"{_sig}|{_win}".encode("utf-8")).hexdigest()[:40]
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key or checkout_attempt_id is required when creating an order from cart items",
+        )
     else:
         _idem_key = None
     if _idem_key and not _idempotent("checkout_initiate", _idem_key):

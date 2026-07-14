@@ -11094,24 +11094,6 @@ def suggest(
     if _qty_refusal_note:
         assistant_message = f"{_qty_refusal_note}\n\n{assistant_message}" if assistant_message else _qty_refusal_note
         payload["refusal_note"] = _qty_refusal_note
-    if explanation_request:
-        payload["explainability_mode"] = "llm_assisted" if llm_summary_requested else "rules_only"
-        try:
-            log_trace_event(
-                trace_id=trace_id,
-                event_type="selection_explanation_requested",
-                source_type="user",
-                source_id=uid,
-                target_type="agent",
-                target_id="NLP_Search_Agent",
-                payload={
-                    "query": scrub_pii(query),
-                    "explainability_mode": payload["explainability_mode"],
-                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["results", "constraints"]),
-                },
-            )
-        except Exception:
-            pass
     # MUTE LAYER 5 (2026-07-08 brain-on audit): this overwrite discards the LLM prose EXACTLY on the
     # hard queries (fit-conflict turns are the ones that most need nuanced narration). Under the
     # experiment force flag the guarded LLM prose stands; default behavior unchanged.
@@ -11139,6 +11121,29 @@ def suggest(
     payload["narration_model"] = _narration_model_tel
     payload["narration_mode"] = _narration_mode_tel
     payload["claim_guard_result"] = _claim_guard_result
+    if explanation_request:
+        from src.app.services.recommend_narration_stage import resolve_explainability_mode
+        payload["explainability_mode"] = resolve_explainability_mode(
+            narration_mode=_narration_mode_tel,
+            narration_model=_narration_model_tel,
+            claim_guard_result=_claim_guard_result,
+        )
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="selection_explanation_requested",
+                source_type="user",
+                source_id=uid,
+                target_type="agent",
+                target_id="NLP_Search_Agent",
+                payload={
+                    "query": scrub_pii(query),
+                    "explainability_mode": payload["explainability_mode"],
+                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["results", "constraints"]),
+                },
+            )
+        except Exception:
+            pass
     # Escalation / human-in-the-loop decoration (deterministic, no added latency) — extracted to
     # recommend_escalation_stage. Folds risk/complexity/order/B2B signals into one decision surfaced on
     # payload (b2b_assessment, escalation_assessment, and the review envelope + incident on review/human).

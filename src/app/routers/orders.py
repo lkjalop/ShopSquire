@@ -445,18 +445,16 @@ def cancel_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
             {"id": order_id, "expected": status},
         )
         won = int(getattr(res, "rowcount", 0) or 0) > 0
-        if won:
-            try:
-                release_inventory_for_order(db, order_id=order_id)
-            except Exception:
-                pass
         try:
+            if won:
+                release_inventory_for_order(db, order_id=order_id)
             db.commit()
-        except Exception:
+        except Exception as exc:
             try:
                 db.rollback()
             except Exception:
                 pass
+            raise HTTPException(status_code=503, detail="Order cancellation could not be committed") from exc
         if not won:
             # order existed at read (else _get_order_status 404'd) → status changed under us
             raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
@@ -476,11 +474,12 @@ def return_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
         )
         try:
             db.commit()
-        except Exception:
+        except Exception as exc:
             try:
                 db.rollback()
             except Exception:
                 pass
+            raise HTTPException(status_code=503, detail="Return request could not be committed") from exc
         if int(getattr(res, "rowcount", 0) or 0) == 0:
             raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
         return {"return_requested": True, "order_id": order_id}
@@ -509,11 +508,12 @@ def update_status(
         )
         try:
             db.commit()
-        except Exception:
+        except Exception as exc:
             try:
                 db.rollback()
             except Exception:
                 pass
+            raise HTTPException(status_code=503, detail="Order status update could not be committed") from exc
         if int(getattr(res, "rowcount", 0) or 0) == 0:
             raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
         return {"updated": True, "order_id": order_id, "status": target}

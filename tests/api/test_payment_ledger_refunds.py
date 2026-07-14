@@ -66,7 +66,8 @@ def test_paid_webhook_appends_succeeded_and_dispatch_events(client, monkeypatch)
     import src.app.routers.orders as orders_mod
     monkeypatch.setattr(orders_mod, "create_order_core", fake_core)
     d = client.post("/api/v1/payments/checkout-initiate",
-                    json={"uid": "u", "items": [{"sku": "X", "quantity": 1}]}).json()
+                    json={"uid": "u", "items": [{"sku": "X", "quantity": 1}]},
+                    headers={"Idempotency-Key": "checkout-ledger-webhook"}).json()
     client.post("/api/v1/payments/webhook",
                 content=json.dumps({"type": "payment_intent.succeeded",
                                     "data": {"object": {"id": d["stripe_intent_id"]}}}),
@@ -124,6 +125,26 @@ def test_refund_guards(client):
         db.commit()
     assert client.post("/api/v1/payments/refunds/request", headers=MERCHANT,
                        json={"order_id": "ORD-L3", "amount_cents": 900}).status_code == 409
+
+
+def test_approved_refund_reserves_balance_before_provider_settlement(client):
+    _seed_paid_order(oid="ORD-EXPOSURE", total=10000, intent="pi_demo_exposure")
+    opened = client.post(
+        "/api/v1/payments/refunds/request",
+        headers=MERCHANT,
+        json={"order_id": "ORD-EXPOSURE", "amount_cents": 10000},
+    )
+    assert opened.status_code == 200
+    approved = client.post("/api/v1/payments/refunds/ORD-EXPOSURE/approve", headers=OWNER)
+    assert approved.status_code == 200
+
+    duplicate_exposure = client.post(
+        "/api/v1/payments/refunds/request",
+        headers=MERCHANT,
+        json={"order_id": "ORD-EXPOSURE", "amount_cents": 10000},
+    )
+    assert duplicate_exposure.status_code == 422
+    assert duplicate_exposure.json()["detail"]["refundable_cents"] == 0
 
 
 def test_refund_approve_executes_via_stripe_when_live(client, monkeypatch):

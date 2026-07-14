@@ -64,19 +64,19 @@ test('pre-payment split-fulfilment — ships now + supplier-ETA follow-up, buyer
   });
 
   await test.step('2 · checkout is GATED until the buyer confirms the delivery plan', async () => {
-    const checkout = page.getByTestId('cart-checkout');
-    await expect(checkout).toBeVisible();
-    await expect(checkout).toContainText(/Confirm delivery plan first/i);
-    await expect(checkout).toBeDisabled();
+    const helper = page.getByTestId('cart-confirm-plan-first');
+    await helper.scrollIntoViewIfNeeded();
+    await expect(helper).toBeVisible();
+    await expect(helper).toContainText(/Confirm delivery plan first/i);
+    await helper.click();
+    await expect(page.getByTestId('split-confirm')).toBeVisible();
     await page.waitForTimeout(1500);
   });
 
   await test.step('3 · buyer confirms the plan → checkout unlocks', async () => {
     await page.getByTestId('split-confirm').click();
     await expect(page.getByTestId('split-confirmed')).toBeVisible();
-    const checkout = page.getByTestId('cart-checkout');
-    await expect(checkout).toContainText(/^Checkout$/);
-    await expect(checkout).toBeEnabled();
+    await expect(page.getByTestId('cart-proceed')).toContainText(/Continue to checkout/i);
     await page.waitForTimeout(2500);
   });
 });

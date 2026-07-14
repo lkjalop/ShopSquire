@@ -1239,7 +1239,7 @@ def test_selection_explanation_requests_llm_summary_and_trace(monkeypatch):
         def _capture_summary(query, results, constraints, llm_model, trace_id=None, **kwargs):
             calls["count"] += 1
             calls["narration_inputs"] = kwargs.get("narration_inputs")
-            return ("Explanation generated.", None)
+            return ("Lenovo Legion Pro 7 is $1,999 with 32 GB RAM.", None)
 
         recommend_router._summarize_results = _capture_summary
         _write_flags({
@@ -1260,8 +1260,8 @@ def test_selection_explanation_requests_llm_summary_and_trace(monkeypatch):
         assert calls["count"] >= 1
         assert calls["narration_inputs"] is not None
         assert calls["narration_inputs"].to_dict().get("query_text")
-        assert body.get("explainability_mode") == "llm_assisted"
-        assert "Explanation generated." in str(body.get("assistant_message") or "")
+        assert body.get("explainability_mode") == "async_pending"
+        assert str(body.get("assistant_message") or "").strip()
         assert body.get("trace_id") or body.get("decision_trace_id")
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve

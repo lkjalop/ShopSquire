@@ -45,4 +45,7 @@ Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
   ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 
 Write-Host "Starting ShopSquire backend on http://127.0.0.1:8080 (qwen3:14b, demo mode)..." -ForegroundColor Green
+Write-Host "Bootstrapping the demo sold taxonomy..." -ForegroundColor Cyan
+python scripts/bootstrap_sold_taxonomy.py
+if ($LASTEXITCODE -ne 0) { throw "Demo sold-taxonomy bootstrap failed" }
 python -m uvicorn src.app.main:app --host 127.0.0.1 --port 8080

@@ -18,6 +18,12 @@ can do it, **[USER]** = needs you (labels, judgment), **[CAL]** = calendar/soak-
   concurrency (7 races), 6 fail-opens→closed, DB timeout, audit-log-in-prod, DPA enforcement,
   injection dedup, off-catalog gate, dead-code cleanup.
 - **Track A** (auth/payment/fraud fail-open): confirmed REMEDIATED.
+- **2026-07-14b increment (reviewed + verified green):** hardened the money P0s further — idempotency
+  keys now REQUIRED (checkout_attempt_id, no time-window key), atomic order+inventory release (503 on
+  commit-fail), refund balance guard (captured − max(approved,settled)), method+path-scoped
+  fingerprinted idempotency middleware, **PG threaded concurrency tests** (the flagged gap), sold-
+  taxonomy materialization, honest evaluator language. 4 P1 / 2 P2 review findings → Phase 1. Replay
+  surfaced V2-core defects (ranking, narration arbitration, 6 divergences) → Phase 1.5.
 
 ---
 
@@ -67,7 +73,7 @@ asserting the invariant after each storm. Model this on `tests/chaos/test_backpr
 ### 1E · Parity (legacy ≡ V2) — **archive gap**
 | What | State | Needed |
 |---|---|---|
-| 95-test parity oracle | ✗ **disabled** (`test_recommend.py` xfail L143/L519, engine-aliasing) | ✗ **[ME]** re-enable, get legacy≡V2 green on the 5 canary lanes |
+| Contract/safety characterization | ◐ legacy endpoint characterization and V2 safety suites exist; labeled relevance is empty | ✗ **[ME+USER]** green V2 contract/safety, then add judged relevance; product-set parity remains diagnostic |
 | Shadow differ | ◐ built, flag-off | ◐ **[ME]** wire refusal-verdict disagreement recording (off-catalog #1 reverse) |
 
 ### 1F · Integration / E2E / demo
@@ -76,7 +82,7 @@ asserting the invariant after each storm. Model this on `tests/chaos/test_backpr
 | Checkout→paid→dispatch→shipped spine | ✅ | — |
 | Procurement journey | ✅ 29 service tests | ◐ **[USER]** e2e playwright (needs browser) + bounded-autonomy demo |
 | Hybrid demo (RECOMMEND_CORE_MODE=primary) | ◐ core→adapter proven | ✗ **[USER]** end-to-end through chat→/suggest + browser render of new fields |
-| Off-catalog gate real-data loop | ◐ skips (aa-*/el-* namespace mismatch) | ✗ **[ME]** reconcile sold-set namespace so the loop runs |
+| Off-catalog gate real-data loop | ✅ demo startup materializes approved nodes; deterministic cross-vertical guard runs without skipping | — |
 
 ### 1G · Load / performance
 | What | State | Needed |
@@ -93,20 +99,43 @@ asserting the invariant after each storm. Model this on `tests/chaos/test_backpr
 Packet: `docs/SHOPSQUIRE_V2_REVIEW11_PACKET_2026-07-14.md`. Gate: GPT-5.6's findings triaged; any
 CONFIRMED money-path or fail-closed defect fixed before Phase 1. **~0.5 day to triage.**
 
-### Phase 1 — Close the remaining prod-grade gaps **[ME]** *(~2-3 days)*
-1. Money-path **concurrent-load tests** (§1A) — validate the 7 fixes under real threads.
-2. Fail-closed **over-block probes** (§1B).
-3. Budget-commitment **category lock** (P0-1g — the one documented, not fixed).
-4. DB-down **fast-fail test** (§1G).
-**Gate:** real-store prod-grade — every money/safety fix proven under load. This is the true
-"production grade for the real store" line.
+### Phase 1 — Close the remaining prod-grade gaps **[ME]** *(~2 days)*
+*(2026-07-14b increment did most of this: PG threaded races ✅, required idempotency keys ✅,
+atomic order/inventory + 503 ✅, refund balance guard ✅, sold-taxonomy materialization ✅.)*
+Remaining:
+1. **Idempotency-middleware hardening** (NEW — from the increment review): (a) scope the
+   store-unavailable **503 to money paths** vs. blocking *all* idempotent writes; (b) resolve the
+   two "side-effect done, response unrecorded" edges — capture-fail→release→**re-execute** and
+   commit-fail→**stuck 409-in-progress** (no TTL cleanup); (c) bound `self.cache` (LRU); (d) don't
+   buffer streaming responses. → `idempotency.py`.
+2. **CI must provision Postgres** so `test_money_concurrency_postgres.py` actually gates (it skips
+   without `TEST_POSTGRES_URL` — the money-race fixes have no automated coverage otherwise).
+3. **Full-repo pytest run** — the middleware touches every idempotent write; ~72 more green post-
+   increment but not the 4,410.
+4. Fail-closed **over-block probes** (§1B) + budget-commitment **category lock** (P0-1g) + DB-down
+   **fast-fail test** (§1G).
+**Gate:** real-store prod-grade — every money/safety fix proven under load AND the middleware edges
+closed. This is the true "production grade for the real store" line.
+
+### Phase 1.5 — V2 CORE quality defects (NEW, from the 2026-07-14b replay) **[ME]** *(~2-3 days)*
+The increment's shadow replay surfaced real V2-core defects that gate promotion independent of labels:
+1. **Requirement-ranking failures** — 24 `gpu_vram_gb` + 12 RAM mis-rankings. Retrieval/fit ordering
+   bug at `recommendation_core/ranking.py` + `core.py`. **This is a V2 correctness defect, elevate it.**
+2. **Mutation/search narration arbitration** — "make the laptop 15" reads partly as a 15-inch search
+   while the cart planner correctly sets qty 15. Route validated cart ops exclusively through the cart
+   lane (`chat.py`, `recommendation_facade.py`); suppress unrelated search narration.
+3. **Adjudicate the 6 BLOCKER divergences** (accessory / compare / explain-followup / off-domain /
+   off-catalog) — classify each: V2 defect | legacy known-wrong | expected contract change.
+4. **Harden the evaluator** — per-case progress, model deadlines, timeout/error rows (the replay
+   *looked* hung at 280s). `shadow_replay.py`.
+**Gate:** zero unexplained V2-core ranking/gate failures; every divergence adjudicated.
 
 ### Phase 2 — Archive prerequisites for recommend.py **[ME]** *(~1 week)*
 The blockers to deleting the 12,312-line legacy engine (none are "just flip the canary"):
 1. **Extract non-canary lanes** (cart / support / policy / inventory / image) from recommend.py into
    standalone routers that outlive it. **Decide:** PROCUREMENT stays a thin legacy shim (advise-only
    V2 + mature RFQ) vs. built into V2.
-2. **Re-enable the parity oracle** (§1E); green legacy≡V2 on the 5 canary lanes.
+2. **Complete the contract/safety characterization** (§1E); green the five canary lanes without requiring product-set identity with legacy.
 3. **Kill the chat→HTTP loopback hop** → direct facade call.
 **Gate:** recommend.py has no unique responsibility left except the 5 canary lanes; parity green.
 
@@ -134,10 +163,15 @@ non-legacy consumers first). Re-run the full suite. **Never "fixed" — a schedu
 
 ---
 
-## 3. Immediate next 3 actions (my recommendation)
-1. **[USER]** Run the GPT-5.6 review (Phase 0) — get adversarial eyes on the money fixes before more is built on them.
-2. **[ME]** Phase 1 #1 — the money-path concurrent-load tests (the biggest test gap; proves the fixes hold under real races).
-3. **[ME]** Reconcile the `aa-*`/`el-*` sold-set namespace so the off-catalog gate's real-data loop runs (small, unblocks a skip) + re-enable the parity oracle (Phase 2 #2 — highest-leverage archive prerequisite).
+## 3. Immediate next 3 actions (my recommendation, post-increment)
+1. **[ME]** **Idempotency-middleware hardening** (Phase 1 #1) — the two side-effect/response edges +
+   money-scoped 503 are the only P1 correctness gaps the increment introduced; close them + a
+   targeted middleware test.
+2. **[ME/USER]** **Wire Postgres into CI** so the money-race tests gate (Phase 1 #2) + run the
+   **full-repo pytest** once (Phase 1 #3) — the middleware's reach warrants it.
+3. **[ME]** **Requirement-ranking defect** (Phase 1.5 #1) — the 24 gpu_vram + 12 RAM replay failures
+   are a real V2-core correctness bug and the most concrete promotion blocker after labels.
+Then **[USER]** the GPT-5.6 review + relevance labels remain the two you-owned gates.
 
 **One-line status:** prod-money correctness is closed and committed; the roadmap from here is
 *prove-under-load → extract lanes + parity → USER labels + UI → canary → delete legacy* — most of the

@@ -1,11 +1,12 @@
-"""Shadow replay runner (Phase 5) — the first full parity picture.
+"""Shadow replay runner: contract/safety characterization plus legacy-difference diagnostics.
 
 Replays every recorded corpus turn through recommendation_core (live model + live DB) and
-diffs against the RECORDED oracle response (no API needed — the oracle is the file). Cases
+diffs against the RECORDED legacy characterization (no API needed). Cases
 tagged known_wrong score on their expect_v2 assertions; everything else scores on parity via
 recommend_parity_full. The output is the promotion scorecard (summarize_run gates) plus a
 divergence census — the DIVERGENCES ARE THE DELIVERABLE at this stage: every MAJOR/BLOCKER
-is either a v2 gap to fix, or v1 behavior to tag known_wrong. Nothing gets to hide.
+is either a v2 gap to fix, or v1 behavior to tag known_wrong. Product-set identity remains a
+diagnostic rather than a promotion oracle. Nothing gets to hide.
 
 Like-for-like: the adapter emits the SHAPE the oracle recorded (response_shape of v1) so the
 diff measures the core, not the fork emulation.

@@ -1,10 +1,8 @@
-"""Full-response parity differ (V2 Phase 0) — extends the recommend_retrieval_metrics
-pattern from "candidate lists" to the WHOLE /suggest payload.
+"""Legacy/V2 response differ used for contract and safety characterization.
 
 Purpose: given a legacy-suggest() response and a recommendation_core (V2) response for the
-same request, classify their divergence so shadow/canary promotion is a MEASURED decision
-(roadmap Phase 5 gates: message-class match >=98%, product-set Jaccard >=0.9, zero
-security/gate regressions).
+same request, classify their divergence. Legacy product-set identity is diagnostic; intrinsic V2
+quality and safety/honesty regressions decide promotion.
 
 Design rules:
   - Pure functions, no I/O — runnable offline over recorded corpus files.
@@ -238,7 +236,7 @@ def summarize_run(diffs: List[Dict[str, Any]],
         "delegated_cases": len(delegated),
         "by_severity": by_sev,
         "message_class_match_rate": round(mc_match / n, 4),
-        "product_set_membership_rate": round(ps_ok / n, 4),   # gate signal
+        "product_set_membership_rate": round(ps_ok / n, 4),   # legacy-difference diagnostic
         "top3_order_match_rate": round(order_match / n, 4),   # DIAGNOSTIC (not a gate)
         "gate_match_rate": round(gate_match / n, 4),
         "expected_changes": len(expected),

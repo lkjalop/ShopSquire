@@ -458,6 +458,28 @@ def apply_product_claim_guard(
     return assistant_message
 
 
+def resolve_explainability_mode(
+    *,
+    narration_mode: str,
+    narration_model: Optional[str],
+    claim_guard_result: str,
+) -> str:
+    """Report the source that actually produced the final buyer-visible explanation."""
+    guard = str(claim_guard_result or "not_run")
+    mode = str(narration_mode or "skip")
+    if mode == "async":
+        return "async_pending"
+    if guard in {
+        "fell_back_to_deterministic",
+        "guard_error_fell_back",
+        "forced_deterministic_use_case_conflict",
+    }:
+        return "rules_fallback"
+    if narration_model and mode == "blocking":
+        return "llm_assisted"
+    return "rules_only"
+
+
 @dataclass(frozen=True)
 class NarrationInputs:
     query_text: str

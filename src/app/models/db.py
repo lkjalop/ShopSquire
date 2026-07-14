@@ -211,6 +211,11 @@ def _ensure_minimal_sqlite_tables(bind):
                 except Exception:
                     pass   # column already exists (fresh CREATE above includes it)
                 try:
+                    conn.execute(sql_text("ALTER TABLE draft_orders ADD COLUMN version INTEGER "
+                                          "NOT NULL DEFAULT 0"))
+                except Exception:
+                    pass   # column already exists (fresh CREATE above includes it)
+                try:
                     conn.execute(sql_text(
                         "CREATE INDEX IF NOT EXISTS ix_draft_orders_tenant_customer_status "
                         "ON draft_orders (tenant_id, customer_id, status)"))
@@ -1004,6 +1009,15 @@ def _ensure_minimal_sqlite_tables(bind):
                     ))
                 except Exception:
                     pass
+                for statement in (
+                    "ALTER TABLE idempotency_keys ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''",
+                    "ALTER TABLE idempotency_keys ADD COLUMN response_status INT",
+                    "ALTER TABLE idempotency_keys ADD COLUMN response_body TEXT",
+                ):
+                    try:
+                        conn.execute(sql_text(statement))
+                    except Exception:
+                        pass
                 # Per-tenant retention policy configuration
                 try:
                     conn.execute(sql_text(

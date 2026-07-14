@@ -54,7 +54,8 @@ def test_full_spine_created_paid_dispatched_shipped(client, monkeypatch):
     monkeypatch.setattr(orders_mod, "create_order_core", fake_core)
 
     r = client.post("/api/v1/payments/checkout-initiate",
-                    json={"uid": "u-spine", "items": [{"sku": "X", "quantity": 2}], "amount_cents": 1})
+                    json={"uid": "u-spine", "items": [{"sku": "X", "quantity": 2}], "amount_cents": 1},
+                    headers={"Idempotency-Key": "checkout-order-spine"})
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["order_id"] == "ORD-SPINE"
@@ -92,6 +93,15 @@ def test_checkout_initiate_idempotency_409_on_duplicate(client):
     assert r1.status_code == 200
     r2 = client.post("/api/v1/payments/checkout-initiate", json={"order_id": "ORD-DUP", "amount_cents": 500})
     assert r2.status_code == 409
+
+
+def test_new_order_from_cart_requires_stable_checkout_attempt_identity(client):
+    response = client.post(
+        "/api/v1/payments/checkout-initiate",
+        json={"uid": "u-no-key", "items": [{"sku": "X", "quantity": 1}]},
+    )
+    assert response.status_code == 400
+    assert "checkout_attempt_id" in response.json()["detail"]
 
 
 def test_no_items_no_order_still_demo_confirms(client):
