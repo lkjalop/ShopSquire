@@ -652,6 +652,18 @@ def refund_approve(
         record_txn(db, order_id=order_id, kind=KIND_REFUND_APPROVED,
                    amount_cents=_amount, currency=_currency,
                    actor_type="role", actor_id=role, reason="approved", commit=True)
+        # M3: durably record the approved refund as a PENDING execution keyed by the provider
+        # idempotency_key, so a failed provider call is RETRYABLE (re-issue with the same key → the
+        # provider returns the same refund, never a second one).
+        _exec_key = f"refund:{order_id}:{len(approvals)}"
+        _exec_id = None
+        try:
+            from src.app.services import refund_execution as _rx
+            _exec_id = _rx.open_execution(db, order_id=order_id, approval_index=len(approvals),
+                                          amount_cents=_amount, currency=_currency,
+                                          intent_id=_intent_id, idempotency_key=_exec_key)
+        except Exception as _xex:
+            _log.warning("refund_approve: could not record refund execution: %s", _xex)
     _log.info("refund approved for order %s (%s cents) by role=%s", order_id, _amount, role)
 
     # EXECUTE the refund at the provider when Stripe is live AND the order carries a real intent
@@ -664,22 +676,50 @@ def refund_approve(
             client = StripeClient(settings.stripe_api_key)
             refund = client.create_refund(
                 payment_intent_id=_intent, amount_cents=(int(_amount) if _amount is not None else None),
-                reason="requested_by_customer", idempotency_key=f"refund:{order_id}:{len(approvals)}")
+                reason="requested_by_customer", idempotency_key=_exec_key)
+            if _exec_id:                                       # M3: execution settled
+                try:
+                    with db_session() as _xdb:
+                        _rx.mark_settled(_xdb, _exec_id, provider_ref=refund.get("id"))
+                except Exception:
+                    pass
             return {"order_id": order_id, "status": "refund_executed",
                     "amount_cents": _amount, "provider_execution": "stripe",
                     "provider_refund_id": refund.get("id"), "provider_status": refund.get("status"),
                     "settled_by": "charge.refunded webhook"}
         except Exception as exc:
-            # Approval is recorded; execution failed — surface it so an operator retries. The ledger
-            # shows an approved-but-unsettled refund (refund_state.approved > settled) until resolved.
+            # M3: approval + a PENDING execution are recorded; mark the execution failed so the retry
+            # worker (or /refunds/{id}/execute) can re-issue it idempotently — no longer a raise-and-
+            # forget that couldn't be retried (re-approve returned no_open_refund_request).
+            if _exec_id:
+                try:
+                    with db_session() as _xdb:
+                        _rx.mark_failed(_xdb, _exec_id, error=str(exc)[:200])
+                except Exception:
+                    pass
             _log.warning("refund execution failed for order %s: %s", order_id, exc)
-            raise HTTPException(status_code=502, detail={"message": "refund_provider_execution_failed",
-                                                         "error": str(exc)[:160], "order_id": order_id})
+            raise HTTPException(status_code=502, detail={
+                "message": "refund_provider_execution_failed", "error": str(exc)[:160],
+                "order_id": order_id, "retry_via": f"/api/v1/payments/refunds/{order_id}/execute"})
     # No live Stripe / demo intent → the approval AUTHORIZES a manual/dashboard refund; the webhook
     # settles + reconciles it here when it lands.
     return {"order_id": order_id, "status": "refund_approved",
             "amount_cents": _amount,
             "provider_execution": "manual_or_webhook", "settled_by": "charge.refunded webhook"}
+
+
+@router.post("/refunds/{order_id}/execute")
+def refund_execute(
+    order_id: str,
+    role: str = Depends(require_role([ROLE_OWNER])),   # owner-only, like approve
+) -> Dict:
+    """M3: retry an approved refund whose PROVIDER execution failed. Idempotent — re-issues with the
+    same key, so the provider returns the same refund (never a second one). Backs the 'operator can
+    retry' guarantee the approve path only claimed in a comment before."""
+    from src.app.services import refund_execution as _rx
+    with db_session() as db:
+        out = _rx.execute_pending(db, tenant_id="default", order_id=order_id)
+    return {"order_id": order_id, **out}
 
 
 @router.get("/refunds/{order_id}")

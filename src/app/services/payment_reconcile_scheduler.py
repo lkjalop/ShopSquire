@@ -49,6 +49,18 @@ def run_once() -> int:
             for t in (tenants or ["default"]):
                 out = reconcile_orphans(db, tenant_id=t)
                 repaired += int(out.get("repaired") or 0)
+            # M3: also drive pending/failed refund executions to settlement (idempotent — reuses the
+            # provider key, so no double refund).
+            try:
+                from src.app.services.refund_execution import ensure_table as _rx_ensure, execute_pending
+                _rx_ensure(db)
+                rx_tenants = [str(r[0]) for r in db.execute(text(
+                    "SELECT DISTINCT COALESCE(tenant_id,'default') FROM refund_executions "
+                    "WHERE state IN ('pending','failed')")).fetchall()]
+                for t in (rx_tenants or ["default"]):
+                    execute_pending(db, tenant_id=t)
+            except Exception as _rx_exc:
+                logger.warning("refund retry run failed: %s", repr(_rx_exc)[:120])
     except Exception as exc:
         logger.warning("payment reconcile run failed: %s", repr(exc)[:120])
     if repaired:
