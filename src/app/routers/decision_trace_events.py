@@ -257,8 +257,13 @@ async def stream_trace_events(trace_id: str, request: Request):
                     if await request.is_disconnected():
                         break
                     try:
-                        ev = await q.get()
+                        ev = await asyncio.wait_for(q.get(), timeout=15.0)
                         yield f"data: {json.dumps([ev], ensure_ascii=False)}\n\n"
+                    except asyncio.TimeoutError:
+                        # H fix: await q.get() with NO timeout parked the coroutine forever on a
+                        # silent stream after the client dropped (is_disconnected only re-checks
+                        # between events). Heartbeat every 15s → ping + the loop re-checks disconnect.
+                        yield ": keep-alive\n\n"
                     except asyncio.CancelledError:
                         break
                     except Exception:

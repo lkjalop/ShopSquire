@@ -931,8 +931,12 @@ async def decisions_sse_trace(trace_id: str, request: Request):
                     if await request.is_disconnected():
                         break
                     try:
-                        ev = await q.get()
+                        ev = await asyncio.wait_for(q.get(), timeout=15.0)
                         yield f"data: {json.dumps([ev], ensure_ascii=False, default=str)}\n\n"
+                    except asyncio.TimeoutError:
+                        # H fix: bound the wait so a silent stream + client disconnect can't park the
+                        # coroutine forever (is_disconnected only re-checks between events).
+                        yield ": keep-alive\n\n"
                     except asyncio.CancelledError:
                         break
                     except Exception:

@@ -876,8 +876,10 @@ async def ws_room(incident_id: str, websocket: WebSocket):
             if websocket.client_state.name != "CONNECTED":
                 break
             try:
-                rec = await q.get()
+                rec = await asyncio.wait_for(q.get(), timeout=15.0)
                 await websocket.send_text(json.dumps([rec], ensure_ascii=False))
+            except asyncio.TimeoutError:
+                continue   # H fix: bounded wait → loop re-checks client_state, never parks forever
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -910,8 +912,10 @@ async def sse_room(incident_id: str):
         try:
             while True:
                 try:
-                    rec = await q.get()
+                    rec = await asyncio.wait_for(q.get(), timeout=15.0)
                     yield "data: " + json.dumps([rec], ensure_ascii=False) + "\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"   # H fix: heartbeat, never parks forever on a silent stream
                 except asyncio.CancelledError:
                     break
                 except Exception:
@@ -1845,8 +1849,10 @@ async def public_sse_room(
         try:
             while True:
                 try:
-                    rec = await q.get()
+                    rec = await asyncio.wait_for(q.get(), timeout=15.0)
                     yield "data: " + json.dumps([rec], ensure_ascii=False) + "\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"   # H fix: heartbeat, never parks forever on a silent stream
                 except asyncio.CancelledError:
                     break
                 except Exception:

@@ -22,4 +22,7 @@ def run_async_safe(coro) -> Any:
         return asyncio.run(coro)  # no running loop in this thread — the simple path is safe
     # we ARE inside a running loop → asyncio.run() would crash; run it in a loop-free thread instead.
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+        # H fix: bound the sync→async bridge with a generous backstop (300s) so a hung wrapped
+        # coroutine surfaces a TimeoutError instead of parking the calling thread forever. The
+        # wrapped coros (model/HTTP) are individually bounded, so this only fires on a genuine hang.
+        return pool.submit(asyncio.run, coro).result(timeout=300.0)

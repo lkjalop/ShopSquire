@@ -21,7 +21,9 @@ def _run_async_safe(coro):
         asyncio.get_running_loop()
         # We ARE inside a running loop — delegate to a thread where it's safe.
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result()
+            # H fix: generous backstop so a hung wrapped coroutine surfaces a TimeoutError instead
+            # of parking the calling thread forever (wrapped coros are individually bounded).
+            return pool.submit(asyncio.run, coro).result(timeout=300.0)
     except RuntimeError:
         # No running loop in this thread — asyncio.run() is safe.
         return asyncio.run(coro)
