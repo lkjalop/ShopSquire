@@ -305,7 +305,8 @@ def checkout_initiate(
             detail="Idempotency-Key or checkout_attempt_id is required when creating an order from cart items",
         )
     else:
-        _idem_key = None
+        _idem_key = None    # bare-amount path (no order/items/key) — allowed only for DEMO confirm;
+        #                     the REAL-provider guard below (#7) blocks an un-keyed live Stripe intent.
     if _idem_key and not _idempotent("checkout_initiate", _idem_key):
         raise HTTPException(status_code=409, detail="Duplicate checkout initiation")
 
@@ -332,6 +333,13 @@ def checkout_initiate(
     )
 
     if stripe_live:
+        # #7 (GPT-5.6): never create a REAL Stripe intent without an idempotency key — a retry would
+        # mint a second charge. The demo/no-provider path is exempt (no real money). A bare-amount
+        # checkout that reaches live Stripe must carry a header or checkout_attempt_id.
+        if not _idem_key:
+            raise HTTPException(
+                status_code=400,
+                detail="Idempotency-Key or checkout_attempt_id is required for a live payment")
         try:
             client = StripeClient(settings.stripe_api_key)
             # P0-1d: provider-level idempotency — reuse the same key the server dedup reserved, so a
