@@ -2372,6 +2372,16 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
+    # Money-P0 M1: payment-attempt reconciliation (transactional-outbox reader) — heals a lost
+    # order↔intent association so a provider charge never orphans.
+    try:
+        from src.app.services.payment_reconcile_scheduler import (
+            start_payment_reconcile_scheduler, stop_payment_reconcile_scheduler)
+        app.add_event_handler("startup", lambda: start_payment_reconcile_scheduler(app))
+        app.add_event_handler("shutdown", lambda: stop_payment_reconcile_scheduler(app))
+    except Exception:
+        pass
+
     # Automated SBOM correlation scheduler
     try:
         from src.app.services.sbom_scheduler import start_sbom_scheduler, stop_sbom_scheduler

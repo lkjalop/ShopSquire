@@ -340,6 +340,19 @@ def checkout_initiate(
             raise HTTPException(
                 status_code=400,
                 detail="Idempotency-Key or checkout_attempt_id is required for a live payment")
+        # M1 (GPT-5.6 #3): record a durable payment ATTEMPT before the provider call so a lost
+        # order-association is recoverable (was: create intent, then best-effort swallow the writes →
+        # orphan charge). Fail CLOSED — a payment we cannot record must not be charged.
+        from src.app.services import payment_attempts as _pa
+        _attempt_id = None
+        try:
+            with db_session() as _adb:
+                _attempt_id = _pa.open_attempt(_adb, order_id=order_id, provider="stripe",
+                                               amount_cents=amount_cents, currency=currency,
+                                               idempotency_key=_idem_key)
+        except Exception as _aex:
+            _log.error("checkout_initiate: could not record payment attempt (failing closed): %s", _aex)
+            raise HTTPException(status_code=503, detail="Payment attempt could not be recorded")
         try:
             client = StripeClient(settings.stripe_api_key)
             # P0-1d: provider-level idempotency — reuse the same key the server dedup reserved, so a
@@ -347,30 +360,33 @@ def checkout_initiate(
             intent = client.create_payment_intent(amount_cents, currency, idempotency_key=_idem_key)
             if isinstance(intent, dict):
                 stripe_intent_id = intent.get("id") or f"pi_{secrets.token_hex(8)}"
-                # Link the Stripe intent to the internal order so the webhook can
-                # transition pending → paid without guessing the association.
+                # durably record the provider ref FIRST — the association is now repairable if the
+                # next write is lost (reconcile_orphans re-applies from this row).
+                try:
+                    with db_session() as _adb:
+                        _pa.mark_provider_created(_adb, _attempt_id, provider_ref=stripe_intent_id,
+                                                  order_id=order_id)
+                except Exception as _mex:
+                    _log.error("checkout_initiate: could not record provider ref %s: %s", stripe_intent_id, _mex)
+                # associate order + ledger + mark associated in ONE transaction (atomic outbox apply)
                 if order_id:
                     try:
                         with db_session() as _db:
                             _db.execute(
-                                text(
-                                    "UPDATE orders SET stripe_intent_id = :iid, "
-                                    "updated_at = CURRENT_TIMESTAMP "
-                                    "WHERE id = :oid"
-                                ),
-                                {"iid": stripe_intent_id, "oid": order_id},
-                            )
+                                text("UPDATE orders SET stripe_intent_id = :iid, "
+                                     "updated_at = CURRENT_TIMESTAMP WHERE id = :oid"),
+                                {"iid": stripe_intent_id, "oid": order_id})
+                            from src.app.services.payment_ledger import KIND_INTENT_CREATED, record_txn
+                            record_txn(_db, order_id=order_id, kind=KIND_INTENT_CREATED,
+                                       intent_id=stripe_intent_id, amount_cents=amount_cents,
+                                       currency=currency, provider="stripe", commit=False)
+                            _pa.mark_associated(_db, _attempt_id, commit=False)
                             _db.commit()
                     except Exception as _db_exc:
-                        _log.warning("checkout_initiate: failed to store stripe_intent_id: %s", _db_exc)
-                    try:
-                        from src.app.services.payment_ledger import KIND_INTENT_CREATED, record_txn
-                        with db_session() as _ldb:
-                            record_txn(_ldb, order_id=order_id, kind=KIND_INTENT_CREATED,
-                                       intent_id=stripe_intent_id, amount_cents=amount_cents,
-                                       currency=currency, provider="stripe", commit=True)
-                    except Exception as _l_exc:
-                        _log.warning("checkout_initiate: ledger write failed: %s", _l_exc)
+                        # association lost — do NOT fail the buyer (the intent exists); the attempt row
+                        # stays provider_created and reconcile_orphans() repairs it. Loud, not silent.
+                        _log.error("checkout_initiate: association write lost (reconciler repairs) "
+                                   "order=%s ref=%s: %s", order_id, stripe_intent_id, _db_exc)
                 return {
                     "order_id": order_id or stripe_intent_id,
                     "stripe_intent_id": stripe_intent_id,
@@ -380,7 +396,14 @@ def checkout_initiate(
                     "currency": currency,
                     "demo_mode": False,
                 }
+        except HTTPException:
+            raise
         except Exception as exc:
+            try:
+                with db_session() as _adb:
+                    _pa.mark_failed(_adb, _attempt_id, error=str(exc)[:200])
+            except Exception:
+                pass
             if not allow_demo_checkout:
                 raise HTTPException(status_code=503, detail=f"Stripe checkout unavailable: {exc}")
 
