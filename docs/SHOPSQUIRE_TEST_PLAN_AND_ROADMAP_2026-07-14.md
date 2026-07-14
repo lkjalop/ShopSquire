@@ -117,8 +117,11 @@ closed. This is the true "production grade for the real store" line.
 
 ### Phase 1.5 — V2 CORE quality defects (NEW, from the 2026-07-14b replay) **[ME]** *(~2-3 days)*
 The increment's shadow replay surfaced real V2-core defects that gate promotion independent of labels:
-1. **Requirement-ranking failures** — 24 `gpu_vram_gb` + 12 RAM mis-rankings. Retrieval/fit ordering
-   bug at `recommendation_core/ranking.py` + `core.py`. **This is a V2 correctness defect, elevate it.**
+1. ~~**Requirement-ranking failures** — 24 `gpu_vram_gb` + 12 RAM~~ ✅ FIXED (`440fc78`). Diagnosed:
+   NOT a ranking bug (ranking.py provably correct) — a RETRIEVAL-scope gap. A capability query
+   routing to el-6-6 (Laptops) retrieved only that leaf, missing qualifying high-VRAM machines under
+   el-6-11-2 (Gaming Laptops); closest-match then showed failing laptops. `_exec_retrieve` now spans
+   the device host union (mirroring the capability floor). Live-verified + regression test.
 2. **Mutation/search narration arbitration** — "make the laptop 15" reads partly as a 15-inch search
    while the cart planner correctly sets qty 15. Route validated cart ops exclusively through the cart
    lane (`chat.py`, `recommendation_facade.py`); suppress unrelated search narration.
