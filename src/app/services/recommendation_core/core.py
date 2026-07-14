@@ -905,6 +905,31 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
             return
     bundle = gather_evidence(db, envelope, node_handle=decision.node_handle,
                              limit=max(limit * 3, 30))
+    # RETRIEVAL SCOPE UNION (Phase 1.5 fix): when the routed node is a workload-HOST device with
+    # capability requirements, augment the candidate set with the store's device host UNION
+    # (Laptops + Gaming Laptops) — mirroring the capability FLOOR, which already spans the union via
+    # _capability_scope_nodes. Retrieval was LEAF-ONLY, so a qualifying high-VRAM Gaming Laptop
+    # classified under a sibling node was never even a candidate and closest-match faithfully showed
+    # FAILING laptops (the source of the gpu_vram_gb/ram_gb replay 'failures' — a retrieval gap, not
+    # a ranking bug). Budget stays applied (real envelope, not the free floor env).
+    if decision.requirements and _is_workload_host_product(decision.node_handle):
+        _siblings = [n for n in _capability_scope_nodes(decision)
+                     if n and n != decision.node_handle]
+        if _siblings:
+            _merged = list(bundle.variants)
+            _seen = {v.sku for v in _merged}
+            for _node in _siblings:
+                _b = gather_evidence(db, envelope, node_handle=_node, limit=max(limit * 3, 30))
+                if _b.status == "ok":
+                    for _v in _b.variants:
+                        if _v.sku not in _seen:
+                            _seen.add(_v.sku)
+                            _merged.append(_v)
+            if len(_merged) != len(bundle.variants):
+                bundle.variants = _merged
+                bundle.retrieval_mode = "taxonomy_union:" + "+".join([decision.node_handle] + _siblings)
+            if _merged and bundle.status != "ok":
+                bundle.status = "ok"   # a sibling host node supplied candidates the leaf lacked
     # broad-retry ONLY on a valid empty (never on error — that would mask a failure): no node
     # matched and the phrase LIKE-matches nothing ('play valorant at 144fps') but we HAVE
     # clamped requirements = retrieval intent enough; rank the catalog by fit (closest-match
