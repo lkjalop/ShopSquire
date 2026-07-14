@@ -227,3 +227,40 @@ def test_df_shared_token_is_not_distinctive_any_vertical():
         _env("remove the ibuprofen", cart=cart),
         llm_fn=_fixed_llm({"ops": [{"action": "remove_items", "targets": ["the ibuprofen"]}]}))
     assert bound.ops and bound.ops[0].target_skus == ("MED-1",)
+
+
+# ── SHOPPER-ambiguity gate (the 'add 5 more Lenovo' with two Lenovo lines bug) ──────────────────
+
+def test_ambiguous_brand_reference_asks_not_guesses():
+    # the model resolves the under-specified 'Lenovo' to the FIRST Lenovo line; the platform must
+    # still ASK, because the shopper's own word matches TWO Lenovo lines — never guess whose qty.
+    plan = resolve_cart_mutation(
+        _env("add 5 more Lenovo"),
+        llm_fn=_fixed_llm({"ops": [{"action": "set_quantity",
+                                    "targets": ["Lenovo ThinkPad L13 Gen 6"], "quantity": 35}],
+                           "confidence": 0.95}))
+    assert not plan.ops                         # did NOT guess a product to mutate
+    assert plan.ambiguous                       # asked instead
+    assert "ThinkPad" in plan.ambiguous[0] and "IdeaPad" in plan.ambiguous[0]   # both candidates listed
+
+
+def test_full_name_disambiguates_and_binds():
+    # a DISTINCTIVE token ('IdeaPad') in the shopper's own words singles out the line → bind, no ask.
+    plan = resolve_cart_mutation(
+        _env("set the Lenovo IdeaPad to 20"),
+        llm_fn=_fixed_llm({"ops": [{"action": "set_quantity",
+                                    "targets": ["Lenovo IdeaPad Slim 3i"], "quantity": 20}],
+                           "confidence": 0.95}))
+    assert not plan.ambiguous
+    assert [(o.action, o.target_skus, o.quantity) for o in plan.ops] == [
+        ("set_quantity", ("LAP-IDEAP3I9",), 20)]
+
+
+def test_uniquely_matching_brand_binds():
+    # 'HP' matches exactly one line → distinctive → bind (the gate only fires on MULTI-line matches).
+    plan = resolve_cart_mutation(
+        _env("remove the HP"),
+        llm_fn=_fixed_llm({"ops": [{"action": "remove_items",
+                                    "targets": ["HP Envy x360"]}], "confidence": 0.9}))
+    assert not plan.ambiguous
+    assert [(o.action, o.target_skus) for o in plan.ops] == [("remove_items", ("LAP-HPENVY01",))]

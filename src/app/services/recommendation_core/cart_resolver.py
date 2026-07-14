@@ -226,7 +226,12 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
     if isinstance(raw_ops, list) and len(raw_ops) > _MAX_OPS:
         logger.debug("cart resolver ops capped: %d → %d", len(raw_ops), _MAX_OPS)
         raw_ops = raw_ops[:_MAX_OPS]
-    distinctive = _distinctive_index(_line_token_index(lines))
+    line_index = _line_token_index(lines)
+    distinctive = _distinctive_index(line_index)
+    distinctive_map = dict(distinctive)
+    # The SHOPPER's OWN words (not the model's resolved target) — used to catch an under-specified
+    # reference the model resolved by GUESSING a specific line ('add 5 more Lenovo' with two Lenovos).
+    q_tokens = {t for t in _plural_expand(set(_tokens(envelope.query))) if len(t) > 1}
     ops: List[CartOp] = []
     ambiguous: List[str] = []
     for raw_op in raw_ops:
@@ -251,6 +256,16 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
             if not t_str:
                 continue
             sku = _bind_name_to_sku(t_str, lines, distinctive)
+            # SHOPPER-AMBIGUITY gate: the model can resolve an under-specified reference by GUESSING a
+            # specific line ('add 5 more Lenovo' → it picks the FIRST Lenovo). Judge by the SHOPPER'S
+            # words, not the model's target: if the query matches MULTIPLE cart lines and does NOT
+            # carry a token distinctive to the bound line, we must ASK which product — never guess
+            # whose quantity to change. Single-line / uniquely-named references pass through.
+            if sku is not None:
+                q_matches = {s for s, toks in line_index if q_tokens & toks}
+                if len(q_matches) > 1 and not (q_tokens & distinctive_map.get(sku, set())):
+                    ambiguous.append(", ".join(ln["name"] for ln in lines if ln["sku"] in q_matches))
+                    continue
             if sku is None:
                 ambiguous.append(t_str)
             elif sku not in bound:
