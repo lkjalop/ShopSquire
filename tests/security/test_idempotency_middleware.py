@@ -84,3 +84,50 @@ def test_cache_is_bounded(monkeypatch):
     for i in range(400):
         mw._cache_put(f"k{i}", {"ts": i, "body": {}, "status": 200, "fingerprint": "f"})
     assert len(mw.cache) <= 64
+
+
+def _mk_app(calls):
+    from fastapi import FastAPI, Request
+    app = FastAPI()
+    app.add_middleware(IdempotencyMiddleware)
+
+    @app.post("/api/v1/payments/intent")
+    def intent(request: Request, amount: int = 0):
+        calls["n"] += 1
+        return {"amount": amount, "who": request.headers.get("x-api-key")}
+    return app
+
+
+def test_idempotency_is_namespaced_by_principal(tmp_path):
+    # GPT-5.6 review-11b #1: two DIFFERENT callers reusing the same key must NOT cross-replay.
+    import src.app.models.db as db_module
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'idem.sqlite'}", future=True)
+    original = db_module.engine
+    db_module.set_engine(engine)
+    calls = {"n": 0}
+    try:
+        client = TestClient(_mk_app(calls))
+        a = client.post("/api/v1/payments/intent?amount=100", headers={"Idempotency-Key": "K", "x-api-key": "A"})
+        b = client.post("/api/v1/payments/intent?amount=200", headers={"Idempotency-Key": "K", "x-api-key": "B"})
+        assert a.json()["amount"] == 100 and b.json()["amount"] == 200   # no cross-replay
+        assert calls["n"] == 2                                            # both executed
+    finally:
+        db_module.set_engine(original)
+
+
+def test_query_param_change_is_a_conflict_not_a_replay(tmp_path):
+    # /payments/intent takes amount as a QUERY param — a body-only fingerprint replayed the wrong
+    # charge. Same key + different query for the same caller must 409, never silently replay.
+    import src.app.models.db as db_module
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'idem2.sqlite'}", future=True)
+    original = db_module.engine
+    db_module.set_engine(engine)
+    calls = {"n": 0}
+    try:
+        client = TestClient(_mk_app(calls))
+        x = client.post("/api/v1/payments/intent?amount=100", headers={"Idempotency-Key": "K2", "x-api-key": "A"})
+        y = client.post("/api/v1/payments/intent?amount=200", headers={"Idempotency-Key": "K2", "x-api-key": "A"})
+        assert x.status_code == 200 and x.json()["amount"] == 100
+        assert y.status_code == 409                                       # different request, same key
+    finally:
+        db_module.set_engine(original)

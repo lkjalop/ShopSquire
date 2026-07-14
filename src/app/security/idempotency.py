@@ -55,9 +55,21 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             body = await request.body()
         except Exception:
             body = b""
-        fp_source = f"{method}|{path}|{hashlib.sha256(body).hexdigest()}"
+        # PRINCIPAL NAMESPACING (GPT-5.6 review-11b #1): the key was scoped by (method,path,key)
+        # only, so two DIFFERENT callers reusing the same Idempotency-Key on the same route
+        # cross-replayed each other's response (reproduced: tenant B got tenant A's payment intent).
+        # Namespace the storage key by a stable caller identity derived from the auth headers the
+        # middleware CAN see (it runs before the endpoint's role dependency), so a key is private to
+        # its caller. And the fingerprint now includes the QUERY STRING — /payments/intent takes
+        # amount_cents as a QUERY param, so a body-only fingerprint was identical for amount=100 and
+        # amount=200 and replayed the wrong charge.
+        principal = (request.headers.get("x-api-key") or request.headers.get("authorization")
+                     or request.headers.get("x-tenant-id") or request.headers.get("x-tenant") or "anon")
+        principal_id = hashlib.sha256(str(principal).encode("utf-8")).hexdigest()[:16]
+        query = request.url.query or ""
+        fp_source = f"{method}|{path}|{query}|{hashlib.sha256(body).hexdigest()}"
         fingerprint = hashlib.sha256(fp_source.encode("utf-8")).hexdigest()
-        storage_key = f"http:{method}:{path}:{key}"
+        storage_key = f"http:{principal_id}:{method}:{path}:{key}"
         now = time.time()
 
         # in-memory fast path (fingerprint-checked)
