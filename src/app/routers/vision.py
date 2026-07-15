@@ -4,6 +4,7 @@ import asyncio as _asyncio
 import functools as _functools
 import json
 import os
+import re
 import uuid
 import hashlib
 import inspect
@@ -267,6 +268,33 @@ def _is_product_photo(labels: List[str], damage_score: float) -> bool:
 def _compute_image_hash(content: bytes) -> str:
     """SHA-256 of raw image bytes for dedup."""
     return hashlib.sha256(content).hexdigest()[:32]
+
+
+def _mask_ssn(value: str) -> str:
+    digits = re.sub(r"\D", "", str(value or ""))
+    return f"***-**-{digits[-4:]}" if len(digits) >= 4 else "***-**-****"
+
+
+def _redact_linked_artifact_pii(linked: Dict[str, Any]) -> Dict[str, Any]:
+    """Mask the RAW PII the linked-artifact scan extracted so the detection SIGNAL survives
+    (ssn_detected / ssn_count / pii_type) but the cleartext values never propagate into the triage
+    response, logs, traces, or the persisted event — echoing them there turns the detector into a
+    second exposure surface (data-minimisation / Privacy Act). Masks in place; keeps last-4 for
+    correlation; idempotent; leaves all non-PII metadata (url, country, asn, summaries) intact."""
+    if not isinstance(linked, dict):
+        return linked
+    hits = linked.get("ssn_hits")
+    if isinstance(hits, list) and hits:
+        linked["ssn_hits"] = [_mask_ssn(v) for v in hits]
+    for key in ("card_hits", "pan_hits", "cc_hits", "card_numbers"):
+        vals = linked.get(key)
+        if isinstance(vals, list) and vals:
+            linked[key] = [
+                f"****-****-****-{re.sub(r'[^0-9]', '', str(v))[-4:]}"
+                if len(re.sub(r'[^0-9]', '', str(v))) >= 4 else "****"
+                for v in vals
+            ]
+    return linked
 
 
 def _labels_are_weak(labels: List[str]) -> bool:
@@ -600,6 +628,11 @@ async def triage(
                                         ),
                                         timeout=4.0,
                                     )
+                                    # Mask raw SSN/PAN in place BEFORE `linked` propagates into the
+                                    # response, findings, traces, and the persisted event. Detection
+                                    # signals (ssn_detected/ssn_count/pii_type) are set from it below.
+                                    if isinstance(linked, dict):
+                                        _redact_linked_artifact_pii(linked)
                                     linked_artifact_result = linked if isinstance(linked, dict) else None
                                     resp["linked_artifact"] = linked
                                     if linked_artifact_result:
