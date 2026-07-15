@@ -11584,7 +11584,7 @@ def suggest(
         PostPipelineInput as _PostPipelineInput,
         PostPipelineHooks as _PostPipelineHooks,
     )
-    return _run_post_pipeline(
+    _final_response = _run_post_pipeline(
         _PostPipelineInput(
             payload=payload,
             trace_id=trace_id,
@@ -11622,6 +11622,32 @@ def suggest(
             tracer=tracer,
         ),
     )
+    # ZERO-RESULT HONESTY (contract): a below-floor DEVICE query (e.g. "laptop under $50") must emit
+    # the clean zero-results shape — the frontend zero-state reads `message`. Drop the affirming
+    # narration + the accessory/junk fallback results + the spec disambiguation (a laptop query is
+    # not answered "Yes, $50 covers these laptops" pointing at Hand Sanitiser). Applied AFTER the
+    # post-pipeline so nothing re-adds them; guarded (verdict is None for accessory/in-budget queries).
+    try:
+        from src.app.services.recommend_budget_advisor import _below_device_floor_verdict
+        _bf_msg = _below_device_floor_verdict(constraints) if isinstance(constraints, dict) else None
+        # Fire ONLY when the low budget is expressed in the CURRENT query (a fresh "laptop under $50"
+        # search) — NOT when it was inherited by an explain/follow-up ("give me details from those"),
+        # which anchors to a prior shortlist that must not be wiped. This distinguishes the two far
+        # more reliably than turn_type (a shortlist-anchored follow-up still classifies zero_result).
+        _q_cur = str(constraints.get("query") or "").lower() if isinstance(constraints, dict) else ""
+        _budget_in_query = bool(re.search(r"(\$\s*\d|under\s+\$?\d|below\s+\$?\d|less than\s+\$?\d|cheaper than\s+\$?\d)", _q_cur))
+        if (_bf_msg and _budget_in_query and isinstance(_final_response, dict)
+                and not _final_response.get("off_catalog")):
+            _final_response["message"] = str(_final_response.get("assistant_message") or "").strip() or _bf_msg
+            _final_response.pop("assistant_message", None)
+            _final_response["results"] = []
+            _final_response["products"] = []
+            _final_response["needs_disambiguation"] = False
+            _final_response.pop("next_questions", None)
+            _final_response.pop("right_panel", None)
+    except Exception as _e_bf:
+        _record_partial_failure("below_floor_shape_finalize", _e_bf, trace_id=trace_id)
+    return _final_response
 
 
 @router.get("/checkout_upsell")

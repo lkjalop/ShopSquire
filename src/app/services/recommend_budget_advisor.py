@@ -251,6 +251,42 @@ def _budget_reasoning_requested(query: str | None) -> bool:
     )
 
 
+_ACCESSORY_QUERY_TOKENS = (
+    "sleeve", "case", "bag", "stand", "hub", "dock", "mouse", "keyboard", "charger",
+    "adapter", "cable", "protector", "cooler", "cooling", "mat", "cleaning", "sanitis", "sanitiz",
+)
+
+
+def _below_device_floor_verdict(constraints: dict) -> str | None:
+    """Honest short verdict when the budget is below the requested DEVICE-category floor.
+
+    The budget-tier classifier tags `budget_too_low_for_<device>` (e.g. under ~$100 for a laptop).
+    When that fires, the cheap accessory/junk fallback the retriever returns DOES fit the budget, so
+    a price-only check ("cheapest <= cap") wrongly affirms "Yes, $50 covers these laptops" pointing
+    at an $8 Hand Sanitiser. This returns the honest "No, $X is short for a <device>" instead — but
+    returns None (no override) when the shopper explicitly asked for an ACCESSORY, which legitimately
+    fits a low budget. Pure: reads only `constraints`."""
+    tags = constraints.get("budget_tier_tags") or []
+    if not any(str(t).startswith("budget_too_low_for_") for t in tags):
+        return None
+    q = str(constraints.get("query") or "").lower()
+    if any(a in q for a in _ACCESSORY_QUERY_TOKENS):
+        return None
+    cap = _resolve_budget_max(constraints)
+    if cap <= 0:
+        return None
+    cat = "laptop"
+    for t in tags:
+        m = re.match(r"budget_too_low_for_(?:new_)?(.+)", str(t))
+        if m:
+            cat = m.group(1).replace("_", " ")
+            break
+    return (
+        f"No — ${int(cap):,} is short for a {cat}; {cat}s start well above that. "
+        f"You could widen the budget, or I can suggest {cat} accessories that fit ${int(cap):,}."
+    )
+
+
 def _resolve_budget_max(constraints: dict) -> float:
     """Budget cap from ALL the keys it can land in — an EXPLICIT ?budget_max= param lands in
     'budget_max', but a TEXT-extracted budget ("is 3500 enough") lands in '_request_budget_max' /
@@ -789,6 +825,12 @@ def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: 
                         f"No, ${int(cap):,} is below a comfortable gaming-laptop budget in this catalog. "
                         "The machines under that cap are better for school or general work than modern gaming."
                     )
+            # Category-floor honesty: the cheapest RESULT fitting the cap does NOT mean the requested
+            # DEVICE fits — "laptop under $50" must not be answered "Yes, $50 covers these laptops"
+            # pointing at $8 accessory/junk fallback. (Skips accessory queries; None otherwise.)
+            _floor_verdict = _below_device_floor_verdict(constraints)
+            if _floor_verdict:
+                return _floor_verdict
             if cheapest > cap or "nearest_above_budget" in fallback:
                 return f"No, ${int(cap):,} is a little short. The closest {category_label} options start around ${int(round(cheapest)):,}."
             return f"Yes, ${int(cap):,} covers these {category_label} options, with models starting from ${int(round(cheapest)):,}."
