@@ -140,7 +140,7 @@ def triage_all(retriage):
     print(f"\n{'='*94}\nPHASE 1 — VLM TRIAGE (qwen3-vl:8b) + security detectors\n{'='*94}")
     cached = {}
     for img in IMAGES:
-        if img.get("big"):
+        if os.getenv("IMAGE_BATTERY_SKIP_LARGE", "0") == "1" and img.get("big"):
             # >1MP: the un-downscaled VLM/OCR hangs triage >600s. Record the finding; use the
             # direct steg detector (fast, numpy) so we still know the payload IS caught.
             steg = None
