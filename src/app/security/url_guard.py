@@ -19,6 +19,9 @@ _BLOCKED_HOSTS = {
     "instance-data",             # Generic cloud metadata alias
 }
 
+# Cloud-metadata endpoints — ABSOLUTELY blocked; the internal-service allowlist can never name them.
+_METADATA_HOSTS = _BLOCKED_HOSTS - {"localhost"}
+
 _EGRESS_ALLOWLIST_CACHE: list[str] | None = None
 
 
@@ -99,6 +102,21 @@ def validate_outbound_url(url: str) -> tuple[bool, str]:
     host = str(p.hostname or "").strip().lower()
     if not host:
         return False, "missing_host"
+
+    # Cloud-metadata endpoints are NEVER reachable — not even via the internal-service allowlist.
+    if host in _METADATA_HOSTS:
+        return False, "blocked_host"
+
+    # Explicit internal-service allowlist (operator-named host:port), checked BEFORE the generic
+    # localhost/private blocks so a configured local service (e.g. the local model at
+    # 127.0.0.1:11434) is reachable while everything else stays SSRF-blocked. NOT a general
+    # private-network bypass: only exact named `host:port` (or bare `host`) entries win, and the
+    # metadata endpoints above can never be named.
+    _internal_allow = set(_csv_env("INTERNAL_SERVICE_ALLOWLIST"))
+    if _internal_allow:
+        _hostport = f"{host}:{p.port}" if p.port else host
+        if _hostport in _internal_allow or host in _internal_allow:
+            return True, "ok_internal_service"
 
     if host in _BLOCKED_HOSTS:
         return False, "blocked_host"
