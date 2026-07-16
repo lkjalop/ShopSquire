@@ -102,9 +102,16 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
         import httpx
         url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
         model = _router_model()
+        # P1 latency lever: the router emits a compact JSON decision — capping generated tokens cuts
+        # the dominant model time. Configurable so an 8B (better routing quality) can fit the p95 gate
+        # by generating less, rather than dropping to a dumber model. Default 256 (unchanged).
+        try:
+            _num_predict = int(os.getenv("ROUTER_NUM_PREDICT", "256") or 256)
+        except Exception:
+            _num_predict = 256
         payload = {"model": model, "prompt": prompt, "stream": False, "format": "json",
                    "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                   "options": {"temperature": 0, "num_predict": 256}}
+                   "options": {"temperature": 0, "num_predict": _num_predict}}
         if "qwen3" in model.lower():
             payload["think"] = False
         r = httpx.post(f"{url}/api/generate", json=payload, timeout=max(2.0, float(timeout or 12.0)))
