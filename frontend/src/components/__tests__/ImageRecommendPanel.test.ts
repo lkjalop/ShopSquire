@@ -3,7 +3,7 @@
  * Unit tests for computeTrustLevel — covers steg + all trust branches.
  */
 import { describe, it, expect } from 'vitest';
-import { computeTrustLevel, shouldUseFastPath, isProofRelevant } from '../ImageRecommendPanel';
+import { computeTrustLevel, shouldUseFastPath, isProofRelevant, normalizeUseCaseFit } from '../ImageRecommendPanel';
 
 const clean = () => ({});
 
@@ -95,5 +95,19 @@ describe('shouldUseFastPath', () => {
 
   it('disables fast path for budget reasoning questions', () => {
     expect(shouldUseFastPath('im looking for a gaming laptop? is 1800 enough? or should i go higher? why?')).toBe(false);
+  });
+});
+
+describe('normalizeUseCaseFit', () => {
+  it('turns structured fit evidence into renderable buyer text', () => {
+    expect(normalizeUseCaseFit({
+      use_case: 'office_work', suitable: false, verdict: 'below recommended',
+      gaps: ['gpu_vram_gb'], strengths: ['ram_gb'], overkill_score: 0,
+    })).toBe('below recommended - gpu vram gb');
+  });
+
+  it('preserves string fit summaries and rejects unknown shapes', () => {
+    expect(normalizeUseCaseFit('Good office fit')).toBe('Good office fit');
+    expect(normalizeUseCaseFit(null)).toBeNull();
   });
 });

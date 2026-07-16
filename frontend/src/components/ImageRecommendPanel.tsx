@@ -441,6 +441,21 @@ function assistantClaimsProducts(text: string | null | undefined): boolean {
   return /top picks|i['’]ve found \d+|found \d+ (?:matches|products|options)/i.test(String(text || ''));
 }
 
+export function normalizeUseCaseFit(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null;
+  if (!value || typeof value !== 'object') return null;
+  const fit = value as Record<string, unknown>;
+  const useCase = String(fit.use_case || '').trim().replace(/_/g, ' ');
+  const explicitVerdict = String(fit.verdict || '').trim().replace(/_/g, ' ');
+  const suitable = typeof fit.suitable === 'boolean' ? fit.suitable : null;
+  const prefix = explicitVerdict
+    || (suitable === true ? `Suitable${useCase ? ` for ${useCase}` : ''}` : '')
+    || (suitable === false ? `Not suitable${useCase ? ` for ${useCase}` : ''}` : '');
+  const details = suitable === false ? fit.gaps : fit.strengths;
+  const firstDetail = Array.isArray(details) ? String(details[0] || '').trim().replace(/_/g, ' ') : '';
+  return [prefix, firstDetail].filter(Boolean).join(' - ') || null;
+}
+
 function normalizeProductCard(raw: any): ProductCard | null {
   if (!raw || typeof raw !== 'object') return null;
   const sku = String(raw.sku || raw.id || '').trim();
@@ -466,7 +481,7 @@ function normalizeProductCard(raw: any): ProductCard | null {
     subtitle: raw.subtitle || raw.specs?.subtitle || undefined,
     price,
     specs_summary: specsSummary || undefined,
-    use_case_fit: raw.use_case_suitability || raw.use_case_fit || raw.reason || null,
+    use_case_fit: normalizeUseCaseFit(raw.use_case_suitability || raw.use_case_fit || raw.reason),
     image_url: raw.image_url || null,
     reasons: Array.isArray(raw.reasons) ? raw.reasons.slice(0, 5).map(String) : undefined,
     reason_codes: Array.isArray(raw.reason_codes) ? raw.reason_codes.slice(0, 5) : undefined,
