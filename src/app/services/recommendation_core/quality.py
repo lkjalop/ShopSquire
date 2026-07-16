@@ -42,6 +42,7 @@ DEFAULT_THRESHOLDS: Dict[str, float] = {
     #                                        approved classification (onboarding coverage gate)
     "p95_latency_ms_max": 8000.0,          # V2 (GPT-5.6 review-11b): reliability gate — the replay
     "timeout_rate_max": 0.01,              #   had 34-35s cases + a model timeout; promotion needs p95
+    "fallback_rate_max": 0.01,
     #                                        under 8s and model-timeout/fallback under 1%.
 }
 
@@ -198,7 +199,9 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
                           catalog_violations: int = 0,
                           split: Optional[str] = None,
                           latency_ms: Optional[float] = None,
-                          timed_out: bool = False) -> Dict[str, Any]:
+                          timed_out: bool = False,
+                          fallback_used: bool = False,
+                          model_mode: Optional[str] = None) -> Dict[str, Any]:
     """One case's quality row. `case` needs: id; optional budget_max (dollars), expects_products
     (default True for SEARCH-ish cases; False for refusal/clarify-expected cases).
     `response` is the v2 legacy-shape payload (products: [{sku, price, brand, workload_fit}]).
@@ -217,7 +220,9 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
                            "catalog_measured": bool(cat.get("measured", True)),
                            "shown_classified": int(cat.get("classified", 0)),
                            "latency_ms": (float(latency_ms) if latency_ms is not None else None),
-                           "timed_out": bool(timed_out)}
+                           "timed_out": bool(timed_out),
+                           "fallback_used": bool(fallback_used),
+                           "model_mode": str(model_mode or "unknown")}
 
     # PAYLOAD violations (review-6 #18): over-budget shown products and duplicate SKUs — the two
     # things measurable from the payload alone. Tenant/active/sold-taxonomy live in the SERVER-
@@ -300,6 +305,11 @@ def summarize_quality(rows: List[Dict[str, Any]],
     lats = sorted(float(r["latency_ms"]) for r in rows if r.get("latency_ms") is not None)
     p95_latency = lats[max(0, math.ceil(0.95 * len(lats)) - 1)] if lats else None
     timeout_rate = (sum(1 for r in rows if r.get("timed_out")) / len(rows)) if rows else 0.0
+    fallback_rate = (sum(1 for r in rows if r.get("fallback_used")) / len(rows)) if rows else 0.0
+    model_modes: Dict[str, int] = {}
+    for row in rows:
+        mode = str(row.get("model_mode") or "unknown")
+        model_modes[mode] = model_modes.get(mode, 0) + 1
 
     failures: List[str] = []
     if empty_rate > th["empty_rate_max"]:
@@ -320,6 +330,8 @@ def summarize_quality(rows: List[Dict[str, Any]],
         failures.append(f"p95_latency {p95_latency:.0f}ms > {th['p95_latency_ms_max']:.0f}ms")
     if timeout_rate > th["timeout_rate_max"]:
         failures.append(f"timeout_rate {timeout_rate:.3f} > {th['timeout_rate_max']}")
+    if fallback_rate > th["fallback_rate_max"]:
+        failures.append(f"fallback_rate {fallback_rate:.3f} > {th['fallback_rate_max']}")
     if labeled_coverage < th["labeled_coverage_min"]:
         failures.append(f"labeled_coverage {labeled_coverage:.3f} < {th['labeled_coverage_min']} "
                         f"(relevance UNMEASURED is a failure, not a pass)")
@@ -341,5 +353,7 @@ def summarize_quality(rows: List[Dict[str, Any]],
                                       if classified_shown_rate is not None else None),
             "p95_latency_ms": (round(p95_latency, 1) if p95_latency is not None else None),
             "timeout_rate": round(timeout_rate, 4),
+            "fallback_rate": round(fallback_rate, 4),
+            "model_modes": model_modes,
             "thresholds": th,
             "gates": {"pass": not failures, "failures": failures}}

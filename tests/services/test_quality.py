@@ -271,6 +271,21 @@ def test_latency_and_timeout_gates():
     # a slow tail (>8s at p95) → latency gate fires
     slow = summarize_quality([row(1000)] * 5 + [row(35000)] * 5)
     assert any("p95_latency" in f for f in slow["gates"]["failures"])
+
+
+def test_fallback_and_model_mode_are_measured():
+    rows = [evaluate_case_quality(
+        {"id": f"m{i}", "expects_products": False}, {"products": []},
+        fallback_used=(i == 0), model_mode=("default" if i == 0 else "model"))
+        for i in range(100)]
+    summary = summarize_quality(rows)
+    assert summary["fallback_rate"] == 0.01
+    assert summary["model_modes"] == {"default": 1, "model": 99}
+    assert not any("fallback_rate" in f for f in summary["gates"]["failures"])
     # a model timeout above the rate → timeout gate fires
-    to = summarize_quality([row(1000)] * 8 + [row(1000, to=True)] * 2)
+    def timed_row(timed_out=False):
+        return {"case_id": "t", "shown": 1, "expects_products": True, "empty": False,
+                "catalog_measured": True, "unauthorized": 0, "verdict_count": 0,
+                "latency_ms": 1000, "timed_out": timed_out}
+    to = summarize_quality([timed_row()] * 8 + [timed_row(True)] * 2)
     assert to["timeout_rate"] == 0.2 and any("timeout_rate" in f for f in to["gates"]["failures"])

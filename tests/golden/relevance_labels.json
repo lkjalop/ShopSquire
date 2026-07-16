@@ -2,7 +2,8 @@
   "_README": [
     "SEALED relevance labels for the M2-B2 quality gate (recommendation_core/quality.py).",
     "Grades: 2 = highly relevant, 1 = acceptable, 0 = explicitly irrelevant.",
-    "Labels are HUMAN-sealed ground truth, reviewed like the taxonomy — never model-invented.",
+    "These labels are an independent-judge draft produced outside the evaluated Qwen model.",
+    "A human second pass is required before production promotion; do not describe this draft as human-sealed.",
     "Label against the demo catalog by running each case's query and grading the CANDIDATE",
     "SLATE (not just what v2 showed — unlabeled shown SKUs count as NOT relevant).",
     "split.dev cases may be inspected while tuning; split.test cases are the gate — the eval",
@@ -13,10 +14,21 @@
     "relevant set differs from turn 0's. Split entries use the same keyed form."
   ],
   "version": 1,
-  "labeled_by": null,
+  "labeled_by": "codex-independent-review-2026-07-15",
+  "review_status": "independent_draft_requires_human_second_pass",
+  "human_reviewed_by": null,
   "split": {
-    "dev": [],
-    "test": []
+    "dev": ["brand_negation:0", "persona_creator:0", "workload_ai_finetune:0"],
+    "test": ["budget_band:0", "search_budget:0", "search_university:0", "workload_cyberpunk:0", "workload_valorant_fps:0"]
   },
-  "cases": {}
+  "cases": {
+    "brand_negation:0": {"labels": {"LAP-031E526F": 2, "LAP-04C4955F": 2, "LAP-10BFA3F6": 1, "LAP-1886C355": 1, "LAP-234E845E": 1, "LAP-29EA2785": 1, "LAP-343A37BC": 1, "LAP-37144522": 1, "LAP-38C5278D": 1, "LAP-433AB371": 2}},
+    "budget_band:0": {"labels": {"LAP-031E526F": 2, "LAP-04C4955F": 0, "LAP-10BFA3F6": 0, "LAP-1886C355": 2, "LAP-22527D92": 0, "LAP-234E845E": 0, "LAP-29EA2785": 0, "LAP-2A0308CA": 0, "LAP-343A37BC": 0, "LAP-37144522": 0}},
+    "persona_creator:0": {"labels": {"LAP-343A37BC": 2, "GAM-0001": 1, "GAM-0002": 2, "GAM-0003": 1, "GAM-0004": 1, "GAM-0005": 1, "GAM-0006": 2, "GAM-0007": 1, "LAP-0A1191AB": 1, "LAP-647D08E6": 1}},
+    "search_budget:0": {"labels": {"GAM-0001": 2, "GAM-0002": 2, "GAM-0003": 2, "GAM-0004": 2, "GAM-0005": 2, "GAM-0006": 2, "GAM-0007": 2, "LAP-647D08E6": 0, "LAP-69763798": 1, "LAP-788760E4": 0}},
+    "search_university:0": {"labels": {"LAP-22527D92": 1, "LAP-2A0308CA": 1, "LAP-4743EFFF": 2, "HDD-A9AE2F06": 0, "LAP-031E526F": 2, "LAP-04C4955F": 2, "LAP-10BFA3F6": 1, "LAP-1886C355": 2, "LAP-234E845E": 1, "LAP-29EA2785": 1}},
+    "workload_ai_finetune:0": {"labels": {"LAP-343A37BC": 1, "LAP-0A1191AB": 1, "LAP-858DC749": 2, "LAP-BCBAFE20": 2, "HDD-A9AE2F06": 0, "LAP-29EA2785": 0, "LAP-AF295B6E": 0, "GAM-0002": 1, "GAM-0006": 1, "LAP-647D08E6": 1}},
+    "workload_cyberpunk:0": {"labels": {"GAM-0001": 2, "GAM-0002": 2, "GAM-0003": 2, "GAM-0004": 2, "GAM-0005": 2, "GAM-0006": 2, "GAM-0007": 2, "LAP-647D08E6": 1, "LAP-788760E4": 1, "LAP-858DC749": 1}},
+    "workload_valorant_fps:0": {"labels": {"GAM-0001": 2, "GAM-0002": 2, "GAM-0003": 2, "GAM-0004": 2, "GAM-0005": 2, "GAM-0006": 2, "GAM-0007": 2, "LAP-647D08E6": 1, "LAP-69763798": 2, "LAP-788760E4": 1}}
+  }
 }

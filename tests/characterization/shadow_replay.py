@@ -174,6 +174,8 @@ def main() -> None:
     ap.add_argument("--diagnose", action="store_true",
                     help="decompose constraint-satisfaction into meets/unknown/fails + the top "
                          "unknown vs failed requirement keys; write tmp/quality_diagnosis.json")
+    ap.add_argument("--label-split", choices=("dev", "test"), default="test",
+                    help="sealed relevance-label split used by the promotion gate (default: test)")
     args = ap.parse_args()
 
     expects = {c["id"]: (c.get("known_wrong") or {}).get("expect_v2")
@@ -201,7 +203,19 @@ def main() -> None:
                     budget_max=(float(bmax) if bmax not in (None, "") else None),
                     session=dict(session))
                 t0 = time.monotonic()
-                core = recommend_turn(s, envelope)
+                model_call = {"timed_out": False, "error": None}
+
+                def tracked_llm(prompt: str, timeout: float) -> str:
+                    from src.app.services.recommendation_core.turn_router import _default_llm_fn
+                    try:
+                        return _default_llm_fn(prompt, timeout)
+                    except Exception as exc:
+                        model_call["error"] = type(exc).__name__
+                        model_call["timed_out"] = "timeout" in type(exc).__name__.lower()
+                        raise
+
+                core = recommend_turn(s, envelope, llm_fn=tracked_llm)
+                latency_ms = (time.monotonic() - t0) * 1000.0
                 dec = _decision_slice(core) or {}
                 used = {}
                 try:
@@ -240,7 +254,10 @@ def main() -> None:
                     authz = catalog_authorization(s, shown, tenant_id="default")
                     quality_rows.append(evaluate_case_quality(
                         _quality_case(f"{case['id']}:{t['turn']}", req, core), v2, labels,
-                        catalog=authz))
+                        catalog=authz, split=args.label_split, latency_ms=latency_ms,
+                        timed_out=bool(model_call["timed_out"]),
+                        fallback_used=str(dec.get("source") or "default") != "model",
+                        model_mode=str(dec.get("source") or "default")))
                     if args.diagnose:
                         diag_rows.append(_diagnose_case(case["id"], t["turn"],
                                                         req.get("query", ""), core, v2))
@@ -251,6 +268,11 @@ def main() -> None:
                              ("MET" if r.get("expectation_met") else "MISSED") if r.get("expected_change")
                              else f"{message_class(v1)}->{message_class(v2)}",
                              ",".join(mismatched)[:60], f"{time.monotonic()-t0:.1f}s"))
+                print(
+                    f"replay progress {len(rows):02d}: {case['id']}:{t['turn']} "
+                    f"lane={core.lane} elapsed={time.monotonic()-t0:.1f}s",
+                    flush=True,
+                )
     finally:
         s.close()
 
