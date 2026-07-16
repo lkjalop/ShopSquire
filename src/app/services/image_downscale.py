@@ -97,7 +97,7 @@ def bound_image_for_vlm(blob: bytes, *, max_edge: Optional[int] = None) -> Dict[
     w, h = p.get("width"), p.get("height")
     if not p.get("readable") or not w or not h:
         # Can't introspect — pass through; CV_VISION_TIMEOUT_SEC bounds the model call.
-        return {"reject": False, "bytes": blob, "downscaled": False, "meta": p}
+        return {"reject": True, "reason": "decode", "meta": p}
 
     if max(w, h) <= max(edge, DOWNSCALE_ABOVE_EDGE_PX):
         return {"reject": False, "bytes": blob, "downscaled": False, "meta": p}
@@ -115,4 +115,4 @@ def bound_image_for_vlm(blob: bytes, *, max_edge: Optional[int] = None) -> Dict[
         return {"reject": False, "bytes": out, "downscaled": True, "meta": meta}
     except Exception:
         # Downscale failed (odd format) — pass original through; timeout backstops it.
-        return {"reject": False, "bytes": blob, "downscaled": False, "meta": p}
+        return {"reject": True, "reason": "resize", "meta": p}

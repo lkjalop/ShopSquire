@@ -57,10 +57,10 @@ def test_reject_by_bytes_even_when_unreadable(monkeypatch):
     assert out["reason"] == "bytes"
 
 
-def test_unreadable_small_blob_passes_through():
+def test_unreadable_small_blob_is_rejected():
     out = D.bound_image_for_vlm(b"not-an-image")
-    assert out["reject"] is False
-    assert out["downscaled"] is False
+    assert out["reject"] is True
+    assert out["reason"] == "decode"
     assert out["meta"]["readable"] is False
 
 

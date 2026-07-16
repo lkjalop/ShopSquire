@@ -2,6 +2,8 @@
 keeps the detection signal (count/type) while dropping cleartext from the response/logs/event."""
 from __future__ import annotations
 
+import json
+
 from src.app.routers.vision import _redact_linked_artifact_pii, _mask_ssn
 
 
@@ -35,6 +37,19 @@ def test_redact_masks_card_hits():
 
 def test_redact_idempotent_and_safe_on_empty():
     assert _redact_linked_artifact_pii({}) == {}
+
+
+def test_recursive_redaction_covers_excerpt_and_nested_pan():
+    from src.app.security.linked_artifact_analysis import redact_sensitive_artifact
+
+    raw = {
+        "linked_text_excerpt": "SSN 123-45-6789; card 4242 4242 4242 4242",
+        "linked_bank_fields": {"notes": ["social security number: 234 56 7890"]},
+    }
+    encoded = json.dumps(redact_sensitive_artifact(raw))
+    assert "123-45-6789" not in encoded and "234 56 7890" not in encoded
+    assert "4242 4242 4242 4242" not in encoded
+    assert "***-**-6789" in encoded and "****-****-****-4242" in encoded
     assert _redact_linked_artifact_pii(None) is None
     once = _redact_linked_artifact_pii({"ssn_hits": ["205-52-0027"]})
     twice = _redact_linked_artifact_pii(dict(once))

@@ -347,14 +347,14 @@ async def triage(
         mime = None
         name = None
 
-    content = await image.read()
-    if not content:
+    raw_content = await image.read()
+    if not raw_content:
         raise HTTPException(status_code=400, detail="empty_image")
     gate = strict_image_ingest_gate(
         filename=str(name or "image.jpg"),
         content_type=mime,
-        blob=content,
-        size_bytes=len(content),
+        blob=raw_content,
+        size_bytes=len(raw_content),
     )
     if bool(gate.get("blocked")):
         raise HTTPException(
@@ -366,21 +366,25 @@ async def triage(
             },
         )
     try:
-        sanitized = sanitize_image(content)
+        sanitized = sanitize_image(raw_content)
         if isinstance(sanitized, dict) and str(sanitized.get("status") or "") == "sanitized":
-            content = sanitized.get("bytes") or content
-    except Exception:
-        pass
+            sanitized_content = sanitized.get("bytes")
+        else:
+            sanitized_content = None
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="image_sanitization_failed") from exc
+    if not sanitized_content:
+        raise HTTPException(status_code=422, detail="image_sanitization_failed")
 
     # Bound the VLM/OCR cost: reject decode-bombs and downscale a COPY for the model pass.
-    # `content` (full-res) is preserved for the steg/forensic LSB analysis below, which is
+    # `raw_content` is preserved only for steg/forensic analysis below, which is
     # fast (numpy) and MUST see untouched pixels. Without this a 2-24 MP photo hangs the VLM
     # for minutes — a trivial DoS and a functional gap on normal e-commerce image sizes.
-    vlm_content = content
+    analysis_content = sanitized_content
     downscale_meta: Dict[str, Any] = {}
     try:
         from src.app.services.image_downscale import bound_image_for_vlm
-        _bound = bound_image_for_vlm(content)
+        _bound = bound_image_for_vlm(sanitized_content)
         if bool(_bound.get("reject")):
             _m = _bound.get("meta") or {}
             raise HTTPException(
@@ -395,13 +399,15 @@ async def triage(
                     "image": {"megapixels": _m.get("megapixels"), "bytes": _m.get("bytes")},
                 },
             )
-        vlm_content = _bound.get("bytes") or content
+        analysis_content = _bound.get("bytes")
         downscale_meta = _bound.get("meta") or {}
         downscale_meta["downscaled"] = bool(_bound.get("downscaled"))
     except HTTPException:
         raise
-    except Exception:
-        vlm_content = content
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="image_decode_or_resize_failed") from exc
+    if not analysis_content:
+        raise HTTPException(status_code=422, detail="image_decode_or_resize_failed")
 
     labels = []
     extracted_text = ""
@@ -413,7 +419,7 @@ async def triage(
             provider = ManagedCVProvider()
             provider_name = provider.provider
             labels, extracted_text, product_identity = await provider.get_labels_and_text(
-                vlm_content, mode="visual_search",
+                analysis_content, mode="visual_search",
             )
             ocr_meta = dict(getattr(provider, "last_ocr_meta", {}) or {})
         except Exception:
@@ -431,7 +437,7 @@ async def triage(
         triage_result = triager.analyze(
             labels,
             extracted_text or "",
-            image_bytes=None if fast else content,
+            image_bytes=None if fast else analysis_content,
             mime=mime or "image/jpeg",
         )
     except TypeError:
@@ -462,7 +468,7 @@ async def triage(
         "analysis": analysis,
         "damage_score": _damage_score,
         "is_product_photo": _is_product_photo(labels, _damage_score),
-        "image_hash": _compute_image_hash(content),
+        "image_hash": _compute_image_hash(raw_content),
         "ingest_gate": gate,
         "vlm_input": downscale_meta,  # {megapixels, bytes, downscaled, downscaled_to?} — the model saw this
     }
@@ -522,7 +528,10 @@ async def triage(
                     _loop.run_in_executor(
                         None,
                         decode_barcodes,
-                        [(str(name or "image.jpg"), content)],
+                        # SECURITY control: decode the QR on the FULL-RES upload (feeds the
+                        # qr_external_url_detected -> text_only wipe). A small malicious QR can be
+                        # lost after the ~1280px VLM downscale, so this must NOT use analysis_content.
+                        [(str(name or "image.jpg"), raw_content)],
                     ),
                     timeout=float(os.getenv("CV_FAST_QR_TIMEOUT_S", "1.5") or 1.5),
                 )
@@ -536,7 +545,10 @@ async def triage(
                     _loop.run_in_executor(
                         None,
                         decode_barcodes,
-                        [(str(name or "image.jpg"), content)],
+                        # SECURITY control: decode the QR on the FULL-RES upload (feeds the
+                        # qr_external_url_detected -> text_only wipe). A small malicious QR can be
+                        # lost after the ~1280px VLM downscale, so this must NOT use analysis_content.
+                        [(str(name or "image.jpg"), raw_content)],
                     ),
                     timeout=float(os.getenv("CV_QR_TIMEOUT_S", "4.0") or 4.0),
                 )
@@ -718,7 +730,9 @@ async def triage(
             from src.app.security.adversarial_image_detector import detect_adversarial
             _loop = _asyncio.get_event_loop()
             adv = await _asyncio.wait_for(
-                _loop.run_in_executor(None, detect_adversarial, content),
+                # SECURITY control on FULL-RES bytes: downscaling attenuates adversarial
+                # perturbations, so this must see raw_content (like steg), not analysis_content.
+                _loop.run_in_executor(None, detect_adversarial, raw_content),
                 timeout=8.0,
             )
             if hasattr(adv, "is_adversarial") and adv.is_adversarial:
@@ -735,7 +749,7 @@ async def triage(
             from src.app.security.steg_detector import detect_steganography
             _loop = _asyncio.get_event_loop()
             steg = await _asyncio.wait_for(
-                _loop.run_in_executor(None, detect_steganography, content),
+                _loop.run_in_executor(None, detect_steganography, raw_content),
                 timeout=8.0,
             )
             steg_score = float(getattr(steg, "steg_score", 0.0) or 0.0)
@@ -776,10 +790,11 @@ async def triage(
             or (len(stage_a_text) < 12 and bool(security_signals.get("qr_code_detected")))
             or (not stage_a_text and any(tok in filename_hint_for_ocr for tok in ("ms texti", "ms-texti")))
         )
-        if deep_trigger and not fast and len(content) >= _MIN_STAGE_B_OCR_BYTES:
+        if deep_trigger and not fast and len(analysis_content) >= _MIN_STAGE_B_OCR_BYTES:
             # Risk-triggered deep OCR for low-evidence or overlay-heavy images.
             from src.app.cv.cv_pipeline import run_risk_triggered_multicontrast_ocr
-            deep = run_risk_triggered_multicontrast_ocr(content, ocr_provider=None, enabled=True)
+            deep = run_risk_triggered_multicontrast_ocr(
+                analysis_content, ocr_provider=None, enabled=True)
             deep_text = str(deep.get("best_text") or "").strip()
             deep_conf = float(deep.get("best_confidence") or 0.0)
             deep_min_conf = float(os.getenv("CV_STAGE_B_OCR_CONFIDENCE_MIN", "0.45") or 0.45)
@@ -865,7 +880,7 @@ async def triage(
 
                 if not product_identity:
                     stage_b = identify_product_from_image(
-                        content,
+                        analysis_content,
                         user_query=filename_hint or None,
                         trace_id=None,
                         timeout_s=float(os.getenv("CV_IDENTITY_STAGE_B_TIMEOUT_S", "6.0") or 6.0),
