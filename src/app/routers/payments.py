@@ -759,6 +759,19 @@ def _handle_payment_outbox_job(job_type: str, payload: Dict[str, Any]) -> None:
             if not row:
                 return
             order_id = str(row[0])
+            _pref = str(payload.get("provider_ref") or "").strip()
+            # P0-1c: dedup a FULLY-successful re-drive (append+settle committed, then job-marking
+            # failed) by the provider refund ref stored in `reason`. Distinct partial refunds (each a
+            # different provider_ref) still append; a repeat of the SAME refund does not double-count.
+            if _pref:
+                from src.app.services.payment_ledger import ensure_table as _ensure_ledger_table
+                _ensure_ledger_table(db)
+                if db.execute(
+                    text("SELECT 1 FROM payment_transactions WHERE order_id=:o AND kind=:k "
+                         "AND intent_id=:i AND reason=:r LIMIT 1"),
+                    {"o": order_id, "k": KIND_REFUND_SETTLED, "i": intent_id, "r": _pref},
+                ).fetchone():
+                    return  # this exact refund already settled — re-drive must not double-count
             # P0-1: append `refund_settled` AND settle the FSM in ONE transaction. Previously the
             # append committed first (separate session), so a settle failure left it orphaned and an
             # at-least-once re-drive appended it again -> settled_cents double-counted. One commit for
@@ -768,7 +781,7 @@ def _handle_payment_outbox_job(job_type: str, payload: Dict[str, Any]) -> None:
                            amount_cents=(int(amount) if amount is not None else row[1]),
                            currency=str(row[2] or "USD"),
                            provider=("demo" if intent_id.startswith("pi_demo_") else "stripe"),
-                           commit=False)
+                           reason=_pref, commit=False)
                 settle_submitted_for_intent(
                     db, intent_id=intent_id, provider_ref=payload.get("provider_ref"), commit=False)
                 db.commit()

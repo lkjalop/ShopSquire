@@ -71,6 +71,43 @@ def test_reconcile_refund_idempotent_across_settle_failure(monkeypatch, tmp_path
         db_module.set_engine(original)
 
 
+def test_reconcile_refund_idempotent_across_full_success_redrive(monkeypatch, tmp_path):
+    """P0-1c: a reconcile_refund job that FULLY succeeded (append+settle committed) but whose
+    completion-marking then failed is re-driven with the SAME provider_ref. The refund_settled
+    append must be deduped on provider_ref — distinct partial refunds still append, but the same
+    refund does not double-count. DONE = settled_cents == 5000 across two full deliveries."""
+    import src.app.routers.payments as payments
+    from src.app.services.payment_ledger import refund_state, record_txn, KIND_REFUND_APPROVED
+
+    import src.app.services.refund_execution as refund_execution
+    monkeypatch.setattr(refund_execution, "settle_submitted_for_intent",
+                        lambda db, *, intent_id, provider_ref=None, commit=True: 0)  # FSM no-op; test the ledger
+
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'fullredrive.sqlite'}", future=True)
+    client, db_module, original = _client_on(engine)
+    intent = "pi_fullredrive"
+    try:
+        with db_module.db_session() as db:
+            db.execute(text(
+                "INSERT INTO orders (id,status,total_cents,currency,stripe_intent_id) "
+                "VALUES ('ORD-FR','paid',5000,'USD','pi_fullredrive')"))
+            db.commit()
+            record_txn(db, order_id="ORD-FR", kind=KIND_REFUND_APPROVED, intent_id=intent,
+                       amount_cents=5000, commit=True)
+
+        payload = {"intent_id": intent, "amount_cents": 5000, "provider_ref": "re_full1"}
+        payments._handle_payment_outbox_job("reconcile_refund", payload)   # full success
+        payments._handle_payment_outbox_job("reconcile_refund", payload)   # re-drive, same ref
+
+        with db_module.db_session() as db:
+            state = refund_state(db, "ORD-FR")
+        assert state["settled_cents"] == 5000, (
+            f"refund_settled double-counted on a full-success re-drive: "
+            f"settled_cents={state['settled_cents']} (expected 5000).")
+    finally:
+        db_module.set_engine(original)
+
+
 def test_payment_succeeded_ledger_append_is_idempotent_on_redrive(monkeypatch, tmp_path):
     """The money agent's BIGGEST risk: a `ledger_payment_succeeded` job re-driven after its
     completion-marking failed appends `payment_succeeded` a SECOND time -> captured_cents inflated,
