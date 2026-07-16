@@ -112,3 +112,28 @@ def test_cancel_and_mark_paid_cannot_both_win(postgres_sessions):
     winner = next(target for target, rowcount in outcomes if rowcount == 1)
     with postgres_sessions() as db:
         assert db.execute(text("SELECT status FROM orders WHERE id='ORDER-1'")).scalar_one() == winner
+
+
+def test_concurrent_refund_workers_call_provider_once(postgres_sessions):
+    from src.app.services import refund_execution as refunds
+    with postgres_sessions() as db:
+        refunds.open_execution(
+            db, order_id="ORDER-R", approval_index=0, amount_cents=2500, currency="USD",
+            intent_id="pi_refund_race", idempotency_key="refund:ORDER-R:0")
+    calls = {"n": 0}
+    lock = threading.Lock()
+
+    def provider(_intent, _amount, _key):
+        with lock:
+            calls["n"] += 1
+        return {"id": "re_race", "status": "pending"}
+
+    def worker():
+        with postgres_sessions() as db:
+            return refunds.execute_pending(db, refund_fn=provider)
+
+    _race(worker)
+    assert calls["n"] == 1
+    with postgres_sessions() as db:
+        assert db.execute(text(
+            "SELECT state FROM refund_executions WHERE order_id='ORDER-R'")) .scalar_one() == refunds.STATE_SUBMITTED

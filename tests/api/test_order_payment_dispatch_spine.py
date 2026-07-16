@@ -65,7 +65,7 @@ def test_full_spine_created_paid_dispatched_shipped(client, monkeypatch):
 
     # webhook succeeded -> paid + tracking assigned + dispatch queued (P0-C)
     r2 = client.post("/api/v1/payments/webhook",
-                     content=json.dumps({"type": "payment_intent.succeeded", "data": {"object": {"id": intent}}}),
+                         content=json.dumps({"id": "evt_spine_paid", "type": "payment_intent.succeeded", "data": {"object": {"id": intent}}}),
                      headers={"Content-Type": "application/json"})
     assert r2.status_code == 200, r2.text
     from src.app.models.db import db_session
@@ -128,7 +128,7 @@ def test_high_value_dispatch_held_then_owner_approves(client, monkeypatch):
                       "VALUES ('ORD-BIG', 500000, 'USD', 'created', 'pi_demo_big')"))
         db.commit()
     r = client.post("/api/v1/payments/webhook",
-                    content=json.dumps({"type": "payment_intent.succeeded",
+        content=json.dumps({"id": "evt_big_paid", "type": "payment_intent.succeeded",
                                         "data": {"object": {"id": "pi_demo_big"}}}),
                     headers={"Content-Type": "application/json"})
     assert r.status_code == 200

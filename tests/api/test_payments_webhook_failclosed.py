@@ -42,7 +42,7 @@ def test_webhook_fail_closed_in_non_dev_without_secret(monkeypatch):
     assert "STRIPE_WEBHOOK_SECRET" in r.text
 
 
-def test_webhook_dev_without_secret_still_processes(monkeypatch):
+def test_webhook_dev_without_secret_requires_provider_event_id(monkeypatch):
     # Dev/test env (the default) keeps the unsigned fallback so local flows work.
     monkeypatch.setattr(payments, "_is_non_dev_env", lambda _env: False)
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
@@ -65,7 +65,8 @@ def test_webhook_dev_without_secret_still_processes(monkeypatch):
     client = _client()
     payload = {"type": "payment_intent.succeeded", "data": {"object": {"id": "pi_dev"}}}
     r = client.post("/api/v1/payments/webhook", data=json.dumps(payload))
-    assert r.status_code == 200, r.text
+    assert r.status_code == 400, r.text
+    assert r.json().get("detail") == "Stripe event id is required"
 
 
 def test_webhook_dedups_repeat_event_delivery(monkeypatch, tmp_path):

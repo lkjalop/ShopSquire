@@ -3,6 +3,8 @@
 Proves the association-integrity outbox: an intent whose order-association write was LOST (the
 orphan-charge failure) is recoverable from the attempt row.
 """
+from contextlib import contextmanager
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -77,3 +79,40 @@ def test_reconcile_skips_already_linked_orders(tmp_path):
     assert out["repaired"] == 0   # order already linked → no new ledger row
     assert db.execute(text("SELECT COUNT(*) FROM payment_transactions WHERE order_id='O4'")).scalar() == 0
     db.close()
+
+
+def test_scheduler_drains_webhook_outbox_without_another_webhook(monkeypatch, tmp_path):
+    from src.app.routers import payments
+    from src.app.services import payment_reconcile_scheduler as scheduler
+    from src.app.services import payment_webhook_delivery as delivery
+
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'scheduler.sqlite'}", future=True)
+    Session = sessionmaker(bind=engine, future=True)
+
+    @contextmanager
+    def _session():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    with _session() as db:
+        db.execute(text("CREATE TABLE orders (id TEXT PRIMARY KEY, stripe_intent_id TEXT, updated_at TEXT)"))
+        delivery.ensure_tables(db)
+        delivery.enqueue_job(
+            db, event_id="evt-quiet", job_type="ledger_payment_failed",
+            payload={"intent_id": "pi-quiet"})
+        db.commit()
+
+    handled = []
+    monkeypatch.setattr(scheduler, "db_session", _session)
+    monkeypatch.setattr(payments, "_handle_payment_outbox_job",
+                        lambda kind, payload: handled.append((kind, payload)))
+
+    assert scheduler.run_once() == 1
+    assert handled == [("ledger_payment_failed", {"intent_id": "pi-quiet"})]
+    with _session() as db:
+        assert db.execute(text(
+            "SELECT state FROM payment_side_effect_jobs WHERE event_id='evt-quiet'"
+        )).scalar() == "processed"

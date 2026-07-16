@@ -47,7 +47,7 @@ class GuestLookupPayload(BaseModel):
 
 ALLOWED_TRANSITIONS = {
     "created": {"paid", "cancelled"},
-    "paid": {"shipped", "cancelled"},
+    "paid": {"shipped"},
     "shipped": {"delivered"},
     "delivered": {"return_requested"},
     "return_requested": {"returned"},

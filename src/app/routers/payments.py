@@ -39,10 +39,10 @@ def _demo_checkout_allowed(settings, capability: Dict | None) -> bool:
     return not _is_non_dev_env(getattr(settings, "app_env", None))
 
 
-def _idempotent(path: str, key: str | None) -> bool:
+def _idempotent(path: str, key: str | None, *, tenant_id: str = "default") -> bool:
     if not key:
         return True
-    k = f"{path}:{key}"
+    k = f"{tenant_id or 'default'}:{path}:{key}"
     with db_session() as db:
         try:
             # Ensure the table exists — schema matches idempotency middleware.
@@ -193,7 +193,8 @@ def create_intent(
             code = 401 if risk.get("action") == "step_up_mfa" else 202
             detail = "mfa_stepup_required" if code == 401 else "manual_review_required"
             raise HTTPException(status_code=code, detail={"message": detail, "security": risk})
-        if not _idempotent("payment_intent", idempotency_key):
+        tenant_id = request.headers.get("x-tenant-id") or request.headers.get("x-tenant") or "default"
+        if not _idempotent("payment_intent", idempotency_key, tenant_id=tenant_id):
             raise HTTPException(status_code=409, detail="Duplicate payment intent")
         # pass the key to Stripe too (P0-1d): provider-level guard so even a retry that slips past
         # the server dedup can't mint a second intent.
@@ -307,7 +308,8 @@ def checkout_initiate(
     else:
         _idem_key = None    # bare-amount path (no order/items/key) — allowed only for DEMO confirm;
         #                     the REAL-provider guard below (#7) blocks an un-keyed live Stripe intent.
-    if _idem_key and not _idempotent("checkout_initiate", _idem_key):
+    tenant_id = request.headers.get("x-tenant-id") or request.headers.get("x-tenant") or "default"
+    if _idem_key and not _idempotent("checkout_initiate", _idem_key, tenant_id=tenant_id):
         raise HTTPException(status_code=409, detail="Duplicate checkout initiation")
 
     # P0-A: no order_id but cart lines present → create the REAL order row server-side.
@@ -506,105 +508,41 @@ async def stripe_webhook(request: Request) -> Dict:
     # event.id under a unique key BEFORE handling; a duplicate returns early. Fail-CLOSED on store
     # error (skip) rather than risk a double-apply.
     _event_id = str(event.get("id") or "").strip()
-    if _event_id:
+    if not _event_id:
+        raise HTTPException(status_code=400, detail="Stripe event id is required")
+    from src.app.services import payment_webhook_delivery as delivery
+    try:
+        with db_session() as _idb:
+            claim_state, claim_token = delivery.claim_event(
+                _idb, event_id=_event_id, event_type=event_type, payload=event)
+            _idb.commit()
+    except Exception as exc:
+        _log.exception("stripe_webhook: inbox unavailable")
+        raise HTTPException(status_code=503, detail="Webhook inbox unavailable") from exc
+    if claim_state == "busy":
+        raise HTTPException(status_code=503, detail="Webhook event is already processing")
+    if claim_state == "processed":
+        outbox = delivery.drain_jobs(db_session, _handle_payment_outbox_job)
+        return {"received": True, "duplicate": True, "event_id": _event_id, "outbox": outbox}
+
+    try:
+        _apply_payment_webhook_event(event, event_id=_event_id)
+        with db_session() as _done_db:
+            delivery.mark_event_processed(_done_db, _event_id, str(claim_token))
+            _done_db.commit()
+    except Exception as exc:
+        _log.exception("stripe_webhook: processing failed for %s", _event_id)
         try:
-            with db_session() as _edb:
-                _edb.execute(text(
-                    "CREATE TABLE IF NOT EXISTS stripe_events (event_id TEXT PRIMARY KEY, "
-                    "type TEXT, processed_at TEXT DEFAULT CURRENT_TIMESTAMP)"))
-                _seen = _edb.execute(text(
-                    "INSERT INTO stripe_events (event_id, type) VALUES (:i,:t) "
-                    "ON CONFLICT (event_id) DO NOTHING"), {"i": _event_id, "t": event_type})
-                _edb.commit()
-                if int(getattr(_seen, "rowcount", 0) or 0) == 0:
-                    _log.info("stripe_webhook: duplicate event %s (%s) skipped", _event_id, event_type)
-                    return {"received": True, "duplicate": True, "event_id": _event_id}
-        except Exception as _eex:
-            _log.error("stripe_webhook: event dedup store error (skipping to avoid double-apply): %s", _eex)
-            return {"received": True, "dedup_unavailable": True}
+            with db_session() as _fail_db:
+                delivery.mark_event_failed(_fail_db, _event_id, str(claim_token), repr(exc))
+                _fail_db.commit()
+        except Exception:
+            _log.exception("stripe_webhook: failed to record inbox failure for %s", _event_id)
+        raise HTTPException(status_code=503, detail="Webhook processing failed; retry required") from exc
 
-    if event_type == "payment_intent.succeeded" and intent_id:
-        with db_session() as _db:
-            result = _db.execute(
-                text(
-                    "UPDATE orders SET status = 'paid', updated_at = CURRENT_TIMESTAMP "
-                    "WHERE stripe_intent_id = :iid AND status = 'created'"
-                ),
-                {"iid": intent_id},
-            )
-            _db.commit()
-        _log.info("stripe_webhook: marked paid for intent %s (rows=%s)", intent_id, getattr(result, "rowcount", "?"))
-        if getattr(result, "rowcount", 0):
-            _ledger_txn_for_intent(intent_id, "payment_succeeded")
-            try:
-                _dispatch_paid_order(intent_id)
-            except Exception as exc:
-                _log.warning("stripe_webhook: dispatch after paid failed for %s: %s", intent_id, exc)
+    outbox = delivery.drain_jobs(db_session, _handle_payment_outbox_job)
+    return {"received": True, "type": event_type, "event_id": _event_id, "outbox": outbox}
 
-    elif event_type == "payment_intent.payment_failed" and intent_id:
-        with db_session() as _db:
-            _res = _db.execute(
-                text(
-                    "UPDATE orders SET status = 'payment_failed', updated_at = CURRENT_TIMESTAMP "
-                    "WHERE stripe_intent_id = :iid AND status = 'created'"
-                ),
-                {"iid": intent_id},
-            )
-            _won = int(getattr(_res, "rowcount", 0) or 0) > 0
-            # #4: a failed payment must RELEASE the inventory the order reserved at creation — else
-            # stock stays locked forever (phantom stockout). Atomic with the status flip; only on the
-            # winning transition (idempotent anyway — release CAS-claims the reservations).
-            if _won:
-                _oid = _db.execute(
-                    text("SELECT id FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
-                    {"iid": intent_id}).scalar()
-                if _oid:
-                    try:
-                        from src.app.services.inventory_guard import release_inventory_for_order
-                        release_inventory_for_order(_db, order_id=str(_oid))
-                    except Exception as _rex:
-                        _log.warning("stripe_webhook: inventory release after failed payment %s: %s",
-                                     intent_id, _rex)
-            _db.commit()
-        # #5 (this path): record the failure ONCE — the created→payment_failed CAS updates 0 rows on
-        # a DUPLICATE webhook delivery, so gating the ledger append on the win dedups repeat delivery
-        # (a repeated append would corrupt the refund/settlement fold).
-        if _won:
-            _log.warning("stripe_webhook: payment_failed for intent %s", intent_id)
-            _ledger_txn_for_intent(intent_id, "payment_failed")
-
-    elif event_type == "charge.refunded" and intent_id:
-        # charge.refunded carries payment_intent field, not id
-        pi_id = str(data_obj.get("payment_intent") or "").strip() or intent_id
-        with db_session() as _db:
-            _db.execute(
-                text(
-                    "UPDATE orders SET status = 'returned', updated_at = CURRENT_TIMESTAMP "
-                    "WHERE stripe_intent_id = :iid AND status IN ('delivered', 'shipped', 'paid')"
-                ),
-                {"iid": pi_id},
-            )
-            _db.commit()
-        _log.info("stripe_webhook: refund processed for intent %s", pi_id)
-        # Reconcile settlement against the governed ledger: a provider refund with NO approved
-        # request on file is recorded but flagged loudly — money moved outside the approval flow.
-        try:
-            from src.app.services.payment_ledger import refund_state
-            _amt = data_obj.get("amount_refunded")
-            _oid = _ledger_txn_for_intent(pi_id, "refund_settled",
-                                          amount_cents=(int(_amt) if _amt is not None else None))
-            if _oid:
-                with db_session() as _rdb:
-                    state = refund_state(_rdb, _oid)
-                if int(state.get("approved_cents") or 0) < int(state.get("settled_cents") or 0):
-                    _log.critical(
-                        "stripe_webhook: refund SETTLED WITHOUT MATCHING APPROVAL for order %s "
-                        "(approved=%s settled=%s) — reconcile with the provider dashboard.",
-                        _oid, state.get("approved_cents"), state.get("settled_cents"))
-        except Exception as exc:
-            _log.warning("stripe_webhook: refund reconciliation failed for %s: %s", pi_id, exc)
-
-    return {"received": True, "type": event_type}
 
 
 # ─── Governed refunds (GATE-2 mold: propose → human approve → provider settles) ──────────────
@@ -755,9 +693,106 @@ def refund_ledger(
                 "ledger": ledger_for_order(db, order_id)}
 
 
-def _ledger_txn_for_intent(intent_id: str, kind: str, amount_cents: int | None = None) -> str | None:
+def _apply_payment_webhook_event(event: Dict[str, Any], *, event_id: str) -> None:
+    """Apply the state transition and enqueue non-transactional effects atomically."""
+    from src.app.services import payment_webhook_delivery as delivery
+
+    event_type = str(event.get("type") or "")
+    data_obj = (event.get("data") or {}).get("object") or {}
+    intent_id = str(data_obj.get("id") or "").strip()
+    with db_session() as db:
+        if event_type == "payment_intent.succeeded" and intent_id:
+            result = db.execute(text(
+                "UPDATE orders SET status='paid',updated_at=CURRENT_TIMESTAMP "
+                "WHERE stripe_intent_id=:iid AND status='created'"), {"iid": intent_id})
+            if int(result.rowcount or 0):
+                delivery.enqueue_job(db, event_id=event_id, job_type="ledger_payment_succeeded",
+                                     payload={"intent_id": intent_id})
+                delivery.enqueue_job(db, event_id=event_id, job_type="dispatch_paid_order",
+                                     payload={"intent_id": intent_id})
+        elif event_type == "payment_intent.payment_failed" and intent_id:
+            result = db.execute(text(
+                "UPDATE orders SET status='payment_failed',updated_at=CURRENT_TIMESTAMP "
+                "WHERE stripe_intent_id=:iid AND status='created'"), {"iid": intent_id})
+            if int(result.rowcount or 0):
+                order_id = db.execute(text(
+                    "SELECT id FROM orders WHERE stripe_intent_id=:iid LIMIT 1"),
+                    {"iid": intent_id}).scalar()
+                if order_id:
+                    from src.app.services.inventory_guard import release_inventory_for_order
+                    release_inventory_for_order(db, order_id=str(order_id))
+                delivery.enqueue_job(db, event_id=event_id, job_type="ledger_payment_failed",
+                                     payload={"intent_id": intent_id})
+        elif event_type == "charge.refunded":
+            pi_id = str(data_obj.get("payment_intent") or "").strip() or intent_id
+            db.execute(text(
+                "UPDATE orders SET status='returned',updated_at=CURRENT_TIMESTAMP "
+                "WHERE stripe_intent_id=:iid AND status IN ('delivered','shipped','paid')"),
+                {"iid": pi_id})
+            delivery.enqueue_job(
+                db, event_id=event_id, job_type="reconcile_refund",
+                payload={"intent_id": pi_id, "amount_cents": data_obj.get("amount_refunded"),
+                         "provider_ref": data_obj.get("id")})
+        db.commit()
+
+
+def _handle_payment_outbox_job(job_type: str, payload: Dict[str, Any]) -> None:
+    intent_id = str(payload.get("intent_id") or "")
+    if job_type == "dispatch_paid_order":
+        _dispatch_paid_order(intent_id)
+        return
+    if job_type == "ledger_payment_succeeded":
+        _ledger_txn_for_intent(intent_id, "payment_succeeded", strict=True, dedup=True)
+        return
+    if job_type == "ledger_payment_failed":
+        _ledger_txn_for_intent(intent_id, "payment_failed", strict=True, dedup=True)
+        return
+    if job_type == "reconcile_refund":
+        amount = payload.get("amount_cents")
+        from src.app.services.payment_ledger import KIND_REFUND_SETTLED, record_txn, refund_state
+        from src.app.services.refund_execution import settle_submitted_for_intent
+        with db_session() as db:
+            row = db.execute(
+                text("SELECT id, total_cents, currency FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
+                {"iid": intent_id},
+            ).fetchone()
+            if not row:
+                return
+            order_id = str(row[0])
+            # P0-1: append `refund_settled` AND settle the FSM in ONE transaction. Previously the
+            # append committed first (separate session), so a settle failure left it orphaned and an
+            # at-least-once re-drive appended it again -> settled_cents double-counted. One commit for
+            # both means a settle failure rolls back the append too; the re-drive appends fresh.
+            try:
+                record_txn(db, order_id=order_id, kind=KIND_REFUND_SETTLED, intent_id=intent_id,
+                           amount_cents=(int(amount) if amount is not None else row[1]),
+                           currency=str(row[2] or "USD"),
+                           provider=("demo" if intent_id.startswith("pi_demo_") else "stripe"),
+                           commit=False)
+                settle_submitted_for_intent(
+                    db, intent_id=intent_id, provider_ref=payload.get("provider_ref"), commit=False)
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            state = refund_state(db, order_id)
+        if int(state.get("approved_cents") or 0) < int(state.get("settled_cents") or 0):
+            _log.critical(
+                "refund settled without matching approval for order %s (approved=%s settled=%s)",
+                order_id, state.get("approved_cents"), state.get("settled_cents"))
+        return
+    raise ValueError(f"unknown payment outbox job: {job_type}")
+
+
+def _ledger_txn_for_intent(intent_id: str, kind: str, amount_cents: int | None = None,
+                           *, strict: bool = False, dedup: bool = False) -> str | None:
     """Resolve the order behind an intent and append a ledger event (amount defaults to the order
-    total). Returns the order_id, or None. Best-effort — webhook processing never fails on this."""
+    total). Returns the order_id, or None. Best-effort — webhook processing never fails on this.
+
+    P0-1: when `dedup`, the append is IDEMPOTENT per (order_id, kind, intent_id) — a re-driven
+    at-least-once job must not append the same SINGLETON event (payment_succeeded/failed) twice. A
+    doubled `payment_succeeded` inflates captured_cents, which LOOSENS the refund cap
+    (refundable = captured − approved). Only use for events that occur once per intent."""
     try:
         from src.app.services.payment_ledger import record_txn
         with db_session() as db:
@@ -767,13 +802,26 @@ def _ledger_txn_for_intent(intent_id: str, kind: str, amount_cents: int | None =
             ).fetchone()
             if not row:
                 return None
-            record_txn(db, order_id=str(row[0]), kind=kind, intent_id=intent_id,
+            order_id = str(row[0])
+            if dedup:
+                from src.app.services.payment_ledger import ensure_table as _ensure_ledger_table
+                _ensure_ledger_table(db)  # the ledger table is created lazily by record_txn
+                dup = db.execute(
+                    text("SELECT 1 FROM payment_transactions WHERE order_id=:o AND kind=:k "
+                         "AND intent_id=:iid LIMIT 1"),
+                    {"o": order_id, "k": kind, "iid": intent_id},
+                ).fetchone()
+                if dup:
+                    return order_id  # already recorded — a re-driven job must not double-count
+            record_txn(db, order_id=order_id, kind=kind, intent_id=intent_id,
                        amount_cents=(amount_cents if amount_cents is not None else row[1]),
                        currency=str(row[2] or "USD"),
                        provider=("demo" if intent_id.startswith("pi_demo_") else "stripe"), commit=True)
-            return str(row[0])
+            return order_id
     except Exception as exc:
         _log.warning("payment ledger write (%s) failed for intent %s: %s", kind, intent_id, exc)
+        if strict:
+            raise
         return None
 
 

@@ -62,6 +62,33 @@ def test_settled_execution_is_not_retried(tmp_path):
     db.close()
 
 
+def test_provider_success_then_local_failure_reuses_provider_key(monkeypatch, tmp_path):
+    db = _db(tmp_path)
+    RX.open_execution(db, order_id="O5", approval_index=0, amount_cents=700, currency="USD",
+                      intent_id="pi_5", idempotency_key="refund:O5:0")
+    keys = []
+    real_mark = RX.mark_submitted
+    local_calls = {"n": 0}
+
+    def local_fail_once(*args, **kwargs):
+        local_calls["n"] += 1
+        if local_calls["n"] == 1:
+            raise RuntimeError("local commit window")
+        return real_mark(*args, **kwargs)
+
+    monkeypatch.setattr(RX, "mark_submitted", local_fail_once)
+
+    def provider(_intent, _amount, key):
+        keys.append(key)
+        return {"id": "re_same", "status": "pending"}
+
+    assert RX.execute_pending(db, refund_fn=provider)["failed"] == 1
+    assert RX.execute_pending(db, refund_fn=provider)["failed"] == 0
+    assert keys == ["refund:O5:0", "refund:O5:0"]
+    assert db.execute(text("SELECT state FROM refund_executions WHERE order_id='O5'")) .scalar() == RX.STATE_SUBMITTED
+    db.close()
+
+
 def test_demo_intent_is_not_executed(tmp_path):
     db = _db(tmp_path)
     RX.open_execution(db, order_id="O4", approval_index=0, amount_cents=100, currency="USD",

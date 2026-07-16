@@ -71,13 +71,14 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         # its caller. And the fingerprint now includes the QUERY STRING — /payments/intent takes
         # amount_cents as a QUERY param, so a body-only fingerprint was identical for amount=100 and
         # amount=200 and replayed the wrong charge.
-        principal = (request.headers.get("x-api-key") or request.headers.get("authorization")
-                     or request.headers.get("x-tenant-id") or request.headers.get("x-tenant") or "anon")
+        tenant = request.headers.get("x-tenant-id") or request.headers.get("x-tenant") or "default"
+        principal = request.headers.get("x-api-key") or request.headers.get("authorization") or "anon"
+        tenant_id = hashlib.sha256(str(tenant).encode("utf-8")).hexdigest()[:16]
         principal_id = hashlib.sha256(str(principal).encode("utf-8")).hexdigest()[:16]
         query = request.url.query or ""
         fp_source = f"{method}|{path}|{query}|{hashlib.sha256(body).hexdigest()}"
         fingerprint = hashlib.sha256(fp_source.encode("utf-8")).hexdigest()
-        storage_key = f"http:{principal_id}:{method}:{path}:{key}"
+        storage_key = f"http:{tenant_id}:{principal_id}:{method}:{path}:{key}"
         now = time.time()
 
         # in-memory fast path (fingerprint-checked)

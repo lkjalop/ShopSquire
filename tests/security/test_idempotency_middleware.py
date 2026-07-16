@@ -133,6 +133,27 @@ def test_query_param_change_is_a_conflict_not_a_replay(tmp_path):
         db_module.set_engine(original)
 
 
+def test_idempotency_composes_tenant_and_principal(tmp_path):
+    import src.app.models.db as db_module
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path/'idem-tenant.sqlite'}", future=True)
+    original = db_module.engine
+    db_module.set_engine(engine)
+    calls = {"n": 0}
+    try:
+        client = TestClient(_mk_app(calls))
+        common = {"Idempotency-Key": "SHARED", "x-api-key": "platform-key"}
+        a = client.post("/api/v1/payments/intent?amount=100",
+                        headers={**common, "x-tenant-id": "tenant-a"})
+        b = client.post("/api/v1/payments/intent?amount=100",
+                        headers={**common, "x-tenant-id": "tenant-b"})
+        replay = client.post("/api/v1/payments/intent?amount=100",
+                             headers={**common, "x-tenant-id": "tenant-a"})
+        assert a.status_code == b.status_code == replay.status_code == 200
+        assert calls["n"] == 2
+    finally:
+        db_module.set_engine(original)
+
+
 def test_lease_reclaim_kills_409_forever(tmp_path):
     # M2: a critical-path request whose owner "dies" mid-flight leaves the reservation; a retry gets
     # 409 while the lease is live, then RECLAIMS + executes once the lease expires (not 409 forever).

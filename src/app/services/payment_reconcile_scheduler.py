@@ -34,7 +34,7 @@ def _interval_sec() -> float:
 
 
 def run_once() -> int:
-    """Reconcile every tenant with an orphaned attempt. Returns total repaired. Never raises."""
+    """Reconcile durable payment work. Returns total repaired/drained. Never raises."""
     repaired = 0
     try:
         from src.app.services.payment_attempts import ensure_table, reconcile_orphans
@@ -61,6 +61,18 @@ def run_once() -> int:
                     execute_pending(db, tenant_id=t)
             except Exception as _rx_exc:
                 logger.warning("refund retry run failed: %s", repr(_rx_exc)[:120])
+        # Webhook state and these side effects are intentionally separate transactions. Drain the
+        # durable outbox here so a quiet store still retries work after an acknowledged webhook.
+        try:
+            from src.app.routers.payments import _handle_payment_outbox_job
+            from src.app.services.payment_webhook_delivery import drain_jobs
+
+            outbox = drain_jobs(db_session, _handle_payment_outbox_job)
+            repaired += int(outbox.get("processed") or 0)
+            if outbox.get("failed"):
+                logger.warning("payment outbox retry left %d failed job(s)", outbox["failed"])
+        except Exception as outbox_exc:
+            logger.warning("payment outbox retry run failed: %s", repr(outbox_exc)[:120])
     except Exception as exc:
         logger.warning("payment reconcile run failed: %s", repr(exc)[:120])
     if repaired:
