@@ -516,16 +516,11 @@ def test_image_hint_apple_uses_nearest_above_budget_before_generic_alternatives(
         _restore_app_engine(orig_app_engine, orig_dbmod_engine)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "By design: qr_external_url_detected is a hostile signal that triggers text_only verdict "
-        "(image_feature_gate.py line ~92) which wipes image_context entirely (recommend.py line ~5420). "
-        "Brand forcing cannot work when image context is stripped for security. "
-        "Test needs redesign: either remove hostile CV signals or assert text-only behavior."
-    ),
-    strict=False,
-)
-def test_flagged_macbook_image_forces_apple_brand_family_before_generic_windows(monkeypatch):
+def test_hostile_qr_image_triggers_text_only_wipe_no_brand_forcing(monkeypatch):
+    """SECURITY PIN (P0.5b): qr_external_url_detected is a hostile signal -> the image feature gate's
+    text_only verdict WIPES image_context, so an untrusted image cannot force a brand. A refactor
+    that removed the wipe (letting the hostile MacBook image steer results to Apple) MUST fail here.
+    Positively asserts the wipe instead of the old (xfail'd) brand-forcing expectation."""
     orig_retrieve = RecommendationService.retrieve_candidates
     try:
         RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
@@ -559,11 +554,13 @@ def test_flagged_macbook_image_forces_apple_brand_family_before_generic_windows(
         )
         assert r.status_code == 200
         body = r.json()
-        results = body.get("results") or []
-        assert results, body
-        names = [str((x or {}).get("name") or "").lower() for x in results[:3]]
-        assert any(("macbook" in n or "apple" in n) for n in names), names
-        assert (body.get("price_filter") or {}).get("brand_hint") == "apple"
+        # 1) the hostile QR signal was recognised and the image quarantined
+        assert "qr_external_url_detected" in (body.get("image_reupload_reasons") or []), body
+        # 2) the untrusted image did NOT force the Apple brand — image_context was wiped
+        assert (body.get("price_filter") or {}).get("brand_hint") != "apple", body
+        # 3) the MacBook the hostile image pointed at is NOT surfaced (image label stripped)
+        names = [str((x or {}).get("name") or "").lower() for x in (body.get("results") or [])]
+        assert not any(("macbook" in n or "apple" in n) for n in names), names
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve
 
