@@ -168,6 +168,29 @@ def test_incomplete_draft_escalates(db, monkeypatch):
     assert wf.current_state(db, cid) == S.AWAITING_APPROVAL
 
 
+def test_below_supplier_moq_never_sends_autonomously(db, monkeypatch):
+    from src.app.services.supplier_catalog import ensure_tables
+
+    monkeypatch.setenv("FULFILLMENT_AUTONOMOUS_RFQ", "1")
+    ensure_tables(db)
+    db.execute(text(
+        "INSERT INTO suppliers (id, name, preferred_channel) "
+        "VALUES ('SUP-7','Approved Supplier','email')"
+    ))
+    db.execute(text(
+        "INSERT INTO supplier_products "
+        "(supplier_id, sku, moq, lead_time_days, contract_status, active) "
+        "VALUES ('SUP-7','SKU-1',10,5,'contracted',1)"
+    ))
+    db.commit()
+
+    cid = _case_awaiting_approval(db, qty=6)
+    dec = _send(db, cid, qty=6)
+    assert dec.action == "escalated"
+    assert dec.reason == "pre_send_gate:below_supplier_moq"
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL
+
+
 def test_rate_limited_escalates(db, monkeypatch):
     monkeypatch.setenv("FULFILLMENT_AUTONOMOUS_RFQ", "1")
     monkeypatch.setenv("FULFILLMENT_AUTONOMOUS_RATE_PER_HOUR", "2")

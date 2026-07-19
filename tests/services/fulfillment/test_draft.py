@@ -231,6 +231,20 @@ def test_send_gate_needs_info_when_incomplete():
     assert D.draft_send_gate(_gate_draft(confidence=0.2))["decision"] == "needs_info"
 
 
+def test_send_gate_needs_info_for_missing_deadline_or_below_moq():
+    missing = D.draft_send_gate(_gate_draft(
+        completeness={"complete": False, "reason": "missing_rfq_fields:deadline_date"},
+    ))
+    assert missing["decision"] == "needs_info"
+    assert "missing_rfq_fields:deadline_date" in missing["reasons"]
+
+    below_moq = D.draft_send_gate(_gate_draft(evidence=[
+        {"source": "moq_risk", "summary": "requested 2 below MOQ 5"},
+    ]))
+    assert below_moq["decision"] == "needs_info"
+    assert "below_supplier_moq" in below_moq["reasons"]
+
+
 def test_draft_and_record_attaches_advisory_send_gate(db):
     cid = _committed_case(db)
     res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,

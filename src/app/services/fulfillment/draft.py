@@ -411,6 +411,14 @@ def draft_send_gate(draft: Dict[str, Any], *, min_confidence: float = 0.6) -> Di
         needs.append("low_confidence")
     if not (d.get("evidence") or []):
         needs.append("no_evidence")
+    completeness = d.get("completeness") or {}
+    if completeness and not bool(completeness.get("complete")):
+        needs.append(str(completeness.get("reason") or "missing_required_rfq_fields"))
+    evidence = d.get("evidence") if isinstance(d.get("evidence"), list) else []
+    if any(isinstance(item, dict) and item.get("source") == "moq_risk" for item in evidence):
+        needs.append("below_supplier_moq")
+    # Stable order without duplicate reason codes keeps audit diffs readable.
+    needs = list(dict.fromkeys(needs))
     decision = "block" if blocking else ("needs_info" if needs else "allow")
     return {"decision": decision, "blocking": blocking, "reasons": needs}
 

@@ -193,6 +193,14 @@ def maybe_autonomous_send(
         if not comp.get("complete", False):
             return escalate(f"incomplete:{comp.get('reason')}")
 
+        # Honor the same persisted gate shown to the operator. In particular,
+        # below-MOQ drafts are advisory for a human but never autonomously sent.
+        from src.app.services.fulfillment.draft import draft_send_gate
+        send_gate = draft.get("send_gate") or draft_send_gate(draft)
+        if str(send_gate.get("decision") or "") != "allow":
+            reasons = send_gate.get("blocking") or send_gate.get("reasons") or []
+            return escalate(f"pre_send_gate:{','.join(str(v) for v in reasons)}")
+
         try:
             conf = float(confidence)
         except Exception:
