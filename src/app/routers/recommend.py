@@ -553,8 +553,8 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
     # path (the main path sanitises its own _final_response separately).
     try:
         _sanitize_specs_in_response(payload)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("response spec sanitization skipped: %s", exc)
     # WS2.2 — comparison/knowledge conceptual answer (covers all early returns).
     _maybe_inject_knowledge_answer(payload, trace_id)
     # R2 — plan-selected evidence legs (flag-gated, additive: structured block + trace only).
@@ -4568,6 +4568,8 @@ def suggest(
             db, redis, query=query, uid=uid, tenant_id=tenant_id,
             budget_min=budget_min, budget_max=budget_max, trace_id=trace_id,
             image_labels=image_labels, image_ocr=image_ocr_text, image_hash=image_hash,
+            image_intent=image_intent, image_product_identity=image_product_identity,
+            image_cv_signals=image_cv_signals,
             source_ip=(request.client.host if request and request.client else None),
             request=request, role=role, with_trace=_with_trace,
             record_failure=_record_partial_failure)
@@ -5142,8 +5144,15 @@ def suggest(
                     p["assistant_message"] = f"{_qty_refusal_note}\n\n{_am}"
                 elif not _am:
                     p["assistant_message"] = _qty_refusal_note
-            if p.get("requested_quantity") is None and _early_bulk_qty:
-                p["requested_quantity"] = _early_bulk_qty
+            if p.get("requested_quantity") is None:
+                _payload_constraints = p.get("constraints_used") if isinstance(p.get("constraints_used"), dict) else {}
+                _response_qty = (
+                    _early_bulk_qty
+                    or _payload_constraints.get("quantity")
+                    or _payload_constraints.get("order_quantity")
+                )
+                if isinstance(_response_qty, (int, float)) and 1 <= int(_response_qty) <= 1000:
+                    p["requested_quantity"] = int(_response_qty)
         return p
     _seg_last = [time.perf_counter()]
 
@@ -5981,17 +5990,9 @@ def suggest(
     # PROCUREMENT CONTINUITY: surface the buyer's last (unconfirmed) sourcing preview from session memory so
     # narration/NQE can reference "your N-unit sourcing request" on a follow-up — instead of a cold search.
     try:
+        from src.app.services.procurement_advice import append_sourcing_continuity
         _ls = structured_state.get("last_sourcing_intent") if isinstance(structured_state, dict) else None
-        if isinstance(_ls, dict) and isinstance(_ls.get("lines"), list) and _ls["lines"]:
-            _ls_units = sum(int(l.get("quantity") or 0) for l in _ls["lines"] if isinstance(l, dict))
-            _ls_items = ", ".join(f"{int(l.get('quantity') or 0)}x {l.get('item_ref')}"
-                                  for l in _ls["lines"][:6] if isinstance(l, dict) and l.get("item_ref"))
-            if _ls_items:
-                _sourcing_memo = (f"The buyer previously previewed a sourcing request ({_ls_units} units: "
-                                  f"{_ls_items}) that is not yet confirmed. If this turn refers to it "
-                                  f"('cheaper', 'change it', 'that order'), continue from that request.")
-                conversation_history_text = (f"{conversation_history_text}\n{_sourcing_memo}".strip()
-                                             if conversation_history_text else _sourcing_memo)
+        conversation_history_text = append_sourcing_continuity(conversation_history_text, _ls)
     except Exception as exc:
         logger.debug("sourcing-continuity memo skipped: %s", exc)
 
@@ -6004,13 +6005,23 @@ def suggest(
         or re.search(r"\b(all \d+|those \d+|why (they|those|are they)|list all|detail(ed)?|explain)\b", q_for_memory)
         or _is_followup_explain_query(q_for_memory)
     )
+    # A complete new buying brief starts a new recommendation scope.  Conversation
+    # history still remains available to narration, but transient product filters
+    # from the previous slate (brand/spec/use-case) must not contaminate a turn that
+    # explicitly supplies both quantity and budget.  Follow-ups continue to inherit.
+    parsed = service.parse_constraints(query_effective)
+    _fresh_requirement_brief = bool(
+        _query_is_standalone_search(query)
+        and _early_bulk_qty
+        and (parsed.get("budget_max") is not None or budget_max is not None)
+    )
     nlp = service.analyze_query(
         query_effective,
         {
-            "brands": _decayed_pref("brands", []),
-            "specs": _decayed_pref("specs", []),
+            "brands": [] if _fresh_requirement_brief else _decayed_pref("brands", []),
+            "specs": [] if _fresh_requirement_brief else _decayed_pref("specs", []),
             "budget_max": _decayed_pref("budget_max") if allow_budget_memory else None,
-            "use_case": _decayed_pref("use_case"),
+            "use_case": None if _fresh_requirement_brief else _decayed_pref("use_case"),
         },
     )
     nlp_ms = int((time.perf_counter() - nlp_start) * 1000)
@@ -6075,7 +6086,6 @@ def suggest(
         timing_breakdown["ollama_summary_ms"] = _ir.timing_ms
 
     _ckpt("nlp_and_setup")
-    parsed = service.parse_constraints(query_effective)
     explanation_request = _is_selection_rationale_query(query_effective)
     explicit_constraint_update = _has_explicit_constraint_update(parsed, query)
     turn_intent = _classify_turn_intent(
@@ -6119,14 +6129,19 @@ def suggest(
         "uid_hash": uid_hash,
         "budget_max": budget_max or parsed.get("budget_max") or nlp.get("preferences", {}).get("budget_max") or _decayed_pref("budget_max") or confirmed_slots.get("budget_max"),
         "budget_min": budget_min or parsed.get("budget_min") or nlp.get("preferences", {}).get("budget_min") or _decayed_pref("budget_min") or confirmed_slots.get("budget_min"),
-        "brands": parsed.get("brands") or nlp.get("preferences", {}).get("brands") or _decayed_pref("brands", []) or confirmed_slots.get("brands") or [],
-        "specs": parsed.get("specs") or nlp.get("preferences", {}).get("specs") or _decayed_pref("specs", []) or confirmed_slots.get("specs") or [],
-        "brand_excludes": parsed.get("brand_excludes") or nlp.get("preferences", {}).get("brand_excludes") or _decayed_pref("brand_excludes", []) or confirmed_slots.get("brand_excludes") or [],
+        "brands": parsed.get("brands") or nlp.get("preferences", {}).get("brands") or ([] if _fresh_requirement_brief else (_decayed_pref("brands", []) or confirmed_slots.get("brands") or [])),
+        "specs": parsed.get("specs") or nlp.get("preferences", {}).get("specs") or ([] if _fresh_requirement_brief else (_decayed_pref("specs", []) or confirmed_slots.get("specs") or [])),
+        "brand_excludes": parsed.get("brand_excludes") or nlp.get("preferences", {}).get("brand_excludes") or ([] if _fresh_requirement_brief else (_decayed_pref("brand_excludes", []) or confirmed_slots.get("brand_excludes") or [])),
         "availability": parsed.get("availability") or nlp.get("preferences", {}).get("availability") or _decayed_pref("availability") or confirmed_slots.get("availability"),
         "condition": parsed.get("condition") or nlp.get("preferences", {}).get("condition") or _decayed_pref("condition") or confirmed_slots.get("condition"),
         "intent": nlp.get("intent"),
-        "use_case": nlp.get("preferences", {}).get("use_case") or _decayed_pref("use_case") or confirmed_slots.get("use_case"),
-        "use_case_tags": nlp.get("preferences", {}).get("use_case_tags") or _decayed_pref("use_case_tags", []) or confirmed_slots.get("use_case_tags") or [],
+        "use_case": nlp.get("preferences", {}).get("use_case") or (None if _fresh_requirement_brief else (_decayed_pref("use_case") or confirmed_slots.get("use_case"))),
+        "use_case_tags": nlp.get("preferences", {}).get("use_case_tags") or ([] if _fresh_requirement_brief else (_decayed_pref("use_case_tags", []) or confirmed_slots.get("use_case_tags") or [])),
+        # Quantity is part of the normalized turn envelope, not a late retrieval
+        # decoration.  Early no-result and policy returns must retain the active
+        # procurement quantity just as they retain budget and use case.
+        "quantity": _early_bulk_qty or confirmed_slots.get("order_quantity"),
+        "order_quantity": _early_bulk_qty or confirmed_slots.get("order_quantity"),
         "locale": kv.get("locale"),
         "query": scrub_pii(query or ""),
         "slots": nlp.get("slots") or {},
@@ -6135,6 +6150,33 @@ def suggest(
         "_request_budget_max": budget_max,
         "_request_budget_min": budget_min,
     }
+    # Whole-order budgets must constrain RETRIEVAL, not merely produce a warning after an
+    # unaffordable slate has already rendered.  Keep the authorized total for economics/audit and
+    # derive the per-unit ceiling used by the existing price filter.  This is the legacy bridge for
+    # PROCUREMENT turns while V2 advice still delegates execution to the fulfillment workflow.
+    _bulk_budget_note: str | None = None
+    def _apply_total_budget_unit_cap() -> None:
+        nonlocal _bulk_budget_note
+        from src.app.services.budget_grammar import classify_budget_scope as _budget_scope
+        _scope = _budget_scope(query)
+        _qty_for_budget = int(constraints.get("quantity") or 0)
+        _stated_cap = constraints.get("_total_budget_max") or constraints.get("budget_max")
+        if _scope == "total" and _qty_for_budget >= 2 and _stated_cap is not None:
+            _total_cap = float(_stated_cap)
+            _per_unit_cap = _total_cap / _qty_for_budget
+            constraints["_budget_scope"] = "total"
+            constraints["_total_budget_max"] = _total_cap
+            constraints["budget_max"] = _per_unit_cap
+            constraints["budget_min"] = None
+            _bulk_budget_note = (
+                f"Your ${_total_cap:,.0f} total for {_qty_for_budget} units allows up to "
+                f"${_per_unit_cap:,.0f} per unit. I kept the primary results within that unit cap; "
+                "higher-capability options must be shown separately as a quantity or budget trade-off."
+            )
+    try:
+        _apply_total_budget_unit_cap()
+    except (TypeError, ValueError) as _bulk_budget_exc:
+        _record_partial_failure("bulk_budget_normalization", _bulk_budget_exc, trace_id=trace_id)
     # SuggestContext adoption (Pass 5 — constraints, the largest mutation surface, ~130 subscript
     # writes). Bind the init dict onto the ctx by reference so those mutations flow into the ctx;
     # re-bound after apply_narration_inputs_to_constraints (which returns a NEW dict) below.
@@ -6235,7 +6277,10 @@ def suggest(
     # Apply profile preferences if this turn did not explicitly set brand filters.
     try:
         _p_brands_boot, _n_brands_boot = _extract_profile_brand_prefs(_user_profile_dict)
-        if not (constraints.get("brands") or []) and _p_brands_boot:
+        # Learned brand affinity is a ranking hint, never a hard filter on a new
+        # explicit requirement brief.  Reapplying an old Apple preference here
+        # previously collapsed a game-development fleet request to one MacBook.
+        if not _fresh_requirement_brief and not (constraints.get("brands") or []) and _p_brands_boot:
             constraints["brands"] = _p_brands_boot[:3]
         if _n_brands_boot:
             _merged_ex = list(dict.fromkeys(list(constraints.get("brand_excludes") or []) + _n_brands_boot))
@@ -6285,9 +6330,9 @@ def suggest(
                 constraints["budget_max"] = _confirmed_slots.get("budget_max")
             if not constraints.get("use_case") and _confirmed_slots.get("use_case"):
                 constraints["use_case"] = _confirmed_slots.get("use_case")
-            if not (constraints.get("brands") or []) and isinstance(_confirmed_slots.get("brands"), list):
+            if not _fresh_requirement_brief and not (constraints.get("brands") or []) and isinstance(_confirmed_slots.get("brands"), list):
                 constraints["brands"] = list(_confirmed_slots.get("brands"))[:8]
-            if not (constraints.get("specs") or []) and isinstance(_confirmed_slots.get("specs"), list):
+            if not _fresh_requirement_brief and not (constraints.get("specs") or []) and isinstance(_confirmed_slots.get("specs"), list):
                 constraints["specs"] = list(_confirmed_slots.get("specs"))[:12]
                 # Provenance marker: these specs were CARRIED from session state, not stated this turn.
                 # The spec filter uses this to relax when stale specs from a prior intent (e.g. a gaming
@@ -6306,6 +6351,7 @@ def suggest(
         if _fresh_budget:
             constraints["budget_min"] = _fresh_budget.get("budget_min")
             constraints["budget_max"] = _fresh_budget.get("budget_max")
+            _apply_total_budget_unit_cap()
             # GPT-5.5 #2: a HARD cap ("nothing over $2000") forbids the nearest-above fallback
             # from surfacing over-budget products — the constraint stays hard.
             if _fresh_budget.get("hard_cap"):
@@ -7008,9 +7054,8 @@ def suggest(
         # knowledge-backed advisor so NQE can ask the right follow-ups.
         # "gaming" is excluded: it's a valid key (tier lives in use_case_tags) and
         # must not be overridden when set via NQE selection.
-        _GENERIC_USE_CASES = {"student", "business", "content_creation", "mobile"}
         _nqe_set_use_case = bool(nqe_selection_applied.get("use_case"))
-        if not _nqe_set_use_case and (not _uc_key or _uc_key in _GENERIC_USE_CASES):
+        if not _nqe_set_use_case:
             _refined = _match_uc(query_effective)
             if _refined:
                 _uc_key = _refined
@@ -8530,13 +8575,18 @@ def suggest(
         # enforces the user's stated budget. Observable when it has to correct drift.
         if budget_min is not None and constraints.get("budget_min") != budget_min:
             constraints["budget_min"] = budget_min
-        if budget_max is not None and constraints.get("budget_max") != budget_max:
-            constraints["budget_max"] = budget_max
+        _explicit_budget_for_filter = budget_max
+        if constraints.get("_budget_scope") == "total" and constraints.get("_total_budget_max") is not None:
+            _explicit_budget_for_filter = float(constraints["_total_budget_max"]) / max(1, int(constraints.get("quantity") or 1))
+        if _explicit_budget_for_filter is not None and constraints.get("budget_max") != _explicit_budget_for_filter:
+            constraints["budget_max"] = _explicit_budget_for_filter
             try:
                 log_trace_event(
                     trace_id=trace_id, event_type="agent_process", source_type="agent",
                     source_id="Price_Filter_Agent", target_type="system", target_id=None,
-                    payload={"reasserted_explicit_budget": True, "budget_min": budget_min, "budget_max": budget_max},
+                    payload={"reasserted_explicit_budget": True, "budget_min": budget_min,
+                             "budget_max": _explicit_budget_for_filter,
+                             "budget_scope": constraints.get("_budget_scope")},
                 )
             except Exception:
                 pass
@@ -10874,6 +10924,81 @@ def suggest(
         results=results, constraints=constraints, uid=uid, kv=kv, query=query, payload=payload,
         demote_off_category=_demote_off_category, log=logger,
     )
+    # A whole-order budget authorizes a per-unit cap. Capability recovery may retrieve useful
+    # above-cap alternatives, but those are not primary recommendations and must never retain an
+    # Add action that silently creates an over-budget fleet. Preserve them as a separately-labelled
+    # stretch tier for explanation/next-step UI; the primary product contract remains affordable.
+    if constraints.get("_budget_scope") == "total" and constraints.get("budget_max") is not None:
+        _unit_cap = float(constraints["budget_max"])
+        _primary_budget_fit: list[dict] = []
+        _stretch_budget_fit: list[dict] = []
+        for _row in (results or []):
+            try:
+                _price = float((_row or {}).get("price") or 0)
+            except (TypeError, ValueError):
+                _price = 0.0
+            if _price > 0 and _price <= _unit_cap + 0.01:
+                _row["budget_fit"] = True
+                _primary_budget_fit.append(_row)
+            else:
+                _row["budget_fit"] = False
+                _row["cart_eligible"] = False
+                _row["cart_ineligible_reason"] = "stretch_product_exceeds_authorized_per_unit_cap"
+                _stretch_budget_fit.append(_row)
+        results = _primary_budget_fit
+        payload["results"] = results
+        payload["products"] = results
+        payload["stretch_products"] = _stretch_budget_fit[:5]
+        payload.setdefault("bulk_budget", {})["stretch_count"] = len(_stretch_budget_fit)
+
+    # Minimum workload capabilities are authorization constraints, not ranking
+    # hints.  A product that the shared assessor says lacks a required capability
+    # may be explained as a nearest fit, but cannot remain Add-enabled or create a
+    # sourcing request.
+    if _use_case_match and _use_case_specs and results:
+        from src.app.services.use_case_advisor import assess_suitability as _assess_capability
+        from src.app.services.recommend_message_decorator import partition_capability_eligible
+
+        results, _capability_nearest = partition_capability_eligible(
+            results,
+            use_case_match=_use_case_match,
+            use_case_specs=_use_case_specs,
+            assess_fn=_assess_capability,
+        )
+        if _capability_nearest:
+            _existing_stretch = payload.get("stretch_products") if isinstance(payload.get("stretch_products"), list) else []
+            payload["stretch_products"] = (_existing_stretch + _capability_nearest)[:5]
+            payload["capability_conflict"] = {
+                "status": "minimum_not_met",
+                "count": len(_capability_nearest),
+                "message": "These nearest fits miss a required workload capability and cannot be added without changing the requirements.",
+            }
+        payload["results"] = results
+        payload["products"] = results
+        _capability_prices = sorted(
+            float(row.get("price")) for row in results
+            if isinstance(row, dict) and row.get("price") is not None
+        )
+        if _capability_prices:
+            _mid = len(_capability_prices) // 2
+            _median = (
+                _capability_prices[_mid]
+                if len(_capability_prices) % 2
+                else (_capability_prices[_mid - 1] + _capability_prices[_mid]) / 2
+            )
+            payload["price_range"] = {
+                "min": _capability_prices[0],
+                "max": _capability_prices[-1],
+                "median": _median,
+                "count": len(_capability_prices),
+            }
+        else:
+            payload.pop("price_range", None)
+        _apply_tiers(
+            payload, results=results, constraints=constraints, query=query,
+            parse_explicit_spec_blocks=_parse_explicit_spec_blocks,
+            build_minimum_recommended_tiers=_build_minimum_recommended_tiers,
+        )
 
     # Availability/fulfilment stage (extracted to recommend_fulfillment_stage): bulk availability verdict
     # (sets payload['availability'] + returns the summary line) AND, when FULFILLMENT_CASES_ENABLED, opens
@@ -10886,15 +11011,12 @@ def suggest(
     _pr_id = None
     try:
         from datetime import datetime, timezone
-        from src.app.services.fulfillment import procurement_request as _pr
+        from src.app.platform.tenant_context import current_tenant_id
+        from src.app.services.procurement_advice import resolve_active_request_id
         _now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
-        _pr_kv = mem.get_kv(uid) or {}
-        _active_pr = _pr.resolve_pr(_pr_kv.get("active_pr"), tenant_id="default",
-                                    buyer_key=str(uid_hash or uid or "anon"), now_iso=_now_iso,
-                                    nonce=str(trace_id or _now_iso))
-        _pr_kv["active_pr"] = _active_pr
-        mem.set_kv(uid, _pr_kv)
-        _pr_id = _active_pr.get("pr_id")
+        _pr_id = resolve_active_request_id(
+            mem=mem, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
+            tenant_id=current_tenant_id(), now_iso=_now_iso)
     except Exception as _pr_exc:
         logger.debug("PR resolve skipped: %s", _pr_exc)
     _availability_line = _run_fulfillment_stage(
@@ -11117,7 +11239,7 @@ def suggest(
     # instead of a silent no-match. Only fires on an explicit total cue (a bare budget is per-unit).
     try:
         _c_qty = int(constraints.get("quantity") or 0)
-        _c_cap = constraints.get("budget_max")
+        _c_cap = constraints.get("_total_budget_max") or constraints.get("budget_max")
         if (not _qty_refusal_note and _c_qty >= 2 and _c_cap and results
                 and re.search(r"\b(?:total|all\s+in|altogether|combined|in\s+total|grand\s+total|for\s+(?:all|everything))\b",
                               str(query or "").lower())):
@@ -11142,6 +11264,15 @@ def suggest(
     if _qty_refusal_note:
         assistant_message = f"{_qty_refusal_note}\n\n{assistant_message}" if assistant_message else _qty_refusal_note
         payload["refusal_note"] = _qty_refusal_note
+    if _bulk_budget_note:
+        assistant_message = f"{_bulk_budget_note}\n\n{assistant_message}" if assistant_message else _bulk_budget_note
+        payload["bulk_budget"] = {
+            "scope": "total",
+            "total": constraints.get("_total_budget_max"),
+            "quantity": constraints.get("quantity"),
+            "per_unit_cap": constraints.get("budget_max"),
+            "stretch_count": len(payload.get("stretch_products") or []),
+        }
     # MUTE LAYER 5 (2026-07-08 brain-on audit): this overwrite discards the LLM prose EXACTLY on the
     # hard queries (fit-conflict turns are the ones that most need nuanced narration). Under the
     # experiment force flag the guarded LLM prose stands; default behavior unchanged.

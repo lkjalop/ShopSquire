@@ -166,7 +166,8 @@ class TestPersistTurnState:
             trace_meta_payload=lambda **kw: {},
         )
         inp = self._make_input(
-            constraints={"budget_max": 2000, "use_case": "creative", "brands": ["Apple"]},
+            constraints={"budget_max": 2000, "use_case": "creative", "brands": ["Apple"],
+                         "order_quantity": 25},
         )
         persist_turn_state(inp, hooks)
 
@@ -174,6 +175,7 @@ class TestPersistTurnState:
         assert kv_saved["confirmed_slots"]["budget_max"] == 2000
         assert kv_saved["confirmed_slots"]["use_case"] == "creative"
         assert kv_saved["confirmed_slots"]["brands"] == ["Apple"]
+        assert kv_saved["confirmed_slots"]["order_quantity"] == 25
 
     def test_persists_sourcing_intent_for_continuity(self):
         # Phase 1: the buyer's sourcing PREVIEW must be remembered in kv_state so the next turn can

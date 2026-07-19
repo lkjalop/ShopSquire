@@ -22,6 +22,55 @@ LANES = ("SEARCH", "FILTER", "COMPARE", "EXPLAIN", "SUPPORT_CLAIM", "CART_MUTATE
 
 
 @dataclass(frozen=True)
+class ImageObservation:
+    """Bounded, policy-filtered facts derived from an upload.
+
+    Vision identifies facts; the shared core remains the only owner of taxonomy selection,
+    retrieval, constraints and rank. Raw pixels and OCR payloads never enter this envelope.
+    """
+    labels: tuple[str, ...] = ()
+    product_identity: Dict[str, str] = field(default_factory=dict)
+    image_hash: Optional[str] = None
+    analysis_state: str = "pending"       # complete | pending | degraded
+    trust_mode: str = "text_only"         # full | sanitized | text_only
+
+    @classmethod
+    def bounded(cls, *, labels: Optional[List[Any]] = None,
+                product_identity: Optional[Dict[str, Any]] = None,
+                image_hash: Optional[str] = None, analysis_state: str = "pending",
+                trust_mode: str = "text_only") -> "ImageObservation":
+        safe_labels = tuple(str(value).strip()[:80] for value in (labels or [])[:12]
+                            if str(value).strip())
+        safe_identity: Dict[str, str] = {}
+        for key in ("brand", "product_type", "category", "model", "family", "form_factor"):
+            value = (product_identity or {}).get(key)
+            if value is not None and str(value).strip():
+                safe_identity[key] = str(value).strip()[:120]
+        state = analysis_state if analysis_state in ("complete", "pending", "degraded") else "pending"
+        trust = trust_mode if trust_mode in ("full", "sanitized", "text_only") else "text_only"
+        if trust == "text_only":
+            safe_labels, safe_identity = (), {}
+        elif trust == "sanitized":
+            safe_identity = {}
+        return cls(labels=safe_labels, product_identity=safe_identity,
+                   image_hash=(str(image_hash)[:128] if image_hash else None),
+                   analysis_state=state, trust_mode=trust)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"labels": list(self.labels), "product_identity": dict(self.product_identity),
+                "image_hash": self.image_hash, "analysis_state": self.analysis_state,
+                "trust_mode": self.trust_mode}
+
+    @classmethod
+    def from_dict(cls, value: Dict[str, Any]) -> "ImageObservation":
+        return cls.bounded(labels=list(value.get("labels") or []),
+                           product_identity=dict(value.get("product_identity") or {}),
+                           image_hash=value.get("image_hash"),
+                           analysis_state=str(value.get("analysis_state") or "pending"),
+                           trust_mode=str(value.get("trust_mode") or "text_only"))
+
+
+@dataclass(frozen=True)
 class TurnEnvelope:
     """One turn's typed input. Frozen: stages derive, they never mutate the request."""
     tenant_id: str
@@ -31,6 +80,7 @@ class TurnEnvelope:
     budget_min_cents: Optional[int] = None
     budget_max_cents: Optional[int] = None
     has_image: bool = False
+    image_observations: List[ImageObservation] = field(default_factory=list)
     source_ip: Optional[str] = None
     session: Dict[str, Any] = field(default_factory=dict)   # prior shortlist/slots (read-only)
     # cart: the CURRENT cart lines [{sku,name,quantity}], read once at the facade ingress. The
@@ -48,6 +98,7 @@ class TurnEnvelope:
     def from_suggest_params(cls, *, query: str, uid: str = "", tenant_id: str = "default",
                             budget_min: Optional[float] = None, budget_max: Optional[float] = None,
                             trace_id: Optional[str] = None, has_image: bool = False,
+                            image_observations: Optional[List[ImageObservation]] = None,
                             source_ip: Optional[str] = None,
                             session: Optional[Dict[str, Any]] = None,
                             cart: Optional[List[Dict[str, Any]]] = None,
@@ -57,7 +108,9 @@ class TurnEnvelope:
         return cls(tenant_id=str(tenant_id or "default"), uid=str(uid or ""),
                    query=str(query or "").strip(), trace_id=trace_id or str(uuid.uuid4()),
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
-                   has_image=bool(has_image), source_ip=source_ip, session=dict(session or {}),
+                   has_image=bool(has_image or image_observations),
+                   image_observations=list(image_observations or []), source_ip=source_ip,
+                   session=dict(session or {}),
                    cart=list(cart or []), pre_gate=pre_gate)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -67,6 +120,7 @@ class TurnEnvelope:
         return {"tenant_id": self.tenant_id, "uid": self.uid, "query": self.query,
                 "trace_id": self.trace_id, "budget_min_cents": self.budget_min_cents,
                 "budget_max_cents": self.budget_max_cents, "has_image": self.has_image,
+                "image_observations": [item.to_dict() for item in self.image_observations],
                 "source_ip": self.source_ip, "session": dict(self.session),
                 "cart": list(self.cart), "pre_gate": self.pre_gate}
 
@@ -78,7 +132,10 @@ class TurnEnvelope:
                    query=str(d.get("query") or ""), trace_id=str(d.get("trace_id") or uuid.uuid4()),
                    budget_min_cents=_int(d.get("budget_min_cents")),
                    budget_max_cents=_int(d.get("budget_max_cents")),
-                   has_image=bool(d.get("has_image")), source_ip=d.get("source_ip"),
+                   has_image=bool(d.get("has_image") or d.get("image_observations")),
+                   image_observations=[ImageObservation.from_dict(item) for item in
+                                       (d.get("image_observations") or []) if isinstance(item, dict)],
+                   source_ip=d.get("source_ip"),
                    session=dict(d.get("session") or {}), cart=list(d.get("cart") or []),
                    pre_gate=d.get("pre_gate"))
 

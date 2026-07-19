@@ -133,6 +133,20 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # the p50 to the model call vs the deterministic stages (P1 instrumentation).
     _t_route = time.perf_counter()
     decision = route_turn(db, envelope, llm_fn=llm_fn)
+    # The HTTP contract may not pre-parse a textual budget.  The model maps its value and
+    # scope; deterministic arithmetic turns that bounded proposal into the per-unit ceiling
+    # used by evidence retrieval.  A total budget for N units is never treated as per-unit.
+    if (envelope.budget_min_cents is None and envelope.budget_max_cents is None
+            and decision.total_budget_cents is not None):
+        per_unit_cap = None
+        if decision.budget_scope == "per_unit":
+            per_unit_cap = decision.total_budget_cents
+        elif decision.budget_scope == "total":
+            per_unit_cap = decision.total_budget_cents // max(1, decision.quantity or 1)
+        elif decision.quantity in (None, 1):
+            per_unit_cap = decision.total_budget_cents
+        if per_unit_cap and per_unit_cap > 0:
+            envelope = dataclasses.replace(envelope, budget_max_cents=int(per_unit_cap))
     # INTENT → REQUIREMENTS: the model NAMED the use-case(s); deterministic KB lookup supplies
     # the hardware requirements and merges them (by MAX) with any the shopper stated explicitly.
     # This is what makes a CS student differ from an english major and 'for AutoCAD' carry real
@@ -180,7 +194,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # wins; a fresh SEARCH never inherits (context-rot guard, ledger §8). Runs BEFORE
     # derive_plan so fit_check comes back for inherited requirements.
     budget_inherited = requirements_inherited = False
-    if decision.lane in ("FILTER", "COMPARE", "EXPLAIN"):
+    if (decision.lane in ("FILTER", "COMPARE", "EXPLAIN")
+            and decision.subject_action != "switch"):
         acc = (envelope.session or {}).get("accepted_constraints") or {}
         if envelope.budget_min_cents is None and envelope.budget_max_cents is None:
             bmin, bmax = acc.get("budget_min_cents"), acc.get("budget_max_cents")
@@ -235,6 +250,10 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "node_handle": decision.node_handle,
         "requirements": {k: [list(p) for p in v] for k, v in decision.requirements.items()},
         "use_cases": intent["use_cases"],
+        "brands": [decision.brand_filter] if decision.brand_filter else [],
+        "brand_excludes": [decision.exclude_brand] if decision.exclude_brand else [],
+        "preferred_brands": [decision.preferred_brand] if decision.preferred_brand else [],
+        "budget_cap_mode": decision.budget_cap_mode,
         # provenance (R9.1): the trace must say when this turn's constraints came from the
         # SESSION, not the message — and postflight persists what was USED, so a budget-less
         # follow-up refreshes the remembered budget instead of wiping it.
@@ -1055,10 +1074,10 @@ def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
 
 def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision,
                               resp: CoreResponse, limit: int) -> None:
-    resp.extras["procurement_intent"] = True
-    resp.set_message(("This looks like a bulk/procurement request — I can draft a supplier "
-                      "quote request for review. Nothing is sent without human approval."),
-                     MsgPriority.LANE_BASE)
+    from .procurement import build_procurement_advice
+    advice = build_procurement_advice(envelope)
+    resp.extras.update({key: value for key, value in advice.items() if key != "message"})
+    resp.set_message(advice["message"], MsgPriority.LANE_BASE)
 
 
 _EXECUTORS: Dict[str, Any] = {

@@ -88,16 +88,42 @@ def test_injection_blocks_core_falls_through_to_legacy(monkeypatch):
     assert out is None
 
 
-def test_image_turns_fall_through_to_legacy(monkeypatch):
-    # GPT-5.6 #5c22575.2: an image-carrying turn is not core-served (image lane = legacy),
-    # even on a text lane. Excluded BEFORE routing (core is never called).
+def test_image_turns_use_shared_core_with_bounded_observations(monkeypatch):
+    # IMAGE V2: image is a modality on the shared turn, not an independent recommendation lane.
+    captured = {}
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
-    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _rec())
+    def _image_core(db, envelope):
+        captured["envelope"] = envelope
+        return _rec()(db, envelope)
+    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _image_core)
     out = F.dispatch_recommendation_core(
         db=object(), redis=_Redis(), query="like this laptop", uid="u1", tenant_id="t1",
         budget_min=None, budget_max=None, trace_id="tr", image_labels="laptop,silver",
+        image_product_identity='{"brand":"Lenovo","model":"ThinkPad","ignored":"x"}',
         with_trace=_wt, record_failure=lambda *a, **k: None)
-    assert out is None
+    assert out is not None
+    observation = captured["envelope"].image_observations[0]
+    assert observation.labels == ("laptop", "silver")
+    assert observation.product_identity == {"brand": "Lenovo", "model": "ThinkPad"}
+
+
+def test_hostile_image_facts_are_stripped_before_core(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+    def _image_core(db, envelope):
+        captured["envelope"] = envelope
+        return _rec()(db, envelope)
+    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _image_core)
+    out = F.dispatch_recommendation_core(
+        db=object(), redis=_Redis(), query="find this", uid="u1", tenant_id="t1",
+        budget_min=None, budget_max=None, trace_id="tr", image_labels="laptop,silver",
+        image_product_identity='{"brand":"Lenovo"}',
+        image_cv_signals='{"qr_prompt_injection":true}',
+        with_trace=_wt, record_failure=lambda *a, **k: None)
+    assert out is not None
+    observation = captured["envelope"].image_observations[0]
+    assert observation.trust_mode == "text_only"
+    assert observation.labels == () and observation.product_identity == {}
 
 
 # ── lane gate (finding #6) ────────────────────────────────────────────────────

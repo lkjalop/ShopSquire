@@ -385,6 +385,8 @@ def dispatch_recommendation_core(
     budget_min: Optional[float], budget_max: Optional[float], trace_id: str,
     image_labels: Optional[str] = None, image_hash: Optional[str] = None,
     image_ocr: Optional[str] = None, source_ip: Optional[str] = None, request: Any = None,
+    image_intent: Optional[str] = None, image_product_identity: Optional[str] = None,
+    image_cv_signals: Optional[str] = None,
     role: str = "",
     with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]],
     record_failure: Callable[..., Any],
@@ -395,6 +397,37 @@ def dispatch_recommendation_core(
     if mode == "off" and cart_mode == "off":
         return None
     tenant = tenant_id or "default"
+
+    # IMAGE V2 ingress: transform the legacy flat parameters into one bounded observation.
+    # OCR remains guard-only. The trust posture determines which visual facts may influence
+    # interpretation; taxonomy, eligibility, constraints and ranking remain core-owned.
+    image_observations = []
+    if image_labels or image_hash or image_product_identity or image_cv_signals:
+        from src.app.services.recommendation_core.envelope import ImageObservation
+        try:
+            signals = json.loads(image_cv_signals) if image_cv_signals else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            signals = {}
+        try:
+            identity = json.loads(image_product_identity) if image_product_identity else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            identity = {}
+        if not isinstance(signals, dict):
+            signals = {}
+        if not isinstance(identity, dict):
+            identity = {}
+        hostile = bool(signals.get("qr_prompt_injection") or signals.get("ocr_prompt_injection")
+                       or signals.get("pii_detected") or signals.get("ssn_detected")
+                       or float(signals.get("adversarial_score") or 0) >= 0.7)
+        review = bool(signals.get("qr_code_detected") or signals.get("steg_suspicious")
+                      or signals.get("fast_triage_timeout"))
+        trust_mode = "text_only" if hostile else ("sanitized" if review else "full")
+        analysis_state = ("pending" if signals.get("fast_triage_timeout")
+                          else "degraded" if signals.get("analysis_degraded") else "complete")
+        labels = [part.strip() for part in str(image_labels or "").split(",") if part.strip()]
+        image_observations.append(ImageObservation.bounded(
+            labels=labels, product_identity=identity, image_hash=image_hash,
+            analysis_state=analysis_state, trust_mode=trust_mode))
 
     # ── CART-MUTATION LANE — its OWN ladder, independent of the search mode ──────
     # RECOMMEND_CART_SERVE=on: inline serve (below). =shadow: RESOLVE-ONLY — handled at the
@@ -441,6 +474,7 @@ def dispatch_recommendation_core(
                 query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                 budget_max=budget_max, trace_id=trace_id,
                 has_image=bool(image_labels or image_hash), source_ip=source_ip,
+                image_observations=image_observations,
                 session=_read_session_slice(redis, uid, tenant), cart=cart_slice)
             _enqueue_shadow(redis, envelope=shadow_env, cart_only=(mode != "shadow"))
         if mode == "shadow":
@@ -450,10 +484,8 @@ def dispatch_recommendation_core(
     if mode == "off":
         return None
 
-    # IMAGE turns → legacy (review-3 #5c22575.2): the image lane (quarantine, CV, vision
-    # identity) is not core-SERVED yet; a text lane carrying an image must not be either.
-    if image_labels or image_hash:
-        return None
+    # IMAGE is a modality, not a second product-selection lane. Policy-filtered observations
+    # ride the shared envelope; the lane and every consequential decision remain clamped below.
     # canary bucket on tenant:uid (GPT-5.6 #5c22575.4) — same user in different tenants can
     # legitimately land different sides; anon users bucket by tenant.
     if mode == "canary" and not _in_canary_bucket(f"{tenant}:{uid or 'anon'}", pct):
@@ -474,6 +506,7 @@ def dispatch_recommendation_core(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
             budget_max=budget_max, trace_id=trace_id,
             has_image=bool(image_labels or image_hash), source_ip=source_ip,
+            image_observations=image_observations,
             session=session, pre_gate=guard)
 
         # ── DISPATCH ───────────────────────────────────────────────────────────

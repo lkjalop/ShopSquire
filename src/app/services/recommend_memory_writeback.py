@@ -291,6 +291,9 @@ def _persist_turn_state_inner(inp: TurnPersistenceInput, hooks: TurnPersistenceH
         _val = inp.constraints.get(_key)
         if _val is not None:
             confirmed_slots_out[_key] = _val
+    _quantity = inp.constraints.get("order_quantity") or inp.constraints.get("quantity")
+    if isinstance(_quantity, (int, float)) and 1 <= int(_quantity) <= 1000:
+        confirmed_slots_out["order_quantity"] = int(_quantity)
     if inp.constraints.get("brands"):
         confirmed_slots_out["brands"] = list(inp.constraints.get("brands") or [])[:8]
     if inp.constraints.get("specs"):

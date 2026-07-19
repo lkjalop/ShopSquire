@@ -318,6 +318,30 @@ def test_fresh_search_never_inherits_session_constraints(db):
     assert "ram_gb" not in (cu["requirements"] or {})
 
 
+def test_explicit_subject_switch_does_not_inherit_on_explain_lane(db):
+    session = {"prior_node": "el-6-11-2",
+               "accepted_constraints": {"budget_max_cents": 230000,
+                                        "requirements": {"ram_gb": [[">=", 32]]}}}
+    payload = {"lane": "EXPLAIN", "handle": "el-6-6", "requirements": {},
+               "subject_action": "switch", "confidence": 0.9}
+    resp = recommend_turn(db, _env("switch products: show laptops and explain", session=session),
+                          llm_fn=lambda p, t: json.dumps(payload))
+    cu = resp.extras["constraints_used"]
+    assert cu["budget_max_cents"] is None
+    assert cu["budget_inherited"] is False
+    assert cu["requirements_inherited"] is False
+
+
+def test_model_total_budget_becomes_per_unit_retrieval_cap(db):
+    payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+               "quantity": 2, "total_budget": 3500, "budget_scope": "total",
+               "subject_action": "switch", "confidence": 0.9}
+    resp = recommend_turn(db, _env("two laptops, $3500 total"),
+                          llm_fn=lambda p, t: json.dumps(payload))
+    assert resp.extras["constraints_used"]["budget_max_cents"] == 175000
+    assert all((p.price_cents or 0) <= 175000 for p in resp.products)
+
+
 def test_stocked_handles_within_contains_and_ungrounded(db):
     """R8.2 marker logic: WITHIN a sold subtree marks, a subtree CONTAINING a sold node marks
     (retrieval reads subtrees), unrelated taxonomy does not, and an ungrounded tenant marks
@@ -348,6 +372,15 @@ def test_router_prompt_marks_sold_candidates(db):
     assert any(h.startswith("el-6") for h in marked)          # the sold subtree is marked
     assert unmarked                                            # taxonomy-only candidates are not
     assert not any(h.startswith("fr-") or h.startswith("so-") for h in marked)  # never mismarked
+
+
+def test_router_clamps_wrong_requirements_container_to_empty(db):
+    """A BYO model may return the right keys with the wrong JSON shape; degrade, never raise."""
+    def malformed(_prompt, _timeout):
+        return json.dumps({"lane": "SEARCH", "handle": "el-6-6", "use_cases": [],
+                           "requirements": ["ram_gb", ">=", 16], "confidence": 0.7})
+    decision = route_turn(db, _env("a laptop"), llm_fn=malformed)
+    assert decision.lane == "SEARCH" and decision.requirements == {}
 
 
 def test_workload_reroute_uses_declared_host_not_dominant_node(db):
