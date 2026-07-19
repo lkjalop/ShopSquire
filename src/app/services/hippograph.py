@@ -13,11 +13,11 @@ entities are *proposals* for agent context — they re-enter policy/escalation b
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.app.services.entity_resolution import resolve_brand, resolve_product, resolve_user
-from src.app.services.price_conversion import cents_to_dollars
 
 logger = logging.getLogger("shopsquire.hippograph")
 
@@ -35,6 +35,38 @@ class HippoGraph:
     nodes: Dict[str, HippoNode] = field(default_factory=dict)
     edges: Dict[Tuple[str, str], float] = field(default_factory=dict)
     adjacency: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # Evidence about why an edge exists. Recall still reads only bounded numeric
+    # adjacency; consumers can inspect these typed contributions without treating
+    # them as authorization or a ranking verdict.
+    edge_kinds: Dict[Tuple[str, str], Dict[str, float]] = field(default_factory=dict)
+
+
+_TRACE_EDGE_WEIGHTS = {
+    "viewed": 0.15,
+    "shortlisted": 0.35,
+    "added_to_cart": 0.55,
+    "purchased": 1.0,
+    "returned": -0.8,
+    "rejected": -0.6,
+    "corrected": -0.35,
+}
+
+
+def _typed_edge(event_type: Any) -> Tuple[str, float]:
+    raw = str(event_type or "observed").strip().lower()
+    for kind, weight in _TRACE_EDGE_WEIGHTS.items():
+        if kind in raw:
+            return kind, weight
+    return "observed", 0.1
+
+
+def _bounded_conversion_reward(value_cents: Any) -> float:
+    """Log-scale order value into [0.1, 1.0] so expensive products cannot dominate recall."""
+    try:
+        dollars = max(0.0, float(value_cents or 0) / 100.0)
+    except (TypeError, ValueError):
+        dollars = 0.0
+    return max(0.1, min(1.0, math.log1p(dollars) / math.log1p(10000.0)))
 
 
 def _node_for(kind_hint: Any, raw_id: Any, *, alias_map, known, catalog_skus, sku_pattern=None) -> Optional[Tuple[str, str, str]]:
@@ -81,8 +113,10 @@ def project_graph(
             g.nodes[nid] = n
         return n
 
-    def add_edge(s: str, d: str, w: float = 1.0) -> None:
+    def add_edge(s: str, d: str, w: float = 1.0, kind: str = "observed") -> None:
         g.edges[(s, d)] = g.edges.get((s, d), 0.0) + w
+        kinds = g.edge_kinds.setdefault((s, d), {})
+        kinds[kind] = kinds.get(kind, 0.0) + w
         g.adjacency.setdefault(s, {})[d] = g.adjacency.setdefault(s, {}).get(d, 0.0) + w
         # half-weight reverse so recall can traverse either direction
         g.adjacency.setdefault(d, {})[s] = g.adjacency.setdefault(d, {}).get(s, 0.0) + w * 0.5
@@ -95,10 +129,18 @@ def project_graph(
         if d:
             ensure(*d)
         if s and d:
-            add_edge(s[0], d[0], 1.0)
+            kind, weight = _typed_edge(r.get("event_type"))
+            # Negative outcomes suppress the target prior but do not create a
+            # negative traversal edge (spreading activation assumes non-negative
+            # relatedness). The outcome remains visible in edge_kinds.
+            if weight < 0:
+                ensure(*d).weight += weight
+                add_edge(s[0], d[0], abs(weight) * 0.25, kind)
+            else:
+                add_edge(s[0], d[0], weight, kind)
 
     for c in (conversion_rows or []):
-        val = cents_to_dollars(c.get("value_cents")) or 1.0
+        val = _bounded_conversion_reward(c.get("value_cents"))
         decision_id = str(c.get("decision_id") or "").strip()
         dn = f"decision:{decision_id}" if decision_id else None
         if dn:
@@ -110,7 +152,7 @@ def project_graph(
             node = ensure(ref.id, "product", ref.label)
             node.weight += val  # the reward signal recall ranks toward
             if dn:
-                add_edge(dn, ref.id, val)
+                add_edge(dn, ref.id, val, "purchased")
     return g
 
 

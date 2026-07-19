@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Query
 
 from src.app.models.db import get_db
 from src.app.security.auth import ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER, require_role
+from src.app.platform.tenant_context import current_tenant_id
 
 router = APIRouter(prefix="/api/v1/hippograph", tags=["hippograph"])
 
@@ -31,7 +32,8 @@ def hippograph_recall(
     from src.app.services.hippograph import recall
     from src.app.services.hippograph_db import _DEFAULT_SKU_PATTERN, build_from_db
 
-    graph = build_from_db(db, limit=limit)
+    tenant_id = current_tenant_id()
+    graph = build_from_db(db, tenant_id=tenant_id, limit=limit)
 
     # Canonicalize the seed to a node id the SAME way build_from_db builds nodes.
     kw: Dict[str, Any] = {}
@@ -60,6 +62,7 @@ def hippograph_recall(
     return {
         "seed": seed_id,
         "kind": k,
+        "tenant_id": tenant_id,
         "node_count": len(graph.nodes),
         "edge_count": len(graph.edges),
         "recall": out,

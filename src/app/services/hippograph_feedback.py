@@ -19,6 +19,7 @@ _USEFUL_KINDS = {"product", "brand", "finding", "segment"}
 def build_hippograph_insights(
     db,
     *,
+    tenant_id: str = "default",
     uid_hash: Optional[str] = None,
     seed_skus: Optional[List[str]] = None,
     seed_brands: Optional[List[str]] = None,
@@ -45,7 +46,7 @@ def build_hippograph_insights(
         # (reachability, not reward); HIPPOGRAPH_CATALOG_EDGES=0 is the rollback since this
         # builder is shared with the procurement-draft evidence path.
         _cat_on = str(os.getenv("HIPPOGRAPH_CATALOG_EDGES", "1")).strip().lower() in ("1", "true", "yes", "on")
-        graph = build_from_db(db, limit=limit, include_findings=True, include_human_feedback=_hf_on,
+        graph = build_from_db(db, tenant_id=tenant_id, limit=limit, include_findings=True, include_human_feedback=_hf_on,
                               include_catalog=_cat_on)
         if not graph.nodes:
             return []

@@ -263,7 +263,10 @@ def _safe_one(fn, *args):
 
 def _default_hippograph(db, item_ref, tenant_id):
     from src.app.services.hippograph_feedback import build_hippograph_insights
-    return build_hippograph_insights(db, seed_skus=[item_ref], top_k=4)
+    # P0-sec: forward tenant_id (the leak) — insights are supplier-outbound and must be
+    # tenant-scoped, exactly like _default_market below. build_hippograph_insights already
+    # threads tenant_id into build_from_db.
+    return build_hippograph_insights(db, seed_skus=[item_ref], top_k=4, tenant_id=tenant_id)
 
 
 def _default_market(db, item_ref, tenant_id):
