@@ -308,6 +308,42 @@ def create_app() -> FastAPI:
             _th.Thread(target=_prewarm_decision_log, name="decision-log-prewarm", daemon=True).start()
         except Exception:
             pass
+        # Router-model preload OFF-THREAD: absorb the cold-load spike AND keep the router model
+        # resident so a concurrent vision request (glm-ocr) can't evict it mid-session. Measured:
+        # warm+pinned the router routes in ~5-6s (PASS the 8s gate); cold-or-evicted it spikes to
+        # 11-13s — the "latency blocker" was VRAM eviction, not model speed. Pair with
+        # OLLAMA_MAX_LOADED_MODELS>=2 so the router and the VLM coexist instead of thrashing.
+        # Off by default under test envs (no Ollama on CI); best-effort everywhere.
+        try:
+            _app_env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+            _prewarm_on = str(
+                os.getenv("ROUTER_PREWARM_ON_START", "0" if _app_env in ("test", "testing") else "1")
+            ).strip().lower() in ("1", "true", "yes", "on")
+            if _prewarm_on:
+                import threading as _th2
+
+                def _prewarm_router_model() -> None:
+                    try:
+                        import httpx as _hx
+                        from src.app.services.recommendation_core.turn_router import _router_model
+                        _url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+                        _model = _router_model()
+                        _hx.post(
+                            f"{_url}/api/generate",
+                            json={"model": _model, "prompt": "ok", "stream": False,
+                                  "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+                                  "options": {"num_predict": 1, "temperature": 0}},
+                            timeout=120.0,
+                        )
+                        import logging as _rl2
+                        _rl2.getLogger("shopsquire.startup").info("router-model pre-warm complete: %s", _model)
+                    except Exception as _rw_exc:
+                        import logging as _rl2
+                        _rl2.getLogger("shopsquire.startup").warning("router-model pre-warm failed: %s", _rw_exc)
+
+                _th2.Thread(target=_prewarm_router_model, name="router-model-prewarm", daemon=True).start()
+        except Exception:
+            pass
         try:
             from sqlalchemy import text as _sql_text
             from scripts.seed_demo_data import seed_products
