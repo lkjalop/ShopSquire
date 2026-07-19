@@ -415,6 +415,8 @@ export default function App() {
   const [cvAutoIssueType, setCvAutoIssueType] = useState<string | undefined>(undefined);
   const [imageTriageContexts, setImageTriageContexts] = useState<any[]>([]);
   const [imageTriageRaw, setImageTriageRaw] = useState<any[]>([]);
+  const [canonicalImageProducts, setCanonicalImageProducts] = useState<Product[] | null>(null);
+  const [canonicalImageSummary, setCanonicalImageSummary] = useState('');
   const [visualSearchQuery, setVisualSearchQuery] = useState('');
   const [pendingImageContext, setPendingImageContext] = useState<PendingImageContext | null>(null);
   const [imageRoutingInFlight, setImageRoutingInFlight] = useState(false);
@@ -985,6 +987,19 @@ export default function App() {
   // ever labelled previous.
   const initialCartSkus = useRef<string[] | null>(null);
   useEffect(() => {
+    let active = true;
+    getCart(uid).then((j) => {
+      if (!active) return;
+      if (initialCartSkus.current === null) {
+        initialCartSkus.current = (j?.items || []).map((i: any) => String(i.sku));
+      }
+      setCart(j);
+    }).catch(() => {
+      if (active && initialCartSkus.current === null) initialCartSkus.current = [];
+    });
+    return () => { active = false; };
+  }, [uid]);
+  useEffect(() => {
     if (initialCartSkus.current === null && cart) {
       initialCartSkus.current = (cart.items || []).map((i: any) => String(i.sku));
     }
@@ -996,6 +1011,8 @@ export default function App() {
       for (const sku of priorCartSkus) {
         await removeFromCart(sku);
       }
+      const refreshed = await getCart(uid).catch(() => null);
+      if (refreshed) setCart(refreshed);
       initialCartSkus.current = [];          // the carried-over set is gone; the rest is this session's
       staleCartNoticeShown.current = true;   // and no longer worth nagging about
     } catch {
@@ -1410,6 +1427,11 @@ export default function App() {
     const explicitVisualIntent = visualSearchHint(q);
     const explicitComplaintIntent = complaintTextHint(q);
     const requestImageContext = (Boolean(pendingImageContext) && !explicitComplaintIntent) ? pendingImageContext : null;
+    const imageRecommendationTurn = hasImages || Boolean(requestImageContext);
+    if (imageRecommendationTurn) {
+      setCanonicalImageProducts(null);
+      setCanonicalImageSummary('');
+    }
 
     if (hasPendingImage && explicitComplaintIntent && !hasImages) {
       setPendingImageContext(null);
@@ -1513,20 +1535,8 @@ export default function App() {
             }
           })(), IMAGE_DEEP_TRIAGE_DELAY_MS);
 
-          // For a pure visual-search request, the panel can own the response.
-          // For shopping queries with attached images, continue into /chat/query
-          // so the chat bubble summarizes the grounded recommendation instead
-          // of punting the buyer to the side panel.
-          if (!shoppingIntent && explicitVisualIntent) {
-            const imageNames = currentAttachedFiles.map(f => f.name).join(', ');
-            setMessages(prev => [...prev, {
-              role: 'assistant' as const,
-              content: `I checked your images (${imageNames}). Open **Visual Search** on the right to see per-image matches, nearest alternatives, and why each pick fits.`,
-              timestamp: new Date(),
-            }]);
-            setIsThinking(false);
-            return;
-          }
+          // Product selection always continues through /chat/query. The visual panel is a
+          // renderer for that canonical slate; it no longer owns an independent /suggest call.
         }
       }
 
@@ -1825,6 +1835,10 @@ export default function App() {
         }
 
         const prods = (data.products || []) as Product[];
+        if (imageRecommendationTurn) {
+          setCanonicalImageProducts(prods.slice(0, 10));
+          setCanonicalImageSummary(String(data.assistant_message || data.summary || ''));
+        }
         // bulk-order carry-through: remember the conversation's requested unit count for the Add buttons
         {
           const _rq = Number((data as any).requested_quantity);
@@ -2898,9 +2912,9 @@ export default function App() {
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (
-                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
+                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} canonicalProducts={canonicalImageProducts} canonicalSummary={canonicalImageSummary} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
                   ) : rightPanelMode === 'image_context' ? (
-                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
+                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} canonicalProducts={canonicalImageProducts} canonicalSummary={canonicalImageSummary} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"
@@ -2972,8 +2986,9 @@ export default function App() {
                         onClear={clearCartAll}
                         onAdd={addToCart}
                         onSetQty={setCartQty}
-                        traceId={traceId}
+                        traceId={sourcingTraceId || traceId}
                         onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
+                        onSourcingTraceId={(tid) => setSourcingTraceId(normalizeTraceId(tid))}
                         priorSkus={priorCartSkus}
                         onClearPrior={clearPriorCartItems}
                       />

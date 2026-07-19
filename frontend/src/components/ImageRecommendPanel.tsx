@@ -33,6 +33,7 @@ interface ProductCard {
   use_case_fit?: string;
   image_url?: string;
   reasons?: string[];
+  why?: string[];
   reason_codes?: any[];
 }
 
@@ -43,6 +44,7 @@ interface ImageGroup {
   trustLevel: TrustLevel;
   friendlyBrand: string;
   securityNote: string;
+  analysisState?: 'complete' | 'pending' | 'degraded';
   products: ProductCard[];
   summary: string;
   /** Budget widen state */
@@ -122,6 +124,11 @@ export interface Props {
   onTraceId?: (traceId: string | null) => void;
   /** Add-to-cart callback from App */
   onAdd?: (sku: string) => void;
+  /** Canonical products returned by the chat/recommendation turn. When supplied, this component
+   * is renderer-only and must not issue its historical independent /suggest request. null means
+   * the shared turn is still pending; [] is a completed honest no-match. */
+  canonicalProducts?: ProductCard[] | null;
+  canonicalSummary?: string;
 }
 
 /* ---------- constants ---------- */
@@ -199,7 +206,6 @@ export function computeTrustLevel(signals: ImageAnalysisContext['cv_signals'], s
   // Explicit threat-hypothesis signals always warrant orange
   if (s.ransomware_indicator || s.c2_beacon_detected || s.payment_social_engineering) return 'orange';
   if (signals.qr_external_url_detected) return 'orange';
-  if (s.fast_triage_timeout) return 'orange';
   if (sessionSuspicious >= 2 || signals.manipulation_detected || signals.steg_suspicious) return 'orange';
   if (signals.qr_code_detected) return 'yellow';
   return 'green';
@@ -228,6 +234,12 @@ function buildLaneDetectionReason(signals: ImageAnalysisContext['cv_signals']): 
 
 function buildBuyerSecurityNotice(signals: ImageAnalysisContext['cv_signals']): string {
   const s = signals as Record<string, any>;
+  if (s.fast_triage_timeout || s.analysis_pending) {
+    return 'Image security enrichment is still running. Recommendations use bounded visual hints until analysis completes.';
+  }
+  if (s.analysis_degraded) {
+    return 'Image analysis is degraded. Recommendations use only the verified evidence available.';
+  }
   if (signals.qr_code_detected && s.qr_benign_detected) {
     return 'QR detected and decoded successfully. The visible content looks benign, so recommendations can continue.';
   }
@@ -261,6 +273,12 @@ const TRUST_LABELS: Record<TrustLevel, string> = {
   orange: 'Under Review',
   red: 'Escalated',
 };
+
+function groupStatusLabel(group: ImageGroup): string {
+  if (group.analysisState === 'pending') return 'Analysis pending';
+  if (group.analysisState === 'degraded') return 'Analysis degraded';
+  return TRUST_LABELS[group.trustLevel];
+}
 
 const TRUST_NOTES: Record<TrustLevel, string> = {
   green: 'Image scanned — no issues found.',
@@ -316,7 +334,7 @@ const USE_CASE_BUDGET: Record<string, number> = {
 };
 
 /** Derive a short pros note from product specs + price. */
-function buildProsNote(p: ProductCard, userQuery: string): string {
+export function buildProsNote(p: ProductCard, userQuery: string): string {
   const pros: string[] = [];
   const q = userQuery.toLowerCase();
   const specs = p.specs_summary || '';
@@ -326,7 +344,9 @@ function buildProsNote(p: ProductCard, userQuery: string): string {
   else if (/512/i.test(specs)) pros.push('512 GB SSD');
   if (/oled/i.test(p.name)) pros.push('OLED display');
   if (/touch/i.test(p.name)) pros.push('Touchscreen');
-  if (/rtx|gtx|radeon/i.test(specs)) pros.push('Discrete GPU');
+  if (/\b(?:rtx|gtx)\s*\d|\bradeon\s+(?:rx|pro)\b|\bintel\s+arc\s+[ab]\d/i.test(specs)) {
+    pros.push('Discrete GPU');
+  }
   if (/universit|student/i.test(q) && p.price < 1000) pros.push('Student-budget friendly');
   if (/gaming/i.test(q) && /rtx/i.test(specs)) pros.push('Gaming-ready GPU');
   return pros.slice(0, 3).join(' · ');
@@ -481,7 +501,7 @@ function normalizeProductCard(raw: any): ProductCard | null {
     subtitle: raw.subtitle || raw.specs?.subtitle || undefined,
     price,
     specs_summary: specsSummary || undefined,
-    use_case_fit: normalizeUseCaseFit(raw.use_case_suitability || raw.use_case_fit || raw.reason),
+    use_case_fit: normalizeUseCaseFit(raw.use_case_suitability || raw.use_case_fit || raw.reason) || undefined,
     image_url: raw.image_url || null,
     reasons: Array.isArray(raw.reasons) ? raw.reasons.slice(0, 5).map(String) : undefined,
     reason_codes: Array.isArray(raw.reason_codes) ? raw.reason_codes.slice(0, 5) : undefined,
@@ -735,7 +755,7 @@ function buildLocalTimeoutFallback(
 }
 
 /* ---------- component ---------- */
-export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd }: Props) {
+export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd, canonicalProducts, canonicalSummary }: Props) {
   const [groups, setGroups] = useState<ImageGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -800,6 +820,46 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
   }, []);
 
   const buildGroups = useCallback(async () => {
+    if (canonicalProducts !== undefined) {
+      const buildSeq = ++buildSeqRef.current;
+      setError(null);
+      setGlobalRedBlock(false);
+      if (canonicalProducts === null) {
+        setGroups([]);
+        setLoading(true);
+        return;
+      }
+      const ctx = imageContexts[0] || null;
+      const trust = computeTrustLevel(ctx?.cv_signals || {}, sessionSuspiciousCount);
+      const signals = (ctx?.cv_signals || {}) as Record<string, any>;
+      const analysisState: ImageGroup['analysisState'] = signals.fast_triage_timeout || signals.analysis_pending
+        ? 'pending'
+        : signals.analysis_degraded ? 'degraded' : 'complete';
+      const brand = ctx ? friendlyBrand(ctx.labels, ctx.ocr_text, ctx.source_name, userQuery) : 'Product';
+      const canonicalGroup: ImageGroup = {
+        source: ctx?.source_name || 'Uploaded image',
+        icon: '\uD83D\uDCF8',
+        trustLevel: trust,
+        friendlyBrand: brand,
+        securityNote: trust === 'green' ? TRUST_NOTES.green : buildBuyerSecurityNotice(signals),
+        analysisState,
+        products: canonicalProducts.slice(0, 10).map(product => ({
+          ...product,
+          reasons: product.reasons || product.why || [],
+        })),
+        summary: canonicalSummary || (canonicalProducts.length > 0
+          ? 'Matches from the shared recommendation turn.'
+          : 'No eligible catalog match was found for the current image, query, and constraints.'),
+        context: ctx,
+      };
+      if (buildSeq === buildSeqRef.current) {
+        setGroups([canonicalGroup]);
+        setLoading(false);
+        setClarifyQuestions(null);
+        if (traceId) onTraceId?.(traceId);
+      }
+      return;
+    }
     if (imageContexts.length === 0) {
       setGroups([]);
       setLoading(false);
@@ -837,6 +897,12 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     const perImageSettled = await Promise.allSettled(
       imageContexts.map((ctx, i) => (async () => {
         const trust = computeTrustLevel(ctx.cv_signals || {}, sessionSuspiciousCount);
+        const analysisState: ImageGroup['analysisState'] = (ctx.cv_signals as Record<string, any>)?.fast_triage_timeout
+          || (ctx.cv_signals as Record<string, any>)?.analysis_pending
+          ? 'pending'
+          : (ctx.cv_signals as Record<string, any>)?.analysis_degraded
+            ? 'degraded'
+            : 'complete';
         const brand = friendlyBrand(ctx.labels, ctx.ocr_text, ctx.source_name, userQuery);
         const note = TRUST_NOTES[trust];
         const forcedOffDomain = looksOffDomainContext(ctx, brand);
@@ -1005,6 +1071,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               source: ctx.source_name || `Image ${i + 1}: ${brand}`,
               icon: '\uD83D\uDCF8',
               trustLevel,
+              analysisState,
               friendlyBrand: brand,
               securityNote,
               products,
@@ -1158,7 +1225,8 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
 
     setGroups(built);
     setLoading(false);
-  }, [imageContexts, userQuery, sessionSuspiciousCount, onTraceId, runBrandFallbackChain]);
+  }, [canonicalProducts, canonicalSummary, imageContexts, userQuery, sessionSuspiciousCount,
+      onTraceId, runBrandFallbackChain, traceId]);
 
   const handleWiden = useCallback(async (groupIdx: number, widenAmount: number) => {
     const group = groups[groupIdx];
@@ -1257,7 +1325,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             <div className={styles.anchorHeader}>
               <span className={styles.anchorIcon}>{group.icon}</span>
               <span>{group.source}</span>
-              <span className={`${styles.trustBadge} ${trustClass}`}>{TRUST_LABELS[group.trustLevel]}</span>
+              <span className={`${styles.trustBadge} ${trustClass}`}>{groupStatusLabel(group)}</span>
               {group.domainBadge && <span className={styles.domainBadge}>{group.domainBadge}</span>}
               {group.fillBadge && <span className={styles.fillBadge}>{group.fillBadge}</span>}
               {group.verdictLabel && <span className={styles.domainBadge}>{group.verdictLabel}{group.confidenceBand ? ` • ${group.confidenceBand}` : ''}</span>}
@@ -1339,7 +1407,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
                         <div className={styles.cardName}>{title}</div>
                       </a>
                       <div className={styles.cardMeta}>{subtitle || p.specs_summary || '\u2014'}</div>
-                      {(() => { const pros = buildProsNote(p, userQuery); return pros ? <div className={styles.cardFit}>\u2713 {pros}</div> : null; })()}
+                      {(() => { const pros = buildProsNote(p, userQuery); return pros ? <div className={styles.cardFit}>{'✓ '}{pros}</div> : null; })()}
                       {p.use_case_fit && p.use_case_fit !== buildProsNote(p, userQuery) && <div className={styles.cardFit}>{p.use_case_fit}</div>}
                       {p.sku && <a className={styles.cardLink} href={`/ui/product/${encodeURIComponent(p.sku)}`}>View details</a>}
                     </div>

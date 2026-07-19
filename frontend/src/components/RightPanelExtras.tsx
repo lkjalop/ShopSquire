@@ -69,6 +69,8 @@ export default function RightPanelExtras({
   autoIssueType,
   initialImageContexts,
   userQuery,
+  canonicalProducts,
+  canonicalSummary,
 }: {
   mode: 'faq' | 'cv' | 'visual_search' | 'image_context';
   onEscalate?: (payload: any) => void;
@@ -86,6 +88,9 @@ export default function RightPanelExtras({
   initialImageContexts?: ImageAnalysisContext[];
   /** User's original query text (passed through for visual_search mode). */
   userQuery?: string;
+  /** Shared chat/recommendation slate. Supplying this makes visual search renderer-only. */
+  canonicalProducts?: ImageRecommendProps['canonicalProducts'];
+  canonicalSummary?: string;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
@@ -612,6 +617,8 @@ export default function RightPanelExtras({
           onTraceId={onTraceId}
           onClarify={onClarify}
           onAdd={onAdd}
+          canonicalProducts={canonicalProducts}
+          canonicalSummary={canonicalSummary}
         />
       </div>
     );

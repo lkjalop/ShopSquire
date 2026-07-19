@@ -3,7 +3,7 @@
  * Unit tests for computeTrustLevel — covers steg + all trust branches.
  */
 import { describe, it, expect } from 'vitest';
-import { computeTrustLevel, shouldUseFastPath, isProofRelevant, normalizeUseCaseFit } from '../ImageRecommendPanel';
+import { buildProsNote, computeTrustLevel, shouldUseFastPath, isProofRelevant, normalizeUseCaseFit } from '../ImageRecommendPanel';
 
 const clean = () => ({});
 
@@ -109,5 +109,25 @@ describe('normalizeUseCaseFit', () => {
   it('preserves string fit summaries and rejects unknown shapes', () => {
     expect(normalizeUseCaseFit('Good office fit')).toBe('Good office fit');
     expect(normalizeUseCaseFit(null)).toBeNull();
+  });
+});
+
+describe('buildProsNote', () => {
+  it('does not label generic integrated Radeon graphics as a discrete GPU', () => {
+    expect(buildProsNote({ name: 'Office laptop', specs_summary: '16GB · Radeon Graphics' } as any, 'office work'))
+      .toBe('16 GB RAM');
+  });
+
+  it('does label explicit Radeon RX and GeForce RTX models as discrete GPUs', () => {
+    expect(buildProsNote({ name: 'Creator laptop', specs_summary: '16GB · Radeon RX 7700S' } as any, 'image generation'))
+      .toContain('Discrete GPU');
+    expect(buildProsNote({ name: 'Gaming laptop', specs_summary: '16GB · GeForce RTX 4060' } as any, 'gaming'))
+      .toContain('Discrete GPU');
+  });
+});
+
+describe('analysis availability is not a security verdict', () => {
+  it('does not mark a fast-triage timeout as suspicious', () => {
+    expect(computeTrustLevel({ fast_triage_timeout: true } as any, 0)).toBe('green');
   });
 });

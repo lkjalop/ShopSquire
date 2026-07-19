@@ -35,6 +35,7 @@ export default function CartPanel({
   onSetQty,
   traceId,
   onTraceId,
+  onSourcingTraceId,
   priorSkus,
   onClearPrior,
 }: {
@@ -47,6 +48,7 @@ export default function CartPanel({
   onSetQty?: (sku: string, qty: number) => Promise<void>;
   traceId?: string | null;
   onTraceId?: (traceId: string | null) => void;
+  onSourcingTraceId?: (traceId: string) => void;
   priorSkus?: string[];                    // items carried over from a previous session (App snapshots)
   onClearPrior?: () => Promise<void>;      // remove ONLY those, keeping what was added this session
 }) {
@@ -184,19 +186,34 @@ export default function CartPanel({
         setSourcingNote('This order changed after a supplier was already engaged — an operator must amend it. Nothing was re-sent.');
         return;
       }
-      for (const c of sourcedCasesFrom(res)) {
+      const cases = sourcedCasesFrom(res);
+      const caseCount = sourcedCaseCountFrom(res);
+      if (traceId && caseCount > 0) onSourcingTraceId?.(traceId);
+      if (res.idempotent) {
+        setSourcingNote(`${caseCount} sourcing request(s) were already confirmed earlier. No duplicate RFQ was created; open the original case in Admin to review its draft and audit.`);
+        return;
+      }
+      let committed = 0;
+      for (const c of cases) {
         // retry once: a multi-case commit burst can hit a transient write lock — without the retry one
         // supplier's case silently stays uncommitted and its RFQ is never drafted (observed live).
-        try { await withRetry(() => commitFulfillmentCase((c as any).case_id, uid)); }
-        catch { /* case stays uncommitted after retries — visible in the case queue, never silent-lost */ }
+        try {
+          await withRetry(() => commitFulfillmentCase((c as any).case_id, uid));
+          committed += 1;
+        } catch {
+          // Report the partial failure below. The case remains visible in the operator queue for retry.
+        }
       }
-      const caseCount = sourcedCaseCountFrom(res);
-      if (caseCount > 0) {
+      if (committed === caseCount && caseCount > 0) {
         setSourcingNote(`${caseCount} sourcing request(s) committed — supplier RFQ(s) drafted for human review (nothing sent). Open Decision Trace → Procurement to see the drafts + audit.`);
         // Do NOT overwrite the decision trace id with order_group_id here: the Procurement tab resolves
         // the case via /cases/by-trace/{source_trace_id}; traceId already IS that trace.
+      } else if (caseCount > 0) {
+        setSourcingNote(`${committed} of ${caseCount} sourcing request(s) committed. The remaining case(s) need operator retry; no draft is claimed for them.`);
       }
-    } catch { /* best-effort — the delivery-plan confirm itself still stands */ }
+    } catch {
+      setSourcingNote('The delivery plan was confirmed, but sourcing could not be recorded. Retry or ask an operator; no supplier message was sent.');
+    }
   };
   const splitBlocksCheckout = splitHasSplit && !splitConfirmed;
 
