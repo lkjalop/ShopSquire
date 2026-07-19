@@ -32,6 +32,16 @@ def test_generic_gaming_defaults_parity():
     assert c.get("gpu_preference") == "with_discrete"
 
 
+def test_game_development_is_not_downgraded_to_consumer_gaming_defaults():
+    from src.app.services.recommend_workload_stage import apply_workload_requirements
+    c: dict = {"use_case": "game_development", "budget_max": 1640, "specs": []}
+    ctx = apply_workload_requirements(
+        "25 laptops for gaming development", c,
+        gpu_pref_inferred=False, record_failure=lambda *a, **k: None)
+    assert ctx["generic_gaming"] is False
+    assert c["use_case"] == "game_development"
+
+
 def test_fit_verdicts_meets_minimum_vs_recommended():
     from src.app.services.workload_fit import fit_verdicts, fit_evidence_note
     floors = {"min_ram_gb": 12, "recommended_ram_gb": 16, "min_gpu_vram_gb": 6,

@@ -55,6 +55,26 @@
         "battery_priority"
       ]
     },
+    "game_development": {
+      "label": "Game Development / Real-time 3D",
+      "nqe_persona": "You are helping a game developer choose a machine for engine editors, asset creation, builds, and testing.",
+      "required_specs": {
+        "gpu_tier": "discrete_6gb",
+        "ram_gb_min": 16,
+        "storage_gb_min": 512
+      },
+      "soft_requirements": [
+        "32GB RAM for larger projects and simultaneous editor/tool workloads",
+        "Dedicated GPU with 6GB+ VRAM for real-time 3D viewports and shaders",
+        "Fast NVMe storage for project imports and build artifacts",
+        "Sustained cooling for shader compilation and local builds"
+      ],
+      "exclusion_rules": ["integrated_gpu_only"],
+      "budget_floor": 1000,
+      "emphasize_specs": ["gpu_model", "gpu_vram_gb", "ram_gb", "storage_type"],
+      "nqe_must_ask": ["software_requirements", "project_complexity", "budget"],
+      "nqe_skip": ["target_games", "gaming_depth"]
+    },
     "university": {
       "label": "University / Student",
       "nqe_persona": "You are helping a university student find a reliable laptop for academic work.",

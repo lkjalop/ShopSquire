@@ -41,6 +41,25 @@ class BudgetParse:
         return self.budget_min is not None or self.budget_max is not None
 
 
+def classify_budget_scope(text: str) -> str:
+    """Classify an explicitly stated budget as ``per_unit``, ``total`` or ``unknown``.
+
+    This is deliberately separate from amount parsing: callers may receive the amount as a
+    structured field while scope still lives in the buyer's words.  Per-unit language wins when
+    both families appear because it is the more precise authorization.
+    """
+    q = str(text or "").lower()
+    if re.search(r"\b(?:each|apiece|a\s+piece|per\s+(?:unit|item|device|laptop|computer|pc))\b", q):
+        return "per_unit"
+    if re.search(
+        r"\b(?:total\s+budget|budget\s+(?:for|across)\s+(?:all|the\s+whole)|"
+        r"all\s+in|altogether|combined|grand\s+total|in\s+total|for\s+all)\b",
+        q,
+    ):
+        return "total"
+    return "unknown"
+
+
 def _to_int(num: str, suffix: Optional[str]) -> Optional[int]:
     try:
         v = float(str(num).replace(",", ""))

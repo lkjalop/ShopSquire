@@ -12,6 +12,7 @@ from src.app.services.recommend_message_decorator import (
     apply_confidence_gate,
     apply_security_event_prefix,
     annotate_use_case_suitability,
+    partition_capability_eligible,
 )
 
 
@@ -260,3 +261,33 @@ class TestAnnotateUseCaseSuitability:
         )
         assert len(traced) == 1
         assert traced[0]["event_type"] == "use_case_suitability_assessed"
+
+
+class TestPartitionCapabilityEligible:
+    def test_required_capability_failure_is_read_only_nearest_fit(self):
+        def assess(_use_case, specs):
+            ok = bool(specs.get("has_dedicated_gpu"))
+            return {
+                "suitable": ok,
+                "verdict": "fully_suitable" if ok else "mostly_suitable",
+                "gaps": [] if ok else ["Dedicated GPU required"],
+                "strengths": [],
+                "excess": [],
+                "overkill_score": 0.0,
+            }
+
+        rows = [
+            {"sku": "IGPU", "specs": {}, "cart_eligible": True},
+            {"sku": "DGPU", "specs": {"gpu": "RTX 4060"}, "cart_eligible": True},
+        ]
+        eligible, nearest = partition_capability_eligible(
+            rows,
+            use_case_match="game_development",
+            use_case_specs={"gpu_needed": True},
+            assess_fn=assess,
+        )
+
+        assert [row["sku"] for row in eligible] == ["DGPU"]
+        assert [row["sku"] for row in nearest] == ["IGPU"]
+        assert nearest[0]["cart_eligible"] is False
+        assert nearest[0]["cart_ineligible_reason"] == "minimum_workload_capability_not_met"

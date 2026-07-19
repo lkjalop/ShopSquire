@@ -56,6 +56,18 @@ def test_brand_negation_extracted_and_clamped(db):
     assert d.brand_filter is None and d.preferred_brand is None   # exclusion ≠ inclusion
 
 
+def test_explicit_negation_repairs_model_positive_brand_contradiction(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+    add_sold_node(db, node_handle="el-6-6")
+    d = route_turn(
+        db,
+        _env("a work laptop under $1900, not Apple"),
+        llm_fn=_stub(brand="apple", prefer_brand=None, exclude_brand=None, sort=None),
+    )
+    assert d.exclude_brand == "Apple"
+    assert d.brand_filter is None
+
+
 def test_hard_filter_suppresses_duplicate_soft_band(db):
     from src.app.services.taxonomy_registry import add_sold_node
     add_sold_node(db, node_handle="el-6-6")

@@ -64,6 +64,15 @@
         "gpu": "discrete_6gb"
       }
     },
+    "game_development": {
+      "label": "Game Development / Real-time 3D",
+      "min_price_floor": 1000,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "discrete_6gb"
+      }
+    },
     "content_creator": {
       "label": "Content Creator",
       "min_price_floor": 900,

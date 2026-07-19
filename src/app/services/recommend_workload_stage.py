@@ -90,10 +90,12 @@ def apply_workload_requirements(
     try:
         q_low = str(query_effective or "").lower()
         uc_low = str(constraints.get("use_case") or "").lower()
-        generic_gaming = (
-            ("gaming" in q_low or uc_low in {"gaming", "gaming_casual", "gaming_competitive", "gaming_aaa_heavy", "gaming_light"})
-            and not ctx["games"]
-        )
+        gaming_use_case = uc_low in {
+            "gaming", "gaming_casual", "gaming_competitive", "gaming_aaa_heavy", "gaming_light"
+        }
+        # A word such as "gaming" is not enough to override a more specific, already-normalized
+        # workload (for example game development). The profile-backed advisor owns that distinction.
+        generic_gaming = ((gaming_use_case or (not uc_low and "gaming" in q_low)) and not ctx["games"])
         ctx["generic_gaming"] = bool(generic_gaming)
         if generic_gaming:
             constraints.setdefault("specs", [])

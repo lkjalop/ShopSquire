@@ -247,6 +247,15 @@ def question_fatigue_filter(
     seen_slots: set[str] = set()
     for q in out:
         qid = str(q.get("id") or "").strip().lower()
+        qtext = str(q.get("text") or "").lower()
+        if flow == "creator" and "what kind of games" in qtext:
+            q["text"] = "Which development or creative tools will you run, and how complex are the projects?"
+            q["goal"] = "resolve_software_workload"
+            q["options"] = [
+                {"id": "tools_entry", "label": "Learning / small projects"},
+                {"id": "tools_realtime_3d", "label": "Real-time 3D / engine editor"},
+                {"id": "tools_heavy", "label": "Large scenes / heavy rendering and builds"},
+            ]
         slot = question_slot_from_id(qid)
         q["question_slot"] = slot
         asked_recently = False
@@ -391,7 +400,7 @@ def question_flow(
     use_case = str(c.get("use_case") or "").lower()
     use_case_tags = [str(x).lower() for x in (c.get("use_case_tags") or [])]
 
-    if use_case in {"content_creator", "content_creation", "ai_ml_workstation", "engineering_student", "architecture_student", "data_science_student"}:
+    if use_case in {"content_creator", "content_creation", "game_development", "ai_ml_workstation", "engineering_student", "architecture_student", "data_science_student"}:
         return "creator"
     if use_case.startswith("office_") or any("office_" in t for t in use_case_tags):
         return "office"
@@ -419,7 +428,8 @@ def is_techy_query(query: str | None) -> bool:
     return any(tok in q for tok in _TECHY_QUERY_TOKENS)
 
 
-def append_gpu_disambiguation_question(existing: list[dict] | None, query: str | None = None) -> list[dict]:
+def append_gpu_disambiguation_question(existing: list[dict] | None, query: str | None = None,
+                                       use_case: str | None = None) -> list[dict]:
     """ADAPTER: Electronics-specific GPU tier disambiguation."""
     out = [q for q in (existing or []) if isinstance(q, dict)]
     qid = "ask_gpu_preference"
@@ -427,7 +437,14 @@ def append_gpu_disambiguation_question(existing: list[dict] | None, query: str |
         return out
     techy = is_techy_query(query)
     q_low = str(query or "").lower()
-    gaming_query = any(tok in q_low for tok in ("gaming", "gamer", "game", "esports", "fps"))
+    normalized_use_case = str(use_case or "").strip().lower()
+    development_workload = (bool(normalized_use_case) and not normalized_use_case.startswith("gaming")) or any(tok in q_low for tok in (
+        "game development", "gaming development", "game developer", "develop games",
+        "build games", "unity", "unreal engine", "godot",
+    ))
+    gaming_query = (not development_workload) and any(
+        tok in q_low for tok in ("gaming", "gamer", "game", "esports", "fps")
+    )
 
     if gaming_query:
         question_text = "What kind of games will you mainly play? This determines the GPU tier needed."
@@ -525,7 +542,8 @@ def apply_intent_specific_question_bank(
         return out
     flow = question_flow(query=query, constraints=constraints)
     if flow == "creator":
-        out = append_gpu_disambiguation_question(out, query)
+        out = append_gpu_disambiguation_question(
+            out, query, use_case=str((constraints or {}).get("use_case") or ""))
     for q in out:
         qid = str(q.get("id") or "").strip().lower()
         if qid in {"ask_specs", "ask_requirements", "ask_system_requirements"} and flow in {"student", "office"}:

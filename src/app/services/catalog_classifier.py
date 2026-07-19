@@ -81,7 +81,8 @@ def _node_token_index() -> Dict[str, frozenset]:
     return {h: frozenset(_tokens(n.full_path)) for h, n in _nodes().items()}
 
 
-def candidate_nodes(text: str, *, top_k: int = TOP_K) -> List[Tuple[TaxonomyNode, float]]:
+def candidate_nodes(text: str, *, top_k: int = TOP_K,
+                    semantic: bool = True) -> List[Tuple[TaxonomyNode, float]]:
     """Top-K taxonomy candidates for a product text: SEMANTIC (embedding index) + LEXICAL
     (coverage-weighted token overlap), unioned. Embeddings fix what tokens can't reach —
     'Ibuprofen 200mg' shares zero tokens with 'Pain Relief & Fever Reducers' — and the union
@@ -89,6 +90,11 @@ def candidate_nodes(text: str, *, top_k: int = TOP_K) -> List[Tuple[TaxonomyNode
     (taxonomy_embedding_index logs); the downstream clamp/prior/earn-specificity are
     identical either way — only candidate SOURCING differs."""
     lexical = _lexical_candidates(text, top_k=top_k)
+    # Interactive routing already has a model judgment plus registry/sellability clamps. It uses
+    # lexical candidates as hints and avoids a second model-server round trip. Catalog onboarding
+    # keeps semantic=True because zero-overlap classification is its primary job.
+    if not semantic:
+        return lexical
     semantic: List[Tuple[TaxonomyNode, float]] = []
     try:
         from src.app.services.taxonomy_embedding_index import semantic_top_k

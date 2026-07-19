@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from src.app.services.recommend_utils import _extract_candidate_numeric_specs
+
 
 def apply_confidence_gate(
     assistant_message: Optional[str],
@@ -255,14 +257,7 @@ def annotate_use_case_suitability(
             return results, payload
         verdicts: List[Dict[str, Any]] = []
         for r in results[:3]:
-            specs_dict = r.get("specs") if isinstance(r.get("specs"), dict) else {}
-            prod_specs = {
-                "ram_gb": specs_dict.get("ram_gb"),
-                "storage_gb": specs_dict.get("storage_gb"),
-                "has_dedicated_gpu": bool(specs_dict.get("gpu")),
-                "gpu_vram_gb": specs_dict.get("gpu_vram_gb"),
-                "display_inches": specs_dict.get("display_inches"),
-            }
+            prod_specs = _extract_candidate_numeric_specs(r)
             verdict = assess_fn(use_case_match, prod_specs)
             verdicts.append(verdict)
             r["use_case_suitability"] = {
@@ -309,3 +304,41 @@ def annotate_use_case_suitability(
     except Exception:
         pass
     return results, payload
+
+
+def partition_capability_eligible(
+    results: List[Dict[str, Any]],
+    *,
+    use_case_match: Optional[str],
+    use_case_specs: Optional[Dict[str, Any]],
+    assess_fn: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Keep hard-capability failures out of the actionable primary slate.
+
+    Missing optional metadata remains eligible because the assessor only emits a
+    gap for a known violation or a mandatory capability such as a dedicated GPU.
+    Failed products remain available as read-only nearest-fit evidence.
+    """
+    if not use_case_match or not use_case_specs:
+        return results, []
+
+    eligible: List[Dict[str, Any]] = []
+    nearest: List[Dict[str, Any]] = []
+    for row in results:
+        verdict = assess_fn(use_case_match, _extract_candidate_numeric_specs(row))
+        row["use_case_suitability"] = {
+            "use_case": use_case_match,
+            "suitable": verdict.get("suitable"),
+            "verdict": verdict.get("verdict"),
+            "gaps": verdict.get("gaps", [])[:3],
+            "strengths": verdict.get("strengths", [])[:3],
+            "excess": verdict.get("excess", [])[:3],
+            "overkill_score": verdict.get("overkill_score", 0.0),
+        }
+        if verdict.get("suitable") is False:
+            row["cart_eligible"] = False
+            row["cart_ineligible_reason"] = "minimum_workload_capability_not_met"
+            nearest.append(row)
+        else:
+            eligible.append(row)
+    return eligible, nearest

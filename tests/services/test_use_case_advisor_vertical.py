@@ -35,6 +35,11 @@ class TestElectronicsUseCaseMatch:
         with _vertical("electronics"):
             assert match_use_case_from_query("AAA gaming ultra settings") == "gaming_aaa_heavy"
 
+    def test_game_development_is_not_playing_games(self):
+        with _vertical("electronics"):
+            assert match_use_case_from_query("25 laptops for gaming development") == "game_development"
+            assert match_use_case_from_query("Unity game development workstation") == "game_development"
+
     def test_medical_student(self):
         with _vertical("electronics"):
             assert match_use_case_from_query("medical student anatomy") == "medical_student"
@@ -62,6 +67,10 @@ class TestElectronicsUseCaseMatch:
             persona_map = _get_use_case_to_persona()
             assert persona_map.get("university_general") == "student"
             assert persona_map.get("engineering_student") == "student"
+
+    def test_persona_game_developer(self):
+        with _vertical("electronics"):
+            assert _get_use_case_to_persona().get("game_development") == "developer"
 
 
 # ── Pharmacy: no electronics bleed ──

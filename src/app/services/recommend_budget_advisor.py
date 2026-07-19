@@ -814,7 +814,9 @@ def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: 
             fallback = str(price_meta.get("fallback") or "").strip().lower()
             use_case_label = str(constraints.get("use_case") or "").replace("_", " ").strip()
             category_label = use_case_label or "laptops"
-            gaming_like = any(tok in q_low for tok in ("gaming", "esports", "fps")) or "gaming" in use_case_label.lower()
+            gaming_like = use_case_label.lower().startswith("gaming") or (
+                not use_case_label and any(tok in q_low for tok in ("gaming", "esports", "fps"))
+            )
             if gaming_like:
                 gaming_ready_rows = [
                     row for row in (results or [])
