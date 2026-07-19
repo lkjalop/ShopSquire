@@ -79,6 +79,21 @@ def _signal_scope(entity_ref: Any, sku: str) -> str:
     return "related"
 
 
+def _finding_is_upward(f: Dict[str, Any]) -> bool:
+    """A demand finding is UPWARD (spike/rising/surge) vs DOWNWARD (slowdown/falling). Direction is
+    carried in evidence['direction'] by market_analysis; fall back to summary keywords. Unknown ->
+    NOT upward (conservative: never expand inventory on an ambiguous signal)."""
+    d = str((f.get("evidence") or {}).get("direction") or f.get("direction") or "").lower()
+    if d in ("spike", "rising", "surge", "up", "increase"):
+        return True
+    if d in ("slowdown", "falling", "down", "decrease"):
+        return False
+    s = str(f.get("summary") or "").lower()
+    if any(k in s for k in ("slowdown", "slowing", "falling", "declin", "downward", "trending down")):
+        return False
+    return any(k in s for k in ("spike", "rising", "surg", "upward", "trending up"))
+
+
 def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, Any]) -> Dict[str, str]:
     """Deterministic, explainable finding→action synthesis (NO LLM, NO product vocabulary). Maps the
     strongest active market finding to a bounded recommendation for the operator's procurement decision.
@@ -95,9 +110,17 @@ def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, An
     if "competitor_undercut" in item_types:
         return {"action": "review pricing before promoting",
                 "rationale": "a competitor is priced below our list for this line — hold margin, favour bundles over blunt discounting"}
-    if "demand_shift" in types or "demand_forecast" in types:
+    # P0-trust: inventory expansion requires SCOPED UPWARD demand AND insufficient ATP (a real
+    # shortfall). A bare demand_shift may be a SLOWDOWN, and one on a DIFFERENT product must not
+    # drive this line — recommending "secure inventory ahead of demand" while signals say demand is
+    # falling contradicts the trace. Downward / sufficient-ATP / off-scope falls through to the
+    # shortfall / seasonal / honest-default branches below.
+    _demand = [f for f in (findings or [])
+               if str(f.get("finding_type") or "").lower() in ("demand_shift", "demand_forecast")
+               and f.get("scope") in (None, "this_item")]
+    if short > 0 and any(_finding_is_upward(f) for f in _demand):
         return {"action": "secure inventory ahead of demand",
-                "rationale": "demand is trending up for this line — reorder ahead of the curve and raise its prominence"}
+                "rationale": "demand is trending up for this line and stock is short — reorder ahead of the curve and raise its prominence"}
     if "seasonal_demand" in types:
         return {"action": "time the reorder to the season",
                 "rationale": "a seasonal pattern is active — align supplier lead time with the upcoming peak"}
@@ -117,24 +140,12 @@ def _emit_market_intelligence(*, trace_id: Optional[str], query: Optional[str], 
         return
     try:
         from src.app.models.db import db_session as _mi_db
-        from src.app.services.market_analysis import load_recent_findings
-        from src.app.services.market_intelligence_agent import _finding_dict, _scope_findings, _tokenize
+        from src.app.services.market_intelligence_agent import gather_market_context
         sku = str(avail.get("sku") or "")
         with _mi_db() as _mdb:
-            raw = load_recent_findings(_mdb, limit=24)
-        scoped = _scope_findings(raw, query_tokens=_tokenize(query), result_skus=[sku] if sku else [])
-        # TIERED scoping for a PER-LINE procurement decision (reviewer: "exact SKU first, market second,
-        # related last"): this_item findings always lead; market-level fills the card; 'related' findings
-        # (free-text entities from OTHER queries) are last-resort context ONLY when the card would
-        # otherwise be near-empty — they were the noise crowding out the per-SKU story. Stable sort keeps
-        # the shared scoper's severity×confidence order within each tier.
-        _tier_rank = {"this_item": 0, "market": 1, "related": 2}
-        annotated = [(f, _signal_scope(getattr(f, "entity_ref", None), sku)) for f in scoped]
-        annotated.sort(key=lambda fs: _tier_rank[fs[1]])
-        picked = [fs for fs in annotated if fs[1] != "related"][:4]
-        if len(picked) < 2:   # near-empty card → allow up to 2 related items as honest context
-            picked += [fs for fs in annotated if fs[1] == "related"][: 2 - len(picked)]
-        findings = [{**_finding_dict(f), "scope": scope} for f, scope in picked]
+            context = gather_market_context(
+                _mdb, query=query, result_skus=[sku] if sku else [], max_findings=4, force=True)
+        findings = list(context.get("market_findings") or [])[:4]
         rec = _recommend_market_action(findings, avail)
         _emit_trace(trace_id, "market_intelligence_assessed", "Market_Intelligence_Agent",
                     {"sku": sku or None, "signal_count": len(findings),

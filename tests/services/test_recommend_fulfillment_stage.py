@@ -6,6 +6,7 @@ durable case advanced to GATE 1 (AWAITING_BUYER_COMMITMENT) and exposes a buyer-
 from __future__ import annotations
 
 import pytest
+from contextlib import contextmanager
 
 from src.app.services import recommend_fulfillment_stage as stage
 
@@ -223,6 +224,34 @@ def test_recommend_market_action_maps_findings_to_bounded_actions():
     assert "pricing" in rec([{"finding_type": "competitor_undercut"}], {"shortfall": 9})["action"]
 
 
+def test_market_trace_uses_subject_scoped_context_api(monkeypatch):
+    """The legacy fulfilment projection must not regress to token-overlap/private helpers."""
+    calls = []
+    emitted = []
+
+    @contextmanager
+    def fake_session():
+        yield object()
+
+    def fake_context(db, **kwargs):
+        calls.append(kwargs)
+        return {"market_findings": [{"finding_type": "demand_shift", "scope": "this_item",
+                                      "severity": "warn", "confidence": 0.9,
+                                      "summary": "Demand increased."}]}
+
+    monkeypatch.setattr("src.app.models.db.db_session", fake_session)
+    monkeypatch.setattr("src.app.services.market_intelligence_agent.gather_market_context", fake_context)
+    monkeypatch.setattr(stage, "_emit_trace", lambda *args, **kwargs: emitted.append((args, kwargs)))
+
+    stage._emit_market_intelligence(trace_id="trace-1", query="bulk laptop order",
+                                    avail={"sku": "SKU-1", "shortfall": 4})
+
+    assert calls == [{"query": "bulk laptop order", "result_skus": ["SKU-1"],
+                      "max_findings": 4, "force": True}]
+    assert emitted and emitted[0][0][1] == "market_intelligence_assessed"
+    assert emitted[0][0][3]["signals"][0]["scope"] == "this_item"
+
+
 def test_signal_scope_tiers_this_item_market_related():
     """Tiered MI scoping: exact SKU = this_item; empty/short market labels = market; multi-token
     free-text entities (another query's phrase) = related — the noise class that must not crowd a
@@ -243,7 +272,11 @@ def test_sku_specific_action_requires_this_item_signal():
     other_sku_undercut = [{"finding_type": "competitor_undercut", "scope": "related"},
                           {"finding_type": "demand_shift", "scope": "market"}]
     out = rec(other_sku_undercut, {"shortfall": 5})
-    assert "inventory" in out["action"]                       # demand wins; pricing NOT recommended
+    # off-scope undercut does NOT drive pricing; the market-scope demand_shift is off THIS line and
+    # carries no upward direction, so it does not trigger inventory expansion either (P0-trust) —
+    # the action correctly falls through to the shortfall branch.
+    assert "pricing" not in out["action"]
+    assert "shortfall" in out["action"].lower()
     this_sku_undercut = [{"finding_type": "competitor_undercut", "scope": "this_item"}]
     assert "pricing" in rec(this_sku_undercut, {})["action"]  # exact-SKU undercut still decisive
     # unscoped findings (legacy/test callers) keep the old behaviour
