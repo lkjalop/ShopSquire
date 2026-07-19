@@ -28,6 +28,9 @@ _QTY_PRECEDING_OK = frozenset({
     "with", "need", "needs", "want", "wants", "get", "buy", "order", "purchase", "about", "around",
     "roughly", "approx", "approximately", "so", "for", "of", "the", "some", "extra", "another", "me",
     "us", "like", "say", "grab", "source", "and", "plus", "have", "getting", "buying", "ordering",
+    # Catalog commands before a count: "suggest 10 suitable laptops" is a quantity request,
+    # while the existing name-token guard still rejects product names such as "Dell 15 laptops".
+    "suggest", "recommend", "show", "find", "list", "compare",
     # amendment phrasings — "make it 12 units", "change that to 10", "just 5" (all function words;
     # without these the name-token guard built for "dell 15" wrongly rejected fresh amendments,
     # letting a REMEMBERED qty beat a fresh one — caught live by the T3 memory probe)

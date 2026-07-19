@@ -227,7 +227,7 @@ def test_single_op_is_confirmation_only_by_default(wired):
     assert items[0]["quantity"] == 1                 # untouched until confirm
 
 
-def test_all_rejected_reports_cart_not_updated(wired, monkeypatch):
+def test_over_limit_increase_confirms_then_handler_rejects(wired, monkeypatch):
     # review-5 #9: qty 600 > handler line gate (500) → rejected → cart_updated must be False.
     # auto-apply ON to exercise the apply-outcome path (default is confirmation-only, review-6 #4).
     monkeypatch.setenv("RECOMMEND_CART_AUTO_APPLY", "1")
@@ -241,11 +241,15 @@ def test_all_rejected_reports_cart_not_updated(wired, monkeypatch):
                            "confidence": 0.9}))
     assert payload is not None
     assert payload["cart_updated"] is False
-    assert payload["cart_mutation"]["rejected"]
-    assert payload["cart_mutation"]["rejected"][0]["error"]["error"] == "quantity_out_of_range"
+    assert payload["cart_mutation"]["needs_confirmation"] is True
+    assert "review and reconfirm the updated delivery plan" in payload["message"]
+    from src.app.services.cart_mutation_service import apply_plan
+    outcome = apply_plan(payload["cart_mutation"]["plan_id"], tenant_id="t1", uid=uid)
+    assert outcome["status"] == "rejected"
+    assert outcome["error"]["error"] == "quantity_out_of_range"
 
 
-def test_nl_over_stock_rejected_not_sourced(wired, monkeypatch):
+def test_nl_over_stock_requires_confirmation_then_creates_sourcing_line(wired, monkeypatch):
     # review-5 #8: allow_sourcing is OFF for NL edits — exceeding stock is an honest rejection,
     # never a silent sourcing line (explicit shortfall consent arrives with C1).
     monkeypatch.setenv("RECOMMEND_CART_AUTO_APPLY", "1")   # exercise the apply path (review-6 #4)
@@ -260,10 +264,14 @@ def test_nl_over_stock_rejected_not_sourced(wired, monkeypatch):
         llm_fn=_fixed_llm({"ops": [{"action": "set_quantity", "targets": ["HP Envy"], "quantity": 300}],
                            "confidence": 0.9}))
     assert payload["cart_updated"] is False
-    err = payload["cart_mutation"]["rejected"][0]["error"]
-    assert err["error"] in ("insufficient_stock", "out_of_stock")
+    assert payload["cart_mutation"]["needs_confirmation"] is True
+    from src.app.services.cart_mutation_service import apply_plan
+    outcome = apply_plan(payload["cart_mutation"]["plan_id"], tenant_id="t1", uid=uid)
+    assert outcome["status"] == "applied"
+    assert outcome["applied"][0]["sourcing"] == {
+        "available_now": 100, "shortfall": 200, "requested": 300}
     _, items, _ = _get_or_create_cart(uid)
-    assert items[0]["quantity"] == 1 and not items[0].get("sourcing_required")
+    assert items[0]["quantity"] == 300 and items[0].get("sourcing_required") is True
 
 
 # ── resolve-only shadow dispatch (C0) ────────────────────────────────────────────

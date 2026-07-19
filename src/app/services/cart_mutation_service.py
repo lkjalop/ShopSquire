@@ -239,6 +239,8 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
     # stock is ADVISORY — read outside the write transaction so the txn stays single-connection.
     set_skus = [op.target_skus[0] for op in plan.ops
                 if op.action == "set_quantity" and op.target_skus]
+    set_skus.extend(op.replacement_sku for op in plan.ops
+                    if op.action == "replace_item" and op.replacement_sku)
     stock_map = _batch_stock_levels(set_skus) if set_skus else {}
     prior_items: List[Dict[str, Any]] = []
     working: List[Dict[str, Any]] = []
@@ -294,12 +296,62 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
                     sku = op.target_skus[0]
                     working, shortfall, err = apply_quantity_line(
                         working, sku, int(op.quantity or 0), stock_map.get(sku, 0),
-                        allow_sourcing=False)
+                        allow_sourcing=bool(op.allow_sourcing))
                     if err is not None:
                         _finish(plan_id, "rejected", {"error": err}, db=db)
                         db.commit()
                         return {"status": "rejected", "plan_id": plan_id, "error": err}
                     entry: Dict[str, Any] = {"action": "set_quantity", "sku": sku, "quantity": op.quantity}
+                    if shortfall:
+                        entry["sourcing"] = shortfall
+                    applied.append(entry)
+                elif op.action == "replace_item":
+                    source_sku = op.target_skus[0] if op.target_skus else ""
+                    replacement_sku = str(op.replacement_sku or "")
+                    if not source_sku or not replacement_sku:
+                        _finish(plan_id, "rejected", {"error": "invalid_replacement"}, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id,
+                                "error": {"error": "invalid_replacement"}}
+                    if not any(it.get("sku") == source_sku for it in working):
+                        error = {"error": "target_not_in_cart", "skus": [source_sku]}
+                        _finish(plan_id, "rejected", error, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id, "error": error}
+                    from src.app.services.catalog_read_model import get_variant
+                    replacement = get_variant(db, replacement_sku, tenant_id=tenant_id)
+                    if replacement is None or not replacement.active or replacement.price_cents is None:
+                        error = {"error": "replacement_unavailable", "sku": replacement_sku}
+                        _finish(plan_id, "rejected", error, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id, "error": error}
+                    qty = int(op.quantity or 0)
+                    if (op.unit_price_cents is not None
+                            and int(replacement.price_cents) != int(op.unit_price_cents)):
+                        error = {"error": "replacement_price_changed", "sku": replacement_sku,
+                                 "proposed_unit_price_cents": int(op.unit_price_cents),
+                                 "current_unit_price_cents": int(replacement.price_cents)}
+                        _finish(plan_id, "rejected", error, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id, "error": error}
+                    if (op.budget_max_cents is not None
+                            and int(replacement.price_cents) * qty > int(op.budget_max_cents)):
+                        error = {"error": "replacement_price_changed", "sku": replacement_sku,
+                                 "unit_price_cents": int(replacement.price_cents),
+                                 "budget_max_cents": int(op.budget_max_cents)}
+                        _finish(plan_id, "rejected", error, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id, "error": error}
+                    without_source = [it for it in working if it.get("sku") != source_sku]
+                    working, shortfall, err = apply_quantity_line(
+                        without_source, replacement_sku, qty, stock_map.get(replacement_sku, 0),
+                        allow_sourcing=True)
+                    if err is not None:
+                        _finish(plan_id, "rejected", {"error": err}, db=db)
+                        db.commit()
+                        return {"status": "rejected", "plan_id": plan_id, "error": err}
+                    entry = {"action": "replace_item", "sku": source_sku,
+                             "replacement_sku": replacement_sku, "quantity": qty}
                     if shortfall:
                         entry["sourcing"] = shortfall
                     applied.append(entry)

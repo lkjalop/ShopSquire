@@ -283,7 +283,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
   // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
-  const effectiveApiKey = API_KEY || getOwnerApiKey() || '';
+  // An explicitly supplied operator key must outrank the storefront's build-time merchant key;
+  // otherwise `view=operator` is silently downgraded and the drafted RFQ disappears.
+  const effectiveApiKey = getOwnerApiKey() || API_KEY || '';
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
@@ -542,10 +544,20 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     }
   }, [effectiveTraceId, effectiveApiKey, procurementCaseId]);
 
+  // A cart amendment keeps the original recommendation trace but supersedes and redrafts its
+  // fulfillment case. Refresh the read model when that lifecycle advances; otherwise the tab
+  // keeps the pre-amendment RFQ until the modal is closed and reopened.
+  const procurementRevision = events.reduce((revision, event) => {
+    if (!eventMatches(event, ['case_superseded', 'external_message_drafted', 'quote_drafted'])) {
+      return revision;
+    }
+    return String(event.id ?? event.seq ?? event.created_at ?? event.timestamp ?? revision);
+  }, '');
+
   useEffect(() => {
     if (activeTab !== 'procurement' || !effectiveTraceId) return;
     loadProcurementDetail();
-  }, [activeTab, effectiveTraceId, procurementCaseId, loadProcurementDetail]);
+  }, [activeTab, effectiveTraceId, procurementCaseId, procurementRevision, loadProcurementDetail]);
 
   // Each trace resolves its own procurement case. Drop any prior turn's resolved case id when the trace
   // changes so a normal (no-procurement) trace doesn't inherit a stale case id — which would keep the tab
@@ -3330,6 +3342,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         {procCases.length <= 1 && procCase && draft && !canSeeOperatorDraft && (
                           <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order (human-gated). Sign in with an operator key to view it.</div>
                         )}
+                        {procCases.length <= 1 && procCase && !draft && !canSeeOperatorDraft
+                          && String(procCase.state || '').toUpperCase().includes('DRAFTED') && (
+                          <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order, but supplier contact and message content are operator-only. Sign in with an operator key to view the read-only audit copy.</div>
+                        )}
                         {/* Read-only proof surface: any change to the supplier or the drafted email happens in the
                             operator console (admin), where edits re-lock the send gate — never from this trace. */}
                         {(procCases.length > 0 || (procCase && draft)) && (
@@ -3665,6 +3681,4 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     </div>
   );
 }
-
-
 

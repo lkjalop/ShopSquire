@@ -39,6 +39,15 @@ from src.app.services.taxonomy_registry import get_node, primary_sold_node, sell
 
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
+# Model-facing synonyms for the one bounded procurement lane. These are aliases, not new
+# capabilities: the facade still delegates PROCUREMENT to the established fulfillment path.
+_LANE_ALIASES = {
+    "BULK": "PROCUREMENT",
+    "BULK_QUOTE": "PROCUREMENT",
+    "QUOTE": "PROCUREMENT",
+    "RFQ": "PROCUREMENT",
+}
+
 
 def _reroute_host_node(db, envelope: TurnEnvelope, relationship: str) -> Optional[str]:
     """The DEVICE a named workload runs on (M3-C1 / review-8 #3). The OLD reroute target was
@@ -508,6 +517,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
 
     # clamp 1: lane ∈ LANES
     lane = str(data.get("lane") or "").strip().upper()
+    lane = _LANE_ALIASES.get(lane, lane)
     if lane not in LANES:
         return DEFAULT_DECISION
     # clamp 2: handle must be REGISTRY-REAL. Deliberately looser than the classifier's
@@ -661,6 +671,27 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         total_budget_cents = int(round(float(_tb) * 100))
     _bs = str(data.get("budget_scope") or "").strip().lower()
     budget_scope = _bs if _bs in ("per_unit", "total") else "unknown"
+    if quantity is None:
+        # Model omission fallback: explicit counts are recovered by the one canonical, vertical-blind
+        # grammar. Product nouns come from registry-real taxonomy candidates, not code vocabulary.
+        from src.app.services.bulk_intent import extract_quantity_span
+        unit_nouns = {
+            segment.strip().lower()
+            for candidate, _score in cands
+            for segment in candidate.full_path.split(">")
+            if segment.strip()
+        }
+        parsed_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
+        if parsed_quantity is not None:
+            quantity = parsed_quantity[0]
+    if budget_scope == "unknown":
+        from src.app.services.budget_grammar import classify_budget_scope
+        budget_scope = classify_budget_scope(envelope.query)
+    if total_budget_cents is None and budget_scope == "total":
+        from src.app.services.budget_grammar import parse_budget
+        parsed_budget = parse_budget(envelope.query)
+        if parsed_budget is not None and parsed_budget.budget_max is not None:
+            total_budget_cents = int(parsed_budget.budget_max) * 100
     _bcm = str(data.get("budget_cap_mode") or "").strip().lower()
     budget_cap_mode = _bcm if _bcm in ("hard", "soft", "ambiguous") else "hard"
 

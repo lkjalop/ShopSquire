@@ -32,6 +32,11 @@ $env:MULTI_INTENT_LLM_TIMEOUT_SEC      = "30"
 $env:LLM_PLANNER_ENABLED               = "1"
 $env:LLM_PLANNER_TIMEOUT_SEC           = "20"    # qwen3:14b measures 4-7s on planner prompts
 $env:OLLAMA_KEEP_ALIVE                 = "30m"    # pin generate/vision models resident (P0 lever)
+# Serve the bounded V2 core for its eligible recommendation lanes. Procurement and unsupported
+# lanes still delegate through the facade to their mature handlers; cart mutations remain
+# confirmation-gated because RECOMMEND_CART_AUTO_APPLY is intentionally not enabled here.
+$env:RECOMMEND_CORE_MODE               = "primary"
+$env:RECOMMEND_CART_SERVE              = "1"
 # URL guard is fail-closed. Explicitly authorize only the local Ollama endpoints used by this demo;
 # without this, a normal launcher restart silently downgrades image identity to the filename fallback.
 $env:INTERNAL_SERVICE_ALLOWLIST        = "127.0.0.1:11434,localhost:11434"

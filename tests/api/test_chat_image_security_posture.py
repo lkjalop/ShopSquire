@@ -54,9 +54,10 @@ def test_chat_image_security_posture_uncertain_ocr_is_degraded_not_suspicious():
 
 
 def test_chat_image_timeout_is_pending_not_suspicious():
-    out = _derive_image_security_posture({"vision_pending": True})
+    out = _derive_image_security_posture({"fast_triage_timeout": True})
 
     assert out["route"] == "analysis_pending"
     assert out["analysis_pending"] is True
+    assert out["needs_human_review"] is False
     assert out["security_risk"] is False
     assert out["image_untrusted"] is False

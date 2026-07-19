@@ -38,7 +38,7 @@ import {
   clearStoredRole,
   clearStoredUid,
   getStoredAuthIdentity,
-  getStoredUid,
+  getOrCreateStoredUid,
   setStoredAuthIdentity,
 } from './lib/browserSession';
 
@@ -89,7 +89,7 @@ type ChatMessage = {
   undoServer?: boolean;                  // V2 cart lane: undo via the server-side snapshot (POST /cart/undo)
   // V2 cart lane (C2): a CONFIRM-tier mutation plan — nothing has touched the cart yet; the
   // Confirm button applies it via POST /cart/mutations/{plan_id}/apply (idempotent, stale-guarded).
-  cartConfirm?: { planId: string; ops: { action: string; target_skus?: string[]; quantity?: number }[]; expiresAt?: string };
+  cartConfirm?: { planId: string; ops: { action: string; target_skus?: string[]; quantity?: number; replacement_sku?: string; replacement_name?: string; budget_max_cents?: number; unit_price_cents?: number; previous_quantity?: number; allow_sourcing?: boolean }[]; expiresAt?: string };
   evidence?: any;                        // N1: evidence block from the orchestrator → source chips + Evidence tab
   webConsentPrompt?: { query: string };  // N3 Mode-B: consent chip — never auto-search on an imperative
 };
@@ -425,7 +425,7 @@ export default function App() {
   const [whyDrawerData, setWhyDrawerData] = useState<ProductWhyExplanation | null>(null);
   const [whyDrawerLoading, setWhyDrawerLoading] = useState(false);
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
-  const uid = (getStoredUid() || 'demo-user');
+  const uid = getOrCreateStoredUid();
   // Dev-only debug metadata (LLM tier·model badge) is noise for a pilot buyer OR a live demo (the demo runs
   // the Vite dev server, so a DEV auto-enable leaks the badge on camera). Show it ONLY on an explicit opt-in
   // (localStorage 'shopsquire_debug'='1') — never to a normal shopper and never by default in a dev build.
@@ -1555,7 +1555,7 @@ export default function App() {
             'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
           },
           body: JSON.stringify({
-            uid: getStoredUid() || 'demo-user',
+            uid: getOrCreateStoredUid(),
             cart_total_cents: 0,
             query: q,
             complaint_intent: true,

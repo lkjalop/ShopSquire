@@ -834,7 +834,9 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
     encoded = bool(s.get("encoded_payload_detected"))
     polyglot = bool(s.get("polyglot_suspected"))
     ocr_uncertain = bool(s.get("ocr_low_confidence_uncertain"))
-    analysis_pending = bool(s.get("analysis_pending") or s.get("vision_pending"))
+    analysis_pending = bool(
+        s.get("analysis_pending") or s.get("vision_pending") or s.get("fast_triage_timeout")
+    )
     analysis_degraded = bool(
         ocr_uncertain or s.get("vision_timeout") or s.get("ocr_timeout")
         or s.get("vision_error") or s.get("ocr_error")
@@ -1604,7 +1606,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 )
                 # Warn-and-continue: when an image is involved, run a full breach
                 # assessment (IP/ASN/GeoIP + human escalation). Products still flow.
-                if image_cv_signals_in and breach_assessment is None:
+                if (image_cv_signals_in and breach_assessment is None
+                        and bool(image_security_posture.get("security_risk"))):
                     try:
                         breach_assessment = _assess_image_compromise_breach(
                             merged_text=merged_text,
@@ -2769,6 +2772,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         ),
         "right_panel": _right_panel_contract,
         "copywriting": copy_meta,
+        "security_risk": bool(image_security_posture.get("security_risk")),
+        "analysis_degraded": bool(image_security_posture.get("analysis_degraded")),
+        "analysis_pending": bool(image_security_posture.get("analysis_pending")),
         "image_untrusted": bool(image_security_posture.get("image_untrusted")),
         "image_degraded_mode": bool(image_security_posture.get("image_degraded_mode")),
         "chat_lockdown": bool(image_security_posture.get("chat_lockdown")),
@@ -2784,7 +2790,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # Products still flow; we prepend a clear warning and attach the breach
     # assessment (IP/ASN/GeoIP + intent + repercussions + human-notified) so the
     # user knows the upload is under review and the SOC has the evidence.
-    if breach_assessment is not None or bool(image_security_posture.get("chat_lockdown")):
+    if bool(image_security_posture.get("security_risk")) or bool(image_security_posture.get("chat_lockdown")):
         _ba = breach_assessment if isinstance(breach_assessment, dict) else None
         # Only claim a product "in your photo" when one was actually recognised in-domain. An
         # off-domain / unrecognised upload must be narrated as text + sanitized image context — never

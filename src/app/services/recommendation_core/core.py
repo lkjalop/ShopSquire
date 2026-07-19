@@ -136,13 +136,20 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # The HTTP contract may not pre-parse a textual budget.  The model maps its value and
     # scope; deterministic arithmetic turns that bounded proposal into the per-unit ceiling
     # used by evidence retrieval.  A total budget for N units is never treated as per-unit.
-    if (envelope.budget_min_cents is None and envelope.budget_max_cents is None
-            and decision.total_budget_cents is not None):
+    if decision.budget_scope == "total" and decision.quantity:
+        quantity = max(1, decision.quantity)
+        total_max = decision.total_budget_cents or envelope.budget_max_cents
+        envelope = dataclasses.replace(
+            envelope,
+            budget_min_cents=(envelope.budget_min_cents // quantity
+                              if envelope.budget_min_cents is not None else None),
+            budget_max_cents=(total_max // quantity if total_max is not None else None),
+        )
+    elif (envelope.budget_min_cents is None and envelope.budget_max_cents is None
+          and decision.total_budget_cents is not None):
         per_unit_cap = None
         if decision.budget_scope == "per_unit":
             per_unit_cap = decision.total_budget_cents
-        elif decision.budget_scope == "total":
-            per_unit_cap = decision.total_budget_cents // max(1, decision.quantity or 1)
         elif decision.quantity in (None, 1):
             per_unit_cap = decision.total_budget_cents
         if per_unit_cap and per_unit_cap > 0:

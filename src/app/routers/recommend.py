@@ -3097,6 +3097,15 @@ def _extract_quantity_from_query(query: str | None) -> int | None:
     return r[0] if r else None
 
 
+def _requires_full_path_for_bulk(plan: Any, query: str | None) -> bool:
+    """The catalog fast path has no whole-order economics or availability planning."""
+    return bool(
+        getattr(plan, "quantity", None)
+        or _extract_quantity_span(query)
+        or getattr(plan, "availability_horizon_days", None)
+    )
+
+
 def _absurd_quantity_span(query: str | None) -> tuple[int, str] | None:
     return _core_absurd_quantity_span(query, unit_nouns=_profile_unit_nouns())
 
@@ -4579,6 +4588,7 @@ def suggest(
         _record_partial_failure("recommend_facade_dispatch", _e_facade, trace_id=trace_id)
     image_context = {"labels": [], "ocr": "", "hash": None, "intent": None, "product_identity": {}}
     fast_path_enabled = bool(fast_path)
+    _top_plan = None
     _plan_exclusions = []  # NEW-4: agnostic negation terms ("but not Apple") carried to constraints
     # WS2.2 — decompose once; stash the plan so the universal return wrapper can
     # answer comparison/knowledge questions on any path, and route those off the
@@ -4634,10 +4644,6 @@ def suggest(
             fast_path_enabled = False
         # Bulk/B2B + availability asks need the full path (the Availability_Agent runs there) — the
         # fast catalog shortcut can't answer "N units by date D".
-        if fast_path_enabled and (
-            getattr(_top_plan, "quantity", None) or getattr(_top_plan, "availability_horizon_days", None)
-        ):
-            fast_path_enabled = False
         # Compound queries need the slow path: it carries the per-sub-question retrieval
         # scoping + the answer composer (the fast path would over-constrain and drop the
         # conceptual part). Flag-gated so default behaviour is unchanged.
@@ -4650,6 +4656,11 @@ def suggest(
                 pass
     except Exception:
         pass
+    # Quantity and total-budget economics are safety invariants, not planner features. Keep this
+    # outside the best-effort decomposition block so a planner failure cannot re-enable a shortcut
+    # that treats a total budget as a per-unit ceiling.
+    if fast_path_enabled and _requires_full_path_for_bulk(_top_plan, query):
+        fast_path_enabled = False
     if fast_path_enabled:
         copywriting_enabled = False
         _fast_path_image_context, _fast_path_image_cv_signals = _parse_fast_path_image_inputs(

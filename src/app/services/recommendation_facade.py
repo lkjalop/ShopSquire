@@ -261,10 +261,31 @@ def _cart_confirm_message(plan) -> str:
         elif op.action == "remove_items":
             bits.append(f"remove {len(op.target_skus)} item(s)")
         elif op.action == "set_quantity":
-            bits.append(f"change a line to {op.quantity} unit(s)")
+            detail = f"change a line to {op.quantity} unit(s)"
+            if op.allow_sourcing:
+                detail += "; if stock is short, add the remainder to the supplier delivery plan"
+            bits.append(detail)
+        elif op.action == "replace_item":
+            replacement = op.replacement_name or op.replacement_sku
+            detail = f"replace one item with {replacement} at {op.quantity} unit(s)"
+            if op.unit_price_cents is not None:
+                each = op.unit_price_cents / 100
+                total = each * int(op.quantity or 0)
+                detail += f" (${each:,.0f} each; ${total:,.0f} total)"
+            if op.previous_quantity is not None and op.previous_quantity != op.quantity:
+                detail += f", changing the line from {op.previous_quantity} to {op.quantity} units"
+            if op.budget_max_cents is not None:
+                detail += f" to remain within the ${op.budget_max_cents / 100:,.0f} total budget"
+            bits.append(detail)
     what = "; ".join(bits) or "apply that cart change"
+    reconfirm = ""
+    if any(op.action in {"set_quantity", "replace_item", "remove_items", "clear_all",
+                         "clear_previous", "keep_only"} for op in plan.ops):
+        reconfirm = (" After an inventory change, review and reconfirm the updated delivery plan "
+                     "before checkout.")
     return (f"Just to confirm before I touch your cart — you want me to: {what}. "
-            f"Nothing is changed yet; confirm and I'll apply it (undo stays available).")
+            f"Nothing is changed yet; confirm and I'll apply it (undo stays available)."
+            f"{reconfirm}")
 
 
 def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,

@@ -10,7 +10,8 @@ vocabulary; deterministic clamps bind every target to a REAL cart line by SKU an
 quantity to sane bounds. The model MAPS; the platform BINDS and DECIDES.
 
 Doctrine (same as turn_router): model-judged CLOSED-vocab → clamp → deterministic-fallback.
-  ops vocab (closed) : clear_all | clear_previous | remove_items | set_quantity | keep_only
+  ops vocab (closed) : clear_all | clear_previous | remove_items | set_quantity | keep_only |
+                       replace_item
   target binding     : the model names cart lines in prose ('the 14-inch one'); code resolves
                        each name to a cart SKU by distinctive-token overlap (model numbers /
                        brand tokens outweigh generic 'laptop'). A name that binds to no line
@@ -49,9 +50,10 @@ logger = logging.getLogger("shopsquire.recommendation_core.cart_resolver")
 LLMFn = Callable[[str, float], str]
 
 # CLOSED operation vocabulary. Anything the model returns outside this set is dropped.
-_ACTIONS = frozenset({"clear_all", "clear_previous", "remove_items", "set_quantity", "keep_only"})
+_ACTIONS = frozenset({"clear_all", "clear_previous", "remove_items", "set_quantity", "keep_only",
+                      "replace_item"})
 # actions that target specific named lines (vs. whole-cart intents)
-_TARGETED = frozenset({"remove_items", "set_quantity", "keep_only"})
+_TARGETED = frozenset({"remove_items", "set_quantity", "keep_only", "replace_item"})
 # BOUNDS (GPT-5.6 review-5 #9): a cart edit is a handful of changes, never a script. The model's
 # output is capped BEFORE any op is considered; a runaway/hostile 500-op response is truncated,
 # not iterated. Prompt lines are capped so a huge cart cannot balloon the prompt.
@@ -74,6 +76,15 @@ _CLEAR_INTENT = re.compile(
     r"get rid of (everything|all)|start over|scrap it all)\b", re.IGNORECASE)
 _KEEP_INTENT = re.compile(
     r"\b(keep|only|just|except|all but|everything but|nothing but|leave (only|just))\b", re.IGNORECASE)
+_REPLACE_INTENT = re.compile(r"\b(replace|swap|switch|substitute|instead of|in place of)\b", re.IGNORECASE)
+_AFFORDABLE_QTY_INTENT = re.compile(
+    r"\b(max(?:imum)? affordable|fit (?:it|them|the order) (?:in|within|under) (?:the )?budget|"
+    r"keep (?:it|the order|the total) (?:in|within|under|at) (?:the )?(?:same )?(?:total )?budget|"
+    r"adjust (?:the )?(?:unit )?quantity|how many (?:can|could) (?:i|we) afford)\b",
+    re.IGNORECASE,
+)
+
+CatalogCandidatesFn = Callable[[str], List[Dict[str, Any]]]
 
 
 def _resolver_model() -> str:
@@ -173,6 +184,54 @@ def _bind_name_to_sku(name: str, lines: List[Dict[str, Any]],
     return scored[0][1]
 
 
+def _default_catalog_candidates(tenant_id: str) -> List[Dict[str, Any]]:
+    """Bounded active catalog projection used only when the model proposes a replacement.
+
+    The model supplies language, never identity. This read supplies the finite SKU vocabulary
+    against which the replacement is clamped. A production-sized catalog should back the same
+    contract with its search index; the resolver does not depend on storage details.
+    """
+    try:
+        from src.app.models.db import db_session
+        from src.app.services.catalog_read_model import search_variants
+
+        with db_session() as db:
+            variants = search_variants(db, tenant_id=tenant_id, limit=500)
+        return [{"sku": v.sku, "name": v.title, "brand": v.brand,
+                 "price_cents": v.price_cents, "active": v.active} for v in variants if v.active]
+    except Exception as exc:
+        logger.warning("replacement catalog read failed: %s", repr(exc)[:120])
+        return []
+
+
+def _bind_catalog_product(name: str, candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Bind a model-named replacement to exactly one active catalog SKU; ties fail closed."""
+    ref = str(name or "").strip()
+    if not ref:
+        return None
+    ref_l = ref.lower()
+    for item in candidates:
+        if str(item.get("sku") or "").lower() == ref_l:
+            return item
+    ref_tokens = {t for t in _plural_expand(set(_tokens(ref))) if len(t) > 1}
+    if not ref_tokens:
+        return None
+    scored: List[Tuple[int, int, Dict[str, Any]]] = []
+    for item in candidates:
+        haystack = " ".join((str(item.get("name") or ""), str(item.get("brand") or ""),
+                             str(item.get("sku") or "")))
+        item_tokens = {t for t in _plural_expand(set(_tokens(haystack))) if len(t) > 1}
+        overlap = len(ref_tokens & item_tokens)
+        if overlap:
+            scored.append((overlap, int(ref_l in haystack.lower()), item))
+    if not scored:
+        return None
+    scored.sort(key=lambda value: (value[0], value[1]), reverse=True)
+    if len(scored) > 1 and scored[0][:2] == scored[1][:2]:
+        return None
+    return scored[0][2]
+
+
 def _build_prompt(envelope: TurnEnvelope, lines: List[Dict[str, Any]]) -> str:
     shown = lines[:_MAX_PROMPT_LINES]
     cart_lines = "\n".join(
@@ -194,6 +253,10 @@ def _build_prompt(envelope: TurnEnvelope, lines: List[Dict[str, Any]]) -> str:
         "- set_quantity: change one named line to a number (\"targets\":[name], "
         "\"quantity\":<int>).\n"
         "- keep_only: remove everything EXCEPT the named lines (list keepers in \"targets\").\n\n"
+        "- replace_item: replace one existing named line with a different product the shopper "
+        "named (\"targets\":[old name], \"replacement\":new product name). Set "
+        "\"quantity_mode\":\"max_affordable\" only when the shopper asks to adjust quantity "
+        "to a stated total budget.\n\n"
         "Rules:\n"
         "- A message can hold MORE THAN ONE operation ('remove A and B, set C to 20' = a "
         "remove_items op AND a set_quantity op).\n"
@@ -202,12 +265,14 @@ def _build_prompt(envelope: TurnEnvelope, lines: List[Dict[str, Any]]) -> str:
         "- Put the shopper's own words for each target in \"targets\"; the platform matches "
         "them to real lines.\n\n"
         'Return JSON: {"ops": [{"action": "<action>", "targets": ["<name>", ...], '
-        '"quantity": <int or null>}], "confidence": <0.0-1.0>}\nJSON:'
+        '"replacement": "<new product or null>", "quantity": <int or null>, '
+        '"quantity_mode": "max_affordable|preserve|null"}], "confidence": <0.0-1.0>}\nJSON:'
     )
 
 
 def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
-                          timeout: float = 12.0) -> CartMutationPlan:
+                          timeout: float = 12.0,
+                          catalog_candidates_fn: Optional[CatalogCandidatesFn] = None) -> CartMutationPlan:
     """One model judgment → clamped, SKU-bound plan. Never raises; every failure path is the
     empty plan (source=default), which tells the caller to fall through to legacy.
 
@@ -306,7 +371,60 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
             if qty == 0:
                 ops.append(CartOp(action="remove_items", target_skus=(bound[0],)))
             else:
-                ops.append(CartOp(action="set_quantity", target_skus=(bound[0],), quantity=qty))
+                current_qty = int(next((line["quantity"] for line in lines
+                                        if line["sku"] == bound[0]), 0))
+                ops.append(CartOp(action="set_quantity", target_skus=(bound[0],), quantity=qty,
+                                  previous_quantity=current_qty,
+                                  allow_sourcing=qty > current_qty))
+            continue
+
+        if action == "replace_item":
+            if not _REPLACE_INTENT.search(envelope.query or ""):
+                ambiguous.append("replace the cart item")
+                continue
+            if len(bound) != 1:
+                continue
+            replacement_ref = str(raw_op.get("replacement") or "").strip()
+            candidates_fn = catalog_candidates_fn or _default_catalog_candidates
+            replacement = _bind_catalog_product(replacement_ref, candidates_fn(envelope.tenant_id))
+            if replacement is None:
+                ambiguous.append(replacement_ref or "the replacement product")
+                continue
+            replacement_sku = str(replacement.get("sku") or "")
+            if not replacement_sku or replacement_sku == bound[0]:
+                ambiguous.append(replacement_ref or "the replacement product")
+                continue
+            try:
+                unit_price = int(replacement.get("price_cents"))
+            except (TypeError, ValueError):
+                unit_price = 0
+            old_line = next((line for line in lines if line["sku"] == bound[0]), None)
+            qty = int((old_line or {}).get("quantity") or 1)
+            budget_max_cents: Optional[int] = None
+            from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+            parsed = parse_budget(envelope.query)
+            if (parsed and parsed.budget_max is not None
+                    and classify_budget_scope(envelope.query) == "total"):
+                budget_max_cents = int(parsed.budget_max) * 100
+            mode = str(raw_op.get("quantity_mode") or "").strip().lower()
+            if mode == "max_affordable" and _AFFORDABLE_QTY_INTENT.search(envelope.query or ""):
+                if not budget_max_cents or unit_price <= 0:
+                    ambiguous.append("the total budget or replacement price")
+                    continue
+                qty = budget_max_cents // unit_price
+                if qty < 1:
+                    ambiguous.append("a replacement affordable within the total budget")
+                    continue
+            elif budget_max_cents and unit_price > 0 and qty * unit_price > budget_max_cents:
+                ambiguous.append("whether to reduce quantity to fit the total budget")
+                continue
+            ops.append(CartOp(action="replace_item", target_skus=(bound[0],), quantity=qty,
+                              replacement_sku=replacement_sku,
+                              replacement_name=str(replacement.get("name") or replacement_sku),
+                              budget_max_cents=budget_max_cents,
+                              unit_price_cents=unit_price or None,
+                              previous_quantity=int((old_line or {}).get("quantity") or 1),
+                              allow_sourcing=True))
             continue
 
         # keep_only is destructive (it removes every OTHER line) — require the shopper's keep-intent
@@ -320,6 +438,12 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
         # remove_items / keep_only: apply the bound targets; unbound names already recorded
         if bound:
             ops.append(CartOp(action=action, target_skus=tuple(bound)))
+
+    removed = {sku for op in ops if op.action == "remove_items" for sku in op.target_skus}
+    changed = {sku for op in ops if op.action == "set_quantity" for sku in op.target_skus}
+    for sku in sorted(removed & changed):
+        name = next((line["name"] for line in lines if line["sku"] == sku), sku)
+        ambiguous.append(f"conflicting remove and quantity changes for {name}")
 
     if not ops and not ambiguous:
         return EMPTY_PLAN

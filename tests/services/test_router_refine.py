@@ -75,3 +75,27 @@ def test_hard_filter_suppresses_duplicate_soft_band(db):
     d = route_turn(db, _env("only apple laptops"),
                    llm_fn=_stub(brand="apple", prefer_brand="apple", sort=None))
     assert d.brand_filter == "Apple" and d.preferred_brand is None
+
+
+@pytest.mark.parametrize("model_lane", ["BULK", "BULK_QUOTE", "QUOTE", "RFQ"])
+def test_procurement_lane_synonyms_are_clamped_to_existing_lane(db, model_lane):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    payload = {
+        "lane": model_lane,
+        "handle": "el-6-6",
+        "use_cases": [],
+        "requirements": {},
+        "refine": {},
+        "compare_targets": [],
+        "confidence": 0.9,
+    }
+    decision = route_turn(
+        db,
+        _env("we need 25 laptops for our new office, can you do a bulk quote?"),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert decision.lane == "PROCUREMENT"
+    assert decision.source == "model"

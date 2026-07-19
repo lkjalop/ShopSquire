@@ -1,6 +1,7 @@
 """Phase 4 step 3: the bounded brain — router clamps, plan validation, and THE ACCEPTANCE:
 the corpus's three known_wrongs pass their expect_v2 assertions through the full core
 (route → plan → execute → finalize → legacy adapter)."""
+import dataclasses
 import json
 
 import pytest
@@ -340,6 +341,38 @@ def test_model_total_budget_becomes_per_unit_retrieval_cap(db):
                           llm_fn=lambda p, t: json.dumps(payload))
     assert resp.extras["constraints_used"]["budget_max_cents"] == 175000
     assert all((p.price_cents or 0) <= 175000 for p in resp.products)
+
+
+def test_text_parsed_total_budget_is_normalized_before_retrieval(db):
+    payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+               "quantity": 10, "total_budget": 25000, "budget_scope": "total",
+               "subject_action": "switch", "confidence": 0.9}
+    envelope = dataclasses.replace(
+        _env("ten laptops, $25000 total"),
+        budget_min_cents=20_000_00,
+        budget_max_cents=25_000_00,
+    )
+    resp = recommend_turn(db, envelope, llm_fn=lambda p, t: json.dumps(payload))
+    constraints = resp.extras["constraints_used"]
+    assert constraints["budget_min_cents"] == 200_000
+    assert constraints["budget_max_cents"] == 250_000
+    assert all((product.price_cents or 0) <= 250_000 for product in resp.products)
+
+
+def test_explicit_bulk_fields_survive_when_model_omits_them(db):
+    payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+               "subject_action": "switch", "confidence": 0.9}
+    envelope = dataclasses.replace(
+        _env("suggest 10 suitable laptops under a $25,000 total budget"),
+        budget_max_cents=25_000_00,
+    )
+    resp = recommend_turn(db, envelope, llm_fn=lambda p, t: json.dumps(payload))
+    assert resp.extras["requested_quantity"] == 10
+    assert resp.extras["constraints_used"]["budget_max_cents"] == 250_000
+    assert all((product.price_cents or 0) <= 250_000 for product in resp.products)
+    legacy = to_legacy(resp)
+    assert legacy["requested_quantity"] == 10
+    assert "bulk_budget" in legacy
 
 
 def test_stocked_handles_within_contains_and_ungrounded(db):

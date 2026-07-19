@@ -56,6 +56,22 @@ export function getStoredUid(): string {
   return s ? String(s.getItem(UID_KEY) || '') : '';
 }
 
+export function getOrCreateStoredUid(): string {
+  const existing = getStoredUid().trim();
+  if (existing) return existing;
+  let suffix = '';
+  try {
+    suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2, 18);
+  } catch {
+    suffix = Math.random().toString(36).slice(2, 18);
+  }
+  const uid = `guest-${suffix}`.slice(0, 128);
+  setStoredUid(uid);
+  return uid;
+}
+
 export function setStoredUid(uid: string): void {
   const s = session();
   if (!s) return;

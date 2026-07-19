@@ -106,6 +106,12 @@ def test_risk_tiers():
     assert risk_tier(CartMutationPlan(ops=(CartOp("remove_items", ("A", "B")),))) == RISK_CONFIRM
     compound = CartMutationPlan(ops=(CartOp("remove_items", ("A",)), CartOp("set_quantity", ("B",), 2)))
     assert risk_tier(compound) == RISK_CONFIRM
+    replacement = CartMutationPlan(ops=(CartOp(
+        "replace_item", ("A",), 2, replacement_sku="B", budget_max_cents=20000),))
+    assert risk_tier(replacement) == RISK_CONFIRM
+    sourcing_increase = CartMutationPlan(ops=(CartOp(
+        "set_quantity", ("A",), 25, previous_quantity=10, allow_sourcing=True),))
+    assert risk_tier(sourcing_increase) == RISK_CONFIRM
 
 
 def test_cart_content_hash_tracks_content():
@@ -128,6 +134,23 @@ def test_propose_then_apply_single_set(wired):
     assert out["status"] == "applied"
     assert _skus(uid) == {"SKU-A": 7, "SKU-B": 1}
     assert S.get_plan(prop["plan_id"])["status"] == "applied"
+
+
+def test_replace_item_applies_atomically_and_respects_total_budget(wired):
+    uid = "u-replace"
+    items = _cart(uid, ("SKU-A", 4))
+    plan = CartMutationPlan(ops=(CartOp(
+        "replace_item", ("SKU-A",), 2,
+        replacement_sku="SKU-B", budget_max_cents=20000),), confidence=0.9)
+    prop = S.propose_plan(tenant_id="t1", uid=uid, plan=plan, cart_items=items,
+                          query="replace A with B and keep the total under $200")
+
+    assert prop["risk"] == RISK_CONFIRM
+    out = S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid)
+    assert out["status"] == "applied"
+    assert _skus(uid) == {"SKU-B": 2}
+    assert out["applied"] == [{"action": "replace_item", "sku": "SKU-A",
+                                "replacement_sku": "SKU-B", "quantity": 2}]
 
 
 def test_apply_is_idempotent(wired):

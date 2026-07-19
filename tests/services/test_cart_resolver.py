@@ -49,6 +49,71 @@ def test_compound_edit_binds_all_targets_to_skus():
     assert setq.target_skus == ("LAP-IDEAP3I9",) and setq.quantity == 20
 
 
+def test_replacement_is_catalog_clamped_and_total_budget_sets_affordable_quantity():
+    cart = [{"sku": "GAM-0006", "name": "Dell G16 Gaming Laptop", "quantity": 20}]
+    catalog = lambda _tenant: [{  # noqa: E731 - injected finite catalog projection
+        "sku": "LAP-PROART5070",
+        "name": "ASUS ProArt 16 RTX 5070",
+        "brand": "ASUS",
+        "price_cents": 489400,
+        "active": True,
+    }]
+    plan = resolve_cart_mutation(
+        _env("Replace the Dell G16 with the ASUS ProArt 16 RTX 5070, but keep the total "
+             "budget at $54,000. Adjust the quantity to the maximum affordable number.", cart=cart),
+        llm_fn=_fixed_llm({"ops": [{
+            "action": "replace_item",
+            "targets": ["Dell G16"],
+            "replacement": "ASUS ProArt 16 RTX 5070",
+            "quantity_mode": "max_affordable",
+        }], "confidence": 0.95}),
+        catalog_candidates_fn=catalog,
+    )
+
+    assert not plan.ambiguous
+    assert len(plan.ops) == 1
+    op = plan.ops[0]
+    assert op.action == "replace_item"
+    assert op.target_skus == ("GAM-0006",)
+    assert op.replacement_sku == "LAP-PROART5070"
+    assert op.replacement_name == "ASUS ProArt 16 RTX 5070"
+    assert op.quantity == 11
+    assert op.budget_max_cents == 5_400_000
+    assert op.unit_price_cents == 489_400
+    assert op.previous_quantity == 20
+
+
+def test_replacement_fails_closed_when_catalog_name_is_ambiguous():
+    cart = [{"sku": "OLD", "name": "Old Workstation", "quantity": 2}]
+    catalog = lambda _tenant: [  # noqa: E731
+        {"sku": "NEW-A", "name": "Acme Pro", "brand": "Acme", "price_cents": 10000},
+        {"sku": "NEW-B", "name": "Acme Pro Plus", "brand": "Acme", "price_cents": 12000},
+    ]
+    plan = resolve_cart_mutation(
+        _env("replace the old workstation with Acme", cart=cart),
+        llm_fn=_fixed_llm({"ops": [{"action": "replace_item", "targets": ["Old Workstation"],
+                                     "replacement": "Acme"}], "confidence": 0.9}),
+        catalog_candidates_fn=catalog,
+    )
+
+    assert not plan.ops
+    assert plan.ambiguous == ("Acme",)
+
+
+def test_conflicting_remove_and_quantity_plan_requires_clarification():
+    cart = [{"sku": "GAM-0006", "name": "Dell G16 Gaming Laptop", "quantity": 20}]
+    plan = resolve_cart_mutation(
+        _env("replace the Dell G16 with a ProArt", cart=cart),
+        llm_fn=_fixed_llm({"ops": [
+            {"action": "remove_items", "targets": ["Dell G16"]},
+            {"action": "set_quantity", "targets": ["Dell G16"], "quantity": 20},
+        ], "confidence": 0.9}),
+    )
+
+    assert plan.needs_clarification
+    assert "conflicting remove and quantity" in plan.ambiguous[0]
+
+
 # ── whole-cart intents ──────────────────────────────────────────────────────────
 
 def test_clear_all():
