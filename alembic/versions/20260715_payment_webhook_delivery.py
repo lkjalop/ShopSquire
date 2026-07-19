@@ -10,6 +10,11 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
+    # Alembic creates version_num as VARCHAR(32), but this revision identifier is
+    # 33 characters. Widen it before Alembic records this revision; otherwise a
+    # clean PostgreSQL upgrade fails after all business DDL has succeeded.
+    if "postgres" in str(getattr(bind.dialect, "name", "")).lower():
+        op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)")
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
     if "stripe_events" not in tables:

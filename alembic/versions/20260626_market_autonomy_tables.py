@@ -50,7 +50,7 @@ TABLE_STATEMENTS = (
         confidence REAL,
         summary TEXT,
         evidence_json TEXT,
-        window TEXT,
+        "window" TEXT,
         dedup_key TEXT,
         status TEXT DEFAULT 'active',
         corrected_by_human INTEGER DEFAULT 0,

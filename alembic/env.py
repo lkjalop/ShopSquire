@@ -98,6 +98,11 @@ def run_migrations_online():
             from sqlalchemy import text as _alembic_text
             if connection.dialect.name != "sqlite":
                 connection.execute(_alembic_text("SET search_path TO public"))
+                # SQLAlchemy 2.x autobegins on SET. Commit that configuration
+                # transaction before Alembic opens its managed migration
+                # transaction; otherwise all migration DDL is rolled back when
+                # the connection closes even though `upgrade head` exits zero.
+                connection.commit()
         except Exception:
             pass
         context.configure(

@@ -591,7 +591,7 @@ CREATE TABLE IF NOT EXISTS market_finding (
     confidence REAL,
     summary TEXT,
     evidence_json TEXT,
-    window TEXT,
+    "window" TEXT,
     dedup_key TEXT,
     status TEXT DEFAULT 'active',
     corrected_by_human INTEGER DEFAULT 0,
@@ -692,7 +692,7 @@ def persist_findings(db, findings: List[MarketFinding], *, tenant_id: str = DEFA
             )
             db.execute(
                 text("INSERT INTO market_finding (id, tenant_id, schema_version, finding_type, entity_ref, "
-                     "severity, confidence, summary, evidence_json, window, dedup_key, status) "
+                     "severity, confidence, summary, evidence_json, \"window\", dedup_key, status) "
                      "VALUES (:i,:tn,:sv,:t,:e,:s,:c,:m,:j,:w,:dk,'active')"),
                 {"i": new_id, "tn": tid, "sv": int(SCHEMA_VERSION), "t": f.finding_type, "e": f.entity_ref,
                  "s": f.severity, "c": float(f.confidence), "m": f.summary,
@@ -741,7 +741,7 @@ def load_recent_findings(db, *, limit: int = 50, tenant_id: str = DEFAULT_TENANT
     try:
         ensure_finding_table(db)
         rows = db.execute(
-            text("SELECT finding_type, entity_ref, severity, confidence, summary, evidence_json, window "
+            text("SELECT finding_type, entity_ref, severity, confidence, summary, evidence_json, \"window\" "
                  "FROM market_finding "
                  "WHERE COALESCE(status,'active')='active' AND COALESCE(tenant_id,'default')=:t "
                  "ORDER BY detected_at DESC LIMIT :lim"),

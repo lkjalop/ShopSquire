@@ -49,17 +49,39 @@ def upgrade() -> None:
         )
         """
     )
-    try:
+    # 20260210 could create a TEXT fallback when pgvector was available on the
+    # server but not installed in this database yet. Converge that historical
+    # layout before building a vector operator-class index.
+    column_type = bind.execute(sa.text(
+        """
+        SELECT udt_name
+        FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='product_embeddings'
+          AND column_name='embedding'
+        """
+    )).scalar()
+    if str(column_type or "").lower() != "vector":
         op.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_product_embeddings_hnsw
-            ON product_embeddings
-            USING hnsw (embedding vector_cosine_ops)
+            ALTER TABLE product_embeddings
+            ALTER COLUMN embedding TYPE vector(1536)
+            USING CASE
+                WHEN embedding IS NULL OR btrim(embedding::text) = '' THEN NULL
+                ELSE embedding::text::vector(1536)
+            END
             """
         )
-    except Exception:
-        # Older pgvector versions may not support HNSW yet.
-        pass
+    # Do not catch PostgreSQL DDL errors inside Alembic's transaction. A caught
+    # error still leaves the transaction aborted, so the migration appears to
+    # continue and then fails while updating alembic_version. pgvector-backed
+    # deployments require this index; incompatible versions must fail loudly.
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_product_embeddings_hnsw
+        ON product_embeddings
+        USING hnsw (embedding vector_cosine_ops)
+        """
+    )
 
 
 def downgrade() -> None:
