@@ -1274,6 +1274,18 @@
       "dlss",
       "max settings"
     ],
+    "game_development": [
+      "game development",
+      "gaming development",
+      "game developer",
+      "develop games",
+      "build games",
+      "unity development",
+      "unreal development",
+      "unreal engine",
+      "unity engine",
+      "godot"
+    ],
     "content_creator": [
       "video edit",
       "content creat",
@@ -1402,6 +1414,7 @@
   },
   "use_case_keyword_priority": [
     "ai_ml_workstation",
+    "game_development",
     "data_science_student",
     "engineering_student",
     "computer_science_student",
@@ -1424,6 +1437,7 @@
     "university_general"
   ],
   "use_case_to_persona": {
+    "game_development": "developer",
     "gaming_competitive": "gamer",
     "gaming_aaa_heavy": "gamer",
     "gaming_casual": "gamer",
@@ -1998,9 +2012,9 @@
       "\\bstarting\\s?a\\s?new\\s?job\\b"
     ],
     "gamer": [
-      "\\bgaming\\b",
+      "\\bgaming\\b(?!\\s*dev)",
       "\\bfps\\b",
-      "\\bgame\\b",
+      "\\bgame\\b(?!\\s*dev)",
       "\\bvalorant\\b",
       "\\bfortnite\\b",
       "\\bcyberpunk\\b",
@@ -2025,6 +2039,9 @@
       "\\b4k\\s?edit\\b"
     ],
     "developer": [
+      "\\bgam(?:e|ing)\\s?development\\b",
+      "\\bgam(?:e|ing)\\s?dev(?:eloper|elopment)?\\b",
+      "\\b(?:unity|unreal|godot)\\b",
       "\\bai\\s?engineer\\b",
       "\\bml\\s?engineer\\b",
       "\\bdata\\s?scientist\\b",
