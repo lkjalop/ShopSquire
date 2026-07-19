@@ -68,7 +68,7 @@ def _expects_products(core) -> bool:
     retrieval, or degradation miss; only a query the whole taxonomy has no home for."""
     if core.lane not in ("SEARCH", "FILTER", "COMPARE") or core.off_catalog:
         return False
-    dec = _decision_slice(core)
+    dec = _decision_slice(core) or {}
     if dec is None:
         return True   # no breadcrumbs = can't prove off-domain = count the empty
     ungroundable = dec.get("node_handle") is None and not (dec.get("requirements") or {})

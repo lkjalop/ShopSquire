@@ -10,7 +10,7 @@ $env:OLLAMA_SMALL_MODEL        = "qwen3:14b"     # recommendation/procurement na
 $env:OLLAMA_SUMMARY_MODEL      = "qwen3:14b"
 $env:OLLAMA_EMBED_KEEP_ALIVE   = "60m"           # pin nomic-embed resident (reload costs 2.8-6.1s when evicted)
 # NOTE (Ollama SERVER config, set where `ollama serve` runs — not here): to stop embeds queuing
-# behind 14b generations, set OLLAMA_NUM_PARALLEL=2 and OLLAMA_MAX_LOADED_MODELS=3 in the Ollama
+# behind 14b generations, set OLLAMA_NUM_PARALLEL=2 and OLLAMA_MAX_LOADED_MODELS=2 in the Ollama
 # service environment, then restart Ollama. App-side keep_alive above only prevents the reload.
 # vision/CV/security/OCR intentionally left as configured (qwen3-vl:8b / glm-ocr / llama-guard3)
 
@@ -32,6 +32,9 @@ $env:MULTI_INTENT_LLM_TIMEOUT_SEC      = "30"
 $env:LLM_PLANNER_ENABLED               = "1"
 $env:LLM_PLANNER_TIMEOUT_SEC           = "20"    # qwen3:14b measures 4-7s on planner prompts
 $env:OLLAMA_KEEP_ALIVE                 = "30m"    # pin generate/vision models resident (P0 lever)
+# URL guard is fail-closed. Explicitly authorize only the local Ollama endpoints used by this demo;
+# without this, a normal launcher restart silently downgrades image identity to the filename fallback.
+$env:INTERNAL_SERVICE_ALLOWLIST        = "127.0.0.1:11434,localhost:11434"
 # Evidence orchestrator (N1): plan-selected legs (market/policy/availability/history/image) feed the
 # Evidence tab + source chips. Legs are bounded (2.5s) and additive — message text is untouched.
 $env:EVIDENCE_ORCHESTRATOR_ENABLED     = "1"
