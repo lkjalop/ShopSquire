@@ -4,6 +4,7 @@ buyer view is redacted."""
 from __future__ import annotations
 
 import pytest
+import uuid
 from fastapi.testclient import TestClient
 
 from src.app.main import app
@@ -14,7 +15,7 @@ _BASE = "/api/v1/fulfillment/cases"
 
 
 def _open():
-    r = client.post(_BASE, json={"uid": "u1", "trace_id": "T-API-1"})
+    r = client.post(_BASE, json={"uid": "u1", "trace_id": f"T-API-{uuid.uuid4()}"})
     assert r.status_code == 200, r.text
     return r.json()["case_id"]
 
@@ -55,6 +56,30 @@ def test_commit_auto_drafts_internal_rfq_when_flag_enabled(monkeypatch):
     assert draft["commercial_scope"]["quantity"] == 6
     assert draft["recipient_domain"] == "creatorfleet.example"
     assert draft["content_hash"]
+
+
+def test_commit_records_pending_retry_when_internal_draft_fails(monkeypatch):
+    monkeypatch.setenv("FULFILLMENT_AUTO_DRAFT_ON_COMMIT", "1")
+
+    def _fail_draft(*args, **kwargs):
+        raise RuntimeError("synthetic draft failure")
+
+    monkeypatch.setattr("src.app.routers.fulfillment_cases.fdraft.draft_and_record", _fail_draft)
+    monkeypatch.setattr("src.app.services.decision_log.log_trace_event", lambda **kwargs: None)
+    cid = _open()
+    assessed = client.post(
+        f"{_BASE}/{cid}/assess",
+        json={"requested_qty": 10, "in_stock": 4, "item_ref": "SKU-RETRY-1"},
+    )
+    assert assessed.status_code == 200
+
+    response = client.post(f"{_BASE}/{cid}/commit", json={"uid": "u1"})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["state"] == "COMMITTED"
+    assert body["draft_status"]["status"] == "pending"
+    assert "synthetic draft failure" in body["draft_status"]["last_error"]
 
 
 def test_illegal_command_returns_409():

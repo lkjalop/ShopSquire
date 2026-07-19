@@ -281,6 +281,14 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "args": (),
         }
 
+    draft_retry_enabled = str(os.getenv("FULFILLMENT_DRAFT_RETRY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    if draft_retry_enabled:
+        beat_schedule["fulfillment-draft-retry"] = {
+            "task": "src.app.tasks.fulfillment_tasks.retry_supplier_drafts",
+            "schedule": crontab(minute="*"),
+            "args": (),
+        }
+
     # Data-retention sweep — UNIFORM storage-limitation (idle draft carts, stale conversation, TTL-less
     # Redis session keys). Default-OFF; NEVER IP/geo gated. Windows in config/retention_policy.json.
     retention_sweep_enabled = str(os.getenv("RETENTION_SWEEP_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -415,6 +423,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.human_feedback_tasks.human_feedback_backfill": {"queue": default_q},
             "src.app.tasks.shadow_action_tasks.generate_shadow_actions": {"queue": default_q},
             "src.app.tasks.experiment_ops_tasks.experiment_watchdog": {"queue": default_q},
+            "src.app.tasks.fulfillment_tasks.retry_supplier_drafts": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -433,6 +442,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.experiment_ops_tasks",
             "src.app.tasks.retention_tasks",
             "src.app.tasks.vision_prewarm_tasks",
+            "src.app.tasks.fulfillment_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

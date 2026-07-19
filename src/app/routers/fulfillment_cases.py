@@ -102,6 +102,13 @@ def _case_view(db, case_id: str, *, for_operator: bool) -> Dict[str, Any]:
     msg = buyer_status_message(cur.state, cur.state_json)
     if msg:
         out["buyer_status"] = msg
+    try:
+        from src.app.services.fulfillment.draft_retry import status_for_case
+        retry = status_for_case(db, case_id)
+        if retry and retry.get("status") != "succeeded":
+            out["draft_status"] = retry
+    except Exception:
+        pass
     # SELL ENGINE (operator, rung A): at the send-decision states, surface margin + discount headroom so the
     # operator decides whether the reorder is worth it BEFORE approving the supplier send. Pure analysis;
     # never blocks the transition (warn-by-default) — the human still commits (GATE 2). Best-effort.
@@ -665,10 +672,28 @@ def commit(case_id: str, body: CommitBody) -> Dict[str, Any]:
                 item_ref = str(avail.get("item_ref") or "").strip()
                 qty = int(avail.get("shortfall") or avail.get("requested_qty") or 0)
                 if item_ref and qty > 0:
-                    fdraft.draft_and_record(db, case_id=case_id, actor=_agent(), item_ref=item_ref, quantity=qty,
-                                            estimated_value_cents=0, trace_id=(cur.source_trace_id if cur else None))
-            except Exception:
-                pass
+                    try:
+                        # Workflow transitions commit their own bitemporal state before emitting audit.
+                        # Draft in an independent session so a provider/evidence failure cannot poison the
+                        # already-committed buyer transition, and never wrap the workflow in a savepoint.
+                        with db_session() as draft_db:
+                            draft_result, _draft = fdraft.draft_and_record(
+                                draft_db, case_id=case_id, actor=_agent(), item_ref=item_ref, quantity=qty,
+                                estimated_value_cents=0, trace_id=(cur.source_trace_id if cur else None))
+                            _raise_if_failed(draft_result)
+                    except Exception as exc:
+                        from src.app.services.fulfillment.draft_retry import enqueue
+                        enqueue(db, case_id=case_id, item_ref=item_ref, quantity=qty,
+                                trace_id=(cur.source_trace_id if cur else None), error=exc)
+                        from src.app.services.decision_log import log_trace_event
+                        log_trace_event(trace_id=(cur.source_trace_id if cur else None),
+                                        event_type="supplier_rfq_draft_retry_queued", source_type="agent",
+                                        source_id="Procurement_Agent", target_type="case", target_id=case_id,
+                                        payload={"case_id": case_id, "item_ref": item_ref,
+                                                 "quantity": qty, "status": "pending_retry"})
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception("auto-draft preparation failed for case %s", case_id)
         # bounded autonomy: auto-send the claim-safe "thanks, sourcing" status to the buyer (flag-gated;
         # no human approval needed because it makes no commitment). Best-effort.
         if body.email:
