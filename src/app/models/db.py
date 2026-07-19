@@ -748,6 +748,7 @@ def _ensure_minimal_sqlite_tables(bind):
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS decision_trace_events (\n"
                         "  id TEXT PRIMARY KEY,\n"
+                        "  tenant_id TEXT NOT NULL DEFAULT 'default',\n"
                         "  trace_id TEXT,\n"
                         "  event_type TEXT NOT NULL,\n"
                         "  source_type TEXT,\n"
@@ -758,6 +759,10 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
+                except Exception:
+                    pass
+                try:
+                    conn.execute(sql_text("ALTER TABLE decision_trace_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"))
                 except Exception:
                     pass
                 # PII encrypted fields (compat; plaintext columns retained for fallback)

@@ -15,7 +15,7 @@ def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
     s.execute(text(
-        "CREATE TABLE decision_trace_events (id TEXT, trace_id TEXT, event_type TEXT, "
+        "CREATE TABLE decision_trace_events (id TEXT, tenant_id TEXT NOT NULL DEFAULT 'default', trace_id TEXT, event_type TEXT, "
         "source_type TEXT, source_id TEXT, target_type TEXT, target_id TEXT, payload TEXT, "
         "created_at TEXT DEFAULT CURRENT_TIMESTAMP)"))
     attribution.ensure_tables(s)

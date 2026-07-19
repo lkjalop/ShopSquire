@@ -12,6 +12,14 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
+# The installed ``alembic.exe`` starts with its Scripts directory on
+# ``sys.path``.  Add the repository root before importing application settings;
+# otherwise DATABASE_URL resolution silently falls through and the placeholder
+# in alembic.ini reaches ConfigParser unchanged.
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 # Interpret the config file for Python logging.
 fileConfig(config.config_file_name)
 
@@ -29,14 +37,6 @@ if db_url:
 
 # add your model's MetaData object here for 'autogenerate' support
 target_metadata = None
-
-# Ensure project root is on sys.path for imports like `src.app.models.orm`
-try:
-    project_root = Path(__file__).resolve().parent.parent
-    if project_root.as_posix() not in [Path(p).as_posix() for p in sys.path]:
-        sys.path.insert(0, str(project_root))
-except Exception:
-    pass
 
 # Try to import SQLAlchemy Base metadata for autogenerate
 for import_path in (

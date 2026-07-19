@@ -103,6 +103,15 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
             vv = used.get(key)
         if isinstance(vv, list) and vv:
             out[key] = vv[:12]
+    # The legacy chat extractor sees every catalog brand token as positive.  Reconcile it
+    # with the shared core's clamped exclusion before persisting session memory.
+    excluded = {str(v).strip().lower() for v in (out.get("brand_excludes") or []) if str(v).strip()}
+    if excluded and isinstance(out.get("brands"), list):
+        kept = [v for v in out["brands"] if str(v).strip().lower() not in excluded]
+        if kept:
+            out["brands"] = kept
+        else:
+            out.pop("brands", None)
     if isinstance(data.get("product_identity"), dict):
         ident = data.get("product_identity") or {}
         if ident.get("constraints"):
@@ -825,6 +834,15 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
     encoded = bool(s.get("encoded_payload_detected"))
     polyglot = bool(s.get("polyglot_suspected"))
     ocr_uncertain = bool(s.get("ocr_low_confidence_uncertain"))
+    analysis_pending = bool(s.get("analysis_pending") or s.get("vision_pending"))
+    analysis_degraded = bool(
+        ocr_uncertain or s.get("vision_timeout") or s.get("ocr_timeout")
+        or s.get("vision_error") or s.get("ocr_error")
+    )
+    security_risk = bool(
+        qr_external or qr_injection or ocr_injection or manipulation or steg
+        or adversarial >= 0.35 or encoded or polyglot
+    )
 
     hard_lock = bool(
         polyglot
@@ -842,18 +860,10 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
         or steg
         or adversarial >= 0.5
         or encoded
-        or ocr_uncertain
     )
     degraded = bool(
         qr_detected
-        or qr_external
-        or qr_injection
-        or ocr_injection
-        or manipulation
-        or steg
-        or adversarial >= 0.35
-        or encoded
-        or ocr_uncertain
+        or security_risk
     )
     if hard_lock:
         route = "lockdown"
@@ -872,8 +882,16 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
         route = "visual_sanitized"
         severity = "warn"
         message = (
-            "Image looks untrusted. Continuing in text-only mode; reupload a clean product-only photo for precise visual matching."
+            "Embedded or unverified image channels were ignored. Safe visual matching can continue."
         )
+    elif analysis_pending:
+        route = "analysis_pending"
+        severity = "info"
+        message = "Image analysis is still running. I will not use incomplete image evidence yet."
+    elif analysis_degraded:
+        route = "analysis_degraded"
+        severity = "info"
+        message = "Some image details could not be verified. Visual matches remain available, but uncertain text was ignored."
     else:
         route = "allow"
         severity = "info"
@@ -881,8 +899,11 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
     return {
         "route": route,
         "severity": severity,
-        "image_untrusted": bool(degraded),
-        "image_degraded_mode": bool(degraded and not hard_lock),
+        "security_risk": security_risk,
+        "analysis_degraded": analysis_degraded,
+        "analysis_pending": analysis_pending,
+        "image_untrusted": security_risk,
+        "image_degraded_mode": bool((degraded or analysis_degraded) and not hard_lock),
         "needs_human_review": bool(needs_review),
         "chat_lockdown": bool(hard_lock),
         "warning_message": message,
@@ -1092,7 +1113,12 @@ def _derive_qr_details(sig: Dict[str, Any] | None, posture: Dict[str, Any] | Non
 
 
 def _image_trust_channels(posture: Dict[str, Any] | None) -> Dict[str, bool]:
-    route = str((posture or {}).get("route") or "allow")
+    posture = posture or {}
+    route = str(posture.get("route") or "allow")
+    if posture.get("analysis_pending"):
+        return {"visual_embedding_trusted": False, "ocr_trusted": False, "qr_trusted": False}
+    if posture.get("analysis_degraded") and not posture.get("security_risk"):
+        return {"visual_embedding_trusted": True, "ocr_trusted": False, "qr_trusted": False}
     if route == "allow":
         return {"visual_embedding_trusted": True, "ocr_trusted": True, "qr_trusted": True}
     if route == "visual_sanitized":
@@ -1203,6 +1229,14 @@ def _persist_chat_structured_state(
             if isinstance(value, list) and not value:
                 continue
             merged_slots[str(key)] = value
+    excluded = {str(v).strip().lower() for v in (merged_slots.get("brand_excludes") or [])
+                if str(v).strip()}
+    if excluded and isinstance(merged_slots.get("brands"), list):
+        kept = [v for v in merged_slots["brands"] if str(v).strip().lower() not in excluded]
+        if kept:
+            merged_slots["brands"] = kept
+        else:
+            merged_slots.pop("brands", None)
     if merged_slots:
         out["confirmed_slots"] = merged_slots
         if merged_slots.get("budget_min") is not None:

@@ -27,11 +27,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 _DECISION_DDL = """
 CREATE TABLE IF NOT EXISTS recommendation_decision (
     id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
     trace_id TEXT,
     decision_id TEXT,
     uid_hash TEXT,
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS recommendation_decision (
 _CONVERSION_DDL = """
 CREATE TABLE IF NOT EXISTS conversion_event (
     id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
     decision_id TEXT,
     order_id TEXT,
     uid_hash TEXT,
@@ -76,6 +78,17 @@ def ensure_tables(db) -> None:
     """Create the attribution tables if absent. Idempotent; safe to call per request."""
     db.execute(text(_DECISION_DDL))
     db.execute(text(_CONVERSION_DDL))
+    for table in ("recommendation_decision", "conversion_event"):
+        try:
+            columns = {c["name"] for c in inspect(db.connection()).get_columns(table)}
+            if "tenant_id" not in columns:
+                db.execute(text(f"ALTER TABLE {table} ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"))
+        except Exception:
+            # Migration owns production schema. Lightweight test databases may
+            # not support reflection/ALTER and will use the fresh DDL above.
+            continue
+    db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_conversion_event_tenant_order "
+                    "ON conversion_event(tenant_id, order_id)"))
 
 
 def _dumps(value: Any) -> str:
@@ -106,6 +119,7 @@ def record_decision(
     arm: Optional[str] = None,
     variant: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
+    tenant_id: Optional[str] = None,
 ) -> Optional[str]:
     """Persist the decision a recommendation turn made (which SKUs it proposed, under which
     arm/variant). Returns the row id, or None on failure — never raises into the caller."""
@@ -113,15 +127,20 @@ def record_decision(
         return None
     try:
         ensure_tables(db)
+        if not tenant_id:
+            from src.app.platform.tenant_context import current_tenant_id
+            tenant_id = current_tenant_id()
+        tenant_id = str(tenant_id or "default").strip() or "default"
         row_id = str(uuid.uuid4())
         db.execute(
             text(
                 "INSERT INTO recommendation_decision "
-                "(id, trace_id, decision_id, uid_hash, surface, arm, variant, skus_json, context_json) "
-                "VALUES (:id,:t,:d,:u,:s,:a,:v,:sk,:c)"
+                "(id, tenant_id, trace_id, decision_id, uid_hash, surface, arm, variant, skus_json, context_json) "
+                "VALUES (:id,:tn,:t,:d,:u,:s,:a,:v,:sk,:c)"
             ),
             {
                 "id": row_id,
+                "tn": tenant_id,
                 "t": trace_id,
                 "d": decision_id or trace_id,
                 "u": uid_hash,
@@ -147,16 +166,16 @@ def _loads_dict(raw: Any) -> Dict[str, Any]:
         return {}
 
 
-def _find_decision(db, *, trace_id: Optional[str], uid_hash: Optional[str]) -> Optional[Dict[str, Any]]:
+def _find_decision(db, *, trace_id: Optional[str], uid_hash: Optional[str], tenant_id: str) -> Optional[Dict[str, Any]]:
     """Find the decision an order should be credited to: exact trace_id match first (the cart
     carries it), else the most recent decision for this uid_hash."""
     if trace_id:
         row = db.execute(
             text(
                 "SELECT decision_id, skus_json, context_json FROM recommendation_decision "
-                "WHERE trace_id = :t ORDER BY created_at DESC LIMIT 1"
+                "WHERE tenant_id=:tn AND trace_id = :t ORDER BY created_at DESC LIMIT 1"
             ),
-            {"t": trace_id},
+            {"tn": tenant_id, "t": trace_id},
         ).fetchone()
         if row:
             return {"decision_id": row[0], "skus": _loads_list(row[1]), "context": _loads_dict(row[2])}
@@ -164,9 +183,9 @@ def _find_decision(db, *, trace_id: Optional[str], uid_hash: Optional[str]) -> O
         row = db.execute(
             text(
                 "SELECT decision_id, skus_json, context_json FROM recommendation_decision "
-                "WHERE uid_hash = :u ORDER BY created_at DESC LIMIT 1"
+                "WHERE tenant_id=:tn AND uid_hash = :u ORDER BY created_at DESC LIMIT 1"
             ),
-            {"u": uid_hash},
+            {"tn": tenant_id, "u": uid_hash},
         ).fetchone()
         if row:
             return {"decision_id": row[0], "skus": _loads_list(row[1]), "context": _loads_dict(row[2])}
@@ -184,6 +203,7 @@ def attribute_order(
     window_s: int = 0,
     attribution_model: str = "trace_or_recent",
     converted_at: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> AttributionResult:
     """Link an order back to the decision that produced it. Idempotent per order_id; never
     raises. Returns an AttributionResult that reward_from_outcome() can score."""
@@ -191,17 +211,21 @@ def attribute_order(
         return AttributionResult(attributed=False, order_id=order_id, reason="missing_db_or_order")
     try:
         ensure_tables(db)
+        if not tenant_id:
+            from src.app.platform.tenant_context import current_tenant_id
+            tenant_id = current_tenant_id()
+        tenant_id = str(tenant_id or "default").strip() or "default"
         # Idempotency: an order is attributed at most once.
         existing = db.execute(
-            text("SELECT decision_id FROM conversion_event WHERE order_id = :o LIMIT 1"),
-            {"o": order_id},
+            text("SELECT decision_id FROM conversion_event WHERE tenant_id=:tn AND order_id = :o LIMIT 1"),
+            {"tn": tenant_id, "o": order_id},
         ).fetchone()
         if existing:
             return AttributionResult(
                 attributed=False, order_id=order_id, decision_id=existing[0],
                 reason="already_attributed",
             )
-        match = _find_decision(db, trace_id=trace_id, uid_hash=uid_hash)
+        match = _find_decision(db, trace_id=trace_id, uid_hash=uid_hash, tenant_id=tenant_id)
         if not match:
             return AttributionResult(attributed=False, order_id=order_id, reason="no_matching_decision")
         ordered = [str(x) for x in (line_skus or [])]
@@ -210,12 +234,13 @@ def attribute_order(
         db.execute(
             text(
                 "INSERT INTO conversion_event "
-                "(id, decision_id, order_id, uid_hash, attributed_skus_json, value_cents, "
+                "(id, tenant_id, decision_id, order_id, uid_hash, attributed_skus_json, value_cents, "
                 " window_s, attribution_model, converted_at) "
-                "VALUES (:id,:d,:o,:u,:sk,:v,:w,:m,:ts)"
+                "VALUES (:id,:tn,:d,:o,:u,:sk,:v,:w,:m,:ts)"
             ),
             {
                 "id": str(uuid.uuid4()),
+                "tn": tenant_id,
                 "d": match["decision_id"],
                 "o": order_id,
                 "u": uid_hash,

@@ -72,10 +72,11 @@ def test_gate2_signal_to_finding_to_recall_to_narration(db):
     assert ctx["needs_market_evidence"] is True
     # finding surfaced in the query-scoped findings list
     assert any(f["entity_ref"] == "sku9monitor" for f in ctx["market_findings"])
-    # finding reachable in hippograph recall (query-term seeding resolves to the same node id)
-    insights_no_skus = gather_market_context(db, query="anything about sku9monitor", uid_hash="u1")
-    assert any(i.get("kind") == "finding" for i in insights_no_skus["hippograph_insights"]), \
-        "a query-token finding must be reachable in recall (S2 query-scoping)"
+    # Finding recall is seeded from the authorized result subject, never free-text token overlap.
+    insights = gather_market_context(db, query="anything about sku9monitor", uid_hash="u1",
+                                     result_skus=["sku9monitor"])
+    assert any(i.get("kind") == "finding" for i in insights["hippograph_insights"]), \
+        "an exact result-SKU finding must be reachable in recall"
     # narration receives structured + plain-English evidence
     assert ctx["market_evidence"]["findings"]
     assert "sku9monitor" in ctx["narration_note"] or ctx["narration_note"]  # note built

@@ -103,5 +103,44 @@ def test_scope_findings_pure_function():
         MarketFinding("demand_shift", "GAM-1", "critical", 0.9, "a", {}, "daily"),
         MarketFinding("demand_shift", "OTHER", "info", 0.2, "b", {}, "daily"),
     ]
-    out = _scope_findings(fs, query_tokens=["gam"], result_skus=[])
-    assert [f.entity_ref for f in out] == ["GAM-1"]  # token overlap keeps GAM-1, drops OTHER
+    out = _scope_findings(fs, result_skus=["GAM-1"], taxonomy_nodes=[], ancestor_nodes=[])
+    assert [f.entity_ref for f in out] == ["GAM-1"]
+
+
+def test_scope_findings_does_not_match_brand_token_overlap():
+    from src.app.services.market_intelligence_agent import _scope_findings
+    fs = [MarketFinding("demand_shift", "Lenovo backpack", "warn", 0.8, "accessory spike", {}, "daily")]
+
+    out = _scope_findings(fs, result_skus=["LAP-LENOVO-1"], taxonomy_nodes=["laptops"], ancestor_nodes=[])
+
+    assert out == []
+
+
+def test_agent_derives_taxonomy_scope_from_approved_result_sku(db):
+    from src.app.services.taxonomy_registry import approve_classification, upsert_classification
+    upsert_classification(db, sku="LAP-SCOPED-1", node_handle="el-6-6", source="test",
+                          confidence=1.0, tenant_id="tenant-a")
+    approve_classification(db, sku="LAP-SCOPED-1", approved_by="reviewer",
+                           tenant_id="tenant-a")
+    persist_findings(db, [
+        MarketFinding("demand_shift", "laptop-family", "warn", 0.8, "laptop demand up",
+                      {"subject_type": "taxonomy", "subject_id": "el-6-6",
+                       "taxonomy_node": "el-6-6", "source_system": "erp"}, "daily")
+    ], tenant_id="tenant-a")
+    db.commit()
+
+    ctx = gather_market_context(db, query="are these trending", result_skus=["LAP-SCOPED-1"],
+                                tenant_id="tenant-a")
+
+    assert [f["summary"] for f in ctx["market_findings"]] == ["laptop demand up"]
+
+
+def test_agent_never_reads_another_tenants_findings(db):
+    persist_findings(db, [MarketFinding("demand_shift", None, "critical", 1.0,
+                                                "tenant b secret", {"scope": "global"}, "daily")],
+                     tenant_id="tenant-b")
+    db.commit()
+
+    ctx = gather_market_context(db, query="what is trending", tenant_id="tenant-a")
+
+    assert ctx["market_findings"] == []

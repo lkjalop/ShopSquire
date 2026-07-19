@@ -19,7 +19,7 @@ def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
     s.execute(text(
-        "CREATE TABLE decision_trace_events (id TEXT, trace_id TEXT, event_type TEXT, "
+        "CREATE TABLE decision_trace_events (id TEXT, tenant_id TEXT NOT NULL DEFAULT 'default', trace_id TEXT, event_type TEXT, "
         "source_type TEXT, source_id TEXT, target_type TEXT, target_id TEXT, payload TEXT, "
         "created_at TEXT DEFAULT CURRENT_TIMESTAMP)"))
     attribution.ensure_tables(s)
@@ -37,6 +37,26 @@ def _tev(s, st, si, tt, ti):
         {"id": f"{si}-{ti}", "st": st, "si": si, "tt": tt, "ti": ti})
 
 
+def test_build_from_db_is_tenant_isolated(db):
+    db.execute(text(
+        "INSERT INTO decision_trace_events (id,tenant_id,trace_id,event_type,source_type,source_id,"
+        "target_type,target_id,payload) VALUES "
+        "('ta','tenant-a','TA','viewed','user','same-user','product','SKU-A','{}'),"
+        "('tb','tenant-b','TB','viewed','user','same-user','product','SKU-B','{}')"))
+    db.execute(text(
+        "INSERT INTO conversion_event (id,tenant_id,decision_id,order_id,uid_hash,attributed_skus_json,"
+        "value_cents,converted_at) VALUES "
+        "('ca','tenant-a','DA','OA','same-user','[\"SKU-A\"]',10000,'2026-07-18'),"
+        "('cb','tenant-b','DB','OB','same-user','[\"SKU-B\"]',999999,'2026-07-18')"))
+    db.commit()
+
+    graph = build_from_db(db, tenant_id="tenant-a")
+
+    assert "SKU-A" in graph.nodes
+    assert "SKU-B" not in graph.nodes
+    assert "decision:DB" not in graph.nodes
+
+
 def test_build_from_db_projects_trace_and_reward(db):
     _tev(db, "user", "u1", "product", "GAM-1")
     _tev(db, "user", "u1", "product", "GAM-2")
@@ -44,7 +64,7 @@ def test_build_from_db_projects_trace_and_reward(db):
         "INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, attributed_skus_json, "
         "value_cents, converted_at) VALUES ('c1','D1','O1','u1','[\"GAM-1\"]',500000,'2020-01-01')"))
     db.commit()
-    g = build_from_db(db)
+    g = build_from_db(db, tenant_id="default")
     # SKUs stayed canonical (sku_pattern), not name-mangled
     assert "GAM-1" in g.nodes and "GAM-2" in g.nodes
     assert g.nodes["GAM-1"].weight > 0  # conversion reward applied
@@ -53,8 +73,13 @@ def test_build_from_db_projects_trace_and_reward(db):
 
 
 def test_build_from_db_none_is_empty():
-    g = build_from_db(None)
+    g = build_from_db(None, tenant_id="default")
     assert g.nodes == {} and g.edges == {}
+
+
+def test_build_from_db_requires_explicit_tenant(db):
+    with pytest.raises(ValueError, match="tenant_id is required"):
+        build_from_db(db, tenant_id="")
 
 
 def test_build_from_db_include_findings_projects_finding_nodes(db):
@@ -71,8 +96,8 @@ def test_build_from_db_include_findings_projects_finding_nodes(db):
                    {"id": f"ms{i}", "k": f"ms{i}",
                     "pl": '{"query": "framework 16", "result_count": 0, "uid_hash": "user-%d"}' % i})
     db.commit()
-    base = build_from_db(db, include_findings=False)
-    enriched = build_from_db(db, include_findings=True)
+    base = build_from_db(db, tenant_id="default", include_findings=False)
+    enriched = build_from_db(db, tenant_id="default", include_findings=True)
     assert not any(n.startswith("finding:") for n in base.nodes)  # off by default
     assert any(n.startswith("finding:inventory_demand_mismatch") for n in enriched.nodes)  # M3 → hippograph
 
@@ -82,7 +107,7 @@ def test_build_from_db_degrades_when_tables_absent():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
     try:
-        g = build_from_db(s)
+        g = build_from_db(s, tenant_id="default")
         assert g.nodes == {}
     finally:
         s.close()

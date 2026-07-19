@@ -49,10 +49,10 @@ _TRACE_BATCH: "ContextVar[Optional[dict]]" = ContextVar("trace_event_batch", def
 
 _TRACE_INSERT_SQL = """
     INSERT INTO decision_trace_events (
-        id, trace_id, event_type, source_type, source_id,
+        id, tenant_id, trace_id, event_type, source_type, source_id,
         target_type, target_id, payload, created_at
     ) VALUES (
-        :id, :trace_id, :event_type, :source_type, :source_id,
+        :id, :tenant_id, :trace_id, :event_type, :source_type, :source_id,
         :target_type, :target_id, :payload, :created_at
     )
 """
@@ -752,6 +752,7 @@ def log_trace_event(
     target_id: str | None,
     payload: Dict[str, Any],
     durable: bool = True,
+    tenant_id: str | None = None,
 ) -> None:
     global _TRACE_TABLE_ENSURED, _OUTBOX_TABLE_ENSURED
     if not trace_id:
@@ -769,6 +770,13 @@ def log_trace_event(
             except Exception:
                 pass
         original_payload = payload or {}
+        if not tenant_id:
+            try:
+                from src.app.platform.tenant_context import current_tenant_id
+                tenant_id = current_tenant_id()
+            except Exception:
+                tenant_id = None
+        tenant_id = str(tenant_id or "default").strip() or "default"
         idempotency_key = None
         try:
             if isinstance(original_payload, dict):
@@ -800,6 +808,7 @@ def log_trace_event(
         safe_payload.setdefault("_event_type", event_type)
         broker_payload = {
             "id": event_id,
+            "tenant_id": tenant_id,
             "trace_id": trace_id,
             "event_type": event_type,
             "source_type": source_type,
@@ -841,6 +850,7 @@ def log_trace_event(
         if _batch is not None:
             _batch["events"].append({
                 "id": event_id,
+                "tenant_id": tenant_id,
                 "trace_id": trace_id,
                 "event_type": event_type,
                 "source_type": source_type,
@@ -860,6 +870,7 @@ def log_trace_event(
                         text(_TRACE_INSERT_SQL),
                         {
                             "id": event_id,
+                            "tenant_id": tenant_id,
                             "trace_id": trace_id,
                             "event_type": event_type,
                             "source_type": source_type,
@@ -888,10 +899,10 @@ def log_trace_event(
                                 text(
                                     """
                                     INSERT INTO decision_trace_events (
-                                        id, trace_id, event_type, source_type, source_id,
+                                        id, tenant_id, trace_id, event_type, source_type, source_id,
                                         target_type, target_id, payload, created_at
                                     ) VALUES (
-                                        :id, :trace_id, :event_type, :source_type, :source_id,
+                                        :id, :tenant_id, :trace_id, :event_type, :source_type, :source_id,
                                         :target_type, :target_id, :payload, :created_at
                                     )
                                     ON CONFLICT (id) DO UPDATE SET
@@ -901,6 +912,7 @@ def log_trace_event(
                                 ),
                                 {
                                     "id": event_id,
+                                    "tenant_id": tenant_id,
                                     "trace_id": trace_id,
                                     "event_type": event_type,
                                     "source_type": source_type,

@@ -86,7 +86,9 @@ def _leg_market(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
     from src.app.models.db import db_session
     from src.app.services.market_intelligence_agent import gather_market_context
     with db_session() as db:
-        ctx = gather_market_context(db, query=query, uid_hash=None, result_skus=None)
+        category = str(getattr(plan, "category", None) or "").strip()
+        ctx = gather_market_context(db, query=query, uid_hash=None, result_skus=None,
+                                    taxonomy_nodes=([category] if category else []))
     findings = ctx.get("market_findings") or []
     return {"source": "market_intelligence", "found": bool(findings),
             "summary": (ctx.get("narration_note") or "")[:400],
