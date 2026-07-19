@@ -48,4 +48,21 @@ describe('ImageRecommendPanel canonical slate', () => {
     expect(screen.getByText(/Finding the best matches/i)).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('does not reactivate legacy suggest when the canonical prop is omitted', async () => {
+    render(
+      <ImageRecommendPanel
+        imageContexts={[{
+          labels: ['laptop'],
+          ocr_text: '',
+          cv_signals: {},
+          source_name: 'office-laptop.jpg',
+        }]}
+        userQuery="find something like this"
+      />,
+    );
+
+    expect(await screen.findByText(/Image recommendation is unavailable/i)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

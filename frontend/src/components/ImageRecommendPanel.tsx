@@ -129,6 +129,8 @@ export interface Props {
    * the shared turn is still pending; [] is a completed honest no-match. */
   canonicalProducts?: ProductCard[] | null;
   canonicalSummary?: string;
+  /** Temporary rollback switch. Production callers must use the canonical shared turn. */
+  allowLegacySuggest?: boolean;
 }
 
 /* ---------- constants ---------- */
@@ -755,7 +757,7 @@ function buildLocalTimeoutFallback(
 }
 
 /* ---------- component ---------- */
-export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd, canonicalProducts, canonicalSummary }: Props) {
+export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd, canonicalProducts, canonicalSummary, allowLegacySuggest = false }: Props) {
   const [groups, setGroups] = useState<ImageGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -858,6 +860,14 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
         setClarifyQuestions(null);
         if (traceId) onTraceId?.(traceId);
       }
+      return;
+    }
+    if (!allowLegacySuggest) {
+      ++buildSeqRef.current;
+      setGroups([]);
+      setLoading(false);
+      setGlobalRedBlock(false);
+      setError('Image recommendation is unavailable for this turn.');
       return;
     }
     if (imageContexts.length === 0) {
@@ -1225,13 +1235,17 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
 
     setGroups(built);
     setLoading(false);
-  }, [canonicalProducts, canonicalSummary, imageContexts, userQuery, sessionSuspiciousCount,
+  }, [allowLegacySuggest, canonicalProducts, canonicalSummary, imageContexts, userQuery, sessionSuspiciousCount,
       onTraceId, runBrandFallbackChain, traceId]);
 
   const handleWiden = useCallback(async (groupIdx: number, widenAmount: number) => {
     const group = groups[groupIdx];
     if (!group?.widenState || group.offDomain) return;
     const newMax = (group.widenState.budgetMax || 1500) + widenAmount;
+    if (!allowLegacySuggest) {
+      onClarify?.(`${stripBudgetHints(userQuery)} increase the maximum budget to $${newMax}`.trim());
+      return;
+    }
     try {
       const widenedQuery = `${stripBudgetHints(userQuery)} ${group.friendlyBrand || ''}`.trim();
       const result = await fetchSuggest(widenedQuery, group.context || null, newMax);
@@ -1250,11 +1264,15 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
       });
       if (result.traceId) onTraceId?.(result.traceId);
     } catch { /* ignore */ }
-  }, [groups, userQuery, onTraceId]);
+  }, [allowLegacySuggest, groups, userQuery, onClarify, onTraceId]);
 
   const handleShowNearest = useCallback(async (groupIdx: number) => {
     const group = groups[groupIdx];
     if (!group || group.offDomain) return;
+    if (!allowLegacySuggest) {
+      onClarify?.(buildNearestQuery(userQuery, group.friendlyBrand));
+      return;
+    }
     try {
       const baseMax = group.widenState?.budgetMax || extractBudgetMax(userQuery, 1200) || 1200;
       const nearestBudgetMax = Math.max(1800, baseMax + 1200);
@@ -1277,7 +1295,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
       });
       if (result.traceId) onTraceId?.(result.traceId);
     } catch { /* ignore */ }
-  }, [groups, userQuery, onTraceId]);
+  }, [allowLegacySuggest, groups, userQuery, onClarify, onTraceId]);
 
   useEffect(() => {
     if (imageContexts.length > 0 || userQuery) {
