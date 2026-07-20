@@ -97,6 +97,14 @@ def validate_labels(labels: Dict[str, Any]) -> List[str]:
     return problems
 
 
+def labels_are_human_sealed(labels: Dict[str, Any]) -> bool:
+    """A judged slate may be scored provisionally, but only a named human seal can promote it."""
+    return (
+        str(labels.get("review_status") or "").strip().lower() == "human_sealed"
+        and bool(str(labels.get("human_reviewed_by") or "").strip())
+    )
+
+
 def _split_keys(labels: Dict[str, Any], split: Optional[str]) -> Optional[set]:
     """The set of case keys in `split` ('dev'|'test'), or None to accept ALL labeled cases."""
     if not split:
@@ -262,6 +270,7 @@ def evaluate_case_quality(case: Dict[str, Any], response: Dict[str, Any],
     # never leak into the test gate — GPT-5.6 review-11b: the split was previously not enforced).
     lab = case_labels(labels or {}, row["case_id"], split=split) if labels else None
     row["labeled"] = lab is not None
+    row["label_review_sealed"] = labels_are_human_sealed(labels or {}) if lab is not None else False
     if lab is not None:
         row["precision_at_10"] = round(precision_at_k(shown, lab), 4)
         row["ndcg_at_10"] = ndcg_at_k(shown, lab)
@@ -298,6 +307,7 @@ def summarize_quality(rows: List[Dict[str, Any]],
     # labeled PRODUCT-EXPECTED cases over product-expected cases. Counting a labeled refusal case
     # in the numerator inflated coverage.
     labeled = [r for r in rows if r.get("labeled") and r.get("expects_products")]
+    label_review_sealed = bool(labeled) and all(r.get("label_review_sealed") is True for r in labeled)
     labeled_coverage = len(labeled) / n_exp
     precision = (sum(r["precision_at_10"] for r in labeled) / len(labeled)) if labeled else None
     ndcg = (sum(r["ndcg_at_10"] for r in labeled) / len(labeled)) if labeled else None
@@ -336,6 +346,9 @@ def summarize_quality(rows: List[Dict[str, Any]],
         failures.append(f"labeled_coverage {labeled_coverage:.3f} < {th['labeled_coverage_min']} "
                         f"(relevance UNMEASURED is a failure, not a pass)")
     else:
+        if not label_review_sealed:
+            failures.append("relevance labels are provisional: review_status must be human_sealed "
+                            "and human_reviewed_by must name the reviewer")
         if precision is not None and precision < th["precision_at_10_min"]:
             failures.append(f"precision@10 {precision:.3f} < {th['precision_at_10_min']}")
         if ndcg is not None and ndcg < th["ndcg_at_10_min"]:
@@ -346,6 +359,7 @@ def summarize_quality(rows: List[Dict[str, Any]],
             "constraint_satisfaction": (round(constraint_sat, 4) if constraint_sat is not None else None),
             "diversity": (round(diversity, 4) if diversity is not None else None),
             "labeled_cases": len(labeled), "labeled_coverage": round(labeled_coverage, 4),
+            "label_review_sealed": label_review_sealed,
             "precision_at_10": (round(precision, 4) if precision is not None else None),
             "ndcg_at_10": (round(ndcg, 4) if ndcg is not None else None),
             "authz_unmeasured_cases": authz_unmeasured,

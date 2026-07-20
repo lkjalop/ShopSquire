@@ -88,7 +88,8 @@ def test_gate_fails_on_unmeasured_relevance_not_passes():
 
 
 def test_gate_passes_with_labels_and_clean_slate():
-    labels = {"cases": {f"g{i}": {"labels": {"A": 2, "B": 1, "C": 1}} for i in range(10)}}
+    labels = {"review_status": "human_sealed", "human_reviewed_by": "reviewer-1",
+              "cases": {f"g{i}": {"labels": {"A": 2, "B": 1, "C": 1}} for i in range(10)}}
     rows = [evaluate_case_quality(
         {"id": f"g{i}", "budget_max": 2000},
         _resp([_card("A", 1000, "acme", "meets"), _card("B", 1200, "bravo", "meets"),
@@ -98,8 +99,23 @@ def test_gate_passes_with_labels_and_clean_slate():
     assert s["gates"]["pass"] is True, s["gates"]["failures"]
 
 
+def test_gate_reports_provisional_metrics_but_refuses_unsealed_labels():
+    labels = {"review_status": "independent_draft_requires_human_second_pass",
+              "human_reviewed_by": None,
+              "cases": {f"g{i}": {"labels": {"A": 2, "B": 1, "C": 1}} for i in range(10)}}
+    rows = [evaluate_case_quality(
+        {"id": f"g{i}", "budget_max": 2000},
+        _resp([_card("A", 1000, "acme", "meets"), _card("B", 1200, "bravo", "meets"),
+               _card("C", 1400, "carbon", "meets")]), labels=labels) for i in range(10)]
+    s = summarize_quality(rows)
+    assert s["precision_at_10"] == 1.0 and s["ndcg_at_10"] == 1.0
+    assert s["label_review_sealed"] is False and s["gates"]["pass"] is False
+    assert any("provisional" in failure for failure in s["gates"]["failures"])
+
+
 def test_gate_fails_on_unauthorized_even_when_labeled_green():
-    labels = {"cases": {f"g{i}": {"labels": {"A": 2, "B": 1, "C": 1}} for i in range(10)}}
+    labels = {"review_status": "human_sealed", "human_reviewed_by": "reviewer-1",
+              "cases": {f"g{i}": {"labels": {"A": 2, "B": 1, "C": 1}} for i in range(10)}}
     rows = [evaluate_case_quality(
         {"id": f"g{i}", "budget_max": 1100},                      # B and C now OVER budget
         _resp([_card("A", 1000, "acme", "meets"), _card("B", 1200, "bravo", "meets"),
@@ -135,7 +151,8 @@ def test_summarize_run_requires_quality_when_supplied():
     gated = summarize_run(diffs, quality=red_quality)
     assert gated["quality_evaluated"] is True
     assert gated["gates_pass"] is False                    # parity-green + quality-red = NO
-    green_labels = {"cases": {f"g{i}": {"labels": {"A": 2, "B": 1, "C": 1}} for i in range(10)}}
+    green_labels = {"review_status": "human_sealed", "human_reviewed_by": "reviewer-1",
+                    "cases": {f"g{i}": {"labels": {"A": 2, "B": 1, "C": 1}} for i in range(10)}}
     green_rows = [evaluate_case_quality(
         {"id": f"g{i}", "budget_max": 2000},
         _resp([_card("A", 1000, "acme", "meets"), _card("B", 1200, "bravo", "meets"),
