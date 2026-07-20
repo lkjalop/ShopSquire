@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from src.app.services.recommendation_core.envelope import TurnEnvelope
-from src.app.services.recommendation_core.turn_router import route_turn
+from src.app.services.recommendation_core.turn_router import _instruction_prefix, route_turn
 
 
 @pytest.fixture()
@@ -35,6 +35,13 @@ def _stub(**refine):
     payload = {"lane": "SEARCH", "handle": "el-6-6", "use_cases": [], "requirements": {},
                "refine": refine, "compare_targets": [], "confidence": 0.9}
     return lambda p, t: json.dumps(payload)
+
+
+def test_router_prompt_distinguishes_policy_from_active_procurement_changes():
+    prompt = _instruction_prefix(("ram_gb",), ("office",))
+    assert "general payment/delivery/returns policy only" in prompt
+    assert "RFQ drafts, supplier channels, requested delivery dates" in prompt
+    assert "keep/change-constraint turns" in prompt
 
 
 def test_soft_preferred_brand_is_not_a_hard_filter(db):

@@ -389,7 +389,11 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
         "in requirements. When ANY budget is stated, set budget_scope: 'per_unit' ($X each / per "
         "laptop) or 'total' ($X for the whole order); null when unclear. quantity/total_budget null "
         "for a single item / no stated budget.\n"
-        '- POLICY_QUESTION for services (payment plans, delivery, returns policy).\n\n'
+        "- POLICY_QUESTION is for general service policy (payment plans, generic delivery or returns). "
+        "When the prior subject is a procurement/order, RFQ drafts, supplier channels, requested "
+        "delivery dates, quantities, budgets, MOQ blockers, and whether a supplier message was sent "
+        "are PROCUREMENT. A statement that keeps or changes existing constraints is FILTER or "
+        "PROCUREMENT, not POLICY_QUESTION.\n\n"
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
         '"use_cases": ["<key>", ...], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
@@ -410,7 +414,10 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
     return (
         "Route one commerce turn into bounded JSON. The model interprets language; the platform "
         "validates every category, product, constraint and action.\n"
-        f"LANES: {', '.join(LANES)}. Pick one. POLICY_QUESTION is payment/delivery/returns.\n"
+        f"LANES: {', '.join(LANES)}. Pick one. POLICY_QUESTION is general payment/delivery/returns "
+        "policy only. For an active procurement, RFQ drafts, supplier channels, requested delivery "
+        "dates, quantities, budgets, MOQ blockers, send status, and keep/change-constraint turns are "
+        "PROCUREMENT (or FILTER for a product-only refinement), not POLICY_QUESTION.\n"
         "Pick what the shopper wants to buy, not a mentioned object. A game, application or "
         "workload maps to the device that runs it. OFF_CATALOG is only for a clearly unsold "
         "category. Prefer an [in catalog] sibling only when meaning is otherwise equivalent.\n"
