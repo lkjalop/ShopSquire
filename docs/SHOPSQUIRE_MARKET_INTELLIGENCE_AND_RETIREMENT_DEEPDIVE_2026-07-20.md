@@ -36,6 +36,28 @@ Implementation: `recommendation_core/envelope.py:99`, `recommendation_facade.py:
 `recommendation_core/turn_router.py:783`. The default-tenant legacy-memory bridge is explicitly
 transitional and must be deleted with the loopback.
 
+### 75 x 3 stress result
+
+The checkpointed model-backed run completed all 225 turns across 75 journeys:
+
+- latency: p50 5.88 s, p95 7.03 s, max 22.85 s;
+- no exceptions, unauthorized products, cross-tenant writes, cart-plan safety failures, or
+  quantity/total-budget arithmetic failures;
+- 77 flags were expected-lane label disagreements (`SEARCH` versus an expected `FILTER` or
+  `PROCUREMENT`) and are routing-calibration diagnostics, not proof of an unsafe response;
+- seven flags came from the trace grammar not recognizing `total order budget`; the arithmetic
+  was correct and the grammar is fixed in `budget_grammar.py`;
+- one journey lost its prior laptop node on two follow-ups. Reproduction found a BYO-model budget
+  invention on “keep the total budget.” The core now requires buyer-supplied monetary evidence
+  before accepting a changed amount, persists budget scope, and the exact journey passes:
+  20 laptops/$19k total -> 15 units -> cheaper configuration while retaining $19k.
+
+The old aggregate `62.67%` invariant pass rate therefore mixes semantic invariants with lane-label
+expectations and must not be used as a promotion score. Split the harness into `semantic_safety`,
+`continuity`, `routing_calibration`, and `relevance` dimensions before the next long-context soak.
+The 75 x 3 suite proves breadth; it does not replace the planned 20 x 10 and 14 x 15 context-rot,
+abandonment, returns and repeated-RFQ-amendment suites.
+
 ## Deck assessment
 
 The PDF's seven modules are sensible but "one authoritative store" should mean one authoritative
