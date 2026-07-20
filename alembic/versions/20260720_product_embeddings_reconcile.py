@@ -30,7 +30,21 @@ def _table_exists(bind, qualified_name: str) -> bool:
 
 def upgrade() -> None:
     bind = op.get_bind()
-    if "postgres" not in str(getattr(bind.dialect, "name", "")).lower():
+    dialect = str(getattr(bind.dialect, "name", "")).lower()
+    if "sqlite" in dialect:
+        # Local/demo databases use text-serialized vectors. This keeps the health and
+        # repository contracts available without pretending SQLite provides pgvector.
+        op.execute(
+            """
+            CREATE TABLE IF NOT EXISTS product_embeddings (
+                product_id TEXT PRIMARY KEY,
+                embedding TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        return
+    if "postgres" not in dialect:
         return
 
     available = bool(bind.execute(sa.text(

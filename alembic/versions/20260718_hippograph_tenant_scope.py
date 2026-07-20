@@ -13,12 +13,27 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
     for table in ("decision_trace_events", "recommendation_decision", "conversion_event"):
-        with op.batch_alter_table(table) as batch:
-            batch.add_column(sa.Column("tenant_id", sa.Text(), nullable=False, server_default="default"))
-    op.create_index("ix_trace_events_tenant_created", "decision_trace_events", ["tenant_id", "created_at"])
-    op.create_index("ix_recommendation_decision_tenant_created", "recommendation_decision", ["tenant_id", "created_at"])
-    op.create_index("ix_conversion_event_tenant_created", "conversion_event", ["tenant_id", "created_at"])
+        columns = {column["name"] for column in inspector.get_columns(table)}
+        if "tenant_id" not in columns:
+            with op.batch_alter_table(table) as batch:
+                batch.add_column(sa.Column("tenant_id", sa.Text(), nullable=False,
+                                           server_default="default"))
+
+    def _create_index_if_missing(name: str, table: str, columns: list[str], *,
+                                 unique: bool = False) -> None:
+        existing = {index["name"] for index in sa.inspect(bind).get_indexes(table)}
+        if name not in existing:
+            op.create_index(name, table, columns, unique=unique)
+
+    _create_index_if_missing("ix_trace_events_tenant_created", "decision_trace_events",
+                             ["tenant_id", "created_at"])
+    _create_index_if_missing("ix_recommendation_decision_tenant_created",
+                             "recommendation_decision", ["tenant_id", "created_at"])
+    _create_index_if_missing("ix_conversion_event_tenant_created", "conversion_event",
+                             ["tenant_id", "created_at"])
     # Pre-tenant attribution was application-idempotent only. Remove any race-created duplicates
     # before making the tenant/order identity authoritative at the database boundary.
     op.execute(sa.text(
@@ -27,8 +42,8 @@ def upgrade() -> None:
         "ORDER BY created_at, id) AS rn FROM conversion_event WHERE order_id IS NOT NULL) duplicates "
         "WHERE rn > 1)"
     ))
-    op.create_index("ux_conversion_event_tenant_order", "conversion_event",
-                    ["tenant_id", "order_id"], unique=True)
+    _create_index_if_missing("ux_conversion_event_tenant_order", "conversion_event",
+                             ["tenant_id", "order_id"], unique=True)
 
 
 def downgrade() -> None:
