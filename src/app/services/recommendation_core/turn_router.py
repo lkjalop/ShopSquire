@@ -551,6 +551,11 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             if pn is not None:
                 node = pn
                 subject_from_session = True
+            elif prior_shortlist and lane in ("COMPARE", "EXPLAIN"):
+                # A delegated legacy lane can persist an exact shortlist without a taxonomy
+                # node. The shortlist is sufficient evidence for a deictic compare/explain;
+                # do not invent a node merely to enable continuity.
+                subject_from_session = True
         elif pn is not None:
             # FRAGMENT-DRIFT GUARD (R9.2 live finding): 'show me cheaper ONES' embedding-matched
             # Swimwear > One-Pieces — a continuation fragment that accidentally grounds to an
@@ -783,7 +788,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # not mutate a cart that isn't there). Downgrade to a continuation (FILTER inherits the prior
     # bulk/brand state) when there's a prior subject, else SEARCH. Never mutate an absent cart.
     if lane == "CART_MUTATE" and not (envelope.cart or []):
-        lane = "FILTER" if (envelope.session or {}).get("prior_node") else "SEARCH"
+        prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
+        if prior is not None:
+            lane = "FILTER"
+            if node is None:
+                node = prior
+                subject_from_session = True
+        else:
+            lane = "SEARCH"
 
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),

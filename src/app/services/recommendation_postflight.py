@@ -50,9 +50,13 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
         # inherited budget/requirements, so a budget-less follow-up REFRESHES the remembered
         # budget instead of wiping it (screenshot 30's loss point was exactly this overwrite).
         used = core.extras.get("constraints_used") or {}
+        prior = (envelope.session or {}).get("accepted_constraints") or {}
+        decision_quantity = decision.get("quantity")
+        decision_total = decision.get("total_budget_cents")
         slice_ = {
-            "last_node_handle": decision.get("node_handle"),
-            "last_shortlist_skus": [c.sku for c in core.products][:12],
+            "last_node_handle": decision.get("node_handle") or (envelope.session or {}).get("prior_node"),
+            "last_shortlist_skus": ([c.sku for c in core.products][:12]
+                                    or list((envelope.session or {}).get("shortlist_skus") or [])[:12]),
             "constraints": {
                 "budget_min_cents": used.get("budget_min_cents", envelope.budget_min_cents),
                 "budget_max_cents": used.get("budget_max_cents", envelope.budget_max_cents),
@@ -61,8 +65,10 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
                 # bulk state (Phase 1f) — so a follow-up 'how many can I get?' inherits the order
                 # size + total budget the shopper set earlier (the facade maps this into
                 # accepted_constraints verbatim).
-                "quantity": decision.get("quantity"),
-                "total_budget_cents": decision.get("total_budget_cents"),
+                "quantity": (decision_quantity if decision_quantity is not None
+                             else prior.get("quantity")),
+                "total_budget_cents": (decision_total if decision_total is not None
+                                        else prior.get("total_budget_cents")),
                 # brand constraints (review-10 P0.6) — so 'now show me cheaper ones' keeps the
                 # 'only Asus' / 'not Apple' the shopper set on a prior turn.
                 "brand_filter": decision.get("brand_filter"),

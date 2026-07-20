@@ -32,6 +32,21 @@ def test_envelope_converts_dollars_to_cents_once():
     assert e.trace_id and e.tenant_id == "default"
 
 
+def test_free_text_budget_is_normalized_before_legacy_dispatch_order():
+    e = TurnEnvelope.from_suggest_params(
+        query="work laptops budget 1200 to 1500, need 10", uid="u1"
+    )
+    assert e.budget_min_cents == 120000
+    assert e.budget_max_cents == 150000
+
+
+def test_structured_budget_remains_authoritative_over_text():
+    e = TurnEnvelope.from_suggest_params(
+        query="laptop under 1500", uid="u1", budget_max=1800
+    )
+    assert e.budget_max_cents == 180000
+
+
 def test_finalize_enforces_never_empty_message():
     c = _core(message="", products=[])
     out = c.finalize()

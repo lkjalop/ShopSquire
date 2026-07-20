@@ -381,7 +381,39 @@ def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
         raw = redis.get(f"session:{tenant_id}:{uid}:kv_state")
         data = json.loads(raw) if raw else {}
         if not isinstance(data, dict) or not data:
-            return {}
+            # Transitional bridge: delegated legacy lanes still write an unscoped key. It is
+            # unsafe for named tenants, so only the single-tenant demo namespace may read it.
+            # Delete this branch once all lane postflights write the canonical scoped slice.
+            if tenant_id != "default":
+                return {}
+            legacy_raw = redis.get(f"session:{uid}:kv_state")
+            legacy = json.loads(legacy_raw) if legacy_raw else {}
+            if not isinstance(legacy, dict) or not legacy:
+                return {}
+            confirmed = legacy.get("confirmed_slots") or {}
+            snapshot = (legacy.get("last_valid_constraints_snapshot")
+                        or legacy.get("last_constraints_snapshot") or {})
+            bmin = confirmed.get("budget_min", snapshot.get("budget_min"))
+            bmax = confirmed.get("budget_max", snapshot.get("budget_max"))
+            quantity = confirmed.get("order_quantity")
+            try:
+                bmin = int(round(float(bmin) * 100)) if bmin is not None else None
+                bmax = int(round(float(bmax) * 100)) if bmax is not None else None
+                quantity = int(quantity) if quantity is not None else None
+            except (TypeError, ValueError):
+                bmin = bmax = quantity = None
+            return {
+                "prior_node": None,
+                "shortlist_skus": legacy.get("last_valid_shortlist_skus")
+                                  or legacy.get("last_shortlist_skus") or [],
+                "accepted_constraints": {
+                    "budget_min_cents": bmin,
+                    "budget_max_cents": bmax,
+                    "requirements": {},
+                    "quantity": quantity,
+                },
+                "legacy_bridge": True,
+            }
         return {"prior_node": data.get("last_node_handle"),
                 "shortlist_skus": data.get("last_shortlist_skus") or [],
                 "accepted_constraints": data.get("constraints") or {}}

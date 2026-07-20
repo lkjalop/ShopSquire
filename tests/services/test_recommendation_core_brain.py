@@ -525,6 +525,36 @@ def test_compare_explain_carry_prior_shortlist(db):
     assert d.node_handle == "el-6-11-2"
 
 
+def test_no_cart_mutation_downgrade_carries_authorized_prior_node(db):
+    env = _env("cut it to 1000 max")
+    env = __import__("dataclasses").replace(
+        env,
+        session={"prior_node": "el-6-6", "shortlist_skus": ["LAP-1"],
+                 "accepted_constraints": {}},
+        cart=[],
+    )
+    d = route_turn(db, env, llm_fn=_route_stub("CART_MUTATE", None))
+    assert d.lane == "FILTER"
+    assert d.node_handle == "el-6-6"
+    assert d.subject_from_session is True
+
+
+def test_budget_only_revision_overrides_incorrect_model_switch(db):
+    env = dataclasses.replace(
+        _env("cut it to 1000 max"),
+        session={"prior_node": "el-6-6", "shortlist_skus": ["LAP-1"],
+                 "accepted_constraints": {}},
+    )
+    llm = lambda _p, _t: json.dumps({
+        "lane": "SEARCH", "handle": None, "requirements": {},
+        "subject_action": "switch", "confidence": 0.9,
+    })
+    resp = recommend_turn(db, env, llm_fn=llm)
+    decision = resp.extras["decision"]
+    assert decision["node_handle"] == "el-6-6"
+    assert decision["subject_from_session"] is True
+
+
 def test_fresh_search_does_not_inherit_prior_node(db):
     """A NEW search (not a narrowing lane) must NOT drag the prior subject in — context-rot
     guard: only FILTER/COMPARE/EXPLAIN continuations inherit."""

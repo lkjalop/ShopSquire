@@ -84,6 +84,8 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "complement_offers",
     # capability_conflict: the catalog-derived 'these requirements can't coexist; relax X or Y' (1f).
     "capability_conflict",
+    # bulk_budget: quantity/total/per-unit viability and authorized trade-off menu.
+    "bulk_budget",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):

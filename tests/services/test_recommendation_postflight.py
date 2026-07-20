@@ -57,6 +57,25 @@ def test_followup_without_budget_refreshes_not_wipes():
     assert raw["constraints"]["requirements"] == {"ram_gb": [[">=", 16]]}
 
 
+def test_followup_without_products_or_quantity_preserves_prior_slice():
+    import dataclasses
+    r = _Redis()
+    env = dataclasses.replace(_env(), session={
+        "prior_node": "el-6-6",
+        "shortlist_skus": ["LAP-OLD"],
+        "accepted_constraints": {"quantity": 25, "total_budget_cents": 4000000},
+    })
+    core = CoreResponse(envelope=env, lane="COMPARE", products=[])
+    core.extras["decision"] = {"node_handle": None, "quantity": None,
+                               "total_budget_cents": None}
+    assert write_session(r, env, core) is True
+    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    assert raw["last_node_handle"] == "el-6-6"
+    assert raw["last_shortlist_skus"] == ["LAP-OLD"]
+    assert raw["constraints"]["quantity"] == 25
+    assert raw["constraints"]["total_budget_cents"] == 4000000
+
+
 def test_session_write_is_tenant_scoped():
     r = _Redis()
     env = _env()

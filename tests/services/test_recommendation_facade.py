@@ -160,3 +160,27 @@ def test_session_slice_read_tenant_scoped():
     # a different tenant with the same uid does NOT see it (isolation)
     assert F._read_session_slice(r, "u1", "t2") == {}
     assert F._read_session_slice(None, "u1", "t1") == {}      # no redis → empty, never raises
+
+
+def test_default_tenant_bridges_bounded_legacy_session_fields_only():
+    import json
+    r = _Redis()
+    r.store["session:u1:kv_state"] = json.dumps({
+        "last_valid_shortlist_skus": ["LAP-1", "LAP-2"],
+        "last_valid_constraints_snapshot": {"budget_min": 1200, "budget_max": 1500},
+        "confirmed_slots": {"order_quantity": 25},
+        "untrusted_extra": "must-not-cross",
+    })
+    bridged = F._read_session_slice(r, "u1", "default")
+    assert bridged == {
+        "prior_node": None,
+        "shortlist_skus": ["LAP-1", "LAP-2"],
+        "accepted_constraints": {
+            "budget_min_cents": 120000,
+            "budget_max_cents": 150000,
+            "requirements": {},
+            "quantity": 25,
+        },
+        "legacy_bridge": True,
+    }
+    assert F._read_session_slice(r, "u1", "other-tenant") == {}

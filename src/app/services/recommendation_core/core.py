@@ -133,6 +133,24 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # the p50 to the model call vs the deterministic stages (P1 instrumentation).
     _t_route = time.perf_counter()
     decision = route_turn(db, envelope, llm_fn=llm_fn)
+    # Constraint-only updates preserve the last authorized sold subject even when a BYO
+    # router incorrectly labels the turn as a switch or returns no node. This is a core
+    # authorization invariant, not an intent heuristic: the canonical budget parser proves
+    # the bounded constraint, and the prior node was already sellability-clamped.
+    if decision.node_handle is None and (envelope.session or {}).get("prior_node"):
+        try:
+            from src.app.services.budget_grammar import parse_budget
+            prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
+            if parse_budget(envelope.query) is not None and prior is not None:
+                decision = dataclasses.replace(
+                    decision,
+                    node_handle=prior.handle,
+                    node_path=prior.full_path,
+                    requested_product_node=prior.handle,
+                    subject_from_session=True,
+                )
+        except Exception:
+            pass
     # The HTTP contract may not pre-parse a textual budget.  The model maps its value and
     # scope; deterministic arithmetic turns that bounded proposal into the per-unit ceiling
     # used by evidence retrieval.  A total budget for N units is never treated as per-unit.

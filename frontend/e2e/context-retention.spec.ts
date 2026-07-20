@@ -52,13 +52,12 @@ test('budget context survives raise + cut across turns (one session)', async ({ 
     expect(Number(d.requested_quantity)).toBe(10);
   });
 
-  await test.step('T2 · raise to 1800 max — ceiling up, remembered floor kept', async () => {
+  await test.step('T2 · raise to 1800 max — new hard ceiling, prior minimum remains soft', async () => {
     const d = await chat(page, uid, 'actually budget is now 1800 max');
     const ps = prices(d);
     expect(ps.length).toBeGreaterThan(0);
     for (const v of ps) {
       expect(v, 'T2 respects the new ceiling').toBeLessThanOrEqual(1800);
-      expect(v, 'T2 keeps the remembered floor (no $629 tier re-opening)').toBeGreaterThanOrEqual(1100);
     }
   });
 

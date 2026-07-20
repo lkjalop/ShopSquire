@@ -105,6 +105,17 @@ class TurnEnvelope:
                             pre_gate: Optional[Dict[str, Any]] = None) -> "TurnEnvelope":
         """The /suggest edge speaks DOLLARS; internal is CENTS — converted here, once."""
         to_cents = lambda v: int(round(float(v) * 100)) if v is not None else None  # noqa: E731
+        # Legacy suggest() historically parsed free-text budgets after V2 dispatch. Normalize
+        # the shared grammar here so the core does not depend on order inside that monolith.
+        if budget_min is None and budget_max is None:
+            try:
+                from src.app.services.budget_grammar import parse_budget
+                parsed = parse_budget(query)
+                if parsed is not None:
+                    budget_min, budget_max = parsed.budget_min, parsed.budget_max
+            except Exception:
+                # Input normalization is best-effort; no budget remains an honest core state.
+                pass
         return cls(tenant_id=str(tenant_id or "default"), uid=str(uid or ""),
                    query=str(query or "").strip(), trace_id=trace_id or str(uuid.uuid4()),
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
