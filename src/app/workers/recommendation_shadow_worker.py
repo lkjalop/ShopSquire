@@ -219,8 +219,13 @@ def _read_stream_batch(redis, consumer: str, *, block_ms: int) -> List[tuple]:
         for msg_id, fields in (claimed or [])[:_MAX_CLAIM_PER_CYCLE]:
             out.append((msg_id, _stream_payload(fields)))   # None payload handled downstream
         # ALWAYS also read new (never early-return on claimed — that's the starvation bug)
-        res = redis.xreadgroup(GROUP, consumer, {STREAM_KEY: ">"},
-                               count=_MAX_NEW_PER_CYCLE, block=(0 if out else block_ms))
+        # Redis BLOCK 0 means "wait forever", not "nonblocking". Omit BLOCK entirely when
+        # reclaimed work already exists or the caller requested a one-shot read; otherwise a
+        # crash-recovery cycle processes the pending item and then hangs before returning it.
+        read_kwargs = {"count": _MAX_NEW_PER_CYCLE}
+        if not out and block_ms > 0:
+            read_kwargs["block"] = block_ms
+        res = redis.xreadgroup(GROUP, consumer, {STREAM_KEY: ">"}, **read_kwargs)
         for _stream, entries in res or []:
             for msg_id, fields in entries:
                 out.append((msg_id, _stream_payload(fields)))
