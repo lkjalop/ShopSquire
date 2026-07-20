@@ -571,6 +571,16 @@ def test_known_wrong_valorant_now_answers_with_closest_match(db):
     assert "144" in resp.message                       # says WHY these are closest, not silent
 
 
+def test_expanded_search_slate_excludes_known_capability_failures_when_matches_exist(db):
+    resp = recommend_turn(
+        db,
+        _env("laptop with at least 32 GB RAM"),
+        llm_fn=_route_stub("SEARCH", "el-6-6", {"ram_gb": [">=", 32]}),
+    )
+    assert [p.sku for p in resp.products] == ["LAP-2"]
+    assert all((p.fit or {}).get("overall") == "meets" for p in resp.products)
+
+
 def test_core_never_raises_and_degrades_honestly():
     resp = recommend_turn(None, _env("anything"), llm_fn=lambda p, t: "")
     assert resp.degraded and resp.message and resp.products == []

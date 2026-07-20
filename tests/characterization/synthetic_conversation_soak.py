@@ -84,6 +84,9 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
                      node_contains="Laptop", expect_products=True),
             TurnSpec("why is the first one suitable for me?", lane_in=("EXPLAIN",),
                      node_contains="Laptop", excluded_brand="Apple", expect_products=True),
+            TurnSpec("raise the budget to $1200 but keep the homework and Minecraft needs",
+                     lane_in=("FILTER", "SEARCH"), node_contains="Laptop",
+                     budget_max=1200, excluded_brand="Apple", expect_products=True),
         )),
         JourneySpec("university", "engineering-student", "18-24", (
             TurnSpec("I need a university laptop for AutoCAD and engineering assignments under $1800",
@@ -94,6 +97,8 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             TurnSpec("show me the cheaper ones", lane_in=("FILTER",), node_contains="Laptop",
                      expect_products=True),
             TurnSpec("explain the tradeoff on the first option", lane_in=("EXPLAIN",),
+                     node_contains="Laptop", expect_products=True),
+            TurnSpec("I may also use Blender; keep the same budget", lane_in=("FILTER", "SEARCH"),
                      node_contains="Laptop", expect_products=True),
         )),
         JourneySpec("ai_creator", "local-ai-and-image-generation", "25-44", (
@@ -106,6 +111,8 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
                      node_contains="Laptop", expect_products=True),
             TurnSpec("why is the first one better for that workload?", lane_in=("EXPLAIN",),
                      node_contains="Laptop", excluded_brand="Apple", expect_products=True),
+            TurnSpec("I can use cloud training but want local 7B inference", lane_in=("FILTER", "SEARCH"),
+                     node_contains="Laptop", excluded_brand="Apple", expect_products=True),
         )),
         JourneySpec("retiree", "simple-social-and-casual-games", "65+", (
             TurnSpec("I'm a grandmother and want a simple laptop for Facebook, video calls and Candy Crush under $700",
@@ -117,6 +124,8 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
                      node_contains="Laptop", expect_products=True),
             TurnSpec("why would the first one be easy for me to use?", lane_in=("EXPLAIN",),
                      node_contains="Laptop", excluded_brand="Apple", expect_products=True),
+            TurnSpec("keep it under $700 and prioritise reliable video calls", lane_in=("FILTER", "SEARCH"),
+                     node_contains="Laptop", budget_max=700, excluded_brand="Apple", expect_products=True),
         )),
         JourneySpec("graphics_tablet", "drawing-with-existing-computer", "mixed", (
             TurnSpec("I already have a computer and only want a Wacom graphics tablet for drawing under $500",
@@ -129,6 +138,9 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             TurnSpec("what if the class needs 10 of them with $4000 total?",
                      lane_in=("PROCUREMENT", "FILTER"), node_contains="Graphics Tablet",
                      quantity=10, total_budget_cents=400_000, budget_scope="total"),
+            TurnSpec("actually make that 12 tablets but keep the $4000 total",
+                     lane_in=("PROCUREMENT", "FILTER"), node_contains="Graphics Tablet",
+                     quantity=12, total_budget_cents=400_000, budget_scope="total"),
         )),
         JourneySpec("office_per_unit", "small-business-office-manager", "35-54", (
             TurnSpec(f"We need {office_qty} business laptops for office work, ${1400 + variant * 50} each",
@@ -139,6 +151,8 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             TurnSpec("exclude Apple and keep the same budget", lane_in=("PROCUREMENT", "FILTER"),
                      node_contains="Laptop", excluded_brand="Apple"),
             TurnSpec("what is the delivery and sourcing tradeoff?", lane_in=("PROCUREMENT", "EXPLAIN"),
+                     node_contains="Laptop"),
+            TurnSpec("prepare the supplier quote for the current quantity", lane_in=("PROCUREMENT",),
                      node_contains="Laptop"),
         )),
         JourneySpec("office_total", "procurement-lead", "35-54", (
@@ -151,6 +165,8 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
                      node_contains="Laptop"),
             TurnSpec("why is that allocation the best fit?", lane_in=("EXPLAIN", "PROCUREMENT"),
                      node_contains="Laptop"),
+            TurnSpec("if we select a $3500 workstation, use the maximum quantity the same total can afford",
+                     lane_in=("PROCUREMENT", "FILTER"), node_contains="Laptop"),
         )),
         JourneySpec("gaming", "enthusiast-gamer", "18-34", (
             TurnSpec("gaming laptop for Cyberpunk 2077 under $2300", budget_max=2300,
@@ -161,29 +177,37 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
                      node_contains="Laptop", expect_products=True),
             TurnSpec("explain the first one's minimum versus recommended fit", lane_in=("EXPLAIN",),
                      node_contains="Laptop", expect_products=True),
+            TurnSpec("actually this is for developing games in Unreal and Blender, not only playing them",
+                     lane_in=("FILTER", "SEARCH"), node_contains="Laptop", expect_products=True),
         )),
         JourneySpec("support", "post-purchase-customer", "mixed", (
             TurnSpec("what is the returns policy?", lane_in=("POLICY_QUESTION",)),
             TurnSpec("does the laptop warranty cover a failed screen?", lane_in=("POLICY_QUESTION", "SUPPORT_CLAIM")),
             TurnSpec("the charging port stopped working and I need a repair", lane_in=("SUPPORT_CLAIM",)),
             TurnSpec("it arrived damaged, how do I return it?", lane_in=("SUPPORT_CLAIM", "POLICY_QUESTION")),
+            TurnSpec("what evidence do I need for a warranty repair?", lane_in=("POLICY_QUESTION", "SUPPORT_CLAIM")),
         )),
         JourneySpec("cart_changes", "buyer-changing-their-mind", "25-54", (
             TurnSpec("remove the HP Envy and reduce the IdeaPad Slim 3i to 20", kind="cart", expect_cart_ops=2),
             TurnSpec("actually set the ThinkPad to 15", kind="cart", expect_cart_ops=1),
             TurnSpec("keep only the IdeaPad", kind="cart", expect_cart_ops=1),
             TurnSpec("clear my cart", kind="cart", expect_cart_ops=1),
+            TurnSpec("clear all items again", kind="cart", expect_cart_ops=1),
         ), cart=_CART),
     ]
 
 
-def build_journeys(turn_target: int, seed: int = 20260713) -> List[JourneySpec]:
+def build_journeys(turn_target: int, seed: int = 20260713, *,
+                   turns_per_journey: Optional[int] = None) -> List[JourneySpec]:
     if turn_target < 1:
         return []
     rng = random.Random(seed)
     pool: List[JourneySpec] = []
     variant = 0
-    while sum(len(j.turns) for j in pool) < turn_target:
+    def _planned_turns(journey: JourneySpec) -> int:
+        return min(len(journey.turns), int(turns_per_journey or len(journey.turns)))
+
+    while sum(_planned_turns(j) for j in pool) < turn_target:
         batch = _base_journeys(variant)
         rng.shuffle(batch)
         pool.extend(batch)
@@ -194,7 +218,8 @@ def build_journeys(turn_target: int, seed: int = 20260713) -> List[JourneySpec]:
     for j in pool:
         if remaining <= 0:
             break
-        turns = tuple(j.turns[:remaining])
+        take = min(remaining, int(turns_per_journey or len(j.turns)))
+        turns = tuple(j.turns[:take])
         out.append(JourneySpec(j.family, j.persona, j.age_group, turns, j.cart))
         remaining -= len(turns)
     return out
@@ -283,14 +308,19 @@ def _apply_cart_plan(cart: List[Dict[str, Any]], plan) -> List[Dict[str, Any]]:
     return out
 
 
-def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None) -> Dict[str, Any]:
-    journeys = build_journeys(turn_target, seed)
+def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
+             turns_per_journey: Optional[int] = None,
+             checkpoint_path: Optional[Path] = None) -> Dict[str, Any]:
+    journeys = build_journeys(turn_target, seed, turns_per_journey=turns_per_journey)
     if only_family:
         journeys = [j for j in journeys if j.family == only_family]
     session_factory = sessionmaker(bind=get_engine())
     db = session_factory()
     rows: List[Dict[str, Any]] = []
     started = time.time()
+    if checkpoint_path:
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint_path.unlink(missing_ok=True)
     try:
         for ji, journey in enumerate(journeys):
             session: Dict[str, Any] = {}
@@ -339,6 +369,9 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None) -> 
                 record["latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
                 record["errors"] = errors
                 rows.append(record)
+                if checkpoint_path:
+                    with checkpoint_path.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
                 print(f"[{len(rows):03d}] {journey.family}/{ti} {record.get('lane','ERROR')} "
                       f"{record['latency_ms']:.0f}ms errors={len(errors)}", flush=True)
     finally:
@@ -373,14 +406,19 @@ def main() -> int:
     ap.add_argument("--turns", type=int, default=200)
     ap.add_argument("--seed", type=int, default=20260713)
     ap.add_argument("--only-family")
+    ap.add_argument("--turns-per-journey", type=int)
     ap.add_argument("--output")
     ap.add_argument("--fail-on-invariant", action="store_true")
     args = ap.parse_args()
-    report = run_soak(max(1, args.turns), args.seed, args.only_family)
     out = Path(args.output) if args.output else (
         ROOT / "tmp" / "synthetic_soak" / f"review10_{args.seed}_{args.turns}.json")
+    checkpoint = out.with_suffix(out.suffix + ".partial.jsonl")
+    report = run_soak(max(1, args.turns), args.seed, args.only_family,
+                      turns_per_journey=args.turns_per_journey,
+                      checkpoint_path=checkpoint)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    checkpoint.unlink(missing_ok=True)
     print(json.dumps({"report": str(out), **report["summary"]}, ensure_ascii=False), flush=True)
     return 1 if args.fail_on_invariant and report["summary"]["failed"] else 0
 

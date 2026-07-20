@@ -118,14 +118,23 @@ def _aggregate_diagnosis(rows: list) -> dict:
     failed_keys: dict = {}
     empties = 0
     all_unknown_products = 0        # every requirement unknown → probably WRONG CATEGORY
-    price_bleed_reqs = 0           # storage_gb/ram_gb requirement with a suspiciously price-like value
+    price_bleed_reqs = 0           # requirement copied from an explicit currency amount
     for r in rows:
         if r.get("empty"):
             empties += 1
+        import re
+        query = str(r.get("query") or "")
+        currency_values = {
+            float(v.replace(",", ""))
+            for v in re.findall(r"\$\s*([0-9][0-9,]*(?:\.[0-9]+)?)", query)
+        }
         for k, spec in (r.get("requirements") or {}).items():
             if k in ("storage_gb", "ram_gb"):
                 for op, thr in (spec if isinstance(spec, list) else [spec]):
-                    if float(thr) >= 1000:      # >=1000 GB RAM / >=1000GB with no unit smells like a price
+                    # A 1 TB storage floor is valid. The historical bug copied
+                    # "$1800" into storage_gb; flag only a threshold equal to an
+                    # explicit currency value in this turn.
+                    if float(thr) in currency_values:
                         price_bleed_reqs += 1
         for p in r.get("products", []):
             ov = p.get("overall")

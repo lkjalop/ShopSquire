@@ -15,6 +15,12 @@ def test_build_journeys_hits_exact_turn_target_and_is_deterministic():
         (j.family, [t.query for t in j.turns]) for j in b]
 
 
+def test_build_journeys_supports_explicit_stress_shape():
+    journeys = build_journeys(225, seed=7, turns_per_journey=3)
+    assert len(journeys) == 75
+    assert all(len(j.turns) == 3 for j in journeys)
+
+
 def test_matrix_covers_requested_surfaces():
     journeys = build_journeys(200)
     families = {j.family for j in journeys}

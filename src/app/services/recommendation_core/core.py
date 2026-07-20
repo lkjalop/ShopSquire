@@ -1005,6 +1005,13 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
             resp.extras["compare_bound"] = [v.sku for v in pair]
     cards, summary = build_cards(variants, decision.requirements or None, limit=limit,
                                  sort=decision.sort, preferred=_preferred_values(resp))
+    # A wider top-5/top-10 view is still the primary eligible slate, not an
+    # unlabeled mixture of valid products and known capability failures. Keep
+    # closest alternatives only when the catalog has no meeting product at all.
+    if decision.requirements and decision.lane in ("SEARCH", "FILTER"):
+        meeting = [c for c in cards if (c.fit or {}).get("overall") == "meets"]
+        if meeting:
+            cards = meeting
     resp.products = cards
     if decision.requirements:
         resp.fit_summary = summary
