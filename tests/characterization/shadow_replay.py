@@ -195,6 +195,8 @@ def _merge_replay_session(prior: dict, core) -> dict:
         "brand_filter": dec.get("brand_filter"),
         "preferred_brand": dec.get("preferred_brand"),
     }.items():
+        if key == "budget_scope" and value in (None, "", "unknown"):
+            continue
         if value is not None and value != {} and value != []:
             accepted[key] = value
     out["accepted_constraints"] = accepted

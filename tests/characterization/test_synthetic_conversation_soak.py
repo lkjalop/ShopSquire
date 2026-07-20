@@ -2,6 +2,7 @@ from tests.characterization.synthetic_conversation_soak import (
     TurnSpec,
     _apply_cart_plan,
     _dimension_summary,
+    _effective_decision,
     _error_dimension,
     _percentile,
     _session_from,
@@ -101,6 +102,19 @@ def test_session_merge_does_not_erase_subject_or_constraints_on_explanation_turn
 
     merged = _session_from(Core(), prior)
     assert merged == prior
+
+
+def test_effective_decision_reads_authorized_prior_state_for_nodeless_turn():
+    class Core:
+        extras = {"decision": {"budget_scope": "unknown"}}
+
+    effective = _effective_decision(Core(), {
+        "prior_node": "el-6-1",
+        "accepted_constraints": {"quantity": 25, "budget_scope": "total"},
+    })
+    assert effective["node_handle"] == "el-6-1"
+    assert effective["quantity"] == 25
+    assert effective["budget_scope"] == "total"
 
 
 def test_soak_dimensions_do_not_mix_lane_calibration_with_safety():

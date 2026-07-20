@@ -341,6 +341,8 @@ def _session_from(core, prior: Optional[Dict[str, Any]] = None) -> Dict[str, Any
         "preferred_brand": dec.get("preferred_brand"),
     }
     for key, value in updates.items():
+        if key == "budget_scope" and value in (None, "", "unknown"):
+            continue
         if value is not None and value != [] and value != {}:
             accepted[key] = value
     out["accepted_constraints"] = accepted
@@ -384,9 +386,32 @@ def _dimension_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     return dimensions
 
 
-def _recommend_checks(spec: TurnSpec, core) -> List[str]:
+def _effective_decision(core, prior_session: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    dec = dict(core.extras.get("decision") or {})
+    prior = dict(prior_session or {})
+    accepted = dict(prior.get("accepted_constraints") or {})
+    if not dec.get("node_path") and prior.get("prior_node"):
+        try:
+            from src.app.services.taxonomy_registry import get_node
+
+            node = get_node(str(prior["prior_node"]))
+            if node is not None:
+                dec["node_path"] = node.full_path
+                dec["node_handle"] = node.handle
+        except Exception:
+            pass
+    for key in ("quantity", "total_budget_cents", "exclude_brand", "brand_filter"):
+        if dec.get(key) is None and accepted.get(key) is not None:
+            dec[key] = accepted[key]
+    if dec.get("budget_scope") in (None, "", "unknown") and accepted.get("budget_scope"):
+        dec["budget_scope"] = accepted["budget_scope"]
+    return dec
+
+
+def _recommend_checks(spec: TurnSpec, core,
+                      prior_session: Optional[Dict[str, Any]] = None) -> List[str]:
     errors: List[str] = []
-    dec = core.extras.get("decision") or {}
+    dec = _effective_decision(core, prior_session)
     lane = str(core.lane or "")
     if spec.lane_in and lane not in spec.lane_in:
         errors.append(f"lane:{lane}:expected:{','.join(spec.lane_in)}")
@@ -488,14 +513,15 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
                                        "cart_size": len(cart)})
                     else:
                         core = recommend_turn(db, env)
-                        errors.extend(_recommend_checks(spec, core))
+                        errors.extend(_recommend_checks(spec, core, session))
                         dec = core.extras.get("decision") or {}
                         session = _session_from(core, session)
+                        effective = _effective_decision(core, session)
                         record.update({
-                            "lane": core.lane, "node": dec.get("node_path"),
-                            "quantity": dec.get("quantity"),
-                            "total_budget_cents": dec.get("total_budget_cents"),
-                            "budget_scope": dec.get("budget_scope"),
+                            "lane": core.lane, "node": effective.get("node_path"),
+                            "quantity": effective.get("quantity"),
+                            "total_budget_cents": effective.get("total_budget_cents"),
+                            "budget_scope": effective.get("budget_scope"),
                             "product_skus": [p.sku for p in core.products],
                             "product_brands": [p.brand for p in core.products],
                             "message": str(core.message or "")[:500],
