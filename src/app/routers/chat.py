@@ -2458,6 +2458,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         has_image=has_image,
         buyer_persona=data.get("buyer_persona"),
         brand_name=None,
+        bulk_budget=data.get("bulk_budget") if isinstance(data.get("bulk_budget"), dict) else None,
     )
     assistant_message = aq_out.get("assistant_message")
     # N6 prose citations, re-applied on the /chat path: recommend.suggest appends a "_Sources:_" line,

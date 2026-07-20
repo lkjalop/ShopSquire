@@ -116,6 +116,13 @@ def test_envelope_rejects_unknown_intent_hint():
     assert TurnEnvelope.from_dict(wire).intent_hint is None
 
 
+def test_envelope_currency_is_bounded_and_round_trips():
+    env = TurnEnvelope.from_suggest_params(query="laptop", currency="aud")
+    assert env.currency == "AUD"
+    assert TurnEnvelope.from_dict(env.to_dict()).currency == "AUD"
+    assert TurnEnvelope.from_suggest_params(query="laptop", currency="bitcoin").currency == "USD"
+
+
 def test_shown_products_beat_stray_claims_artifacts():
     """R10 census fix: the legacy kitchen-sink can mint incident_id + needs_human_review=True
     on a PRODUCT turn (recorded live in compare_two_models, 15 products). A payload that SHOWS

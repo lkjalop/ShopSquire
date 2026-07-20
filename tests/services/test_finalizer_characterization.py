@@ -28,6 +28,34 @@ def test_char_ensure_result_prices_keeps_existing_price():
     assert out["results"][0]["price"] == 999  # existing price not overwritten
 
 
+def test_currency_guard_prunes_every_repeated_product_projection():
+    from src.app.services.recommend_response_finalizer import enforce_response_currency
+
+    usd = {"sku": "USD-1", "name": "USD laptop", "price": 1200, "currency": "USD"}
+    aud = {"sku": "AUD-1", "name": "AUD laptop", "price": 1200, "currency": "AUD"}
+    payload = {
+        "results": [usd.copy(), aud.copy()],
+        "products": [usd.copy(), aud.copy()],
+        "right_panel": {"anchor_sections": [{
+            "count": 2,
+            "top_products": [{"sku": "USD-1"}, {"sku": "AUD-1"}],
+        }]},
+        "device_lanes": [{
+            "count": 2,
+            "products": [{"sku": "USD-1"}, {"sku": "AUD-1"}],
+        }],
+    }
+
+    out = enforce_response_currency(payload, "USD")
+
+    assert [item["sku"] for item in out["results"]] == ["USD-1"]
+    assert [item["sku"] for item in out["products"]] == ["USD-1"]
+    assert out["right_panel"]["anchor_sections"][0]["top_products"] == [{"sku": "USD-1"}]
+    assert out["right_panel"]["anchor_sections"][0]["count"] == 1
+    assert out["device_lanes"][0]["products"] == [{"sku": "USD-1"}]
+    assert out["currency_policy"]["excluded_mismatched"] == 2
+
+
 def test_char_recovery_answer_exact_string():
     msg = R._recovery_answer({"budget_max": 1400, "brands": ["asus"]})
     assert msg == (

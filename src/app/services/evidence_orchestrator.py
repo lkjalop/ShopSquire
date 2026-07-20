@@ -90,9 +90,15 @@ def _leg_market(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
         ctx = gather_market_context(db, query=query, uid_hash=None, result_skus=None,
                                     taxonomy_nodes=([category] if category else []))
     findings = ctx.get("market_findings") or []
+    provenance_complete = bool(findings) and all(
+        f.get("source_system") and f.get("observed_at") and f.get("status", "active") == "active"
+        for f in findings
+    )
     return {"source": "market_intelligence", "found": bool(findings),
             "summary": (ctx.get("narration_note") or "")[:400],
-            "data": {"findings": findings[:5], "evidence_kinds": ctx.get("evidence_kinds") or []}}
+            "data": {"findings": findings[:5], "evidence_kinds": ctx.get("evidence_kinds") or [],
+                     "trust_state": "verified_internal" if provenance_complete else "advisory",
+                     "provenance_complete": provenance_complete}}
 
 
 def _leg_policy(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
@@ -236,6 +242,10 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
     for name in selected:
         leg = out["legs"].get(name) or {}
         if leg.get("found") and leg.get("summary"):
-            out["citations"].append({"source": leg.get("source") or name, "summary": leg["summary"]})
+            data = leg.get("data") if isinstance(leg.get("data"), dict) else {}
+            citation = {"source": leg.get("source") or name, "summary": leg["summary"]}
+            if data.get("trust_state"):
+                citation["trusted"] = data.get("trust_state") == "verified_internal"
+            out["citations"].append(citation)
     out["ms"] = int((time.perf_counter() - t0) * 1000)
     return out

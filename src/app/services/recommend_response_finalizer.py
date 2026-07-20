@@ -26,6 +26,68 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 _log = logging.getLogger(__name__)
 
 
+def filter_products_by_currency(results: List[Dict[str, Any]], currency: str
+                                ) -> Tuple[List[Dict[str, Any]], int]:
+    """Authorize products against one settlement currency; never infer an FX conversion."""
+    target = str(currency or "USD").strip().upper()
+    eligible: List[Dict[str, Any]] = []
+    excluded = 0
+    for item in results or []:
+        if not isinstance(item, dict):
+            excluded += 1
+            continue
+        item_currency = str(item.get("currency") or "").strip().upper()
+        if item_currency == target:
+            eligible.append(item)
+        else:
+            excluded += 1
+    return eligible, excluded
+
+
+def enforce_response_currency(payload: Dict[str, Any], currency: str) -> Dict[str, Any]:
+    """Prune stale product projections after root products are currency-authorized."""
+    if not isinstance(payload, dict):
+        return payload
+    target = str(currency or "USD").strip().upper()
+    roots = [item for key in ("results", "products")
+             for item in (payload.get(key) or []) if isinstance(item, dict)]
+    eligible, excluded = filter_products_by_currency(roots, target)
+    allowed_skus = {str(item.get("sku")) for item in eligible if item.get("sku")}
+    had_products = any(item.get("sku") for item in roots)
+
+    def _walk(value: Any) -> Any:
+        if isinstance(value, list):
+            out = []
+            for item in value:
+                if (isinstance(item, dict) and item.get("sku")
+                        and str(item.get("sku")) not in allowed_skus):
+                    continue
+                out.append(_walk(item))
+            return out
+        if isinstance(value, dict):
+            out = {key: _walk(item) for key, item in value.items()}
+            for product_key in ("items", "products", "top_products"):
+                if isinstance(out.get(product_key), list) and "count" in out:
+                    out["count"] = len(out[product_key])
+            return out
+        return value
+
+    if had_products:
+        payload = _walk(payload)
+    payload["currency_policy"] = {
+        "currency": target,
+        "excluded_mismatched": excluded,
+        "fx_applied": False,
+    }
+    if had_products and not allowed_skus:
+        message = (f"The available matches are not priced in {target}. I won't compare "
+                   "unconverted amounts; provide an approved FX quote or choose the store currency.")
+        payload["message"] = message
+        payload["assistant_message"] = message
+        payload.pop("right_panel", None)
+    return payload
+
+
 # ── Answer-shaping helpers (P1: moved from recommend.py — single owner) ────────
 # These are pure, dependency-light transforms over the response payload. They were
 # scattered as inline helpers in the 14.9k-line recommend.py route; consolidating

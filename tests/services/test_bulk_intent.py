@@ -16,6 +16,14 @@ def test_product_model_number_is_not_reclassified_as_quantity():
     assert extract_quantity_span("show Dell 15 laptops", unit_nouns=("laptop",)) is None
 
 
+def test_at_least_count_with_hyphenated_workload_modifier():
+    query = ("I'm starting a gaming studio with a total budget of $55,000. "
+             "I need at least 20 game-development laptops for Unreal Engine.")
+
+    assert extract_quantity_span(query, unit_nouns=("laptop",)) == (20, "20")
+    assert classify_budget_scope(query) == "total"
+
+
 def test_catalog_fast_path_defers_to_full_economics_for_catalog_command_quantity():
     from types import SimpleNamespace
     from src.app.routers.recommend import _requires_full_path_for_bulk

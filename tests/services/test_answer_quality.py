@@ -73,6 +73,21 @@ def test_cv_hard_block_still_answers_text_path():
     assert "eta_to_resolve" in (cov.get("covered") or [])
 
 
+def test_total_order_budget_uses_authorized_per_unit_cap_in_band():
+    out = apply_answer_quality(
+        query="20 game-development laptops, total budget $55,000",
+        assistant_message="Your $55,000 total allows up to $2,750 per unit.",
+        turn_intent="PROCUREMENT",
+        products=[{"price": 1199}, {"price": 1699}, {"price": 1919}],
+        image_cv_signals={}, has_image=False, buyer_persona=None, brand_name=None,
+        bulk_budget={"scope": "total", "total_budget": 55000, "quantity": 20,
+                     "per_unit_cap": 2750},
+    )
+    msg = str(out.get("assistant_message") or "")
+    assert "$1,199-$2,750" in msg
+    assert "$1,199-$55,000" not in msg
+
+
 
 def test_payment_and_contact_are_policy_faq_topics():
     """Payment-methods and contact questions route to the FAQ answerer, not product search (gap fix).

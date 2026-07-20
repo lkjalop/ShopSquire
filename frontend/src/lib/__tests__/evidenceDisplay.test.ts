@@ -4,7 +4,10 @@ import { evidenceRows, citationChips, legMeta } from '../evidenceDisplay';
 const EV = {
   selected: ['availability', 'market', 'web'],
   legs: {
-    market: { source: 'market_intelligence', found: true, summary: 'undercut on 2 SKUs' },
+    market: {
+      source: 'market_intelligence', found: true, summary: 'undercut on 2 SKUs',
+      data: { trust_state: 'verified_internal' },
+    },
     availability: { source: 'inventory', found: true, summary: '9 products, 400 units' },
     web: { source: 'external_web', found: true, summary: 'VRAM guidance…' },
   },
@@ -29,6 +32,12 @@ describe('evidenceRows', () => {
   it('a failed leg keeps its error visible (never silently dropped)', () => {
     const rows = evidenceRows({ legs: { market: { source: 'market_intelligence', found: false, error: 'leg_timeout>2.5s' } } } as any);
     expect(rows[0].error).toContain('leg_timeout');
+  });
+  it('does not badge thin market evidence as trusted', () => {
+    const rows = evidenceRows({
+      legs: { market: { source: 'market_intelligence', found: true, summary: 'broad forecast' } },
+    } as any);
+    expect(rows[0].trusted).toBe(false);
   });
 });
 

@@ -100,8 +100,10 @@ def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, An
     Honest default when there is no external signal — and the shortfall recommendation is real either way.
     SKU-SPECIFIC actions (pricing review) require a this_item signal: an undercut on a DIFFERENT product
     must not drive a pricing recommendation for this line."""
-    types = {str(f.get("finding_type") or "").lower() for f in (findings or [])}
-    item_types = {str(f.get("finding_type") or "").lower() for f in (findings or [])
+    actionable_scopes = {None, "this_item", "this_product", "taxonomy"}
+    relevant = [f for f in (findings or []) if f.get("scope") in actionable_scopes]
+    types = {str(f.get("finding_type") or "").lower() for f in relevant}
+    item_types = {str(f.get("finding_type") or "").lower() for f in relevant
                   if f.get("scope") in (None, "this_item")}   # None = caller didn't scope (tests/legacy)
     try:
         short = int(avail.get("shortfall") or 0)
@@ -115,9 +117,9 @@ def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, An
     # drive this line — recommending "secure inventory ahead of demand" while signals say demand is
     # falling contradicts the trace. Downward / sufficient-ATP / off-scope falls through to the
     # shortfall / seasonal / honest-default branches below.
-    _demand = [f for f in (findings or [])
+    _demand = [f for f in relevant
                if str(f.get("finding_type") or "").lower() in ("demand_shift", "demand_forecast")
-               and f.get("scope") in (None, "this_item")]
+               and f.get("scope") in (None, "this_item", "this_product", "taxonomy")]
     if short > 0 and any(_finding_is_upward(f) for f in _demand):
         return {"action": "secure inventory ahead of demand",
                 "rationale": "demand is trending up for this line and stock is short — reorder ahead of the curve and raise its prominence"}
@@ -131,7 +133,13 @@ def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, An
             "rationale": "no active external market signal for this line (internal-only mode)"}
 
 
-def _emit_market_intelligence(*, trace_id: Optional[str], query: Optional[str], avail: Dict[str, Any]) -> None:
+def _emit_market_intelligence(
+    *,
+    trace_id: Optional[str],
+    query: Optional[str],
+    avail: Dict[str, Any],
+    tenant_id: Optional[str] = None,
+) -> None:
     """GENUINE market-intelligence step for a bulk-procurement decision: read the analysis engine's REAL
     active findings (demand / competitor / seasonal / mismatch), scope them to this line, and emit an
     actionable, human-readable recommendation. Distinct from the inventory-availability step. Best-effort;
@@ -144,16 +152,21 @@ def _emit_market_intelligence(*, trace_id: Optional[str], query: Optional[str], 
         sku = str(avail.get("sku") or "")
         with _mi_db() as _mdb:
             context = gather_market_context(
-                _mdb, query=query, result_skus=[sku] if sku else [], max_findings=4, force=True)
+                _mdb, query=query, result_skus=[sku] if sku else [], max_findings=4,
+                tenant_id=tenant_id, force=True)
         findings = list(context.get("market_findings") or [])[:4]
         rec = _recommend_market_action(findings, avail)
+        scoped_count = sum(1 for f in findings if f.get("scope") in
+                           (None, "this_item", "this_product", "taxonomy"))
         _emit_trace(trace_id, "market_intelligence_assessed", "Market_Intelligence_Agent",
                     {"sku": sku or None, "signal_count": len(findings),
+                     "scoped_signal_count": scoped_count,
                      "signals": [{"type": f.get("finding_type"), "severity": f.get("severity"),
                                   "confidence": f.get("confidence"), "summary": f.get("summary"),
                                   "scope": f.get("scope")} for f in findings],
                      "recommendation": rec["action"], "rationale": rec["rationale"],
-                     "mode": "live" if findings else "internal_only"})
+                     "action_basis": "market_and_inventory" if scoped_count else "inventory_only",
+                     "mode": ("live" if scoped_count else "context_only") if findings else "internal_only"})
     except Exception as exc:
         record_partial_failure("market_intelligence_step", exc, trace_id=trace_id)
 
@@ -169,6 +182,7 @@ def run_fulfillment_stage(
     flags: Optional[Dict[str, Any]] = None,
     query: Optional[str] = None,
     pr_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> str:
     """Compute bulk availability (sets payload['availability']) and, when enabled, open a procurement
     case on a real shortfall. Returns the availability summary line (or '')."""
@@ -264,13 +278,15 @@ def run_fulfillment_stage(
         _emit_trace(trace_id, "bulk_availability_assessed", "Inventory_Availability_Agent",
                     {"sku": _av.get("sku"), "order_qty": qty, "in_stock": _av.get("in_stock"),
                      "shortfall": _av.get("shortfall"), "network": _av.get("network")})
-        _emit_market_intelligence(trace_id=trace_id, query=query, avail=_av)
+        _emit_market_intelligence(
+            trace_id=trace_id, query=query, avail=_av, tenant_id=tenant_id)
         if not _primary_over_budget:
             _attach_alternatives(payload=payload, avail=_av, qty=qty, constraints=constraints, trace_id=trace_id)
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
                      constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
                      flags=flags, single_item=single_item, defer=defer_to_cart, pr_id=pr_id,
-                     force_sourcing=_wants_sourcing(query), primary_name=_primary_name)
+                     force_sourcing=_wants_sourcing(query), primary_name=_primary_name,
+                     query=query or "")
     return line
 
 
@@ -308,7 +324,7 @@ def _network_adjusted_availability_line(line: str, avail: Dict[str, Any], primar
             f"locations, leaving {network_shortfall} to source.")
 
 
-def _buyer_requirements(constraints: Dict[str, Any]) -> Dict[str, Any]:
+def _buyer_requirements(constraints: Dict[str, Any], *, query: str = "") -> Dict[str, Any]:
     """The buyer's stated requirements, captured on the case so the supplier RFQ can cite them (way-1).
     Budget is kept INTERNAL (operator-only) — it is persisted for the operator but the RFQ renderer never
     puts it in the supplier body (no price anchoring). Vertical-blind: opaque use_case/spec tokens only."""
@@ -325,6 +341,9 @@ def _buyer_requirements(constraints: Dict[str, Any]) -> Dict[str, Any]:
     # concrete deadline DATE for the RFQ (today + horizon, or an explicit needed_by) — replaces the vague
     # "the stated deadline" placeholder so the supplier draft is complete and actionable.
     needed_by = str(constraints.get("needed_by") or "").strip()
+    if not needed_by and query:
+        from src.app.services.procurement_requirements import explicit_needed_by
+        needed_by = explicit_needed_by(query) or ""
     if not needed_by and horizon is not None:
         try:
             from datetime import date, timedelta
@@ -406,7 +425,7 @@ def _fluid_multiline_intent(*, query, constraints, trace_id, payload, pr_id=None
     if unresolved:
         # SURFACE phrases we couldn't match instead of dropping them — the buyer clarifies before confirming.
         payload["sourcing_intent"]["unresolved_phrases"] = unresolved
-    _reqs = _buyer_requirements(constraints or {})
+    _reqs = _buyer_requirements(constraints or {}, query=query)
     if _reqs:
         payload["sourcing_intent"]["requirements"] = _reqs  # carried to confirm-cart → onto the case
     n_units = sum(int(l["requested_qty"]) for l in lines)
@@ -451,7 +470,9 @@ def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
         record_partial_failure("bulk_alternatives", exc, trace_id=trace_id)
 
 
-def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False, defer=False, pr_id=None, force_sourcing=False, primary_name=None) -> None:
+def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags,
+                     single_item=False, defer=False, pr_id=None, force_sourcing=False,
+                     primary_name=None, query: str = "") -> None:
     """Open a fulfilment_case at GATE 1 on a real shortfall (flag-gated, best-effort). Two entry points:
     a BULK order at/above the threshold, or a SINGLE fully out-of-stock item (single_item=True).
     When ``defer`` (FULFILLMENT_DEFER_TO_CART), the intent stays FLUID: set payload['sourcing_intent']
@@ -485,7 +506,7 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
         payload["sourcing_intent"] = {"mode": "deferred_to_cart", "pr_id": pr_id,
                                       "lines": [dict(_line)],
                                       "planned_case_count": 1 if item_ref else 0}
-        _reqs = _buyer_requirements(constraints or {})
+        _reqs = _buyer_requirements(constraints or {}, query=query)
         if _reqs:
             payload["sourcing_intent"]["requirements"] = _reqs  # deadline/use_case/ship_to → onto the case at confirm
         _emit_trace(trace_id, "sourcing_previewed", "Procurement_Agent",
@@ -508,7 +529,7 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
             if isinstance((avail or {}).get("network"), dict):
                 _avail_patch["network"] = avail["network"]  # per-location + transfer plan → on the case
             _patch = {"availability": _avail_patch}
-            _reqs = _buyer_requirements(constraints or {})
+            _reqs = _buyer_requirements(constraints or {}, query=query)
             if _reqs:
                 _patch["requirements"] = _reqs  # way-1: buyer constraints → cited in the supplier RFQ
             fwf.transition(db, case_id=cid, event="availability_assessed", actor=agent,

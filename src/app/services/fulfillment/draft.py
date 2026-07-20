@@ -285,9 +285,10 @@ def _default_hippograph(db, item_ref, tenant_id):
 def _default_market(db, item_ref, tenant_id):
     from src.app.services.market_analysis import load_recent_findings
     fs = load_recent_findings(db, limit=20, tenant_id=tenant_id)
+    item_key = str(item_ref or "").strip().lower()
     return [{"finding_type": f.finding_type, "summary": f.summary, "severity": f.severity,
-             "confidence": f.confidence, "entity_ref": f.entity_ref}
-            for f in fs if (f.entity_ref or "").lower() == str(item_ref).lower() or f.entity_ref is None]
+             "confidence": f.confidence, "entity_ref": f.entity_ref, "scope": "exact_item"}
+            for f in fs if item_key and (f.entity_ref or "").strip().lower() == item_key]
 
 
 # ── supplier selection (from the APPROVED allowlist — never buyer text) ───────
@@ -349,7 +350,10 @@ def select_supplier(db, *, item_ref: str, rank_fn: Optional[Callable] = None,
 # ── build the draft ───────────────────────────────────────────────────────────
 def _urgency_note(evidence: List[DraftEvidence]) -> str:
     for e in evidence:
-        if e.source == "market_intel" and "demand" in (e.summary or "").lower():
+        payload = e.payload or {}
+        if (e.source == "market_intel" and payload.get("scope") == "exact_item"
+                and float(payload.get("confidence") or 0.0) >= 0.7
+                and "demand" in (e.summary or "").lower()):
             return "We are seeing elevated demand; a firm dispatch date would be appreciated."
     return "A firm dispatch date would be appreciated."
 

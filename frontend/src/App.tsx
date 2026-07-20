@@ -48,6 +48,7 @@ export type Product = {
   display_name?: string;
   subtitle?: string;
   price: number;
+  currency?: string;
   features?: string[];
   image_url?: string;
   specs?: Record<string, any>;
@@ -224,8 +225,14 @@ function productPrice(p: any): number {
   return 0;
 }
 
-function formatAUD(n: number): string {
-  return n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
+function normalizeCurrency(value: unknown): string {
+  const code = String(value || 'USD').trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(code) ? code : 'USD';
+}
+
+function formatMoney(n: number, currency: unknown = 'USD'): string {
+  const code = normalizeCurrency(currency);
+  return n.toLocaleString('en-AU', { style: 'currency', currency: code, currencyDisplay: 'code', maximumFractionDigits: 0 });
 }
 
 // Render a product price honestly: a real amount when we have one (from price OR price_cents), and an
@@ -233,7 +240,7 @@ function formatAUD(n: number): string {
 // $0 budget-band fix).
 function formatPrice(p: any): string {
   const v = productPrice(p);
-  return v > 0 ? formatAUD(v) : '—';
+  return v > 0 ? formatMoney(v, p?.currency) : '—';
 }
 
 
@@ -289,6 +296,10 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, 
   const prices = items.map((p) => productPrice(p)).filter((v) => v > 0);
   const minPrice = prices.length ? Math.min(...prices) : 0;
   const maxPrice = prices.length ? Math.max(...prices) : 0;
+  const currencies = Array.from(new Set(items.map((p) => normalizeCurrency((p as any)?.currency))));
+  const priceRange = currencies.length === 1
+    ? `${formatMoney(minPrice, currencies[0])} to ${formatMoney(maxPrice, currencies[0])}`
+    : 'multiple currencies (conversion required before comparison)';
   const useCase = _shortUseCase(String(query || ''));
   const top = items.slice(0, 2).map((p) => {
     const reason = Array.isArray(p.why) && p.why.length > 0 ? _prettyReason(String(p.why[0])) : '';
@@ -301,12 +312,12 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, 
       ? 'Budget allows performance-oriented options.'
       : 'Recommendations balance value and use-case fit.';
   if (lane === 'windows') {
-    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks range from ${formatAUD(minPrice)} to ${formatAUD(maxPrice)}.`;
+    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks span ${priceRange}.`;
   }
   if (lane === 'macbook') {
-    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, from ${formatAUD(minPrice)} to ${formatAUD(maxPrice)}.`;
+    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, spanning ${priceRange}.`;
   }
-  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, ${formatAUD(minPrice)}–${formatAUD(maxPrice)}).`;
+  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, ${priceRange}).`;
 }
 
 
@@ -3011,6 +3022,8 @@ export default function App() {
                         onSourcingTraceId={(tid) => setSourcingTraceId(normalizeTraceId(tid))}
                         priorSkus={priorCartSkus}
                         onClearPrior={clearPriorCartItems}
+                        sourcingRequirements={sourcingIntent?.requirements}
+                        sourcingOrderId={sourcingIntent?.pr_id}
                       />
                     </>) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
                       <div className={styles.emptyProductState}>

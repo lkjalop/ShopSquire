@@ -183,6 +183,15 @@ def test_network_breakdown_merged_onto_availability(monkeypatch):
     assert line == "On availability: 10 are available across the network; 5 at your preferred location now and 5 can transfer from other locations."
 
 
+def test_buyer_requirements_captures_explicit_query_deadline():
+    from src.app.services.recommend_fulfillment_stage import _buyer_requirements
+    r = _buyer_requirements(
+        {"use_case": "game_development"},
+        query="20 workstations required by 15 August 2099",
+    )
+    assert r["needed_by"] == "2099-08-15"
+
+
 def test_bulk_alternatives_attached_on_shortfall(monkeypatch):
     # availability stub gives a shortfall; substitutes stubbed → payload['fulfillment_options'] built
     monkeypatch.setattr(
@@ -244,12 +253,15 @@ def test_market_trace_uses_subject_scoped_context_api(monkeypatch):
     monkeypatch.setattr(stage, "_emit_trace", lambda *args, **kwargs: emitted.append((args, kwargs)))
 
     stage._emit_market_intelligence(trace_id="trace-1", query="bulk laptop order",
-                                    avail={"sku": "SKU-1", "shortfall": 4})
+                                    avail={"sku": "SKU-1", "shortfall": 4},
+                                    tenant_id="tenant-a")
 
     assert calls == [{"query": "bulk laptop order", "result_skus": ["SKU-1"],
-                      "max_findings": 4, "force": True}]
+                      "max_findings": 4, "tenant_id": "tenant-a", "force": True}]
     assert emitted and emitted[0][0][1] == "market_intelligence_assessed"
     assert emitted[0][0][3]["signals"][0]["scope"] == "this_item"
+    assert emitted[0][0][3]["scoped_signal_count"] == 1
+    assert emitted[0][0][3]["action_basis"] == "market_and_inventory"
 
 
 def test_signal_scope_tiers_this_item_market_related():
@@ -262,7 +274,32 @@ def test_signal_scope_tiers_this_item_market_related():
     assert scope(None, "LAP-1") == "market"                   # global finding
     assert scope("search", "LAP-1") == "market"               # short market-level label
     assert scope("google/cpc", "LAP-1") == "market"
-    assert scope("can i get help with 15 work laptops", "LAP-1") == "related"   # free-text query entity
+    assert scope("can i get help with 15 work laptops", "LAP-1") == "related"
+
+
+def test_global_market_context_is_not_presented_as_line_authority(monkeypatch):
+    emitted = []
+
+    @contextmanager
+    def fake_session():
+        yield object()
+
+    monkeypatch.setattr("src.app.models.db.db_session", fake_session)
+    monkeypatch.setattr(
+        "src.app.services.market_intelligence_agent.gather_market_context",
+        lambda *args, **kwargs: {"market_findings": [{
+            "finding_type": "seasonal_demand", "scope": "global",
+            "severity": "warn", "confidence": 0.9, "summary": "Global seasonal peak.",
+        }]},
+    )
+    monkeypatch.setattr(stage, "_emit_trace", lambda *args, **kwargs: emitted.append((args, kwargs)))
+
+    stage._emit_market_intelligence(trace_id="trace-global", query="bulk order",
+                                    avail={"sku": "SKU-1", "shortfall": 3}, tenant_id="tenant-a")
+    payload = emitted[0][0][3]
+    assert payload["mode"] == "context_only"
+    assert payload["scoped_signal_count"] == 0
+    assert payload["action_basis"] == "inventory_only"
 
 
 def test_sku_specific_action_requires_this_item_signal():
@@ -281,3 +318,11 @@ def test_sku_specific_action_requires_this_item_signal():
     assert "pricing" in rec(this_sku_undercut, {})["action"]  # exact-SKU undercut still decisive
     # unscoped findings (legacy/test callers) keep the old behaviour
     assert "pricing" in rec([{"finding_type": "competitor_undercut"}], {})["action"]
+
+
+def test_global_seasonal_signal_is_advisory_not_procurement_authority():
+    from src.app.services.recommend_fulfillment_stage import _recommend_market_action as rec
+
+    out = rec([{"finding_type": "seasonal_demand", "scope": "global"}], {"shortfall": 5})
+
+    assert out["action"] == "source the shortfall now"

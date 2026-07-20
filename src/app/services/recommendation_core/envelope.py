@@ -77,6 +77,9 @@ class TurnEnvelope:
     uid: str
     query: str
     trace_id: str
+    # Authoritative settlement currency for this tenant/store. Products in another currency
+    # are not comparable until a bounded FX quote is attached at ingress.
+    currency: str = "USD"
     # A bounded classification supplied by the API edge. It is advisory for fresh turns; the
     # router may use it to preserve an EXPLAIN/COMPARE continuation only when session evidence
     # proves there is an existing shortlist to discuss.
@@ -101,6 +104,7 @@ class TurnEnvelope:
     @classmethod
     def from_suggest_params(cls, *, query: str, uid: str = "", tenant_id: str = "default",
                             budget_min: Optional[float] = None, budget_max: Optional[float] = None,
+                            currency: Optional[str] = None,
                             trace_id: Optional[str] = None, has_image: bool = False,
                             image_observations: Optional[List[ImageObservation]] = None,
                             source_ip: Optional[str] = None,
@@ -124,8 +128,18 @@ class TurnEnvelope:
         normalized_hint = str(intent_hint or "").strip().upper()
         if normalized_hint not in LANES:
             normalized_hint = None
+        if currency is None:
+            try:
+                from src.app.platform.store_profile import profile_slot
+                currency = profile_slot("currency", default="USD")
+            except Exception:
+                currency = "USD"
+        normalized_currency = str(currency or "USD").strip().upper()
+        if len(normalized_currency) != 3 or not normalized_currency.isalpha():
+            normalized_currency = "USD"
         return cls(tenant_id=str(tenant_id or "default"), uid=str(uid or ""),
                    query=str(query or "").strip(), trace_id=trace_id or str(uuid.uuid4()),
+                   currency=normalized_currency,
                    intent_hint=normalized_hint,
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
                    has_image=bool(has_image or image_observations),
@@ -138,7 +152,8 @@ class TurnEnvelope:
         A shadow job that drops budget/session/image measures a DIFFERENT turn than production
         served; this is the full-fidelity round-trip that closes that gap."""
         return {"tenant_id": self.tenant_id, "uid": self.uid, "query": self.query,
-                "trace_id": self.trace_id, "intent_hint": self.intent_hint,
+                "trace_id": self.trace_id, "currency": self.currency,
+                "intent_hint": self.intent_hint,
                 "budget_min_cents": self.budget_min_cents,
                 "budget_max_cents": self.budget_max_cents, "has_image": self.has_image,
                 "image_observations": [item.to_dict() for item in self.image_observations],
@@ -154,6 +169,8 @@ class TurnEnvelope:
             hint = None
         return cls(tenant_id=str(d.get("tenant_id") or "default"), uid=str(d.get("uid") or ""),
                    query=str(d.get("query") or ""), trace_id=str(d.get("trace_id") or uuid.uuid4()),
+                   currency=(str(d.get("currency") or "USD").strip().upper()
+                             if len(str(d.get("currency") or "USD").strip()) == 3 else "USD"),
                    intent_hint=hint,
                    budget_min_cents=_int(d.get("budget_min_cents")),
                    budget_max_cents=_int(d.get("budget_max_cents")),

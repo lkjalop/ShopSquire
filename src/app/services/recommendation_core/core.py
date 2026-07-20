@@ -990,6 +990,31 @@ def _disambiguate_compare_legs(db, envelope: TurnEnvelope, legs: list) -> list:
     return legs
 
 
+def _currency_eligible_variants(variants: list, envelope: TurnEnvelope,
+                                resp: CoreResponse) -> list:
+    """Apply the tenant/store settlement currency as a hard eligibility boundary.
+
+    Cross-currency ranking is only valid with a bounded FX quote. The envelope currently carries
+    no such quote, so mismatched and missing currency rows are excluded instead of compared by
+    their raw numeric price.
+    """
+    requested = envelope.currency.strip().upper()
+    eligible = [v for v in variants if str(v.currency or "").strip().upper() == requested]
+    excluded = len(variants) - len(eligible)
+    resp.extras["currency_policy"] = {
+        "currency": requested,
+        "excluded_mismatched": excluded,
+        "fx_applied": False,
+    }
+    if excluded and not eligible:
+        resp.set_message(
+            f"The available matches are not priced in {requested}. I won't compare "
+            "unconverted amounts; provide an approved FX quote or choose the store currency.",
+            MsgPriority.LANE_BASE,
+        )
+    return eligible
+
+
 def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision,
                               resp: CoreResponse, limit: int) -> bool:
     """R9.4: retrieve the prior turn's SHOWN SKUs (subject continuity) and, for EXPLAIN,
@@ -1005,6 +1030,7 @@ def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision
         return False
     if not variants:
         return False
+    variants = _currency_eligible_variants(variants, envelope, resp)
     resp.extras["evidence"] = {"retrieval_mode": "prior_shortlist", "count": len(variants),
                                "skus": [v.sku for v in variants]}
     # a NAMED compare over the shortlist ('the ROG vs the Katana') narrows the same way (R9.3)
@@ -1023,7 +1049,8 @@ def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision
         # routes as EXPLAIN or COMPARE run-to-run) — only what the cards already carry.
         top = cards[0]
         why = "; ".join(top.why) if top.why else "it leads the shortlist on price and availability"
-        price = f" at ${top.price_cents / 100:,.0f}" if top.price_cents is not None else ""
+        price = (f" at {top.currency} {top.price_cents / 100:,.0f}"
+                 if top.price_cents is not None else "")
         resp.set_message(f"{top.title}{price} leads this shortlist: {why}.", MsgPriority.LANE_BASE)
     return True
 
@@ -1123,7 +1150,7 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     if bundle.status == "error":
         resp.degraded = True         # a retrieval FAILURE degrades — never present as 'no match'
         return
-    variants = bundle.variants
+    variants = _currency_eligible_variants(bundle.variants, envelope, resp)
     # BRAND FILTER (R9.2 — 'only Asus'): clamped upstream to a REAL catalog brand, applied
     # HONESTLY — zero matches shows an honest empty message, never the unfiltered slate (a
     # grid that silently ignored the shopper's filter is the answer-shape lie).

@@ -59,6 +59,30 @@ def test_router_defaults_on_garbage_model(db):
         assert d.lane == "SEARCH" and d.source == "default"
 
 
+def test_recommendation_excludes_products_outside_store_currency(db):
+    from sqlalchemy import text as _t
+    from src.app.services.taxonomy_registry import upsert_classification
+
+    db.execute(_t(
+        "INSERT INTO products (id, sku, name, price_cents, currency, specs, brand) VALUES "
+        "('p-aud','LAP-AUD','AUD Gaming Laptop',120000,'AUD',"
+        "'{\"ram_gb\": 32, \"gpu_vram_gb\": 12}','Other')"
+    ))
+    upsert_classification(db, sku="LAP-AUD", node_handle="el-6-11-2",
+                          source="test", status="approved")
+
+    resp = recommend_turn(
+        db, _env("gaming laptop", currency="USD"),
+        llm_fn=_route_stub("SEARCH", "el-6-11-2"),
+    )
+
+    assert resp.products
+    assert {product.currency for product in resp.products} == {"USD"}
+    assert resp.extras["currency_policy"] == {
+        "currency": "USD", "excluded_mismatched": 1, "fx_applied": False,
+    }
+
+
 def test_router_drops_invented_handle_keeps_registry_real(db):
     # an INVENTED handle is dropped (registry clamp)…
     d = route_turn(db, _env("gaming laptop"), llm_fn=_route_stub("SEARCH", "not-a-node-99"))

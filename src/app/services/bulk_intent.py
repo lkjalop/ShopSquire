@@ -34,7 +34,7 @@ _QTY_PRECEDING_OK = frozenset({
     # amendment phrasings — "make it 12 units", "change that to 10", "just 5" (all function words;
     # without these the name-token guard built for "dell 15" wrongly rejected fresh amendments,
     # letting a REMEMBERED qty beat a fresh one — caught live by the T3 memory probe)
-    "it", "them", "that", "this", "to", "make", "just", "only", "at", "take", "do",
+    "it", "them", "that", "this", "to", "make", "just", "only", "at", "least", "take", "do",
 })
 # a word between the number and the unit-noun that means the number is a SPEC, not a quantity.
 _QTY_SPEC_FILLERS = re.compile(r"\b(?:inch(?:es)?|in|\"|gb|tb|mb|hz|ghz|kg|lb|nits?|core|gen)\b", re.I)
@@ -88,7 +88,9 @@ def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) 
     m = re.search(r"\b(\d{1,4})\s*[x×]\b", q)
     if m:
         return _ok(m)
-    m = re.search(rf"\b(\d{{1,4}})\s+((?:[a-z]+\s+){{0,2}}?)(?:{nouns})\b", q)
+    # Hyphenated workload modifiers are still ordinary fillers ("20 game-development laptops").
+    # The spec-filler guard below remains authoritative for "15-inch laptops" / "16GB laptops".
+    m = re.search(rf"\b(\d{{1,4}})\s+((?:[a-z]+(?:[-\s]+)){{0,3}}?)(?:{nouns})\b", q)
     if m:
         r = _ok(m, check_fillers=True)
         if r:

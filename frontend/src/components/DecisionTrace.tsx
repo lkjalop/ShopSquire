@@ -5,6 +5,7 @@ import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResu
 import { getOwnerApiKey } from '../lib/browserSession';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
 import { explainProcEvent } from '../lib/procEventExplain';
+import { procurementGateDisplay } from '../lib/procurementGateDisplay';
 
 type TraceEvent = {
   id?: string;
@@ -3232,16 +3233,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const mi: any = miEvent?.payload || null;
                     const draft: any = (procCase?.state_json?.draft) || null;
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
-                    const sendGateLabel = (gate: any): string => {
-                      if (!gate) return '';
-                      if (typeof gate === 'string') return gate;
-                      if (typeof gate === 'object') {
-                        const decision = gate.decision || gate.status || gate.action;
-                        const blocking = Array.isArray(gate.blocking) ? gate.blocking.length : 0;
-                        return `${decision || 'recorded'}${blocking ? ` · ${blocking} blocker${blocking === 1 ? '' : 's'}` : ''}`;
-                      }
-                      return String(gate);
-                    };
+                    const gateView = procurementGateDisplay(draft?.send_gate || draft?.gate);
                     return (
                       <>
                         {/* RFQ-FIRST: the drafted supplier RFQ is the first-class object of this tab (GPT-5.5
@@ -3365,7 +3357,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                               )}
                               <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
                               {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
-                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{sendGateLabel(draft.send_gate || draft.gate)}</span></div>}
+                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{gateView.label}</span></div>}
+                              {gateView.reasons.length > 0 && (
+                                <div data-testid="proc-send-gate-actions" style={{ margin: '6px 0', padding: '8px 10px', border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 6 }}>
+                                  <div style={{ fontWeight: 700, color: '#92400e' }}>Resolve before supplier approval</div>
+                                  {gateView.reasons.map((reason) => (
+                                    <div key={reason.code} style={{ marginTop: 5 }}>
+                                      <strong>{reason.label}</strong> {reason.action}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                               <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (a quote request — no price is ever stated to the supplier)</div>
                               <pre data-testid="proc-rfq-body" style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
                             </div>
@@ -3413,10 +3415,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         {mi && (
                           <div data-testid="proc-market-intel" style={{ border: '1px solid #6366f1', background: '#eef2ff', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
                             <div style={{ fontWeight: 700, color: '#3730a3', marginBottom: 4 }}>
-                              📊 Market Intelligence — {String(mi.mode) === 'live' ? `${mi.signal_count} active signal${mi.signal_count === 1 ? '' : 's'}` : 'internal-only (no external signal)'}
+                              📊 Market Intelligence — {String(mi.mode) === 'live'
+                                ? `${mi.scoped_signal_count ?? mi.signal_count} scoped signal${Number(mi.scoped_signal_count ?? mi.signal_count) === 1 ? '' : 's'}`
+                                : String(mi.mode) === 'context_only'
+                                  ? `${mi.signal_count} global context signal${Number(mi.signal_count) === 1 ? '' : 's'} (not line-authorizing)`
+                                  : 'internal-only (no external signal)'}
                             </div>
                             <div style={{ marginBottom: 6 }}>
-                              <span style={{ fontWeight: 700 }}>Recommended action:</span> {String(mi.recommendation || '—')}
+                              <span style={{ fontWeight: 700 }}>{String(mi.action_basis) === 'inventory_only' ? 'Inventory action:' : 'Recommended action:'}</span> {String(mi.recommendation || '—')}
                               <div style={{ color: '#4b5563', marginTop: 2 }}>{String(mi.rationale || '')}</div>
                             </div>
                             {Array.isArray(mi.signals) && mi.signals.length > 0 && (

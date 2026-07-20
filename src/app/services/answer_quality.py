@@ -236,9 +236,17 @@ def score_answer_coverage(*, query: str, message: str, required_answers: List[st
     return {"covered": covered, "missing": missing, "ok": len(missing) == 0}
 
 
-def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_message: str) -> str:
+def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_message: str,
+                            bulk_budget: Dict[str, Any] | None = None) -> str:
     # Prefer stated user budget over any price range found in the LLM message text
     q_lo, q_hi = _extract_query_budget_bounds(query)
+    # A whole-order cap cannot be compared directly with unit prices. The recommendation
+    # pipeline already authorizes and emits the derived per-unit cap; reuse that structured
+    # decision instead of reparsing the total as though it were a single-product budget.
+    if isinstance(bulk_budget, dict) and str(bulk_budget.get("scope") or "").lower() == "total":
+        per_unit = bulk_budget.get("per_unit_cap")
+        if isinstance(per_unit, (int, float)) and per_unit > 0:
+            q_lo, q_hi = None, int(per_unit)
     # Also try "around $N" / "budget $N" / "about $N" patterns
     _around = re.search(r"(?:around|about|roughly|approx\.?|budget\s+(?:of\s+)?)\$?\s*([\d,]{3,6})", str(query or ""), re.I)
     if _around and q_hi is None:
@@ -325,6 +333,7 @@ def apply_answer_quality(
     has_image: bool,
     buyer_persona: str | None,
     brand_name: str | None,
+    bulk_budget: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     msg = str(assistant_message or "").strip()
     decomp = decompose_intent_and_questions(
@@ -343,7 +352,8 @@ def apply_answer_quality(
 
     rewritten = msg
     if template_id == "budget_decision_template":
-        rewritten = _render_budget_decision(query=query, products=products, base_message=msg)
+        rewritten = _render_budget_decision(query=query, products=products, base_message=msg,
+                                             bulk_budget=bulk_budget)
     elif template_id == "no_match_explain_template":
         rewritten = _render_no_match(query=query, products=products)
     elif template_id == "cv_reupload_with_text_fallback_template":
@@ -358,7 +368,8 @@ def apply_answer_quality(
     )
     if not bool(cov.get("ok")) and "direct_answer_first_sentence" in (cov.get("missing") or []):
         if template_id == "budget_decision_template":
-            rewritten = _render_budget_decision(query=query, products=products, base_message=rewritten)
+            rewritten = _render_budget_decision(query=query, products=products, base_message=rewritten,
+                                                 bulk_budget=bulk_budget)
         elif template_id == "no_match_explain_template":
             rewritten = _render_no_match(query=query, products=products)
 
@@ -381,5 +392,4 @@ def apply_answer_quality(
         "template_selected": {"template_id": template_id, "reason": templ.get("reason")},
         "answer_coverage_scored": cov2,
     }
-
 

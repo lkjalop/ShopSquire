@@ -38,6 +38,8 @@ export default function CartPanel({
   onSourcingTraceId,
   priorSkus,
   onClearPrior,
+  sourcingRequirements,
+  sourcingOrderId,
 }: {
   uid: string;
   cart: CartState | null;
@@ -51,6 +53,8 @@ export default function CartPanel({
   onSourcingTraceId?: (traceId: string) => void;
   priorSkus?: string[];                    // items carried over from a previous session (App snapshots)
   onClearPrior?: () => Promise<void>;      // remove ONLY those, keeping what was added this session
+  sourcingRequirements?: Record<string, any>; // deadline/use-case/ship-to from the recommendation turn
+  sourcingOrderId?: string | null;             // stable PR identity; cart_id is only a legacy fallback
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const [upsells, setUpsells] = useState<Product[]>([]);
@@ -164,14 +168,14 @@ export default function CartPanel({
   // current cart. Returns null when a supplier was already engaged (past the send gate) — that is an
   // operator-driven amendment and must not be auto-superseded.
   const sourceCurrentCart = async () => {
-    const cid = cart?.cart_id;
+    const cid = sourcingOrderId || cart?.cart_id;
     if (!cid) return null;
     // Pass the current decision trace so the sourcing case records source_trace_id — the Decision Trace
     // → Procurement tab resolves the drafted RFQ by-trace (was null → 404 → empty tab).
     const lines = items.map((i) => ({ item_ref: i.sku, quantity: i.quantity }));
-    let res = await confirmCartSourcing(uid, cid, lines, traceId || undefined);
+    let res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, false, sourcingRequirements);
     if (res.amend_required) {
-      res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, true);
+      res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, true, sourcingRequirements);
     }
     return res.status === 'operator_required' ? null : res;
   };

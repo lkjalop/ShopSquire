@@ -10953,6 +10953,18 @@ def suggest(
         pass
     # Tier split extracted to recommend_response_shape.apply_recommendation_tiers (E1) —
     # behavior byte-identical, parity-verified (scripts/suggest_parity_capture).
+    # Legacy procurement delegates here, so it must obey the same store-currency boundary as V2
+    # before tiers, narration, or Add actions are assembled. No FX quote means no conversion.
+    from src.app.platform.store_profile import profile_slot as _currency_profile_slot
+    from src.app.services.recommend_response_finalizer import filter_products_by_currency as _filter_currency
+    _settlement_currency = str(_currency_profile_slot("currency", default="USD") or "USD").upper()
+    results, _currency_excluded = _filter_currency(results, _settlement_currency)
+    payload["currency_policy"] = {
+        "currency": _settlement_currency,
+        "excluded_mismatched": _currency_excluded,
+        "fx_applied": False,
+    }
+
     from src.app.services.recommend_response_shape import apply_recommendation_tiers as _apply_tiers
     _apply_tiers(
         payload, results=results, constraints=constraints, query=query,
@@ -11067,7 +11079,7 @@ def suggest(
         logger.debug("PR resolve skipped: %s", _pr_exc)
     _availability_line = _run_fulfillment_stage(
         results=results, constraints=constraints, payload=payload, uid=uid, uid_hash=uid_hash,
-        trace_id=trace_id, flags=flags, query=query, pr_id=_pr_id,
+        trace_id=trace_id, flags=flags, query=query, pr_id=_pr_id, tenant_id=tenant_id,
     )
 
     assistant_message = None
@@ -11871,6 +11883,14 @@ def suggest(
         _sanitize_specs_in_response(_final_response)
     except Exception as _e_san:
         _record_partial_failure("spec_injection_sanitize", _e_san, trace_id=trace_id)
+    try:
+        from src.app.platform.store_profile import profile_slot as _final_currency_slot
+        from src.app.services.recommend_response_finalizer import enforce_response_currency
+        _final_response = enforce_response_currency(
+            _final_response, str(_final_currency_slot("currency", default="USD") or "USD")
+        )
+    except Exception as _e_currency:
+        _record_partial_failure("currency_response_guard", _e_currency, trace_id=trace_id)
     return _final_response
 
 

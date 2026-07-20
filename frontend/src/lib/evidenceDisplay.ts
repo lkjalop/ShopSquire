@@ -18,7 +18,7 @@ export type EvidenceLeg = {
 export type EvidenceBlock = {
   selected?: string[];
   legs?: Record<string, EvidenceLeg>;
-  citations?: { source?: string; summary?: string }[];
+  citations?: { source?: string; summary?: string; trusted?: boolean }[];
   ms?: number;
 };
 
@@ -27,8 +27,8 @@ type LegMeta = { icon: string; label: string; trusted: boolean };
 // Keyed by BOTH the leg key and the leg's source label (the orchestrator emits e.g. key
 // "availability" with source "inventory") so chips and rows resolve either way.
 const _META: Record<string, LegMeta> = {
-  market: { icon: '📈', label: 'Market intelligence', trusted: true },
-  market_intelligence: { icon: '📈', label: 'Market intelligence', trusted: true },
+  market: { icon: '📈', label: 'Market intelligence', trusted: false },
+  market_intelligence: { icon: '📈', label: 'Market intelligence', trusted: false },
   policy: { icon: '📚', label: 'Store policy', trusted: true },
   store_policy: { icon: '📚', label: 'Store policy', trusted: true },
   availability: { icon: '🏬', label: 'Inventory', trusted: true },
@@ -60,11 +60,12 @@ export function evidenceRows(ev: EvidenceBlock | null | undefined): EvidenceRow[
   if (!ev || !ev.legs) return [];
   const rows: EvidenceRow[] = Object.entries(ev.legs).map(([key, leg]) => {
     const meta = legMeta((leg && leg.source) || key);
+    const explicitlyVerified = leg && leg.data && leg.data.trust_state === 'verified_internal';
     return {
       key,
       icon: meta.icon,
       label: meta.label,
-      trusted: meta.trusted,
+      trusted: meta.trusted || Boolean(explicitlyVerified),
       found: Boolean(leg && leg.found),
       summary: String((leg && leg.summary) || ''),
       error: String((leg && leg.error) || ''),
@@ -82,6 +83,9 @@ export function citationChips(ev: EvidenceBlock | null | undefined): CitationChi
     .filter((c) => c && c.source)
     .map((c) => {
       const meta = legMeta(String(c.source));
-      return { key: String(c.source), icon: meta.icon, label: meta.label, trusted: meta.trusted };
+      return {
+        key: String(c.source), icon: meta.icon, label: meta.label,
+        trusted: typeof c.trusted === 'boolean' ? c.trusted : meta.trusted,
+      };
     });
 }

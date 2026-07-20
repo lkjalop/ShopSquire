@@ -104,6 +104,17 @@ def test_content_hash_changes_on_edit(db):
     assert D.content_hash("a", "b") == D.content_hash("a", "b")  # deterministic
 
 
+def test_supplier_urgency_requires_confident_exact_item_market_evidence():
+    broad = D.DraftEvidence("market_intel", "MKT-1", "global demand rising",
+                            payload={"scope": "global", "confidence": 0.99})
+    weak = D.DraftEvidence("market_intel", "MKT-2", "item demand rising",
+                           payload={"scope": "exact_item", "confidence": 0.4})
+    exact = D.DraftEvidence("market_intel", "MKT-3", "item demand rising",
+                            payload={"scope": "exact_item", "confidence": 0.9})
+    assert D._urgency_note([broad, weak]) == "A firm dispatch date would be appreciated."
+    assert D._urgency_note([exact]).startswith("We are seeing elevated demand")
+
+
 # ── flows through the workflow chokepoint ────────────────────────────────────
 def test_draft_and_record_advances_to_quote_drafted_with_evidence(db):
     cid = _committed_case(db)
