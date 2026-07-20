@@ -146,12 +146,21 @@ def test_buyer_storefront_renders_procurement_check():
         page.get_by_role("button", name="Ask Me!").click()
         msg = page.get_by_placeholder("Type your message...")
         msg.wait_for(timeout=10000)
-        msg.fill("I need 20 gaming laptops for an esports lab, $1800 each within two weeks")
+        # The AUD demo catalog's competitive-gaming floor starts above $2,000. Keep this
+        # procurement smoke on an eligible product so it tests sourcing/fulfilment rendering,
+        # not the separately covered below-capability-budget response.
+        msg.fill("I need 20 gaming laptops for an esports lab, $3000 each within two weeks")
         msg.press("Enter")
-        # FLUID model (FULFILLMENT_DEFER_TO_CART) shows the buyer sourcing-preview card; legacy eager mode
-        # shows the fulfilment block. Accept either so the harness tracks the current UI.
-        page.wait_for_selector("[data-testid='sourcing-intent'], [data-testid='fulfilment-options']", timeout=75000)
+        # The V2 advisory path renders backend fulfillment_options through BulkAlternatives;
+        # committed/legacy paths use the sourcing or fulfilment cards. All are governed previews.
+        page.wait_for_selector(
+            "[data-testid='bulk-alternatives'], [data-testid='sourcing-intent'], "
+            "[data-testid='fulfilment-options']",
+            timeout=75000,
+        )
         body = page.locator("body").inner_text().lower()
         assert ("needs confirmation before sourcing" in body
-                or "awaiting buyer commitment" in body), "expected a sourcing preview or procurement case"
+                or "awaiting buyer commitment" in body
+                or "fulfilment options for your bulk order" in body), (
+                    "expected a sourcing preview, fulfillment advisory, or procurement case")
         browser.close()
