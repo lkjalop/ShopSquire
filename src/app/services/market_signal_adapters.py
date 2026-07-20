@@ -30,6 +30,7 @@ def from_order(row: Dict[str, Any]) -> Optional[MarketSignal]:
         signal_type="order", source="orders",
         payload={"order_id": oid, "total_cents": row.get("total_cents"), "status": row.get("status")},
         occurred_at=row.get("created_at"), trust_score=1.0, dedup_fields=["order_id"],
+        tenant_id=row.get("tenant_id"),
     )
 
 
@@ -41,6 +42,7 @@ def from_conversion(row: Dict[str, Any]) -> Optional[MarketSignal]:
         signal_type="conversion", source="conversion_event",
         payload={"order_id": oid, "decision_id": row.get("decision_id"), "value_cents": row.get("value_cents")},
         occurred_at=row.get("converted_at"), trust_score=1.0, dedup_fields=["order_id"],
+        tenant_id=row.get("tenant_id"),
     )
 
 
@@ -51,7 +53,8 @@ def from_return(row: Dict[str, Any]) -> Optional[MarketSignal]:
     return normalize(
         signal_type="return", source="orders",
         payload={"order_id": oid, "status": row.get("status")},
-        occurred_at=row.get("updated_at") or row.get("created_at"), trust_score=1.0, dedup_fields=["order_id"],
+        occurred_at=row.get("updated_at") or row.get("created_at"), trust_score=1.0,
+        dedup_fields=["order_id"], tenant_id=row.get("tenant_id"),
     )
 
 
@@ -66,6 +69,7 @@ def from_search(row: Dict[str, Any]) -> Optional[MarketSignal]:
         payload={"event_id": eid, "query": row.get("query"), "result_count": row.get("result_count"),
                  "uid_hash": row.get("uid_hash"), "session": row.get("session_id")},
         occurred_at=row.get("event_time"), trust_score=0.8, dedup_fields=["event_id"],
+        tenant_id=row.get("tenant_id"),
     )
 
 
@@ -86,6 +90,7 @@ def from_competitor(row: Dict[str, Any]) -> Optional[MarketSignal]:
                  "competitor_price_cents": row.get("competitor_price_cents"),
                  "competitor": row.get("competitor")},
         occurred_at=row.get("observed_at"), trust_score=0.6, dedup_fields=["obs_id"],
+        tenant_id=row.get("tenant_id"),
     )
 
 
@@ -100,6 +105,7 @@ def from_support_objection(row: Dict[str, Any]) -> Optional[MarketSignal]:
         signal_type="support_objection", source="support_inbox",
         payload={"obs_id": oid, "theme": theme, "entity_ref": row.get("entity_ref")},
         occurred_at=row.get("raised_at"), trust_score=0.7, dedup_fields=["obs_id"],
+        tenant_id=row.get("tenant_id"),
     )
 
 
@@ -115,69 +121,81 @@ def from_funnel(row: Dict[str, Any]) -> Optional[MarketSignal]:
         payload={"obs_id": oid, "stage": stage, "entered": row.get("entered"),
                  "abandoned": row.get("abandoned")},
         occurred_at=row.get("observed_at"), trust_score=0.7, dedup_fields=["obs_id"],
+        tenant_id=row.get("tenant_id"),
     )
 
 
 # name -> (sql, row->dict mapper, dict->MarketSignal mapper)
 _SOURCES = {
     "orders": (
-        "SELECT id, total_cents, status, created_at FROM orders ORDER BY created_at DESC LIMIT :lim",
-        lambda r: {"id": r[0], "total_cents": r[1], "status": r[2], "created_at": r[3]},
+        "SELECT id, total_cents, status, created_at, tenant_id FROM orders "
+        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY created_at DESC LIMIT :lim",
+        lambda r: {"id": r[0], "total_cents": r[1], "status": r[2], "created_at": r[3],
+                   "tenant_id": r[4]},
         from_order,
     ),
     "conversion_event": (
-        "SELECT order_id, decision_id, value_cents, converted_at FROM conversion_event "
-        "ORDER BY created_at DESC LIMIT :lim",
-        lambda r: {"order_id": r[0], "decision_id": r[1], "value_cents": r[2], "converted_at": r[3]},
+        "SELECT order_id, decision_id, value_cents, converted_at, tenant_id FROM conversion_event "
+        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY created_at DESC LIMIT :lim",
+        lambda r: {"order_id": r[0], "decision_id": r[1], "value_cents": r[2],
+                   "converted_at": r[3], "tenant_id": r[4]},
         from_conversion,
     ),
     "search_events": (
-        "SELECT id, query, result_count, event_time, uid_hash, session_id FROM search_events "
-        "ORDER BY event_time DESC LIMIT :lim",
+        "SELECT id, query, result_count, event_time, uid_hash, session_id, tenant_id FROM search_events "
+        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY event_time DESC LIMIT :lim",
         lambda r: {"id": r[0], "query": r[1], "result_count": r[2], "event_time": r[3],
-                   "uid_hash": r[4], "session_id": r[5]},
+                   "uid_hash": r[4], "session_id": r[5], "tenant_id": r[6]},
         from_search,
     ),
     "returns": (
-        "SELECT id, status, updated_at, created_at FROM orders "
-        "WHERE status IN ('refunded','chargebacked') ORDER BY updated_at DESC LIMIT :lim",
-        lambda r: {"id": r[0], "status": r[1], "updated_at": r[2], "created_at": r[3]},
+        "SELECT id, status, updated_at, created_at, tenant_id FROM orders "
+        "WHERE COALESCE(tenant_id,'default')=:tenant AND status IN ('refunded','chargebacked') "
+        "ORDER BY updated_at DESC LIMIT :lim",
+        lambda r: {"id": r[0], "status": r[1], "updated_at": r[2], "created_at": r[3],
+                   "tenant_id": r[4]},
         from_return,
     ),
     # competitor: a REAL source — joins the rival observation to OUR canonical price_book retail, so the
     # detect_competitor_undercut detector fires on live data. No-op when either table is absent.
     "competitor": (
-        "SELECT co.id, co.sku, pb.list_cents, co.competitor_price_cents, co.competitor, co.observed_at "
+        "SELECT co.id, co.sku, pb.list_cents, co.competitor_price_cents, co.competitor, "
+        "co.observed_at, co.tenant_id "
         "FROM competitor_observation co LEFT JOIN price_book_entry pb "
         "ON pb.sku = co.sku AND COALESCE(pb.tenant_id,'default') = COALESCE(co.tenant_id,'default') "
         "AND pb.channel = 'default' AND pb.currency = 'AUD' "
+        "WHERE COALESCE(co.tenant_id,'default')=:tenant "
         "ORDER BY co.observed_at DESC LIMIT :lim",
         lambda r: {"obs_id": r[0], "entity_ref": r[1], "our_price_cents": r[2],
-                   "competitor_price_cents": r[3], "competitor": r[4], "observed_at": r[5]},
+                   "competitor_price_cents": r[3], "competitor": r[4], "observed_at": r[5],
+                   "tenant_id": r[6]},
         from_competitor,
     ),
     # support objections: a REAL source — recurring buyer objections on a theme feed
     # detect_objection_cluster. No-op when the table is absent.
     "support_objection": (
-        "SELECT id, theme, entity_ref, raised_at FROM support_objection ORDER BY raised_at DESC LIMIT :lim",
-        lambda r: {"obs_id": r[0], "theme": r[1], "entity_ref": r[2], "raised_at": r[3]},
+        "SELECT id, theme, entity_ref, raised_at, tenant_id FROM support_objection "
+        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY raised_at DESC LIMIT :lim",
+        lambda r: {"obs_id": r[0], "theme": r[1], "entity_ref": r[2], "raised_at": r[3],
+                   "tenant_id": r[4]},
         from_support_objection,
     ),
     # funnel: a REAL source — purchase-funnel stage drop-off feeds detect_funnel_dropoff. No-op when absent.
     "funnel": (
-        "SELECT id, stage, entered, abandoned, observed_at FROM cart_funnel_event "
-        "ORDER BY observed_at DESC LIMIT :lim",
-        lambda r: {"obs_id": r[0], "stage": r[1], "entered": r[2], "abandoned": r[3], "observed_at": r[4]},
+        "SELECT id, stage, entered, abandoned, observed_at, tenant_id FROM cart_funnel_event "
+        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY observed_at DESC LIMIT :lim",
+        lambda r: {"obs_id": r[0], "stage": r[1], "entered": r[2], "abandoned": r[3],
+                   "observed_at": r[4], "tenant_id": r[5]},
         from_funnel,
     ),
 }
 
 
 def _backfill_one(db, sql: str, row_map, sig_map, *, limit: int, min_trust: float,
-                  max_age_seconds: Optional[float], now_iso: Optional[str]) -> int:
+                  max_age_seconds: Optional[float], now_iso: Optional[str], tenant_id: str) -> int:
     n = 0
     try:
-        rows = db.execute(text(sql), {"lim": int(limit)}).fetchall()
+        rows = db.execute(text(sql), {"lim": int(limit), "tenant": tenant_id}).fetchall()
         for r in rows:
             sig = sig_map(row_map(r))
             if sig and ingest(db, sig, min_trust=min_trust,
@@ -203,6 +221,7 @@ def backfill_from_db(
     min_trust: float = 0.0,
     max_age_seconds: Optional[float] = None,
     now_iso: Optional[str] = None,
+    tenant_id: Optional[str] = None,
     commit: bool = True,
 ) -> Dict[str, int]:
     """Ingest recent rows from each source into market_signal (idempotent). Trust- and (when
@@ -210,6 +229,10 @@ def backfill_from_db(
     can drive autonomous behaviour. Returns {source: count}."""
     if db is None:
         return {}
+    if not tenant_id:
+        from src.app.platform.tenant_context import current_tenant_id
+        tenant_id = current_tenant_id()
+    tenant_id = str(tenant_id or "default").strip() or "default"
     ensure_table(db)
     counts: Dict[str, int] = {}
     want = set(sources) if sources else None
@@ -217,7 +240,8 @@ def backfill_from_db(
         if want is not None and name not in want:
             continue
         counts[name] = _backfill_one(db, sql, row_map, sig_map, limit=limit, min_trust=min_trust,
-                                     max_age_seconds=max_age_seconds, now_iso=now_iso)
+                                     max_age_seconds=max_age_seconds, now_iso=now_iso,
+                                     tenant_id=tenant_id)
     if commit:
         _safe_commit(db)
     return counts

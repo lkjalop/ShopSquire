@@ -46,9 +46,12 @@ def test_signal_dedup_is_per_tenant(db):
 
 
 def test_backfill_freshness_gate_drops_stale_order(db):
-    db.execute(text("CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT)"))
-    db.execute(text("INSERT INTO orders VALUES ('O-fresh', 100, 'paid', '2026-06-25 12:00:00')"))
-    db.execute(text("INSERT INTO orders VALUES ('O-stale', 100, 'paid', '2020-01-01 00:00:00')"))
+    db.execute(text("CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT, "
+                    "tenant_id TEXT DEFAULT 'default')"))
+    db.execute(text("INSERT INTO orders (id,total_cents,status,created_at) "
+                    "VALUES ('O-fresh', 100, 'paid', '2026-06-25 12:00:00')"))
+    db.execute(text("INSERT INTO orders (id,total_cents,status,created_at) "
+                    "VALUES ('O-stale', 100, 'paid', '2020-01-01 00:00:00')"))
     db.commit()
     counts = backfill_from_db(db, sources=["orders"], max_age_seconds=86400, now_iso="2026-06-25 12:30:00")
     assert counts["orders"] == 1  # only the fresh order survives the freshness gate

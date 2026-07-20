@@ -1,6 +1,8 @@
 """Source adapters (orders/conversion/search → market_signal) + idempotent backfill."""
 from __future__ import annotations
 
+import json
+
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -66,12 +68,14 @@ def test_inline_mappers_reject_missing_fields():
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
-    s.execute(text("CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT)"))
+    s.execute(text("CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT, "
+                   "tenant_id TEXT DEFAULT 'default')"))
     s.execute(text("CREATE TABLE search_events (id TEXT, event_time TEXT, uid_hash TEXT, query TEXT, "
                    "filters_json TEXT, result_skus_json TEXT, result_count INTEGER, view_mode TEXT, "
-                   "trace_id TEXT, session_id TEXT)"))
+                   "trace_id TEXT, session_id TEXT, tenant_id TEXT DEFAULT 'default')"))
     attribution.ensure_tables(s)
-    s.execute(text("INSERT INTO orders VALUES ('O1',119900,'paid','2026-06-25')"))
+    s.execute(text("INSERT INTO orders (id,total_cents,status,created_at) "
+                   "VALUES ('O1',119900,'paid','2026-06-25')"))
     s.execute(text("INSERT INTO search_events (id, query, result_count, event_time) VALUES ('S1','laptop',5,'2026-06-25')"))
     s.execute(text("INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, attributed_skus_json, "
                    "value_cents, converted_at) VALUES ('c1','D1','O1','u','[\"GAM-1\"]',119900,'2026-06-25')"))
@@ -107,3 +111,17 @@ def test_backfill_source_filter(db):
 
 def test_backfill_none_db_safe():
     assert backfill_from_db(None) == {}
+
+
+def test_backfill_never_reads_another_tenant(db):
+    db.execute(text(
+        "INSERT INTO orders (id,total_cents,status,created_at,tenant_id) "
+        "VALUES ('O2',200,'paid','2026-06-25','tenant-b')"
+    ))
+    db.commit()
+    counts = backfill_from_db(db, sources=["orders"], tenant_id="tenant-b")
+    assert counts == {"orders": 1}
+    rows = db.execute(text("SELECT tenant_id, payload_json FROM market_signal")).fetchall()
+    assert [(tenant, json.loads(payload)["order_id"]) for tenant, payload in rows] == [
+        ("tenant-b", "O2")
+    ]
