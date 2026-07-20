@@ -24,6 +24,8 @@ _EXCISED_FLOORS = {
 def test_electronics_profile_loads():
     p = get_store_profile("electronics")
     assert p.get("id") == "electronics"
+    assert p.get("currency") == "AUD"
+    assert (p.get("delivery_policy") or {}).get("currency") == "AUD"
     assert "brand_price_floors_usd" in p
 
 

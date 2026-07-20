@@ -86,6 +86,8 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "capability_conflict",
     # bulk_budget: quantity/total/per-unit viability and authorized trade-off menu.
     "bulk_budget",
+    # routing_source: model versus bounded fallback provenance used by promotion telemetry.
+    "routing_source",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):

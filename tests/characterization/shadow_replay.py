@@ -363,6 +363,7 @@ def main() -> None:
         args.output.write_text(json.dumps({
             "scorecard": score,
             "quality": quality,
+            "quality_cases": quality_rows,
             "divergences": results,
             "diagnosis": (_aggregate_diagnosis(diag_rows) if diag_rows else None),
             "elapsed_seconds": round(time.monotonic() - t_start, 1),

@@ -123,6 +123,11 @@ def test_envelope_currency_is_bounded_and_round_trips():
     assert TurnEnvelope.from_suggest_params(query="laptop", currency="bitcoin").currency == "USD"
 
 
+def test_envelope_uses_authoritative_store_currency_when_unspecified():
+    env = TurnEnvelope.from_suggest_params(query="laptop")
+    assert env.currency == "AUD"
+
+
 def test_shown_products_beat_stray_claims_artifacts():
     """R10 census fix: the legacy kitchen-sink can mint incident_id + needs_human_review=True
     on a PRODUCT turn (recorded live in compare_two_models, 15 products). A payload that SHOWS

@@ -2,6 +2,7 @@
   "_comment": "ELECTRONICS StoreProfile (P5, electronics-first). This is the CONSOLIDATED home for everything laptop/electronics-SPECIFIC that is currently hardcoded across recommend.py (~115 flavour lines), use_case_advisor.py, query_decomposer.py, nqe.py, plus the existing store_vocab.json + verticals/electronics.json. It is BOTH the scaffold for the agnostic core AND the excision map: every slot below names a place in code that should READ from here instead of hardcoding. The agents (Candidate_Retrieval, Product_Ranking, Spec_Filter, Device_Match, Budget_Guard, NQE, Policy_Gate, ...) are agnostic MECHANISMS and do NOT move; only this FLAVOUR moves. Adding a second profile (pharmacy.json) with the same shape is the agnostic proof.",
   "id": "electronics",
   "version": "2026-06-18",
+  "currency": "AUD",
   "_excision_source": {
     "known_brands": "recommend.py _BRAND_LABEL_PATTERNS + store_vocab.known_brands",
     "brand_price_floors": "recommend.py _BRAND_PRICE_FLOORS (~line 8645)",
@@ -2650,7 +2651,7 @@
   ],
   "_delivery_policy_comment": "Agnostic delivery economics — each store sets its own. Drives split-fulfillment (ship-now + backorder-later) fees + free-shipping threshold.",
   "delivery_policy": {
-    "currency": "USD",
+    "currency": "AUD",
     "base_fee_cents": 1500,
     "split_shipment_fee_cents": 900,
     "free_shipping_threshold_cents": 500000,
