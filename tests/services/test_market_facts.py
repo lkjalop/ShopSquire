@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -94,3 +95,27 @@ def test_invalid_signature_is_quarantined(db, monkeypatch):
         record_marketing_event(db, fact)
     assert db.execute(text("SELECT reason_code FROM market_fact_quarantine")).scalar_one() == \
         "invalid_source_signature"
+
+
+@pytest.mark.parametrize(
+    ("patch", "reason"),
+    [
+        ({"provenance_chain": []}, "missing_provenance_chain"),
+        ({"occurred_at": "2026-07-21T00:06:00Z"}, "event_time_in_future"),
+        ({"occurred_at": "2026-07-13T00:00:00Z"}, "event_too_stale"),
+        ({"source_system": "untrusted_scraper"}, "source_not_allowlisted"),
+    ],
+)
+def test_untrusted_or_temporally_invalid_fact_is_quarantined(db, patch, reason):
+    fact = {
+        "tenant_id": "tenant-a", "deduplication_id": f"cart:{reason}",
+        "source_system": "cart", "source_record_id": reason, "event_type": "view_item",
+        "occurred_at": "2026-07-21T00:00:00Z", "provenance_chain": [f"cart/{reason}"],
+    } | patch
+    with pytest.raises(MarketFactRejected, match=reason):
+        record_marketing_event(
+            db, fact, now=datetime(2026, 7, 21, tzinfo=timezone.utc),
+        )
+    assert db.execute(text(
+        "SELECT reason_code FROM market_fact_quarantine ORDER BY quarantined_at DESC LIMIT 1"
+    )).scalar_one() == reason
