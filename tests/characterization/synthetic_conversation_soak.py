@@ -225,6 +225,91 @@ def build_journeys(turn_target: int, seed: int = 20260713, *,
     return out
 
 
+def build_context_journeys(count: int = 20, seed: int = 20260720) -> List[JourneySpec]:
+    """Ten-turn recommendation sessions that stress retained buyer constraints."""
+    rng = random.Random(seed)
+    source = [j for variant in range(3) for j in _base_journeys(variant)
+              if j.family not in {"support", "cart_changes"}]
+    rng.shuffle(source)
+    out: List[JourneySpec] = []
+    for index in range(count):
+        base = source[index % len(source)]
+        node = base.turns[0].node_contains
+        extras = (
+            TurnSpec("keep the same product type, budget and requirements",
+                     lane_in=("FILTER", "SEARCH", "PROCUREMENT"), node_contains=node),
+            TurnSpec("why is the first current option a fit?",
+                     lane_in=("EXPLAIN",), node_contains=node),
+            TurnSpec("show another option without changing my constraints",
+                     lane_in=("FILTER", "SEARCH", "PROCUREMENT"), node_contains=node),
+            TurnSpec("do not change the quantity or total budget",
+                     lane_in=("FILTER", "SEARCH", "PROCUREMENT"), node_contains=node),
+            TurnSpec("summarise what I asked for and the main tradeoff",
+                     lane_in=("EXPLAIN", "FILTER", "PROCUREMENT"), node_contains=node),
+        )
+        out.append(JourneySpec(
+            family=f"context_{base.family}", persona=base.persona, age_group=base.age_group,
+            turns=tuple(base.turns) + extras, cart=base.cart,
+        ))
+    return out
+
+
+def build_lifecycle_journeys(count: int = 14, seed: int = 20260720) -> List[JourneySpec]:
+    """Fifteen-turn proposal-only procurement/support journeys.
+
+    These turns verify routing, continuity and the no-send/no-persist boundary. Durable RFQ
+    creation, channel selection and redraft are exercised by fulfillment integration tests.
+    """
+    rng = random.Random(seed)
+    quantities = [15, 20, 25, 30]
+    budgets = [22_000, 30_000, 41_000, 54_000]
+    out: List[JourneySpec] = []
+    for index in range(count):
+        qty = quantities[index % len(quantities)]
+        revised = max(5, qty - 5)
+        budget = budgets[index % len(budgets)]
+        turns = (
+            TurnSpec(f"I need {qty} office laptops with a total order budget of ${budget}",
+                     lane_in=("PROCUREMENT", "SEARCH"), node_contains="Laptop", quantity=qty,
+                     total_budget_cents=budget * 100, budget_scope="total"),
+            TurnSpec("prepare a supplier quote but do not send anything",
+                     lane_in=("PROCUREMENT",), node_contains="Laptop"),
+            TurnSpec(f"actually reduce the requirement to {revised} units",
+                     lane_in=("PROCUREMENT", "FILTER"), node_contains="Laptop", quantity=revised),
+            TurnSpec("revise the supplier quote for that current quantity",
+                     lane_in=("PROCUREMENT",), node_contains="Laptop"),
+            TurnSpec("which supplier communication channel would be used and why?",
+                     lane_in=("PROCUREMENT", "EXPLAIN"), node_contains="Laptop"),
+            TurnSpec("we need delivery by the end of next month",
+                     lane_in=("PROCUREMENT", "FILTER"), node_contains="Laptop"),
+            TurnSpec("what warranty applies to this business order?",
+                     lane_in=("POLICY_QUESTION", "PROCUREMENT"), node_contains="Laptop"),
+            TurnSpec("I am not ready to proceed; keep it as a draft",
+                     lane_in=("PROCUREMENT", "POLICY_QUESTION"), node_contains="Laptop"),
+            TurnSpec("what happens if some units arrive damaged?",
+                     lane_in=("POLICY_QUESTION", "SUPPORT_CLAIM", "PROCUREMENT")),
+            TurnSpec("what evidence would a warranty repair require?",
+                     lane_in=("POLICY_QUESTION", "SUPPORT_CLAIM")),
+            TurnSpec("resume the laptop sourcing draft with the same constraints",
+                     lane_in=("PROCUREMENT", "FILTER", "SEARCH"), node_contains="Laptop"),
+            TurnSpec(f"change it back to {qty} units but keep the total budget",
+                     lane_in=("PROCUREMENT", "FILTER"), node_contains="Laptop", quantity=qty,
+                     total_budget_cents=budget * 100, budget_scope="total"),
+            TurnSpec("show the lower-cost capable option for that order",
+                     lane_in=("PROCUREMENT", "FILTER", "SEARCH"), node_contains="Laptop"),
+            TurnSpec("redraft the quote and identify any MOQ or delivery-date blocker",
+                     lane_in=("PROCUREMENT",), node_contains="Laptop"),
+            TurnSpec("confirm that no supplier message has been sent",
+                     lane_in=("PROCUREMENT", "EXPLAIN"), node_contains="Laptop"),
+        )
+        out.append(JourneySpec(
+            family="lifecycle_procurement", persona="procurement-lead",
+            age_group=("25-44" if index % 2 else "45-64"), turns=turns,
+        ))
+    rng.shuffle(out)
+    return out
+
+
 def _percentile(values: List[float], p: float) -> float:
     if not values:
         return 0.0
@@ -247,8 +332,48 @@ def _session_from(core) -> Dict[str, Any]:
             "quantity": dec.get("quantity"),
             "total_budget_cents": dec.get("total_budget_cents"),
             "budget_scope": dec.get("budget_scope"),
+            "exclude_brand": dec.get("exclude_brand"),
+            "brand_filter": dec.get("brand_filter"),
+            "preferred_brand": dec.get("preferred_brand"),
         },
     }
+
+
+def _error_dimension(error: str, *, turn: int) -> str:
+    """Keep routing calibration separate from buyer-safety and context continuity."""
+    code = str(error or "").split(":", 1)[0]
+    if code == "lane":
+        return "routing_calibration"
+    if turn > 0 and code in {
+        "node", "quantity", "total_budget", "budget_scope", "excluded_brand_shown",
+    }:
+        return "continuity"
+    return "semantic_safety"
+
+
+def _dimension_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    dimensions: Dict[str, Any] = {}
+    for name in ("semantic_safety", "continuity", "routing_calibration"):
+        flagged = []
+        codes: Counter[str] = Counter()
+        for row in rows:
+            matching = [error for error in row.get("errors", [])
+                        if _error_dimension(error, turn=int(row.get("turn") or 0)) == name]
+            if matching:
+                flagged.append(row)
+                codes.update(error.split(":", 1)[0] for error in matching)
+        dimensions[name] = {
+            "measured": True,
+            "passed_turns": len(rows) - len(flagged),
+            "flagged_turns": len(flagged),
+            "pass_rate": round((len(rows) - len(flagged)) / max(1, len(rows)), 4),
+            "failures_by_code": dict(codes),
+        }
+    dimensions["relevance"] = {
+        "measured": False,
+        "reason": "synthetic traffic is not relevance ground truth; use sealed human labels",
+    }
+    return dimensions
 
 
 def _recommend_checks(spec: TurnSpec, core) -> List[str]:
@@ -311,8 +436,11 @@ def _apply_cart_plan(cart: List[Dict[str, Any]], plan) -> List[Dict[str, Any]]:
 
 def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
              turns_per_journey: Optional[int] = None,
-             checkpoint_path: Optional[Path] = None) -> Dict[str, Any]:
-    journeys = build_journeys(turn_target, seed, turns_per_journey=turns_per_journey)
+             checkpoint_path: Optional[Path] = None,
+             journeys_override: Optional[Sequence[JourneySpec]] = None,
+             suite: str = "breadth") -> Dict[str, Any]:
+    journeys = (list(journeys_override) if journeys_override is not None else
+                build_journeys(turn_target, seed, turns_per_journey=turns_per_journey))
     if only_family:
         journeys = [j for j in journeys if j.family == only_family]
     session_factory = sessionmaker(bind=get_engine())
@@ -369,6 +497,9 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
                     errors.append(f"exception:{type(exc).__name__}:{str(exc)[:120]}")
                 record["latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
                 record["errors"] = errors
+                record["error_dimensions"] = sorted({
+                    _error_dimension(error, turn=ti) for error in errors
+                })
                 rows.append(record)
                 if checkpoint_path:
                     with checkpoint_path.open("a", encoding="utf-8") as fh:
@@ -381,7 +512,7 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
     latencies = [float(r["latency_ms"]) for r in rows]
     failures = [r for r in rows if r["errors"]]
     return {
-        "meta": {"seed": seed, "requested_turns": turn_target,
+        "meta": {"seed": seed, "suite": suite, "requested_turns": turn_target,
                  "completed_turns": len(rows), "journeys": len(journeys),
                  "started_at": datetime.fromtimestamp(started, timezone.utc).isoformat(),
                  "duration_seconds": round(time.time() - started, 1),
@@ -396,6 +527,8 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
             "lanes": dict(Counter(str(r.get("lane") or "ERROR") for r in rows)),
             "failures_by_code": dict(Counter(e.split(":", 1)[0] for r in failures for e in r["errors"])),
             "failures_by_family": dict(Counter(r["family"] for r in failures)),
+            "dimensions": _dimension_summary(rows),
+            "aggregate_invariant_rate_deprecated": True,
         },
         "failures": failures,
         "turns": rows,
@@ -408,15 +541,23 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=20260713)
     ap.add_argument("--only-family")
     ap.add_argument("--turns-per-journey", type=int)
+    ap.add_argument("--suite", choices=("breadth", "context", "lifecycle"), default="breadth")
     ap.add_argument("--output")
     ap.add_argument("--fail-on-invariant", action="store_true")
     args = ap.parse_args()
     out = Path(args.output) if args.output else (
         ROOT / "tmp" / "synthetic_soak" / f"review10_{args.seed}_{args.turns}.json")
     checkpoint = out.with_suffix(out.suffix + ".partial.jsonl")
-    report = run_soak(max(1, args.turns), args.seed, args.only_family,
-                      turns_per_journey=args.turns_per_journey,
-                      checkpoint_path=checkpoint)
+    if args.suite == "breadth":
+        report = run_soak(max(1, args.turns), args.seed, args.only_family,
+                          turns_per_journey=args.turns_per_journey,
+                          checkpoint_path=checkpoint)
+    else:
+        journeys = (build_context_journeys(max(1, args.turns // 10), args.seed)
+                    if args.suite == "context"
+                    else build_lifecycle_journeys(max(1, args.turns // 15), args.seed))
+        report = run_soak(args.turns, args.seed, checkpoint_path=checkpoint,
+                          journeys_override=journeys, suite=args.suite)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     checkpoint.unlink(missing_ok=True)

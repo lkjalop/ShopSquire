@@ -1,9 +1,13 @@
 from tests.characterization.synthetic_conversation_soak import (
     TurnSpec,
     _apply_cart_plan,
+    _dimension_summary,
+    _error_dimension,
     _percentile,
     _session_from,
+    build_context_journeys,
     build_journeys,
+    build_lifecycle_journeys,
 )
 
 
@@ -19,6 +23,14 @@ def test_build_journeys_supports_explicit_stress_shape():
     journeys = build_journeys(225, seed=7, turns_per_journey=3)
     assert len(journeys) == 75
     assert all(len(j.turns) == 3 for j in journeys)
+
+
+def test_long_context_and_lifecycle_shapes_are_real_not_repeated_five_turns():
+    context = build_context_journeys(20, seed=7)
+    lifecycle = build_lifecycle_journeys(14, seed=7)
+    assert len(context) == 20 and all(len(j.turns) == 10 for j in context)
+    assert len(lifecycle) == 14 and all(len(j.turns) == 15 for j in lifecycle)
+    assert all(j.family == "lifecycle_procurement" for j in lifecycle)
 
 
 def test_matrix_covers_requested_surfaces():
@@ -52,7 +64,7 @@ def test_percentile_nearest_rank():
     assert _percentile([1, 2, 3, 4], 95) == 4
 
 
-def test_session_emulates_production_brand_persistence_gap():
+def test_session_emulates_production_brand_persistence():
     class Core:
         products = []
         extras = {
@@ -66,6 +78,21 @@ def test_session_emulates_production_brand_persistence_gap():
         }
 
     accepted = _session_from(Core())["accepted_constraints"]
-    assert "exclude_brand" not in accepted
-    assert "brand_filter" not in accepted
-    assert "preferred_brand" not in accepted
+    assert accepted["exclude_brand"] == "Apple"
+    assert accepted["brand_filter"] == "Lenovo"
+    assert accepted["preferred_brand"] == "Dell"
+
+
+def test_soak_dimensions_do_not_mix_lane_calibration_with_safety():
+    rows = [
+        {"turn": 0, "errors": ["lane:SEARCH:expected:FILTER"]},
+        {"turn": 1, "errors": ["node:None:expected_contains:Laptop"]},
+        {"turn": 2, "errors": ["irreversible_action_executed"]},
+        {"turn": 2, "errors": []},
+    ]
+    summary = _dimension_summary(rows)
+    assert summary["routing_calibration"]["flagged_turns"] == 1
+    assert summary["continuity"]["flagged_turns"] == 1
+    assert summary["semantic_safety"]["flagged_turns"] == 1
+    assert summary["relevance"]["measured"] is False
+    assert _error_dimension("node:x", turn=0) == "semantic_safety"
