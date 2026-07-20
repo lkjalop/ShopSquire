@@ -42,6 +42,7 @@ def test_router_prompt_distinguishes_policy_from_active_procurement_changes():
     assert "general payment/delivery/returns policy only" in prompt
     assert "RFQ drafts, supplier channels, requested delivery dates" in prompt
     assert "keep/change-constraint turns" in prompt
+    assert "has the supplier draft been sent?" in prompt
 
 
 def test_soft_preferred_brand_is_not_a_hard_filter(db):
