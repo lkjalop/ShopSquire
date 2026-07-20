@@ -77,6 +77,9 @@ def _ensure_run_columns(db) -> None:
 
 
 def ensure_tables(db) -> None:
+    from src.app.services.schema_policy import runtime_ddl_allowed
+    if not runtime_ddl_allowed():
+        return
     for stmt in _DDL:
         db.execute(text(stmt))
     _ensure_run_columns(db)

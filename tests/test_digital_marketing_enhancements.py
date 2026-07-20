@@ -660,6 +660,11 @@ class TestDeterministicAssistantMessagePersona:
 class TestCheckoutInitiateEndpoint:
     """POST /api/v1/payments/checkout-initiate — fail-closed outside explicit demo mode."""
 
+    def setup_method(self):
+        from src.app.security.payment_threats import reset_counters
+
+        reset_counters()
+
     def _get_app(self):
         """Import and return a minimal FastAPI test client for the payments router."""
         from fastapi import FastAPI
@@ -689,7 +694,15 @@ class TestCheckoutInitiateEndpoint:
                         "id": "pi_live_123",
                         "client_secret": "cs_live_123",
                     }
-                    resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 5000, "currency": "AUD"})
+                    with patch(
+                        "src.app.routers.payments.evaluate_transaction_firewall",
+                        return_value={"action": "allow"},
+                    ):
+                        resp = client.post(
+                            "/api/v1/payments/checkout-initiate",
+                            headers={"Idempotency-Key": f"configured-provider-checkout-{time.time_ns()}"},
+                            json={"amount_cents": 5000, "currency": "AUD"},
+                        )
         assert resp.status_code == 200
         body = resp.json()
         assert body["currency"] == "AUD"

@@ -29,6 +29,8 @@ from typing import Any, Dict, Iterable, Optional
 from sqlalchemy import inspect as _sa_inspect
 from sqlalchemy import text
 
+from src.app.services.schema_policy import runtime_ddl_allowed
+
 SCHEMA_VERSION = 1  # bump when the envelope shape changes; stored per row so old rows stay readable
 DEFAULT_TENANT = "default"  # single-tenant today; the column isolates a future multi-tenant deployment
 
@@ -108,6 +110,8 @@ def _ensure_columns(db, table: str, coldefs) -> None:
 
 
 def ensure_table(db) -> None:
+    if not runtime_ddl_allowed():
+        return
     db.execute(text(_DDL))
     _ensure_columns(db, "market_signal", _UPGRADE_COLS)  # before the composite index needs tenant_id
     for stmt in _INDEXES:

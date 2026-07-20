@@ -47,6 +47,9 @@ _INDEXES = (
 
 
 def ensure_rollup_table(db) -> None:
+    from src.app.services.schema_policy import runtime_ddl_allowed
+    if not runtime_ddl_allowed():
+        return
     db.execute(text(_DDL))
     for stmt in _INDEXES:
         db.execute(text(stmt))

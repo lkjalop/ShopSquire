@@ -67,6 +67,9 @@ _INDEXES = (
 
 
 def ensure_tables(db) -> None:
+    from src.app.services.schema_policy import runtime_ddl_allowed
+    if not runtime_ddl_allowed():
+        return
     for ddl in _DDL:
         db.execute(text(ddl))
     for idx in _INDEXES:
