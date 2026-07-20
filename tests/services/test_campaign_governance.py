@@ -47,8 +47,9 @@ def _prove_rollback(db, now_iso):
             subj = f"{eid}-{arm}-{i}"
             ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm, assigned_at="2026-06-24")
             db.execute(text("INSERT INTO conversion_event (id,decision_id,order_id,uid_hash,"
-                            "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d','o',:u,'[]',:v,'2026-06-25')"),
-                       {"id": f"{subj}-c", "u": subj, "v": int(val * 100)})
+                            "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d',:o,:u,'[]',:v,'2026-06-25')"),
+                       {"id": f"{subj}-c", "o": f"order-{subj}",
+                        "u": subj, "v": int(val * 100)})
     db.commit()
     out = evaluate_experiment(db, eid, min_samples=2)
     assert out["decision"] == "revert"  # the evaluator recorded a data-driven revert

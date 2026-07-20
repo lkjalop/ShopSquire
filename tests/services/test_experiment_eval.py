@@ -100,12 +100,14 @@ def test_pre_assignment_conversions_are_not_credited(db):
             subj = f"{eid}-{arm}-{i}"
             ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm, assigned_at="2026-06-10")
             db.execute(text("INSERT INTO conversion_event (id,decision_id,order_id,uid_hash,"
-                            "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d','o',:u,'[]',:v,:t)"),
-                       {"id": f"{subj}-after", "u": subj, "v": 10000, "t": "2026-06-12"})  # valid (after)
+                            "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d',:o,:u,'[]',:v,:t)"),
+                       {"id": f"{subj}-after", "o": f"order-{subj}-after",
+                        "u": subj, "v": 10000, "t": "2026-06-12"})  # valid (after)
             if arm == "treatment":
                 db.execute(text("INSERT INTO conversion_event (id,decision_id,order_id,uid_hash,"
-                                "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d','o',:u,'[]',:v,:t)"),
-                           {"id": f"{subj}-before", "u": subj, "v": 999999, "t": "2026-06-01"})  # PRE-assignment
+                                "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d',:o,:u,'[]',:v,:t)"),
+                           {"id": f"{subj}-before", "o": f"order-{subj}-before",
+                            "u": subj, "v": 999999, "t": "2026-06-01"})  # PRE-assignment
     db.commit()
     out = evaluate_experiment(db, eid, min_samples=2)
     # both arms have equal POST-assignment revenue → ~0% uplift (the pre-assignment windfall is excluded)
