@@ -3,7 +3,12 @@ only a TOTALLY ungroundable turn (no node AND no requirements) is excused from e
 products; a node-routed empty still counts (can never mask a routing/retrieval miss)."""
 from types import SimpleNamespace
 
-from tests.characterization.shadow_replay import _diagnose_case, _expects_products, _quality_case
+from tests.characterization.shadow_replay import (
+    _diagnose_case,
+    _expects_products,
+    _merge_replay_session,
+    _quality_case,
+)
 
 
 def _core(lane="SEARCH", off_catalog=None, node=None, reqs=None, extras_error=False):
@@ -44,3 +49,16 @@ def test_quality_and_diagnose_share_the_decision():
 def test_degraded_core_without_extras_defaults_to_counting():
     # missing decision breadcrumbs must FAIL CLOSED for the metric: count the empty
     assert _expects_products(_core(node=None, reqs={}, extras_error=True)) is True
+
+
+def test_replay_session_preserves_prior_subject_on_explanation_turn():
+    prior = {
+        "prior_node": "el-6-1",
+        "shortlist_skus": ["LAP-1"],
+        "accepted_constraints": {"quantity": 25, "exclude_brand": "Apple"},
+    }
+    core = SimpleNamespace(
+        products=[],
+        extras={"decision": {"lane": "EXPLAIN"}, "constraints_used": {}},
+    )
+    assert _merge_replay_session(prior, core) == prior

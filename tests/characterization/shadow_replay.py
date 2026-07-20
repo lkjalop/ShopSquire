@@ -68,7 +68,7 @@ def _expects_products(core) -> bool:
     retrieval, or degradation miss; only a query the whole taxonomy has no home for."""
     if core.lane not in ("SEARCH", "FILTER", "COMPARE") or core.off_catalog:
         return False
-    dec = _decision_slice(core) or {}
+    dec = _decision_slice(core)
     if dec is None:
         return True   # no breadcrumbs = can't prove off-domain = count the empty
     ungroundable = dec.get("node_handle") is None and not (dec.get("requirements") or {})
@@ -174,6 +174,33 @@ def _aggregate_diagnosis(rows: list) -> dict:
 _CANARY_LANES = frozenset({"SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG"})
 
 
+def _merge_replay_session(prior: dict, core) -> dict:
+    dec = _decision_slice(core) or {}
+    used = core.extras.get("constraints_used") or {}
+    out = dict(prior or {})
+    if dec.get("node_handle"):
+        out["prior_node"] = dec["node_handle"]
+    shortlist = [card.sku for card in (core.products or [])][:12]
+    if shortlist:
+        out["shortlist_skus"] = shortlist
+    accepted = dict(out.get("accepted_constraints") or {})
+    for key, value in {
+        "budget_min_cents": used.get("budget_min_cents"),
+        "budget_max_cents": used.get("budget_max_cents"),
+        "requirements": used.get("requirements") or dec.get("requirements"),
+        "quantity": dec.get("quantity"),
+        "total_budget_cents": dec.get("total_budget_cents"),
+        "budget_scope": dec.get("budget_scope"),
+        "exclude_brand": dec.get("exclude_brand"),
+        "brand_filter": dec.get("brand_filter"),
+        "preferred_brand": dec.get("preferred_brand"),
+    }.items():
+        if value is not None and value != {} and value != []:
+            accepted[key] = value
+    out["accepted_constraints"] = accepted
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only")
@@ -185,6 +212,8 @@ def main() -> None:
                          "unknown vs failed requirement keys; write tmp/quality_diagnosis.json")
     ap.add_argument("--label-split", choices=("dev", "test"), default="test",
                     help="sealed relevance-label split used by the promotion gate (default: test)")
+    ap.add_argument("--output", type=Path,
+                    help="write the complete scorecard and divergence rows as JSON")
     args = ap.parse_args()
 
     expects = {c["id"]: (c.get("known_wrong") or {}).get("expect_v2")
@@ -231,12 +260,7 @@ def main() -> None:
                     used = core.extras.get("constraints_used") or {}
                 except Exception:
                     pass
-                session = {"prior_node": dec.get("node_handle"),
-                           "shortlist_skus": [c.sku for c in (core.products or [])][:12],
-                           "accepted_constraints": {
-                               "budget_min_cents": used.get("budget_min_cents"),
-                               "budget_max_cents": used.get("budget_max_cents"),
-                               "requirements": used.get("requirements") or {}}}
+                session = _merge_replay_session(session, core)
                 shape = response_shape(v1)
                 v2 = to_legacy(core, shape=shape if shape in SHAPES else "full_pipeline")
                 expect = expects.get(case["id"]) if t["turn"] == 0 else None
@@ -327,6 +351,16 @@ def main() -> None:
         except Exception:
             # last-resort ascii-scrub if the console is even narrower than CP1252
             print("\n".join(s.encode("ascii", "replace").decode("ascii") for s in lines))
+
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps({
+            "scorecard": score,
+            "quality": quality,
+            "divergences": results,
+            "diagnosis": (_aggregate_diagnosis(diag_rows) if diag_rows else None),
+            "elapsed_seconds": round(time.monotonic() - t_start, 1),
+        }, indent=2, default=str) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
