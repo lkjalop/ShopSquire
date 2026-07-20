@@ -140,6 +140,20 @@ class ManagedCVProvider:
             except Exception:
                 # Fall through to local OCR so the pipeline still has text evidence.
                 logging.getLogger(__name__).exception("cv_provider.ollama_failed")
+        # The visual-search VLM already extracts visible text. If it times out, starting the
+        # local Stage-A/Stage-B ladder can turn one bounded miss into another minute-long path.
+        # Risk-triggered OCR in the router remains available for suspicious screenshots.
+        if (mode == "visual_search"
+                and str(os.getenv("CV_VISUAL_SEARCH_OCR_FALLBACK", "0")).lower()
+                not in ("1", "true", "yes", "on")):
+            self._set_last_ocr_meta(
+                ocr_confidence=0.0,
+                ocr_engine=None,
+                ocr_word_count=0,
+                cv_model_confidence=None,
+                cv_extraction_method="visual_search_ocr_deferred",
+            )
+            return [], "", None
         # Degradation path: if managed providers fail/misconfigured, use local OCR (tesseract)
         try:
             text = await asyncio.to_thread(self._tesseract_text, image_bytes)
@@ -194,7 +208,10 @@ class ManagedCVProvider:
 
         # Try configured model first, then a small fallback list for resilience.
         model_candidates = []
-        for m in (self.model, os.getenv("CV_VISION_MODEL"), os.getenv("OLLAMA_DEFAULT_MODEL"), "llava-latest:latest", "llava:latest", "llava-latest", "llava"):
+        # Never fall back to the text router model for an image request. On constrained GPUs that
+        # caused a costly model swap followed by a guaranteed modality failure.
+        for m in (self.model, os.getenv("CV_VISION_MODEL"), os.getenv("OLLAMA_VISION_MODEL"),
+                  "llava-latest:latest", "llava:latest", "llava-latest", "llava"):
             if m and str(m).strip():
                 model_candidates.append(str(m).strip())
         # stable de-dupe preserving order

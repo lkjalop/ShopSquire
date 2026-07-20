@@ -35,6 +35,13 @@ $env:MULTI_INTENT_LLM_TIMEOUT_SEC      = "30"
 $env:LLM_PLANNER_ENABLED               = "1"
 $env:LLM_PLANNER_TIMEOUT_SEC           = "20"    # qwen3:14b measures 4-7s on planner prompts
 $env:OLLAMA_KEEP_ALIVE                 = "30m"    # pin generate/vision models resident (P0 lever)
+$env:CV_VISION_TIMEOUT_SEC             = "8"      # per-call network/model bound
+$env:CV_PROVIDER_TOTAL_TIMEOUT_S       = "10"     # whole identity leg, including fallback
+$env:CV_DAMAGE_REASONING_TIMEOUT_S     = "8"      # only runs when damage evidence exists
+$env:CV_DEEP_OCR_TIMEOUT_S             = "6"      # risk-triggered OCR cannot hold the request open
+$env:CV_VISUAL_SEARCH_OCR_FALLBACK     = "0"      # VLM already extracts text; deep OCR is risk-triggered
+$env:CV_SELECTIVE_OCR_PROVIDER         = "tesseract" # CPU fallback only for QR/overlay risk evidence
+$env:CV_SELECTIVE_OCR_TIMEOUT_S        = "3"      # bounded before the deeper OCR ladder
 # Serve the bounded V2 core for its eligible recommendation lanes. Procurement and unsupported
 # lanes still delegate through the facade to their mature handlers; cart mutations remain
 # confirmation-gated because RECOMMEND_CART_AUTO_APPLY is intentionally not enabled here.
