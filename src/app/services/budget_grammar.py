@@ -125,6 +125,14 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
         if v is not None and v >= _floor:
             return BudgetParse(None, v, "per_unit")
 
+    # 3b) explicit whole-order amount with trailing scope: "$3500 total". Currency is
+    # mandatory here so a specification followed by the word "total" cannot become money.
+    m = re.search(rf"{_CUR}\s*{_NUM}\s+(?:in\s+)?total\b", q)
+    if m:
+        v = _to_int(m.group(1), m.group(2))
+        if v is not None and v >= _floor:
+            return BudgetParse(None, v, "ceiling")
+
     # 4) ceiling — "under 1500", "below $2k", "up to 5 grand", "no more than 1200", "1500 max"
     m = (re.search(rf"\b(?:under|below|less than|within|up\s*to|no more than|max(?:imum)?(?:\s+of)?)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
          or re.search(rf"{_CUR}?\s*{_NUM}\s+max\b", q))

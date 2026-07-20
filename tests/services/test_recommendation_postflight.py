@@ -63,7 +63,8 @@ def test_followup_without_products_or_quantity_preserves_prior_slice():
     env = dataclasses.replace(_env(), session={
         "prior_node": "el-6-6",
         "shortlist_skus": ["LAP-OLD"],
-        "accepted_constraints": {"quantity": 25, "total_budget_cents": 4000000},
+        "accepted_constraints": {"quantity": 25, "total_budget_cents": 4000000,
+                                 "budget_scope": "total"},
     })
     core = CoreResponse(envelope=env, lane="COMPARE", products=[])
     core.extras["decision"] = {"node_handle": None, "quantity": None,
@@ -74,6 +75,7 @@ def test_followup_without_products_or_quantity_preserves_prior_slice():
     assert raw["last_shortlist_skus"] == ["LAP-OLD"]
     assert raw["constraints"]["quantity"] == 25
     assert raw["constraints"]["total_budget_cents"] == 4000000
+    assert raw["constraints"]["budget_scope"] == "total"
 
 
 def test_session_write_is_tenant_scoped():

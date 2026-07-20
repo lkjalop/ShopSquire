@@ -404,6 +404,30 @@ def test_search_lane_continuation_inherits_prior_bulk_quantity(db):
     assert resp.extras["requested_quantity"] == 25
 
 
+def test_model_cannot_invent_budget_on_keep_total_followup(db):
+    payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+               "quantity": None, "total_budget": 950, "budget_scope": "total",
+               "subject_action": "switch", "confidence": 0.9}
+    session = {
+        "prior_node": "el-6-6",
+        "accepted_constraints": {
+            "quantity": 15,
+            "total_budget_cents": 1_900_000,
+            "budget_scope": "total",
+        },
+    }
+    resp = recommend_turn(
+        db,
+        _env("show a cheaper configuration but keep the total budget", session=session),
+        llm_fn=lambda p, t: json.dumps(payload),
+    )
+    decision = resp.extras["decision"]
+    assert decision["total_budget_cents"] == 1_900_000
+    assert decision["quantity"] == 15
+    assert decision["budget_scope"] == "total"
+    assert decision["node_handle"] == "el-6-6"
+
+
 def test_stocked_handles_within_contains_and_ungrounded(db):
     """R8.2 marker logic: WITHIN a sold subtree marks, a subtree CONTAINING a sold node marks
     (retrieval reads subtrees), unrelated taxonomy does not, and an ungrounded tenant marks

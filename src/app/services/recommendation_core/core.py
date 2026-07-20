@@ -133,13 +133,32 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # the p50 to the model call vs the deterministic stages (P1 instrumentation).
     _t_route = time.perf_counter()
     decision = route_turn(db, envelope, llm_fn=llm_fn)
+    # Monetary changes require buyer-supplied evidence. A BYO router may propose a number
+    # even when the turn only says "keep the total budget"; accepting that proposal would
+    # let narration silently rewrite an order constraint. The canonical grammar is the
+    # authorization boundary: without a parsed amount, discard a new model amount. When the
+    # buyer explicitly names total/per-unit scope and a prior value exists, preserve it.
+    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+    _parsed_turn_budget = parse_budget(envelope.query)
+    _explicit_turn_scope = classify_budget_scope(envelope.query)
+    _accepted = (envelope.session or {}).get("accepted_constraints") or {}
+    if _parsed_turn_budget is None and decision.total_budget_cents is not None:
+        decision = dataclasses.replace(decision, total_budget_cents=None)
+    if _parsed_turn_budget is None and _explicit_turn_scope == "total":
+        _prior_total = _accepted.get("total_budget_cents")
+        decision = dataclasses.replace(
+            decision,
+            total_budget_cents=(int(_prior_total) if _prior_total is not None else None),
+            budget_scope="total",
+            quantity=(decision.quantity if decision.quantity is not None
+                      else (int(_accepted["quantity"]) if _accepted.get("quantity") else None)),
+        )
     # Constraint-only updates preserve the last authorized sold subject even when a BYO
     # router incorrectly labels the turn as a switch or returns no node. This is a core
     # authorization invariant, not an intent heuristic: the canonical budget parser proves
     # the bounded constraint, and the prior node was already sellability-clamped.
     if decision.node_handle is None and (envelope.session or {}).get("prior_node"):
         try:
-            from src.app.services.budget_grammar import parse_budget
             prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
             if parse_budget(envelope.query) is not None and prior is not None:
                 decision = dataclasses.replace(

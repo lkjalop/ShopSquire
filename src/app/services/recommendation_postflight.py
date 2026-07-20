@@ -69,6 +69,9 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
                              else prior.get("quantity")),
                 "total_budget_cents": (decision_total if decision_total is not None
                                         else prior.get("total_budget_cents")),
+                "budget_scope": (decision.get("budget_scope")
+                                 if decision.get("budget_scope") in ("total", "per_unit")
+                                 else prior.get("budget_scope")),
                 # brand constraints (review-10 P0.6) — so 'now show me cheaper ones' keeps the
                 # 'only Asus' / 'not Apple' the shopper set on a prior turn.
                 "brand_filter": decision.get("brand_filter"),

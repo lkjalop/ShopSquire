@@ -246,6 +246,7 @@ def _session_from(core) -> Dict[str, Any]:
             "use_cases": dec.get("use_cases") or [],
             "quantity": dec.get("quantity"),
             "total_budget_cents": dec.get("total_budget_cents"),
+            "budget_scope": dec.get("budget_scope"),
         },
     }
 
