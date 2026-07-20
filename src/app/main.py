@@ -563,7 +563,11 @@ def create_app() -> FastAPI:
                     import httpx
                     _log = _wlog.getLogger("shopsquire.startup")
                     base = (os.getenv("OLLAMA_URL") or "http://127.0.0.1:11434").rstrip("/")
-                    model = (os.getenv("OLLAMA_SMALL_MODEL") or os.getenv("CV_VISION_MODEL") or "qwen3-vl:8b").strip()
+                    model = (
+                        os.getenv("CV_VISION_MODEL")
+                        or os.getenv("OLLAMA_VISION_MODEL")
+                        or "qwen3-vl:8b"
+                    ).strip()
                     try:
                         async with httpx.AsyncClient(timeout=30.0) as _client:
                             await _client.post(
