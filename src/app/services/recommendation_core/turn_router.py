@@ -612,6 +612,22 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             continue
         requirements[d.key] = [(op, float(thr))]
     # clamp 3b: use_cases — clamp each to a real KB key (normalize aliases; drop unknowns)
+    # A model cannot weaken an explicit buyer constraint. Recover only number+unit values
+    # bound to buyer-named attributes through the vertical-blind registry data.
+    from src.app.services.attribute_registry import extract_keyed_quantity_requirements
+    for key, predicates in extract_keyed_quantity_requirements(envelope.query, defs).items():
+        existing = list(requirements.get(key) or [])
+        for op, value in predicates:
+            same_op = [float(v) for current_op, v in existing if current_op == op]
+            if same_op:
+                chosen = max(same_op + [value]) if op in (">=", ">") else min(same_op + [value])
+                existing = [(current_op, current_value) for current_op, current_value in existing
+                            if current_op != op]
+                existing.append((op, chosen))
+            else:
+                existing.append((op, value))
+        requirements[key] = existing
+
     from src.app.services.recommendation_core.intent_resolver import normalize_use_case
     use_cases: List[str] = []
     for uc in (data.get("use_cases") or []):

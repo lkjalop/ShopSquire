@@ -3,6 +3,7 @@ extraction with GB-ambiguity surfaced (never guessed), and tri-state requirement
 from src.app.services.attribute_registry import (
     defs_union,
     evaluate_requirements,
+    extract_keyed_quantity_requirements,
     extract_quantities,
     load_defs,
     meets,
@@ -89,6 +90,15 @@ def test_extraction_gb_is_ambiguous_never_assigned():
     assigned, ambiguous = extract_quantities("Laptop 16GB RAM 512GB SSD RTX 4060 8GB", EL)
     assert "ram_gb" not in assigned and "storage_gb" not in assigned and "gpu_vram_gb" not in assigned
     assert sorted(ambiguous["gb"]) == [8.0, 16.0, 512.0]   # surfaced for the MODEL to assign
+
+
+def test_keyed_quantity_requirements_resolve_shared_units_from_registry():
+    assert extract_keyed_quantity_requirements(
+        "only models with 16GB RAM or more and storage at least 1TB", EL
+    ) == {"ram_gb": [(">=", 16.0)], "storage_gb": [(">=", 1024.0)]}
+    assert extract_keyed_quantity_requirements("VRAM at most 8GB", EL) == {
+        "gpu_vram_gb": [("<=", 8.0)]
+    }
 
 
 def test_extraction_pharmacy_spf_and_ml():

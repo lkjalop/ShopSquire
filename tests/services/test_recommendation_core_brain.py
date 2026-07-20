@@ -597,6 +597,15 @@ def test_cold_start_filter_fragment_still_never_refused(db):
     assert d.lane != "OFF_CATALOG" and not d.refusal_granted
 
 
+def test_explicit_keyed_quantity_cannot_be_weakened_by_model(db):
+    d = route_turn(
+        db,
+        _env("only ones with 16GB RAM or more"),
+        llm_fn=_route_stub("FILTER", "el-6-11-2", {"ram_gb": [">=", 8]}),
+    )
+    assert d.requirements["ram_gb"] == [(">=", 16.0)]
+
+
 def test_sold_name_veto_blocks_refusal_when_query_names_sold_category(db):
     """Census: 'laptop for fine-tuning LLMs' — numberless, model itself proposed refusal via
     a datacenter mapping. The query NAMES 'laptop' (a sold category) → refusal vetoed by the

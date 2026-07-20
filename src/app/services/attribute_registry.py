@@ -278,6 +278,51 @@ def extract_quantities(text: str, defs: Dict[str, AttributeDef]) -> Tuple[Dict[s
     return assigned, ambiguous
 
 
+def extract_keyed_quantity_requirements(
+    text: str, defs: Dict[str, AttributeDef]
+) -> Dict[str, List[Tuple[str, float]]]:
+    """Bind explicit number+unit values to buyer-named registry attributes.
+
+    Shared units such as GB are safe only when the buyer also names the key, for example
+    ``16GB RAM`` or ``VRAM 8GB``. Attribute vocabulary, unit conversion and bounds come from
+    registry data, keeping this clamp vertical-blind.
+    """
+    query = str(text or "")
+    out: Dict[str, List[Tuple[str, float]]] = {}
+    ceiling = re.compile(
+        r"\b(at\s+most|maximum|max\.?|up\s+to|no\s+more\s+than|or\s+less|or\s+lower)\b", re.I
+    )
+    for key, definition in defs.items():
+        if definition.kind != "quantity" or not definition.text_extract:
+            continue
+        aliases = sorted({key, *definition.key_aliases}, key=len, reverse=True)
+        units = sorted({*(definition.unit_aliases or {}), (definition.unit or "").lower()} - {""},
+                       key=len, reverse=True)
+        if not aliases or not units:
+            continue
+        alias_pat = "|".join(re.escape(value) for value in aliases)
+        unit_pat = "|".join(re.escape(value) for value in units)
+        number = r"([0-9]+(?:\.[0-9]+)?)"
+        patterns = (
+            re.compile(rf"{number}\s*({unit_pat})\s*(?:of\s+)?(?:{alias_pat})\b", re.I),
+            re.compile(
+                rf"\b(?:{alias_pat})\b\s*"
+                rf"(?:of|at\s+least|at\s+most|minimum|maximum|up\s+to|is|:)?\s*"
+                rf"{number}\s*({unit_pat})\b", re.I
+            ),
+        )
+        for pattern in patterns:
+            for match in pattern.finditer(query):
+                value = normalize_value(definition, f"{match.group(1)}{match.group(2)}")
+                if value is None:
+                    continue
+                context = query[max(0, match.start() - 28):min(len(query), match.end() + 28)]
+                predicate = ("<=" if ceiling.search(context) else ">=", float(value))
+                if predicate not in out.setdefault(key, []):
+                    out[key].append(predicate)
+    return out
+
+
 def extract_categoricals(text: str, defs: Dict[str, AttributeDef]) -> Dict[str, Any]:
     """ENUM + BOOLEAN attributes read from free text (the product TITLE) — the capability signals
     that make the platform SMART about form-factor / touch / stylus without structured specs. A
