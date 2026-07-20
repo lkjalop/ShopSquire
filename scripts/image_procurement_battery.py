@@ -198,7 +198,14 @@ def build_img_obj(tj):
 def chat(uid, query, images):
     body = {"uid": uid, "query": query, "images": images, "image_intent": "shop"}
     t0 = time.time()
-    r = CLIENT.post(f"{BASE}/api/v1/chat/query", headers=H, json=body)
+    try:
+        r = CLIENT.post(f"{BASE}/api/v1/chat/query", headers=H, json=body)
+    except httpx.TimeoutException as exc:
+        return {"_error": f"{type(exc).__name__}: {exc}",
+                "_ms": int((time.time() - t0) * 1000)}
+    except httpx.HTTPError as exc:
+        return {"_error": f"{type(exc).__name__}: {exc}",
+                "_ms": int((time.time() - t0) * 1000)}
     dt = int((time.time() - t0) * 1000)
     if r.status_code != 200:
         return {"_status": r.status_code, "_text": r.text[:300], "_ms": dt}
@@ -274,6 +281,10 @@ def run_procurement(cached):
             a = None
             for attempt in range(3):
                 resp = chat(f"batt-{uuid.uuid4().hex[:8]}", q, [img_obj])
+                if resp.get("_error"):
+                    a = {"error": resp["_error"], "ms": resp.get("_ms"), "n": 0,
+                         "leaks": [], "refusal": False}
+                    break
                 if resp.get("_status"):
                     a = {"error": resp.get("_status"), "ms": resp.get("_ms"), "n": 0, "leaks": [], "refusal": False}
                     break
@@ -285,6 +296,7 @@ def run_procurement(cached):
                 a["retries"] = attempt
                 break
             flags = []
+            if a.get("error"): flags.append(f"error={a['error']}")
             if a.get("leaks"): flags.append(f"!!LEAK={a['leaks']}")
             if a.get("refusal"): flags.append("refusal")
             if a.get("escalated"): flags.append("escalated")
