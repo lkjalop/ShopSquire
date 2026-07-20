@@ -98,6 +98,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "confidence_band": core.extras.get("confidence_band", "unscored"),
         "confidence_calibrated": None,
         "constraints_used": core.extras.get("constraints_used", {}),
+        "routing_source": (core.extras.get("decision") or {}).get("source"),
         "counterfactual": None,
         "eligible": True,
         "evidence_items": core.extras.get("evidence_items", []),

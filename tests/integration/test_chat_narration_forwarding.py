@@ -6,32 +6,9 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
-class _FakeResp:
-    def __init__(self, body: dict, status_code: int = 200):
-        self._body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self._body
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"http_{self.status_code}")
-
-
-class _FakeNarrationAsyncClient:
-    """Upstream recommend returned the deterministic answer NOW + a job id for the async LLM prose."""
-    def __init__(self, timeout: float = 8.0):
-        self.timeout = timeout
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def get(self, url, params=None, headers=None):
-        return _FakeResp({
+async def _fake_recommend(*args, **kwargs):
+    """Recommend returned the deterministic answer plus an async narration job."""
+    return 200, {
             "results": [{"sku": "GAM-0002", "name": "MSI Katana", "price_cents": 149900,
                          "specs": {"ram_gb": 16}, "factors": {"positive": ["+within_budget"]},
                          "score_norm": 90.0}],
@@ -43,13 +20,13 @@ class _FakeNarrationAsyncClient:
             "bulk_budget": {"scope": "total", "total": 41000.0, "quantity": 25,
                             "per_unit_cap": 1640},
             "next_questions": [],
-        })
+        }
 
 
 def test_chat_query_forwards_narration_job_id(monkeypatch):
     from src.app.routers import chat as chat_router
 
-    monkeypatch.setattr(chat_router.httpx, "AsyncClient", _FakeNarrationAsyncClient)
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process", _fake_recommend)
     app = create_app()
     client = TestClient(app)
     resp = client.post(

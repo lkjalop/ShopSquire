@@ -117,9 +117,9 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
         # by generating less, rather than dropping to a dumber model. 192 covers the bounded
         # schema with headroom; sealed replay guards against truncation-induced fallback.
         try:
-            _num_predict = int(os.getenv("ROUTER_NUM_PREDICT", "192") or 192)
+            _num_predict = int(os.getenv("ROUTER_NUM_PREDICT", "320") or 320)
         except Exception:
-            _num_predict = 192
+            _num_predict = 320
         payload = {"model": model, "prompt": prompt, "stream": False, "format": "json",
                    "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                    "options": {"temperature": 0, "num_predict": _num_predict}}
@@ -236,6 +236,52 @@ class TurnDecision:
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
+
+
+def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str) -> TurnDecision:
+    """Recover only platform-verifiable facts when model routing is unavailable.
+
+    This path never invents requirements or use cases. It may select a registry-real,
+    tenant-sold taxonomy candidate and recover an explicit quantity/budget scope with
+    the shared grammars. The source remains a fallback so promotion metrics count it.
+    """
+    node = None
+    for candidate, _score in cands:
+        if sells_within(db, candidate.handle, tenant_id=envelope.tenant_id) is True:
+            node = candidate
+            break
+    if node is None or not _query_names_sold_category(db, envelope):
+        return TurnDecision(source=f"fallback:{reason}")
+
+    from src.app.services.bulk_intent import extract_quantity_span
+    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+
+    unit_nouns = {
+        segment.strip().lower()
+        for candidate, _score in cands
+        for segment in candidate.full_path.split(">")
+        if segment.strip()
+    }
+    parsed_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
+    quantity = parsed_quantity[0] if parsed_quantity is not None else None
+    budget_scope = classify_budget_scope(envelope.query)
+    total_budget_cents = None
+    if budget_scope == "total":
+        parsed_budget = parse_budget(envelope.query)
+        if parsed_budget is not None and parsed_budget.budget_max is not None:
+            total_budget_cents = int(parsed_budget.budget_max) * 100
+
+    return TurnDecision(
+        lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
+        node_handle=node.handle,
+        node_path=node.full_path,
+        confidence=0.4,
+        source=f"fallback:{reason}",
+        requested_product_node=node.handle,
+        quantity=quantity,
+        total_budget_cents=total_budget_cents,
+        budget_scope=budget_scope,
+    )
 
 
 def _clamp_brand(db, raw: Any) -> Optional[str]:
@@ -523,13 +569,13 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     except Exception:
         data = None
     if not isinstance(data, dict):
-        return DEFAULT_DECISION
+        return _bounded_fallback_decision(db, envelope, cands, reason="model_unavailable")
 
     # clamp 1: lane ∈ LANES
     lane = str(data.get("lane") or "").strip().upper()
     lane = _LANE_ALIASES.get(lane, lane)
     if lane not in LANES:
-        return DEFAULT_DECISION
+        return _bounded_fallback_decision(db, envelope, cands, reason="invalid_lane")
     # EDGE-HINT CONTINUITY CLAMP: the chat edge has already classified a bounded follow-up.
     # Only let EXPLAIN/COMPARE correct the model when a real prior shortlist exists. This fixes
     # model misroutes such as "why Lenovo and not MSI?" -> POLICY_QUESTION without turning the

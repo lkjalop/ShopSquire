@@ -12,9 +12,9 @@ from threading import RLock
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response
 from sqlalchemy import text as sql_text
+from starlette.concurrency import run_in_threadpool
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.deps import get_redis
@@ -1305,7 +1305,7 @@ async def _idem_single_flight(redis, key: str, producer):
     except Exception:
         claimed = True   # redis unavailable → don't block; just run (degrade to today's behavior)
     if not claimed:
-        for _ in range(40):          # ~20s: poll for the in-flight producer's result
+        for _ in range(180):         # ~90s: match the producer lease before takeover
             await asyncio.sleep(0.5)
             try:
                 cached = redis.get(result_key)
@@ -1338,6 +1338,56 @@ async def _idem_single_flight(redis, key: str, producer):
                 redis.delete(lock_key)
         except Exception as _de:
             logger.debug("idem lock release skipped: %s", repr(_de)[:80])
+
+
+async def _call_recommend_in_process(
+    request: Request,
+    params: Dict[str, Any],
+    *,
+    redis: Any,
+    db: Any,
+    role: str,
+) -> tuple[int, Dict[str, Any]]:
+    """Invoke the existing recommendation contract without HTTP self-calls."""
+    from src.app.routers.recommend import suggest
+
+    def _invoke() -> Dict[str, Any]:
+        return suggest(
+            request=request,
+            uid=str(params.get("uid") or ""),
+            query=str(params.get("query") or ""),
+            budget_max=params.get("budget_max"),
+            budget_min=params.get("budget_min"),
+            nqe_question_id=params.get("nqe_question_id"),
+            nqe_option_id=params.get("nqe_option_id"),
+            nqe_option_label=params.get("nqe_option_label"),
+            nqe_option_value=params.get("nqe_option_value"),
+            image_labels=params.get("image_labels"),
+            image_ocr_text=params.get("image_ocr_text"),
+            image_hash=params.get("image_hash"),
+            image_intent=params.get("image_intent"),
+            image_product_identity=params.get("image_product_identity"),
+            image_cv_signals=params.get("image_cv_signals"),
+            fast_path=None,
+            turn_intent=params.get("turn_intent"),
+            include_summary=None,
+            external_research_consent=(
+                str(params.get("external_research_consent") or "").lower() == "true"
+            ),
+            copywriting_enabled=None,
+            copywriting_profile=None,
+            response=Response(),
+            redis=redis,
+            role=role,
+            db=db,
+        )
+
+    try:
+        data = await run_in_threadpool(_invoke)
+        return 200, data if isinstance(data, dict) else {}
+    except HTTPException as exc:
+        detail = exc.detail
+        return int(exc.status_code), detail if isinstance(detail, dict) else {"detail": detail}
 
 
 @router.post("/query")
@@ -1888,9 +1938,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         except Exception:
             pass
 
-    # Call internal recommend endpoint to leverage agentic pipeline
-    base = str(request.base_url).rstrip("/")
-    url = f"{base}/api/v1/recommend/suggest"
+    # Delegate through the in-process compatibility boundary. The mature suggest
+    # contract remains authoritative until facade dispatch is fully hoisted.
     params = {"uid": uid, "query": _query_for_retrieval}
     if _deficit_reorder:
         params["reorder_consent_intent"] = "true"  # emphasize the backorder-consent answer downstream
@@ -2029,20 +2078,16 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             _upstream_timeout = float(os.getenv("CHAT_UPSTREAM_TIMEOUT_SEC", "25") or 25)
         except (TypeError, ValueError):
             _upstream_timeout = 25.0
-        async with httpx.AsyncClient(timeout=_upstream_timeout) as client:
-            r = await client.get(url, params=params, headers=headers)
-            data = {}
-            try:
-                data = r.json()
-            except Exception:
-                data = {}
+        status_code, data = await _call_recommend_in_process(
+            request, params, redis=redis, db=db, role=role)
+        if status_code is not None:
             # CART-MUTATION short-circuit (V2 cart lane): see _cart_mutation_short_circuit.
-            if r.status_code == 200:
+            if status_code == 200:
                 _cart_out = _cart_mutation_short_circuit(
                     data, q=q, uid=_resolve_uid(payload, request), db=db)
                 if _cart_out is not None:
                     return _cart_out
-            if r.status_code == 403 and isinstance(data, dict):
+            if status_code == 403 and isinstance(data, dict):
                 # Safety/policy blocks are a normal outcome; surface them as a friendly chat response.
                 blocked = data.get("detail") if isinstance(data.get("detail"), dict) else data
                 decision_trace_id = (
@@ -2142,7 +2187,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 except Exception:
                     pass
                 return out
-            r.raise_for_status()
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=data)
     except Exception as e:
         import traceback as _tb
         _detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__

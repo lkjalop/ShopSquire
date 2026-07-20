@@ -53,10 +53,11 @@ def _env(q, **kw):
 
 # ── router clamps ─────────────────────────────────────────────────────────────
 
-def test_router_defaults_on_garbage_model(db):
+def test_router_bounded_fallback_on_garbage_model(db):
     for bad in ("", "not json", json.dumps({"lane": "INVENTED_LANE"})):
         d = route_turn(db, _env("gaming laptop"), llm_fn=lambda p, t, b=bad: b)
-        assert d.lane == "SEARCH" and d.source == "default"
+        assert d.lane == "SEARCH" and d.source.startswith("fallback:")
+        assert d.requirements == {} and d.use_cases == ()
 
 
 def test_recommendation_excludes_products_outside_store_currency(db):

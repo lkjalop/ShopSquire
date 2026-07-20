@@ -47,6 +47,27 @@ def test_duplicate_returns_cached_without_reproducing():
     assert calls["n"] == 1              # producer ran exactly ONCE
 
 
+def test_concurrent_duplicate_waits_for_the_same_producer():
+    """The stream and query fallback overlap, so both must join one producer."""
+    r = _FakeRedis()
+    calls = {"n": 0}
+
+    async def producer():
+        calls["n"] += 1
+        await asyncio.sleep(0.1)
+        return {"answer": calls["n"]}
+
+    async def go():
+        return await asyncio.gather(
+            _idem_single_flight(r, "chat:idem:overlap", producer),
+            _idem_single_flight(r, "chat:idem:overlap", producer),
+        )
+
+    results = asyncio.run(go())
+    assert results == [{"answer": 1}, {"answer": 1}]
+    assert calls["n"] == 1
+
+
 def test_stale_producer_cannot_release_successors_lease():
     """R10.3 (review-8 #8): a SLOW producer whose lease expired must not delete the SUCCESSOR's
     lock on exit — release is compare-and-delete on the ownership token, so only the current

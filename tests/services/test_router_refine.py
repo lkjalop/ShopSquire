@@ -108,3 +108,44 @@ def test_procurement_lane_synonyms_are_clamped_to_existing_lane(db, model_lane):
 
     assert decision.lane == "PROCUREMENT"
     assert decision.source == "model"
+
+
+def test_router_default_generation_budget_fits_bulk_decision(monkeypatch):
+    from src.app.services.recommendation_core import turn_router
+
+    seen = {}
+
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            return {"response": "{}"}
+
+    def fake_post(url, json, timeout):
+        seen.update(json)
+        return _Response()
+
+    monkeypatch.delenv("ROUTER_NUM_PREDICT", raising=False)
+    monkeypatch.setattr("httpx.post", fake_post)
+    turn_router._default_llm_fn("route this bulk request", 20)
+
+    assert seen["options"]["num_predict"] == 320
+
+
+def test_router_failure_recovers_only_bounded_bulk_facts(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-11-2")
+    decision = route_turn(
+        db,
+        _env("I need 20 gaming laptops for an esports lab, $1800 each within two weeks"),
+        llm_fn=lambda _prompt, _timeout: '{"lane":"PROCUREMENT",',
+    )
+
+    assert decision.source == "fallback:model_unavailable"
+    assert decision.lane == "PROCUREMENT"
+    assert decision.node_handle == "el-6-11-2"
+    assert decision.quantity == 20
+    assert decision.budget_scope == "per_unit"
+    assert decision.use_cases == ()
+    assert decision.requirements == {}
