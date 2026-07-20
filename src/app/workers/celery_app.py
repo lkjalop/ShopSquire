@@ -349,7 +349,8 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "args": (),
         }
     # Market signal backfill (Module 1 batch wiring) — schedule only when enabled.
-    if str(os.getenv("MARKET_SIGNAL_BACKFILL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+    if (str(os.getenv("MARKET_SIGNAL_BACKFILL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+            or str(os.getenv("MARKET_CANONICAL_FACTS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")):
         beat_schedule["market-signal-backfill"] = {
             "task": "src.app.tasks.market_signal_tasks.market_signal_backfill",
             "schedule": crontab(minute=f"*/{max(1, int(os.getenv('MARKET_SIGNAL_BACKFILL_INTERVAL_MIN', '15')))}"),

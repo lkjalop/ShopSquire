@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "sources": {
+    "orders": {"families": ["marketing"], "max_age_seconds": 7776000, "signature": "internal"},
+    "cart": {"families": ["marketing"], "max_age_seconds": 604800, "signature": "internal"},
+    "returns": {"families": ["marketing"], "max_age_seconds": 7776000, "signature": "internal"},
+    "inventory_level": {"families": ["atp"], "max_age_seconds": 86400, "signature": "internal"},
+    "supplier_quote": {"families": ["atp"], "max_age_seconds": 2592000, "signature": "internal"},
+    "synthetic_lab": {"families": ["marketing", "atp"], "max_age_seconds": 86400, "signature": "internal"},
+    "erp": {"families": ["atp"], "max_age_seconds": 86400, "signature": "hmac", "secret_env": "MARKET_SOURCE_ERP_SECRET"},
+    "wms": {"families": ["atp"], "max_age_seconds": 21600, "signature": "hmac", "secret_env": "MARKET_SOURCE_WMS_SECRET"},
+    "sap": {"families": ["atp"], "max_age_seconds": 21600, "signature": "hmac", "secret_env": "MARKET_SOURCE_SAP_SECRET"},
+    "netsuite": {"families": ["atp", "marketing"], "max_age_seconds": 86400, "signature": "hmac", "secret_env": "MARKET_SOURCE_NETSUITE_SECRET"},
+    "ga4": {"families": ["marketing"], "max_age_seconds": 604800, "signature": "hmac", "secret_env": "MARKET_SOURCE_GA4_SECRET"},
+    "shopify": {"families": ["marketing", "atp"], "max_age_seconds": 86400, "signature": "hmac", "secret_env": "MARKET_SOURCE_SHOPIFY_SECRET"}
+  }
+}

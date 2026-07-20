@@ -48,7 +48,7 @@ def _write_user(session_factory, *, tenant: str, user: int, turns: int, seed: in
         fact = {
             "tenant_id": tenant,
             "deduplication_id": f"{tenant}:{user}:{turn}",
-            "source_system": "synthetic_concurrent_soak",
+            "source_system": "synthetic_lab",
             "source_record_id": f"user-{user}:turn-{turn}",
             "event_type": event,
             "occurred_at": occurred.isoformat(),

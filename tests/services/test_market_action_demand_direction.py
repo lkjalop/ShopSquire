@@ -19,10 +19,11 @@ def test_downward_demand_shift_does_not_recommend_expansion():
     assert "secure inventory ahead of demand" not in rec["action"], rec
 
 
-def test_upward_demand_with_shortfall_recommends_expansion():
+def test_upward_demand_with_shortfall_only_sources_verified_deficit_without_governed_economics():
     rec = _recommend_market_action(
         [_f("demand_shift", "spike", summary="Search demand spike vs baseline")], {"shortfall": 5})
-    assert "secure inventory ahead of demand" in rec["action"], rec
+    assert rec["action"] == "source the verified shortfall", rec
+    assert rec["policy"]["allowed"] is False
 
 
 def test_upward_demand_without_shortfall_no_expansion():

@@ -39,6 +39,7 @@ def _finding_dict(f: Any) -> Dict[str, Any]:
         "taxonomy_node": evidence.get("taxonomy_node"),
         "source_system": evidence.get("source_system"),
         "observed_at": evidence.get("observed_at"),
+        "provenance_chain": evidence.get("provenance_chain"),
         "status": evidence.get("status", "active"),
     }
 

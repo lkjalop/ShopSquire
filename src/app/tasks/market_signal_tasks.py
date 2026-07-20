@@ -22,7 +22,9 @@ def _enabled() -> bool:
 
 @celery_app.task(name="src.app.tasks.market_signal_tasks.market_signal_backfill")
 def market_signal_backfill() -> Dict[str, Any]:
-    if not _enabled():
+    canonical_enabled = str(os.getenv("MARKET_CANONICAL_FACTS_ENABLED", "0")).strip().lower() in (
+        "1", "true", "yes", "on")
+    if not _enabled() and not canonical_enabled:
         return {"skipped": "disabled"}
     try:
         limit = max(1, int(float(os.getenv("MARKET_SIGNAL_BACKFILL_LIMIT", "1000") or 1000)))
@@ -36,10 +38,17 @@ def market_signal_backfill() -> Dict[str, Any]:
         from src.app.models.db import db_session
         from src.app.services.market_signal_adapters import backfill_from_db
         with db_session() as db:
-            counts = backfill_from_db(db, limit=limit, min_trust=min_trust,
-                                      max_age_seconds=max_age_seconds, now_iso=now_iso)
+            counts = (backfill_from_db(db, limit=limit, min_trust=min_trust,
+                                       max_age_seconds=max_age_seconds, now_iso=now_iso)
+                      if _enabled() else {})
+            canonical = {}
+            if canonical_enabled:
+                from src.app.platform.tenant_context import current_tenant_id
+                from src.app.services.canonical_fact_adapters import backfill_canonical_facts
+                canonical = backfill_canonical_facts(
+                    db, tenant_id=current_tenant_id(), limit=limit)
         logger.info("market_signal_backfill counts=%s (min_trust=%s max_age=%s)", counts, min_trust, max_age_seconds)
-        return counts
+        return {"legacy_signals": counts, "canonical_facts": canonical}
     except Exception as exc:
         logger.warning("market_signal_backfill failed: %s", exc)
         return {"error": f"{type(exc).__name__}: {exc}"}

@@ -9,8 +9,11 @@ from src.app.services.fulfillment import margin_advisor as ma
 
 
 def _econ(cost_unit, retail_unit, qty, floor=0.10):
-    return feco.compute(supplier_unit_cost_cents=cost_unit, retail_unit_cents=retail_unit,
-                        quantity=qty, floor_margin_pct=floor).to_dict()
+    out = feco.compute(supplier_unit_cost_cents=cost_unit, retail_unit_cents=retail_unit,
+                       quantity=qty, floor_margin_pct=floor).to_dict()
+    out.update({"cost_basis": "validated_landed_supplier_quote",
+                "discount_headroom_authorized": True})
+    return out
 
 
 def test_healthy_margin_proposes_a_buffered_discount(monkeypatch):
@@ -48,3 +51,19 @@ def test_insufficient_data_is_unavailable(monkeypatch):
     monkeypatch.setattr(feco, "from_case", lambda db, cid, **k: {})
     out = ma.assess(None, "c1")
     assert out["available"] is False and out["verdict"] is None
+
+
+def test_unlanded_quote_never_exposes_discount_headroom(monkeypatch):
+    econ = _econ(500, 1000, 10)
+    econ.update({"cost_basis": "validated_supplier_quote_unlanded",
+                 "discount_headroom_authorized": False})
+    monkeypatch.setattr(feco, "from_case", lambda db, cid, **k: econ)
+    monkeypatch.setattr(ma, "_supplier_last_invoice_cents", lambda db, cid, t: None)
+
+    out = ma.assess(None, "c1")
+
+    assert out["available"] is True
+    assert out["discount_headroom_authorized"] is False
+    assert out["max_buyer_discount_cents"] == 0
+    assert out["recommended_buyer_discount_cents"] == 0
+    assert any("landed unit cost" in reason for reason in out["rationale"])

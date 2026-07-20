@@ -79,9 +79,18 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     po = st.get("purchase_order") or {}
     selection = st.get("selection") or {}
 
-    su = vq.get("unit_amount_cents")
+    # A supplier unit quote is not landed COGS: freight, duty, handling, and other
+    # attributable costs may still be absent. Keep it as an estimate, but authorize
+    # discount headroom only when the validated response supplies landed unit cost.
+    su = vq.get("landed_unit_cost_cents")
+    cost_basis = "validated_landed_supplier_quote" if su is not None else None
+    if su is None and vq.get("unit_amount_cents") is not None:
+        su = vq.get("unit_amount_cents")
+        cost_basis = "validated_supplier_quote_unlanded"
     if su is None:
         su = _catalog_wholesale(db, st, tenant_id)  # supplier-catalog fallback when no live quote
+        if su is not None:
+            cost_basis = "approved_supplier_catalog"
     qty = po.get("quantity")
     if qty is None:
         qty = sum(int(a.get("quantity") or 0) for a in (selection.get("allocation") or [])
@@ -100,21 +109,17 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
         ru = _selected_retail_unit(st)            # fallback: derive from the selected option
     if ru is None:
         ru = _product_retail(db, _case_sku(st))   # last resort: the product catalog list price (always present)
-    # DEMO-economics safeguard: a wholesale AT/ABOVE retail is a seed artifact (a fixed supplier unit_cost
-    # applied to a cheaper SKU) → it would imply selling at a loss and makes the positive-margin demo path
-    # impossible. Fall back to a realistic markup (DEMO_WHOLESALE_FRACTION, default 0.70 → ~30% margin).
-    # Genuinely thin-but-PROFITABLE SKUs (wholesale < retail) are untouched, so the below-floor gate still
-    # fires for real cases. No-op once a real validated quote sets the wholesale.
-    if isinstance(su, int) and isinstance(ru, int) and ru > 0 and su >= ru:
-        import os as _os
-        try:
-            _frac = float(_os.getenv("DEMO_WHOLESALE_FRACTION", "0.70") or 0.70)
-        except (TypeError, ValueError):
-            _frac = 0.70
-        su = int(round(ru * max(0.1, min(0.95, _frac))))
     econ = compute(supplier_unit_cost_cents=su, retail_unit_cents=ru, quantity=qty,
                    floor_margin_pct=floor_margin_pct)
-    return econ.to_dict() if econ else {}
+    if not econ:
+        return {}
+    out = econ.to_dict()
+    landed = cost_basis == "validated_landed_supplier_quote"
+    out.update({"available": True, "cost_basis": cost_basis,
+                "landed_cost_complete": landed,
+                "discount_headroom_authorized": landed,
+                "cost_is_estimated": not landed, "currency_conversion_applied": False})
+    return out
 
 
 def _case_sku(state_json: Dict[str, Any]) -> Optional[str]:

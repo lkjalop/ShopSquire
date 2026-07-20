@@ -221,14 +221,16 @@ def test_recommend_market_action_maps_findings_to_bounded_actions():
     from src.app.services.recommend_fulfillment_stage import _recommend_market_action as rec
 
     assert "pricing" in rec([{"finding_type": "competitor_undercut"}], {})["action"]
-    assert "inventory" in rec([{"finding_type": "demand_shift"}], {})["action"]
+    demand = rec([{"finding_type": "demand_shift"}], {})
+    assert demand["action"].startswith("no market action")
+    assert demand["policy"]["allowed"] is False
     assert "season" in rec([{"finding_type": "seasonal_demand"}], {})["action"].lower()
     # no findings but a real shortfall → still actionable (source it)
     short = rec([], {"shortfall": 6})
     assert "source" in short["action"] and "6" in short["rationale"]
     # nothing at all → HONEST internal-only default, not a fake signal
     empty = rec([], {"shortfall": 0})
-    assert "no market action" in empty["action"] and "internal-only" in empty["rationale"]
+    assert "no market action" in empty["action"] and "governed market evidence" in empty["rationale"]
     # competitor_undercut dominates a co-occurring shortfall (strongest-signal priority)
     assert "pricing" in rec([{"finding_type": "competitor_undercut"}], {"shortfall": 9})["action"]
 
@@ -261,7 +263,8 @@ def test_market_trace_uses_subject_scoped_context_api(monkeypatch):
     assert emitted and emitted[0][0][1] == "market_intelligence_assessed"
     assert emitted[0][0][3]["signals"][0]["scope"] == "this_item"
     assert emitted[0][0][3]["scoped_signal_count"] == 1
-    assert emitted[0][0][3]["action_basis"] == "market_and_inventory"
+    assert emitted[0][0][3]["action_basis"] == "inventory_only"
+    assert emitted[0][0][3]["action_policy"]["allowed"] is False
 
 
 def test_signal_scope_tiers_this_item_market_related():
@@ -325,4 +328,4 @@ def test_global_seasonal_signal_is_advisory_not_procurement_authority():
 
     out = rec([{"finding_type": "seasonal_demand", "scope": "global"}], {"shortfall": 5})
 
-    assert out["action"] == "source the shortfall now"
+    assert out["action"] == "source the verified shortfall"

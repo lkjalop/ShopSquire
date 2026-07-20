@@ -94,7 +94,8 @@ def _finding_is_upward(f: Dict[str, Any]) -> bool:
     return any(k in s for k in ("spike", "rising", "surg", "upward", "trending up"))
 
 
-def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, Any]) -> Dict[str, str]:
+def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, Any],
+                             economics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Deterministic, explainable finding→action synthesis (NO LLM, NO product vocabulary). Maps the
     strongest active market finding to a bounded recommendation for the operator's procurement decision.
     Honest default when there is no external signal — and the shortfall recommendation is real either way.
@@ -120,17 +121,24 @@ def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, An
     _demand = [f for f in relevant
                if str(f.get("finding_type") or "").lower() in ("demand_shift", "demand_forecast")
                and f.get("scope") in (None, "this_item", "this_product", "taxonomy")]
-    if short > 0 and any(_finding_is_upward(f) for f in _demand):
+    from src.app.services.market_action_policy import authorize_replenishment
+    policy = authorize_replenishment(
+        demand_facts=_demand, atp=avail, economics=economics or {})
+    if short > 0 and any(_finding_is_upward(f) for f in _demand) and policy["allowed"]:
         return {"action": "secure inventory ahead of demand",
-                "rationale": "demand is trending up for this line and stock is short — reorder ahead of the curve and raise its prominence"}
+                "rationale": "independent demand growth, ATP deficit, lead time, and margin evidence support replenishment",
+                "policy": policy}
     if "seasonal_demand" in types:
         return {"action": "time the reorder to the season",
-                "rationale": "a seasonal pattern is active — align supplier lead time with the upcoming peak"}
+                "rationale": "seasonal context is advisory; no replenishment is authorized without ATP, lead-time, and margin proof",
+                "policy": policy}
     if "inventory_demand_mismatch" in types or short > 0:
-        return {"action": "source the shortfall now",
-                "rationale": f"{short} unit(s) short of the requested quantity — open a supplier RFQ to close the gap"}
+        return {"action": "source the verified shortfall",
+                "rationale": f"{short} unit(s) are not covered by current stock; broader replenishment is not authorized",
+                "policy": policy}
     return {"action": "no market action — proceed on inventory + supplier terms",
-            "rationale": "no active external market signal for this line (internal-only mode)"}
+            "rationale": "no governed market evidence authorizes an action for this line",
+            "policy": policy}
 
 
 def _emit_market_intelligence(
@@ -165,7 +173,10 @@ def _emit_market_intelligence(
                                   "confidence": f.get("confidence"), "summary": f.get("summary"),
                                   "scope": f.get("scope")} for f in findings],
                      "recommendation": rec["action"], "rationale": rec["rationale"],
-                     "action_basis": "market_and_inventory" if scoped_count else "inventory_only",
+                     "action_policy": rec.get("policy"),
+                     "action_basis": ("market_and_inventory"
+                                      if (rec.get("policy") or {}).get("allowed")
+                                      else "inventory_only"),
                      "mode": ("live" if scoped_count else "context_only") if findings else "internal_only"})
     except Exception as exc:
         record_partial_failure("market_intelligence_step", exc, trace_id=trace_id)

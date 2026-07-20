@@ -13,6 +13,7 @@ from src.app.services.market_metrics import summarize_marketing_facts
 
 
 MIGRATION = Path(__file__).resolve().parents[2] / "alembic" / "versions" / "20260721_market_fact_contract.py"
+GOVERNANCE = Path(__file__).resolve().parents[2] / "alembic" / "versions" / "20260722_market_fact_governance.py"
 
 
 def _db():
@@ -23,6 +24,11 @@ def _db():
     with engine.begin() as connection:
         migration.op = Operations(MigrationContext.configure(connection))
         migration.upgrade()
+        spec2 = importlib.util.spec_from_file_location("market_fact_governance_metrics", GOVERNANCE)
+        governance = importlib.util.module_from_spec(spec2)
+        spec2.loader.exec_module(governance)
+        governance.op = Operations(MigrationContext.configure(connection))
+        governance.upgrade()
     return sessionmaker(bind=engine)()
 
 
@@ -34,7 +40,7 @@ def test_summary_is_tenant_scoped_and_requires_sample_before_action():
                 for turn, event in enumerate(("view_item", "click", "add_to_cart", "purchase")):
                     record_marketing_event(db, {
                         "tenant_id": tenant, "deduplication_id": f"{tenant}:{user}:{turn}",
-                        "source_system": "test", "source_record_id": f"{user}:{turn}",
+                        "source_system": "synthetic_lab", "source_record_id": f"{user}:{turn}",
                         "event_type": event, "occurred_at": f"2026-07-20T00:0{turn}:00Z",
                         "session_id": f"session-{user}", "sku": "SKU-1", "consent_state": "granted",
                         "provenance_chain": ["test"],
@@ -56,7 +62,7 @@ def test_cart_abandonment_needs_denominator_and_is_operator_only():
             for turn, event in enumerate(("view_item", "click", "add_to_cart")):
                 record_marketing_event(db, {
                     "tenant_id": "tenant-a", "deduplication_id": f"a:{user}:{turn}",
-                    "source_system": "test", "source_record_id": f"{user}:{turn}",
+                    "source_system": "synthetic_lab", "source_record_id": f"{user}:{turn}",
                     "event_type": event, "occurred_at": f"2026-07-20T00:0{turn}:00Z",
                     "session_id": f"session-{user}", "sku": "SKU-1", "consent_state": "granted",
                     "provenance_chain": ["test"],

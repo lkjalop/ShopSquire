@@ -57,13 +57,15 @@ def BU(): return Actor(A.BUYER, "u1")
 def HU(): return Actor(A.HUMAN_OPERATOR, "owner-01")
 
 
-def _to_selected(db, *, wholesale_cents=90000):
+def _to_selected(db, *, wholesale_cents=90000, landed=False):
     """Walk to SELECTED. wholesale_cents=None omits the quoted wholesale (to test the catalog fallback)."""
     cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
                        now_iso="2026-06-26 09:00:00"); db.commit()
     vq = {"quoted_quantity": 6, "estimated_delivery_at": "2026-07-08", "confidence": 0.96}
     if wholesale_cents is not None:
         vq["unit_amount_cents"] = wholesale_cents
+        if landed:
+            vq["landed_unit_cost_cents"] = wholesale_cents
     seq = [
         ("availability_assessed", AG(), {"availability": {"requested_qty": 10, "in_stock": 4,
                                                           "shortfall": 6, "item_ref": "LAP-021"}}),
@@ -100,6 +102,18 @@ def test_from_case_derives_wholesale_and_retail(db):
     assert econ and econ["quantity"] == 6
     assert econ["supplier_unit_cost_cents"] == 90000 and econ["retail_unit_cents"] == 120000
     assert econ["margin_pct"] == 0.25 and econ["max_buyer_discount_cents"] == 120000
+    assert econ["cost_basis"] == "validated_supplier_quote_unlanded"
+    assert econ["discount_headroom_authorized"] is False
+    assert econ["cost_is_estimated"] is True
+
+
+def test_from_case_authorizes_headroom_only_for_validated_landed_cost(db):
+    cid = _to_selected(db, landed=True)
+    econ = E.from_case(db, cid, floor_margin_pct=0.10)
+
+    assert econ["cost_basis"] == "validated_landed_supplier_quote"
+    assert econ["discount_headroom_authorized"] is True
+    assert econ["cost_is_estimated"] is False
 
 
 def test_from_case_retail_falls_back_to_product_catalog_price_pre_send(db, monkeypatch):
@@ -131,12 +145,12 @@ def test_from_case_retail_falls_back_to_product_catalog_price_pre_send(db, monke
     assert econ["quantity"] == 6                         # ← pre-send qty from the draft commercial scope
     assert econ["supplier_unit_cost_cents"] > 0          # ← wholesale from the supplier catalog
     assert econ["clears_floor"] is True                  # 2000 list vs ~1100 wholesale → healthy margin
+    assert econ["discount_headroom_authorized"] is False
 
 
-def test_from_case_demo_safeguard_rescues_loss_making_seed(db, monkeypatch):
-    # the live bug: a cheap SKU ($629 retail) routed to a fixed-cost supplier ($1095 wholesale) showed
-    # below_floor (selling at a loss). The safeguard falls the wholesale back to a realistic markup so the
-    # positive-margin demo works; the override still fires only when wholesale >= retail.
+def test_from_case_does_not_fabricate_profitable_cost_when_supplier_cost_exceeds_retail(db, monkeypatch):
+    # A bad seed or genuinely loss-making supplier offer must remain visible as below-floor.
+    # Replacing it with a percentage of retail would manufacture discount headroom.
     monkeypatch.setenv("COMMERCE_CATALOG_ENABLED", "1")
     from sqlalchemy import text as _t
     from src.app.services.supplier_catalog import seed_demo as seed_suppliers
@@ -154,8 +168,10 @@ def test_from_case_demo_safeguard_rescues_loss_making_seed(db, monkeypatch):
         assert wf.transition(db, case_id=cid, event=event, actor=actor, state_patch=patch, now_iso=f"2026-06-26 09:0{ts}:00").ok, event
     econ = E.from_case(db, cid, floor_margin_pct=0.10)
     assert econ["retail_unit_cents"] == 62900
-    assert econ["supplier_unit_cost_cents"] == int(round(62900 * 0.70))   # safeguarded, not the $1095 loss
-    assert econ["clears_floor"] is True                                    # now a healthy ~30% margin demo
+    assert econ["supplier_unit_cost_cents"] > 62900
+    assert econ["clears_floor"] is False
+    assert econ["max_buyer_discount_cents"] == 0
+    assert econ["cost_basis"] == "approved_supplier_catalog"
 
 
 def test_from_case_empty_before_quote_validated(db):

@@ -50,6 +50,7 @@ def assess(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     retail = int(econ.get("retail_cents") or 0)
     cost = int(econ.get("supplier_cost_cents") or 0)
     max_discount = int(econ.get("max_buyer_discount_cents") or 0)
+    discount_authorized = bool(econ.get("discount_headroom_authorized"))
 
     if not clears:
         verdict = "below_floor"
@@ -62,14 +63,17 @@ def assess(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     # that still keeps margin at floor+buffer is cost/(1-(floor+buffer)); the discount is retail minus that.
     target = min(0.95, floor + _DISCOUNT_BUFFER_PCT)
     min_retail_for_target = (cost / (1.0 - target)) if (1.0 - target) > 0 else retail
-    recommended = max(0, int(round(retail - min_retail_for_target))) if clears else 0
+    recommended = max(0, int(round(retail - min_retail_for_target))) if clears and discount_authorized else 0
     recommended = min(recommended, max_discount)
 
     rationale = [
         f"List margin {margin * 100:.1f}% vs floor {floor * 100:.0f}% — "
         + ("clears the floor." if clears else "BELOW the floor: this reorder may not be worth it."),
     ]
-    if clears and recommended > 0:
+    if not discount_authorized:
+        rationale.append("Discount headroom is locked until a validated supplier response includes landed unit cost.")
+        max_discount = 0
+    elif clears and recommended > 0:
         rationale.append(f"You can offer up to {recommended / 100:.0f} discount and still keep a "
                          f"{target * 100:.0f}% margin (hard ceiling {max_discount / 100:.0f}).")
     last_inv = _supplier_last_invoice_cents(db, case_id, tenant_id)
@@ -82,6 +86,7 @@ def assess(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
         "economics": econ,
         "max_buyer_discount_cents": max_discount,
         "recommended_buyer_discount_cents": recommended,
+        "discount_headroom_authorized": discount_authorized,
         "supplier_last_invoice_cents": last_inv,
         "rationale": rationale,
     }
