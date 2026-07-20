@@ -350,10 +350,12 @@ def _session_from(core, prior: Optional[Dict[str, Any]] = None) -> Dict[str, Any
 
 
 def _error_dimension(error: str, *, turn: int) -> str:
-    """Keep routing calibration separate from buyer-safety and context continuity."""
+    """Keep routing, catalog coverage, buyer safety and context continuity separate."""
     code = str(error or "").split(":", 1)[0]
     if code == "lane":
         return "routing_calibration"
+    if code == "products":
+        return "catalog_coverage"
     if turn > 0 and code in {
         "node", "quantity", "total_budget", "budget_scope", "excluded_brand_shown",
     }:
@@ -363,7 +365,7 @@ def _error_dimension(error: str, *, turn: int) -> str:
 
 def _dimension_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     dimensions: Dict[str, Any] = {}
-    for name in ("semantic_safety", "continuity", "routing_calibration"):
+    for name in ("semantic_safety", "catalog_coverage", "continuity", "routing_calibration"):
         flagged = []
         codes: Counter[str] = Counter()
         for row in rows:

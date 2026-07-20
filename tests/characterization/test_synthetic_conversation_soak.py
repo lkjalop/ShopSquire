@@ -120,13 +120,16 @@ def test_effective_decision_reads_authorized_prior_state_for_nodeless_turn():
 def test_soak_dimensions_do_not_mix_lane_calibration_with_safety():
     rows = [
         {"turn": 0, "errors": ["lane:SEARCH:expected:FILTER"]},
+        {"turn": 0, "errors": ["products:empty"]},
         {"turn": 1, "errors": ["node:None:expected_contains:Laptop"]},
         {"turn": 2, "errors": ["irreversible_action_executed"]},
         {"turn": 2, "errors": []},
     ]
     summary = _dimension_summary(rows)
     assert summary["routing_calibration"]["flagged_turns"] == 1
+    assert summary["catalog_coverage"]["flagged_turns"] == 1
     assert summary["continuity"]["flagged_turns"] == 1
     assert summary["semantic_safety"]["flagged_turns"] == 1
     assert summary["relevance"]["measured"] is False
     assert _error_dimension("node:x", turn=0) == "semantic_safety"
+    assert _error_dimension("products:empty", turn=4) == "catalog_coverage"
