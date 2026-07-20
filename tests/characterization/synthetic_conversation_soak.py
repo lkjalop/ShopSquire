@@ -318,25 +318,33 @@ def _percentile(values: List[float], p: float) -> float:
     return round(xs[rank], 1)
 
 
-def _session_from(core) -> Dict[str, Any]:
+def _session_from(core, prior: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     dec = core.extras.get("decision") or {}
     used = core.extras.get("constraints_used") or {}
-    return {
-        "prior_node": dec.get("node_handle"),
-        "shortlist_skus": [p.sku for p in core.products[:12]],
-        "accepted_constraints": {
-            "budget_min_cents": used.get("budget_min_cents"),
-            "budget_max_cents": used.get("budget_max_cents"),
-            "requirements": used.get("requirements") or dec.get("requirements") or {},
-            "use_cases": dec.get("use_cases") or [],
-            "quantity": dec.get("quantity"),
-            "total_budget_cents": dec.get("total_budget_cents"),
-            "budget_scope": dec.get("budget_scope"),
-            "exclude_brand": dec.get("exclude_brand"),
-            "brand_filter": dec.get("brand_filter"),
-            "preferred_brand": dec.get("preferred_brand"),
-        },
+    out = dict(prior or {})
+    if dec.get("node_handle"):
+        out["prior_node"] = dec["node_handle"]
+    shortlist = [p.sku for p in core.products[:12]]
+    if shortlist:
+        out["shortlist_skus"] = shortlist
+    accepted = dict(out.get("accepted_constraints") or {})
+    updates = {
+        "budget_min_cents": used.get("budget_min_cents"),
+        "budget_max_cents": used.get("budget_max_cents"),
+        "requirements": used.get("requirements") or dec.get("requirements"),
+        "use_cases": dec.get("use_cases"),
+        "quantity": dec.get("quantity"),
+        "total_budget_cents": dec.get("total_budget_cents"),
+        "budget_scope": dec.get("budget_scope"),
+        "exclude_brand": dec.get("exclude_brand"),
+        "brand_filter": dec.get("brand_filter"),
+        "preferred_brand": dec.get("preferred_brand"),
     }
+    for key, value in updates.items():
+        if value is not None and value != [] and value != {}:
+            accepted[key] = value
+    out["accepted_constraints"] = accepted
+    return out
 
 
 def _error_dimension(error: str, *, turn: int) -> str:
@@ -482,7 +490,7 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
                         core = recommend_turn(db, env)
                         errors.extend(_recommend_checks(spec, core))
                         dec = core.extras.get("decision") or {}
-                        session = _session_from(core)
+                        session = _session_from(core, session)
                         record.update({
                             "lane": core.lane, "node": dec.get("node_path"),
                             "quantity": dec.get("quantity"),

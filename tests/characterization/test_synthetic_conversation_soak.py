@@ -83,6 +83,26 @@ def test_session_emulates_production_brand_persistence():
     assert accepted["preferred_brand"] == "Dell"
 
 
+def test_session_merge_does_not_erase_subject_or_constraints_on_explanation_turn():
+    prior = {
+        "prior_node": "el-6-1",
+        "shortlist_skus": ["LAP-1"],
+        "accepted_constraints": {
+            "quantity": 25,
+            "total_budget_cents": 4100000,
+            "budget_scope": "total",
+            "exclude_brand": "Apple",
+        },
+    }
+
+    class Core:
+        products = []
+        extras = {"decision": {"lane": "EXPLAIN"}, "constraints_used": {}}
+
+    merged = _session_from(Core(), prior)
+    assert merged == prior
+
+
 def test_soak_dimensions_do_not_mix_lane_calibration_with_safety():
     rows = [
         {"turn": 0, "errors": ["lane:SEARCH:expected:FILTER"]},
