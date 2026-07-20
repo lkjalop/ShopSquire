@@ -52,7 +52,7 @@ def classify_budget_scope(text: str) -> str:
     if re.search(r"\b(?:each|apiece|a\s+piece|per\s+(?:unit|item|device|laptop|computer|pc))\b", q):
         return "per_unit"
     if re.search(
-        r"\b(?:total\s+budget|budget\s+(?:for|across)\s+(?:all|the\s+whole)|"
+        r"\b(?:total(?:\s+order)?\s+budget|budget\s+(?:for|across)\s+(?:all|the\s+whole)|"
         r"all\s+in|altogether|combined|grand\s+total|in\s+total|for\s+all)\b",
         q,
     ):
