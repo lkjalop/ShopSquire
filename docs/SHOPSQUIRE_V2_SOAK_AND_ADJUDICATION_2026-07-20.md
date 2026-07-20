@@ -74,3 +74,21 @@ Do not start real canaries yet. Required gates are:
    78ms);
 5. improve or explicitly accept procurement routing calibration by turn subtype;
 6. finish the live IMAGE battery and migrated deployment/browser proof.
+
+## Live verification addendum
+
+- The brownfield demo database is at Alembic head `20260721_market_fact_contract`. After restart,
+  `/health` reports DB, Redis, Ollama, pgvector and CV provider healthy; the former missing
+  `product_embeddings` condition is closed.
+- The live procurement browser smoke passed through the sourcing confirmation surface. Supplier
+  dispatch was deliberately not invoked.
+- IMAGE contract tests passed (28 backend and 27 frontend), including pending/degraded/security
+  separation and canonical-slate authority.
+- A real benign-image request returned in 25.17s as bounded degradation with
+  `vision_provider_timeout` and `security_risk=false`. Timeout honesty is correct, but interactive
+  runtime reliability is not. The 9.3GB text model and 6.1GB vision model cannot be co-resident on
+  a 12GB GPU. Smaller installed candidates were not acceptable: Moondream returned an empty
+  identity and LLaVA fabricated brand/model evidence. No launcher model swap was made.
+- The Redis Stream worker contained a real infinite-wait defect: `XREADGROUP BLOCK 0` was used
+  after reclaim, but Redis interprets zero as wait forever. Commit `d8cfa50` omits `BLOCK` for a
+  nonblocking read; all 22 worker tests now pass, including real crash recovery.
