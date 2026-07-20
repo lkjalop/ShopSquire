@@ -392,6 +392,18 @@ def test_explicit_bulk_fields_survive_when_model_omits_them(db):
     assert "bulk_budget" in legacy
 
 
+def test_search_lane_continuation_inherits_prior_bulk_quantity(db):
+    payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+               "quantity": None, "subject_action": "continue", "confidence": 0.9}
+    session = {"prior_node": "el-6-6", "accepted_constraints": {"quantity": 25}}
+    resp = recommend_turn(
+        db,
+        _env("which of these has the best battery life?", session=session),
+        llm_fn=lambda p, t: json.dumps(payload),
+    )
+    assert resp.extras["requested_quantity"] == 25
+
+
 def test_stocked_handles_within_contains_and_ungrounded(db):
     """R8.2 marker logic: WITHIN a sold subtree marks, a subtree CONTAINING a sold node marks
     (retrieval reads subtrees), unrelated taxonomy does not, and an ungrounded tenant marks

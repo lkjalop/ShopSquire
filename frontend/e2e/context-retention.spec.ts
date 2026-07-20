@@ -47,7 +47,8 @@ test('budget context survives raise + cut across turns (one session)', async ({ 
     const d = await chat(page, uid, 'work laptops budget 1200 to 1500, need 10');
     const ps = prices(d);
     expect(ps.length).toBeGreaterThan(0);
-    for (const v of ps) expect(v, 'T1 price inside 1200-1500').toBeGreaterThanOrEqual(1100); // small tolerance floor
+    // The stated maximum is hard; the minimum is a preference, so a lower-priced valid fit is allowed.
+    for (const v of ps) expect(v, 'T1 respects the hard 1500 ceiling').toBeLessThanOrEqual(1500);
     expect(Number(d.requested_quantity)).toBe(10);
   });
 

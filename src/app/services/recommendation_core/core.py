@@ -201,7 +201,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # wins; a fresh SEARCH never inherits (context-rot guard, ledger §8). Runs BEFORE
     # derive_plan so fit_check comes back for inherited requirements.
     budget_inherited = requirements_inherited = False
-    if (decision.lane in ("FILTER", "COMPARE", "EXPLAIN")
+    if ((decision.subject_action == "continue"
+         or decision.lane in ("FILTER", "COMPARE", "EXPLAIN"))
             and decision.subject_action != "switch"):
         acc = (envelope.session or {}).get("accepted_constraints") or {}
         if envelope.budget_min_cents is None and envelope.budget_max_cents is None:
