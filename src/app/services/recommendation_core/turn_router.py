@@ -684,11 +684,23 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         parsed_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
         if parsed_quantity is not None:
             quantity = parsed_quantity[0]
-    if budget_scope == "unknown":
-        from src.app.services.budget_grammar import classify_budget_scope
-        budget_scope = classify_budget_scope(envelope.query)
+    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+    explicit_budget_scope = classify_budget_scope(envelope.query)
+    if explicit_budget_scope != "unknown":
+        # Buyer words authorize scope; the model may interpret an amount but cannot override
+        # explicit "each"/"total" language.
+        budget_scope = explicit_budget_scope
+    else:
+        parsed_scope_budget = parse_budget(envelope.query)
+        # A range such as "$1,500-$1,900, need 25" describes the item band unless the
+        # buyer explicitly says total/all-in. Treating it as $76 per unit is never useful.
+        if quantity and parsed_scope_budget and parsed_scope_budget.mode == "range":
+            budget_scope = "per_unit"
+    if budget_scope == "per_unit":
+        # total_budget is contractually the whole-order amount. Some models echo the
+        # per-item ceiling into this field; discard it and use the parsed envelope band.
+        total_budget_cents = None
     if total_budget_cents is None and budget_scope == "total":
-        from src.app.services.budget_grammar import parse_budget
         parsed_budget = parse_budget(envelope.query)
         if parsed_budget is not None and parsed_budget.budget_max is not None:
             total_budget_cents = int(parsed_budget.budget_max) * 100

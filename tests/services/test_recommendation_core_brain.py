@@ -359,6 +359,23 @@ def test_text_parsed_total_budget_is_normalized_before_retrieval(db):
     assert all((product.price_cents or 0) <= 250_000 for product in resp.products)
 
 
+def test_bulk_budget_range_defaults_to_per_unit_despite_model_total_claim(db):
+    payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+               "quantity": 25, "total_budget": 1900, "budget_scope": "total",
+               "subject_action": "switch", "confidence": 0.9}
+    envelope = dataclasses.replace(
+        _env("what laptops for work? budget 1500 to 1900, I need about 25"),
+        budget_min_cents=150_000,
+        budget_max_cents=190_000,
+    )
+    resp = recommend_turn(db, envelope, llm_fn=lambda p, t: json.dumps(payload))
+    decision = resp.extras["decision"]
+    assert decision["budget_scope"] == "per_unit"
+    assert decision["total_budget_cents"] is None
+    assert resp.products
+    assert all(150_000 <= (product.price_cents or 0) <= 190_000 for product in resp.products)
+
+
 def test_explicit_bulk_fields_survive_when_model_omits_them(db):
     payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
                "subject_action": "switch", "confidence": 0.9}
