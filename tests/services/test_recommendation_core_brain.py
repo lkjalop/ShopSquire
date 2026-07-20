@@ -574,6 +574,7 @@ def test_router_prompt_marks_sold_candidates(db):
     assert unmarked                                            # taxonomy-only candidates are not
     assert not any(h.startswith("fr-") or h.startswith("so-") for h in marked)  # never mismarked
     assert "lane itself is never null" in seen["p"]
+    assert "Do not copy the schema's example values" in seen["p"]
 
 
 def test_router_clamps_wrong_requirements_container_to_empty(db):

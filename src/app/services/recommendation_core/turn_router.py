@@ -531,7 +531,8 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
                  ". Platform validation still controls category and products.\n")
     return (_instruction_prefix(tuple(sorted(req_keys)), tuple(use_case_keys)) + "\n" + context +
             f'MESSAGE: "{envelope.query[:400]}"\n' + budget + image +
-            "CANDIDATE CATEGORIES (listed handle or null only):\n" + lines + "\nJSON:")
+            "CANDIDATE CATEGORIES (listed handle or null only):\n" + lines +
+            "\nResolve MESSAGE now. Do not copy the schema's example values.\nJSON:")
 
 
 def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
