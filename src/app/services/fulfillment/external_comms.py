@@ -53,6 +53,16 @@ _PRICE_RE = re.compile(
 # "per unit" / "/unit" / "each" / "/ea" — prefer a price in this context (a unit price, not a line total)
 _PER_UNIT_RE = re.compile(r"\b(?:per\s+unit|each|/\s*unit|/\s*ea|ea\b|pp\b)", re.IGNORECASE)
 
+# Only an explicitly labelled landed unit cost can unlock margin headroom. A normal
+# quoted unit price is not landed COGS because freight, duty and handling may be absent.
+_LANDED_UNIT_RE = re.compile(
+    r"\blanded\s+(?:unit\s+)?(?:cost|price)\b(?:\s+per\s+unit)?\s*(?::|is|of)?\s*"
+    r"(?:\$(?P<dollar>\d[\d,]*(?:\.\d{1,2})?)"
+    r"|(?P<code1>USD|AUD|EUR|GBP|JPY|NZD|CAD)\s*(?P<amount1>\d[\d,]*(?:\.\d{1,2})?)"
+    r"|(?P<amount2>\d[\d,]*(?:\.\d{1,2})?)\s*(?P<code2>USD|AUD|EUR|GBP|JPY|NZD|CAD)\b)",
+    re.IGNORECASE,
+)
+
 # lead time in days: "lead time 10 days" / "ships in 10 business days" / "10 day lead"
 _LEAD_RE = re.compile(
     r"(?:lead[\s-]?time|ships?\s+in|dispatch(?:es)?\s+in|delivery\s+in)\D{0,10}?(?P<a>\d+)\s*(?:business\s+)?days?\b"
@@ -303,6 +313,15 @@ def parse_quote(raw_body: str, commercial_scope: Optional[Dict[str, Any]] = None
         currency = (code.upper() if code else _CURRENCY_SYMBOL.get(sym or "", "AUD"))
         spans.append({"field": "unit_amount", "text": chosen.group(0)})
 
+    landed_unit_cost_cents: Optional[int] = None
+    landed_cost_currency: Optional[str] = None
+    landed = _LANDED_UNIT_RE.search(body)
+    if landed is not None:
+        landed_amount = landed.group("dollar") or landed.group("amount1") or landed.group("amount2")
+        landed_unit_cost_cents = _to_cents(landed_amount)
+        landed_cost_currency = str(landed.group("code1") or landed.group("code2") or "AUD").upper()
+        spans.append({"field": "landed_unit_cost", "text": landed.group(0)})
+
     # lead time in days (a common alternative to an explicit dispatch date; also feeds quote comparison)
     lead_time_days: Optional[int] = None
     lm = _LEAD_RE.search(body)
@@ -329,7 +348,9 @@ def parse_quote(raw_body: str, commercial_scope: Optional[Dict[str, Any]] = None
     confidence = round((found / len(core)) * (0.6 if contradictory else 1.0), 3)
     return {
         "quoted_quantity": quoted_quantity, "unit_amount_cents": unit_amount_cents,
-        "currency": currency, "lead_time_days": lead_time_days, "dispatch_ready_at": dispatch_ready_at,
+        "currency": currency, "landed_unit_cost_cents": landed_unit_cost_cents,
+        "landed_cost_currency": landed_cost_currency,
+        "lead_time_days": lead_time_days, "dispatch_ready_at": dispatch_ready_at,
         "estimated_delivery_at": estimated_delivery_at, "quote_expires_at": quote_expires_at,
         "substitutions": substitutions, "contradictory": contradictory,
         "confidence": confidence, "evidence_spans": spans,

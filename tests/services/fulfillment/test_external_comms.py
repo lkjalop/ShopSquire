@@ -110,6 +110,25 @@ def test_parse_full_quote_extracts_fields_with_spans():
     assert {"quoted_quantity", "unit_amount", "dispatch_ready_at", "quote_expires_at"} <= fields
 
 
+def test_parse_explicit_landed_unit_cost_with_evidence():
+    body = (
+        "Quantity: 6\nUnit price: AUD 1,115 per unit\n"
+        "Landed unit cost: AUD 1,245.50\nDispatch by 3 July 2026\nValid until 15 July 2026"
+    )
+    pq = ec.parse_quote(body, {"quantity": 6})
+    assert pq["unit_amount_cents"] == 111500
+    assert pq["landed_unit_cost_cents"] == 124550
+    assert pq["landed_cost_currency"] == "AUD"
+    assert "landed_unit_cost" in {span["field"] for span in pq["evidence_spans"]}
+
+
+def test_parse_does_not_treat_ordinary_unit_quote_as_landed_cost():
+    pq = ec.parse_quote("Quantity: 6\nUnit price: AUD 1,115 per unit", {"quantity": 6})
+    assert pq["unit_amount_cents"] == 111500
+    assert pq["landed_unit_cost_cents"] is None
+    assert pq["landed_cost_currency"] is None
+
+
 def test_parse_contradictory_quantity_lowers_confidence():
     reply = sb.generate_reply(case_ref="FC-1", scenario="contradictory_quantity", requested_qty=6)
     pq = ec.parse_quote(reply["body"], {"quantity": 6})
