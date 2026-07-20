@@ -2744,6 +2744,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # is present only when its flag-gated lever ran; the products themselves are already re-ranked.
         # bulk-order intent: the parsed unit count so Add buttons land the conversation's qty, not 1.
         "requested_quantity": data.get("requested_quantity"),
+        # Whole-order sizing is consequential UI state too.  The storefront must be able to
+        # reject a stale/stretch product whose requested quantity would exceed the accepted
+        # total instead of blindly carrying requested_quantity into the cart.
+        "bulk_budget": data.get("bulk_budget") if isinstance(data.get("bulk_budget"), dict) else None,
         "sales_response_nudge": data.get("sales_response_nudge") if isinstance(data.get("sales_response_nudge"), dict) else None,
         "ranking_experiment": data.get("ranking_experiment") if isinstance(data.get("ranking_experiment"), dict) else None,
         "storefront_emphasis": data.get("storefront_emphasis") if isinstance(data.get("storefront_emphasis"), dict) else None,

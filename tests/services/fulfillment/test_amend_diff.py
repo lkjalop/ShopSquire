@@ -58,7 +58,7 @@ def test_list_order_cases_shows_active_and_superseded_with_diff(db):
                     "body": "10 units"}, supersede=True, ts="01")
     _case(db, grp, {"subject": "RFQ v2", "recipient_domain": "creatorfleet.example", "content_hash": "H2",
                     "body": "12 units"}, ts="05")
-    cases = cc.list_order_cases(db, "PR-x")
+    cases = cc.list_order_cases(db, "PR-x", include_body=True)
     assert len(cases) == 2
     active = [c for c in cases if not c["superseded"]]
     superseded = [c for c in cases if c["superseded"]]
@@ -67,3 +67,7 @@ def test_list_order_cases_shows_active_and_superseded_with_diff(db):
     # the diff between the superseded and active drafts shows the re-route
     d = cc.draft_diff(superseded[0]["draft"], active[0]["draft"])
     assert "recipient_domain" in d["changed_fields"] and "content_hash" in d["changed_fields"]
+    assert d["body_changed"] is True
+
+    summary = cc.list_order_cases(db, "PR-x")
+    assert "body" not in summary[0]["draft"]

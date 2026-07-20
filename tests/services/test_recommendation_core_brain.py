@@ -189,6 +189,51 @@ def test_compare_named_units_narrows_to_exactly_those(db):
     assert "MSI Thin" in resp.message and "Acer Nitro" in resp.message
 
 
+def test_compare_named_units_without_shared_taxonomy_node_retrieves_each_target(db):
+    """A model may identify both real products but return no common category node. The core
+    retrieves the bounded target names independently instead of searching the non-matching
+    phrase 'X versus Y'."""
+    resp = recommend_turn(
+        db,
+        _env("compare the msi thin versus the asus tuf"),
+        llm_fn=_route_stub_ct("COMPARE", None, ["msi thin", "asus tuf"]),
+    )
+
+    assert [p.sku for p in resp.products] == ["LAP-1", "LAP-2"]
+    assert (resp.extras.get("evidence") or {}).get("retrieval_mode") == "named_compare_union"
+    assert resp.extras.get("compare_bound") == ["LAP-1", "LAP-2"]
+
+
+def test_compare_uses_taxonomy_to_disambiguate_same_brand_accessories(db):
+    """An unambiguous leg supplies the product type for a brand-family leg containing
+    a laptop, monitor, and bag; unrelated variants cannot hijack the comparison."""
+    db.execute(text(
+        "INSERT INTO products (id, sku, name, price_cents, specs, brand) VALUES "
+        "('p3','LAP-3','Dell G16 Gaming Laptop',179900,'{}','Dell'), "
+        "('p4','LAP-4','Lenovo Legion Gaming Laptop',189900,'{}','Lenovo'), "
+        "('p5','MON-1','Lenovo Legion Gaming Monitor',49900,'{}','Lenovo'), "
+        "('p6','BAG-1','Lenovo Legion Laptop Backpack',9900,'{}','Lenovo')"))
+    from src.app.services.taxonomy_registry import upsert_classification
+    upsert_classification(db, sku="LAP-3", node_handle="el-6-11-2", source="test",
+                          status="approved")
+    upsert_classification(db, sku="LAP-4", node_handle="el-6-11-2", source="test",
+                          status="approved")
+    upsert_classification(db, sku="MON-1", node_handle="el-17-1", source="test",
+                          status="approved")
+    upsert_classification(db, sku="BAG-1", node_handle="lb-1-16", source="test",
+                          status="approved")
+    db.commit()
+
+    resp = recommend_turn(
+        db,
+        _env("Dell G16 versus Lenovo Legion"),
+        llm_fn=_route_stub_ct("COMPARE", None, ["Dell G16", "Lenovo Legion"]),
+    )
+
+    assert [p.sku for p in resp.products] == ["LAP-3", "LAP-4"]
+    assert resp.extras.get("compare_bound") == ["LAP-3", "LAP-4"]
+
+
 def test_compare_unbindable_targets_keep_whole_slate(db):
     """<2 targets bind ('the rolex') → the whole slate stands — never narrow to wrong units."""
     resp = recommend_turn(db, _env("compare the msi thin and the rolex"),
@@ -333,6 +378,26 @@ def test_explicit_subject_switch_does_not_inherit_on_explain_lane(db):
     assert cu["requirements_inherited"] is False
 
 
+def test_explain_named_alternatives_cannot_silently_drop_accepted_budget(db):
+    """Screenshot 30: naming brands/products in a why-question is comparison evidence,
+    not buyer authorization to release the accepted monetary constraint."""
+    session = {"prior_node": "el-6-11-2", "shortlist_skus": ["LAP-2"],
+               "accepted_constraints": {"budget_max_cents": 230000,
+                                        "requirements": {"ram_gb": [[">=", 16]]}}}
+    payload = {"lane": "EXPLAIN", "handle": "el-6-11-2", "requirements": {},
+               "subject_action": "switch", "confidence": 0.9}
+    resp = recommend_turn(
+        db,
+        _env("why Lenovo and not MSI or Alienware?", session=session),
+        llm_fn=lambda p, t: json.dumps(payload),
+    )
+    cu = resp.extras["constraints_used"]
+    assert cu["budget_max_cents"] == 230000
+    assert cu["budget_inherited"] is True
+    assert cu["requirements_inherited"] is True
+    assert all((p.price_cents or 0) <= 230000 for p in resp.products)
+
+
 def test_model_total_budget_becomes_per_unit_retrieval_cap(db):
     payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
                "quantity": 2, "total_budget": 3500, "budget_scope": "total",
@@ -376,11 +441,34 @@ def test_bulk_budget_range_defaults_to_per_unit_despite_model_total_claim(db):
     assert all(150_000 <= (product.price_cents or 0) <= 190_000 for product in resp.products)
 
 
+def test_explicit_per_unit_budget_does_not_inherit_prior_total_budget(db):
+    payload = {"lane": "FILTER", "handle": "el-6-6", "requirements": {},
+               "quantity": 25, "total_budget": None, "budget_scope": "per_unit",
+               "subject_action": "continue", "use_cases": ["office"], "confidence": 0.9}
+    session = {
+        "prior_node": "el-6-11-2",
+        "shortlist_skus": ["GAM-0001"],
+        "accepted_constraints": {
+            "budget_max_cents": 230000,
+            "total_budget_cents": 230000,
+            "quantity": 1,
+            "requirements": {},
+        },
+    }
+    envelope = _env(
+        "office laptops budget 1500 to 1900 per laptop, I need 25", session=session,
+    )
+    resp = recommend_turn(db, envelope, llm_fn=lambda p, t: json.dumps(payload))
+    assert resp.extras["decision"]["total_budget_cents"] is None
+    assert resp.extras["constraints_used"]["budget_max_cents"] == 190000
+
+
 def test_explicit_bulk_fields_survive_when_model_omits_them(db):
-    payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+    payload = {"lane": "SEARCH", "handle": "el-6-6",
+               "requirements": {"ram_gb": [">=", 16]},
                "subject_action": "switch", "confidence": 0.9}
     envelope = dataclasses.replace(
-        _env("suggest 10 suitable laptops under a $25,000 total budget"),
+        _env("suggest 10 suitable laptops with 16GB RAM under a $25,000 total budget"),
         budget_max_cents=25_000_00,
     )
     resp = recommend_turn(db, envelope, llm_fn=lambda p, t: json.dumps(payload))
@@ -390,6 +478,8 @@ def test_explicit_bulk_fields_survive_when_model_omits_them(db):
     legacy = to_legacy(resp)
     assert legacy["requested_quantity"] == 10
     assert "bulk_budget" in legacy
+    shown_floor = min(p.price_cents for p in resp.products if p.price_cents is not None)
+    assert legacy["bulk_budget"]["floor_cents"] == shown_floor
 
 
 def test_search_lane_continuation_inherits_prior_bulk_quantity(db):
@@ -547,6 +637,25 @@ def test_compare_explain_carry_prior_shortlist(db):
                    llm_fn=_route_stub("EXPLAIN", None))
     assert d.prior_shortlist == ("LAP-1", "LAP-2")      # referents resolvable
     assert d.node_handle == "el-6-11-2"
+
+
+def test_edge_explain_hint_corrects_policy_misroute_only_with_prior_shortlist(db):
+    session = {"prior_node": "el-6-11-2", "shortlist_skus": ["GAM-0001", "GAM-0002"]}
+    env = TurnEnvelope.from_suggest_params(
+        query="why Lenovo and not MSI?", uid="u1", tenant_id="default",
+        intent_hint="EXPLAIN", session=session,
+    )
+    d = route_turn(db, env, llm_fn=_route_stub("POLICY_QUESTION", None))
+    assert d.lane == "EXPLAIN"
+    assert d.prior_shortlist == ("GAM-0001", "GAM-0002")
+    assert d.node_handle == "el-6-11-2"
+
+    fresh = TurnEnvelope.from_suggest_params(
+        query="what is your return policy?", uid="u1", tenant_id="default",
+        intent_hint="EXPLAIN", session={},
+    )
+    d2 = route_turn(db, fresh, llm_fn=_route_stub("POLICY_QUESTION", None))
+    assert d2.lane == "POLICY_QUESTION"
 
 
 def test_no_cart_mutation_downgrade_carries_authorized_prior_node(db):

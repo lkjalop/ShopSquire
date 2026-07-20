@@ -77,6 +77,10 @@ class TurnEnvelope:
     uid: str
     query: str
     trace_id: str
+    # A bounded classification supplied by the API edge. It is advisory for fresh turns; the
+    # router may use it to preserve an EXPLAIN/COMPARE continuation only when session evidence
+    # proves there is an existing shortlist to discuss.
+    intent_hint: Optional[str] = None
     budget_min_cents: Optional[int] = None
     budget_max_cents: Optional[int] = None
     has_image: bool = False
@@ -100,6 +104,7 @@ class TurnEnvelope:
                             trace_id: Optional[str] = None, has_image: bool = False,
                             image_observations: Optional[List[ImageObservation]] = None,
                             source_ip: Optional[str] = None,
+                            intent_hint: Optional[str] = None,
                             session: Optional[Dict[str, Any]] = None,
                             cart: Optional[List[Dict[str, Any]]] = None,
                             pre_gate: Optional[Dict[str, Any]] = None) -> "TurnEnvelope":
@@ -116,8 +121,12 @@ class TurnEnvelope:
             except Exception:
                 # Input normalization is best-effort; no budget remains an honest core state.
                 pass
+        normalized_hint = str(intent_hint or "").strip().upper()
+        if normalized_hint not in LANES:
+            normalized_hint = None
         return cls(tenant_id=str(tenant_id or "default"), uid=str(uid or ""),
                    query=str(query or "").strip(), trace_id=trace_id or str(uuid.uuid4()),
+                   intent_hint=normalized_hint,
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
                    has_image=bool(has_image or image_observations),
                    image_observations=list(image_observations or []), source_ip=source_ip,
@@ -129,7 +138,8 @@ class TurnEnvelope:
         A shadow job that drops budget/session/image measures a DIFFERENT turn than production
         served; this is the full-fidelity round-trip that closes that gap."""
         return {"tenant_id": self.tenant_id, "uid": self.uid, "query": self.query,
-                "trace_id": self.trace_id, "budget_min_cents": self.budget_min_cents,
+                "trace_id": self.trace_id, "intent_hint": self.intent_hint,
+                "budget_min_cents": self.budget_min_cents,
                 "budget_max_cents": self.budget_max_cents, "has_image": self.has_image,
                 "image_observations": [item.to_dict() for item in self.image_observations],
                 "source_ip": self.source_ip, "session": dict(self.session),
@@ -139,8 +149,12 @@ class TurnEnvelope:
     def from_dict(cls, d: Dict[str, Any]) -> "TurnEnvelope":
         """Inverse of to_dict — cents stay cents (never re-converted), unknown keys ignored."""
         _int = lambda v: int(v) if v is not None else None  # noqa: E731
+        hint = str(d.get("intent_hint") or "").strip().upper()
+        if hint not in LANES:
+            hint = None
         return cls(tenant_id=str(d.get("tenant_id") or "default"), uid=str(d.get("uid") or ""),
                    query=str(d.get("query") or ""), trace_id=str(d.get("trace_id") or uuid.uuid4()),
+                   intent_hint=hint,
                    budget_min_cents=_int(d.get("budget_min_cents")),
                    budget_max_cents=_int(d.get("budget_max_cents")),
                    has_image=bool(d.get("has_image") or d.get("image_observations")),

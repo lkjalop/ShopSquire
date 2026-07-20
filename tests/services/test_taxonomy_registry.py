@@ -9,6 +9,7 @@ from src.app.services.taxonomy_registry import (
     add_sold_node,
     ancestors,
     approve_classification,
+    classification_nodes_for_skus,
     children,
     get_node,
     is_sold,
@@ -53,6 +54,16 @@ def test_primary_sold_node_counts_subtree_under_a_coarse_grant(db):
 
 def test_primary_sold_node_none_when_ungrounded(db):
     assert primary_sold_node(db) is None           # no sold set → no reroute target
+
+
+def test_classification_nodes_for_skus_is_tenant_scoped_and_approved_only(db):
+    upsert_classification(db, sku="A", node_handle="el-6-6", status="approved")
+    upsert_classification(db, sku="B", node_handle="el-9-3", status="proposed")
+    upsert_classification(db, sku="C", node_handle="el-9-3", status="approved",
+                          tenant_id="other")
+    db.commit()
+
+    assert classification_nodes_for_skus(db, ["A", "B", "C", "A"]) == {"A": "el-6-6"}
 
 
 # ── pinned release integrity (drift tests — rerun on every release upgrade) ──

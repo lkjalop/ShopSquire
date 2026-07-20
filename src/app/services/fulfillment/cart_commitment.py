@@ -52,7 +52,13 @@ def count_amendments(db, order_id: str, tenant_id: str = "default") -> int:
         return 0
 
 
-def list_order_cases(db, order_id: str, tenant_id: str = "default") -> List[Dict[str, Any]]:
+def list_order_cases(
+    db,
+    order_id: str,
+    tenant_id: str = "default",
+    *,
+    include_body: bool = False,
+) -> List[Dict[str, Any]]:
     """Every case under an order group — ACTIVE and SUPERSEDED — newest-first, with a draft summary. The
     'amendment history of this order' read model (#5): the operator sees each version that was sourced and,
     via draft_diff, what changed between drafts. Best-effort; [] on error."""
@@ -77,10 +83,18 @@ def list_order_cases(db, order_id: str, tenant_id: str = "default") -> List[Dict
         except Exception:
             sj = {}
         draft = sj.get("draft") or {}
+        draft_summary = {
+            "subject": draft.get("subject"),
+            "recipient_domain": draft.get("recipient_domain"),
+            "content_hash": draft.get("content_hash"),
+        }
+        if include_body:
+            draft_summary.update({
+                "recipient_email": draft.get("recipient_email"),
+                "body": draft.get("body"),
+            })
         out.append({"case_id": r[0], "state": r[1], "valid_from": r[3],
-                    "superseded": r[1] == "SUPERSEDED",
-                    "draft": {"subject": draft.get("subject"), "recipient_domain": draft.get("recipient_domain"),
-                              "content_hash": draft.get("content_hash")}})
+                    "superseded": r[1] == "SUPERSEDED", "draft": draft_summary})
     return out
 
 

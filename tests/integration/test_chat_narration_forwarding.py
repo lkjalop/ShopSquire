@@ -39,6 +39,9 @@ class _FakeNarrationAsyncClient:
             "decision_trace_id": "trace-narr-1",
             "llm_summary_job_id": "job-narr-abc123",
             "summary_pending": True,
+            "requested_quantity": 25,
+            "bulk_budget": {"scope": "total", "total": 41000.0, "quantity": 25,
+                            "per_unit_cap": 1640},
             "next_questions": [],
         })
 
@@ -58,3 +61,6 @@ def test_chat_query_forwards_narration_job_id(monkeypatch):
     body = resp.json()
     assert body.get("llm_summary_job_id") == "job-narr-abc123"
     assert body.get("summary_pending") is True
+    assert body.get("requested_quantity") == 25
+    assert body.get("bulk_budget") == {"scope": "total", "total": 41000.0,
+                                        "quantity": 25, "per_unit_cap": 1640}

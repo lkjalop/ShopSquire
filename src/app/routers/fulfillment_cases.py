@@ -219,7 +219,7 @@ def cases_by_order(order_id: str, role: str = Depends(require_role(_OPERATOR))) 
     current active draft. Lets the operator see 'what the buyer changed' across an amendment."""
     from src.app.services.fulfillment.cart_commitment import draft_diff, list_order_cases
     with db_session() as db:
-        cases = list_order_cases(db, order_id)
+        cases = list_order_cases(db, order_id, include_body=True)
         active = next((c for c in cases if not c["superseded"]), None)
         prior = next((c for c in cases if c["superseded"]), None)
         diff = draft_diff(prior["draft"], active["draft"]) if (active and prior) else None

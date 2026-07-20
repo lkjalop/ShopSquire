@@ -77,6 +77,8 @@ _CLEAR_INTENT = re.compile(
 _KEEP_INTENT = re.compile(
     r"\b(keep|only|just|except|all but|everything but|nothing but|leave (only|just))\b", re.IGNORECASE)
 _REPLACE_INTENT = re.compile(r"\b(replace|swap|switch|substitute|instead of|in place of)\b", re.IGNORECASE)
+_QUANTITY_CHANGE_INTENT = re.compile(
+    r"\b(make|set|change|reduce|increase|raise|lower|cut)\b", re.IGNORECASE)
 _AFFORDABLE_QTY_INTENT = re.compile(
     r"\b(max(?:imum)? affordable|fit (?:it|them|the order) (?:in|within|under) (?:the )?budget|"
     r"keep (?:it|the order|the total) (?:in|within|under|at) (?:the )?(?:same )?(?:total )?budget|"
@@ -128,7 +130,9 @@ def _cart_lines(envelope: TurnEnvelope) -> List[Dict[str, Any]]:
             qty = int(line.get("quantity") or line.get("qty") or 1)
         except (TypeError, ValueError):
             qty = 1
-        out.append({"sku": sku, "name": name, "quantity": qty})
+        out.append({"sku": sku, "name": name, "quantity": qty,
+                    "sourcing_required": bool(line.get("sourcing_required")),
+                    "available_now": line.get("available_now")})
     return out
 
 
@@ -262,6 +266,9 @@ def _build_prompt(envelope: TurnEnvelope, lines: List[Dict[str, Any]]) -> str:
         "remove_items op AND a set_quantity op).\n"
         "- Only emit an operation the shopper actually asked for. If they are just asking a "
         "question or searching for products, return an empty ops list.\n"
+        "- A trailing integer in 'make/set/change <existing line> <N> instead' is a quantity, "
+        "not a replacement product. Emit set_quantity unless the shopper names a distinct new "
+        "product after replace/swap/instead of.\n"
         "- Put the shopper's own words for each target in \"targets\"; the platform matches "
         "them to real lines.\n\n"
         'Return JSON: {"ops": [{"action": "<action>", "targets": ["<name>", ...], '
@@ -352,6 +359,25 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
             elif sku not in bound:
                 bound.append(sku)
 
+        # A model can confuse "make X 15 instead" with product replacement even though the
+        # shopper named no replacement product. Normalize that malformed proposal to the only
+        # operation its bounded fields can authorize: one bound line + integer quantity. An
+        # actual replace/swap/instead-of request still follows the replacement gate below.
+        if action == "replace_item" and not _REPLACE_INTENT.search(envelope.query or ""):
+            qraw = raw_op.get("quantity")
+            if qraw is None and len(bound) == 1 and _QUANTITY_CHANGE_INTENT.search(envelope.query or ""):
+                current_qty = int(next((line["quantity"] for line in lines
+                                        if line["sku"] == bound[0]), 0))
+                numbers = re.findall(r"\b([0-9]{1,6})\b", envelope.query or "")
+                # Bulk context disambiguates a bare trailing number from a product model number.
+                if current_qty > 1 and numbers:
+                    qraw = int(numbers[-1])
+                    raw_op = dict(raw_op)
+                    raw_op["quantity"] = qraw
+            if (len(bound) == 1 and isinstance(qraw, (int, float)) and not isinstance(qraw, bool)
+                    and (not isinstance(qraw, float) or qraw.is_integer())):
+                action = "set_quantity"
+
         if action == "set_quantity":
             # exactly one bound target + an INTEGER quantity. Guarded (not try/except: continue)
             # so this stays a zero-silent-swallow module. A fractional quantity (2.9) is NOT a
@@ -371,11 +397,12 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
             if qty == 0:
                 ops.append(CartOp(action="remove_items", target_skus=(bound[0],)))
             else:
-                current_qty = int(next((line["quantity"] for line in lines
-                                        if line["sku"] == bound[0]), 0))
+                current_line = next((line for line in lines if line["sku"] == bound[0]), {})
+                current_qty = int(current_line.get("quantity") or 0)
                 ops.append(CartOp(action="set_quantity", target_skus=(bound[0],), quantity=qty,
                                   previous_quantity=current_qty,
-                                  allow_sourcing=qty > current_qty))
+                                  allow_sourcing=(qty > current_qty
+                                                  or bool(current_line.get("sourcing_required")))))
             continue
 
         if action == "replace_item":

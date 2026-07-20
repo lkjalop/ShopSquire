@@ -99,11 +99,21 @@ def test_envelope_wire_roundtrip_cents_exact():
     from src.app.services.recommendation_core.envelope import TurnEnvelope
     env = TurnEnvelope.from_suggest_params(
         query="gaming laptop", uid="u1", tenant_id="t1", budget_max=2499.99, has_image=True,
+        intent_hint="explain",
         session={"prior_node": "el-6-11-2", "shortlist_skus": ["A"]},
         cart=[{"sku": "A", "quantity": 2}])
     back = TurnEnvelope.from_dict(env.to_dict())
     assert back == env                                    # frozen dataclass equality = full fidelity
     assert back.budget_max_cents == 249999                # cents-exact, no dollar re-round
+    assert back.intent_hint == "EXPLAIN"
+
+
+def test_envelope_rejects_unknown_intent_hint():
+    env = TurnEnvelope.from_suggest_params(query="laptop", intent_hint="invented_lane")
+    assert env.intent_hint is None
+    wire = env.to_dict()
+    wire["intent_hint"] = "INVENTED_LANE"
+    assert TurnEnvelope.from_dict(wire).intent_hint is None
 
 
 def test_shown_products_beat_stray_claims_artifacts():

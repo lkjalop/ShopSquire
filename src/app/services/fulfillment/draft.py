@@ -266,7 +266,20 @@ def _default_hippograph(db, item_ref, tenant_id):
     # P0-sec: forward tenant_id (the leak) — insights are supplier-outbound and must be
     # tenant-scoped, exactly like _default_market below. build_hippograph_insights already
     # threads tenant_id into build_from_db.
-    return build_hippograph_insights(db, seed_skus=[item_ref], top_k=4, tenant_id=tenant_id)
+    insights = build_hippograph_insights(
+        db, seed_skus=[item_ref], top_k=12, tenant_id=tenant_id
+    )
+    # Supplier-outbound rationale must be subject-bound. Brand siblings are useful discovery
+    # candidates in a storefront, but they are not evidence about this RFQ line (for example, a
+    # Lenovo backpack must never appear in a Lenovo laptop draft). Keep only findings explicitly
+    # keyed to this item; global market evidence has its own provenance-aware source below.
+    item_key = str(item_ref or "").strip().lower()
+    return [
+        insight for insight in (insights or [])
+        if str(insight.get("kind") or "").lower() == "finding"
+        and item_key
+        and str(insight.get("id") or "").lower().endswith(f":{item_key}")
+    ][:4]
 
 
 def _default_market(db, item_ref, tenant_id):

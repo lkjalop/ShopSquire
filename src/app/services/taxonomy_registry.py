@@ -41,7 +41,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 logger = logging.getLogger("shopsquire.taxonomy_registry")
 
@@ -231,6 +231,28 @@ def approve_classification(db, *, sku: str, approved_by: str, tenant_id: str = D
         return bool(getattr(res, "rowcount", 0) or 0)
     except Exception:
         return False
+
+
+def classification_nodes_for_skus(db, skus: List[str], *,
+                                  tenant_id: str = DEFAULT_TENANT) -> Dict[str, str]:
+    """Return approved SKU-to-taxonomy-node mappings in one tenant-scoped read."""
+    normalized = list(dict.fromkeys(str(sku).strip() for sku in skus if str(sku).strip()))
+    if db is None or not normalized:
+        return {}
+    try:
+        ensure_tables(db)
+        stmt = text(
+            "SELECT sku, node_handle FROM product_classification "
+            "WHERE tenant_id=:tenant_id AND status='approved' AND sku IN :skus"
+        ).bindparams(bindparam("skus", expanding=True))
+        rows = db.execute(stmt, {
+            "tenant_id": str(tenant_id).strip() or DEFAULT_TENANT,
+            "skus": normalized,
+        }).fetchall()
+        return {str(row[0]): str(row[1]) for row in rows if get_node(str(row[1])) is not None}
+    except Exception as exc:
+        logger.warning("classification batch read failed: %s", repr(exc)[:160])
+        return {}
 
 
 def add_sold_node(db, *, node_handle: str, source: str = "manual",

@@ -520,6 +520,13 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     lane = _LANE_ALIASES.get(lane, lane)
     if lane not in LANES:
         return DEFAULT_DECISION
+    # EDGE-HINT CONTINUITY CLAMP: the chat edge has already classified a bounded follow-up.
+    # Only let EXPLAIN/COMPARE correct the model when a real prior shortlist exists. This fixes
+    # model misroutes such as "why Lenovo and not MSI?" -> POLICY_QUESTION without turning the
+    # edge classifier into the general-purpose brain for fresh searches.
+    _intent_hint = str(envelope.intent_hint or "").strip().upper()
+    if _intent_hint in ("EXPLAIN", "COMPARE") and (envelope.session or {}).get("shortlist_skus"):
+        lane = _intent_hint
     # clamp 2: handle must be REGISTRY-REAL. Deliberately looser than the classifier's
     # candidates-only clamp: queries name INTENTS, not product titles — 'do you sell
     # forklifts?' has zero token overlap with 'Material Handling', so the true node is often

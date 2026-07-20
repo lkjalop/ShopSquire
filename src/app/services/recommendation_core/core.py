@@ -11,7 +11,9 @@ breadcrumbs, which is what the shadow differ diffs against the oracle.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
+import re
 import time
 from typing import Any, Callable, Dict, Optional
 
@@ -23,11 +25,22 @@ from src.app.services.recommendation_core.evidence import (
 from src.app.services.recommendation_core.fit import build_cards
 from src.app.services.recommendation_core.plan import Plan, derive_plan
 from src.app.services.recommendation_core.turn_router import TurnDecision, route_turn
-from src.app.services.taxonomy_registry import ancestors, get_node, grounding_status
+from src.app.services.taxonomy_registry import (
+    ancestors,
+    classification_nodes_for_skus,
+    get_node,
+    grounding_status,
+)
 
 logger = logging.getLogger("shopsquire.recommendation_core.core")
 
 LLMFn = Callable[[str, float], str]
+
+_EXPLICIT_CONTEXT_RESET = re.compile(
+    r"\b(?:start\s+over|new\s+search|forget\s+(?:that|those|the\s+previous)|"
+    r"switch\s+(?:products?|categories?|to))\b",
+    re.IGNORECASE,
+)
 
 
 def _is_descendant_or_self(node_handle: str, root: str) -> bool:
@@ -238,9 +251,18 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # wins; a fresh SEARCH never inherits (context-rot guard, ledger §8). Runs BEFORE
     # derive_plan so fit_check comes back for inherited requirements.
     budget_inherited = requirements_inherited = False
-    if ((decision.subject_action == "continue"
-         or decision.lane in ("FILTER", "COMPARE", "EXPLAIN"))
-            and decision.subject_action != "switch"):
+    # EXPLAIN is financially non-destructive: naming competing products in "why X rather
+    # than Y?" is not authorization to discard an accepted budget.  A model-proposed
+    # subject switch only releases prior constraints when the buyer explicitly resets or
+    # switches context.  Fresh searches remain isolated by the lane guard below.
+    explicit_context_reset = bool(_EXPLICIT_CONTEXT_RESET.search(envelope.query or ""))
+    is_continuation = (
+        decision.subject_action == "continue"
+        or (decision.lane in ("FILTER", "COMPARE", "EXPLAIN")
+            and decision.subject_action != "switch")
+        or (decision.lane == "EXPLAIN" and not explicit_context_reset)
+    )
+    if is_continuation:
         acc = (envelope.session or {}).get("accepted_constraints") or {}
         if envelope.budget_min_cents is None and envelope.budget_max_cents is None:
             bmin, bmax = acc.get("budget_min_cents"), acc.get("budget_max_cents")
@@ -256,7 +278,10 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         # ('how many can I get?' keeps the prior 6 units + $19k); a stated value this turn wins.
         if decision.quantity is None and acc.get("quantity"):
             decision = dataclasses.replace(decision, quantity=int(acc["quantity"]))
-        if decision.total_budget_cents is None and acc.get("total_budget_cents"):
+        if (decision.total_budget_cents is None
+                and _parsed_turn_budget is None
+                and _explicit_turn_scope == "unknown"
+                and acc.get("total_budget_cents")):
             decision = dataclasses.replace(decision, total_budget_cents=int(acc["total_budget_cents"]))
         # BRAND continuation (review-10 P0.6): inherit brand constraints when THIS turn didn't set
         # one ('show me cheaper ones' keeps the prior 'only Asus' / 'not Apple'); stated wins.
@@ -863,10 +888,29 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
     floor = build_cards(variants, reqs or None, limit=1)[1].get("capability_floor_cents")
     if not floor:
         return
+    # Buyer-facing order math must price something the buyer can actually select.  The
+    # capability floor may come from an unshown product outside a stated lower budget bound
+    # (for example $629 while the visible slate starts at $1,599), which made the total both
+    # arithmetically correct and commercially false.  Use the cheapest non-failing shown card
+    # as the actionable floor; retain the capability floor only when no eligible card is shown.
+    shown_prices = [
+        int(card.price_cents)
+        for card in resp.products
+        if card.price_cents is not None
+        and str((card.fit or {}).get("overall") or "unknown") != "fails"
+    ]
+    if shown_prices:
+        floor = min(shown_prices)
     vertical = _vertical_name(decision.node_handle)
     total, scope_ambiguous = _resolve_bulk_total(decision, envelope, quantity)   # P0: scope-safe
-    econ = assess_bulk(quantity, total, floor,
-                       bundle_floor_cents=_bundle_floor(db, envelope, decision, vertical, variants, reqs))
+    # Bundle discovery is an optional upsell leg.  Missing companion/supplier tables must not
+    # suppress the primary quantity x price arithmetic for the order itself.
+    try:
+        bundle_floor = _bundle_floor(db, envelope, decision, vertical, variants, reqs)
+    except Exception as exc:
+        logger.info("bulk bundle floor unavailable; base order sizing retained: %s", repr(exc)[:120])
+        bundle_floor = None
+    econ = assess_bulk(quantity, total, floor, bundle_floor_cents=bundle_floor)
     if not econ:
         return
     resp.extras["bulk"] = econ
@@ -919,6 +963,33 @@ def _bind_compare_targets(variants, targets) -> Optional[list]:
     return bound if len(bound) >= 2 else None
 
 
+def _disambiguate_compare_legs(db, envelope: TurnEnvelope, legs: list) -> list:
+    """Narrow a mixed-product comparison leg using approved taxonomy truth.
+
+    One unambiguous leg may identify the shared product type. Conflicting unambiguous legs are
+    left untouched so legitimate cross-category comparisons remain possible.
+    """
+    all_variants = [variant for leg in legs for variant in getattr(leg, "variants", [])]
+    nodes = classification_nodes_for_skus(
+        db, [variant.sku for variant in all_variants], tenant_id=envelope.tenant_id,
+    )
+    leg_nodes = [
+        {nodes[variant.sku] for variant in getattr(leg, "variants", []) if variant.sku in nodes}
+        for leg in legs
+    ]
+    anchors = {next(iter(values)) for values in leg_nodes if len(values) == 1}
+    if len(anchors) != 1:
+        return legs
+    anchor = next(iter(anchors))
+    for leg, values in zip(legs, leg_nodes):
+        if len(values) <= 1 or anchor not in values:
+            continue
+        narrowed = [variant for variant in leg.variants if nodes.get(variant.sku) == anchor]
+        if narrowed:
+            leg.variants = narrowed
+    return legs
+
+
 def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision,
                               resp: CoreResponse, limit: int) -> bool:
     """R9.4: retrieve the prior turn's SHOWN SKUs (subject continuity) and, for EXPLAIN,
@@ -967,8 +1038,43 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
             and decision.prior_shortlist):
         if _retrieve_prior_shortlist(db, envelope, decision, resp, limit):
             return
-    bundle = gather_evidence(db, envelope, node_handle=decision.node_handle,
-                             limit=max(limit * 3, 30))
+    bundle = None
+    if decision.lane == "COMPARE" and len(decision.compare_targets) >= 2:
+        # A fresh named comparison often has no single taxonomy node: the model correctly
+        # identifies the two product names, while searching the joined "X versus Y" phrase
+        # matches neither. Retrieve each bounded target independently, then let the existing
+        # deterministic binder authorize the exact catalog variants. At most four targets are
+        # admitted by the router clamp, so this cannot become an unbounded retrieval fan-out.
+        legs = []
+        merged, seen = [], set()
+        for target in decision.compare_targets:
+            target_env = dataclasses.replace(envelope, query=str(target))
+            leg = gather_evidence(
+                db, target_env, node_handle=None, text_query=str(target),
+                limit=max(limit * 2, 20),
+            )
+            legs.append(leg)
+        legs = _disambiguate_compare_legs(db, envelope, legs)
+        for leg in legs:
+            if leg.status == "ok":
+                for variant in leg.variants:
+                    if variant.sku not in seen:
+                        seen.add(variant.sku)
+                        merged.append(variant)
+        if merged and _bind_compare_targets(merged, decision.compare_targets):
+            bundle = legs[0]
+            bundle.variants = merged
+            bundle.status = "ok"
+            bundle.grounding = "grounded"
+            bundle.retrieval_mode = "named_compare_union"
+            bundle.queries = sum(leg.queries for leg in legs)
+            bundle.latency_ms = sum(leg.latency_ms for leg in legs)
+            bundle.total_before_budget = sum(leg.total_before_budget for leg in legs)
+            bundle.budget_filtered = sum(leg.budget_filtered for leg in legs)
+            bundle.errors = [err for leg in legs for err in leg.errors]
+    if bundle is None:
+        bundle = gather_evidence(db, envelope, node_handle=decision.node_handle,
+                                 limit=max(limit * 3, 30))
     # RETRIEVAL SCOPE UNION (Phase 1.5 fix): when the routed node is a workload-HOST device with
     # capability requirements, augment the candidate set with the store's device host UNION
     # (Laptops + Gaming Laptops) — mirroring the capability FLOOR, which already spans the union via

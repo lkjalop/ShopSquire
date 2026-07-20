@@ -374,6 +374,7 @@ export default function App() {
   // Bulk-order carry-through: the conversation's parsed unit count ("15 work laptops" → 15). Add buttons
   // land THIS qty (sourcing-aware) instead of a silent 1. Cleared/updated on every chat turn.
   const [pendingBulkQty, setPendingBulkQty] = useState<number | null>(null);
+  const [pendingBulkBudget, setPendingBulkBudget] = useState<Record<string, any> | null>(null);
   // Session hygiene: a PRIOR session's cart must never silently shape this conversation (stale items were
   // inflating totals in the demo). On first chat open with a non-empty cart, disclose it + how to clear.
   const staleCartNoticeShown = useRef(false);
@@ -773,6 +774,23 @@ export default function App() {
     // "asked for 30, cart got 1".
     const bulkQty = qty <= 1 && pendingBulkQty && pendingBulkQty > 1 ? pendingBulkQty : null;
     if (bulkQty) {
+      const picked = displayProducts.find((p) => p.sku === sku) || products.find((p) => p.sku === sku);
+      const unitCents = Number((picked as any)?.price_cents)
+        || Math.round(Number((picked as any)?.price || 0) * 100);
+      const totalCents = Number((pendingBulkBudget as any)?.total_cents)
+        || Math.round(Number((pendingBulkBudget as any)?.total || 0) * 100);
+      const totalScope = String((pendingBulkBudget as any)?.scope || '').toLowerCase() === 'total';
+      if (totalScope && totalCents > 0 && unitCents > 0 && bulkQty * unitCents > totalCents) {
+        const affordable = Math.floor(totalCents / unitCents);
+        const productName = picked?.name || sku;
+        setChatOpen(true);
+        setMessages((prev) => [...prev, {
+          role: 'assistant' as const,
+          content: `That selection changes the order math: ${bulkQty} × ${productName} is $${(bulkQty * unitCents / 100).toLocaleString()}, above your $${(totalCents / 100).toLocaleString()} total budget. I have not changed the cart. At this price the budget covers ${affordable} unit${affordable === 1 ? '' : 's'}; ask me to use that quantity, choose a lower-priced option, or approve a higher total.`,
+          timestamp: new Date(),
+        }]);
+        return;
+      }
       // Stale-cart preflight: disclose pre-existing lines (other SKUs) AT the moment of the bulk add,
       // so accumulated items from an earlier turn/session never surprise the buyer in the total.
       const priorOther = (cart?.items || []).filter((i: any) => i.sku && i.sku !== sku);
@@ -1843,6 +1861,8 @@ export default function App() {
         {
           const _rq = Number((data as any).requested_quantity);
           setPendingBulkQty(Number.isFinite(_rq) && _rq > 1 ? Math.min(1000, Math.floor(_rq)) : null);
+          const _bb = (data as any).bulk_budget;
+          setPendingBulkBudget(_bb && typeof _bb === 'object' && !Array.isArray(_bb) ? _bb : null);
         }
         setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
         setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);
@@ -2966,7 +2986,7 @@ export default function App() {
                       {cart?.undo?.available && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
                                       background: '#fef3c7', borderRadius: 8, margin: '0 0 8px 0', fontSize: 13 }}>
-                          <span>🧹 You recently cleared {cart.undo.count} item(s) — restorable for a limited time.</span>
+                          <span>Undo available for your last cart change ({cart.undo.count} prior line item(s)).</span>
                           <button type="button" className={styles.filterBtn}
                             onClick={async () => {
                               try {

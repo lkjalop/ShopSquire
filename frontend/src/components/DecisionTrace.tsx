@@ -306,6 +306,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // (a normal shopper never sees it — blind-ship stays intact).
   const [procCase, setProcCase] = useState<any | null>(null);
   const [procCases, setProcCases] = useState<any[]>([]);  // ALL cases for the trace (multi-supplier → N RFQs)
+  const [procHistory, setProcHistory] = useState<any | null>(null);
   // Procurement agent-row drill-down: row index → expanded (the payload is the evidence — one click deep).
   const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
@@ -529,6 +530,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       ).then(safeJson).catch(() => null);
       const cases: any[] = Array.isArray(allView?.cases) ? allView.cases : [];
       setProcCases(cases);
+      const orderGroupId = String(allView?.order_group_id || '');
+      if (canSeeOperatorDraft && orderGroupId.startsWith('order-')) {
+        const orderId = orderGroupId.slice('order-'.length);
+        const history: any = await fetch(
+          apiUrl(`/api/v1/fulfillment/cases/by-order/${encodeURIComponent(orderId)}`),
+          { credentials: 'include', headers },
+        ).then(safeJson).catch(() => null);
+        setProcHistory(history?.case_count ? history : null);
+      } else {
+        setProcHistory(null);
+      }
       const primary = cases[0] || null;
       setProcCase(primary && (primary.case_id || primary.state) ? primary : null);
       const cid = (primary && primary.case_id) || procurementCaseId;
@@ -542,7 +554,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     } finally {
       setProcLoading(false);
     }
-  }, [effectiveTraceId, effectiveApiKey, procurementCaseId]);
+  }, [effectiveTraceId, effectiveApiKey, procurementCaseId, canSeeOperatorDraft]);
 
   // A cart amendment keeps the original recommendation trace but supersedes and redrafts its
   // fulfillment case. Refresh the read model when that lifecycle advances; otherwise the tab
@@ -563,7 +575,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // changes so a normal (no-procurement) trace doesn't inherit a stale case id — which would keep the tab
   // badged AND (via the guard below) re-fire the case lookup. FulfilmentTraceLink re-resolves when the new
   // trace genuinely carries procurement signals.
-  useEffect(() => { setProcurementCaseId(null); }, [effectiveTraceId]);
+  useEffect(() => {
+    setProcurementCaseId(null);
+    setProcHistory(null);
+  }, [effectiveTraceId]);
 
   useEffect(() => {
     if (traceId && traceId.trim()) {
@@ -3235,6 +3250,23 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             "Raw recorded payload" disclosure. */}
                         {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
 
+                        {canSeeOperatorDraft && procHistory?.case_count > 1 && (
+                          <div data-testid="proc-amendment-history" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '8px 10px', marginBottom: 12, fontSize: 13 }}>
+                            <div style={{ fontWeight: 700, color: '#92400e' }}>
+                              RFQ revision {procHistory.case_count} - prior draft superseded
+                            </div>
+                            <div style={{ marginTop: 4, color: '#4b5563' }}>
+                              {procHistory?.draft_diff?.fields?.subject
+                                ? <><span className={styles.mono}>{procHistory.draft_diff.fields.subject.from}</span><br /><span aria-hidden="true">→ </span><span className={styles.mono}>{procHistory.draft_diff.fields.subject.to}</span></>
+                                : 'The active supplier draft was regenerated from the amended cart.'}
+                            </div>
+                            <div style={{ marginTop: 4, color: '#6b7280', fontSize: 12 }}>
+                              {procHistory?.draft_diff?.body_changed ? 'Draft body changed.' : 'Draft metadata changed.'}
+                              {' '}The prior content hash remains in the bitemporal audit; nothing was sent.
+                            </div>
+                          </div>
+                        )}
+
                         {/* MULTI-SUPPLIER: a bulk order that splits across suppliers opens one case per supplier,
                             each with its OWN drafted RFQ. Show them all (read-only proof) so "3 suppliers → where
                             are the emails?" is answered in-place. Single-supplier orders fall through to the rich
@@ -3681,4 +3713,3 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     </div>
   );
 }
-

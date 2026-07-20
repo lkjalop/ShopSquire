@@ -178,6 +178,58 @@ def test_set_quantity_zero_collapses_to_remove():
     assert plan.ops[0].action == "remove_items" and plan.ops[0].target_skus == ("LAP-IDEAP3I9",)
 
 
+def test_malformed_replace_with_only_quantity_normalizes_to_set_quantity():
+    plan = resolve_cart_mutation(
+        _env("actually make the Lenovo IdeaPad 15 instead", cart=[{
+            "sku": "LAP-IDEAP3I9",
+            "name": 'Lenovo IdeaPad Slim 3i 15.3" 2K Laptop (Intel Core i7)[1TB]',
+            "quantity": 25,
+        }]),
+        llm_fn=_fixed_llm({"ops": [{"action": "replace_item", "targets": ["IdeaPad"],
+                                     "replacement": None, "quantity": 15}],
+                              "confidence": 0.92}),
+    )
+    assert not plan.ambiguous
+    assert len(plan.ops) == 1
+    assert plan.ops[0].action == "set_quantity"
+    assert plan.ops[0].quantity == 15
+
+
+def test_malformed_replace_recovers_trailing_quantity_for_existing_bulk_line():
+    plan = resolve_cart_mutation(
+        _env("actually make the Lenovo IdeaPad 15 instead", cart=[{
+            "sku": "LAP-IDEAP3I9",
+            "name": 'Lenovo IdeaPad Slim 3i 15.3" 2K Laptop (Intel Core i7)[1TB]',
+            "quantity": 25,
+        }]),
+        llm_fn=_fixed_llm({"ops": [{"action": "replace_item", "targets": ["IdeaPad"],
+                                     "replacement": "Lenovo IdeaPad 15", "quantity": None}],
+                              "confidence": 0.95}),
+    )
+    assert not plan.ambiguous
+    assert len(plan.ops) == 1
+    assert plan.ops[0].action == "set_quantity"
+    assert plan.ops[0].quantity == 15
+
+
+def test_reducing_an_existing_sourced_line_preserves_sourcing_authorization():
+    cart = [{
+        "sku": "LAP-IDEAP3I9",
+        "name": 'Lenovo IdeaPad Slim 3i 15.3" 2K Laptop',
+        "quantity": 25,
+        "available_now": 12,
+        "sourcing_required": True,
+    }]
+    plan = resolve_cart_mutation(
+        _env("set the IdeaPad to 15", cart=cart),
+        llm_fn=_fixed_llm({"ops": [{"action": "set_quantity", "targets": ["IdeaPad"],
+                                     "quantity": 15}], "confidence": 0.95}),
+    )
+    assert plan.ops[0].previous_quantity == 25
+    assert plan.ops[0].quantity == 15
+    assert plan.ops[0].allow_sourcing is True
+
+
 def test_set_quantity_overflow_dropped_not_clamped():
     # beyond the pure overflow sanity bound the op is dropped — NEVER silently rewritten to a
     # number the shopper didn't say (the old 100k clamp misquoted intent).

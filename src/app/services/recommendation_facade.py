@@ -201,7 +201,9 @@ def _read_cart_slice(db, uid: str, tenant_id: Optional[str] = None) -> List[Dict
                 continue
             sku = str(it["sku"])
             out.append({"sku": sku, "name": names.get(sku, ""),
-                        "quantity": int(it.get("quantity") or 1)})
+                        "quantity": int(it.get("quantity") or 1),
+                        "sourcing_required": bool(it.get("sourcing_required")),
+                        "available_now": it.get("available_now")})
         return out
     except Exception as exc:
         logger.debug("cart slice read skipped: %s", repr(exc)[:100])
@@ -440,6 +442,7 @@ def dispatch_recommendation_core(
     image_ocr: Optional[str] = None, source_ip: Optional[str] = None, request: Any = None,
     image_intent: Optional[str] = None, image_product_identity: Optional[str] = None,
     image_cv_signals: Optional[str] = None,
+    intent_hint: Optional[str] = None,
     role: str = "",
     with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]],
     record_failure: Callable[..., Any],
@@ -500,6 +503,7 @@ def dispatch_recommendation_core(
                     envelope = TurnEnvelope.from_suggest_params(
                         query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                         budget_max=budget_max, trace_id=trace_id, has_image=False,
+                        intent_hint=intent_hint,
                         source_ip=source_ip, session=_read_session_slice(redis, uid, tenant),
                         cart=cart_slice, pre_gate=_served_guard)
                     cart_payload = _serve_cart_mutation(envelope, role=role,
@@ -526,6 +530,7 @@ def dispatch_recommendation_core(
             shadow_env = TurnEnvelope.from_suggest_params(
                 query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                 budget_max=budget_max, trace_id=trace_id,
+                intent_hint=intent_hint,
                 has_image=bool(image_labels or image_hash), source_ip=source_ip,
                 image_observations=image_observations,
                 session=_read_session_slice(redis, uid, tenant), cart=cart_slice)
@@ -558,6 +563,7 @@ def dispatch_recommendation_core(
         envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
             budget_max=budget_max, trace_id=trace_id,
+            intent_hint=intent_hint,
             has_image=bool(image_labels or image_hash), source_ip=source_ip,
             image_observations=image_observations,
             session=session, pre_gate=guard)

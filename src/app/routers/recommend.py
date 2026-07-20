@@ -699,9 +699,38 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
                     "intent_snapshot": _intent_snapshot_from_payload(payload),
                 },
             )
-            payload["_trace_recommendation_persisted"] = True
-    except Exception:
-        pass
+            intent_snapshot = _intent_snapshot_from_payload(payload)
+            persisted_id = log_decision(
+                agent_name="Recommendation_Agent",
+                input_data={
+                    "query": str(_CURRENT_QUERY_CTX.get() or ""),
+                    "intent": intent_snapshot,
+                },
+                retrieved_context={
+                    "agent_chain": payload.get("agent_chain") or [
+                        {"agent": "Recommendation_Agent", "duration_ms": None}
+                    ],
+                    "products_count": len(products_summary),
+                    "policy_gates": payload.get("policy_gates") or {},
+                    "right_panel_contract": right_panel_contract,
+                },
+                proposed_action={
+                    "decision_mode": str(payload.get("decision_mode") or "catalog_recommendation"),
+                    "results": products_summary,
+                    "products_summary": products_summary,
+                    "right_panel_contract": right_panel_contract,
+                    "reasoning": payload.get("assistant_message") or payload.get("message"),
+                },
+                decision_id=trace_id,
+                tenant_id=str(payload.get("tenant_id") or "default"),
+                actor_id=str(payload.get("uid") or "") or None,
+                actor_role="buyer",
+                event_type="recommendation_result",
+            )
+            payload["_trace_recommendation_persisted"] = bool(persisted_id)
+    except Exception as exc:
+        payload["_trace_recommendation_persisted"] = False
+        logger.warning("recommendation trace persistence failed for %s: %s", trace_id, exc)
     return payload
 
 
@@ -4412,6 +4441,7 @@ def suggest(
     image_product_identity: Optional[str] = None,
     image_cv_signals: Optional[str] = None,
     fast_path: Optional[bool] = None,
+    turn_intent: Optional[str] = None,
     include_summary: Optional[bool] = None,
     external_research_consent: Optional[bool] = None,
     copywriting_enabled: Optional[bool] = None,
@@ -4579,6 +4609,7 @@ def suggest(
             image_labels=image_labels, image_ocr=image_ocr_text, image_hash=image_hash,
             image_intent=image_intent, image_product_identity=image_product_identity,
             image_cv_signals=image_cv_signals,
+            intent_hint=turn_intent,
             source_ip=(request.client.host if request and request.client else None),
             request=request, role=role, with_trace=_with_trace,
             record_failure=_record_partial_failure)
@@ -6099,12 +6130,16 @@ def suggest(
     _ckpt("nlp_and_setup")
     explanation_request = _is_selection_rationale_query(query_effective)
     explicit_constraint_update = _has_explicit_constraint_update(parsed, query)
-    turn_intent = _classify_turn_intent(
-        query=query_effective,
-        nlp=nlp if isinstance(nlp, dict) else {},
-        followup_explain=followup_explain,
-        explicit_constraint_update=explicit_constraint_update,
-    )
+    _edge_intent = str(turn_intent or "").strip().upper()
+    if _edge_intent in {"EXPLAIN", "COMPARE"}:
+        turn_intent = _edge_intent
+    else:
+        turn_intent = _classify_turn_intent(
+            query=query_effective,
+            nlp=nlp if isinstance(nlp, dict) else {},
+            followup_explain=followup_explain,
+            explicit_constraint_update=explicit_constraint_update,
+        )
     confirmed_slots_src = (
         structured_state.get("confirmed_slots")
         if isinstance(structured_state.get("confirmed_slots"), dict)

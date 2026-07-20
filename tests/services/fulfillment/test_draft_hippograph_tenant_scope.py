@@ -16,11 +16,16 @@ def test_default_hippograph_forwards_tenant_id(monkeypatch):
     def _spy(db, **kwargs):
         captured["tenant_id"] = kwargs.get("tenant_id")
         captured["seed_skus"] = kwargs.get("seed_skus")
-        return {}
+        return [
+            {"id": "lenovo", "kind": "brand", "label": "Lenovo"},
+            {"id": "BAG-1", "kind": "product", "label": "Lenovo laptop backpack"},
+            {"id": "finding:demand_shift:SKU-TENANT-B", "kind": "finding", "label": "demand shift"},
+        ]
 
     monkeypatch.setattr(hf, "build_hippograph_insights", _spy)
-    draft._default_hippograph(None, "SKU-TENANT-B", "tenant-B")
+    evidence = draft._default_hippograph(None, "SKU-TENANT-B", "tenant-B")
 
     assert captured["tenant_id"] == "tenant-B", (
         "cross-tenant leak: _default_hippograph must forward tenant_id to the hippograph insights")
     assert captured["seed_skus"] == ["SKU-TENANT-B"]
+    assert [item["id"] for item in evidence] == ["finding:demand_shift:SKU-TENANT-B"]
