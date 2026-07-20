@@ -573,6 +573,7 @@ def test_router_prompt_marks_sold_candidates(db):
     assert any(h.startswith("el-6") for h in marked)          # the sold subtree is marked
     assert unmarked                                            # taxonomy-only candidates are not
     assert not any(h.startswith("fr-") or h.startswith("so-") for h in marked)  # never mismarked
+    assert "lane itself is never null" in seen["p"]
 
 
 def test_router_clamps_wrong_requirements_container_to_empty(db):
