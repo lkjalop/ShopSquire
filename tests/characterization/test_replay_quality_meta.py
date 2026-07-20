@@ -11,8 +11,11 @@ from tests.characterization.shadow_replay import (
 )
 
 
-def _core(lane="SEARCH", off_catalog=None, node=None, reqs=None, extras_error=False):
+def _core(lane="SEARCH", off_catalog=None, node=None, reqs=None, extras_error=False,
+          compare_currency_conflict=None):
     extras = {"decision": {"node_handle": node, "requirements": reqs or {}}}
+    if compare_currency_conflict:
+        extras["compare_currency_conflict"] = compare_currency_conflict
     if extras_error:
         extras = None  # .get raises AttributeError → best-effort slice returns {}
     return SimpleNamespace(lane=lane, off_catalog=off_catalog, extras=extras)
@@ -37,6 +40,12 @@ def test_requirements_without_node_still_counts():
 def test_refusal_and_non_product_lanes_never_expect():
     assert _expects_products(_core(off_catalog={"class": "vp-2-2-1"}, node="vp-2-2-1")) is False
     assert _expects_products(_core(lane="POLICY_QUESTION", node=None)) is False
+
+
+def test_cross_currency_named_compare_is_an_honest_clarification_not_empty_failure():
+    conflict = {"settlement_currency": "USD", "excluded": [{"sku": "AUD-1"}]}
+    assert _expects_products(_core(lane="COMPARE", node="el-6-11-2",
+                                  compare_currency_conflict=conflict)) is False
 
 
 def test_quality_and_diagnose_share_the_decision():

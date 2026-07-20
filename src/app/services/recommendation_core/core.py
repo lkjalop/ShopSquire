@@ -963,6 +963,26 @@ def _bind_compare_targets(variants, targets) -> Optional[list]:
     return bound if len(bound) >= 2 else None
 
 
+def _compare_currency_conflict(all_variants, eligible_variants, targets,
+                               settlement_currency: str) -> Optional[Dict[str, Any]]:
+    """Return an explicit conflict when a fully bound named comparison loses a target
+    at the currency gate. A one-card response is not a valid two-product comparison."""
+    bound = _bind_compare_targets(all_variants, targets)
+    if not bound:
+        return None
+    eligible_skus = {variant.sku for variant in eligible_variants}
+    excluded = [variant for variant in bound if variant.sku not in eligible_skus]
+    if not excluded:
+        return None
+    return {
+        "settlement_currency": str(settlement_currency or "").upper(),
+        "excluded": [{"sku": variant.sku, "title": variant.title,
+                      "currency": str(variant.currency or "").upper()}
+                     for variant in excluded],
+        "fx_applied": False,
+    }
+
+
 def _disambiguate_compare_legs(db, envelope: TurnEnvelope, legs: list) -> list:
     """Narrow a mixed-product comparison leg using approved taxonomy truth.
 
@@ -1151,6 +1171,21 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
         resp.degraded = True         # a retrieval FAILURE degrades — never present as 'no match'
         return
     variants = _currency_eligible_variants(bundle.variants, envelope, resp)
+    if decision.lane == "COMPARE" and len(decision.compare_targets) >= 2:
+        conflict = _compare_currency_conflict(
+            bundle.variants, variants, decision.compare_targets, envelope.currency)
+        if conflict:
+            resp.extras["compare_currency_conflict"] = conflict
+            mismatched = ", ".join(
+                f"{item['title']} ({item['currency'] or 'currency unknown'})"
+                for item in conflict["excluded"])
+            resp.set_message(
+                f"I can't compare both requested products against a {envelope.currency} budget: "
+                f"{mismatched} is outside the store currency. Provide an approved FX quote or "
+                "choose products in one currency.",
+                MsgPriority.LANE_BASE,
+            )
+            variants = []
     # BRAND FILTER (R9.2 — 'only Asus'): clamped upstream to a REAL catalog brand, applied
     # HONESTLY — zero matches shows an honest empty message, never the unfiltered slate (a
     # grid that silently ignored the shopper's filter is the answer-shape lie).

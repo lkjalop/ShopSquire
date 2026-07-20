@@ -202,6 +202,22 @@ def test_bind_compare_targets_df_discipline():
     assert _bind_compare_targets([t1, t2, a], ("acme box", "dell g16")) is None
 
 
+def test_named_compare_reports_currency_conflict_instead_of_one_card():
+    from src.app.services.recommendation_core.core import _compare_currency_conflict
+    usd = VariantView(sku="USD-1", title="Dell G16 Gaming Laptop", currency="USD")
+    aud = VariantView(sku="AUD-1", title="Lenovo Legion Gaming Laptop", currency="AUD")
+
+    conflict = _compare_currency_conflict(
+        [usd, aud], [usd], ("dell g16", "lenovo legion"), "USD")
+
+    assert conflict == {
+        "settlement_currency": "USD",
+        "excluded": [{"sku": "AUD-1", "title": "Lenovo Legion Gaming Laptop",
+                      "currency": "AUD"}],
+        "fx_applied": False,
+    }
+
+
 def test_no_requirements_means_price_ranked_no_verdicts(db):
     cards, summary = build_cards(_views(db))
     assert [c.sku for c in cards] == ["LAP-3", "LAP-1", "LAP-2"]

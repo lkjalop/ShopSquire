@@ -68,6 +68,10 @@ def _expects_products(core) -> bool:
     retrieval, or degradation miss; only a query the whole taxonomy has no home for."""
     if core.lane not in ("SEARCH", "FILTER", "COMPARE") or core.off_catalog:
         return False
+    # A named comparison proven to cross the settlement-currency boundary must clarify
+    # rather than emit a one-card pseudo-comparison. That honest gate is not an empty slate.
+    if isinstance(getattr(core, "extras", None), dict) and core.extras.get("compare_currency_conflict"):
+        return False
     dec = _decision_slice(core)
     if dec is None:
         return True   # no breadcrumbs = can't prove off-domain = count the empty
