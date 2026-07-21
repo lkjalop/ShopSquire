@@ -158,13 +158,23 @@ def _aggregate_diagnosis(rows: list) -> dict:
             "(present but below the requirement)"
             if verdicts["fails"] >= verdicts["unknown"]
             else "DATA gap — more products are UNKNOWN than fail (missing catalog spec)")
+    if verdicts["fails"] == 0 and verdicts["unknown"] == 0:
+        dominance = "none"
+        read = "No fit gap in this run: every measured product met its requirements"
+    elif verdicts["fails"] > verdicts["unknown"]:
+        dominance = "fails"
+    elif verdicts["unknown"] > verdicts["fails"]:
+        dominance = "unknown"
+    else:
+        dominance = "mixed"
+        read = "Mixed fit gap: failed and unknown requirement verdicts are equally common"
     if all_unknown_products > tot * 0.25:
         read += " | WRONG-CATEGORY suspected (many all-unknown products — check reroute/retrieval)"
     if price_bleed_reqs:
         read += f" | {price_bleed_reqs} suspected PRICE-BLEED requirement(s)"
     return {"verdicts": verdicts, "verdict_total": tot,
             "constraint_sat": round(verdicts["meets"] / tot, 4) if tot else None,
-            "verdict_dominance": ("fails" if verdicts["fails"] >= verdicts["unknown"] else "unknown"),
+            "verdict_dominance": dominance,
             "all_unknown_products": all_unknown_products,
             "price_bleed_reqs": price_bleed_reqs,
             "top_unknown_keys": sorted(unknown_keys.items(), key=lambda x: -x[1])[:10],
