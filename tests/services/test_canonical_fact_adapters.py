@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
 from pathlib import Path
@@ -26,6 +26,7 @@ def test_real_order_inventory_and_supplier_quote_materialize_canonical_facts():
     db = sessionmaker(bind=create_engine("sqlite+pysqlite:///:memory:", future=True))()
     _migration(db, "20260721_market_fact_contract.py", "fact_contract")
     _migration(db, "20260722_market_fact_governance.py", "fact_governance")
+    _migration(db, "20260723_market_fact_quarantine_dedup.py", "fact_quarantine_dedup")
     now = datetime.now(timezone.utc).isoformat()
     db.execute(text("CREATE TABLE orders (id TEXT, draft_order_id TEXT, customer_id TEXT, "
                     "guest_email_hash TEXT, total_cents INT, currency TEXT, status TEXT, "
@@ -56,4 +57,16 @@ def test_real_order_inventory_and_supplier_quote_materialize_canonical_facts():
     assert db.execute(text("SELECT COUNT(*) FROM marketing_event_fact")).scalar_one() == 1
     assert db.execute(text("SELECT COUNT(*) FROM inventory_atp_fact")).scalar_one() == 2
     assert backfill_canonical_facts(db, tenant_id="tenant-a")["written"] == 0
+
+    stale = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    db.execute(text("INSERT INTO inventory_level VALUES "
+                    "('STALE-1','tenant-a','SYD',7,2,5,'wms',:stale),"
+                    "('STALE-2','tenant-a','MEL',4,0,4,'wms',:stale)"), {"stale": stale})
+    db.commit()
+    rejected = backfill_canonical_facts(db, tenant_id="tenant-a")
+    assert rejected["errors"] == {}
+    assert rejected["quarantined_by_source"]["inventory"] == 2
+    assert db.execute(text("SELECT COUNT(*) FROM market_fact_quarantine")).scalar_one() == 2
+    backfill_canonical_facts(db, tenant_id="tenant-a")
+    assert db.execute(text("SELECT COUNT(*) FROM market_fact_quarantine")).scalar_one() == 2
     db.close()

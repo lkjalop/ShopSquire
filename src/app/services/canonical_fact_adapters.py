@@ -12,7 +12,19 @@ from typing import Any, Dict, Iterable
 
 from sqlalchemy import text
 
-from src.app.services.market_facts import record_atp_fact, record_marketing_event
+from src.app.services.market_facts import (
+    MarketFactRejected,
+    record_atp_fact,
+    record_marketing_event,
+)
+
+
+def _record(writer, db, fact: Dict[str, Any]) -> tuple[int, int]:
+    """Return (written, quarantined); one rejected row must not abort its source batch."""
+    try:
+        return int(writer(db, fact, commit=False)), 0
+    except MarketFactRejected:
+        return 0, 1
 
 
 def _iso(value: Any) -> str:
@@ -33,7 +45,7 @@ def _lines(raw: Any) -> Iterable[Dict[str, Any]]:
     return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
 
 
-def _order_facts(db, tenant_id: str, limit: int) -> int:
+def _order_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
     rows = db.execute(text("""
         SELECT o.id, d.id, o.customer_id, o.guest_email_hash, o.total_cents, o.currency,
                o.status, o.created_at, o.updated_at, d.line_items
@@ -42,7 +54,7 @@ def _order_facts(db, tenant_id: str, limit: int) -> int:
           AND o.status IN ('paid','shipped','delivered','returned','refunded','chargebacked')
         ORDER BY COALESCE(o.updated_at,o.created_at) DESC LIMIT :lim
     """), {"tenant": tenant_id, "lim": int(limit)}).fetchall()
-    written = 0
+    written = rejected = 0
     for row in rows:
         order_id, draft_id, customer_id, guest_hash, total, currency, status, created, updated, raw_lines = row
         event_type = "return" if str(status) == "returned" else (
@@ -54,7 +66,7 @@ def _order_facts(db, tenant_id: str, limit: int) -> int:
                 continue
             unit = int(line.get("price_cents") or 0)
             record_id = f"{order_id}:{status}:{index}:{sku}"
-            written += int(record_marketing_event(db, {
+            accepted, quarantined = _record(record_marketing_event, db, {
                 "tenant_id": tenant_id, "deduplication_id": f"orders:{record_id}",
                 "event_type": event_type, "subject_hash": str(guest_hash or "") or _subject_hash(customer_id),
                 "session_id": str(order_id), "sku": sku, "value": unit * quantity if unit else total,
@@ -63,11 +75,13 @@ def _order_facts(db, tenant_id: str, limit: int) -> int:
                 "source_record_id": record_id, "occurred_at": _iso(updated or created),
                 "provenance_chain": [f"orders/{order_id}", f"draft_orders/{draft_id}/line/{index}"],
                 "confidence": 1.0, "freshness_policy": "transactional_record",
-            }, commit=False))
-    return written
+            })
+            written += accepted
+            rejected += quarantined
+    return written, rejected
 
 
-def _interaction_facts(db, tenant_id: str, limit: int) -> int:
+def _interaction_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
     rows = db.execute(text("""
         SELECT id, event_time, uid_hash, sku, action, surface, trace_id, context_json
         FROM recommend_interactions ORDER BY event_time DESC LIMIT :lim
@@ -76,7 +90,7 @@ def _interaction_facts(db, tenant_id: str, limit: int) -> int:
         "view": "view_item", "impression": "view_item", "click": "select_item",
         "add": "add_to_cart", "add_to_cart": "add_to_cart", "accepted": "add_to_cart",
     }
-    written = 0
+    written = rejected = 0
     for row in rows:
         rid, event_time, uid_hash, sku, action, surface, trace_id, raw_context = row
         try:
@@ -87,7 +101,7 @@ def _interaction_facts(db, tenant_id: str, limit: int) -> int:
         event_type = event_map.get(str(action or "").lower())
         if row_tenant != tenant_id or not event_type or not sku:
             continue
-        written += int(record_marketing_event(db, {
+        accepted, quarantined = _record(record_marketing_event, db, {
             "tenant_id": tenant_id, "deduplication_id": f"cart:{rid}", "event_type": event_type,
             "subject_hash": str(uid_hash or "") or None, "session_id": context.get("session_id"),
             "sku": str(sku), "channel": str(surface or "recommendation"),
@@ -95,20 +109,22 @@ def _interaction_facts(db, tenant_id: str, limit: int) -> int:
             "source_system": "cart", "source_record_id": str(rid), "occurred_at": _iso(event_time),
             "provenance_chain": [f"recommend_interactions/{rid}", f"trace/{trace_id}"],
             "confidence": 1.0, "freshness_policy": "behavioral_event",
-        }, commit=False))
-    return written
+        })
+        written += accepted
+        rejected += quarantined
+    return written, rejected
 
 
-def _inventory_facts(db, tenant_id: str, limit: int) -> int:
+def _inventory_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
     rows = db.execute(text("""
         SELECT sku, location_id, on_hand, reserved, available, source, updated_at
         FROM inventory_level WHERE tenant_id=:tenant ORDER BY updated_at DESC LIMIT :lim
     """), {"tenant": tenant_id, "lim": int(limit)}).fetchall()
-    written = 0
+    written = rejected = 0
     for sku, location, on_hand, reserved, available, source, observed in rows:
         stamp = _iso(observed)
         record_id = f"{sku}:{location}:{stamp}"
-        written += int(record_atp_fact(db, {
+        accepted, quarantined = _record(record_atp_fact, db, {
             "tenant_id": tenant_id, "deduplication_id": f"inventory_level:{record_id}",
             "material_id": str(sku), "sku": str(sku), "location_id": str(location or "default"),
             "on_hand_quantity": int(on_hand or 0), "committed_quantity": int(reserved or 0),
@@ -116,18 +132,20 @@ def _inventory_facts(db, tenant_id: str, limit: int) -> int:
             "source_system": "inventory_level", "source_record_id": record_id,
             "observed_at": stamp, "provenance_chain": [f"inventory_level/{sku}/{location}"],
             "confidence": 1.0, "freshness_policy": "max_age:86400",
-        }, commit=False))
-    return written
+        })
+        written += accepted
+        rejected += quarantined
+    return written, rejected
 
 
-def _supplier_quote_facts(db, tenant_id: str, limit: int) -> int:
+def _supplier_quote_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
     rows = db.execute(text("""
         SELECT id, case_id, state_json, valid_from
         FROM fulfillment_case_version
         WHERE tenant_id=:tenant AND event='supplier_quote_validated'
         ORDER BY valid_from DESC LIMIT :lim
     """), {"tenant": tenant_id, "lim": int(limit)}).fetchall()
-    written = 0
+    written = rejected = 0
     for version_id, case_id, raw_state, observed in rows:
         try:
             state = json.loads(raw_state or "{}") if isinstance(raw_state, str) else (raw_state or {})
@@ -140,7 +158,7 @@ def _supplier_quote_facts(db, tenant_id: str, limit: int) -> int:
         sku = str(availability.get("item_ref") or scope.get("item_ref") or "").strip()
         if not sku or not quote.get("quoted_quantity"):
             continue
-        written += int(record_atp_fact(db, {
+        accepted, quarantined = _record(record_atp_fact, db, {
             "tenant_id": tenant_id, "deduplication_id": f"supplier_quote:{version_id}",
             "material_id": sku, "sku": sku,
             "requested_quantity": int(scope.get("quantity") or availability.get("shortfall") or 0),
@@ -154,8 +172,10 @@ def _supplier_quote_facts(db, tenant_id: str, limit: int) -> int:
             "provenance_chain": [f"fulfillment_case/{case_id}", f"version/{version_id}"],
             "confidence": float(quote.get("confidence") or 1.0),
             "freshness_policy": "quote_validity",
-        }, commit=False))
-    return written
+        })
+        written += accepted
+        rejected += quarantined
+    return written, rejected
 
 
 def backfill_canonical_facts(db, *, tenant_id: str, limit: int = 1000,
@@ -164,16 +184,18 @@ def backfill_canonical_facts(db, *, tenant_id: str, limit: int = 1000,
     if not str(tenant_id or "").strip():
         raise ValueError("tenant_id is required")
     counts: Dict[str, int] = {}
+    rejected_counts: Dict[str, int] = {}
     errors: Dict[str, str] = {}
     for name, adapter in (
         ("orders", _order_facts), ("cart", _interaction_facts),
         ("inventory", _inventory_facts), ("supplier_quotes", _supplier_quote_facts),
     ):
         try:
-            counts[name] = adapter(db, str(tenant_id), int(limit))
+            counts[name], rejected_counts[name] = adapter(db, str(tenant_id), int(limit))
         except Exception as exc:
             errors[name] = f"{type(exc).__name__}: {exc}"
     if commit:
         db.commit()
     return {"tenant_id": str(tenant_id), "written": sum(counts.values()),
-            "written_by_source": counts, "errors": errors}
+            "written_by_source": counts, "quarantined": sum(rejected_counts.values()),
+            "quarantined_by_source": rejected_counts, "errors": errors}

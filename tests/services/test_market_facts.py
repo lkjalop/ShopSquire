@@ -19,6 +19,8 @@ MIGRATION = (Path(__file__).resolve().parents[2] / "alembic" / "versions" /
              "20260721_market_fact_contract.py")
 GOVERNANCE_MIGRATION = (Path(__file__).resolve().parents[2] / "alembic" / "versions" /
                         "20260722_market_fact_governance.py")
+QUARANTINE_DEDUP_MIGRATION = (Path(__file__).resolve().parents[2] / "alembic" / "versions" /
+                              "20260723_market_fact_quarantine_dedup.py")
 
 
 @pytest.fixture()
@@ -36,6 +38,12 @@ def db():
         spec2.loader.exec_module(governance)
         governance.op = Operations(MigrationContext.configure(connection))
         governance.upgrade()
+        spec3 = importlib.util.spec_from_file_location(
+            "market_fact_quarantine_dedup", QUARANTINE_DEDUP_MIGRATION)
+        quarantine_dedup = importlib.util.module_from_spec(spec3)
+        spec3.loader.exec_module(quarantine_dedup)
+        quarantine_dedup.op = Operations(MigrationContext.configure(connection))
+        quarantine_dedup.upgrade()
     session = sessionmaker(bind=engine)()
     yield session
     session.close()

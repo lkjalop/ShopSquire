@@ -84,6 +84,7 @@ def _quarantine(db, family: str, fact: Dict[str, Any], reason: str) -> None:
           id, tenant_id, family, source_system, source_record_id, deduplication_id,
           reason_code, payload_json, quarantined_at
         ) VALUES (:id,:tenant,:family,:source,:record,:dedup,:reason,:payload,:at)
+        ON CONFLICT(tenant_id, family, deduplication_id, reason_code) DO NOTHING
     """), {"id": str(uuid.uuid4()), "tenant": tenant, "family": family,
            "source": fact.get("source_system"), "record": fact.get("source_record_id"),
            "dedup": fact.get("deduplication_id"), "reason": reason,
