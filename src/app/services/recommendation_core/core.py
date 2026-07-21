@@ -492,6 +492,14 @@ def _budget_free_cards(db, envelope: TurnEnvelope, decision: TurnDecision, limit
     variants = _gather_scope_variants(db, free_env, decision, limit)   # device host FAMILY, not just the leaf
     if not variants:
         return []
+    # Currency is an authorization boundary on every retrieval leg, including this auxiliary
+    # budget-free probe. A probe must never reintroduce numerically cheap USD rows into an AUD
+    # slate merely because the primary evidence path filtered them correctly.
+    requested_currency = str(envelope.currency or "").strip().upper()
+    variants = [v for v in variants
+                if str(v.currency or "").strip().upper() == requested_currency]
+    if not variants:
+        return []
     # HONESTY (review finding #1): a HARD brand filter must not leak off-brand products into the
     # floor/stretch — 'only Dell, $900' must never quote a Lenovo as 'the cheapest that meets'.
     bf = getattr(decision, "brand_filter", None)
@@ -543,6 +551,20 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
                         and (c.fit or {}).get("overall") == "meets"]
         floor = min(meets_prices) if meets_prices else None
         probed = True
+        # The broader host-scope probe may recover a valid product that the initial leaf
+        # retrieval missed. If it is still inside the authorized cap, it belongs in the primary
+        # slate; do not merely quote its floor while showing inferior failing products.
+        recovered = [c for c in bf_cards
+                     if c.price_cents is not None and c.price_cents <= bmax
+                     and (c.fit or {}).get("overall") == "meets"]
+        if recovered:
+            existing = {c.sku for c in recovered}
+            resp.products = (recovered + [c for c in resp.products if c.sku not in existing])[:limit]
+            meets_in_budget = len(recovered)
+            fs["meets"] = sum(1 for c in resp.products
+                              if (c.fit or {}).get("overall") == "meets")
+            fs["fails"] = sum(1 for c in resp.products
+                              if (c.fit or {}).get("overall") == "fails")
 
     cap: Dict[str, Any] = {"floor_cents": floor, "budget_max_cents": bmax,
                            "meets_in_budget": meets_in_budget, "probed_budget_free": probed,
@@ -645,7 +667,11 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
     band1 = (meets_in or in_budget)[:3]
     used.update(c.sku for c in band1)
     if band1:
-        bands.append(_band("best_fit", "Best fit for you", "intent+budget", band1))
+        if meets_in:
+            bands.append(_band("best_fit", "Best fit for you", "intent+budget", band1))
+        else:
+            bands.append(_band("closest_fit", "Closest within budget - requirements not met",
+                               "closest_noncompliant", band1))
 
     # band 2 — stretch (below budget) OR more-capable headroom (within / no budget)
     rest_meets = [c for c in universe if c.sku not in used and meets(c)]

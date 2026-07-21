@@ -168,6 +168,15 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
             return BudgetParse(None, v, "ceiling")
 
     # 7) around — "around 1500", "about $2k", "roughly 1200" → ±20% band
+    # Affordability question: "is $1800 enough?", "would 1500 be enough?", or
+    # "do I have enough at $1000?". This is a proposed maximum, not a product specification.
+    m = (re.search(rf"\b(?:is|would|will|could)\s*{_CUR}?\s*{_NUM}\s+(?:be\s+)?enough\b", q)
+         or re.search(rf"\benough\b[^\d$â‚¬Â£]{{0,18}}(?:at|with|on)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q))
+    if m:
+        v = _to_int(m.group(1), m.group(2))
+        if v is not None and v >= _floor:
+            return BudgetParse(None, v, "ceiling")
+
     m = re.search(rf"\b(?:around|about|roughly|approx\w*|~)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
     if m:
         v = _to_int(m.group(1), m.group(2))

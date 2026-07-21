@@ -186,6 +186,20 @@ def test_off_catalog_exact_category_avoids_semantic_repair(db, monkeypatch):
     assert decision.source == "model+taxonomy_exact"
 
 
+def test_search_repairs_model_named_taxonomy_path(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": None,
+        "wanted_category": "Electronics > Computers > Laptops",
+        "request_scope": "product", "requirements": {},
+        "refine": {"exclude_brand": "Apple"}, "confidence": 0.8,
+    })
+    decision = route_turn(db, _env("a good laptop but not Apple"), llm_fn=lambda p, t: raw)
+
+    assert decision.node_handle == "el-6-6"
+    assert decision.source == "model+taxonomy_exact"
+    assert decision.exclude_brand == "Apple" or decision.exclude_brand is None
+
+
 def test_off_catalog_distinct_lexical_category_avoids_semantic_repair(db, monkeypatch):
     monkeypatch.setattr(
         "src.app.services.taxonomy_embedding_index.semantic_top_k",

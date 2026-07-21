@@ -81,8 +81,10 @@ def test_below_budget_stretch_band(monkeypatch):
         card("DELL", 119900), card("YOGA", 149900), card("CLAM", 65000, overall="fails")])
     core._build_shelf(None, env, _decision(), resp, 10)
     shelf = resp.extras["shelf"]
-    assert [b["id"] for b in shelf["bands"]] == ["best_fit", "stretch"]
-    assert _by_id(shelf, "best_fit")["skus"] == ["CLAM"]                    # closest-in-budget, labeled fail
+    assert [b["id"] for b in shelf["bands"]] == ["closest_fit", "stretch"]
+    closest = _by_id(shelf, "closest_fit")
+    assert closest["skus"] == ["CLAM"]
+    assert closest["basis"] == "closest_noncompliant"
     stretch = _by_id(shelf, "stretch")
     assert stretch["skus"] == ["DELL", "YOGA"]                             # cheapest meets first (the floor)
     assert "1,199" in stretch["label"]

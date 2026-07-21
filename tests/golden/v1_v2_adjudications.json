@@ -1,0 +1,26 @@
+{
+  "as_of": "2026-07-21",
+  "source_replay": "tmp/shadow_replay_aud_review_pass3.json",
+  "policy": "V1 product identity is diagnostic; V2 intrinsic safety, currency, capability and independently judged relevance are promotion gates.",
+  "entries": {
+    "accessory_bag:0": {"recorded_severity": "BLOCKER", "disposition": "known_wrong_v1", "status": "fixed_v2", "reason": "V1 returned no products. V2 now grounds Laptop Bags and returns active catalog bags."},
+    "brand_negation:0": {"recorded_severity": "MAJOR", "disposition": "accepted_v2_contract", "status": "fixed_v2", "reason": "V2 now grounds Laptops and enforces Apple exclusion; remaining difference is stale V1 breadth and currency."},
+    "budget_band:0": {"recorded_severity": "MAJOR", "disposition": "known_wrong_v1", "status": "accepted", "reason": "V1 mixed legacy USD rows into an AUD price band. V2 returns only authorized AUD in-band products."},
+    "budget_binary_floor:0": {"recorded_severity": "MAJOR", "disposition": "v2_regression", "status": "fixed_v2", "reason": "Canonical grammar now parses affordability questions as ceilings; auxiliary capability probes enforce currency and separate closest from stretch."},
+    "budget_cap_negated:0": {"recorded_severity": "MAJOR", "disposition": "known_wrong_v1", "status": "accepted", "reason": "V2 applies the explicit AUD ceiling; product-set identity with mixed-currency V1 is not a target."},
+    "cart_swap_via_suggest:0": {"recorded_severity": "MAJOR", "disposition": "delegated_dependency", "status": "accepted_with_gate", "reason": "The corpus request has no cart snapshot. Consequential cart mutation remains delegated to the guarded cart lane and is not V2 canary eligible."},
+    "compare_two_models:0": {"recorded_severity": "BLOCKER", "disposition": "known_wrong_v1", "status": "data_blocked_fx", "reason": "Named targets bind, but Dell G16 is USD and Lenovo Legion is AUD. V2 correctly refuses numeric comparison without approved FX; V1 compared unlike currencies and also raised a false escalation."},
+    "explain_followup:0": {"recorded_severity": "MAJOR", "disposition": "accepted_v2_contract", "status": "accepted", "reason": "V2 returns the one authorized AUD gaming match rather than V1's mixed-currency breadth."},
+    "explain_followup:1": {"recorded_severity": "BLOCKER", "disposition": "accepted_v2_contract", "status": "fixed_v2", "reason": "Prompt calibration now routes the referential follow-up to EXPLAIN. V2 caution is intentionally stricter than V1 auto autonomy."},
+    "filter_followup:0": {"recorded_severity": "MAJOR", "disposition": "known_wrong_v1", "status": "accepted", "reason": "V2 product set is active, classified and AUD-scoped; V1 breadth is not a relevance oracle."},
+    "filter_followup:1": {"recorded_severity": "MAJOR", "disposition": "v2_regression", "status": "fixed_v2", "reason": "Explicit 16GB evidence is recovered through the attribute registry and cannot be weakened by a model omission."},
+    "off_domain:0": {"recorded_severity": "BLOCKER", "disposition": "accepted_v2_contract", "status": "fixed_v2", "reason": "A bounded service_or_place signal now explains that ShopSquire handles store products rather than claiming a catalog miss."},
+    "offcatalog_a100:0": {"recorded_severity": "BLOCKER", "disposition": "accepted_v2_contract", "status": "accepted", "reason": "Both versions refuse safely. V2 records a real taxonomy node instead of a hard-coded legacy class."},
+    "offcatalog_paraphrase:0": {"recorded_severity": "BLOCKER", "disposition": "accepted_v2_contract", "status": "accepted", "reason": "Both versions refuse safely; taxonomy-backed class identity intentionally differs from V1."},
+    "persona_creator:0": {"recorded_severity": "MAJOR", "disposition": "known_wrong_v1", "status": "accepted", "reason": "V2 applies current creator capability and AUD catalog evidence. Relevance is governed by the labeled slate, not V1 SKU overlap."},
+    "search_budget:0": {"recorded_severity": "MAJOR", "disposition": "known_wrong_v1", "status": "accepted", "reason": "V2 returns the sole capability-eligible AUD product under the cap; V1 includes USD rows."},
+    "search_university:0": {"recorded_severity": "MAJOR", "disposition": "data_gap", "status": "open_nonblocking_demo", "reason": "The safe three-product slate passes relevance, but Apple-only breadth exposes missing battery evidence on non-Apple catalog rows."},
+    "workload_ai_finetune:0": {"recorded_severity": "MAJOR", "disposition": "known_wrong_v1", "status": "accepted", "reason": "V2 applies explicit local-AI VRAM/RAM capability floors; V1 broad laptop results are not a quality target."},
+    "workload_cyberpunk:0": {"recorded_severity": "MAJOR", "disposition": "known_wrong_v1", "status": "accepted", "reason": "V2 returns current AUD products satisfying the workload floor; V1 overlap differences are diagnostic only."}
+  }
+}

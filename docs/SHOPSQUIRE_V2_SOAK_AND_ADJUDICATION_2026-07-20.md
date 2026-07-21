@@ -1,5 +1,26 @@
 # ShopSquire V2 Soak and Adjudication - 2026-07-20
 
+## 2026-07-21 AUD re-adjudication
+
+The machine-readable disposition ledger is now
+`tests/golden/v1_v2_adjudications.json`: all current `6 BLOCKER / 13 MAJOR` rows have an owner,
+reason and status. The prior notes below are historical where they conflict with this update.
+
+- `accessory_bag` regressed to an empty slate after the router prompt change, then was fixed by
+  clamping model-named taxonomy paths for all product lanes, not only `OFF_CATALOG`.
+- `brand_negation` was fixed by the same path clamp; Apple exclusion remains authoritative.
+- affordability questions such as `is $1800 enough?` now enter the canonical budget envelope;
+  failing products are labeled `closest_fit`, and capability matches are a separate stretch band.
+- the budget-free capability probe had bypassed currency filtering. It is now currency-clamped;
+  an AUD turn cannot recover or price a USD candidate.
+- named Dell G16 versus Lenovo Legion binding works, but the current rows are USD versus AUD.
+  V2 correctly blocks numeric comparison without approved FX; reproducing V1 is unsafe.
+- the explanation follow-up now routes to `EXPLAIN`; the remaining V1 `auto` versus V2 `caution`
+  mismatch is an accepted stricter autonomy contract.
+- three independent-draft replay passes produced identical relevance: precision `0.9333`, NDCG
+  `0.8614`, zero timeout/fallback/authorization failures, and p95 `7.125-7.484s`. Human sealing is
+  still intentionally incomplete.
+
 ## Sealed evidence
 
 | Evaluation | Result | Artifact |

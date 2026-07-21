@@ -20,7 +20,7 @@ DRAW_REQ = {"touchscreen": [("==", True)],
 
 
 def _env(**over):
-    kw = dict(query="a laptop for drawing", uid="u1", tenant_id="default")
+    kw = dict(query="a laptop for drawing", uid="u1", tenant_id="default", currency="USD")
     kw.update(over)
     return TurnEnvelope.from_suggest_params(**kw)
 
@@ -92,6 +92,25 @@ def test_below_budget_offers_tradeoff(monkeypatch):
     assert {o["id"] for o in tradeoff[0]["options"]} == {"stretch", "relax", "closest"}
 
 
+def test_budget_free_probe_recovers_missed_in_budget_match(monkeypatch):
+    monkeypatch.setattr(core, "_budget_free_cards", lambda *a, **k: [
+        ProductCard(sku="MATCH", title="Recovered match", price_cents=170000,
+                    fit={"overall": "meets"}),
+    ])
+    env = _env(budget_max=1800)
+    resp = CoreResponse(envelope=env, lane="SEARCH")
+    resp.products = [ProductCard(sku="FAIL", title="Initial miss", price_cents=120000,
+                                 fit={"overall": "fails"})]
+    resp.fit_summary = {"meets": 0, "unknown": 0, "fails": 1,
+                        "capability_floor_cents": None, "requirements": {}}
+
+    _apply_capability_budget(None, env, _decision(), resp, 10)
+
+    assert resp.extras["capability"]["verdict"] == "within_budget"
+    assert resp.extras["capability"]["meets_in_budget"] == 1
+    assert [card.sku for card in resp.products[:2]] == ["MATCH", "FAIL"]
+
+
 # ── the probe genuinely IGNORES the ceiling (finds the above-budget match) ───────
 
 def test_budget_free_floor_ignores_ceiling(monkeypatch):
@@ -128,6 +147,25 @@ def test_budget_free_probe_respects_hard_brand_filter(monkeypatch):
     monkeypatch.setattr(core, "gather_evidence", fake_gather)
     floor = _budget_free_floor(None, _env(budget_max=900), _decision(brand_filter="Dell"), 10)
     assert floor == 139900        # the Dell, NOT the cheaper off-brand Lenovo
+
+
+def test_budget_free_probe_never_crosses_currency(monkeypatch):
+    def fake_gather(db, env, *, node_handle=None, limit=50):
+        b = EvidenceBundle(status="ok")
+        b.variants = [
+            VariantView(sku="USD", title="USD 2-in-1 match", price_cents=99900,
+                        currency="USD", specs={"ram_gb": 16}),
+            VariantView(sku="AUD", title="AUD 2-in-1 match", price_cents=149900,
+                        currency="AUD", specs={"ram_gb": 16}),
+        ]
+        return b
+
+    monkeypatch.setattr(core, "gather_evidence", fake_gather)
+    floor = _budget_free_floor(
+        None, _env(budget_max=900, currency="AUD"), _decision(), 10,
+    )
+
+    assert floor == 149900
 
 
 # ── guards: no-op off the product lanes / degraded / no requirements ─────────────

@@ -482,6 +482,8 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "as 'which supplier channel would be used?' and 'has the supplier draft been sent?' are "
         "PROCUREMENT status questions. Requests to pause, retain, resume, or keep a sourcing request "
         "as a draft are also PROCUREMENT.\n"
+        "EXPLAIN is for why a prior recommendation or 'the first one' fits; COMPARE is for explicit "
+        "side-by-side product comparisons. Do not turn an explanation follow-up into COMPARE.\n"
         "Pick what the shopper wants to buy, not a mentioned object. A game, application or "
         "workload maps to the device that runs it. OFF_CATALOG is only for a clearly unsold "
         "category. Buy/quote/source/do-you-sell requests remain commerce even when no exact "
@@ -869,10 +871,15 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     request_scope = (raw_request_scope
                      if raw_request_scope in ("product", "service_or_place", "uncertain")
                      else "uncertain")
-    if lane == "OFF_CATALOG" and node is None and wanted_category:
-        normalized = wanted_category.lower().rstrip("s")
-        exact = [candidate for candidate in search_nodes(wanted_category, limit=20)
-                 if candidate.name.lower().rstrip("s") == normalized]
+    if node is None and wanted_category:
+        normalized = wanted_category.lower().strip().rstrip("s")
+        leaf = normalized.rsplit(">", 1)[-1].strip()
+        candidates = search_nodes(wanted_category, limit=20)
+        path_exact = [candidate for candidate in candidates
+                      if candidate.full_path.lower().strip().rstrip("s") == normalized]
+        name_exact = [candidate for candidate in candidates
+                      if candidate.name.lower().strip().rstrip("s") == leaf]
+        exact = path_exact or name_exact
         if len(exact) == 1:
             node = exact[0]
             routing_source = "model+taxonomy_exact"
@@ -883,7 +890,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             if lexical and top_score >= 4.0 and top_score - runner_up >= 1.5:
                 node = lexical[0][0]
                 routing_source = "model+taxonomy_lexical"
-            else:
+            elif lane == "OFF_CATALOG":
                 try:
                     from src.app.services.taxonomy_embedding_index import semantic_top_k
                     semantic = [(get_node(handle), score)
