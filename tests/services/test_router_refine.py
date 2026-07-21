@@ -44,6 +44,8 @@ def test_router_prompt_distinguishes_policy_from_active_procurement_changes():
     assert "keep/change-constraint turns" in prompt
     assert "has the supplier draft been sent?" in prompt
     assert "keep a sourcing request as a draft" in prompt
+    assert "price-affordability question by itself" in prompt
+    assert "requires a quantity, supplier" in prompt
 
 
 def test_soft_preferred_brand_is_not_a_hard_filter(db):
