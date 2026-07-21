@@ -29,7 +29,8 @@ def _is_upward(fact: Dict[str, Any]) -> bool:
 def authorize_replenishment(
     *, demand_facts: Iterable[Dict[str, Any]], atp: Dict[str, Any], economics: Dict[str, Any],
     now: datetime | None = None, min_confidence: float = 0.7,
-    max_demand_age_seconds: int = 7 * 86400, min_source_diversity: int = 2,
+    max_demand_age_seconds: int = 7 * 86400, max_atp_age_seconds: int = 86400,
+    min_source_diversity: int = 2,
 ) -> Dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     eligible = []
@@ -49,10 +50,21 @@ def authorize_replenishment(
     sources = {str(f.get("source_system")) for f in eligible}
     shortfall = max(0, int(atp.get("shortfall") or 0))
     lead_time = float(atp.get("lead_time_days") or 0.0)
+    atp_observed = _time(atp.get("observed_at"))
+    atp_age = (current - atp_observed).total_seconds() if atp_observed else None
+    atp_authoritative = (
+        atp_observed is not None
+        and -300 <= float(atp_age) <= float(max_atp_age_seconds)
+        and float(atp.get("confidence") or 0.0) >= min_confidence
+        and bool(atp.get("source_system"))
+        and bool(atp.get("provenance_chain"))
+    )
     margin_authoritative = (
         bool(economics.get("available")) and bool(economics.get("clears_floor"))
         and str(economics.get("cost_basis") or "")
         == "validated_landed_supplier_quote"
+        and bool(economics.get("source_record_id"))
+        and bool(economics.get("provenance_chain"))
     )
     reasons = []
     if len(sources) < int(min_source_diversity):
@@ -61,6 +73,8 @@ def authorize_replenishment(
         reasons.append("no_atp_deficit")
     if lead_time <= 0:
         reasons.append("missing_supplier_lead_time")
+    if not atp_authoritative:
+        reasons.append("untrusted_or_stale_atp")
     if not margin_authoritative:
         reasons.append("unverified_or_unprofitable_cost_basis")
     return {
@@ -71,5 +85,7 @@ def authorize_replenishment(
         "qualified_demand_facts": len(eligible),
         "shortfall": shortfall,
         "lead_time_days": lead_time or None,
+        "atp_authoritative": atp_authoritative,
+        "economics_authoritative": margin_authoritative,
         "authority": "operator_advisory_only",
     }

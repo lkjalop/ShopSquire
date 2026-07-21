@@ -12,12 +12,26 @@ def _demand(source):
             "provenance_chain": [f"{source}/record-1"]}
 
 
+def _atp(**overrides):
+    return {
+        "shortfall": 8, "lead_time_days": 12, "confidence": 0.95,
+        "observed_at": "2026-07-20T12:00:00Z", "source_system": "wms",
+        "provenance_chain": ["wms/snapshot-1"],
+    } | overrides
+
+
+def _economics(**overrides):
+    return {
+        "available": True, "clears_floor": True,
+        "cost_basis": "validated_landed_supplier_quote",
+        "source_record_id": "quote-1", "provenance_chain": ["supplier/quote-1"],
+    } | overrides
+
+
 def test_replenishment_requires_every_independent_gate():
     verdict = authorize_replenishment(
         demand_facts=[_demand("ga4"), _demand("orders")],
-        atp={"shortfall": 8, "lead_time_days": 12},
-        economics={"available": True, "clears_floor": True,
-                   "cost_basis": "validated_landed_supplier_quote"}, now=NOW)
+        atp=_atp(), economics=_economics(), now=NOW)
     assert verdict["allowed"] is True
     assert verdict["authority"] == "operator_advisory_only"
 
@@ -30,5 +44,17 @@ def test_replenishment_fails_closed_on_one_source_missing_lead_and_fake_margin()
     assert verdict["allowed"] is False
     assert set(verdict["reasons"]) == {
         "insufficient_independent_demand_sources", "missing_supplier_lead_time",
-        "unverified_or_unprofitable_cost_basis",
+        "untrusted_or_stale_atp", "unverified_or_unprofitable_cost_basis",
+    }
+
+
+def test_replenishment_rejects_stale_or_unproven_atp_and_quote_economics():
+    verdict = authorize_replenishment(
+        demand_facts=[_demand("ga4"), _demand("orders")],
+        atp=_atp(observed_at="2026-07-10T00:00:00Z"),
+        economics=_economics(provenance_chain=[]), now=NOW,
+    )
+    assert verdict["allowed"] is False
+    assert set(verdict["reasons"]) == {
+        "untrusted_or_stale_atp", "unverified_or_unprofitable_cost_basis",
     }
