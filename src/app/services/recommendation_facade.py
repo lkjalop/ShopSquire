@@ -406,6 +406,15 @@ def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
                 bmin = bmax = quantity = None
             return {
                 "prior_node": None,
+                # The mature legacy procurement workflow remains the executor. Bridge only its
+                # explicit workflow state into the V2 routing context; do not infer procurement
+                # from quantity alone because ordinary multi-pack searches also carry quantity.
+                "prior_lane": ("PROCUREMENT"
+                               if legacy.get("active_pr") or legacy.get("last_sourcing_intent")
+                               else None),
+                "active_workflow_lane": ("PROCUREMENT"
+                                         if legacy.get("active_pr")
+                                         or legacy.get("last_sourcing_intent") else None),
                 "shortlist_skus": legacy.get("last_valid_shortlist_skus")
                                   or legacy.get("last_shortlist_skus") or [],
                 "accepted_constraints": {
@@ -417,6 +426,8 @@ def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
                 "legacy_bridge": True,
             }
         return {"prior_node": data.get("last_node_handle"),
+                "prior_lane": data.get("last_lane"),
+                "active_workflow_lane": data.get("active_workflow_lane"),
                 "shortlist_skus": data.get("last_shortlist_skus") or [],
                 "accepted_constraints": data.get("constraints") or {}}
     except Exception:

@@ -53,6 +53,16 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
         prior = (envelope.session or {}).get("accepted_constraints") or {}
         decision_quantity = decision.get("quantity")
         decision_total = decision.get("total_budget_cents")
+        prior_workflow = ((envelope.session or {}).get("active_workflow_lane")
+                          or ((envelope.session or {}).get("prior_lane")
+                              if (envelope.session or {}).get("prior_lane") == "PROCUREMENT"
+                              else None))
+        if core.lane == "PROCUREMENT":
+            active_workflow = "PROCUREMENT"
+        elif decision.get("subject_action") == "switch":
+            active_workflow = None
+        else:
+            active_workflow = prior_workflow
         slice_ = {
             "last_node_handle": decision.get("node_handle") or (envelope.session or {}).get("prior_node"),
             "last_shortlist_skus": ([c.sku for c in core.products][:12]
@@ -74,11 +84,18 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
                                  else prior.get("budget_scope")),
                 # brand constraints (review-10 P0.6) — so 'now show me cheaper ones' keeps the
                 # 'only Asus' / 'not Apple' the shopper set on a prior turn.
-                "brand_filter": decision.get("brand_filter"),
-                "exclude_brand": decision.get("exclude_brand"),
-                "preferred_brand": decision.get("preferred_brand"),
+                "brand_filter": (decision.get("brand_filter")
+                                 if decision.get("brand_filter") is not None
+                                 else prior.get("brand_filter")),
+                "exclude_brand": (decision.get("exclude_brand")
+                                  if decision.get("exclude_brand") is not None
+                                  else prior.get("exclude_brand")),
+                "preferred_brand": (decision.get("preferred_brand")
+                                    if decision.get("preferred_brand") is not None
+                                    else prior.get("preferred_brand")),
             },
             "last_lane": core.lane,
+            "active_workflow_lane": active_workflow,
             "ts": int(time.time()),
         }
         payload = json.dumps(slice_)

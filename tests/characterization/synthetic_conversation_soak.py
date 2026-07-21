@@ -322,6 +322,14 @@ def _session_from(core, prior: Optional[Dict[str, Any]] = None) -> Dict[str, Any
     dec = core.extras.get("decision") or {}
     used = core.extras.get("constraints_used") or {}
     out = dict(prior or {})
+    out["prior_lane"] = core.lane
+    prior_workflow = out.get("active_workflow_lane")
+    if core.lane == "PROCUREMENT":
+        out["active_workflow_lane"] = "PROCUREMENT"
+    elif dec.get("subject_action") == "switch":
+        out.pop("active_workflow_lane", None)
+    elif prior_workflow:
+        out["active_workflow_lane"] = prior_workflow
     if dec.get("node_handle"):
         out["prior_node"] = dec["node_handle"]
     shortlist = [p.sku for p in core.products[:12]]

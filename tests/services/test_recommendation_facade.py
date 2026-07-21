@@ -154,9 +154,13 @@ def test_session_slice_read_tenant_scoped():
     r = _Redis()
     # tenant-scoped key (GPT-5.6 #5c22575.3): session:{tenant}:{uid}:kv_state, never uid-alone
     r.store["session:t1:u1:kv_state"] = json.dumps(
-        {"last_node_handle": "el-6-6", "last_shortlist_skus": ["LAP-1"]})
+        {"last_node_handle": "el-6-6", "last_lane": "PROCUREMENT",
+         "active_workflow_lane": "PROCUREMENT",
+         "last_shortlist_skus": ["LAP-1"]})
     slice_ = F._read_session_slice(r, "u1", "t1")
     assert slice_["prior_node"] == "el-6-6" and slice_["shortlist_skus"] == ["LAP-1"]
+    assert slice_["prior_lane"] == "PROCUREMENT"
+    assert slice_["active_workflow_lane"] == "PROCUREMENT"
     # a different tenant with the same uid does NOT see it (isolation)
     assert F._read_session_slice(r, "u1", "t2") == {}
     assert F._read_session_slice(None, "u1", "t1") == {}      # no redis → empty, never raises
@@ -174,6 +178,8 @@ def test_default_tenant_bridges_bounded_legacy_session_fields_only():
     bridged = F._read_session_slice(r, "u1", "default")
     assert bridged == {
         "prior_node": None,
+        "prior_lane": None,
+        "active_workflow_lane": None,
         "shortlist_skus": ["LAP-1", "LAP-2"],
         "accepted_constraints": {
             "budget_min_cents": 120000,
@@ -184,3 +190,17 @@ def test_default_tenant_bridges_bounded_legacy_session_fields_only():
         "legacy_bridge": True,
     }
     assert F._read_session_slice(r, "u1", "other-tenant") == {}
+
+
+def test_default_tenant_bridges_explicit_legacy_procurement_state():
+    import json
+    r = _Redis()
+    r.store["session:u1:kv_state"] = json.dumps({
+        "active_pr": {"pr_id": "PR-default-1"},
+        "confirmed_slots": {"order_quantity": 25},
+        "last_shortlist_skus": ["LAP-1"],
+    })
+    bridged = F._read_session_slice(r, "u1", "default")
+    assert bridged["prior_lane"] == "PROCUREMENT"
+    assert bridged["active_workflow_lane"] == "PROCUREMENT"
+    assert bridged["accepted_constraints"]["quantity"] == 25

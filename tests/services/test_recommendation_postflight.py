@@ -35,6 +35,8 @@ def test_session_write_roundtrips_through_facade_reader():
     # the facade reads it back next turn (tenant-scoped key)
     slice_ = F._read_session_slice(r, "u1", "t1")
     assert slice_["prior_node"] == "el-6-6" and slice_["shortlist_skus"] == ["LAP-1", "LAP-2"]
+    assert slice_["prior_lane"] == "SEARCH"
+    assert slice_["active_workflow_lane"] is None
     # persisted content is complete for prior-subject resolution
     raw = json.loads(r.store["session:t1:u1:kv_state"])
     assert raw["last_lane"] == "SEARCH" and raw["constraints"]["use_cases"] == ["gaming"]
@@ -76,6 +78,46 @@ def test_followup_without_products_or_quantity_preserves_prior_slice():
     assert raw["constraints"]["quantity"] == 25
     assert raw["constraints"]["total_budget_cents"] == 4000000
     assert raw["constraints"]["budget_scope"] == "total"
+
+
+def test_followup_preserves_prior_brand_constraints_when_not_replaced():
+    import dataclasses
+    r = _Redis()
+    env = dataclasses.replace(_env(), session={
+        "accepted_constraints": {
+            "brand_filter": "Lenovo",
+            "exclude_brand": "Apple",
+            "preferred_brand": "Dell",
+        },
+    })
+    core = _core(env)
+    core.extras["decision"].update({
+        "brand_filter": None,
+        "exclude_brand": None,
+        "preferred_brand": None,
+    })
+    assert write_session(r, env, core) is True
+    constraints = json.loads(r.store["session:t1:u1:kv_state"])["constraints"]
+    assert constraints["brand_filter"] == "Lenovo"
+    assert constraints["exclude_brand"] == "Apple"
+    assert constraints["preferred_brand"] == "Dell"
+
+
+def test_filter_followup_preserves_active_procurement_workflow():
+    import dataclasses
+    r = _Redis()
+    env = dataclasses.replace(_env(), session={
+        "prior_lane": "PROCUREMENT",
+        "active_workflow_lane": "PROCUREMENT",
+        "accepted_constraints": {"quantity": 25},
+    })
+    core = _core(env)
+    core.lane = "FILTER"
+    core.extras["decision"]["subject_action"] = "continue"
+    assert write_session(r, env, core) is True
+    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    assert raw["last_lane"] == "FILTER"
+    assert raw["active_workflow_lane"] == "PROCUREMENT"
 
 
 def test_session_write_is_tenant_scoped():

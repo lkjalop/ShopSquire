@@ -27,3 +27,22 @@ def test_prompt_includes_prior_when_given_omits_when_not():
     assert "PRIOR TURN" in with_prior and "Laptops" in with_prior
     without = _build_prompt(_env("a laptop for drawing"), [], [], ["drawing"])
     assert "PRIOR TURN" not in without      # first turn / no session → stateless, unchanged
+
+
+def test_prompt_carries_active_procurement_lane_without_forcing_policy_questions():
+    prior = {"node_path": "Electronics > Computers > Laptops", "use_cases": ["office"],
+             "budget_max_cents": 5_000_000, "lane": "PROCUREMENT"}
+    prompt = _build_prompt(_env("what is the delivery and sourcing tradeoff?"), [], [], [],
+                           prior=prior)
+    assert "active_lane=PROCUREMENT" in prompt
+    assert "current order's quantity, sourcing, delivery" in prompt
+    assert "general policy questions remain POLICY_QUESTION" in prompt
+    assert "procurement_context=current_order" in prompt
+
+
+def test_prompt_can_carry_legacy_procurement_lane_without_taxonomy_subject():
+    prompt = _build_prompt(_env("what is the delivery and sourcing tradeoff?"), [], [], [],
+                           prior={"node_path": None, "use_cases": [],
+                                  "budget_max_cents": None, "lane": "PROCUREMENT"})
+    assert "category=current product/order" in prompt
+    assert "active_lane=PROCUREMENT" in prompt

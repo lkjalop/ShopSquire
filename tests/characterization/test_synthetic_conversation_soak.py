@@ -67,6 +67,7 @@ def test_percentile_nearest_rank():
 
 def test_session_emulates_production_brand_persistence():
     class Core:
+        lane = "FILTER"
         products = []
         extras = {
             "decision": {
@@ -84,6 +85,23 @@ def test_session_emulates_production_brand_persistence():
     assert accepted["preferred_brand"] == "Dell"
 
 
+def test_session_keeps_active_procurement_across_filter_refinement():
+    class Procurement:
+        lane = "PROCUREMENT"
+        products = []
+        extras = {"decision": {"subject_action": "continue"}, "constraints_used": {}}
+
+    class Filter:
+        lane = "FILTER"
+        products = []
+        extras = {"decision": {"subject_action": "continue"}, "constraints_used": {}}
+
+    session = _session_from(Procurement())
+    refined = _session_from(Filter(), session)
+    assert refined["prior_lane"] == "FILTER"
+    assert refined["active_workflow_lane"] == "PROCUREMENT"
+
+
 def test_session_merge_does_not_erase_subject_or_constraints_on_explanation_turn():
     prior = {
         "prior_node": "el-6-1",
@@ -97,11 +115,13 @@ def test_session_merge_does_not_erase_subject_or_constraints_on_explanation_turn
     }
 
     class Core:
+        lane = "EXPLAIN"
         products = []
         extras = {"decision": {"lane": "EXPLAIN"}, "constraints_used": {}}
 
     merged = _session_from(Core(), prior)
-    assert merged == prior
+    assert merged["prior_lane"] == "EXPLAIN"
+    assert {key: value for key, value in merged.items() if key != "prior_lane"} == prior
 
 
 def test_effective_decision_reads_authorized_prior_state_for_nodeless_turn():

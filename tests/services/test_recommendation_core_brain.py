@@ -820,6 +820,44 @@ def test_edge_explain_hint_corrects_policy_misroute_only_with_prior_shortlist(db
     assert d2.lane == "POLICY_QUESTION"
 
 
+def test_active_procurement_uses_model_continuity_to_correct_policy_conflict(db):
+    session = {"prior_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"]}
+
+    def model(subject_action, procurement_context):
+        return lambda _prompt, _timeout: json.dumps({
+            "lane": "POLICY_QUESTION", "handle": None, "requirements": {},
+            "subject_action": subject_action, "confidence": 0.9,
+            "procurement_context": procurement_context,
+        })
+
+    sourcing = route_turn(
+        db, _env_session("what is the delivery and sourcing tradeoff?", session),
+        llm_fn=model("continue", "current_order"),
+    )
+    policy = route_turn(
+        db, _env_session("what is your general returns policy?", session),
+        llm_fn=model("uncertain", "general_policy"),
+    )
+
+    assert sourcing.lane == "PROCUREMENT"
+    assert sourcing.subject_action == "continue"
+    assert policy.lane == "POLICY_QUESTION"
+
+
+def test_active_procurement_can_use_bounded_context_judgment_when_subject_is_uncertain(db):
+    session = {"active_workflow_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"]}
+    raw = json.dumps({
+        "lane": "POLICY_QUESTION", "handle": None, "requirements": {},
+        "subject_action": "uncertain", "procurement_context": "current_order",
+        "confidence": 0.9,
+    })
+    decision = route_turn(
+        db, _env_session("what is the delivery and sourcing tradeoff?", session),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+    assert decision.lane == "PROCUREMENT"
+
+
 def test_no_cart_mutation_downgrade_carries_authorized_prior_node(db):
     env = _env("cut it to 1000 max")
     env = __import__("dataclasses").replace(

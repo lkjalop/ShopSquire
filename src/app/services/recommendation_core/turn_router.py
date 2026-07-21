@@ -485,6 +485,9 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "as a draft are also PROCUREMENT. A price-affordability question by itself ('is $X enough "
         "for a laptop?') is SEARCH/FILTER, not PROCUREMENT; PROCUREMENT requires a quantity, supplier, "
         "quote/RFQ, sourcing/reorder action, or an existing procurement case.\n"
+        "Set procurement_context=current_order only when the message concerns the active order, "
+        "sourcing case, supplier interaction, quantity, delivery plan, or RFQ; set general_policy "
+        "for store-wide delivery/returns/payment policy; otherwise none.\n"
         "EXPLAIN is for why a prior recommendation or 'the first one' fits; COMPARE is for explicit "
         "side-by-side product comparisons. Do not turn an explanation follow-up into COMPARE.\n"
         "Pick what the shopper wants to buy, not a mentioned object. A game, application or "
@@ -513,7 +516,8 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         '"use_cases":[],"requirements":{},'
         '"refine":{"brand":null,"prefer_brand":null,"exclude_brand":null,"sort":null},'
         '"compare_targets":[],"quantity":null,"total_budget":null,"budget_scope":null,'
-        '"budget_cap_mode":"hard","subject_action":null,"confidence":0.0}.\n')
+        '"budget_cap_mode":"hard","subject_action":null,"procurement_context":"none",'
+        '"confidence":0.0}.\n')
 
 
 def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
@@ -533,13 +537,21 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
         for node, _ in prompt_cands
     ) or "  (none)"
     context = ""
-    if prior and prior.get("node_path"):
+    if prior and (prior.get("node_path") or prior.get("lane")):
         use_cases = ",".join(prior.get("use_cases") or []) or "general"
         prior_budget = (f"; budget_max=${prior['budget_max_cents']//100}"
                         if prior.get("budget_max_cents") else "")
-        context = (f"PRIOR TURN: category={prior['node_path']}; use_cases={use_cases}{prior_budget}. "
+        prior_lane = str(prior.get("lane") or "").strip().upper()
+        lane_context = f"; active_lane={prior_lane}" if prior_lane else ""
+        prior_subject = prior.get("node_path") or "current product/order"
+        context = (f"PRIOR TURN: category={prior_subject}; use_cases={use_cases}"
+                   f"{prior_budget}{lane_context}. "
                    "Set subject_action=continue for a refinement, switch for a new product, "
-                   "uncertain otherwise. A continuation retains the prior subject.\n")
+                   "uncertain otherwise. A continuation retains the prior subject. When the active "
+                   "lane is PROCUREMENT, questions about the current order's quantity, sourcing, "
+                   "delivery, supplier quote, RFQ, or fulfillment remain PROCUREMENT (or EXPLAIN "
+                   "when only explaining a prior result); general policy questions remain "
+                   "POLICY_QUESTION. Never copy the prior lane for an unrelated new request.\n")
     budget = ""
     if envelope.budget_min_cents is not None or envelope.budget_max_cents is not None:
         low = f"${envelope.budget_min_cents//100}" if envelope.budget_min_cents else "any"
@@ -593,10 +605,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     prior = None
     _sess = envelope.session or {}
     _pn = get_node(str(_sess.get("prior_node") or ""))
-    if _pn is not None:
+    _prior_lane = str(_sess.get("active_workflow_lane")
+                      or _sess.get("prior_lane") or "").strip().upper()
+    if _pn is not None or _prior_lane:
         _acc = _sess.get("accepted_constraints") or {}
-        prior = {"node_path": _pn.full_path, "use_cases": _acc.get("use_cases") or [],
-                 "budget_max_cents": _acc.get("budget_max_cents")}
+        prior = {"node_path": (_pn.full_path if _pn is not None else None),
+                 "use_cases": _acc.get("use_cases") or [],
+                 "budget_max_cents": _acc.get("budget_max_cents"),
+                 "lane": _prior_lane or None}
     try:
         raw = fn(_build_prompt(envelope, cands, fit_keys, known_use_cases(), stocked, prior), timeout)
         data = json.loads(raw) if raw else None
@@ -640,6 +656,19 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # an explicit 'switch' suppresses the fragment-drift override (the shopper started fresh).
     _sa = str(data.get("subject_action") or "").strip().lower()
     subject_action = _sa if _sa in ("continue", "switch", "uncertain") else "uncertain"
+    _pc = str(data.get("procurement_context") or "").strip().lower()
+    procurement_context = (_pc if _pc in ("current_order", "general_policy", "none")
+                           else "none")
+    # The model supplies two independent semantic judgments: lane and subject continuity. When a
+    # mature legacy procurement workflow is explicitly active, a current-order judgment paired
+    # with POLICY_QUESTION is an internal contradiction: it describes the active order, not a
+    # general store policy. Correct that contradiction without inspecting query words. General
+    # policy turns remain untouched because the model marks them general_policy/uncertain.
+    if (str(session.get("active_workflow_lane")
+            or session.get("prior_lane") or "").strip().upper() == "PROCUREMENT"
+            and lane == "POLICY_QUESTION"
+            and (subject_action == "continue" or procurement_context == "current_order")):
+        lane = "PROCUREMENT"
     _continues = subject_action == "continue" or (
         subject_action != "switch" and lane in ("FILTER", "COMPARE", "EXPLAIN"))
     if _continues:
