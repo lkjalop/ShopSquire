@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import datetime, timezone
 from pathlib import Path
 
 from alembic.migration import MigrationContext
@@ -44,7 +45,7 @@ def test_summary_is_tenant_scoped_and_requires_sample_before_action():
                         "event_type": event, "occurred_at": f"2026-07-20T00:0{turn}:00Z",
                         "session_id": f"session-{user}", "sku": "SKU-1", "consent_state": "granted",
                         "provenance_chain": ["test"],
-                    })
+                    }, now=datetime(2026, 7, 21, tzinfo=timezone.utc))
         report = summarize_marketing_facts(db, tenant_id="tenant-a", min_action_sample=10)
         assert report["event_count"] == 12
         assert report["unique_sessions"] == 3
@@ -66,7 +67,7 @@ def test_cart_abandonment_needs_denominator_and_is_operator_only():
                     "event_type": event, "occurred_at": f"2026-07-20T00:0{turn}:00Z",
                     "session_id": f"session-{user}", "sku": "SKU-1", "consent_state": "granted",
                     "provenance_chain": ["test"],
-                })
+                }, now=datetime(2026, 7, 21, tzinfo=timezone.utc))
         report = summarize_marketing_facts(db, tenant_id="tenant-a")
         assert report["insights"][0]["type"] == "cart_abandonment"
         assert report["insights"][0]["authority"] == "operator_advisory"

@@ -52,11 +52,12 @@ def test_atp_facts_are_tenant_scoped_and_deduplicated(db, monkeypatch):
         "provenance_chain": ["erp/order/42"],
     }
     fact["signature"] = sign_fact(fact, "erp-test-secret")
-    assert record_atp_fact(db, fact) is True
-    assert record_atp_fact(db, fact) is False
+    evaluation_time = datetime(2026, 7, 21, tzinfo=timezone.utc)
+    assert record_atp_fact(db, fact, now=evaluation_time) is True
+    assert record_atp_fact(db, fact, now=evaluation_time) is False
     tenant_b = fact | {"tenant_id": "tenant-b"}
     tenant_b["signature"] = sign_fact(tenant_b, "erp-test-secret")
-    assert record_atp_fact(db, tenant_b) is True
+    assert record_atp_fact(db, tenant_b, now=evaluation_time) is True
     rows = db.execute(text(
         "SELECT tenant_id, confidence, provenance_json FROM inventory_atp_fact ORDER BY tenant_id"
     )).fetchall()
