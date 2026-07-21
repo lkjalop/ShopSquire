@@ -342,6 +342,20 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                       retrieval_count=int((resp.extras.get("evidence") or {}).get("count") or 0),
                       won_message=resp._msg_priority > _prio_before)
 
+    # Closed, model-interpreted scope with a deterministic authorization clamp in the router.
+    # This is intentionally generic: the core does not learn pizza, restaurants, plumbers, or
+    # other domain phrases. It explains the platform boundary without pretending a catalog miss.
+    if decision.request_scope == "service_or_place" and not resp.products:
+        resp.extras["unsupported_scope"] = {
+            "kind": "service_or_place",
+            "can_help_with": "products_sold_by_store",
+        }
+        resp.set_message(
+            "I can help compare and source products sold by this store, but I can't recommend "
+            "local services or places. Try a local directory or map service for that request.",
+            MsgPriority.REFUSAL,
+        )
+
     # gates: prefer the SHARED commerce guard's verdict (run once at the facade ingress) —
     # the core does NOT own a second security regex (GPT-5.6 #10). The thin evaluate_text_gates
     # is the NO-FACADE fallback only (offline replay / direct tests).

@@ -177,6 +177,9 @@ class TurnDecision:
     # retrieval target (rerouted to the device for a run_on turn).
     requested_product_node: Optional[str] = None   # the DEVICE to retrieve (== node_handle)
     requested_category_label: Optional[str] = None  # buyer-facing label when taxonomy is approximate
+    # Closed model signal for requests outside product commerce. It is advisory until the clamp
+    # confirms there is no grounded product node; it can never suppress a catalog result.
+    request_scope: str = "uncertain"               # product | service_or_place | uncertain
     workloads: Tuple[str, ...] = ()                # content/software nodes named as workloads
     relationship: str = "buy"                      # buy (named a product) | run_on (named a workload)
     # SESSION (M3-C2): the prior turn's shortlist SKUs. CONSUMED since R9.4 (review-6 #17
@@ -227,6 +230,7 @@ class TurnDecision:
                 "confidence": round(self.confidence, 3), "source": self.source,
                 "requested_product_node": self.requested_product_node,
                 "requested_category_label": self.requested_category_label,
+                "request_scope": self.request_scope,
                 "workloads": list(self.workloads), "relationship": self.relationship,
                 "prior_shortlist": list(self.prior_shortlist),
                 "brand_filter": self.brand_filter, "sort": self.sort,
@@ -451,6 +455,7 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
         "PROCUREMENT, not POLICY_QUESTION.\n\n"
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
         '"wanted_category": "<short product category when handle is null, else null>", '
+        '"request_scope": "product|service_or_place|uncertain", '
         '"use_cases": ["<key>", ...], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
         '"refine": {"brand": "<hard-filter brand or null>", '
@@ -486,7 +491,8 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "Translate coined workload/form-factor wording to the standard category of the complete "
         "product instead of repeating the shopper's phrase. "
         "It MUST NOT be null. A non-product "
-        "service/location request uses SEARCH with handle=null and confidence=0; lane itself is "
+        "service/location request uses SEARCH with handle=null, request_scope=service_or_place, "
+        "and confidence=0; lane itself is "
         "never null. Prefer an [in catalog] sibling only when meaning is otherwise equivalent.\n"
         f"USE_CASE keys: {', '.join(use_case_keys)}. Name zero or more; do not invent hardware "
         "floors because the platform resolves those from evidence.\n"
@@ -498,7 +504,8 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "per_unit, total or null. Never reinterpret per-unit as total. budget_cap_mode is hard "
         "for explicit limits, soft for approximate targets, ambiguous when the wording is unclear.\n"
         "Return ONLY this JSON shape (use null/empty values when absent): "
-        '{"lane":"SEARCH","handle":null,"wanted_category":null,"use_cases":[],"requirements":{},'
+        '{"lane":"SEARCH","handle":null,"wanted_category":null,"request_scope":"uncertain",'
+        '"use_cases":[],"requirements":{},'
         '"refine":{"brand":null,"prefer_brand":null,"exclude_brand":null,"sort":null},'
         '"compare_targets":[],"quantity":null,"total_budget":null,"budget_scope":null,'
         '"budget_cap_mode":"hard","subject_action":null,"confidence":0.0}.\n')
@@ -858,6 +865,10 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # makes the repair abstain. No second generation call is added to the latency path.
     routing_source = "model"
     wanted_category = str(data.get("wanted_category") or "").strip()[:120]
+    raw_request_scope = str(data.get("request_scope") or "").strip().lower()
+    request_scope = (raw_request_scope
+                     if raw_request_scope in ("product", "service_or_place", "uncertain")
+                     else "uncertain")
     if lane == "OFF_CATALOG" and node is None and wanted_category:
         normalized = wanted_category.lower().rstrip("s")
         exact = [candidate for candidate in search_nodes(wanted_category, limit=20)
@@ -928,6 +939,11 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # model mis-proposed the lane ('reduce the order to 15' AMENDS a procurement journey, it does
     # not mutate a cart that isn't there). Downgrade to a continuation (FILTER inherits the prior
     # bulk/brand state) when there's a prior subject, else SEARCH. Never mutate an absent cart.
+    # The model can identify a non-product service/place, but it cannot use that label to hide
+    # grounded commerce. Keep the signal only for a nodeless SEARCH with no named product class.
+    if node is not None or wanted_category or lane != "SEARCH":
+        request_scope = "product"
+
     if lane == "CART_MUTATE" and not (envelope.cart or []):
         prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
         if prior is not None:
@@ -944,6 +960,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         refusal_granted=refusal_granted, confidence=conf, source=routing_source,
                         requested_product_node=(node.handle if node else None),
                         requested_category_label=(wanted_category or None),
+                        request_scope=request_scope,
                         workloads=tuple(workloads), relationship=relationship,
                         prior_shortlist=prior_shortlist,
                         brand_filter=brand_filter, sort=sort, preferred_brand=preferred_brand,

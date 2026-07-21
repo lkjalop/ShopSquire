@@ -61,6 +61,31 @@ def test_router_bounded_fallback_on_garbage_model(db):
         assert d.requirements == {} and d.use_cases == ()
 
 
+def test_non_product_service_scope_gets_bounded_explanation(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": None, "wanted_category": None,
+        "request_scope": "service_or_place", "requirements": {}, "confidence": 0.0,
+    })
+    resp = recommend_turn(db, _env("find a pizza place near me"), llm_fn=lambda p, t: raw)
+
+    assert resp.products == []
+    assert resp.extras["decision"]["request_scope"] == "service_or_place"
+    assert resp.extras["unsupported_scope"]["kind"] == "service_or_place"
+    assert "local services or places" in resp.message
+    assert "catalog match" not in resp.message.lower()
+
+
+def test_service_scope_cannot_hide_a_grounded_product(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-6", "wanted_category": None,
+        "request_scope": "service_or_place", "requirements": {}, "confidence": 0.9,
+    })
+    decision = route_turn(db, _env("show me laptops"), llm_fn=lambda p, t: raw)
+
+    assert decision.node_handle == "el-6-6"
+    assert decision.request_scope == "product"
+
+
 def test_recommendation_excludes_products_outside_store_currency(db):
     from sqlalchemy import text as _t
     from src.app.services.taxonomy_registry import upsert_classification
