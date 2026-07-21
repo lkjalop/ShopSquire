@@ -273,3 +273,48 @@ def test_drawing_injects_registry_touchscreen_into_live_decision(db):
                                                        "use_cases": ["drawing"], "confidence": 0.9}))
     reqs = r.extras["constraints_used"]["requirements"]
     assert "touchscreen" in reqs and "form_factor" in reqs
+
+
+def test_bulk_shortfall_preview_reuses_governed_stage_without_creating_case(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.app.services.recommendation_core.core import _maybe_fulfillment_preview
+    from src.app.services.recommendation_core.envelope import CoreResponse, ProductCard
+    from src.app.services.recommendation_core.legacy_adapter import to_legacy
+    from src.app.services.recommendation_core.turn_router import TurnDecision
+
+    observed = {}
+
+    def fake_stage(**kwargs):
+        observed.update(kwargs)
+        assert kwargs["flags"]["FULFILLMENT_DEFER_TO_CART"] is True
+        kwargs["payload"].update({
+            "availability": {"sku": "AUD-1", "in_stock": 15, "shortfall": 5},
+            "fulfillment_options": [{"type": "source_shortfall", "quantity": 5}],
+            "sourcing_intent": {"mode": "deferred_to_cart", "lines": []},
+        })
+        return ""
+
+    monkeypatch.setattr("src.app.config.get_settings",
+                        lambda: SimpleNamespace(feature_flags_path="unused.json"))
+    monkeypatch.setattr("src.app.config.load_feature_flags", lambda path: {})
+    monkeypatch.setattr(
+        "src.app.services.recommend_fulfillment_stage.run_fulfillment_stage", fake_stage)
+
+    envelope = _env(query="20 laptops at $3000 each", budget_max=3000)
+    response = CoreResponse(envelope=envelope, lane="SEARCH")
+    response.products = [ProductCard(sku="AUD-1", title="Laptop", price_cents=289900,
+                                     currency="AUD", stock=15)]
+    response.extras["requested_quantity"] = 20
+
+    _maybe_fulfillment_preview(
+        envelope,
+        TurnDecision(use_cases=("gaming",), quantity=20),
+        response,
+    )
+
+    assert observed["constraints"]["order_quantity"] == 20
+    payload = to_legacy(response)
+    assert payload["availability"]["shortfall"] == 5
+    assert payload["fulfillment_options"][0]["quantity"] == 5
+    assert payload["sourcing_intent"]["mode"] == "deferred_to_cart"

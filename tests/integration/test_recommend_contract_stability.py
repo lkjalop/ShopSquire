@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.app.main import app
+from src.app.routers.recommend import _ensure_trace_response
 from tests.utils import default_headers
 
 client = TestClient(app, headers=default_headers())
@@ -100,6 +101,24 @@ def test_success_shape_full_ui_contract():
     assert isinstance(body["right_panel"], dict)
     assert "anchor_sections" in body["right_panel"], "right_panel.anchor_sections is consumed by the storefront sidebar"
     assert "products" in body
+
+
+def test_anchor_product_preserves_authoritative_currency():
+    body = _ensure_trace_response(
+        {
+            "results": [{
+                "sku": "AUD-1",
+                "name": "Australian laptop",
+                "price_cents": 289900,
+                "currency": "AUD",
+            }],
+        },
+        "trace-currency",
+        {},
+    )
+
+    product = body["right_panel"]["anchor_sections"][0]["top_products"][0]
+    assert product["currency"] == "AUD"
 
 
 def test_zero_results_uses_message_not_assistant_message():

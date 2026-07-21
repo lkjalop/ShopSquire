@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
+import { formatMoney, formatProductPrice, normalizeCurrency } from './lib/money';
 import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import SourcingIntentCard from './components/SourcingIntentCard';
@@ -225,22 +226,11 @@ function productPrice(p: any): number {
   return 0;
 }
 
-function normalizeCurrency(value: unknown): string {
-  const code = String(value || 'USD').trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(code) ? code : 'USD';
-}
-
-function formatMoney(n: number, currency: unknown = 'USD'): string {
-  const code = normalizeCurrency(currency);
-  return n.toLocaleString('en-AU', { style: 'currency', currency: code, currencyDisplay: 'code', maximumFractionDigits: 0 });
-}
-
 // Render a product price honestly: a real amount when we have one (from price OR price_cents), and an
 // em-dash when the object carries no price — never a misleading "$0" (demo-truth, same class as the
 // $0 budget-band fix).
 function formatPrice(p: any): string {
-  const v = productPrice(p);
-  return v > 0 ? formatMoney(v, p?.currency) : '—';
+  return formatProductPrice(p);
 }
 
 

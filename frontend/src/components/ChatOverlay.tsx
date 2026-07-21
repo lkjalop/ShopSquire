@@ -2,11 +2,11 @@ import { useRef, useEffect, useState } from 'react';
 import styles from './ChatOverlay.module.css';
 import type { Product } from '../App';
 import { focusFirst, trapFocus } from '../utils/a11y';
+import { formatProductPrice } from '../lib/money';
 
 // Honest price: from price OR price_cents; em-dash (not "$0") when the object carries no price.
 function priceText(p: any): string {
-  const v = Number(p?.price) > 0 ? Number(p.price) : (Number(p?.price_cents) > 0 ? Number(p.price_cents) / 100 : 0);
-  return v > 0 ? `$${v.toLocaleString()}` : '—';
+  return formatProductPrice(p);
 }
 
 // Inline SVG icons to avoid heroicons dependency issues

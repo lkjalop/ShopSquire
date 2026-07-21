@@ -78,6 +78,9 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         # to create the requested line quantity. Do not leave it trapped inside CoreResponse extras.
         "requested_quantity": core.extras.get("requested_quantity"),
         "bulk_budget": core.extras.get("bulk"),
+        "availability": core.extras.get("availability"),
+        "fulfillment_options": core.extras.get("fulfillment_options"),
+        "sourcing_intent": core.extras.get("sourcing_intent"),
         # v1 semantics: a budget-carrying search reads as FILTER (the recorded naming)
         "turn_intent": ("FILTER" if core.lane == "SEARCH"
                         and (core.envelope.budget_max_cents is not None

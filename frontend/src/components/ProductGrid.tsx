@@ -1,11 +1,11 @@
 import styles from './ProductGrid.module.css';
 import type { Product } from '../App';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
+import { formatProductPrice } from '../lib/money';
 
 // Honest price: from price OR price_cents; em-dash (not "$0") when the object carries no price.
 function priceText(p: any): string {
-  const v = Number(p?.price) > 0 ? Number(p.price) : (Number(p?.price_cents) > 0 ? Number(p.price_cents) / 100 : 0);
-  return v > 0 ? `$${v.toLocaleString()}` : '—';
+  return formatProductPrice(p);
 }
 
 // Buyer-facing "why" cleaner — the ranker tags (`+in_stock`, `+within_budget`, `+ram_gb_min:8`,

@@ -3005,6 +3005,7 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
                 top_products.append({
                     "sku": str(item.get("sku") or ""),
                     "name": str(item.get("name") or ""),
+                    "currency": item.get("currency"),
                     "price_cents": _pc,
                     "price": item.get("price") if item.get("price") is not None else (
                         round(_pc / 100, 2) if _pc else None),

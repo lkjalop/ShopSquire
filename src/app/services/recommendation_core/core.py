@@ -406,6 +406,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                lambda: _maybe_complement_offer(db, envelope, decision, resp))
     _run_stage(resp, "bulk_economics",
                lambda: _maybe_bulk_economics(db, envelope, decision, resp))
+    _run_stage(resp, "fulfillment_preview",
+               lambda: _maybe_fulfillment_preview(envelope, decision, resp))
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
@@ -967,6 +969,47 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
                                              {"id": "total", "label": f"{per} total for all {quantity}"}]})
     else:
         resp.set_message(_bulk_message(econ, decision), MsgPriority.BULK_VERDICT)
+
+
+def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
+                               resp: CoreResponse) -> None:
+    """Project bulk availability through the mature, read-only fulfillment stage.
+
+    V2 owns recommendation advice, not procurement execution. Forcing deferred mode here
+    preserves that boundary: the stage may expose stock, transfer, shortfall and a sourcing
+    intent, but a durable case is still created only when the buyer confirms the cart.
+    """
+    quantity = resp.extras.get("requested_quantity")
+    if not quantity or int(quantity) < 2 or not resp.products:
+        return
+
+    from src.app.config import get_settings, load_feature_flags
+    from src.app.services.recommend_fulfillment_stage import run_fulfillment_stage
+
+    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags["FULFILLMENT_DEFER_TO_CART"] = True
+    constraints: Dict[str, Any] = {
+        "order_quantity": int(quantity),
+        "budget_min": (envelope.budget_min_cents / 100
+                       if envelope.budget_min_cents is not None else None),
+        "budget_max": (envelope.budget_max_cents / 100
+                       if envelope.budget_max_cents is not None else None),
+        "use_case": decision.use_cases[0] if decision.use_cases else None,
+    }
+    projection: Dict[str, Any] = {}
+    run_fulfillment_stage(
+        results=[product.as_dict() for product in resp.products],
+        constraints=constraints,
+        payload=projection,
+        uid=envelope.uid,
+        trace_id=envelope.trace_id,
+        flags=flags,
+        query=envelope.query,
+        tenant_id=envelope.tenant_id,
+    )
+    for key in ("availability", "fulfillment_options", "sourcing_intent"):
+        if projection.get(key) is not None:
+            resp.extras[key] = projection[key]
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:
