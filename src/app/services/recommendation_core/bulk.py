@@ -10,7 +10,8 @@ from typing import Any, Dict, Optional
 
 
 def assess_bulk(quantity: Optional[int], total_cents: Optional[int], floor_cents: Optional[int],
-                *, bundle_floor_cents: Optional[int] = None) -> Optional[Dict[str, Any]]:
+                *, bundle_floor_cents: Optional[int] = None,
+                bundle_label: str = "Lower-cost compatible bundle") -> Optional[Dict[str, Any]]:
     """quantity × per-unit floor vs total budget → viability + tradeoffs. None when there's no
     quantity or no floor (nothing to size). total_cents None → 'here's the total, tell me budget'.
     All money in CENTS."""
@@ -41,9 +42,9 @@ def assess_bulk(quantity: Optional[int], total_cents: Optional[int], floor_cents
         out["bundle"] = {"floor_cents": bundle_floor_cents, "needed_cents": b_needed,
                          "fits": b_fits, "units_affordable": total_cents // bundle_floor_cents}
         t.append({"id": "bundle", "fits": b_fits, "needed_cents": b_needed,
-                  "label": (f"Bundle path (cheaper laptop + tablet) fits all {quantity}: "
+                  "label": (f"{bundle_label} fits all {quantity}: "
                             f"~${b_needed / 100:,.0f}") if b_fits else
-                           (f"Bundle path: {total_cents // bundle_floor_cents} units in "
+                           (f"{bundle_label}: {total_cents // bundle_floor_cents} units in "
                             f"${total_cents / 100:,.0f}, or ~${b_needed / 100:,.0f} for all {quantity}")})
     # review-10: don't ASSERT a payment plan exists (no tenant financing policy) — offer to check.
     t.append({"id": "financing_review",

@@ -32,18 +32,8 @@ _KB_PATH = Path(__file__).resolve().parents[4] / "config" / "use_case_kb.json"
 
 # KB required_specs key → (attribute-registry key, op). Numeric hard requirements only;
 # descriptive prefs (ir_camera, display_color_gamut, webcam) stay soft and are not gated.
-_SPEC_MAP: Dict[str, Tuple[str, str]] = {
-    "ram_gb_min": ("ram_gb", ">="),
-    "storage_gb_min": ("storage_gb", ">="),
-    "refresh_hz_min": ("refresh_hz", ">="),
-    "battery_hr_min": ("battery_hours", ">="),
-    "gpu_vram_gb_min": ("gpu_vram_gb", ">="),
-}
 # gpu_tier (a class, not a number) → a VRAM floor (vertical-blind translation; the legacy
 # gpu_translation module does the desktop↔laptop nuance — reused later).
-_GPU_TIER_VRAM = {"discrete": 4, "discrete_6gb": 6, "discrete_8gb": 8}
-
-
 @lru_cache(maxsize=1)
 def _kb() -> Dict[str, Any]:
     try:
@@ -85,15 +75,22 @@ def _profile_constraints(use_case: str):
     'use_case:<key>' (M2-B1: ranges + provenance replace the (op,thr) one-slot)."""
     from src.app.services.recommendation_core.constraints import from_op, merge
     specs = ((_kb().get("use_cases") or {}).get(use_case) or {}).get("required_specs") or {}
+    numeric_mappings = _kb().get("requirement_mappings") or {}
+    categorical_mappings = _kb().get("categorical_requirement_mappings") or {}
     src = f"use_case:{use_case}"
     out: Dict[str, Any] = {}
     for spec_key, val in specs.items():
         c = None
-        if spec_key in _SPEC_MAP and isinstance(val, (int, float)):
-            attr, op = _SPEC_MAP[spec_key]
-            c = from_op(attr, op, float(val), src)
-        elif spec_key == "gpu_tier" and str(val) in _GPU_TIER_VRAM:
-            c = from_op("gpu_vram_gb", ">=", float(_GPU_TIER_VRAM[str(val)]), src)
+        mapping = numeric_mappings.get(spec_key) if isinstance(numeric_mappings, dict) else None
+        if isinstance(mapping, dict) and isinstance(val, (int, float)):
+            c = from_op(str(mapping.get("attribute") or ""), str(mapping.get("op") or ""),
+                        float(val), src)
+        else:
+            choices = categorical_mappings.get(spec_key) if isinstance(categorical_mappings, dict) else None
+            mapping = choices.get(str(val)) if isinstance(choices, dict) else None
+            if isinstance(mapping, dict) and isinstance(mapping.get("value"), (int, float)):
+                c = from_op(str(mapping.get("attribute") or ""), str(mapping.get("op") or ""),
+                            float(mapping["value"]), src)
         if c is not None:
             out[c.key] = merge(out[c.key], c) if c.key in out else c
     return out

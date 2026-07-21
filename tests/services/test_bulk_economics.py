@@ -24,6 +24,16 @@ def test_bundle_makes_it_fit():
     assert any(t["id"] == "bundle" and t["fits"] for t in e["tradeoffs"])
 
 
+def test_bundle_buyer_text_is_vertical_neutral_and_overrideable():
+    generic = assess_bulk(20, 1_600_000, 112_400, bundle_floor_cents=70_800)
+    assert "laptop" not in next(t["label"] for t in generic["tradeoffs"] if t["id"] == "bundle").lower()
+    named = assess_bulk(20, 1_600_000, 112_400, bundle_floor_cents=70_800,
+                        bundle_label="Device and accessory bundle")
+    assert "Device and accessory bundle" in next(
+        t["label"] for t in named["tradeoffs"] if t["id"] == "bundle"
+    )
+
+
 def test_unsized_without_budget():
     e = assess_bulk(20, None, 112_400)
     assert e["verdict"] == "unsized" and e["per_unit_cents"] is None and not e["tradeoffs"]

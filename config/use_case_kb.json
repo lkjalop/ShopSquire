@@ -1,6 +1,20 @@
 {
   "_version": "1.0.0",
   "_description": "High-level use-case knowledge base. Maps canonical use-case keys to required specs, soft requirements, and exclusion rules. Used by NQE, LLM summarizer persona context, and candidate ranking adjustments.",
+  "requirement_mappings": {
+    "ram_gb_min": {"attribute": "ram_gb", "op": ">="},
+    "storage_gb_min": {"attribute": "storage_gb", "op": ">="},
+    "refresh_hz_min": {"attribute": "refresh_hz", "op": ">="},
+    "battery_hr_min": {"attribute": "battery_hours", "op": ">="},
+    "gpu_vram_gb_min": {"attribute": "gpu_vram_gb", "op": ">="}
+  },
+  "categorical_requirement_mappings": {
+    "gpu_tier": {
+      "discrete": {"attribute": "gpu_vram_gb", "op": ">=", "value": 4},
+      "discrete_6gb": {"attribute": "gpu_vram_gb", "op": ">=", "value": 6},
+      "discrete_8gb": {"attribute": "gpu_vram_gb", "op": ">=", "value": 8}
+    }
+  },
   "use_cases": {
     "gaming": {
       "label": "Gaming",

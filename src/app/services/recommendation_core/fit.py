@@ -26,6 +26,7 @@ from src.app.services.attribute_registry import (
     extract_categoricals,
     extract_quantities,
     normalize_specs,
+    registered_verticals,
 )
 from src.app.services.catalog_read_model import VariantView
 from src.app.services.recommendation_core.envelope import ProductCard
@@ -33,7 +34,7 @@ from src.app.services.recommendation_core.envelope import ProductCard
 import logging
 _log = logging.getLogger("shopsquire.recommendation_core.fit")
 
-DEFAULT_VERTICALS = ("electronics", "pharmacy", "fashion")
+DEFAULT_VERTICALS = registered_verticals()
 
 
 def variant_attributes(view: VariantView,

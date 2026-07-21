@@ -9,6 +9,7 @@ from src.app.services.attribute_registry import (
     meets,
     normalize_specs,
     normalize_value,
+    registered_verticals,
 )
 
 EL = load_defs("electronics")
@@ -23,6 +24,10 @@ def test_defs_load_per_vertical_and_union():
     assert load_defs("no-such-vertical") == {}
     merged = defs_union(("electronics", "pharmacy", "fashion"))
     assert {"ram_gb", "strength_mg", "material"} <= set(merged)
+
+
+def test_registered_verticals_are_discovered_from_installed_data():
+    assert {"electronics", "pharmacy", "fashion"} <= set(registered_verticals())
 
 
 # ── value normalization ───────────────────────────────────────────────────────

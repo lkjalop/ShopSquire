@@ -40,6 +40,16 @@ ROLES = ("variant_axis", "descriptive", "fit", "regulatory", "offer")
 KINDS = ("quantity", "enum", "boolean", "text")
 
 
+@lru_cache(maxsize=1)
+def registered_verticals() -> Tuple[str, ...]:
+    """Verticals with installed attribute data. New data files enroll automatically."""
+    try:
+        return tuple(sorted(path.stem for path in _DATA_DIR.glob("*.json") if path.is_file()))
+    except OSError as exc:
+        logger.warning("attribute registry directory unreadable: %s", exc)
+        return ()
+
+
 @dataclass(frozen=True)
 class AttributeDef:
     key: str
