@@ -858,6 +858,86 @@ def test_active_procurement_can_use_bounded_context_judgment_when_subject_is_unc
     assert decision.lane == "PROCUREMENT"
 
 
+@pytest.mark.parametrize(
+    ("subject_action", "procurement_context", "expected_lane"),
+    [
+        ("continue", "current_order", "PROCUREMENT"),
+        ("uncertain", "current_order", "PROCUREMENT"),
+        ("continue", "general_policy", "POLICY_QUESTION"),
+        ("uncertain", "general_policy", "POLICY_QUESTION"),
+    ],
+)
+def test_active_procurement_policy_clamp_requires_non_policy_context(
+    db, subject_action, procurement_context, expected_lane,
+):
+    session = {"active_workflow_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"]}
+    raw = json.dumps({
+        "lane": "POLICY_QUESTION", "handle": None, "requirements": {},
+        "subject_action": subject_action, "procurement_context": procurement_context,
+        "confidence": 0.9,
+    })
+    decision = route_turn(
+        db, _env_session("follow-up", session),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+    assert decision.lane == expected_lane
+
+
+def test_brand_clear_is_a_bounded_explicit_operation(db):
+    session = {
+        "prior_node": "el-6-6",
+        "accepted_constraints": {
+            "brand_filter": "Lenovo",
+            "exclude_brand": "Apple",
+            "preferred_brand": "Dell",
+        },
+    }
+    raw = json.dumps({
+        "lane": "FILTER", "handle": "el-6-6", "requirements": {},
+        "refine": {
+            "brand": None, "prefer_brand": None, "exclude_brand": None,
+            "sort": None, "brand_action": "clear",
+        },
+        "subject_action": "continue", "confidence": 0.9,
+    })
+    decision = route_turn(
+        db, _env_session("any brand is fine", session),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+    assert decision.brand_action == "clear"
+    assert decision.brand_filter is None
+    assert decision.exclude_brand is None
+    assert decision.preferred_brand is None
+
+
+def test_brand_clear_prevents_core_from_reinheriting_prior_constraints(db):
+    session = {
+        "prior_node": "el-6-6",
+        "accepted_constraints": {
+            "brand_filter": "Asus",
+            "exclude_brand": "MSI",
+            "preferred_brand": "Asus",
+        },
+    }
+    raw = json.dumps({
+        "lane": "FILTER", "handle": "el-6-6", "requirements": {},
+        "refine": {
+            "brand": None, "prefer_brand": None, "exclude_brand": None,
+            "sort": None, "brand_action": "clear",
+        },
+        "subject_action": "continue", "confidence": 0.9,
+    })
+    response = recommend_turn(
+        db, _env("any brand is fine", session=session),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+    decision = response.extras["decision"]
+    assert decision["brand_action"] == "clear"
+    assert decision["brand_filter"] is None
+    assert decision["exclude_brand"] is None
+    assert {product.brand for product in response.products} == {"MSI"}
+
+
 def test_no_cart_mutation_downgrade_carries_authorized_prior_node(db):
     env = _env("cut it to 1000 max")
     env = __import__("dataclasses").replace(

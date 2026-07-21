@@ -53,6 +53,7 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
         prior = (envelope.session or {}).get("accepted_constraints") or {}
         decision_quantity = decision.get("quantity")
         decision_total = decision.get("total_budget_cents")
+        clear_brands = decision.get("brand_action") == "clear"
         prior_workflow = ((envelope.session or {}).get("active_workflow_lane")
                           or ((envelope.session or {}).get("prior_lane")
                               if (envelope.session or {}).get("prior_lane") == "PROCUREMENT"
@@ -84,13 +85,13 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
                                  else prior.get("budget_scope")),
                 # brand constraints (review-10 P0.6) — so 'now show me cheaper ones' keeps the
                 # 'only Asus' / 'not Apple' the shopper set on a prior turn.
-                "brand_filter": (decision.get("brand_filter")
+                "brand_filter": (None if clear_brands else decision.get("brand_filter")
                                  if decision.get("brand_filter") is not None
                                  else prior.get("brand_filter")),
-                "exclude_brand": (decision.get("exclude_brand")
+                "exclude_brand": (None if clear_brands else decision.get("exclude_brand")
                                   if decision.get("exclude_brand") is not None
                                   else prior.get("exclude_brand")),
-                "preferred_brand": (decision.get("preferred_brand")
+                "preferred_brand": (None if clear_brands else decision.get("preferred_brand")
                                     if decision.get("preferred_brand") is not None
                                     else prior.get("preferred_brand")),
             },

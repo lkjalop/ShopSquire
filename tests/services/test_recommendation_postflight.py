@@ -103,6 +103,30 @@ def test_followup_preserves_prior_brand_constraints_when_not_replaced():
     assert constraints["preferred_brand"] == "Dell"
 
 
+def test_explicit_brand_clear_drops_all_prior_brand_constraints():
+    import dataclasses
+    r = _Redis()
+    env = dataclasses.replace(_env(), session={
+        "accepted_constraints": {
+            "brand_filter": "Lenovo",
+            "exclude_brand": "Apple",
+            "preferred_brand": "Dell",
+        },
+    })
+    core = _core(env)
+    core.extras["decision"].update({
+        "brand_action": "clear",
+        "brand_filter": None,
+        "exclude_brand": None,
+        "preferred_brand": None,
+    })
+    assert write_session(r, env, core) is True
+    constraints = json.loads(r.store["session:t1:u1:kv_state"])["constraints"]
+    assert constraints["brand_filter"] is None
+    assert constraints["exclude_brand"] is None
+    assert constraints["preferred_brand"] is None
+
+
 def test_filter_followup_preserves_active_procurement_workflow():
     import dataclasses
     r = _Redis()

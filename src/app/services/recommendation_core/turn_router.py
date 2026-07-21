@@ -198,6 +198,9 @@ class TurnDecision:
     # brand EXCLUSION ('a gaming laptop but NOT Apple') — the negation slot the V2 core was missing;
     # clamped to a real catalog brand, subtracted at retrieval AND from the capability floor.
     exclude_brand: Optional[str] = None
+    # keep | set | clear. A separate operation is required because null brand fields mean
+    # "not mentioned this turn" and must not also mean "remove remembered constraints".
+    brand_action: str = "keep"
     # R9.4: True when the routed node came from the SESSION (nodeless-continuation inherit or
     # fragment-drift override) — the turn is ABOUT the prior subject, so EXPLAIN/COMPARE may
     # consume prior_shortlist ('the first one' = the items actually shown last turn).
@@ -235,6 +238,7 @@ class TurnDecision:
                 "prior_shortlist": list(self.prior_shortlist),
                 "brand_filter": self.brand_filter, "sort": self.sort,
                 "preferred_brand": self.preferred_brand, "exclude_brand": self.exclude_brand,
+                "brand_action": self.brand_action,
                 "subject_from_session": self.subject_from_session,
                 "compare_targets": list(self.compare_targets),
                 "quantity": self.quantity, "total_budget_cents": self.total_budget_cents,
@@ -507,14 +511,17 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         f"REQUIREMENT keys: {', '.join(req_keys)}. Extract only explicit numeric specs in an "
         "object mapping key to [operator,number]. Price and item count are not specs.\n"
         "REFINE: brand=hard-only, prefer_brand=soft, exclude_brand=negation, sort=price_asc, "
-        "price_desc or null. compare_targets contains only specifically named products.\n"
+        "price_desc or null. brand_action=keep when brands are unmentioned, set when adding or "
+        "replacing a brand constraint, clear only when the shopper explicitly removes all brand "
+        "constraints. compare_targets contains only specifically named products.\n"
         "BULK: quantity is unit count; total_budget is whole-order dollars; budget_scope is "
         "per_unit, total or null. Never reinterpret per-unit as total. budget_cap_mode is hard "
         "for explicit limits, soft for approximate targets, ambiguous when the wording is unclear.\n"
         "Return ONLY this JSON shape (use null/empty values when absent): "
         '{"lane":"SEARCH","handle":null,"wanted_category":null,"request_scope":"uncertain",'
         '"use_cases":[],"requirements":{},'
-        '"refine":{"brand":null,"prefer_brand":null,"exclude_brand":null,"sort":null},'
+        '"refine":{"brand":null,"prefer_brand":null,"exclude_brand":null,"sort":null,'
+        '"brand_action":"keep"},'
         '"compare_targets":[],"quantity":null,"total_budget":null,"budget_scope":null,'
         '"budget_cap_mode":"hard","subject_action":null,"procurement_context":"none",'
         '"confidence":0.0}.\n')
@@ -667,6 +674,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     if (str(session.get("active_workflow_lane")
             or session.get("prior_lane") or "").strip().upper() == "PROCUREMENT"
             and lane == "POLICY_QUESTION"
+            and procurement_context != "general_policy"
             and (subject_action == "continue" or procurement_context == "current_order")):
         lane = "PROCUREMENT"
     _continues = subject_action == "continue" or (
@@ -769,6 +777,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # real brands (canonical casing). A miss drops the refinement — never invent a narrowing.
     from src.app.services.recommendation_core.ranking import SORTS
     refine = data.get("refine") if isinstance(data.get("refine"), dict) else {}
+    raw_brand_action = str(refine.get("brand_action") or "keep").strip().lower()
+    brand_action = raw_brand_action if raw_brand_action in ("keep", "set", "clear") else "keep"
     sort = str(refine.get("sort") or "").strip().lower() or None
     if sort not in SORTS:
         sort = None
@@ -777,6 +787,10 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     if preferred_brand and preferred_brand == brand_filter:
         preferred_brand = None      # a hard filter already narrows to it — no separate soft band
     exclude_brand = _clamp_brand(db, refine.get("exclude_brand"))   # negation ('not Apple')
+    if brand_action == "clear":
+        brand_filter = preferred_brand = exclude_brand = None
+    elif any((brand_filter, preferred_brand, exclude_brand)):
+        brand_action = "set"
     # Consequential contradiction clamp: a weak/BYO model can put "not Apple" in the
     # positive brand slot.  Explicit negation against a real catalog brand wins; the
     # model still supplies every non-literal/ambiguous refinement.
@@ -1017,7 +1031,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         workloads=tuple(workloads), relationship=relationship,
                         prior_shortlist=prior_shortlist,
                         brand_filter=brand_filter, sort=sort, preferred_brand=preferred_brand,
-                        exclude_brand=exclude_brand,
+                        exclude_brand=exclude_brand, brand_action=brand_action,
                         subject_from_session=subject_from_session,
                         compare_targets=compare_targets,
                         quantity=quantity, total_budget_cents=total_budget_cents,

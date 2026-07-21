@@ -204,3 +204,16 @@ def test_default_tenant_bridges_explicit_legacy_procurement_state():
     assert bridged["prior_lane"] == "PROCUREMENT"
     assert bridged["active_workflow_lane"] == "PROCUREMENT"
     assert bridged["accepted_constraints"]["quantity"] == 25
+
+
+def test_default_tenant_does_not_reactivate_finalized_legacy_procurement():
+    import json
+    r = _Redis()
+    r.store["session:u1:kv_state"] = json.dumps({
+        "active_pr": {"pr_id": "PR-default-1", "finalized": True},
+        "confirmed_slots": {"order_quantity": 25},
+        "last_shortlist_skus": ["LAP-1"],
+    })
+    bridged = F._read_session_slice(r, "u1", "default")
+    assert bridged["prior_lane"] is None
+    assert bridged["active_workflow_lane"] is None

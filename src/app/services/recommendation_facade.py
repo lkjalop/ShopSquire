@@ -404,17 +404,18 @@ def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
                 quantity = int(quantity) if quantity is not None else None
             except (TypeError, ValueError):
                 bmin = bmax = quantity = None
+            active_pr = legacy.get("active_pr")
+            if isinstance(active_pr, dict):
+                procurement_active = bool(active_pr.get("pr_id") and not active_pr.get("finalized"))
+            else:
+                procurement_active = bool(legacy.get("last_sourcing_intent"))
             return {
                 "prior_node": None,
                 # The mature legacy procurement workflow remains the executor. Bridge only its
                 # explicit workflow state into the V2 routing context; do not infer procurement
                 # from quantity alone because ordinary multi-pack searches also carry quantity.
-                "prior_lane": ("PROCUREMENT"
-                               if legacy.get("active_pr") or legacy.get("last_sourcing_intent")
-                               else None),
-                "active_workflow_lane": ("PROCUREMENT"
-                                         if legacy.get("active_pr")
-                                         or legacy.get("last_sourcing_intent") else None),
+                "prior_lane": "PROCUREMENT" if procurement_active else None,
+                "active_workflow_lane": "PROCUREMENT" if procurement_active else None,
                 "shortlist_skus": legacy.get("last_valid_shortlist_skus")
                                   or legacy.get("last_shortlist_skus") or [],
                 "accepted_constraints": {
