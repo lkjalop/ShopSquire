@@ -216,6 +216,27 @@ def test_procurement_accepts_registry_handle_from_category_slot(db):
     assert decision.source == "model+taxonomy_handle"
 
 
+def test_nothing_from_brand_is_a_continuation_not_subject_switch(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-6", "wanted_category": None,
+        "request_scope": "product", "requirements": {}, "confidence": 0.8,
+        "subject_action": "switch",
+        "refine": {"brand": None, "prefer_brand": None,
+                   "exclude_brand": None, "sort": None},
+    })
+    env = _env("nothing from MSI", session={
+        "prior_node": "el-6-6",
+        "accepted_constraints": {"budget_max_cents": 180000},
+    })
+
+    response = recommend_turn(db, env, llm_fn=lambda _prompt, _timeout: raw)
+
+    assert response.extras["decision"]["exclude_brand"] == "MSI"
+    assert response.extras["decision"]["subject_action"] == "continue"
+    assert response.extras["constraints_used"]["budget_max_cents"] == 180000
+    assert all(product.brand != "MSI" for product in response.products)
+
+
 def test_off_catalog_distinct_lexical_category_avoids_semantic_repair(db, monkeypatch):
     monkeypatch.setattr(
         "src.app.services.taxonomy_embedding_index.semantic_top_k",

@@ -334,6 +334,7 @@ def _explicitly_excluded_brand(db, query: str) -> Optional[str]:
         brand = _re.escape(canonical.lower())
         patterns = (
             rf"\b(?:not|except|excluding|exclude|without)\s+{brand}\b",
+            rf"\b(?:no|nothing)\s+from\s+{brand}\b",
             rf"\banything\s+but\s+{brand}\b",
         )
         if any(_re.search(pattern, q) for pattern in patterns):
@@ -755,6 +756,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             brand_filter = None
         if preferred_brand and preferred_brand.lower() == explicit_exclusion.lower():
             preferred_brand = None
+        prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
+        # Excluding a catalog brand refines the active subject; it cannot by itself authorize
+        # a subject reset. This also lets the core inherit the active budget and requirements.
+        if prior is not None and (node is None or node.handle == prior.handle):
+            subject_action = "continue"
+            if node is None:
+                node = prior
+                subject_from_session = True
     # compare_targets shape clamp (R9.3): short strings, ≤4 — the BINDING clamp (name → real
     # retrieved variant, distinctive-token overlap) runs in the core where the slate exists.
     raw_targets = data.get("compare_targets")
