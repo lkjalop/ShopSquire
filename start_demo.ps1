@@ -8,6 +8,8 @@
 $env:OLLAMA_DEFAULT_MODEL      = "qwen3:14b"
 $env:OLLAMA_SMALL_MODEL        = "qwen3:14b"     # recommendation/procurement narration uses 14b (was 8b-vl)
 $env:OLLAMA_SUMMARY_MODEL      = "qwen3:14b"
+$env:ROUTER_MODEL              = "qwen3:14b"     # V2 router ignores generic OLLAMA_* model aliases
+$env:CLASSIFIER_MODEL          = "qwen3:14b"     # taxonomy/onboarding text classification
 $env:OLLAMA_VISION_MODEL       = "qwen3-vl:8b"
 $env:CV_VISION_MODEL           = "qwen3-vl:8b"
 $env:CV_MODEL                  = "qwen3-vl:8b"
@@ -42,6 +44,10 @@ $env:CV_DEEP_OCR_TIMEOUT_S             = "6"      # risk-triggered OCR cannot ho
 $env:CV_VISUAL_SEARCH_OCR_FALLBACK     = "0"      # VLM already extracts text; deep OCR is risk-triggered
 $env:CV_SELECTIVE_OCR_PROVIDER         = "tesseract" # CPU fallback only for QR/overlay risk evidence
 $env:CV_SELECTIVE_OCR_TIMEOUT_S        = "3"      # bounded before the deeper OCR ladder
+# A 12GB GPU cannot keep qwen3:14b and qwen3-vl:8b resident together. Keep the text router and
+# taxonomy embedder warm for the main journey; selective IMAGE V2 loads vision only on demand.
+# Record image acts last, or expect the following text turn to pay one router reload.
+$env:CV_WARMUP_ON_START                = "0"
 # Serve the bounded V2 core for its eligible recommendation lanes. Procurement and unsupported
 # lanes still delegate through the facade to their mature handlers; cart mutations remain
 # confirmation-gated because RECOMMEND_CART_AUTO_APPLY is intentionally not enabled here.
@@ -57,6 +63,10 @@ $env:EVIDENCE_LEG_BUDGET_SEC           = "2.5"
 # Supplier comms stay SAFE for the demo (no real email): sandbox transport + autonomy OFF.
 $env:FULFILLMENT_SUPPLIER_TRANSPORT = "sandbox"
 $env:FULFILLMENT_AUTONOMOUS_RFQ     = "0"
+
+# A previous image turn may leave the VLM resident across backend restarts. Free that slot before
+# startup so the router prewarm can establish the intended qwen3:14b + nomic demo profile.
+ollama stop $env:CV_VISION_MODEL 2>$null | Out-Null
 
 # free port 8080 if a stale backend is still running
 Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue |
