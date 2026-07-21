@@ -200,6 +200,22 @@ def test_search_repairs_model_named_taxonomy_path(db):
     assert decision.exclude_brand == "Apple" or decision.exclude_brand is None
 
 
+def test_procurement_accepts_registry_handle_from_category_slot(db):
+    raw = json.dumps({
+        "lane": "PROCUREMENT", "handle": None, "wanted_category": "el-6-6",
+        "request_scope": "product", "requirements": {}, "quantity": 20,
+        "confidence": 0.9,
+    })
+    decision = route_turn(
+        db, _env("quote 20 work laptops"), llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.lane == "PROCUREMENT"
+    assert decision.node_handle == "el-6-6"
+    assert decision.node_path and "Laptops" in decision.node_path
+    assert decision.source == "model+taxonomy_handle"
+
+
 def test_off_catalog_distinct_lexical_category_avoids_semantic_repair(db, monkeypatch):
     monkeypatch.setattr(
         "src.app.services.taxonomy_embedding_index.semantic_top_k",

@@ -872,18 +872,24 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                      if raw_request_scope in ("product", "service_or_place", "uncertain")
                      else "uncertain")
     if node is None and wanted_category:
-        normalized = wanted_category.lower().strip().rstrip("s")
-        leaf = normalized.rsplit(">", 1)[-1].strip()
-        candidates = search_nodes(wanted_category, limit=20)
-        path_exact = [candidate for candidate in candidates
-                      if candidate.full_path.lower().strip().rstrip("s") == normalized]
-        name_exact = [candidate for candidate in candidates
-                      if candidate.name.lower().strip().rstrip("s") == leaf]
-        exact = path_exact or name_exact
-        if len(exact) == 1:
-            node = exact[0]
-            routing_source = "model+taxonomy_exact"
+        # Some compatible model adapters put a real registry handle in the descriptive
+        # category slot. Treat both bounded fields identically before attempting fuzzy repair.
+        node = get_node(wanted_category)
+        if node is not None:
+            routing_source = "model+taxonomy_handle"
         else:
+            normalized = wanted_category.lower().strip().rstrip("s")
+            leaf = normalized.rsplit(">", 1)[-1].strip()
+            candidates = search_nodes(wanted_category, limit=20)
+            path_exact = [candidate for candidate in candidates
+                          if candidate.full_path.lower().strip().rstrip("s") == normalized]
+            name_exact = [candidate for candidate in candidates
+                          if candidate.name.lower().strip().rstrip("s") == leaf]
+            exact = path_exact or name_exact
+            if len(exact) == 1:
+                node = exact[0]
+                routing_source = "model+taxonomy_exact"
+        if node is None:
             lexical = candidate_nodes(wanted_category, semantic=False)
             top_score = lexical[0][1] if lexical else 0.0
             runner_up = lexical[1][1] if len(lexical) > 1 else 0.0
