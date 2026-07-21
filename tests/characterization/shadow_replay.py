@@ -291,12 +291,14 @@ def main() -> None:
                     shown = [str(p.get("sku")) for p in (v2.get("products") or [])
                              if isinstance(p, dict) and p.get("sku")]
                     authz = catalog_authorization(s, shown, tenant_id="default")
+                    decision_source = str(dec.get("source") or "default")
                     quality_rows.append(evaluate_case_quality(
                         _quality_case(f"{case['id']}:{t['turn']}", req, core), v2, labels,
                         catalog=authz, split=args.label_split, latency_ms=latency_ms,
                         timed_out=bool(model_call["timed_out"]),
-                        fallback_used=str(dec.get("source") or "default") != "model",
-                        model_mode=str(dec.get("source") or "default")))
+                        fallback_used=(decision_source == "default"
+                                       or decision_source.startswith("fallback:")),
+                        model_mode=decision_source))
                     if args.diagnose:
                         diag_rows.append(_diagnose_case(case["id"], t["turn"],
                                                         req.get("query", ""), core, v2))

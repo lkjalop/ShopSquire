@@ -38,8 +38,12 @@ def _embed(texts: List[str], *, timeout: float = 120.0) -> Optional[List[List[fl
     try:
         import httpx
         url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-        r = httpx.post(f"{url}/api/embed", json={"model": EMBED_MODEL, "input": texts},
-                       timeout=timeout)
+        r = httpx.post(
+            f"{url}/api/embed",
+            json={"model": EMBED_MODEL, "input": texts,
+                  "keep_alive": os.getenv("OLLAMA_EMBED_KEEP_ALIVE", "60m")},
+            timeout=timeout,
+        )
         data = r.json() or {}
         if r.status_code != 200 or data.get("error"):
             logger.warning("embed call failed: http=%s error=%s", r.status_code,

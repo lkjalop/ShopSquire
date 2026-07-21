@@ -1262,7 +1262,7 @@ def _exec_fit_check(db, envelope: TurnEnvelope, decision: TurnDecision,
 def _exec_off_catalog(db, envelope: TurnEnvelope, decision: TurnDecision,
                       resp: CoreResponse, limit: int) -> None:
     # only reachable with refusal_granted (router clamp AND plan validator both enforce it)
-    node_label = decision.node_path or "that category"
+    node_label = decision.requested_category_label or decision.node_path or "that category"
     resp.off_catalog = {"class": decision.node_handle, "label": node_label,
                         "supplier_rfq_offer": True}
 

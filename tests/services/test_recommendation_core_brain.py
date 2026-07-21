@@ -48,6 +48,7 @@ def _route_stub(lane, handle, requirements=None, conf=0.9, refine=None):
 
 
 def _env(q, **kw):
+    kw.setdefault("currency", "USD")
     return TurnEnvelope.from_suggest_params(query=q, uid="u1", **kw)
 
 
@@ -116,6 +117,64 @@ def test_refusal_needs_the_sold_set_not_the_model(db):
     # and a SOLD category can never be refused, whatever the model says
     d3 = route_turn(db, _env("gaming laptops"), llm_fn=_route_stub("OFF_CATALOG", "el-6-11-2"))
     assert d3.lane == "SEARCH" and not d3.refusal_granted
+
+
+def test_off_catalog_null_handle_is_repaired_through_taxonomy_then_sellability(db, monkeypatch):
+    """Candidate recall may miss an absent category, but the model still cannot authorize it."""
+    monkeypatch.setattr(
+        "src.app.services.taxonomy_embedding_index.semantic_top_k",
+        lambda wanted, *, top_k: [("bi-18", 0.8)],
+    )
+    raw = json.dumps({
+        "lane": "OFF_CATALOG", "handle": None, "wanted_category": "forklifts",
+        "requirements": {}, "confidence": 0.8,
+    })
+    decision = route_turn(db, _env("do you sell forklifts?"), llm_fn=lambda p, t: raw)
+
+    assert decision.node_handle == "bi-18"
+    assert decision.lane == "OFF_CATALOG" and decision.refusal_granted
+    assert decision.source == "model+taxonomy_semantic"
+    assert decision.requested_category_label == "forklifts"
+
+    # The same bridge cannot turn a sold node into a refusal.
+    sold_raw = json.dumps({
+        "lane": "OFF_CATALOG", "handle": None, "wanted_category": "Laptops",
+        "requirements": {}, "confidence": 0.8,
+    })
+    sold = route_turn(db, _env("do you sell laptops?"), llm_fn=lambda p, t: sold_raw)
+    assert sold.node_handle == "el-6-6"
+    assert sold.lane == "SEARCH" and not sold.refusal_granted
+
+
+def test_off_catalog_exact_category_avoids_semantic_repair(db, monkeypatch):
+    monkeypatch.setattr(
+        "src.app.services.taxonomy_embedding_index.semantic_top_k",
+        lambda wanted, *, top_k: pytest.fail("exact taxonomy name must not use semantic repair"),
+    )
+    raw = json.dumps({
+        "lane": "OFF_CATALOG", "handle": None, "wanted_category": "Computer Servers",
+        "requirements": {}, "confidence": 0.95,
+    })
+    decision = route_turn(db, _env("quote rackmount GPU nodes"), llm_fn=lambda p, t: raw)
+    assert decision.lane == "OFF_CATALOG" and decision.refusal_granted
+    assert decision.node_handle == "el-6-2"
+    assert decision.source == "model+taxonomy_exact"
+
+
+def test_off_catalog_distinct_lexical_category_avoids_semantic_repair(db, monkeypatch):
+    monkeypatch.setattr(
+        "src.app.services.taxonomy_embedding_index.semantic_top_k",
+        lambda wanted, *, top_k: pytest.fail("distinct lexical category must not use semantic repair"),
+    )
+    raw = json.dumps({
+        "lane": "OFF_CATALOG", "handle": None,
+        "wanted_category": "Computers > Servers > GPU Servers",
+        "requirements": {}, "confidence": 0.95,
+    })
+    decision = route_turn(db, _env("need rackmount GPU servers"), llm_fn=lambda p, t: raw)
+    assert decision.lane == "OFF_CATALOG" and decision.refusal_granted
+    assert decision.node_handle == "el-6-2"
+    assert decision.source == "model+taxonomy_lexical"
 
 
 def test_wrongful_refusal_guard_spec_turns_never_platform_refused(db):

@@ -335,8 +335,20 @@ def create_app() -> FastAPI:
                                   "options": {"num_predict": 1, "temperature": 0}},
                             timeout=120.0,
                         )
+                        # The off-catalog taxonomy clamp uses the small embedding model. Warm and
+                        # pin it beside the router so the first absent-category turn does not pay
+                        # a 12s model-load spike. This requires OLLAMA_MAX_LOADED_MODELS>=2, which
+                        # start_demo.ps1 documents as part of the 12GB demo residency profile.
+                        from src.app.services.taxonomy_embedding_index import EMBED_MODEL
+                        _hx.post(
+                            f"{_url}/api/embed",
+                            json={"model": EMBED_MODEL, "input": ["product taxonomy warmup"],
+                                  "keep_alive": os.getenv("OLLAMA_EMBED_KEEP_ALIVE", "60m")},
+                            timeout=120.0,
+                        )
                         import logging as _rl2
-                        _rl2.getLogger("shopsquire.startup").info("router-model pre-warm complete: %s", _model)
+                        _rl2.getLogger("shopsquire.startup").info(
+                            "router/taxonomy-model pre-warm complete: %s + %s", _model, EMBED_MODEL)
                     except Exception as _rw_exc:
                         import logging as _rl2
                         _rl2.getLogger("shopsquire.startup").warning("router-model pre-warm failed: %s", _rw_exc)

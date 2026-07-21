@@ -35,7 +35,8 @@ from src.app.services.catalog_classifier import candidate_nodes
 from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
-from src.app.services.taxonomy_registry import get_node, primary_sold_node, sells_within, sold_nodes
+from src.app.services.taxonomy_registry import (get_node, primary_sold_node, search_nodes,
+                                                sells_within, sold_nodes)
 
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
@@ -175,6 +176,7 @@ class TurnDecision:
     # routed node's vertical (so-/me- = a workload, not a device); node_handle stays the
     # retrieval target (rerouted to the device for a run_on turn).
     requested_product_node: Optional[str] = None   # the DEVICE to retrieve (== node_handle)
+    requested_category_label: Optional[str] = None  # buyer-facing label when taxonomy is approximate
     workloads: Tuple[str, ...] = ()                # content/software nodes named as workloads
     relationship: str = "buy"                      # buy (named a product) | run_on (named a workload)
     # SESSION (M3-C2): the prior turn's shortlist SKUs. CONSUMED since R9.4 (review-6 #17
@@ -224,6 +226,7 @@ class TurnDecision:
                 "use_cases": list(self.use_cases), "refusal_granted": self.refusal_granted,
                 "confidence": round(self.confidence, 3), "source": self.source,
                 "requested_product_node": self.requested_product_node,
+                "requested_category_label": self.requested_category_label,
                 "workloads": list(self.workloads), "relationship": self.relationship,
                 "prior_shortlist": list(self.prior_shortlist),
                 "brand_filter": self.brand_filter, "sort": self.sort,
@@ -406,8 +409,12 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
         "performance' is a LAPTOP described by a spec).\n"
         "- OFF_CATALOG only when the wanted category is clearly not something this kind of "
         "store sells; the platform verifies against the real sold list either way.\n"
-        "- For a request that is not about commerce or products at all, use SEARCH with a null "
-        "handle and confidence 0. Do not return a null or invented lane.\n"
+        "- A request to buy, quote, source, or ask whether the store sells a product is commerce, "
+        "even when the exact category is absent: use OFF_CATALOG. If no handle fits, provide a "
+        "non-null wanted_category naming the specific taxonomy-style leaf, including its parent "
+        "noun when ambiguous and describing the product rather than an accessory. "
+        "Only a non-product service/location request uses SEARCH with a null handle and confidence "
+        "0. Do not return a null or invented lane.\n"
         "- When SEVERAL candidates plausibly fit the same want (bag vs sleeve vs case), prefer "
         "one marked [in catalog] — unmarked categories exist in the taxonomy but this store "
         "does not stock them. If what the shopper wants is clearly an UNMARKED category, still "
@@ -443,6 +450,7 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
         "are PROCUREMENT. A statement that keeps or changes existing constraints is FILTER or "
         "PROCUREMENT, not POLICY_QUESTION.\n\n"
         'Return JSON: {"lane": "<lane>", "handle": "<candidate handle or null>", '
+        '"wanted_category": "<short product category when handle is null, else null>", '
         '"use_cases": ["<key>", ...], '
         '"requirements": {"<key>": ["<op one of >=,<=,>,<,==>", <number>]}, '
         '"refine": {"brand": "<hard-filter brand or null>", '
@@ -471,9 +479,15 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "as a draft are also PROCUREMENT.\n"
         "Pick what the shopper wants to buy, not a mentioned object. A game, application or "
         "workload maps to the device that runs it. OFF_CATALOG is only for a clearly unsold "
-        "category. A request unrelated to commerce/products uses SEARCH with handle=null and "
-        "confidence=0; lane itself is never null. Prefer an [in catalog] sibling only when "
-        "meaning is otherwise equivalent.\n"
+        "category. Buy/quote/source/do-you-sell requests remain commerce even when no exact "
+        "candidate exists: use OFF_CATALOG. If no candidate handle fits, wanted_category MUST "
+        "name the specific taxonomy-style leaf being requested, include its parent noun when the "
+        "leaf is ambiguous, and name the requested product rather than its parts or accessories. "
+        "Translate coined workload/form-factor wording to the standard category of the complete "
+        "product instead of repeating the shopper's phrase. "
+        "It MUST NOT be null. A non-product "
+        "service/location request uses SEARCH with handle=null and confidence=0; lane itself is "
+        "never null. Prefer an [in catalog] sibling only when meaning is otherwise equivalent.\n"
         f"USE_CASE keys: {', '.join(use_case_keys)}. Name zero or more; do not invent hardware "
         "floors because the platform resolves those from evidence.\n"
         f"REQUIREMENT keys: {', '.join(req_keys)}. Extract only explicit numeric specs in an "
@@ -484,7 +498,7 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "per_unit, total or null. Never reinterpret per-unit as total. budget_cap_mode is hard "
         "for explicit limits, soft for approximate targets, ambiguous when the wording is unclear.\n"
         "Return ONLY this JSON shape (use null/empty values when absent): "
-        '{"lane":"SEARCH","handle":null,"use_cases":[],"requirements":{},'
+        '{"lane":"SEARCH","handle":null,"wanted_category":null,"use_cases":[],"requirements":{},'
         '"refine":{"brand":null,"prefer_brand":null,"exclude_brand":null,"sort":null},'
         '"compare_targets":[],"quantity":null,"total_budget":null,"budget_scope":null,'
         '"budget_cap_mode":"hard","subject_action":null,"confidence":0.0}.\n')
@@ -532,7 +546,10 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
     return (_instruction_prefix(tuple(sorted(req_keys)), tuple(use_case_keys)) + "\n" + context +
             f'MESSAGE: "{envelope.query[:400]}"\n' + budget + image +
             "CANDIDATE CATEGORIES (listed handle or null only):\n" + lines +
-            "\nResolve MESSAGE now. Do not copy the schema's example values.\nJSON:")
+            "\nResolve MESSAGE now. Do not copy the schema's example values. For a product-commerce "
+            "request with no fitting handle, return OFF_CATALOG and a specific non-null "
+            "wanted_category; avoid ambiguous umbrella nouns, coined phrases, and accessory "
+            "categories.\nJSON:")
 
 
 def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
@@ -832,6 +849,46 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # (relationship=run_on) and REROUTE retrieval to that device node — a real catalog leg, not
     # a broad miss. Vertical-blind: the reroute target is 'most-classified sold node', furniture/
     # pharma-agnostic; a forklift (bi) is not a workload vertical and never reaches here.
+    # OFF-CATALOG TAXONOMY REPAIR: lexical candidate recall can legitimately miss an absent
+    # category ("forklifts" does not overlap Shopify's "Heavy Machinery" path). The model may
+    # therefore name the wanted PRODUCT CLASS, but never authorize the node or refusal. Exact and
+    # distinct lexical matches are cheap. Otherwise use the pinned semantic taxonomy index and
+    # accept its neighborhood only when EVERY candidate is affirmatively unsold for this tenant.
+    # The nearest node is trace evidence, not the buyer-facing label; any sold/unknown neighbor
+    # makes the repair abstain. No second generation call is added to the latency path.
+    routing_source = "model"
+    wanted_category = str(data.get("wanted_category") or "").strip()[:120]
+    if lane == "OFF_CATALOG" and node is None and wanted_category:
+        normalized = wanted_category.lower().rstrip("s")
+        exact = [candidate for candidate in search_nodes(wanted_category, limit=20)
+                 if candidate.name.lower().rstrip("s") == normalized]
+        if len(exact) == 1:
+            node = exact[0]
+            routing_source = "model+taxonomy_exact"
+        else:
+            lexical = candidate_nodes(wanted_category, semantic=False)
+            top_score = lexical[0][1] if lexical else 0.0
+            runner_up = lexical[1][1] if len(lexical) > 1 else 0.0
+            if lexical and top_score >= 4.0 and top_score - runner_up >= 1.5:
+                node = lexical[0][0]
+                routing_source = "model+taxonomy_lexical"
+            else:
+                try:
+                    from src.app.services.taxonomy_embedding_index import semantic_top_k
+                    semantic = [(get_node(handle), score)
+                                for handle, score in semantic_top_k(wanted_category, top_k=8)]
+                    semantic = [(candidate, score) for candidate, score in semantic
+                                if candidate is not None]
+                except Exception as exc:
+                    logger.warning("off-catalog semantic taxonomy repair failed: %s",
+                                   repr(exc)[:160])
+                    semantic = []
+                if (semantic and all(refusal_allowed(db, candidate.handle,
+                                                     tenant_id=envelope.tenant_id)
+                                     for candidate, _score in semantic)):
+                    node = semantic[0][0]
+                    routing_source = "model+taxonomy_semantic"
+
     workloads: List[str] = []
     relationship = "buy"
     if node is not None and _WORKLOAD_RE.match(node.handle):
@@ -884,8 +941,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
                         requirements=requirements, use_cases=tuple(use_cases),
-                        refusal_granted=refusal_granted, confidence=conf, source="model",
+                        refusal_granted=refusal_granted, confidence=conf, source=routing_source,
                         requested_product_node=(node.handle if node else None),
+                        requested_category_label=(wanted_category or None),
                         workloads=tuple(workloads), relationship=relationship,
                         prior_shortlist=prior_shortlist,
                         brand_filter=brand_filter, sort=sort, preferred_brand=preferred_brand,
