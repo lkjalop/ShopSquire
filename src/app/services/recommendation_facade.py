@@ -38,7 +38,8 @@ import json
 import logging
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from src.app.security.commerce_request_guard import inspect_commerce_request
 from src.app.services.recommendation_core.envelope import TurnEnvelope
@@ -57,6 +58,23 @@ _SHADOW_QUEUE_KEY = "shadow:core:queue"          # legacy list (fallback + migra
 _SHADOW_STREAM_KEY = "shadow:core:stream"        # R10.4b: the durable path
 _SHADOW_QUEUE_MAX = 5000
 _SHADOW_STREAM_MAX = 10000
+
+FacadeStatus = Literal["served", "delegate", "blocked", "degraded", "error"]
+
+
+@dataclass(frozen=True)
+class FacadeOutcome:
+    """Typed dispatch result for callers that must distinguish why V2 did not serve."""
+
+    status: FacadeStatus
+    payload: Optional[Dict[str, Any]] = None
+    reason: str = ""
+    lane: Optional[str] = None
+    latency_ms: float = 0.0
+
+    @property
+    def served(self) -> bool:
+        return self.status == "served" and self.payload is not None
 
 
 def _fallback_metric(reason: str) -> None:
@@ -496,7 +514,7 @@ def _run_guard(*, query: str, uid: str, image_labels: Optional[str],
         return {"verdict": "review", "severity": "medium", "reasons": ["guard_error"]}
 
 
-def dispatch_recommendation_core(
+def dispatch_recommendation_core_typed(
     db, redis, *, query: str, uid: str, tenant_id: Optional[str],
     budget_min: Optional[float], budget_max: Optional[float], trace_id: str,
     image_labels: Optional[str] = None, image_hash: Optional[str] = None,
@@ -507,12 +525,21 @@ def dispatch_recommendation_core(
     role: str = "",
     with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]],
     record_failure: Callable[..., Any],
-) -> Optional[Dict[str, Any]]:
-    """See module docstring. Returns finalized payload if the core owns the turn, else None."""
+) -> FacadeOutcome:
+    """Dispatch with explicit ownership and failure semantics."""
+    dispatch_started = time.perf_counter()
+
+    def outcome(status: FacadeStatus, *, payload: Optional[Dict[str, Any]] = None,
+                reason: str = "", lane: Optional[str] = None) -> FacadeOutcome:
+        return FacadeOutcome(
+            status=status, payload=payload, reason=reason, lane=lane,
+            latency_ms=round((time.perf_counter() - dispatch_started) * 1000.0, 1),
+        )
+
     mode, pct = _resolve_mode()
     cart_mode = _cart_mode()
     if mode == "off" and cart_mode == "off":
-        return None
+        return outcome("delegate", reason="mode_off")
     tenant = tenant_id or "default"
 
     # IMAGE V2 ingress: transform the legacy flat parameters into one bounded observation.
@@ -571,7 +598,7 @@ def dispatch_recommendation_core(
                                                         with_trace=with_trace, redis=redis)
                     if cart_payload is not None:
                         logger.info("core served CART_MUTATE (uid=%s)", uid or "anon")
-                        return cart_payload
+                        return outcome("served", payload=cart_payload, lane="CART_MUTATE")
         except Exception as exc:
             record_failure("recommend_cart_dispatch", exc, trace_id=trace_id)
             _served_guard = None   # a guard from a failed cart attempt is not reused
@@ -597,18 +624,18 @@ def dispatch_recommendation_core(
                 session=_read_session_slice(redis, uid, tenant, db), cart=cart_slice)
             _enqueue_shadow(redis, envelope=shadow_env, cart_only=(mode != "shadow"))
         if mode == "shadow":
-            return None
+            return outcome("delegate", reason="shadow_only")
 
     # ── SEARCH-LANE MODE LADDER ─────────────────────────────────────────────────
     if mode == "off":
-        return None
+        return outcome("delegate", reason="search_mode_off")
 
     # IMAGE is a modality, not a second product-selection lane. Policy-filtered observations
     # ride the shared envelope; the lane and every consequential decision remain clamped below.
     # canary bucket on tenant:uid (GPT-5.6 #5c22575.4) — same user in different tenants can
     # legitimately land different sides; anon users bucket by tenant.
     if mode == "canary" and not _in_canary_bucket(f"{tenant}:{uid or 'anon'}", pct):
-        return None
+        return outcome("delegate", reason="outside_canary_bucket")
 
     try:
         # ── PREFLIGHT: the real shared guard (finding #1/#10). Reuse the cart path's verdict if
@@ -617,7 +644,7 @@ def dispatch_recommendation_core(
         guard = _served_guard or _run_guard(query=query, uid=uid, image_labels=image_labels,
                                             image_ocr=image_ocr)
         if str(guard.get("verdict")) != "allow":
-            return None
+            return outcome("blocked", reason=f"guard:{guard.get('verdict') or 'unknown'}")
 
         session = _read_session_slice(redis, uid, tenant, db)
         # the search core is cart-blind; cart editing already ran above (parallel-run).
@@ -640,7 +667,7 @@ def dispatch_recommendation_core(
         if core.lane not in CANARY_LANES:
             logger.debug("core lane %s not canary-eligible — falling through to legacy", core.lane)
             _fallback_metric(f"lane:{core.lane}")
-            return None
+            return outcome("delegate", reason="lane_not_enrolled", lane=core.lane)
 
         # DEGRADED → legacy (review #5): a core turn that couldn't verify the catalog
         # (grounding error / retrieval failure) must NOT serve a 'try again' apology to a
@@ -650,7 +677,7 @@ def dispatch_recommendation_core(
             logger.info("core degraded (grounding=%s reason=%s) — falling through to legacy",
                         core.grounding, (core.extras or {}).get("degraded_reason"))
             _fallback_metric(f"grounding:{core.grounding}")
-            return None
+            return outcome("degraded", reason=f"grounding:{core.grounding}", lane=core.lane)
 
         # ── FINALIZE FIRST, THEN POSTFLIGHT (review #3): with_trace (sanitize + trace
         # persistence) must SUCCEED before any session mutation. If it raises, the outer except
@@ -662,7 +689,32 @@ def dispatch_recommendation_core(
             run_postflight(redis, envelope, core, latency_ms=_latency_ms)
         except Exception as _e_pf:
             logger.warning("postflight failed (non-fatal): %s", repr(_e_pf)[:120])
-        return payload
+        return outcome("served", payload=payload, lane=core.lane)
     except Exception as exc:
         record_failure("recommend_core_dispatch", exc, trace_id=trace_id)
-        return None   # legacy is always a safe fallback
+        return outcome("error", reason=type(exc).__name__)
+
+
+def dispatch_recommendation_core(
+    db, redis, *, query: str, uid: str, tenant_id: Optional[str],
+    budget_min: Optional[float], budget_max: Optional[float], trace_id: str,
+    image_labels: Optional[str] = None, image_hash: Optional[str] = None,
+    image_ocr: Optional[str] = None, source_ip: Optional[str] = None, request: Any = None,
+    image_intent: Optional[str] = None, image_product_identity: Optional[str] = None,
+    image_cv_signals: Optional[str] = None,
+    intent_hint: Optional[str] = None,
+    role: str = "",
+    with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]] = lambda payload, _trace: payload,
+    record_failure: Callable[..., Any] = lambda *_args, **_kwargs: None,
+) -> Optional[Dict[str, Any]]:
+    """Payload-or-None compatibility edge while routers migrate to typed outcomes."""
+    result = dispatch_recommendation_core_typed(
+        db, redis, query=query, uid=uid, tenant_id=tenant_id,
+        budget_min=budget_min, budget_max=budget_max, trace_id=trace_id,
+        image_labels=image_labels, image_hash=image_hash, image_ocr=image_ocr,
+        source_ip=source_ip, request=request, image_intent=image_intent,
+        image_product_identity=image_product_identity, image_cv_signals=image_cv_signals,
+        intent_hint=intent_hint, role=role, with_trace=with_trace,
+        record_failure=record_failure,
+    )
+    return result.payload if result.served else None

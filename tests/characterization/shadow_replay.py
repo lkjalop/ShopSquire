@@ -238,10 +238,14 @@ def _phase_telemetry(core, *, case_id: str, turn: int, total_latency_ms: float,
     post_ms = sum(float(s.get("latency_ms") or 0.0) for s in stages
                   if not str(s.get("stage") or "").startswith(("route+intent", "plan:")))
     evidence = {}
+    narration = {}
     try:
         evidence = core.extras.get("evidence") or {}
+        narration = core.extras.get("narration_telemetry") or {}
     except Exception:
         pass
+    narration_ms = narration.get("latency_ms")
+    narration_mode = str(narration.get("mode") or "not_enrolled")
     return {
         "case_id": f"{case_id}:{turn}",
         "total_ms": round(float(total_latency_ms), 1),
@@ -249,8 +253,8 @@ def _phase_telemetry(core, *, case_id: str, turn: int, total_latency_ms: float,
         "plan_ms": round(plan_ms, 1),
         "retrieval_ms": round(float(evidence.get("latency_ms") or 0.0), 1),
         "post_stage_ms": round(post_ms, 1),
-        "narration_ms": None,
-        "narration_mode": "not_enrolled",
+        "narration_ms": (round(float(narration_ms), 1) if narration_ms is not None else None),
+        "narration_mode": narration_mode,
         "timed_out": bool(timed_out),
         "fallback_used": bool(fallback_used),
         "model_mode": str(model_mode or "unknown"),
@@ -266,7 +270,9 @@ def _p95(values: list[float]) -> float | None:
 
 
 def _summarize_phase_telemetry(rows: list[dict]) -> dict:
-    phase_keys = ("total_ms", "route_intent_ms", "plan_ms", "retrieval_ms", "post_stage_ms")
+    phase_keys = ("total_ms", "route_intent_ms", "plan_ms", "retrieval_ms", "post_stage_ms",
+                  "narration_ms")
+    narration_rows = [row for row in rows if row.get("narration_ms") is not None]
     return {
         "cases": len(rows),
         "p95_ms": {key: _p95([row[key] for row in rows if row.get(key) is not None])
@@ -278,7 +284,15 @@ def _summarize_phase_telemetry(rows: list[dict]) -> dict:
             mode: sum(1 for row in rows if row.get("model_mode") == mode)
             for mode in sorted({str(row.get("model_mode")) for row in rows})
         },
-        "narration": {"mode": "not_enrolled", "measured": False},
+        "narration": {
+            "measured": bool(narration_rows),
+            "modes": {
+                mode: sum(1 for row in rows if row.get("narration_mode") == mode)
+                for mode in sorted({str(row.get("narration_mode") or "not_enrolled")
+                                    for row in rows})
+            },
+            "p95_ms": _p95([row["narration_ms"] for row in narration_rows]),
+        },
         "note": "retrieval_ms is contained within plan_ms and must not be added to total",
     }
 

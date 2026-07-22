@@ -112,3 +112,22 @@ def test_phase_telemetry_summary_reports_fallback_latency_and_model_modes():
     assert summary["fallback_p95_ms"] == 200.0
     assert summary["model_modes"] == {"fallback:model_unavailable": 1, "model": 1}
     assert summary["narration"]["measured"] is False
+
+
+def test_phase_telemetry_reports_narration_only_when_stage_enrolled():
+    core = SimpleNamespace(
+        stage_results=[],
+        extras={"evidence": {}, "narration_telemetry": {"mode": "async", "latency_ms": 42.5}},
+    )
+
+    row = _phase_telemetry(
+        core, case_id="case", turn=0, total_latency_ms=100.0,
+        timed_out=False, fallback_used=False, model_mode="model",
+    )
+    summary = _summarize_phase_telemetry([row])
+
+    assert row["narration_ms"] == 42.5
+    assert row["narration_mode"] == "async"
+    assert summary["narration"] == {
+        "measured": True, "modes": {"async": 1}, "p95_ms": 42.5,
+    }
