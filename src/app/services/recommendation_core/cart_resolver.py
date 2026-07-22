@@ -115,6 +115,25 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
         return ""
 
 
+def _grammar_cart_data(envelope: TurnEnvelope) -> Optional[Dict[str, Any]]:
+    """Reuse the canonical amendment grammar before paying for model interpretation."""
+    try:
+        from src.app.services.intent_decomposer import decompose_turn
+        intent = decompose_turn(envelope.query, has_prior_selection=bool(envelope.cart))
+    except Exception as exc:
+        logger.debug("cart amendment grammar failed: %s", repr(exc)[:100])
+        return None
+    if not intent.amendments or intent.new_lines:
+        return None
+    return {
+        "ops": [
+            {"action": "set_quantity", "targets": [item.ref], "quantity": item.new_qty}
+            for item in intent.amendments
+        ],
+        "confidence": intent.confidence,
+    }
+
+
 def _cart_lines(envelope: TurnEnvelope) -> List[Dict[str, Any]]:
     """Cart lines with a usable SKU + display name. Defensive: the read model may hand us
     partially-hydrated rows."""
@@ -289,15 +308,18 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
     if not envelope.query:
         return EMPTY_PLAN
 
-    fn = llm_fn or _default_llm_fn
-    try:
-        raw = fn(_build_prompt(envelope, lines), timeout)
-        data = json.loads(raw) if raw else None
-    except Exception as exc:
-        # observable, not invisible (review-5 #9): a parse/model failure means the lane is dark
-        # for this turn — the caller falls through, but ops must be able to see how often.
-        logger.debug("cart resolver model/parse failure → empty plan: %s", repr(exc)[:100])
-        data = None
+    source = "grammar"
+    data = _grammar_cart_data(envelope) if llm_fn is None else None
+    if not isinstance(data, dict):
+        source = "model"
+        fn = llm_fn or _default_llm_fn
+        try:
+            raw = fn(_build_prompt(envelope, lines), timeout)
+            data = json.loads(raw) if raw else None
+        except Exception as exc:
+            # Observable: model/parse failure falls through rather than inventing an operation.
+            logger.debug("cart resolver model/parse failure: %s", repr(exc)[:100])
+            data = None
     if not isinstance(data, dict):
         return EMPTY_PLAN
 
@@ -475,4 +497,4 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
     if not ops and not ambiguous:
         return EMPTY_PLAN
     return CartMutationPlan(ops=tuple(ops), ambiguous=tuple(dict.fromkeys(ambiguous)),
-                            confidence=conf, source="model")
+                            confidence=conf, source=source)

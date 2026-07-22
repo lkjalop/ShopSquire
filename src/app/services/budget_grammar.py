@@ -60,6 +60,33 @@ def classify_budget_scope(text: str) -> str:
     return "unknown"
 
 
+def resolve_total_budget_cap(
+    text: str,
+    *,
+    normalized_budget_max: Optional[float],
+    prior_total_budget_cents: Optional[int] = None,
+    prior_budget_scope: Optional[str] = None,
+) -> Optional[float]:
+    """Resolve a whole-order ceiling without reinterpreting a normalized per-unit cap."""
+    if classify_budget_scope(text) != "total":
+        return None
+    parsed = parse_budget(text)
+    if parsed is not None and parsed.budget_max is not None:
+        return float(parsed.budget_max)
+    if prior_budget_scope == "total" and prior_total_budget_cents is not None:
+        try:
+            prior = int(prior_total_budget_cents)
+        except (TypeError, ValueError):
+            prior = 0
+        if prior > 0:
+            return prior / 100.0
+    try:
+        fallback = float(normalized_budget_max) if normalized_budget_max is not None else None
+    except (TypeError, ValueError):
+        return None
+    return fallback if fallback is not None and fallback > 0 else None
+
+
 def _to_int(num: str, suffix: Optional[str]) -> Optional[int]:
     try:
         v = float(str(num).replace(",", ""))

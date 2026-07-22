@@ -6206,10 +6206,18 @@ def suggest(
     _bulk_budget_note: str | None = None
     def _apply_total_budget_unit_cap() -> None:
         nonlocal _bulk_budget_note
-        from src.app.services.budget_grammar import classify_budget_scope as _budget_scope
+        from src.app.services.budget_grammar import (
+            classify_budget_scope as _budget_scope,
+            resolve_total_budget_cap as _resolve_total_budget_cap,
+        )
         _scope = _budget_scope(query)
         _qty_for_budget = int(constraints.get("quantity") or 0)
-        _stated_cap = constraints.get("_total_budget_max") or constraints.get("budget_max")
+        _stated_cap = constraints.get("_total_budget_max") or _resolve_total_budget_cap(
+            query,
+            normalized_budget_max=constraints.get("budget_max"),
+            prior_total_budget_cents=confirmed_slots.get("total_budget_cents"),
+            prior_budget_scope=confirmed_slots.get("budget_scope"),
+        )
         if _scope == "total" and _qty_for_budget >= 2 and _stated_cap is not None:
             _total_cap = float(_stated_cap)
             _per_unit_cap = _total_cap / _qty_for_budget

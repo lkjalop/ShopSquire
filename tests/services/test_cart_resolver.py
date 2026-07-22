@@ -49,6 +49,25 @@ def test_compound_edit_binds_all_targets_to_skus():
     assert setq.target_skus == ("LAP-IDEAP3I9",) and setq.quantity == 20
 
 
+def test_compound_action_question_uses_fast_grammar_and_answers_reconfirmation():
+    cart = [{
+        "sku": "LAP-DELL",
+        "name": 'Dell DB16255 16" WUXGA Copilot+ PC Laptop',
+        "quantity": 20,
+    }]
+    plan = resolve_cart_mutation(_env(
+        "Actually reduce the Dell order to 15 and keep the same total budget. "
+        "Do I need to reconfirm the supplier plan?",
+        cart=cart,
+    ))
+
+    assert plan.source == "grammar"
+    assert plan.confidence == 1.0
+    assert plan.ops[0].action == "set_quantity"
+    assert plan.ops[0].target_skus == ("LAP-DELL",)
+    assert plan.ops[0].quantity == 15
+
+
 def test_replacement_is_catalog_clamped_and_total_budget_sets_affordable_quantity():
     cart = [{"sku": "GAM-0006", "name": "Dell G16 Gaming Laptop", "quantity": 20}]
     catalog = lambda _tenant: [{  # noqa: E731 - injected finite catalog projection

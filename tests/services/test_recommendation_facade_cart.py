@@ -227,6 +227,26 @@ def test_single_op_is_confirmation_only_by_default(wired):
     assert items[0]["quantity"] == 1                 # untouched until confirm
 
 
+def test_compound_action_question_returns_confirmation_without_model_wait(wired):
+    uid = "u-action-question"
+    from src.app.routers.cart import CartItemPayload, add_item, _get_or_create_cart
+    add_item(CartItemPayload(uid=uid, sku="SKU-IDEA", quantity=20), role=ROLE_OWNER)
+    cart = [{"sku": "SKU-IDEA", "name": "Lenovo IdeaPad Slim 3i", "quantity": 20}]
+
+    payload = F._serve_cart_mutation(
+        _env(uid, "Actually reduce the IdeaPad order to 15. Do I need to reconfirm the "
+                  "supplier plan?", cart),
+        role=ROLE_OWNER,
+        with_trace=_IDENTITY_TRACE,
+    )
+
+    assert payload["cart_mutation"]["needs_confirmation"] is True
+    assert payload["cart_mutation"]["ops"][0]["quantity"] == 15
+    assert "reconfirm the updated delivery plan" in payload["message"]
+    _, items, _ = _get_or_create_cart(uid)
+    assert items[0]["quantity"] == 20
+
+
 def test_over_limit_increase_confirms_then_handler_rejects(wired, monkeypatch):
     # review-5 #9: qty 600 > handler line gate (500) → rejected → cart_updated must be False.
     # auto-apply ON to exercise the apply-outcome path (default is confirmation-only, review-6 #4).

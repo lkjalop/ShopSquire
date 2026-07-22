@@ -1,4 +1,8 @@
-from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+from src.app.services.budget_grammar import (
+    classify_budget_scope,
+    parse_budget,
+    resolve_total_budget_cap,
+)
 
 
 def test_explicit_whole_order_budget_is_total():
@@ -26,3 +30,21 @@ def test_affordability_question_is_a_budget_ceiling():
         assert parsed.budget_min is None
         assert parsed.budget_max == expected
         assert parsed.mode == "ceiling"
+
+
+def test_same_total_budget_reuses_explicit_cents_not_normalized_unit_cap():
+    assert resolve_total_budget_cap(
+        "keep the same total budget and quantity",
+        normalized_budget_max=2050,
+        prior_total_budget_cents=4_100_000,
+        prior_budget_scope="total",
+    ) == 41_000
+
+
+def test_new_explicit_total_overrides_prior_total():
+    assert resolve_total_budget_cap(
+        "change the total budget to $50,000",
+        normalized_budget_max=50_000,
+        prior_total_budget_cents=4_100_000,
+        prior_budget_scope="total",
+    ) == 50_000
