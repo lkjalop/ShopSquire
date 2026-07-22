@@ -39,7 +39,9 @@ OLLAMA = "http://127.0.0.1:11434"
 ROUTER_MODEL = os.getenv("ROUTER_MODEL", "qwen3:14b")
 H = {**default_headers(), "Content-Type": "application/json"}
 HDR_MP = default_headers()
-CLIENT = httpx.Client(timeout=120.0)
+CHAT_TIMEOUT_S = max(5.0, float(os.getenv("IMAGE_BATTERY_CHAT_TIMEOUT_S", "45") or 45))
+ROUTER_WARM_TIMEOUT_S = max(5.0, float(os.getenv("IMAGE_BATTERY_WARM_TIMEOUT_S", "45") or 45))
+CLIENT = httpx.Client(timeout=CHAT_TIMEOUT_S)
 TRIAGE_CLIENT = httpx.Client(timeout=100.0)   # >1MP images hang the un-downscaled VLM/OCR — cap + record as a finding
 CACHE = "runs/triage_cache"
 
@@ -89,6 +91,16 @@ IMAGES = [
 
 QTY = {"VALID": [1, 5, 50, 500], "WRONG": [1, 50], "PCI": [1, 50], "STEG": [1, 50]}
 
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except AttributeError:
+    pass
+
+
+def selected_images():
+    raw = int(os.getenv("IMAGE_BATTERY_MAX_IMAGES", "0") or 0)
+    return IMAGES[:raw] if raw > 0 else IMAGES
+
 
 def procurement_query(noun, qty):
     if qty == 1:
@@ -104,7 +116,8 @@ def warm_router():
     try:
         httpx.post(f"{OLLAMA}/api/generate",
                    json={"model": ROUTER_MODEL, "prompt": "ok", "stream": False,
-                         "keep_alive": "60m", "options": {"num_predict": 2}}, timeout=180.0)
+                         "keep_alive": "60m", "options": {"num_predict": 2}},
+                   timeout=ROUTER_WARM_TIMEOUT_S)
     except Exception as e:
         print(f"  [warm-router] {e}")
 
@@ -137,7 +150,7 @@ def triage_all(retriage):
     os.makedirs(CACHE, exist_ok=True)
     print(f"\n{'='*94}\nPHASE 1 — VLM TRIAGE (qwen3-vl:8b) + security detectors\n{'='*94}")
     cached = {}
-    for img in IMAGES:
+    for img in selected_images():
         if os.getenv("IMAGE_BATTERY_SKIP_LARGE", "0") == "1" and img.get("big"):
             # >1MP: the un-downscaled VLM/OCR hangs triage >600s. Record the finding; use the
             # direct steg detector (fast, numpy) so we still know the payload IS caught.
@@ -232,6 +245,9 @@ def analyze(resp, markers):
     )
     return {
         "ms": resp.get("_ms"), "n": len(prods),
+        "timing_breakdown": resp.get("timing_breakdown") or resp.get("timing") or {},
+        "routing_source": resp.get("routing_source"),
+        "facade_outcome": resp.get("facade_outcome"),
         "top": [p.get("name") or p.get("sku") for p in prods[:3]],
         "leaks": scan_leak(resp, markers),
         "img_mode": resp.get("image_handling_mode"),
@@ -255,7 +271,7 @@ def run_procurement(cached):
     warm_router()
     print(f"  router resident: {router_resident()}")
     results = []
-    for img in IMAGES:
+    for img in selected_images():
         tj = cached.get(img["fn"]) or {}
         if tj.get("_big_skip"):
             print(f"\n[{img['cls']}] {img['fn']} — SKIP procurement (triage hangs on >1MP); "
