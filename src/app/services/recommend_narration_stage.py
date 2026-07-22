@@ -426,6 +426,8 @@ def apply_product_claim_guard(
                     budget_min=(constraints or {}).get("budget_min"),
                     budget_max=(constraints or {}).get("budget_max"),
                     preamble=combined_preamble,
+                    requested_quantity=(constraints or {}).get("quantity") or (constraints or {}).get("order_quantity"),
+                    total_budget=(constraints or {}).get("_total_budget_max"),
                 )
                 _status = "passed"
             except Exception:

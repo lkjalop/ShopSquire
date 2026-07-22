@@ -162,3 +162,31 @@ def test_tb_claim_grounds_against_gb_evidence():
     prose = "The Alienware 16 Aurora includes a fast 1TB SSD and 32GB RAM."
     r = verify_product_narration(prose, results, budget_min=1500, budget_max=3500)
     assert r.grounded, r.violations
+
+
+def test_rejects_bulk_affordability_count_that_contradicts_authorized_math():
+    result = verify_product_narration(
+        "Four of these Asus laptops would fit within your AUD 41,000 budget.",
+        [{"name": "Asus TUF Gaming Laptop", "price_cents": 191900}],
+        requested_quantity=20,
+        total_budget=41000,
+    )
+
+    assert not result.grounded
+    assert any(v.startswith("quantity_budget_contradiction:4") for v in result.violations)
+
+
+def test_allows_requested_or_computed_maximum_bulk_affordability_count():
+    products = [{"name": "Asus TUF Gaming Laptop", "price_cents": 191900}]
+
+    requested = verify_product_narration(
+        "Twenty of these Asus laptops fit within your budget.", products,
+        requested_quantity=20, total_budget=41000,
+    )
+    maximum = verify_product_narration(
+        "21 of these Asus laptops fit within your budget.", products,
+        requested_quantity=20, total_budget=41000,
+    )
+
+    assert requested.grounded
+    assert maximum.grounded

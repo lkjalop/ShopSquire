@@ -197,6 +197,8 @@ def verify_product_narration(
     budget_min: int | None = None,
     budget_max: int | None = None,
     preamble: str | None = None,
+    requested_quantity: int | None = None,
+    total_budget: float | None = None,
 ) -> GuardResult:
     """Reject narration that asserts a product/price/spec not in the evidence,
     or that parrots a quarantined QR/URL/injection payload.
@@ -259,6 +261,42 @@ def verify_product_narration(
         if val in pre_amounts:
             continue
         violations.append(f"ungrounded_price:{val}")
+
+    # 3b. Bulk affordability is a consequential arithmetic claim.  When the
+    # requested quantity is affordable at the leading candidate's price, prose
+    # may repeat that requested count or the computed maximum.  A different
+    # lower count ("four of these would fit" for an affordable 20-unit order)
+    # contradicts the authorized budget calculation and must fall back.
+    try:
+        requested = int(requested_quantity or 0)
+        total = float(total_budget or 0)
+        lead_cents = int((results or [{}])[0].get("price_cents") or 0)
+        if lead_cents <= 0:
+            lead_price = float((results or [{}])[0].get("price") or 0)
+        else:
+            lead_price = lead_cents / 100.0
+        maximum = int(total // lead_price) if requested > 1 and total > 0 and lead_price > 0 else 0
+        if maximum >= requested:
+            number_words = {
+                "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+                "fifteen": 15, "sixteen": 16, "seventeen": 17,
+                "eighteen": 18, "nineteen": 19, "twenty": 20,
+            }
+            count_re = re.compile(
+                r"\b(\d{1,4}|" + "|".join(number_words) + r")\s+of\s+these\b.{0,180}?\bfit\b",
+                re.IGNORECASE | re.DOTALL,
+            )
+            for match in count_re.finditer(text):
+                token = match.group(1).lower()
+                claimed = int(token) if token.isdigit() else number_words[token]
+                if claimed not in {requested, maximum}:
+                    violations.append(
+                        f"quantity_budget_contradiction:{claimed}:expected_{requested}_or_{maximum}"
+                    )
+    except (TypeError, ValueError, ZeroDivisionError, IndexError):
+        pass
 
     # 4. Invented spec: a spec/GPU token not present in any product's evidence.
     # Only enforce when the evidence ACTUALLY carries specs — if no result has a
