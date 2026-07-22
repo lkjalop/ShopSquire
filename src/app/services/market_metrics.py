@@ -67,12 +67,23 @@ def summarize_marketing_facts(db, *, tenant_id: str, min_action_sample: int = 10
 
     by_sku: Dict[str, Counter] = defaultdict(Counter)
     by_campaign: Dict[str, Counter] = defaultdict(Counter)
+    by_month: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         event = str(row.get("event_type") or "unknown").lower()
         if row.get("sku"):
             by_sku[str(row["sku"])][event] += 1
         if row.get("campaign_id"):
             by_campaign[str(row["campaign_id"])][event] += 1
+        occurred = str(row.get("occurred_at") or "")
+        month = occurred[:7] if len(occurred) >= 7 else "unknown"
+        cohort = by_month.setdefault(month, {
+            "events": Counter(), "sessions": set(), "purchase_value_cents_by_currency": Counter(),
+        })
+        cohort["events"][event] += 1
+        if row.get("session_id"):
+            cohort["sessions"].add(str(row["session_id"]))
+        if event == "purchase" and row.get("value") is not None and row.get("currency"):
+            cohort["purchase_value_cents_by_currency"][str(row["currency"])] += int(row["value"])
 
     entered = len(stages["entered"])
     carted = len(stages["carted"])
@@ -121,6 +132,17 @@ def summarize_marketing_facts(db, *, tenant_id: str, min_action_sample: int = 10
         },
         "sku_cohorts": {sku: dict(sorted(values.items())) for sku, values in sorted(by_sku.items())},
         "campaign_cohorts": {key: dict(sorted(values.items())) for key, values in sorted(by_campaign.items())},
+        "month_cohorts": {
+            month: {
+                "event_count": sum(cohort["events"].values()),
+                "unique_sessions": len(cohort["sessions"]),
+                "events": dict(sorted(cohort["events"].items())),
+                "purchase_value_cents_by_currency": dict(
+                    sorted(cohort["purchase_value_cents_by_currency"].items())
+                ),
+            }
+            for month, cohort in sorted(by_month.items())
+        },
         "insights": insights,
         "authority": "read_only_operator_advisory",
     }

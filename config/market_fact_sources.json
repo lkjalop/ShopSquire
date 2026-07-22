@@ -7,6 +7,7 @@
     "inventory_level": {"families": ["atp"], "max_age_seconds": 86400, "signature": "internal"},
     "supplier_quote": {"families": ["atp"], "max_age_seconds": 2592000, "signature": "internal"},
     "synthetic_lab": {"families": ["marketing", "atp"], "max_age_seconds": 86400, "signature": "internal"},
+    "synthetic_scenario": {"families": ["marketing", "atp"], "max_age_seconds": 31536000, "signature": "internal"},
     "erp": {"families": ["atp"], "max_age_seconds": 86400, "signature": "hmac", "secret_env": "MARKET_SOURCE_ERP_SECRET"},
     "wms": {"families": ["atp"], "max_age_seconds": 21600, "signature": "hmac", "secret_env": "MARKET_SOURCE_WMS_SECRET"},
     "sap": {"families": ["atp"], "max_age_seconds": 21600, "signature": "hmac", "secret_env": "MARKET_SOURCE_SAP_SECRET"},

@@ -52,6 +52,8 @@ def test_summary_is_tenant_scoped_and_requires_sample_before_action():
         assert report["funnel"]["cart_to_purchase_rate"] == 1.0
         assert report["insights"] == []
         assert report["data_quality"]["source_identity_rate"] == 1.0
+        assert report["month_cohorts"]["2026-07"]["events"]["purchase"] == 3
+        assert report["month_cohorts"]["2026-07"]["unique_sessions"] == 3
     finally:
         db.close()
 
