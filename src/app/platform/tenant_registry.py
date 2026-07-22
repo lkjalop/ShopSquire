@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 _REGISTRY_JSON_ENV = "STORE_TENANT_REGISTRY_JSON"
 _REGISTRY_PATH_ENV = "STORE_TENANT_REGISTRY_PATH"
@@ -107,6 +107,21 @@ def tenant_config(tenant_id: Optional[str]) -> Dict[str, Any]:
         return dict(_load_registry().get(tid) or {})
     except Exception:
         return {}
+
+
+def registered_tenant_ids() -> Tuple[str, ...]:
+    """Return configured tenant IDs without inventing a demo/default tenant.
+
+    Background workers have no request tenant context. Callers that fan work out
+    by tenant must therefore use this registry (or an explicit operator-supplied
+    list) and fail closed when neither exists.
+    """
+    if not registry_enabled():
+        return ()
+    try:
+        return tuple(sorted(_load_registry()))
+    except Exception:
+        return ()
 
 
 def resolve_store_profile_for_request(

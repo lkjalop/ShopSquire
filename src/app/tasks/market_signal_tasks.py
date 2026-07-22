@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, Tuple
 
 from src.app.workers.celery_app import celery_app
 
@@ -20,8 +20,21 @@ def _enabled() -> bool:
     return str(os.getenv("MARKET_SIGNAL_BACKFILL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _canonical_tenant_ids(explicit_tenant_id: str | None = None) -> Tuple[str, ...]:
+    """Resolve a bounded tenant fan-out without request-local fallbacks."""
+    explicit = str(explicit_tenant_id or "").strip()
+    if explicit:
+        return (explicit,)
+    configured: Iterable[str] = os.getenv("MARKET_CANONICAL_TENANTS", "").split(",")
+    tenants = tuple(dict.fromkeys(value.strip() for value in configured if value.strip()))
+    if tenants:
+        return tenants[:100]
+    from src.app.platform.tenant_registry import registered_tenant_ids
+    return registered_tenant_ids()[:100]
+
+
 @celery_app.task(name="src.app.tasks.market_signal_tasks.market_signal_backfill")
-def market_signal_backfill() -> Dict[str, Any]:
+def market_signal_backfill(tenant_id: str | None = None) -> Dict[str, Any]:
     canonical_enabled = str(os.getenv("MARKET_CANONICAL_FACTS_ENABLED", "0")).strip().lower() in (
         "1", "true", "yes", "on")
     if not _enabled() and not canonical_enabled:
@@ -41,12 +54,29 @@ def market_signal_backfill() -> Dict[str, Any]:
             counts = (backfill_from_db(db, limit=limit, min_trust=min_trust,
                                        max_age_seconds=max_age_seconds, now_iso=now_iso)
                       if _enabled() else {})
-            canonical = {}
+            canonical: Dict[str, Any] = {}
             if canonical_enabled:
-                from src.app.platform.tenant_context import current_tenant_id
                 from src.app.services.canonical_fact_adapters import backfill_canonical_facts
-                canonical = backfill_canonical_facts(
-                    db, tenant_id=current_tenant_id(), limit=limit)
+                tenants = _canonical_tenant_ids(tenant_id)
+                if not tenants:
+                    canonical = {"skipped": "no_tenants_configured", "tenants": {}}
+                    logger.error(
+                        "canonical market backfill skipped: set MARKET_CANONICAL_TENANTS "
+                        "or configure STORE_TENANT_REGISTRY"
+                    )
+                else:
+                    reports = {
+                        tid: backfill_canonical_facts(db, tenant_id=tid, limit=limit, commit=False)
+                        for tid in tenants
+                    }
+                    db.commit()
+                    canonical = {
+                        "tenants": reports,
+                        "written": sum(int(report.get("written") or 0) for report in reports.values()),
+                        "quarantined": sum(
+                            int(report.get("quarantined") or 0) for report in reports.values()
+                        ),
+                    }
         logger.info("market_signal_backfill counts=%s (min_trust=%s max_age=%s)", counts, min_trust, max_age_seconds)
         return {"legacy_signals": counts, "canonical_facts": canonical}
     except Exception as exc:
