@@ -1486,6 +1486,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         aria-modal="true"
         aria-label="Decision Trace"
         data-testid="decision-trace-modal"
+        data-trace-id={effectiveTraceId || ''}
         className={`${styles.modal} ${minimized ? styles.minimized : ''}`}
         style={{ left: position.x, top: position.y }}
         onClick={e => e.stopPropagation()}
