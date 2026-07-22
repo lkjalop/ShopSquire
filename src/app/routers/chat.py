@@ -2184,6 +2184,21 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 except Exception:
                     pass
                 return out
+            if status_code == 429:
+                detail = data.get("detail") if isinstance(data.get("detail"), dict) else data
+                reason = str((detail or {}).get("reason") or "quota_exceeded")
+                decision_trace_id = (detail or {}).get("trace_id")
+                return {
+                    "products": [], "view_mode": "cards", "confidence": None,
+                    "decision_trace_id": decision_trace_id, "trace_id": decision_trace_id,
+                    "assistant_message": (
+                        "This account has reached its configured AI-assistance allowance for today. "
+                        "Your cart and prior work are unchanged; an operator can raise the allowance "
+                        "or you can continue after it resets."
+                    ),
+                    "next_questions": [], "blocked": True, "blocked_detail": detail,
+                    "degraded": False, "security_route": "allow", "quota_reason": reason,
+                }
             if status_code >= 400:
                 raise HTTPException(status_code=status_code, detail=data)
     except Exception as e:

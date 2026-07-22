@@ -53,6 +53,11 @@ $env:CV_WARMUP_ON_START                = "0"
 # confirmation-gated because RECOMMEND_CART_AUTO_APPLY is intentionally not enabled here.
 $env:RECOMMEND_CORE_MODE               = "primary"
 $env:RECOMMEND_CART_SERVE              = "1"
+# Preserve quota enforcement in the demo, but allow a full recorded journey for one guest. The
+# production limits remain sourced from the deployment environment and are intentionally lower.
+$env:TOKEN_BUDGET_ENABLED              = "1"
+$env:TOKEN_BUDGET_GUEST_DAILY_TOKENS   = "100000"
+$env:TOKEN_BUDGET_GUEST_DAILY_USD      = "10"
 # URL guard is fail-closed. Explicitly authorize only the local Ollama endpoints used by this demo;
 # without this, a normal launcher restart silently downgrades image identity to the filename fallback.
 $env:INTERNAL_SERVICE_ALLOWLIST        = "127.0.0.1:11434,localhost:11434"

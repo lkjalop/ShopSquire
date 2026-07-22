@@ -528,6 +528,9 @@ def dispatch_recommendation_core_typed(
 ) -> FacadeOutcome:
     """Dispatch with explicit ownership and failure semantics."""
     dispatch_started = time.perf_counter()
+    quota_budget = None
+    quota_estimated = 0
+    quota_recorded = False
     if record_failure is None:
         from src.app.services.safe_stage import record_partial_failure
         record_failure = record_partial_failure
@@ -541,6 +544,15 @@ def dispatch_recommendation_core_typed(
 
     def outcome(status: FacadeStatus, *, payload: Optional[Dict[str, Any]] = None,
                 reason: str = "", lane: Optional[str] = None) -> FacadeOutcome:
+        nonlocal quota_recorded
+        if status == "served" and quota_budget is not None and not quota_recorded:
+            try:
+                from src.app.services.token_budget import estimate_cost
+                quota_budget.record_usage(uid or "anonymous", quota_estimated,
+                                          estimate_cost(quota_estimated))
+                quota_recorded = True
+            except Exception as exc:
+                record_failure("recommend_facade_quota_record", exc, trace_id=trace_id)
         return FacadeOutcome(
             status=status, payload=payload, reason=reason, lane=lane,
             latency_ms=round((time.perf_counter() - dispatch_started) * 1000.0, 1),
@@ -556,8 +568,10 @@ def dispatch_recommendation_core_typed(
     # check during migration; checks are read-only, so delegation cannot double-charge usage.
     try:
         from src.app.services.token_budget import TokenBudget, estimate_tokens, infer_tier
-        allowed, quota_reason, _remaining = TokenBudget(redis).check_budget(
-            uid or "anonymous", infer_tier(uid or "anonymous"), estimate_tokens(query),
+        quota_budget = TokenBudget(redis)
+        quota_estimated = estimate_tokens(query)
+        allowed, quota_reason, _remaining = quota_budget.check_budget(
+            uid or "anonymous", infer_tier(uid or "anonymous"), quota_estimated,
         )
         if not allowed:
             return outcome("blocked", reason=f"quota:{quota_reason}")

@@ -144,6 +144,28 @@ def test_typed_default_finalizer_persists_canonical_trace(monkeypatch):
     assert decisions[0]["tenant_id"] == "t1"
 
 
+def test_typed_facade_records_quota_once_for_served_response(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _rec())
+    recorded = []
+    monkeypatch.setattr(
+        "src.app.services.token_budget.TokenBudget.check_budget",
+        lambda *args, **kwargs: (True, "ok", 999),
+    )
+    monkeypatch.setattr(
+        "src.app.services.token_budget.TokenBudget.record_usage",
+        lambda self, uid, tokens, cost: recorded.append((uid, tokens, cost)),
+    )
+    outcome = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="gaming laptop", uid="u1", tenant_id="t1",
+        budget_min=None, budget_max=2000, trace_id="tr-quota-record",
+        with_trace=_wt, record_failure=lambda *args, **kwargs: None,
+    )
+    assert outcome.status == "served"
+    assert len(recorded) == 1
+    assert recorded[0][0] == "u1" and recorded[0][1] > 0 and recorded[0][2] > 0
+
+
 # ── bucketing determinism (finding #4) ────────────────────────────────────────
 
 def test_bucket_is_stable_and_monotone():
