@@ -90,6 +90,60 @@ def test_typed_outcome_distinguishes_served_delegate_and_blocked(monkeypatch):
     assert blocked.payload is None
 
 
+def test_typed_ingress_blocks_quota_before_core(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+    called = {"core": 0}
+
+    def _must_not_run(*args, **kwargs):
+        called["core"] += 1
+        raise AssertionError("quota rejection must precede core execution")
+
+    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _must_not_run)
+    monkeypatch.setattr(
+        "src.app.services.token_budget.TokenBudget.check_budget",
+        lambda *args, **kwargs: (False, "daily_token_limit", 0),
+    )
+    outcome = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="gaming laptop", uid="u1", tenant_id="t1",
+        budget_min=None, budget_max=2000, trace_id="tr-quota",
+        with_trace=_wt, record_failure=lambda *args, **kwargs: None,
+    )
+    assert outcome.status == "blocked"
+    assert outcome.reason == "quota:daily_token_limit"
+    assert called["core"] == 0
+
+
+def test_typed_default_finalizer_persists_canonical_trace(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", _rec())
+    monkeypatch.setattr(
+        "src.app.services.token_budget.TokenBudget.check_budget",
+        lambda *args, **kwargs: (True, "ok", 999),
+    )
+    events = []
+    decisions = []
+    monkeypatch.setattr(
+        "src.app.services.recommendation_response_finalizer.log_trace_event",
+        lambda **kwargs: events.append(kwargs),
+    )
+    monkeypatch.setattr(
+        "src.app.services.recommendation_response_finalizer.log_decision",
+        lambda **kwargs: decisions.append(kwargs) or True,
+    )
+
+    outcome = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="gaming laptop", uid="u1", tenant_id="t1",
+        budget_min=None, budget_max=2000, trace_id="tr-final",
+    )
+    assert outcome.status == "served"
+    assert outcome.payload["trace_id"] == "tr-final"
+    assert outcome.payload["decision_trace_id"] == "tr-final"
+    assert outcome.payload["_trace_recommendation_persisted"] is True
+    assert events[0]["trace_id"] == "tr-final"
+    assert decisions[0]["decision_id"] == "tr-final"
+    assert decisions[0]["tenant_id"] == "t1"
+
+
 # ── bucketing determinism (finding #4) ────────────────────────────────────────
 
 def test_bucket_is_stable_and_monotone():

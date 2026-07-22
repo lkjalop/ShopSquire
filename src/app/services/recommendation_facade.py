@@ -523,11 +523,21 @@ def dispatch_recommendation_core_typed(
     image_cv_signals: Optional[str] = None,
     intent_hint: Optional[str] = None,
     role: str = "",
-    with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]],
-    record_failure: Callable[..., Any],
+    with_trace: Optional[Callable[[Dict[str, Any], str], Dict[str, Any]]] = None,
+    record_failure: Optional[Callable[..., Any]] = None,
 ) -> FacadeOutcome:
     """Dispatch with explicit ownership and failure semantics."""
     dispatch_started = time.perf_counter()
+    if record_failure is None:
+        from src.app.services.safe_stage import record_partial_failure
+        record_failure = record_partial_failure
+    if with_trace is None:
+        from src.app.services.recommendation_response_finalizer import finalize_core_response
+
+        def with_trace(payload: Dict[str, Any], active_trace_id: str) -> Dict[str, Any]:
+            return finalize_core_response(
+                payload, active_trace_id, query=query, tenant_id=tenant_id or "default", uid=uid,
+            )
 
     def outcome(status: FacadeStatus, *, payload: Optional[Dict[str, Any]] = None,
                 reason: str = "", lane: Optional[str] = None) -> FacadeOutcome:
@@ -541,6 +551,19 @@ def dispatch_recommendation_core_typed(
     if mode == "off" and cart_mode == "off":
         return outcome("delegate", reason="mode_off")
     tenant = tenant_id or "default"
+
+    # Universal quota admission belongs at the typed ingress. Legacy delegation retains its own
+    # check during migration; checks are read-only, so delegation cannot double-charge usage.
+    try:
+        from src.app.services.token_budget import TokenBudget, estimate_tokens, infer_tier
+        allowed, quota_reason, _remaining = TokenBudget(redis).check_budget(
+            uid or "anonymous", infer_tier(uid or "anonymous"), estimate_tokens(query),
+        )
+        if not allowed:
+            return outcome("blocked", reason=f"quota:{quota_reason}")
+    except Exception as exc:
+        record_failure("recommend_facade_quota", exc, trace_id=trace_id)
+        return outcome("error", reason="quota_check_failed")
 
     # IMAGE V2 ingress: transform the legacy flat parameters into one bounded observation.
     # OCR remains guard-only. The trust posture determines which visual facts may influence
