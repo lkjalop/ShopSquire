@@ -203,6 +203,14 @@ function humanizeKey(key: string): string {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function componentSource(evt: TraceEvent): string {
+  const label = inlineText(evt.payload?._component_label);
+  const kind = inlineText(evt.payload?._component_kind);
+  const authority = inlineText(evt.payload?._component_authority);
+  if (label) return `${label}${kind ? ` (${kind}${authority ? ` · ${authority}` : ''})` : ''}`;
+  return String(evt.source_id || '?');
+}
+
 function renderValue(value: any) {
   const unknownText = new Set(['', '?', '--', '-', 'unknown', 'n/a', 'null', 'undefined']);
   if (value === null || value === undefined) return <span className={styles.muted}>Not available</span>;
@@ -1617,7 +1625,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                     <div className={styles.detailLabel}>Type</div>
                                     <div className={styles.detailValue}>{humanizeKey(displayEventType(evt))}</div>
                                     <div className={styles.detailLabel}>Source</div>
-                                    <div className={styles.detailValue}>{evt.source_id || '?'}</div>
+                                    <div className={styles.detailValue}>{componentSource(evt)}</div>
                                     <div className={styles.detailLabel}>Timestamp</div>
                                     <div className={styles.detailValue}>{evt.timestamp || evt.created_at || '?'}</div>
                                     <div className={styles.detailLabel}>Latency</div>

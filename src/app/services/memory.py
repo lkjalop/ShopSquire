@@ -15,6 +15,7 @@ STRUCTURED_STATE_KEY = "session:{uid}:structured_state"
 PRODUCT_MEMORY_BANK_KEY = "session:{uid}:product_memory_bank"
 OBSERVATION_LOG_KEY = "session:{uid}:observation_log"
 OBSERVATION_SUMMARY_KEY = "session:{uid}:observation_summary"
+PENDING_CLARIFICATION_KEY = "session:{tenant_id}:{uid}:pending_clarification"
 
 
 class Memory:
@@ -126,6 +127,50 @@ class Memory:
                     self._LOCAL_STORE.pop(key, None)
         except Exception:
             pass
+
+    def set_pending_clarification(
+        self, uid: str, pending: Dict[str, Any], *, tenant_id: str = "default", ttl_seconds: int = 900,
+    ) -> None:
+        """Persist one bounded clarification turn independently of browser chat history."""
+        key = PENDING_CLARIFICATION_KEY.format(
+            tenant_id=str(tenant_id or "default").strip() or "default", uid=str(uid or "").strip(),
+        )
+        payload = json.dumps(pending if isinstance(pending, dict) else {})
+        ttl = max(30, min(int(ttl_seconds), 3600))
+        try:
+            self.redis.setex(key, ttl, payload)
+        except Exception:
+            self._local_setex(key, ttl, payload)
+        else:
+            self._local_setex(key, ttl, payload)
+
+    def get_pending_clarification(self, uid: str, *, tenant_id: str = "default") -> Dict[str, Any]:
+        key = PENDING_CLARIFICATION_KEY.format(
+            tenant_id=str(tenant_id or "default").strip() or "default", uid=str(uid or "").strip(),
+        )
+        raw = None
+        try:
+            raw = self.redis.get(key)
+        except Exception:
+            pass
+        if not raw:
+            raw = self._local_get(key)
+        try:
+            parsed = json.loads(raw) if raw else {}
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    def clear_pending_clarification(self, uid: str, *, tenant_id: str = "default") -> None:
+        key = PENDING_CLARIFICATION_KEY.format(
+            tenant_id=str(tenant_id or "default").strip() or "default", uid=str(uid or "").strip(),
+        )
+        try:
+            self.redis.delete(key)
+        except Exception:
+            pass
+        with self._LOCAL_LOCK:
+            self._LOCAL_STORE.pop(key, None)
 
     def set_summary(self, uid: str, summary: Dict[str, Any], ttl_seconds: int | None = None) -> None:
         try:

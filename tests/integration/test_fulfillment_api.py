@@ -203,6 +203,58 @@ def test_by_trace_404_when_no_case():
     assert client.get(f"{_BASE}/by-trace/no-such-trace-xyz").status_code == 404
 
 
+def test_closed_loop_trace_survives_confirmation_and_rfq_redraft(monkeypatch):
+    """One immutable recommendation trace must own the initial and amended sourcing history."""
+    monkeypatch.setenv("FULFILLMENT_AUTO_DRAFT_ON_COMMIT", "1")
+    from src.app.models.db import db_session
+    from src.app.services.supplier_catalog import ensure_supplier_coverage
+    with db_session() as db:
+        ensure_supplier_coverage(db)
+
+    suffix = uuid.uuid4().hex[:10]
+    trace_id = f"T-CLOSED-{suffix}"
+    order_id = f"O-CLOSED-{suffix}"
+    uid = f"buyer-{suffix}"
+    requirements = {"needed_by": "2026-08-20", "use_case": "game development",
+                    "ship_to": "Sydney NSW 2000"}
+
+    first = client.post(f"{_BASE}/confirm-cart", json={
+        "uid": uid, "order_id": order_id, "trace_id": trace_id, "requirements": requirements,
+        "lines": [{"item_ref": "GAM-0002", "requested_qty": 20, "in_stock": 15, "source_qty": 5}],
+    })
+    assert first.status_code == 200, first.text
+    first_case = first.json()["cases"][0]["case_id"]
+    committed = client.post(f"{_BASE}/{first_case}/commit", json={"uid": uid})
+    assert committed.status_code == 200 and committed.json()["state"] == "QUOTE_DRAFTED", committed.text
+    first_draft = client.get(f"{_BASE}/{first_case}/operator-view").json()["state_json"]["draft"]
+    assert first_draft["commercial_scope"]["quantity"] == 5
+    assert "Quantity: 5" in first_draft["body"]
+
+    amended = client.post(f"{_BASE}/confirm-cart", json={
+        "uid": uid, "order_id": order_id, "trace_id": trace_id, "supersede": True,
+        "lines": [{"item_ref": "GAM-0002", "requested_qty": 15, "in_stock": 12, "source_qty": 3}],
+    })
+    assert amended.status_code == 200, amended.text
+    assert amended.json()["status"] == "superseded"
+    second_case = amended.json()["created"]["cases"][0]["case_id"]
+    assert second_case != first_case
+    redrafted = client.post(f"{_BASE}/{second_case}/commit", json={"uid": uid})
+    assert redrafted.status_code == 200 and redrafted.json()["state"] == "QUOTE_DRAFTED", redrafted.text
+    second_draft = client.get(f"{_BASE}/{second_case}/operator-view").json()["state_json"]["draft"]
+    assert second_draft["commercial_scope"]["quantity"] == 3
+    assert "Quantity: 3" in second_draft["body"]
+    assert second_draft["content_hash"] != first_draft["content_hash"]
+
+    active = client.get(f"{_BASE}/by-trace/{trace_id}/all/operator-view")
+    assert active.status_code == 200
+    assert active.json()["trace_id"] == trace_id
+    assert [case["case_id"] for case in active.json()["cases"]] == [second_case]
+    history = client.get(f"{_BASE}/by-order/{order_id}").json()
+    assert history["case_count"] == 2
+    assert history["draft_diff"]["changed"] is True
+    assert history["draft_diff"]["quantity"] == {"from": 5, "to": 3}
+
+
 def test_market_refresh_and_state_run_the_real_pipeline():
     # operator-triggered REAL pipeline (default tenant) — returns 200 + a LIVE state (counts may be 0
     # when the source tables are empty; the point is the wiring + tenant label).

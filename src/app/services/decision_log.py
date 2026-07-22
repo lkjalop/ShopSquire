@@ -23,6 +23,7 @@ from src.app.services.trace_taxonomy import normalize_trace_event_type
 from src.app.services.trace_contracts import apply_trace_contract
 from src.app.observability.telemetry import telemetry_emit
 from src.app.observability.metrics import record_decision_trace_write_failure
+from src.app.services.trace_component_ontology import classify_trace_component
 import urllib.request
 import urllib.error
 try:
@@ -806,6 +807,11 @@ def log_trace_event(
         safe_payload.setdefault("_schema_version", "1.0")
         safe_payload.setdefault("_producer", source_id or source_type or "unknown")
         safe_payload.setdefault("_event_type", event_type)
+        component = classify_trace_component(source_type, source_id)
+        safe_payload.setdefault("_component_kind", component["kind"])
+        safe_payload.setdefault("_component_authority", component["authority"])
+        safe_payload.setdefault("_component_label", component["label"])
+        safe_payload.setdefault("_legacy_source_id", component["legacy_id"])
         broker_payload = {
             "id": event_id,
             "tenant_id": tenant_id,

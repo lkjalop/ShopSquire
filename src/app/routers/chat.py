@@ -727,6 +727,7 @@ def _extract_brand_mentions(query: str) -> List[str]:
 def _merge_material_nqe_answer(
     *, query: str, nqe_selection: Dict[str, Any] | None,
     recent_messages: List[Dict[str, Any]] | None,
+    pending_clarification: Dict[str, Any] | None = None,
 ) -> str:
     """Resolve a bounded material answer against the turn that asked for it.
 
@@ -742,7 +743,14 @@ def _merge_material_nqe_answer(
         return query
 
     prior_query = ""
+    pending = pending_clarification if isinstance(pending_clarification, dict) else {}
+    if str(pending.get("question_id") or "").strip().lower() == qid:
+        allowed = {str(item).strip().lower() for item in (pending.get("allowed_option_ids") or [])}
+        if oid in allowed:
+            prior_query = str(pending.get("original_query") or "").strip()
     for item in reversed(recent_messages or []):
+        if prior_query:
+            break
         if not isinstance(item, dict) or str(item.get("role") or "").strip().lower() != "user":
             continue
         candidate = str(item.get("content") or "").strip()
@@ -1462,6 +1470,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                image_intent?, voice_transcript?, voice_confidence?, recent_messages? }
     """
     q = (payload or {}).get("query") or ""
+    submitted_query = str(q or "")
 
     # -----------------------------------------------------------------------
     # Merge voice transcript into query when present
@@ -1983,12 +1992,24 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     if bool((payload or {}).get("external_research_consent")):
         params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
+    tenant_id = (request.headers.get("X-Tenant-Id") or request.headers.get("x-tenant-id") or "default")
+    pending_clarification: Dict[str, Any] = {}
+    try:
+        pending_clarification = Memory(redis).get_pending_clarification(uid, tenant_id=tenant_id)
+    except Exception:
+        pending_clarification = {}
     q = _merge_material_nqe_answer(
         query=str(q or ""),
         nqe_selection=nqe_selection if isinstance(nqe_selection, dict) else {},
         recent_messages=(payload or {}).get("recent_messages")
         if isinstance((payload or {}).get("recent_messages"), list) else [],
+        pending_clarification=pending_clarification,
     )
+    if q != submitted_query and pending_clarification:
+        try:
+            Memory(redis).clear_pending_clarification(uid, tenant_id=tenant_id)
+        except Exception:
+            pass
     params["query"] = q
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
     if not confirmed_slots:
@@ -2997,6 +3018,20 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             data.get("agent_steps") or []
         )
     try:
+        material_question = next((item for item in (out.get("next_questions") or [])
+                                  if isinstance(item, dict) and item.get("id") == "budget_scope"), None)
+        if material_question and not nqe_selection:
+            option_ids = [str(item.get("id") or "").strip().lower()
+                          for item in (material_question.get("options") or []) if isinstance(item, dict)]
+            Memory(redis).set_pending_clarification(
+                uid,
+                {"version": 1, "question_id": "budget_scope",
+                 "reason": material_question.get("reason") or "missing_material_budget_scope",
+                 "original_query": submitted_query[:1000], "trace_id": decision_trace_id,
+                 "allowed_option_ids": (option_ids or ["total", "per_unit"])[:8]},
+                tenant_id=tenant_id,
+                ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
+            )
         _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
         _store_chat_message(
             db,

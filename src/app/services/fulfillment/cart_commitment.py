@@ -83,10 +83,13 @@ def list_order_cases(
         except Exception:
             sj = {}
         draft = sj.get("draft") or {}
+        scope = draft.get("commercial_scope") if isinstance(draft.get("commercial_scope"), dict) else {}
         draft_summary = {
             "subject": draft.get("subject"),
             "recipient_domain": draft.get("recipient_domain"),
             "content_hash": draft.get("content_hash"),
+            "item_ref": scope.get("item_ref"),
+            "quantity": scope.get("quantity"),
         }
         if include_body:
             draft_summary.update({
@@ -103,11 +106,12 @@ def draft_diff(old_draft: Optional[Dict[str, Any]], new_draft: Optional[Dict[str
     old = old_draft if isinstance(old_draft, dict) else {}
     new = new_draft if isinstance(new_draft, dict) else {}
     fields: Dict[str, Any] = {}
-    for k in ("recipient_domain", "recipient_email", "subject", "content_hash"):
+    for k in ("recipient_domain", "recipient_email", "item_ref", "quantity", "subject", "content_hash"):
         if str(old.get(k) or "") != str(new.get(k) or ""):
             fields[k] = {"from": old.get(k), "to": new.get(k)}
     body_changed = str(old.get("body") or "") != str(new.get("body") or "")
     return {"changed_fields": list(fields.keys()), "fields": fields, "body_changed": body_changed,
+            "quantity": fields.get("quantity"), "item_ref": fields.get("item_ref"),
             "prior_content_hash": old.get("content_hash"), "new_content_hash": new.get("content_hash"),
             "changed": bool(fields) or body_changed}
 
