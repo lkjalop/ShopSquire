@@ -33,7 +33,7 @@ def test_router_prewarm_records_success(monkeypatch):
     assert result["router_model"] == "router-model"
     assert result["embedding_model"] == "embed-model"
     assert app.state.router_prewarm == result
-    assert [call[0].rsplit("/", 1)[-1] for call in calls] == ["generate", "embed"]
+    assert [call[0].rsplit("/", 1)[-1] for call in calls] == ["embed", "generate"]
 
 
 def test_router_prewarm_records_failure(monkeypatch):

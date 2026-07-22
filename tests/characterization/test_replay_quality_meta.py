@@ -8,9 +8,23 @@ from tests.characterization.shadow_replay import (
     _expects_products,
     _merge_replay_session,
     _phase_telemetry,
+    _prewarm_models,
     _quality_case,
     _summarize_phase_telemetry,
 )
+
+
+def test_replay_prewarm_records_shared_readiness(monkeypatch):
+    monkeypatch.setattr(
+        "src.app.main._prewarm_router_models",
+        lambda app: {"ready": True, "status": "ready", "router_model": "qwen"},
+    )
+
+    result = _prewarm_models()
+
+    assert result["ready"] is True
+    assert result["router_model"] == "qwen"
+    assert result["elapsed_ms"] >= 0
 
 
 def _core(lane="SEARCH", off_catalog=None, node=None, reqs=None, extras_error=False,

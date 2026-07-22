@@ -114,14 +114,18 @@ def index_available() -> bool:
     return _load() is not None
 
 
-def semantic_top_k(text: str, *, top_k: int = 12) -> Optional[List[Tuple[str, float]]]:
-    """[(handle, cosine)] for a product text, best first. None when index/embedder is
-    unavailable (caller falls back to lexical — loudly logged in _embed/_load, never silent)."""
+@lru_cache(maxsize=256)
+def _semantic_top_k_cached(
+    text: str,
+    top_k: int,
+    timeout: float,
+) -> Optional[Tuple[Tuple[str, float], ...]]:
+    """Cached query-side lookup for the immutable pinned taxonomy index."""
     loaded = _load()
-    if loaded is None or not str(text or "").strip():
+    if loaded is None or not text:
         return None
     import numpy as np
-    got = _embed([str(text)[:512]], timeout=30.0)
+    got = _embed([text[:512]], timeout=timeout)
     if got is None:
         return None
     q = np.asarray(got[0], dtype="float32")
@@ -134,4 +138,18 @@ def semantic_top_k(text: str, *, top_k: int = 12) -> Optional[List[Tuple[str, fl
     sims = vectors @ q
     top = np.argpartition(-sims, min(top_k, len(sims) - 1))[:top_k]
     ranked = sorted(((handles[i], float(sims[i])) for i in top), key=lambda p: -p[1])
-    return ranked
+    return tuple(ranked)
+
+
+def semantic_top_k(text: str, *, top_k: int = 12) -> Optional[List[Tuple[str, float]]]:
+    """Return semantic candidates without making repair an unbounded hot-path leg."""
+    normalized = " ".join(str(text or "").strip().split()).lower()[:512]
+    if not normalized:
+        return None
+    top_k = max(1, min(int(top_k or 12), 50))
+    timeout = max(
+        0.25,
+        min(float(os.getenv("TAXONOMY_QUERY_EMBED_TIMEOUT_SEC", "2.0") or 2.0), 10.0),
+    )
+    result = _semantic_top_k_cached(normalized, top_k, timeout)
+    return list(result) if result is not None else None

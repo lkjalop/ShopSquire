@@ -246,6 +246,11 @@ def _phase_telemetry(core, *, case_id: str, turn: int, total_latency_ms: float,
         pass
     narration_ms = narration.get("latency_ms")
     narration_mode = str(narration.get("mode") or "not_enrolled")
+    try:
+        from src.app.services.recommendation_core.turn_router import last_router_call_metrics
+        router_model = last_router_call_metrics()
+    except Exception:
+        router_model = {}
     return {
         "case_id": f"{case_id}:{turn}",
         "total_ms": round(float(total_latency_ms), 1),
@@ -258,6 +263,7 @@ def _phase_telemetry(core, *, case_id: str, turn: int, total_latency_ms: float,
         "timed_out": bool(timed_out),
         "fallback_used": bool(fallback_used),
         "model_mode": str(model_mode or "unknown"),
+        "router_model": router_model,
         "stages": stages,
     }
 
@@ -280,6 +286,18 @@ def _summarize_phase_telemetry(rows: list[dict]) -> dict:
         "timeouts": sum(1 for row in rows if row.get("timed_out")),
         "fallbacks": sum(1 for row in rows if row.get("fallback_used")),
         "fallback_p95_ms": _p95([row["total_ms"] for row in rows if row.get("fallback_used")]),
+        "router_model_p95_ms": {
+            key: _p95([float((row.get("router_model") or {}).get(key) or 0.0)
+                       for row in rows if (row.get("router_model") or {}).get(key) is not None])
+            for key in ("queue_ms", "wall_ms", "load_ms", "prompt_eval_ms", "decode_ms",
+                        "taxonomy_repair_ms")
+        },
+        "router_outcomes": {
+            outcome: sum(1 for row in rows
+                         if str((row.get("router_model") or {}).get("outcome") or "unknown") == outcome)
+            for outcome in sorted({str((row.get("router_model") or {}).get("outcome") or "unknown")
+                                   for row in rows})
+        },
         "model_modes": {
             mode: sum(1 for row in rows if row.get("model_mode") == mode)
             for mode in sorted({str(row.get("model_mode")) for row in rows})
@@ -297,6 +315,22 @@ def _summarize_phase_telemetry(rows: list[dict]) -> dict:
     }
 
 
+def _prewarm_models() -> dict:
+    """Load local models before measurement and preserve setup as replay evidence."""
+    started = time.monotonic()
+    try:
+        from types import SimpleNamespace
+
+        from src.app.main import _prewarm_router_models
+
+        app = SimpleNamespace(state=SimpleNamespace())
+        result = dict(_prewarm_router_models(app))
+    except Exception as exc:
+        result = {"ready": False, "status": "failed", "error": str(exc)[:300]}
+    result["elapsed_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+    return result
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only")
@@ -310,7 +344,13 @@ def main() -> None:
                     help="sealed relevance-label split used by the promotion gate (default: test)")
     ap.add_argument("--output", type=Path,
                     help="write the complete scorecard and divergence rows as JSON")
+    ap.add_argument("--prewarm", action="store_true",
+                    help="load router and taxonomy models before the measured sealed replay")
     args = ap.parse_args()
+
+    prewarm = _prewarm_models() if args.prewarm else {"ready": None, "status": "not_requested"}
+    if args.prewarm and not prewarm.get("ready"):
+        raise SystemExit(f"sealed replay prewarm failed: {prewarm}")
 
     expects = {c["id"]: (c.get("known_wrong") or {}).get("expect_v2")
                for c in json.loads(BATTERY.read_text(encoding="utf-8"))}
@@ -465,6 +505,7 @@ def main() -> None:
             "telemetry": _summarize_phase_telemetry(telemetry_rows),
             "telemetry_cases": telemetry_rows,
             "diagnosis": (_aggregate_diagnosis(diag_rows) if diag_rows else None),
+            "prewarm": prewarm,
             "elapsed_seconds": round(time.monotonic() - t_start, 1),
         }, indent=2, default=str) + "\n", encoding="utf-8")
 

@@ -146,6 +146,49 @@ def test_router_default_generation_budget_fits_bulk_decision(monkeypatch):
     assert seen["options"]["num_predict"] == 320
 
 
+def test_router_call_records_server_phase_metrics(monkeypatch):
+    from src.app.services.recommendation_core import turn_router
+
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "response": "{}",
+                "load_duration": 1_000_000,
+                "prompt_eval_duration": 2_000_000,
+                "eval_duration": 3_000_000,
+                "prompt_eval_count": 40,
+                "eval_count": 12,
+            }
+
+    monkeypatch.setattr("httpx.post", lambda *_args, **_kwargs: _Response())
+    turn_router._default_llm_fn("route this", 20)
+
+    metrics = turn_router.last_router_call_metrics()
+    assert metrics["outcome"] == "ok"
+    assert metrics["load_ms"] == 1.0
+    assert metrics["prompt_eval_ms"] == 2.0
+    assert metrics["decode_ms"] == 3.0
+    assert metrics["prompt_tokens"] == 40
+    assert metrics["output_tokens"] == 12
+
+
+def test_custom_router_call_does_not_inherit_prior_model_metrics(db):
+    from src.app.services.recommendation_core import turn_router
+
+    turn_router._ROUTER_CALL_STATE.metrics = {"outcome": "stale", "wall_ms": 999}
+    route_turn(
+        db,
+        _env("gaming laptop"),
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+        }),
+    )
+
+    assert turn_router.last_router_call_metrics() == {}
+
+
 def test_router_failure_recovers_only_bounded_bulk_facts(db):
     from src.app.services.taxonomy_registry import add_sold_node
 

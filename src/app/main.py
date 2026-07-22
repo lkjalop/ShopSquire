@@ -184,6 +184,19 @@ def _prewarm_router_models(app: FastAPI) -> dict[str, Any]:
 
         url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
         model = _router_model()
+        # Warm the optional taxonomy embedder first and the latency-critical router last. When
+        # Ollama is configured for one resident model, the inverse order evicts the router just
+        # before the first buyer turn and turns readiness into a misleading cold-start claim.
+        embed = httpx.post(
+            f"{url}/api/embed",
+            json={
+                "model": EMBED_MODEL,
+                "input": ["product taxonomy warmup"],
+                "keep_alive": os.getenv("OLLAMA_EMBED_KEEP_ALIVE", "60m"),
+            },
+            timeout=120.0,
+        )
+        embed.raise_for_status()
         generate = httpx.post(
             f"{url}/api/generate",
             json={
@@ -196,16 +209,6 @@ def _prewarm_router_models(app: FastAPI) -> dict[str, Any]:
             timeout=120.0,
         )
         generate.raise_for_status()
-        embed = httpx.post(
-            f"{url}/api/embed",
-            json={
-                "model": EMBED_MODEL,
-                "input": ["product taxonomy warmup"],
-                "keep_alive": os.getenv("OLLAMA_EMBED_KEEP_ALIVE", "60m"),
-            },
-            timeout=120.0,
-        )
-        embed.raise_for_status()
         result = {
             "ready": True,
             "status": "ready",

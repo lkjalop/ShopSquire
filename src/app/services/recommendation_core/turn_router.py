@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -33,6 +35,18 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from src.app.services.attribute_registry import defs_union
 from src.app.services.catalog_classifier import candidate_nodes
 from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
+
+_ROUTER_MAX_CONCURRENCY = max(1, min(int(os.getenv("ROUTER_MAX_CONCURRENCY", "1") or 1), 4))
+_ROUTER_GATE = threading.BoundedSemaphore(_ROUTER_MAX_CONCURRENCY)
+_ROUTER_CALL_STATE = threading.local()
+
+
+def last_router_call_metrics() -> Dict[str, Any]:
+    return dict(getattr(_ROUTER_CALL_STATE, "metrics", {}) or {})
+
+
+def _reset_router_call_metrics() -> None:
+    _ROUTER_CALL_STATE.metrics = {}
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
 from src.app.services.taxonomy_registry import (get_node, primary_sold_node, search_nodes,
@@ -109,10 +123,26 @@ def _router_model() -> str:
 
 
 def _default_llm_fn(prompt: str, timeout: float) -> str:
+    started = time.monotonic()
+    metrics: Dict[str, Any] = {
+        "model": _router_model(),
+        "outcome": "error",
+        "queue_ms": 0.0,
+        "wall_ms": 0.0,
+    }
+    _ROUTER_CALL_STATE.metrics = metrics
+    acquired = False
     try:
         import httpx
         url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
         model = _router_model()
+        metrics["model"] = model
+        queue_started = time.monotonic()
+        acquired = _ROUTER_GATE.acquire(timeout=max(0.1, float(timeout or 20.0)))
+        metrics["queue_ms"] = round((time.monotonic() - queue_started) * 1000.0, 1)
+        if not acquired:
+            metrics["outcome"] = "queue_timeout"
+            return ""
         # P1 latency lever: the router emits a compact JSON decision — capping generated tokens cuts
         # the dominant model time. Configurable so an 8B (better routing quality) can fit the p95 gate
         # by generating less, rather than dropping to a dumber model. 192 covers the bounded
@@ -126,16 +156,34 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
                    "options": {"temperature": 0, "num_predict": _num_predict}}
         if "qwen3" in model.lower():
             payload["think"] = False
-        r = httpx.post(f"{url}/api/generate", json=payload, timeout=max(2.0, float(timeout or 12.0)))
+        remaining = max(2.0, float(timeout or 20.0) - (metrics["queue_ms"] / 1000.0))
+        r = httpx.post(f"{url}/api/generate", json=payload, timeout=remaining)
         data = r.json() or {}
+        metrics.update({
+            "http_status": int(r.status_code),
+            "load_ms": round(float(data.get("load_duration") or 0) / 1_000_000.0, 1),
+            "prompt_eval_ms": round(float(data.get("prompt_eval_duration") or 0) / 1_000_000.0, 1),
+            "decode_ms": round(float(data.get("eval_duration") or 0) / 1_000_000.0, 1),
+            "prompt_tokens": int(data.get("prompt_eval_count") or 0),
+            "output_tokens": int(data.get("eval_count") or 0),
+        })
         if r.status_code != 200 or data.get("error"):
+            metrics["outcome"] = "http_error"
             logger.warning("router model call failed: http=%s error=%s model=%s",
                            r.status_code, str(data.get("error"))[:120], model)
             return ""
+        metrics["outcome"] = "ok"
         return str(data.get("response", "") or "")
     except Exception as exc:
+        metrics["outcome"] = "timeout" if "timeout" in type(exc).__name__.lower() else "error"
+        metrics["error_type"] = type(exc).__name__
         logger.warning("router model call failed: %s model=%s", repr(exc)[:120], _router_model())
         return ""
+    finally:
+        if acquired:
+            _ROUTER_GATE.release()
+        metrics["wall_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+        _ROUTER_CALL_STATE.metrics = metrics
 
 
 def _query_names_sold_category(db, envelope: TurnEnvelope) -> bool:
@@ -729,6 +777,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                timeout: float = 20.0) -> TurnDecision:
     """One model judgment, four deterministic clamps, one grounded refusal gate.
     Never raises; every failure path is the deterministic default (SEARCH, ungated)."""
+    _reset_router_call_metrics()
     if not envelope.query:
         return DEFAULT_DECISION
     try:
@@ -1136,16 +1185,29 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 node = lexical[0][0]
                 routing_source = "model+taxonomy_lexical"
             elif lane == "OFF_CATALOG":
+                repair_started = time.monotonic()
+                repair_outcome = "empty"
                 try:
                     from src.app.services.taxonomy_embedding_index import semantic_top_k
                     semantic = [(get_node(handle), score)
-                                for handle, score in semantic_top_k(wanted_category, top_k=8)]
+                                for handle, score in
+                                (semantic_top_k(wanted_category, top_k=8) or [])]
                     semantic = [(candidate, score) for candidate, score in semantic
                                 if candidate is not None]
+                    repair_outcome = "candidates" if semantic else "empty"
                 except Exception as exc:
                     logger.warning("off-catalog semantic taxonomy repair failed: %s",
                                    repr(exc)[:160])
                     semantic = []
+                    repair_outcome = "error"
+                router_metrics = getattr(_ROUTER_CALL_STATE, "metrics", {}) or {}
+                router_metrics.update({
+                    "taxonomy_repair_ms": round(
+                        (time.monotonic() - repair_started) * 1000.0, 1
+                    ),
+                    "taxonomy_repair_outcome": repair_outcome,
+                })
+                _ROUTER_CALL_STATE.metrics = router_metrics
                 if (semantic and all(refusal_allowed(db, candidate.handle,
                                                      tenant_id=envelope.tenant_id)
                                      for candidate, _score in semantic)):
