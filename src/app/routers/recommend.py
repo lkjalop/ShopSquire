@@ -517,10 +517,12 @@ def _maybe_attach_evidence(payload: Dict[str, Any], trace_id: str | None) -> Dic
         plan = (_kq or {}).get("plan") if isinstance(_kq, dict) else None
         if plan is None:
             return payload
+        from src.app.platform.tenant_context import current_tenant_id
         ev = gather_evidence(plan, query=str((_kq or {}).get("query") or ""),
                              uid=(_kq or {}).get("uid"),
                              image_identity=(_kq or {}).get("image_identity"),
-                             web_consent=bool((_kq or {}).get("web_consent")))
+                             web_consent=bool((_kq or {}).get("web_consent")),
+                             tenant_id=current_tenant_id())
         if ev.get("selected"):
             payload["evidence"] = ev
             # N6 — prose citations: one compact "Sources:" sentence so provenance reads in the MESSAGE

@@ -29,6 +29,16 @@ from typing import Any, Callable, Dict, List, Optional
 _REORDER_RE = re.compile(r"\b(?:again|reorder|re-?order|last\s+time|previous\s+order|bought|purchased)\b", re.I)
 
 
+def _table_has_column(db: Any, table: str, column: str) -> bool:
+    """Schema capability check used to fail closed on tenant-sensitive reads."""
+    try:
+        from sqlalchemy import inspect
+        return any(str(item.get("name") or "") == column
+                   for item in inspect(db.get_bind()).get_columns(table))
+    except Exception:
+        return False
+
+
 def orchestrator_enabled() -> bool:
     return str(os.getenv("EVIDENCE_ORCHESTRATOR_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
 
@@ -82,13 +92,15 @@ def _templated_web_query(plan: Any) -> str:
 
 # ── Leg implementations (deterministic reads; each independently best-effort) ──
 
-def _leg_market(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
+def _leg_market(plan: Any, query: str, uid: Optional[str], *,
+                tenant_id: Optional[str] = None) -> Dict[str, Any]:
     from src.app.models.db import db_session
     from src.app.services.market_intelligence_agent import gather_market_context
     with db_session() as db:
         category = str(getattr(plan, "category", None) or "").strip()
         ctx = gather_market_context(db, query=query, uid_hash=None, result_skus=None,
-                                    taxonomy_nodes=([category] if category else []))
+                                    taxonomy_nodes=([category] if category else []),
+                                    tenant_id=tenant_id)
     findings = ctx.get("market_findings") or []
     provenance_complete = bool(findings) and all(
         f.get("source_system") and f.get("observed_at") and f.get("status", "active") == "active"
@@ -101,52 +113,68 @@ def _leg_market(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
                      "provenance_complete": provenance_complete}}
 
 
-def _leg_policy(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
+def _leg_policy(plan: Any, query: str, uid: Optional[str], *,
+                tenant_id: Optional[str] = None) -> Dict[str, Any]:
     from src.app.services.answer_quality import policy_faq_answer
     ans = policy_faq_answer(query or "")
     return {"source": "store_policy", "found": bool(ans), "summary": (ans or "")[:400], "data": {}}
 
 
-def _leg_availability(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
+def _leg_availability(plan: Any, query: str, uid: Optional[str], *,
+                      tenant_id: Optional[str] = None) -> Dict[str, Any]:
     from sqlalchemy import text
     from src.app.models.db import db_session
     category = getattr(plan, "category", None)
     qty = int(getattr(plan, "quantity", None) or 0)
     with db_session() as db:
+        if not tenant_id or not _table_has_column(db, "inventory_level", "tenant_id"):
+            return {"source": "inventory", "found": False, "summary": "", "data": {},
+                    "error": "tenant_scope_unavailable"}
         row = db.execute(text(
-            "SELECT COUNT(DISTINCT p.sku), COALESCE(SUM(i.stock), 0) FROM products p "
-            "LEFT JOIN inventory i ON i.product_id = p.id "
-            "WHERE p.active = 1" + (" AND p.product_type = :cat" if category else "")),
-            ({"cat": category} if category else {})).fetchone()
+            "SELECT COUNT(DISTINCT sku), "
+            "COALESCE(SUM(COALESCE(available, on_hand - reserved)), 0) "
+            "FROM inventory_level WHERE tenant_id = :tenant"),
+            {"tenant": tenant_id}).fetchone()
     skus, units = int(row[0] or 0), int(row[1] or 0)
-    summary = f"{skus} product(s) with {units} unit(s) on hand" + (f" vs {qty} requested" if qty else "")
+    summary = f"{skus} tenant inventory line(s) with {units} unit(s) available"
+    if qty:
+        summary += f" vs {qty} requested"
     return {"source": "inventory", "found": skus > 0,
-            "summary": summary, "data": {"sku_count": skus, "units_on_hand": units, "requested_qty": qty}}
+            "summary": summary, "data": {"sku_count": skus, "units_available": units,
+                                               "requested_qty": qty, "scope": "tenant_inventory",
+                                               "requested_category": category}}
 
 
-def _leg_purchase_history(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
+def _leg_purchase_history(plan: Any, query: str, uid: Optional[str], *,
+                          tenant_id: Optional[str] = None) -> Dict[str, Any]:
     from sqlalchemy import text
     from src.app.models.db import db_session
     if not uid:
         return {"source": "purchase_history", "found": False, "summary": "", "data": {}}
     with db_session() as db:
+        if not tenant_id or not _table_has_column(db, "orders", "tenant_id"):
+            return {"source": "purchase_history", "found": False, "summary": "", "data": {},
+                    "error": "tenant_scope_unavailable"}
         rows = db.execute(text(
             "SELECT id, status, total_cents, created_at FROM orders "
-            "WHERE customer_id = :u ORDER BY created_at DESC LIMIT 3"), {"u": uid}).fetchall()
+            "WHERE customer_id = :u AND tenant_id = :tenant "
+            "ORDER BY created_at DESC LIMIT 3"), {"u": uid, "tenant": tenant_id}).fetchall()
     orders = [{"order_id": str(r[0]), "status": str(r[1] or ""), "total_cents": int(r[2] or 0),
                "created_at": str(r[3] or "")} for r in rows or []]
     summary = f"{len(orders)} recent order(s)" + (f", latest {orders[0]['status']}" if orders else "")
     return {"source": "purchase_history", "found": bool(orders), "summary": summary, "data": {"orders": orders}}
 
 
-def _leg_image(plan: Any, query: str, uid: Optional[str], image_identity: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _leg_image(plan: Any, query: str, uid: Optional[str], image_identity: Optional[Dict[str, Any]] = None,
+               *, tenant_id: Optional[str] = None) -> Dict[str, Any]:
     ident = image_identity or {}
     bits = [str(ident.get(k)) for k in ("brand", "model", "category") if ident.get(k)]
     return {"source": "image_identity", "found": bool(bits),
             "summary": ("photo identified as " + " ".join(bits)) if bits else "", "data": dict(ident)}
 
 
-def _leg_web(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
+def _leg_web(plan: Any, query: str, uid: Optional[str], *,
+             tenant_id: Optional[str] = None) -> Dict[str, Any]:
     """Governed external research leg (N3). Reuses the SSRF-safe guardrailed service end-to-end
     (allowlist from profile, size-bounded single-endpoint fetch, cache). Adds the inbound-content
     governance this leg owes on top: every snippet is injection-scanned (same detector as OCR text);
@@ -154,7 +182,7 @@ def _leg_web(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
     hidden. The outbound query is TEMPLATED from plan slots (zero user tokens)."""
     from src.app.services.external_product_research_service import run_external_research_stage
     templated = _templated_web_query(plan)
-    res = run_external_research_stage(query=templated, results=None)
+    res = run_external_research_stage(query=templated, results=None, tenant_id=tenant_id)
     if res is None:
         return {"source": "external_web", "found": False, "summary": "", "data": {"disabled": True}}
     items = res.get("items") or []
@@ -200,7 +228,8 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
                     image_identity: Optional[Dict[str, Any]] = None,
                     leg_fns: Optional[Dict[str, Callable[..., Dict[str, Any]]]] = None,
                     budget_s: Optional[float] = None,
-                    web_consent: bool = False) -> Dict[str, Any]:
+                    web_consent: bool = False,
+                    tenant_id: Optional[str] = None) -> Dict[str, Any]:
     """Run the selected legs concurrently under a per-leg budget. Returns
     {selected, legs: {name: leg_dict}, citations: [{source, summary}], ms}. Never raises;
     a timed-out/failed leg reports found=False with an error note instead of vanishing silently."""
@@ -218,8 +247,8 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
             return {"source": name, "found": False, "summary": "", "data": {}, "error": "no_leg_fn"}
         try:
             if name == "image":
-                return fn(plan, query, uid, image_identity=image_identity)
-            return fn(plan, query, uid)
+                return fn(plan, query, uid, image_identity=image_identity, tenant_id=tenant_id)
+            return fn(plan, query, uid, tenant_id=tenant_id)
         except Exception as exc:   # a broken leg is EVIDENCE of a problem, not silence
             return {"source": name, "found": False, "summary": "", "data": {}, "error": str(exc)[:160]}
 
