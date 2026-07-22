@@ -11,6 +11,7 @@ import ExternalResearchPanel, { type ExternalResearchItem } from './components/E
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
+import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
 import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { procurementAwareTraceId } from './lib/trace';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
@@ -355,6 +356,7 @@ export default function App() {
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
   const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
+  const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   // Safe-internet-search results (separate labeled source; never owned catalog items).
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
@@ -1854,6 +1856,14 @@ export default function App() {
         }
 
         const prods = (data.products || []) as Product[];
+        const shelf = data.shelf && Array.isArray(data.shelf.bands)
+          ? data.shelf as RecommendationShelfContract
+          : null;
+        setRecommendationShelf(shelf);
+        const shelfProducts = (shelf?.bands || []).flatMap((band) => Array.isArray(band.cards) ? band.cards : []);
+        const allVisibleProducts = Array.from(
+          new Map([...prods, ...shelfProducts].map((product) => [String(product.sku), product])).values(),
+        );
         if (imageRecommendationTurn) {
           setCanonicalImageProducts(prods.slice(0, 10));
           setCanonicalImageSummary(String(data.assistant_message || data.summary || ''));
@@ -1969,7 +1979,7 @@ export default function App() {
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else if (prods.length > 0) {
-          const visibleProducts = prods.slice(0, 12);
+          const visibleProducts = allVisibleProducts.slice(0, 12);
           setDisplayProducts(visibleProducts);
           if (panelContract?.mode === 'support') switchRightPanelMode('faq');
           else if (cartUpsellIntent) switchRightPanelMode('cart');
@@ -2721,6 +2731,7 @@ export default function App() {
                   {/* BACKEND choice-lanes (evidence-driven) — render these when present; map each lane's
                       skus to the full product cards. Falls back to the frontend heuristic lanes below. */}
                   {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode)
+                    && !recommendationShelf
                     && filteredDisplayProducts.length > 0
                     && Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0 && (
                     <div className={styles.deviceLanePanel} data-testid="backend-device-lanes">
@@ -2767,6 +2778,7 @@ export default function App() {
 
                   {/* Heuristic lane fallback — only when the backend provided no device_lanes. */}
                   {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode)
+                    && !recommendationShelf
                     && filteredDisplayProducts.length > 0
                     && !(Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0) && (
                     <div className={styles.deviceLanePanel}>
@@ -3015,7 +3027,13 @@ export default function App() {
                         sourcingRequirements={sourcingIntent?.requirements}
                         sourcingOrderId={sourcingIntent?.pr_id}
                       />
-                    </>) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
+                    </>) : recommendationShelf && ['grid', 'list'].includes(rightPanelMode) ? (
+                      <RecommendationShelf
+                        shelf={recommendationShelf}
+                        onAdd={addToCart}
+                        onWhy={handleWhyProduct}
+                      />
+                    ) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
                       <div className={styles.emptyProductState}>
                         <div className={styles.emptyProductIcon}>🔍</div>
                         <div className={styles.emptyProductTitle}>No products found</div>
