@@ -148,6 +148,43 @@ def test_core_uses_workload_as_primary_context_when_audience_is_also_present(db)
     assert "university general" not in response.message.lower()
 
 
+def test_game_development_primary_slate_excludes_known_integrated_gpu_when_fit_exists(db):
+    from src.app.services.taxonomy_registry import upsert_classification
+
+    insert = text(
+        "INSERT INTO products (id, sku, name, price_cents, specs, brand) "
+        "VALUES (:id, :sku, :name, :price, :specs, :brand)"
+    )
+    db.execute(insert, [
+        {"id": "p-dev", "sku": "DEV-RTX", "name": "Creator RTX Laptop",
+         "price": 220000, "brand": "Creator",
+         "specs": json.dumps({"ram_gb": 32, "storage_gb": 1024,
+                               "gpu_discrete": True, "gpu_vram_gb": 8})},
+        {"id": "p-igpu", "sku": "DEV-IGPU", "name": "Integrated Graphics Laptop",
+         "price": 120000, "brand": "Budget",
+         "specs": json.dumps({"ram_gb": 32, "storage_gb": 1024,
+                               "gpu_discrete": False})},
+    ])
+    upsert_classification(db, sku="DEV-RTX", node_handle="el-6-11-2",
+                          source="test", status="approved")
+    upsert_classification(db, sku="DEV-IGPU", node_handle="el-6-11-2",
+                          source="test", status="approved")
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-11-2", "requirements": {},
+        "use_cases": ["game_development"], "confidence": 0.9,
+    })
+
+    response = recommend_turn(
+        db,
+        _env("laptop for game development"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert "DEV-RTX" in {product.sku for product in response.products}
+    assert "DEV-IGPU" not in {product.sku for product in response.products}
+    assert all((product.fit or {}).get("overall") == "meets" for product in response.products)
+
+
 def test_refusal_needs_the_sold_set_not_the_model(db):
     # forklift: bi-18 offered by candidates, model proposes OFF_CATALOG, sold set grants it
     d = route_turn(db, _env("do you sell forklifts?"), llm_fn=_route_stub("OFF_CATALOG", "bi-18"))
