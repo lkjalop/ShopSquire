@@ -304,6 +304,7 @@ def _clamp_bulk_budget_prose(
     contradiction_markers = (
         "would exceed the total budget", "total would be too high",
         "exceeds the total budget", "over the total budget",
+        "far above what's needed", "far above what is needed",
     )
     paragraphs = [part.strip() for part in re.split(r"\n{2,}", str(message or "")) if part.strip()]
     kept = [part for part in paragraphs

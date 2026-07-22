@@ -172,6 +172,52 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
     }
 
 
+def _prewarm_router_models(app: FastAPI) -> dict[str, Any]:
+    """Load the bounded router and taxonomy models and publish truthful readiness."""
+    result: dict[str, Any] = {"ready": False, "status": "warming"}
+    app.state.router_prewarm = result
+    try:
+        import httpx
+
+        from src.app.services.recommendation_core.turn_router import _router_model
+        from src.app.services.taxonomy_embedding_index import EMBED_MODEL
+
+        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        model = _router_model()
+        generate = httpx.post(
+            f"{url}/api/generate",
+            json={
+                "model": model,
+                "prompt": "ok",
+                "stream": False,
+                "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+                "options": {"num_predict": 1, "temperature": 0},
+            },
+            timeout=120.0,
+        )
+        generate.raise_for_status()
+        embed = httpx.post(
+            f"{url}/api/embed",
+            json={
+                "model": EMBED_MODEL,
+                "input": ["product taxonomy warmup"],
+                "keep_alive": os.getenv("OLLAMA_EMBED_KEEP_ALIVE", "60m"),
+            },
+            timeout=120.0,
+        )
+        embed.raise_for_status()
+        result = {
+            "ready": True,
+            "status": "ready",
+            "router_model": model,
+            "embedding_model": EMBED_MODEL,
+        }
+    except Exception as exc:
+        result = {"ready": False, "status": "failed", "error": str(exc)[:300]}
+    app.state.router_prewarm = result
+    return result
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -323,37 +369,27 @@ def create_app() -> FastAPI:
                 import threading as _th2
 
                 def _prewarm_router_model() -> None:
-                    try:
-                        import httpx as _hx
-                        from src.app.services.recommendation_core.turn_router import _router_model
-                        _url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-                        _model = _router_model()
-                        _hx.post(
-                            f"{_url}/api/generate",
-                            json={"model": _model, "prompt": "ok", "stream": False,
-                                  "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                                  "options": {"num_predict": 1, "temperature": 0}},
-                            timeout=120.0,
-                        )
-                        # The off-catalog taxonomy clamp uses the small embedding model. Warm and
-                        # pin it beside the router so the first absent-category turn does not pay
-                        # a 12s model-load spike. This requires OLLAMA_MAX_LOADED_MODELS>=2, which
-                        # start_demo.ps1 documents as part of the 12GB demo residency profile.
-                        from src.app.services.taxonomy_embedding_index import EMBED_MODEL
-                        _hx.post(
-                            f"{_url}/api/embed",
-                            json={"model": EMBED_MODEL, "input": ["product taxonomy warmup"],
-                                  "keep_alive": os.getenv("OLLAMA_EMBED_KEEP_ALIVE", "60m")},
-                            timeout=120.0,
-                        )
-                        import logging as _rl2
+                    result = _prewarm_router_models(app)
+                    import logging as _rl2
+                    if result.get("ready"):
                         _rl2.getLogger("shopsquire.startup").info(
-                            "router/taxonomy-model pre-warm complete: %s + %s", _model, EMBED_MODEL)
-                    except Exception as _rw_exc:
-                        import logging as _rl2
-                        _rl2.getLogger("shopsquire.startup").warning("router-model pre-warm failed: %s", _rw_exc)
+                            "router/taxonomy-model pre-warm complete: %s + %s",
+                            result.get("router_model"), result.get("embedding_model"),
+                        )
+                    else:
+                        _rl2.getLogger("shopsquire.startup").warning(
+                            "router-model pre-warm failed: %s", result.get("error"),
+                        )
 
-                _th2.Thread(target=_prewarm_router_model, name="router-model-prewarm", daemon=True).start()
+                _blocking = str(os.getenv("ROUTER_PREWARM_BLOCKING", "0")).strip().lower() in (
+                    "1", "true", "yes", "on",
+                )
+                if _blocking:
+                    _prewarm_router_model()
+                else:
+                    _th2.Thread(
+                        target=_prewarm_router_model, name="router-model-prewarm", daemon=True,
+                    ).start()
         except Exception:
             pass
         try:
@@ -1469,6 +1505,7 @@ def create_app() -> FastAPI:
             "cv_ocr": {"status": "skipped", "details": {"mode": "deep_only"}},
             "redis": {"status": "skipped", "details": {"mode": "deep_only"}},
             "db": {"status": "unknown", "details": {}},
+            "router_model": {"status": "unknown", "details": {}},
         }
 
         def _set_component(name: str, ready: bool, details: dict[str, Any] | None = None) -> None:
@@ -1506,6 +1543,18 @@ def create_app() -> FastAPI:
             ok = False
             reasons.append("ready_check_failed")
             _set_component("db", False, {"error": "ready_check_failed"})
+
+        router_prewarm = getattr(app.state, "router_prewarm", None)
+        if isinstance(router_prewarm, dict):
+            router_ready = bool(router_prewarm.get("ready"))
+            _set_component("router_model", router_ready, router_prewarm)
+            if not router_ready and str(os.getenv("ROUTER_PREWARM_REQUIRED", "0")).strip().lower() in (
+                "1", "true", "yes", "on",
+            ):
+                ok = False
+                reasons.append("router_model_not_ready")
+        else:
+            _set_component("router_model", False, {"status": "not_started"})
 
         if deep:
             try:

@@ -106,7 +106,7 @@ class Memory:
         except Exception:
             pass
 
-    def clear_session(self, uid: str) -> None:
+    def clear_session(self, uid: str, *, tenant_id: str = "default") -> None:
         keys = [
             SUMMARY_KEY.format(uid=uid),
             KV_KEY.format(uid=uid),
@@ -116,6 +116,10 @@ class Memory:
             PRODUCT_MEMORY_BANK_KEY.format(uid=uid),
             OBSERVATION_LOG_KEY.format(uid=uid),
             OBSERVATION_SUMMARY_KEY.format(uid=uid),
+            PENDING_CLARIFICATION_KEY.format(
+                tenant_id=str(tenant_id or "default").strip() or "default",
+                uid=str(uid or "").strip(),
+            ),
         ]
         try:
             self.redis.delete(*keys)

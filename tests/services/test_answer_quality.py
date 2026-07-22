@@ -110,6 +110,26 @@ def test_total_order_budget_removes_narration_that_contradicts_authorized_math()
     assert "AUD 1,919 per unit" in msg
 
 
+def test_total_order_budget_removes_inverse_affordability_claim():
+    out = apply_answer_quality(
+        query="20 game-development laptops, total budget AUD 41000",
+        assistant_message=(
+            "Your AUD 41,000 total allows up to AUD 2,050 per unit.\n\n"
+            "NO, your budget of AUD 41,000 is far above what's needed for these laptops.\n\n"
+            "The selected laptop is AUD 1,919 per unit."
+        ),
+        turn_intent="FILTER",
+        products=[{"price": 1919}],
+        image_cv_signals={}, has_image=False, buyer_persona=None, brand_name=None,
+        bulk_budget={"scope": "total", "total": 41000, "quantity": 20,
+                     "per_unit_cap": 2050},
+    )
+    msg = str(out.get("assistant_message") or "")
+    assert "allows up to AUD 2,050" in msg
+    assert "far above" not in msg.lower()
+    assert "AUD 1,919 per unit" in msg
+
+
 
 def test_payment_and_contact_are_policy_faq_topics():
     """Payment-methods and contact questions route to the FAQ answerer, not product search (gap fix).

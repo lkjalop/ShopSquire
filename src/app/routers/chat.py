@@ -2005,11 +2005,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         if isinstance((payload or {}).get("recent_messages"), list) else [],
         pending_clarification=pending_clarification,
     )
-    if q != submitted_query and pending_clarification:
-        try:
-            Memory(redis).clear_pending_clarification(uid, tenant_id=tenant_id)
-        except Exception:
-            pass
+    pending_clarification_consumed = bool(q != submitted_query and pending_clarification)
     params["query"] = q
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
     if not confirmed_slots:
@@ -3051,6 +3047,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
             confirmed_slots=_extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else None),
         )
+        if pending_clarification_consumed:
+            Memory(redis).clear_pending_clarification(uid, tenant_id=tenant_id)
     except Exception:
         pass
     return out

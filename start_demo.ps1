@@ -52,6 +52,9 @@ $env:CV_WARMUP_ON_START                = "0"
 # lanes still delegate through the facade to their mature handlers; cart mutations remain
 # confirmation-gated because RECOMMEND_CART_AUTO_APPLY is intentionally not enabled here.
 $env:RECOMMEND_CORE_MODE               = "primary"
+$env:ROUTER_PREWARM_ON_START           = "1"
+$env:ROUTER_PREWARM_BLOCKING           = "1"
+$env:ROUTER_PREWARM_REQUIRED           = "1"
 $env:RECOMMEND_CART_SERVE              = "1"
 # Preserve quota enforcement in the demo, but allow a full recorded journey for one guest. The
 # production limits remain sourced from the deployment environment and are intentionally lower.
