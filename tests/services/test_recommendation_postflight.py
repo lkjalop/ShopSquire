@@ -59,6 +59,18 @@ def test_followup_without_budget_refreshes_not_wipes():
     assert raw["constraints"]["requirements"] == {"ram_gb": [[">=", 16]]}
 
 
+def test_inferred_retrieval_subject_is_persisted():
+    r = _Redis()
+    env = _env()
+    core = _core(env)
+    core.extras["decision"]["node_handle"] = None
+    core.extras["constraints_used"] = {"node_handle": "el-6-6"}
+
+    assert write_session(r, env, core) is True
+    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    assert raw["last_node_handle"] == "el-6-6"
+
+
 def test_followup_without_products_or_quantity_preserves_prior_slice():
     import dataclasses
     r = _Redis()

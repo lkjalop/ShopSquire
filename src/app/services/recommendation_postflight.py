@@ -65,7 +65,8 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
         else:
             active_workflow = prior_workflow
         slice_ = {
-            "last_node_handle": decision.get("node_handle") or (envelope.session or {}).get("prior_node"),
+            "last_node_handle": (decision.get("node_handle") or used.get("node_handle")
+                                 or (envelope.session or {}).get("prior_node")),
             "last_shortlist_skus": ([c.sku for c in core.products][:12]
                                     or list((envelope.session or {}).get("shortlist_skus") or [])[:12]),
             "constraints": {

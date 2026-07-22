@@ -192,6 +192,30 @@ def test_default_tenant_bridges_bounded_legacy_session_fields_only():
     assert F._read_session_slice(r, "u1", "other-tenant") == {}
 
 
+def test_legacy_bridge_derives_subject_from_approved_shortlist():
+    import json
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+
+    db = sessionmaker(bind=create_engine("sqlite://"))()
+    db.execute(text(
+        "CREATE TABLE product_classification (tenant_id TEXT, sku TEXT, node_handle TEXT, status TEXT)"
+    ))
+    db.execute(text(
+        "INSERT INTO product_classification VALUES "
+        "('default','LAP-1','el-6-6','approved'),"
+        "('default','LAP-2','el-6-11-2','approved')"
+    ))
+    r = _Redis()
+    r.store["session:u1:kv_state"] = json.dumps({
+        "last_valid_shortlist_skus": ["LAP-1", "LAP-2"],
+        "last_valid_constraints_snapshot": {"budget_max": 2300},
+    })
+
+    bridged = F._read_session_slice(r, "u1", "default", db)
+    assert bridged["prior_node"] == "el-6"
+
+
 def test_default_tenant_bridges_explicit_legacy_procurement_state():
     import json
     r = _Redis()

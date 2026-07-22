@@ -372,7 +372,43 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
     return with_trace(payload, envelope.trace_id)
 
 
-def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
+def _classified_subject(db, skus: List[str], tenant_id: str) -> Optional[str]:
+    """Deepest shared approved subject for a delegated lane's exact shortlist."""
+    if db is None or not skus:
+        return None
+    from sqlalchemy import text as _sql
+    from src.app.services.taxonomy_registry import ancestors, get_node
+
+    shortlist = [str(sku) for sku in skus if sku][:12]
+    params = {f"s{i}": sku for i, sku in enumerate(shortlist)}
+    params["t"] = tenant_id
+    placeholders = ", ".join(f":s{i}" for i in range(len(shortlist)))
+    try:
+        rows = db.execute(_sql(
+            "SELECT sku, node_handle FROM product_classification "
+            f"WHERE tenant_id=:t AND status='approved' AND sku IN ({placeholders})"
+        ), params).fetchall()
+    except Exception as exc:
+        logger.warning("legacy shortlist taxonomy bridge failed (tenant=%s): %s",
+                       tenant_id, repr(exc)[:120])
+        return None
+    # A partial classification page is not sufficient evidence to narrow the whole slate.
+    if len(rows) < max(1, (len(shortlist) * 4 + 4) // 5):
+        return None
+    chains = []
+    for row in rows:
+        node = get_node(str(row[1] or ""))
+        if node is not None:
+            chains.append({node.handle, *(item.handle for item in ancestors(node.handle))})
+    if not chains:
+        return None
+    shared = set.intersection(*chains)
+    nodes = [get_node(handle) for handle in shared]
+    specific = [node for node in nodes if node is not None and node.depth >= 1]
+    return max(specific, key=lambda node: (node.depth, node.handle)).handle if specific else None
+
+
+def _read_session_slice(redis, uid: str, tenant_id: str, db: Any = None) -> Dict[str, Any]:
     """Best-effort immutable session slice, TENANT-SCOPED (GPT-5.6 #5c22575.3): the core's
     session namespace is session:{tenant}:{uid}:kv_state — never uid-alone (that would cross
     tenants). Consumed by prior-subject resolution later; populated now so the wiring is
@@ -409,15 +445,16 @@ def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
                 procurement_active = bool(active_pr.get("pr_id") and not active_pr.get("finalized"))
             else:
                 procurement_active = bool(legacy.get("last_sourcing_intent"))
+            shortlist = (legacy.get("last_valid_shortlist_skus")
+                         or legacy.get("last_shortlist_skus") or [])
             return {
-                "prior_node": None,
+                "prior_node": _classified_subject(db, shortlist, tenant_id),
                 # The mature legacy procurement workflow remains the executor. Bridge only its
                 # explicit workflow state into the V2 routing context; do not infer procurement
                 # from quantity alone because ordinary multi-pack searches also carry quantity.
                 "prior_lane": "PROCUREMENT" if procurement_active else None,
                 "active_workflow_lane": "PROCUREMENT" if procurement_active else None,
-                "shortlist_skus": legacy.get("last_valid_shortlist_skus")
-                                  or legacy.get("last_shortlist_skus") or [],
+                "shortlist_skus": shortlist,
                 "accepted_constraints": {
                     "budget_min_cents": bmin,
                     "budget_max_cents": bmax,
@@ -426,10 +463,12 @@ def _read_session_slice(redis, uid: str, tenant_id: str) -> Dict[str, Any]:
                 },
                 "legacy_bridge": True,
             }
-        return {"prior_node": data.get("last_node_handle"),
+        shortlist = data.get("last_shortlist_skus") or []
+        return {"prior_node": (data.get("last_node_handle")
+                               or _classified_subject(db, shortlist, tenant_id)),
                 "prior_lane": data.get("last_lane"),
                 "active_workflow_lane": data.get("active_workflow_lane"),
-                "shortlist_skus": data.get("last_shortlist_skus") or [],
+                "shortlist_skus": shortlist,
                 "accepted_constraints": data.get("constraints") or {}}
     except Exception:
         return {}
@@ -516,7 +555,7 @@ def dispatch_recommendation_core(
                         query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                         budget_max=budget_max, trace_id=trace_id, has_image=False,
                         intent_hint=intent_hint,
-                        source_ip=source_ip, session=_read_session_slice(redis, uid, tenant),
+                        source_ip=source_ip, session=_read_session_slice(redis, uid, tenant, db),
                         cart=cart_slice, pre_gate=_served_guard)
                     cart_payload = _serve_cart_mutation(envelope, role=role,
                                                         with_trace=with_trace, redis=redis)
@@ -545,7 +584,7 @@ def dispatch_recommendation_core(
                 intent_hint=intent_hint,
                 has_image=bool(image_labels or image_hash), source_ip=source_ip,
                 image_observations=image_observations,
-                session=_read_session_slice(redis, uid, tenant), cart=cart_slice)
+                session=_read_session_slice(redis, uid, tenant, db), cart=cart_slice)
             _enqueue_shadow(redis, envelope=shadow_env, cart_only=(mode != "shadow"))
         if mode == "shadow":
             return None
@@ -570,7 +609,7 @@ def dispatch_recommendation_core(
         if str(guard.get("verdict")) != "allow":
             return None
 
-        session = _read_session_slice(redis, uid, tenant)
+        session = _read_session_slice(redis, uid, tenant, db)
         # the search core is cart-blind; cart editing already ran above (parallel-run).
         envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
