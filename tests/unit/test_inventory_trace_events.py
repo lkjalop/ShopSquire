@@ -45,3 +45,19 @@ def test_inventory_brand_notice_emits_events(monkeypatch):
 
     assert inv_ev["payload"].get("unmatched_brands") == ["apple"]
     assert sup_ev["payload"].get("missing_suppliers_for") == ["apple"]
+
+
+def test_excluded_brand_never_emits_missing_supplier_notice(monkeypatch):
+    emitted = []
+    monkeypatch.setattr(recommend, "log_trace_event", lambda **event: emitted.append(event))
+
+    note, unmatched = recommend._emit_inventory_brand_notice(
+        results=[{"name": "Dell XPS 13", "sku": "DELL-XPS-13"}],
+        constraints={"brands": ["Apple"], "brand_excludes": ["Apple"]},
+        decision_id="TEST-ID",
+        trace_id="TEST-ID",
+    )
+
+    assert note is None
+    assert unmatched == []
+    assert emitted == []

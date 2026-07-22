@@ -4355,7 +4355,14 @@ def _emit_inventory_brand_notice(
     Returns a user-facing note to append to `assistant_message` and the list of unmatched brands.
     """
     try:
-        req_brands = set([str(b).lower() for b in (constraints.get("brands") or []) if b is not None])
+        req_brands = {str(b).strip().lower() for b in (constraints.get("brands") or [])
+                      if b is not None and str(b).strip()}
+        excluded_brands = {str(b).strip().lower()
+                           for b in (constraints.get("brand_excludes") or [])
+                           if b is not None and str(b).strip()}
+        # A negated brand is a subtraction, never a supplier request. Some legacy assembly paths
+        # include it in both collections; resolve the set semantics at this final notice boundary.
+        req_brands -= excluded_brands
         if not req_brands:
             return None, []
         matched_brands = set()
