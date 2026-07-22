@@ -28,7 +28,18 @@ client = TestClient(app, headers=default_headers())
 def nudge_stack(monkeypatch):
     monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
     orig = RecommendationService.retrieve_candidates
-    RecommendationService.retrieve_candidates = lambda self, q, limit=10: []
+    RecommendationService.retrieve_candidates = lambda self, q, limit=10: [{
+        "id": "RNW-1",
+        "sku": "RNW-1",
+        "name": "RN Laptop",
+        "price": 1199.0,
+        "price_cents": 119900,
+        "currency": "USD",
+        "specs": {},
+        "stock": 5,
+        "active": True,
+        "score": 0.5,
+    }]
     orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
     _write_flags({
         "USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 100,
