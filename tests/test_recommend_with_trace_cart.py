@@ -65,3 +65,18 @@ def test_with_trace_persists_canonical_decision_row(_stub_trace_writes):
     decision = _stub_trace_writes["decisions"][0][1]
     assert decision["decision_id"] == "tid-cart-durable"
     assert decision["event_type"] == "recommendation_result"
+
+
+def test_with_trace_persists_typed_execution_ontology(_stub_trace_writes):
+    payload = _cart_payload()
+    payload["execution_steps"] = [{
+        "id": "model_proposal", "kind": "model", "authority": "proposes",
+        "label": "Model proposed a bounded turn decision", "status": "accepted",
+    }]
+
+    _with_trace(payload, "tid-execution-proof")
+
+    event_payload = _stub_trace_writes["events"][0][1]["payload"]
+    decision = _stub_trace_writes["decisions"][0][1]
+    assert event_payload["execution_steps"][0]["authority"] == "proposes"
+    assert decision["retrieved_context"]["execution_steps"][0]["kind"] == "model"

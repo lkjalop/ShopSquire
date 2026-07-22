@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from src.app.services.recommendation_core.envelope import CoreResponse
+from src.app.services.recommendation_core.trace_ontology import build_execution_steps
 
 SHAPES = ("full_pipeline", "inventory_fast", "claims", "policy_faq")
 
@@ -95,6 +96,9 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         # ── legacy-required CORE_FIELDS the core doesn't produce yet: HONEST inert
         # defaults, populated stage-by-stage as Phase 4 proceeds — never fabricated ──
         "agent_chain": core.extras.get("agent_chain", []),
+        # Canonical V2 audit surface. ``agent_chain`` remains only for legacy consumers; these
+        # typed rows make proposal, authorization, execution, observation, and presentation clear.
+        "execution_steps": build_execution_steps(core),
         "ambiguity_reason": core.extras.get("ambiguity_reason"),
         "buyer_persona": None, "buyer_persona_candidate": None, "buyer_persona_confidence": None,
         "complexity_signals": core.extras.get("complexity_signals", {}),

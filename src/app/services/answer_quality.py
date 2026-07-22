@@ -278,6 +278,39 @@ def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_
     return f"{direct} {base_message}".strip()
 
 
+def _clamp_bulk_budget_prose(
+    *, message: str, products: List[Dict[str, Any]], bulk_budget: Dict[str, Any] | None,
+) -> str:
+    """Remove model prose that contradicts an authorized whole-order calculation."""
+    if not isinstance(bulk_budget, dict) or str(bulk_budget.get("scope") or "").lower() != "total":
+        return message
+    total = bulk_budget.get("total")
+    if not isinstance(total, (int, float)):
+        total = bulk_budget.get("total_budget")
+    quantity = bulk_budget.get("quantity")
+    if not isinstance(total, (int, float)) or not isinstance(quantity, (int, float)) or quantity <= 0:
+        return message
+    prices = []
+    for product in products or []:
+        try:
+            price = float(product.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices.append(price)
+    if not prices or not all(price * float(quantity) <= float(total) + 0.005 for price in prices):
+        return message
+
+    contradiction_markers = (
+        "would exceed the total budget", "total would be too high",
+        "exceeds the total budget", "over the total budget",
+    )
+    paragraphs = [part.strip() for part in re.split(r"\n{2,}", str(message or "")) if part.strip()]
+    kept = [part for part in paragraphs
+            if not any(marker in part.lower() for marker in contradiction_markers)]
+    return "\n\n".join(kept).strip() or message
+
+
 def _render_no_match(*, query: str, products: List[Dict[str, Any]]) -> str:
     lo, hi = _extract_query_budget_bounds(query)
     if hi is not None and lo is None:
@@ -335,7 +368,10 @@ def apply_answer_quality(
     brand_name: str | None,
     bulk_budget: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    msg = str(assistant_message or "").strip()
+    msg = _clamp_bulk_budget_prose(
+        message=str(assistant_message or "").strip(), products=products,
+        bulk_budget=bulk_budget,
+    )
     decomp = decompose_intent_and_questions(
         query=query,
         turn_intent=turn_intent,
@@ -392,4 +428,3 @@ def apply_answer_quality(
         "template_selected": {"template_id": template_id, "reason": templ.get("reason")},
         "answer_coverage_scored": cov2,
     }
-

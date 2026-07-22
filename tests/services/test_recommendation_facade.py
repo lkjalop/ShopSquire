@@ -63,6 +63,29 @@ def test_primary_serves_core_lane(monkeypatch):
     assert out is not None and out["_via_with_trace"] and out["turn_intent"] == "FILTER"
 
 
+def test_material_clarification_can_cross_delegated_lane_without_execution(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+
+    def clarify_only(_db, envelope):
+        response = CoreResponse(envelope=envelope, lane="PROCUREMENT", message="Which scope?")
+        response.clarify.append({
+            "id": "budget_scope", "reason": "missing_material_budget_scope",
+            "text": "Is that per item or the total?",
+        })
+        return response.finalize()
+
+    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn", clarify_only)
+    outcome = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="20 laptops budget 41000", uid="u1",
+        tenant_id="t1", budget_min=None, budget_max=41000, trace_id="tr1",
+        with_trace=_wt, record_failure=lambda *a, **k: None,
+    )
+
+    assert outcome.status == "served" and outcome.lane == "CLARIFY"
+    assert outcome.payload["products"] == []
+    assert outcome.payload["next_questions"][0]["reason"] == "missing_material_budget_scope"
+
+
 def test_typed_outcome_distinguishes_served_delegate_and_blocked(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "off")
     delegated = F.dispatch_recommendation_core_typed(

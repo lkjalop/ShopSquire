@@ -37,7 +37,7 @@ UNIVERSAL_FIELDS = frozenset({
 # Present on every FULL-PIPELINE branch (search / off-catalog / workload / clarify with
 # retrieval). Alternate branches (below) do NOT emit these. V2's full-pipeline lane must.
 CORE_FIELDS = frozenset({
-    "_trace_recommendation_persisted", "agent_chain", "ambiguity_reason", "assistant_message",
+    "_trace_recommendation_persisted", "agent_chain", "execution_steps", "ambiguity_reason", "assistant_message",
     "buyer_persona", "buyer_persona_candidate", "buyer_persona_confidence", "complexity_signals",
     "confidence_band", "confidence_calibrated", "constraints_used", "counterfactual",
     "decision_id", "decision_trace_id", "degraded", "eligible", "evidence_items",

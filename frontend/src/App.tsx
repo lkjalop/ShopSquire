@@ -2012,7 +2012,10 @@ export default function App() {
           if (panelContract?.mode === 'support') switchRightPanelMode('faq');
           else if (cartUpsellIntent) switchRightPanelMode('cart');
           // else: keep current panel mode unchanged
-          const nqePrompt = formatNextQuestions(nextQuestions);
+          const nqePrompt = nextQuestions.some((item: any) => {
+            const questionText = String(item?.text || item?.question || '').trim();
+            return Boolean(questionText) && String(respAssistant || '').includes(questionText);
+          }) ? '' : formatNextQuestions(nextQuestions);
           const noProdsBase = respAssistant || 'I could not find products matching that query.';
           const budgetNote = budgetAdvice ? `\n\n⚠️ Budget note: ${budgetAdvice}` : '';
           const assistantMsg: ChatMessage = {

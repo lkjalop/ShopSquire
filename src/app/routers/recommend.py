@@ -695,6 +695,7 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
                     "products_summary": products_summary,
                     "right_panel_contract": right_panel_contract,
                     "intent_snapshot": _intent_snapshot_from_payload(payload),
+                    "execution_steps": payload.get("execution_steps") or [],
                 },
             )
             intent_snapshot = _intent_snapshot_from_payload(payload)
@@ -711,6 +712,7 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
                     "products_count": len(products_summary),
                     "policy_gates": payload.get("policy_gates") or {},
                     "right_panel_contract": right_panel_contract,
+                    "execution_steps": payload.get("execution_steps") or [],
                 },
                 proposed_action={
                     "decision_mode": str(payload.get("decision_mode") or "catalog_recommendation"),

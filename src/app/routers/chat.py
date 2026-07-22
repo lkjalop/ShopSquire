@@ -724,6 +724,42 @@ def _extract_brand_mentions(query: str) -> List[str]:
     return out
 
 
+def _merge_material_nqe_answer(
+    *, query: str, nqe_selection: Dict[str, Any] | None,
+    recent_messages: List[Dict[str, Any]] | None,
+) -> str:
+    """Resolve a bounded material answer against the turn that asked for it.
+
+    NQE buttons submit their short label as the visible user message.  For slots that change
+    authorization semantics, that label is not a standalone query: it must refine the preceding
+    buyer request.  Only known question/option IDs are accepted; arbitrary button text is never
+    promoted into hidden context.
+    """
+    selection = nqe_selection if isinstance(nqe_selection, dict) else {}
+    qid = str(selection.get("question_id") or "").strip().lower()
+    oid = str(selection.get("option_id") or "").strip().lower()
+    if qid != "budget_scope" or oid not in {"total", "per_unit"}:
+        return query
+
+    prior_query = ""
+    for item in reversed(recent_messages or []):
+        if not isinstance(item, dict) or str(item.get("role") or "").strip().lower() != "user":
+            continue
+        candidate = str(item.get("content") or "").strip()
+        if candidate and candidate.casefold() != str(query or "").strip().casefold():
+            prior_query = candidate
+            break
+    if not prior_query:
+        return query
+
+    scope_statement = (
+        "The stated budget is the total budget for all requested units."
+        if oid == "total"
+        else "The stated budget is a per-item budget."
+    )
+    return f"{prior_query} {scope_statement}"
+
+
 def _include_adaptive_metadata(out: Dict[str, Any], source: Dict[str, Any]) -> None:
     """Copy only adaptive levers that actually ran; absence is a public contract."""
     for key in ("sales_response_nudge", "ranking_experiment", "storefront_emphasis"):
@@ -1947,6 +1983,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     if bool((payload or {}).get("external_research_consent")):
         params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
+    q = _merge_material_nqe_answer(
+        query=str(q or ""),
+        nqe_selection=nqe_selection if isinstance(nqe_selection, dict) else {},
+        recent_messages=(payload or {}).get("recent_messages")
+        if isinstance((payload or {}).get("recent_messages"), list) else [],
+    )
+    params["query"] = q
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
     if not confirmed_slots:
         try:
@@ -2523,17 +2566,21 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         prompts = [f"- {q.get('text')}" for q in next_questions if isinstance(q, dict) and q.get("text")]
         assistant_message = "I could not find a confident in-catalog match yet. Try one of these refinements:\n" + "\n".join(prompts)
 
-    aq_out = apply_answer_quality(
-        query=q,
-        assistant_message=assistant_message,
-        turn_intent=turn_intent,
-        products=products,
-        image_cv_signals=image_cv_signals_in if isinstance(image_cv_signals_in, dict) else {},
-        has_image=has_image,
-        buyer_persona=data.get("buyer_persona"),
-        brand_name=None,
-        bulk_budget=data.get("bulk_budget") if isinstance(data.get("bulk_budget"), dict) else None,
-    )
+    clarification_only = bool(data.get("needs_disambiguation") and not products and next_questions)
+    if clarification_only:
+        aq_out = {"assistant_message": assistant_message}
+    else:
+        aq_out = apply_answer_quality(
+            query=q,
+            assistant_message=assistant_message,
+            turn_intent=turn_intent,
+            products=products,
+            image_cv_signals=image_cv_signals_in if isinstance(image_cv_signals_in, dict) else {},
+            has_image=has_image,
+            buyer_persona=data.get("buyer_persona"),
+            brand_name=None,
+            bulk_budget=data.get("bulk_budget") if isinstance(data.get("bulk_budget"), dict) else None,
+        )
     assistant_message = aq_out.get("assistant_message")
     # N6 prose citations, re-applied on the /chat path: recommend.suggest appends a "_Sources:_" line,
     # but chat re-derives the message through apply_answer_quality (which drops it). Re-append here on
@@ -2799,6 +2846,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # recommend.suggest but was DROPPED here — so the frontend (which hits /chat/query, not
         # /suggest) never saw it and the Evidence tab + Source chips stayed empty. Forward it.
         "evidence": data.get("evidence"),
+        # Canonical V2 execution ontology.  Persisting this on the chat response lets the same
+        # immutable trace prove model proposal, deterministic authorization, and stage execution.
+        "execution_steps": data.get("execution_steps") or [],
         # Async narration handoff: when recommend ran in async/skip mode it returns the deterministic
         # grounded answer now + a job id for the richer LLM prose. Forward both so the storefront can
         # poll /api/v1/recommend/narration/{job_id} and replace the message in place (no blocking wait).

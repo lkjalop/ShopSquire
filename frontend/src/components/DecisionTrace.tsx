@@ -25,6 +25,7 @@ type Trace = {
   input_query?: string;
   intent_analysis?: any;
   agent_chain?: any[];
+  execution_steps?: any[];
   rag_context?: any;
   recommendation?: { product_id?: string; reasoning?: string; score?: number };
   policy_gates?: any;
@@ -294,7 +295,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const _TABS = ['events', 'summary', 'why', 'intent', 'multimodal', 'complexity', 'memory', 'security', 'procurement', 'evidence', 'audit', 'raw'] as const;
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'evidence' | 'audit' | 'raw'>(
+  const [activeTab, setActiveTab] = useState<'events' | 'execution' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'evidence' | 'audit' | 'raw'>(
     (initialTab && (_TABS as readonly string[]).includes(initialTab)) ? (initialTab as typeof _TABS[number]) : 'events');
   // When this decision opened a procurement journey, badge the Procurement tab so the operator sees it
   // exists instead of having to click through blind. FulfilmentTraceLink resolves the case; it reports up.
@@ -477,7 +478,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
   const fetchExplainReplayLazy = useCallback(async () => {
     if (!effectiveTraceId) return;
-    const tabsAllowFetch = activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw';
+    const tabsAllowFetch = activeTab === 'execution' || activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw';
     if (!tabsAllowFetch) return;
 
     try {
@@ -779,7 +780,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
   useEffect(() => {
     if (!effectiveTraceId) return;
-    if (!(activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw')) return;
+    if (!(activeTab === 'execution' || activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw')) return;
     if (explain || replay || explainReplayLoading) return;
     fetchExplainReplayLazy();
   }, [effectiveTraceId, activeTab, explain, replay, explainReplayLoading, fetchExplainReplayLazy]);
@@ -821,6 +822,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
 
   const ms = trace?.model_selection || {};
+  const persistedExecutionEvent = [...allDisplayEvents].reverse().find((evt: any) =>
+    Array.isArray(evt?.payload?.execution_steps));
+  const typedExecutionSteps = Array.isArray(trace?.execution_steps) && trace!.execution_steps!.length > 0
+    ? trace!.execution_steps!
+    : (persistedExecutionEvent?.payload?.execution_steps || []);
+  const proposalExecutionStep = typedExecutionSteps.find((step: any) =>
+    step?.kind === 'model' && step?.authority === 'proposes');
 
   // Badge the Procurement tab when a case resolved OR the trace already carries procurement/split/supplier
   // activity — so the operator sees there's a story to open even before FulfilmentTraceLink resolves a case.
@@ -1517,6 +1525,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
             {/* Tabs */}
             <div className={styles.tabs}>
               <button className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => setActiveTab('events')}>Events</button>
+              <button className={activeTab === 'execution' ? styles.activeTab : ''} onClick={() => setActiveTab('execution')}>Execution</button>
               <button className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => setActiveTab('summary')}>Summary</button>
               <button className={activeTab === 'why' ? styles.activeTab : ''} onClick={() => setActiveTab('why')}>Why Recommended</button>
               <button className={activeTab === 'intent' ? styles.activeTab : ''} onClick={() => setActiveTab('intent')}>Intent</button>
@@ -1654,19 +1663,55 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 </>
               )}
 
+              {activeTab === 'execution' && (
+                <div className={styles.summaryPane}>
+                  {(() => {
+                    const steps = typedExecutionSteps;
+                    if (!steps.length) {
+                      return <div className={styles.empty}>This trace predates the typed execution contract. It cannot prove proposal, authorization, and execution boundaries.</div>;
+                    }
+                    return (
+                      <>
+                        <div className={styles.sectionTitle}>Who decided what</div>
+                        <table className={styles.table}>
+                          <thead><tr><th>Kind</th><th>Authority</th><th>Step</th><th>Status</th><th>Latency</th></tr></thead>
+                          <tbody>
+                            {steps.map((step: any, index: number) => (
+                              <tr key={step.id || `execution-${index}`}>
+                                <td>{humanizeKey(String(step.kind || 'stage'))}</td>
+                                <td><strong>{humanizeKey(String(step.authority || 'observes'))}</strong></td>
+                                <td>
+                                  {formatDisplayText(step.label, 'Unnamed step')}
+                                  {Array.isArray(step.changes) && step.changes.length > 0 && (
+                                    <div className={styles.muted}>Corrected: {step.changes.join(', ')}</div>
+                                  )}
+                                </td>
+                                <td>{humanizeKey(String(step.status || 'unknown'))}</td>
+                                <td>{step.latency_ms != null ? `${Number(step.latency_ms).toFixed(1)}ms` : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div className={styles.muted}>Models propose. Platform gates authorize. Stages and connectors execute or observe. Human approval is shown only when an approval event exists.</div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+
               {activeTab === 'summary' && trace && (
                 <div className={styles.summaryPane}>
                   <div className={styles.kvRow}><span>Decision ID</span><span>{trace.decision_id}</span></div>
                   <div className={styles.kvRow}><span>Timestamp</span><span>{trace.timestamp}</span></div>
                   <div className={styles.kvRow}><span>Query</span><span>{trace.input_query || '--'}</span></div>
-                  <div className={styles.kvRow}><span>Model</span><span>{ms.selected || '--'}</span></div>
-                  <div className={styles.kvRow}><span>Path</span><span>{Array.isArray(ms.path) ? ms.path.join(' -> ') : '--'}</span></div>
-                  <div className={styles.kvRow}><span>Latency</span><span>{ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--'}</span></div>
+                  <div className={styles.kvRow}><span>Model</span><span>{proposalExecutionStep ? 'Model-directed router' : (ms.selected || '--')}</span></div>
+                  <div className={styles.kvRow}><span>Path</span><span>{typedExecutionSteps.length > 0 ? typedExecutionSteps.map((step: any) => step.authority).join(' -> ') : (Array.isArray(ms.path) ? ms.path.join(' -> ') : '--')}</span></div>
+                  <div className={styles.kvRow}><span>Latency</span><span>{proposalExecutionStep?.latency_ms != null ? `${Math.round(proposalExecutionStep.latency_ms)}ms` : (ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--')}</span></div>
                   <div className={styles.kvRow}><span>Intent</span><span>{ms.intent_summary || '--'}</span></div>
                   <div className={styles.kvRow}>
                     <span>Tier Decision</span>
                     <span>
-                      {ms?.decision?.action ? (
+                      {proposalExecutionStep ? 'Model proposal + platform authorization' : ms?.decision?.action ? (
                         <>
                           {ms.decision.action}
                           {(ms.decision.from || ms.decision.to) ? ` (${ms.decision.from || '-'} -> ${ms.decision.to || '-'})` : ''}

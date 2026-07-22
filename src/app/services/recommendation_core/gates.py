@@ -45,3 +45,26 @@ def slot_gap_clarify(*, has_products: bool, budget_known: bool,
                 "changes which specs matter.", "goal": "narrow_results",
                 "reason": "use_case_slot_empty"}
     return None
+
+
+def material_pre_retrieval_clarify(*, quantity: Optional[int], budget_known: bool,
+                                   budget_scope: str) -> Optional[Dict[str, Any]]:
+    """Stop before retrieval only when an unresolved slot changes authorization semantics.
+
+    A missing generic use case does not qualify: balanced retrieval can proceed and refine later.
+    Whole-order versus per-unit budget does qualify because retrieval would apply different price
+    ceilings and could present a mathematically invalid slate.
+    """
+    if quantity is not None and quantity >= 2 and budget_known and budget_scope == "unknown":
+        return {
+            "id": "budget_scope",
+            "goal": "resolve_budget_scope",
+            "reason": "missing_material_budget_scope",
+            "missing_slots": ["budget_scope"],
+            "text": f"Is that budget per item, or the total for all {quantity}?",
+            "options": [
+                {"id": "per_unit", "label": "Per item"},
+                {"id": "total", "label": f"Total for all {quantity}"},
+            ],
+        }
+    return None

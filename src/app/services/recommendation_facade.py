@@ -700,6 +700,17 @@ def dispatch_recommendation_core_typed(
         core = recommend_turn(db, envelope)
         _latency_ms = int((time.perf_counter() - _t0) * 1000)
 
+        # A material clarification is safe across a delegated-lane boundary: it contains no
+        # products and performs no procurement action. The answered turn is routed again, while
+        # the mature workflow continues to own every sourcing and approval operation.
+        material_clarification = any(
+            str(item.get("reason") or "").startswith("missing_material_")
+            for item in (core.clarify or []) if isinstance(item, dict)
+        )
+        if core.lane not in CANARY_LANES and material_clarification and not core.products:
+            payload = with_trace(to_legacy(core), trace_id)
+            return outcome("served", payload=payload, lane="CLARIFY")
+
         # ── LANE GATE (finding #6): non-core lanes fall through to legacy ───────
         if core.lane not in CANARY_LANES:
             logger.debug("core lane %s not canary-eligible — falling through to legacy", core.lane)

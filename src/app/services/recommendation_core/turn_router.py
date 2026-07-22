@@ -230,6 +230,11 @@ class TurnDecision:
     # current_order | general_policy | none. Kept separate from subject continuity so an omitted
     # quantity can only be inherited for a real active procurement workflow.
     procurement_context: str = "none"
+    # Audit-only, bounded copy of the model's semantic proposal before platform clamps. This is
+    # never consumed by retrieval or execution; it exists so the trace can prove which component
+    # proposed a value and which component authorized the final decision.
+    model_proposal: Dict[str, Any] = field(default_factory=dict)
+    authorization_changes: Tuple[str, ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -251,7 +256,65 @@ class TurnDecision:
                 "quantity": self.quantity, "total_budget_cents": self.total_budget_cents,
                 "budget_scope": self.budget_scope, "budget_cap_mode": self.budget_cap_mode,
                 "subject_action": self.subject_action,
-                "procurement_context": self.procurement_context}
+                "procurement_context": self.procurement_context,
+                "model_proposal": dict(self.model_proposal),
+                "authorization_changes": list(self.authorization_changes)}
+
+
+def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a small, non-executable audit projection of model output.
+
+    The raw model response is intentionally not persisted: it can contain arbitrary text. Only
+    closed decision fields are retained, with short strings and bounded collections.
+    """
+    def short(value: Any) -> Optional[str]:
+        text = str(value or "").strip()
+        return text[:120] if text else None
+
+    requirements = data.get("requirements") if isinstance(data.get("requirements"), dict) else {}
+    return {
+        "lane": short(data.get("lane")),
+        "handle": short(data.get("handle")),
+        "requirements": {short(k) or "": list(v)[:2] if isinstance(v, (list, tuple)) else short(v)
+                         for k, v in list(requirements.items())[:16]},
+        "use_cases": [short(v) for v in list(data.get("use_cases") or [])[:8] if short(v)],
+        "audience_contexts": [short(v) for v in list(data.get("audience_contexts") or [])[:8]
+                              if short(v)],
+        "brand": short((data.get("refine") or {}).get("brand")
+                       if isinstance(data.get("refine"), dict) else None),
+        "exclude_brand": short((data.get("refine") or {}).get("exclude_brand")
+                               if isinstance(data.get("refine"), dict) else None),
+        "quantity": data.get("quantity") if isinstance(data.get("quantity"), (int, float)) else None,
+        "total_budget": data.get("total_budget") if isinstance(data.get("total_budget"), (int, float)) else None,
+        "budget_scope": short(data.get("budget_scope")),
+        "subject_action": short(data.get("subject_action")),
+        "procurement_context": short(data.get("procurement_context")),
+    }
+
+
+def _authorization_changes(proposal: Dict[str, Any], accepted: Dict[str, Any]) -> Tuple[str, ...]:
+    """Describe platform defaults separately from rejected or corrected model values."""
+    comparisons = {
+        "lane": accepted.get("lane"),
+        "handle": accepted.get("node_handle"),
+        "requirements": accepted.get("requirements") or {},
+        "use_cases": accepted.get("use_cases") or [],
+        "brand": accepted.get("brand_filter"),
+        "exclude_brand": accepted.get("exclude_brand"),
+        "quantity": accepted.get("quantity"),
+        "budget_scope": accepted.get("budget_scope"),
+        "subject_action": accepted.get("subject_action"),
+        "procurement_context": accepted.get("procurement_context"),
+    }
+    changed = []
+    for field_name, accepted_value in comparisons.items():
+        proposed_value = proposal.get(field_name)
+        if field_name == "lane" and proposed_value:
+            proposed_value = _LANE_ALIASES.get(str(proposed_value).upper(), str(proposed_value).upper())
+        if proposed_value != accepted_value:
+            reason = "defaulted" if proposed_value is None else "clamped"
+            changed.append(f"{field_name}:{reason}")
+    return tuple(changed)
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -1157,6 +1220,19 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         else:
             lane = "SEARCH"
 
+    proposal = _bounded_model_proposal(data)
+    accepted_audit = {
+        "lane": lane,
+        "node_handle": (node.handle if node else None),
+        "requirements": {k: [list(p) for p in v] for k, v in requirements.items()},
+        "use_cases": list(use_cases),
+        "brand_filter": brand_filter,
+        "exclude_brand": exclude_brand,
+        "quantity": quantity,
+        "budget_scope": budget_scope,
+        "subject_action": subject_action,
+        "procurement_context": procurement_context,
+    }
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
                         requirements=requirements, use_cases=tuple(use_cases),
@@ -1175,4 +1251,6 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         quantity=quantity, total_budget_cents=total_budget_cents,
                         budget_scope=budget_scope, budget_cap_mode=budget_cap_mode,
                         subject_action=subject_action,
-                        procurement_context=procurement_context)
+                        procurement_context=procurement_context,
+                        model_proposal=proposal,
+                        authorization_changes=_authorization_changes(proposal, accepted_audit))

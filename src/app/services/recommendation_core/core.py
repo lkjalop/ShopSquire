@@ -349,6 +349,36 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "requirements_inherited": requirements_inherited,
     }
 
+    # SMALL LOOP, BEFORE RETRIEVAL: only material missing slots stop execution. Generic workload
+    # refinement remains post-retrieval; an unresolved bulk budget scope changes the authorized
+    # price ceiling and therefore must be answered before products are selected.
+    from src.app.services.recommendation_core.gates import (
+        evaluate_text_gates, material_pre_retrieval_clarify, slot_gap_clarify,
+    )
+    if envelope.pre_gate is not None:
+        pg = envelope.pre_gate
+        route = "allow" if str(pg.get("verdict") or "allow") == "allow" else "review"
+        gates = {"policy_route": route, "image_untrusted": bool(envelope.has_image),
+                 "injection_flagged": route != "allow", "source": "commerce_request_guard"}
+    else:
+        gates = evaluate_text_gates(envelope.query)
+    resp.extras["gates"] = gates
+    if gates["policy_route"] != "allow":
+        resp.degraded = True
+    material_question = material_pre_retrieval_clarify(
+        quantity=decision.quantity,
+        budget_known=(decision.total_budget_cents is not None
+                      or envelope.budget_max_cents is not None
+                      or envelope.budget_min_cents is not None),
+        budget_scope=decision.budget_scope,
+    )
+    if material_question:
+        resp.clarify.append(material_question)
+        resp.set_message(material_question["text"], MsgPriority.BULK_SCOPE_CLARIFY)
+        resp.record_stage("clarify:pre_retrieval", status="clarify", won_message=True,
+                          reason=material_question["reason"])
+        return resp.finalize()
+
     # plan executors are the turn's MAIN work (retrieve / fit / compare / handoff); time the whole
     # planned sequence as one 'plan' breadcrumb, with the retrieval count the evidence leg recorded.
     _t_plan = time.perf_counter()
@@ -377,18 +407,6 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # gates: prefer the SHARED commerce guard's verdict (run once at the facade ingress) —
     # the core does NOT own a second security regex (GPT-5.6 #10). The thin evaluate_text_gates
     # is the NO-FACADE fallback only (offline replay / direct tests).
-    from src.app.services.recommendation_core.gates import evaluate_text_gates, slot_gap_clarify
-    if envelope.pre_gate is not None:
-        pg = envelope.pre_gate
-        route = "allow" if str(pg.get("verdict") or "allow") == "allow" else "review"
-        gates = {"policy_route": route, "image_untrusted": bool(envelope.has_image),
-                 "injection_flagged": route != "allow", "source": "commerce_request_guard"}
-    else:
-        gates = evaluate_text_gates(envelope.query)
-    resp.extras["gates"] = gates
-    if gates["policy_route"] != "allow":
-        resp.degraded = True
-
     # M2-B1: a CONFLICTED requirement ('nothing over 8GB' stated vs a use-case floor of 16) is
     # the SHOPPER'S call — surface the clarify; never silently pick a side.
     if intent.get("conflicts") and not resp.off_catalog and not resp.clarify:

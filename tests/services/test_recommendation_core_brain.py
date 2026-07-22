@@ -61,6 +61,59 @@ def test_router_bounded_fallback_on_garbage_model(db):
         assert d.requirements == {} and d.use_cases == ()
 
 
+def test_router_records_bounded_proposal_and_authorization_changes(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "invented-root-node",
+        "requirements": {"invented_spec": [">=", 999999], "ram_gb": [">=", 999999]},
+        "use_cases": ["invented_workload"],
+        "refine": {"brand": "Invented Brand", "exclude_brand": "Invented Brand"},
+        "quantity": 999999999, "budget_scope": "unbounded",
+        "subject_action": "delete", "procurement_context": "auto_send",
+    })
+
+    decision = route_turn(db, _env("gaming laptop"), llm_fn=lambda _p, _t: raw)
+
+    assert decision.model_proposal["handle"] == "invented-root-node"
+    assert decision.node_handle is None
+    assert decision.requirements == {}
+    assert decision.use_cases == ()
+    assert decision.brand_filter is None and decision.exclude_brand is None
+    assert decision.quantity is None
+    assert {"handle:clamped", "requirements:clamped", "use_cases:clamped", "brand:clamped",
+            "exclude_brand:clamped", "quantity:clamped"}.issubset(
+        set(decision.authorization_changes))
+
+
+def test_legacy_adapter_exposes_truthful_execution_boundaries(db):
+    response = recommend_turn(db, _env("gaming laptop"), llm_fn=_route_stub(
+        "SEARCH", "el-6-11-2", {"gpu_vram_gb": [">=", 8]}))
+
+    steps = to_legacy(response)["execution_steps"]
+
+    assert steps[0]["kind"] == "model" and steps[0]["authority"] == "proposes"
+    assert steps[1]["kind"] == "gate" and steps[1]["authority"] == "authorizes"
+    assert any(step["authority"] == "executes" for step in steps)
+    assert steps[-1]["authority"] == "presents"
+
+
+def test_material_bulk_budget_ambiguity_clarifies_before_retrieval(db):
+    raw = json.dumps({
+        "lane": "PROCUREMENT", "handle": "el-6-6", "requirements": {},
+        "use_cases": ["general_office"], "quantity": 20,
+        "total_budget": None, "budget_scope": None,
+    })
+    response = recommend_turn(
+        db,
+        _env("I need 20 laptops, budget 41000", budget_max=41000),
+        llm_fn=lambda _p, _t: raw,
+    )
+
+    assert response.products == []
+    assert response.clarify[0]["reason"] == "missing_material_budget_scope"
+    assert response.extras["stage_results"][-1]["stage"] == "clarify:pre_retrieval"
+    assert "per item" in response.message.lower() and "total" in response.message.lower()
+
+
 def test_non_product_service_scope_gets_bounded_explanation(db):
     raw = json.dumps({
         "lane": "SEARCH", "handle": None, "wanted_category": None,

@@ -35,6 +35,7 @@ class DecisionTraceQueryResponse(StrictModel):
     input_query: Optional[str] = None
     intent_analysis: Dict[str, Any] = Field(default_factory=dict)
     agent_chain: List[Dict[str, Any]] = Field(default_factory=list)
+    execution_steps: List[Dict[str, Any]] = Field(default_factory=list)
     rag_context: Dict[str, Any] = Field(default_factory=dict)
     recommendation: Any = None
     policy_gates: Dict[str, Any] = Field(default_factory=dict)
