@@ -808,6 +808,25 @@ def test_fresh_search_does_not_inherit_prior_bulk_quantity(db):
     assert resp.extras.get("requested_quantity") is None
 
 
+def test_complete_brand_excluded_search_does_not_reactivate_prior_bulk_quantity(db):
+    payload = {
+        "lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+        "use_cases": ["game_development"], "quantity": None,
+        "subject_action": "switch", "confidence": 0.9,
+        "refine": {"brand": "MSI", "exclude_brand": None},
+    }
+    session = {"prior_node": "el-6-6", "accepted_constraints": {"quantity": 20}}
+    resp = recommend_turn(
+        db,
+        _env("professional game development under $2500, no MSI",
+             session=session, budget_max=2500),
+        llm_fn=lambda p, t: json.dumps(payload),
+    )
+    assert resp.extras["decision"]["exclude_brand"] == "MSI"
+    assert resp.extras["decision"]["subject_action"] == "switch"
+    assert resp.extras.get("requested_quantity") is None
+
+
 def test_model_cannot_invent_budget_on_keep_total_followup(db):
     payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
                "quantity": None, "total_budget": 950, "budget_scope": "total",

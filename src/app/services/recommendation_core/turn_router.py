@@ -913,8 +913,16 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             preferred_brand = None
         prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
         # Excluding a catalog brand refines the active subject; it cannot by itself authorize
-        # a subject reset. This also lets the core inherit the active budget and requirements.
-        if prior is not None and (node is None or node.handle == prior.handle):
+        # a subject reset. A complete new request carrying material workload, capability, budget,
+        # or quantity constraints remains a switch, however; otherwise a trailing "no Apple"
+        # can resurrect an unrelated prior bulk quantity in the response and audit trace.
+        material_new_request = bool(
+            use_cases or requirements
+            or envelope.budget_min_cents is not None or envelope.budget_max_cents is not None
+            or data.get("quantity") is not None or data.get("total_budget") is not None
+        )
+        if (prior is not None and (node is None or node.handle == prior.handle)
+                and not (subject_action == "switch" and material_new_request)):
             subject_action = "continue"
             if node is None:
                 node = prior
