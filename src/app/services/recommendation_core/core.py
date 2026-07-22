@@ -414,7 +414,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         q = slot_gap_clarify(
             has_products=bool(resp.products),
             budget_known=envelope.budget_max_cents is not None or envelope.budget_min_cents is not None,
-            has_requirements=bool(decision.requirements))
+            has_requirements=bool(decision.requirements),
+            has_use_case=bool(decision.use_cases))
         if q:
             resp.clarify.append(q)
     return resp.finalize()

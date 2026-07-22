@@ -34,13 +34,13 @@ def evaluate_text_gates(query: str) -> Dict[str, Any]:
 
 
 def slot_gap_clarify(*, has_products: bool, budget_known: bool,
-                     has_requirements: bool) -> Optional[Dict[str, Any]]:
+                     has_requirements: bool, has_use_case: bool = False) -> Optional[Dict[str, Any]]:
     if not has_products:
         return None
     if not budget_known:
         return {"id": "ask_budget", "text": "What budget range should I stay within?",
                 "goal": "narrow_results", "reason": "budget_slot_empty"}
-    if not has_requirements:
+    if not has_requirements and not has_use_case:
         return {"id": "ask_use_case", "text": "What will you mainly use it for? That "
                 "changes which specs matter.", "goal": "narrow_results",
                 "reason": "use_case_slot_empty"}
