@@ -77,8 +77,17 @@ _CLEAR_INTENT = re.compile(
 _KEEP_INTENT = re.compile(
     r"\b(keep|only|just|except|all but|everything but|nothing but|leave (only|just))\b", re.IGNORECASE)
 _REPLACE_INTENT = re.compile(r"\b(replace|swap|switch|substitute|instead of|in place of)\b", re.IGNORECASE)
+_REMOVE_INTENT = re.compile(
+    r"\b(remove|delete|drop|ditch|discard|take out|get rid of|do not want|don't want)\b",
+    re.IGNORECASE,
+)
 _QUANTITY_CHANGE_INTENT = re.compile(
     r"\b(make|set|change|reduce|increase|raise|lower|cut)\b", re.IGNORECASE)
+_QUANTITY_SIGNAL_INTENT = re.compile(
+    r"\b(?:make|set|change|reduce|increase|raise|lower|cut)\b|"
+    r"\b[0-9]{1,6}\s+(?:more|fewer|less)\b|\bto\s+[0-9]{1,6}\b",
+    re.IGNORECASE,
+)
 _AFFORDABLE_QTY_INTENT = re.compile(
     r"\b(max(?:imum)? affordable|fit (?:it|them|the order) (?:in|within|under) (?:the )?budget|"
     r"keep (?:it|the order|the total) (?:in|within|under|at) (?:the )?(?:same )?(?:total )?budget|"
@@ -345,6 +354,25 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
             continue
         action = str(raw_op.get("action") or "").strip().lower()
         if action not in _ACTIONS:
+            continue
+
+        # CONSEQUENCE AUTHORIZATION: model interpretation may propose an operation, but a
+        # targeted cart consequence must be corroborated by the shopper's own action language.
+        # Unsupported proposals are not "ambiguous cart edits"; they are not cart edits at all,
+        # so drop them and let the ordinary recommendation route handle the turn.  The patterns
+        # authorize generic operation classes and contain no catalog/product vocabulary.
+        if action == "remove_items" and not (
+                _REMOVE_INTENT.search(envelope.query or "")
+                or _REPLACE_INTENT.search(envelope.query or "")):
+            continue
+        if action == "set_quantity" and not (
+                _QUANTITY_SIGNAL_INTENT.search(envelope.query or "")
+                or _AFFORDABLE_QTY_INTENT.search(envelope.query or "")
+                or _REPLACE_INTENT.search(envelope.query or "")):
+            continue
+        if action == "replace_item" and not (
+                _REPLACE_INTENT.search(envelope.query or "")
+                or _QUANTITY_CHANGE_INTENT.search(envelope.query or "")):
             continue
 
         # whole-cart intents carry no targets to bind. Track C: a destructive clear must be backed by

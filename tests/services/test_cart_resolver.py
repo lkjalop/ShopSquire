@@ -296,6 +296,21 @@ def test_non_cart_intent_yields_empty_plan():
     assert plan.is_empty and plan.source == "default"
 
 
+def test_product_search_drops_hallucinated_targeted_cart_operation():
+    """A populated cart must not turn an ordinary product search into a cart clarification."""
+    plan = resolve_cart_mutation(
+        _env("a Wacom drawing tablet for high school digital art under $500"),
+        llm_fn=_fixed_llm({
+            "ops": [{"action": "replace_item", "targets": ["the cart item"],
+                     "replacement": "Wacom drawing tablet"}],
+            "confidence": 0.9,
+        }),
+    )
+
+    assert plan.is_empty
+    assert not plan.ambiguous
+
+
 def test_bad_json_is_empty_plan_not_raise():
     plan = resolve_cart_mutation(_env("clear my cart"), llm_fn=lambda p, t: "not json {{{")
     assert plan is CartMutationPlan() or plan.is_empty
