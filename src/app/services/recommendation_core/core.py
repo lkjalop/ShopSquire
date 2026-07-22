@@ -518,6 +518,31 @@ def _budget_free_cards(db, envelope: TurnEnvelope, decision: TurnDecision, limit
     return cards
 
 
+def _inferred_subject_from_variants(variants: list) -> Optional[str]:
+    """Return the deepest shared, non-root taxonomy subject for an authorized slate.
+
+    Text fallback can retrieve a coherent slate even when the router supplies no node. Persisting
+    that bounded catalog subject lets later FILTER/COMPARE turns refine the slate instead of
+    text-searching a fragment such as "exclude Apple". A vertical root is deliberately rejected:
+    it is too broad to be useful continuation evidence.
+    """
+    from src.app.services.taxonomy_registry import ancestors, get_node
+
+    chains = []
+    for variant in variants:
+        handle = str(getattr(variant, "taxonomy_node_id", None) or "").strip()
+        node = get_node(handle)
+        if node is None:
+            continue
+        chains.append({node.handle, *(ancestor.handle for ancestor in ancestors(node.handle))})
+    if not chains:
+        return None
+    shared = set.intersection(*chains)
+    candidates = [get_node(handle) for handle in shared]
+    specific = [node for node in candidates if node is not None and node.depth >= 1]
+    return max(specific, key=lambda node: (node.depth, node.handle)).handle if specific else None
+
+
 def _budget_free_floor(db, envelope: TurnEnvelope, decision: TurnDecision,
                        limit: int) -> Optional[int]:
     """The capability floor IGNORING budget — cheapest node product that MEETS, even above the
@@ -1283,6 +1308,11 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     if decision.exclude_brand:
         xb = decision.exclude_brand.strip().lower()
         variants = [v for v in variants if (v.brand or "").strip().lower() != xb]
+    if decision.node_handle is None:
+        inferred_subject = _inferred_subject_from_variants(variants)
+        if inferred_subject:
+            resp.extras["constraints_used"]["node_handle"] = inferred_subject
+            resp.extras["subject_inferred_from_slate"] = inferred_subject
     # COMPARE of NAMED units (R9.3): narrow to the products the shopper actually named — the
     # compare_two_models case returned the whole category instead of the Dell G16 vs the Lenovo.
     if decision.lane == "COMPARE" and decision.compare_targets:

@@ -474,6 +474,38 @@ def test_filter_only_brand_narrows_to_that_brand(db):
     assert skus == ["LAP-2"]                                     # MSI LAP-1 filtered out
 
 
+def test_text_retrieval_persists_subject_for_brand_only_followup(db):
+    first = recommend_turn(
+        db,
+        _env("gaming laptop", budget_max=2300),
+        llm_fn=_route_stub("SEARCH", None),
+    )
+    inferred = first.extras["constraints_used"]["node_handle"]
+    assert inferred == "el-6"
+
+    session = {
+        "prior_node": inferred,
+        "shortlist_skus": [product.sku for product in first.products],
+        "accepted_constraints": {"budget_max_cents": 230000},
+    }
+    raw = json.dumps({
+        "lane": "FILTER", "handle": None, "requirements": {},
+        "subject_action": "switch", "confidence": 0.9,
+        "refine": {"brand": None, "prefer_brand": None,
+                   "exclude_brand": "MSI", "sort": None},
+    })
+    second = recommend_turn(
+        db,
+        _env("Exclude MSI and keep the same budget", session=session),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert second.products
+    assert {product.brand for product in second.products} == {"Asus"}
+    assert second.extras["constraints_used"]["budget_max_cents"] == 230000
+    assert second.extras["decision"]["subject_action"] == "continue"
+
+
 def test_brand_filter_zero_match_is_honest_not_ignored(db):
     """A brand filter that matches nothing shows an honest empty + message — NEVER the
     unfiltered slate (a grid that silently ignored the filter is the answer-shape lie)."""

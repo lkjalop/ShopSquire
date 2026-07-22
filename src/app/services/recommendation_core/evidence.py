@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
 
 from src.app.services.catalog_read_model import VariantView, search_variants
@@ -80,6 +80,33 @@ def _skus_for_node(db, node_handle: str, tenant_id: str, limit: int) -> List[str
     return [str(r[0]) for r in rows]
 
 
+def _attach_taxonomy_nodes(db, variants: List[VariantView], tenant_id: str) -> List[VariantView]:
+    """Batch-enrich catalog views with their approved taxonomy identity.
+
+    Both catalog adapters intentionally share ``VariantView`` but historically left its
+    documented taxonomy slot empty. Recommendation continuity and audit evidence must use the
+    approved classification table, not infer categories from product names.
+    """
+    if not variants:
+        return variants
+    from sqlalchemy import text as _sql
+
+    params: Dict[str, Any] = {f"s{i}": variant.sku for i, variant in enumerate(variants)}
+    params["t"] = tenant_id
+    placeholders = ", ".join(f":s{i}" for i in range(len(variants)))
+    try:
+        rows = db.execute(_sql(
+            "SELECT sku, node_handle FROM product_classification "
+            f"WHERE tenant_id=:t AND status='approved' AND sku IN ({placeholders})"
+        ), params).fetchall()
+    except Exception as exc:
+        _log.warning("taxonomy view enrichment skipped (tenant=%s): %s",
+                     tenant_id, repr(exc)[:120])
+        return variants
+    nodes = {str(row[0]): str(row[1]) for row in rows if row[0] and row[1]}
+    return [replace(variant, taxonomy_node_id=nodes.get(variant.sku)) for variant in variants]
+
+
 def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = None,
                     text_query: Optional[str] = None, category: Optional[str] = None,
                     product_type: Optional[str] = None, limit: int = 50,
@@ -129,6 +156,7 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
             bundle.errors = [e for e in bundle.errors if not e.startswith("taxonomy_lookup")]
     if not bundle.retrieval_mode.startswith("taxonomy:"):
         bundle.retrieval_mode = mode or "default"
+    variants = _attach_taxonomy_nodes(counted, variants, tenant)
     bundle.total_before_budget = len(variants)
     lo, hi = envelope.budget_min_cents, envelope.budget_max_cents
     if lo is not None or hi is not None:
