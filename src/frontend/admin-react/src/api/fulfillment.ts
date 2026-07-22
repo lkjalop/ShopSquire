@@ -47,7 +47,7 @@ const _fcPost = (path: string, body?: any) =>
 
 export const listFulfillmentCases = () =>
   http<{ cases: FulfillmentCaseRow[] }>(`/api/v1/fulfillment/cases`).then((d) => d.cases || []);
-export const getFulfillmentCaseOp = (id: string) => http<FulfillmentCaseView>(_fc(id));
+export const getFulfillmentCaseOp = (id: string) => http<FulfillmentCaseView>(`${_fc(id)}/operator-view`);
 export const getFulfillmentJourney = (id: string) =>
   http<{ journey: JourneyEvent[] }>(`${_fc(id)}/journey`).then((d) => d.journey || []);
 export const fcDraftQuote = (id: string, item_ref: string, quantity: number, estimated_value_cents = 0) =>

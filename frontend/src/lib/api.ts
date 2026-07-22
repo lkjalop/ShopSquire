@@ -191,9 +191,9 @@ export interface FulfillmentOption {
 }
 
 export async function getFulfillmentCase(caseId: string, view: 'buyer' | 'operator' = 'buyer') {
-  const u = new URL(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(caseId)}`), window.location.href);
-  u.searchParams.set('view', view);
-  const r = await fetch(u.toString(), { credentials: 'include', headers: authHeaders() });
+  const suffix = view === 'operator' ? '/operator-view' : '';
+  const r = await fetch(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(caseId)}${suffix}`),
+    { credentials: 'include', headers: authHeaders() });
   const j = await safeJson(r);
   if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `case_get_failed (${r.status})`);
   return j;

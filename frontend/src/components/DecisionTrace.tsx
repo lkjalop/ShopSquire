@@ -284,8 +284,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
   // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
-  // An explicitly supplied operator key must outrank the storefront's build-time merchant key;
-  // otherwise `view=operator` is silently downgraded and the drafted RFQ disappears.
+  // An explicitly supplied operator key must outrank the storefront's build-time merchant key so the
+  // component can use the authenticated operator projection rather than the buyer-safe trace summary.
   const effectiveApiKey = getOwnerApiKey() || API_KEY || '';
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
   const [trace, setTrace] = useState<Trace | null>(null);
@@ -526,8 +526,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       // Read-only: resolve EVERY case opened from this trace — a multi-supplier bulk order opens one case
       // per supplier group (each with its own drafted RFQ), so the Procurement tab shows all N, not just the
       // newest. Falls back gracefully to an empty list; the primary case (cases[0]) drives the audit journey.
+      const caseViewPath = canSeeOperatorDraft
+        ? `/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all/operator-view`
+        : `/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all`;
       const allView: any = await fetch(
-        apiUrl(`/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all?view=operator`),
+        apiUrl(caseViewPath),
         { credentials: 'include', headers },
       ).then(safeJson).catch(() => null);
       const cases: any[] = Array.isArray(allView?.cases) ? allView.cases : [];
@@ -3248,6 +3251,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                       && e?.payload?.recommendation);
                     const mi: any = miEvent?.payload || null;
                     const draft: any = (procCase?.state_json?.draft) || null;
+                    const procurementTrace: any = (procCase?.state_json?.procurement_trace) || null;
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     const gateView = procurementGateDisplay(draft?.send_gate || draft?.gate);
                     return (
@@ -3389,8 +3393,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             </div>
                           </div>
                         )}
-                        {procCases.length <= 1 && procCase && draft && !canSeeOperatorDraft && (
-                          <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order (human-gated). Sign in with an operator key to view it.</div>
+                        {procCases.length <= 1 && procCase && procurementTrace && !canSeeOperatorDraft && (
+                          <div data-testid="proc-rfq-safe-summary" style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 11px', marginTop: 8, fontSize: 13 }}>
+                            <div style={{ fontWeight: 700 }}>Supplier RFQ drafted <span style={{ color: '#b45309', fontSize: 12 }}>human-gated · not sent</span></div>
+                            <div className={styles.kvRow}><span>RFQ quantity</span><span>{procurementTrace.quantity ?? '—'} supplier-shortfall unit(s)</span></div>
+                            {procurementTrace.channel && <div className={styles.kvRow}><span>Preferred channel</span><span>{String(procurementTrace.channel)}{procurementTrace.requires_human ? ' · human-only' : procurementTrace.integration_kind ? ` · ${String(procurementTrace.integration_kind).toUpperCase()} handoff` : ' · human sends'}</span></div>}
+                            {procurementTrace.gate_decision && <div className={styles.kvRow}><span>Send gate</span><span>{String(procurementTrace.gate_decision)}</span></div>}
+                            <div className={styles.empty} style={{ marginTop: 6 }}>Supplier contact, ordering terms, and message content are operator-only.</div>
+                          </div>
                         )}
                         {procCases.length <= 1 && procCase && !draft && !canSeeOperatorDraft
                           && String(procCase.state || '').toUpperCase().includes('DRAFTED') && (

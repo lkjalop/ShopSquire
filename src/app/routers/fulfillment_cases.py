@@ -78,12 +78,41 @@ def _raise_if_failed(res: "fwf.TransitionResult") -> None:
 _BUYER_REDACT = ("draft", "inbound", "quarantine")
 
 
+def _buyer_procurement_trace(draft: Any) -> Optional[Dict[str, Any]]:
+    """Expose workflow proof without leaking supplier-private message content or economics."""
+    if not isinstance(draft, dict):
+        return None
+    scope = draft.get("commercial_scope") if isinstance(draft.get("commercial_scope"), dict) else {}
+    channel = draft.get("channel_plan") if isinstance(draft.get("channel_plan"), dict) else {}
+    gate = draft.get("send_gate") or draft.get("gate")
+    gate = gate if isinstance(gate, dict) else {}
+    reasons = gate.get("blocking") or gate.get("reasons") or []
+    if not isinstance(reasons, list):
+        reasons = [reasons]
+    return {
+        "drafted": True,
+        "status": "human_gated_not_sent",
+        "item_ref": scope.get("item_ref"),
+        "quantity": scope.get("quantity"),
+        "currency": scope.get("currency"),
+        "channel": channel.get("channel"),
+        "requires_human": bool(channel.get("requires_human")),
+        "integration_kind": channel.get("integration_kind"),
+        "gate_decision": gate.get("decision"),
+        "gate_reasons": [str(reason) for reason in reasons if reason],
+        "content_hash": draft.get("content_hash"),
+    }
+
+
 def _case_view(db, case_id: str, *, for_operator: bool) -> Dict[str, Any]:
     cur = fwf.repository.current_version(db, case_id)
     if cur is None:
         raise HTTPException(status_code=404, detail="case not found")
     state_json = dict(cur.state_json)
     if not for_operator:
+        procurement_trace = _buyer_procurement_trace(state_json.get("draft"))
+        if procurement_trace:
+            state_json["procurement_trace"] = procurement_trace
         for k in _BUYER_REDACT:
             state_json.pop(k, None)
         vq = state_json.get("validated_quote")
@@ -167,24 +196,39 @@ def autonomous_audit(limit: int = Query(100, ge=1, le=1000),
 
 
 @router.get("/cases/{case_id}")
-def get_case(case_id: str, view: str = Query("operator")) -> Dict[str, Any]:
+def get_case(case_id: str) -> Dict[str, Any]:
     with db_session() as db:
-        return _case_view(db, case_id, for_operator=(view != "buyer"))
+        return _case_view(db, case_id, for_operator=False)
+
+
+@router.get("/cases/{case_id}/operator-view")
+def get_case_operator(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    with db_session() as db:
+        return _case_view(db, case_id, for_operator=True)
 
 
 @router.get("/cases/by-trace/{trace_id}")
-def get_case_by_trace(trace_id: str, view: str = Query("buyer")) -> Dict[str, Any]:
+def get_case_by_trace(trace_id: str) -> Dict[str, Any]:
     """Resolve the procurement case opened from a decision trace_id — the link that lets the buyer's
     DecisionTrace surface the fulfilment journey for the same turn. 404 when no case was opened."""
     with db_session() as db:
         cid = fwf.repository.case_id_by_trace(db, trace_id)
         if not cid:
             raise HTTPException(status_code=404, detail="no case for trace")
-        return {"trace_id": trace_id, **_case_view(db, cid, for_operator=(view != "buyer"))}
+        return {"trace_id": trace_id, **_case_view(db, cid, for_operator=False)}
 
 
-@router.get("/cases/by-trace/{trace_id}/all")
-def get_cases_by_trace_all(trace_id: str, view: str = Query("buyer")) -> Dict[str, Any]:
+@router.get("/cases/by-trace/{trace_id}/operator-view")
+def get_case_by_trace_operator(trace_id: str,
+                               role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    with db_session() as db:
+        cid = fwf.repository.case_id_by_trace(db, trace_id)
+        if not cid:
+            raise HTTPException(status_code=404, detail="no case for trace")
+        return {"trace_id": trace_id, **_case_view(db, cid, for_operator=True)}
+
+
+def _cases_by_trace_view(trace_id: str, *, for_operator: bool) -> Dict[str, Any]:
     """READ-ONLY: every ACTIVE case opened from a decision trace — a multi-supplier bulk order opens one
     case per supplier group, all sharing the trace, so the Decision Trace → Procurement tab can show ALL
     the drafted RFQs (one per supplier), not just the newest. Superseded cases are excluded (they belong to
@@ -195,7 +239,7 @@ def get_cases_by_trace_all(trace_id: str, view: str = Query("buyer")) -> Dict[st
         order_group_id: Optional[str] = None
         for cid in cids:
             try:
-                cv = _case_view(db, cid, for_operator=(view != "buyer"))
+                cv = _case_view(db, cid, for_operator=for_operator)
             except HTTPException:
                 continue
             if str(cv.get("state") or "").upper() == "SUPERSEDED":
@@ -204,6 +248,17 @@ def get_cases_by_trace_all(trace_id: str, view: str = Query("buyer")) -> Dict[st
             cases.append(cv)
         return {"trace_id": trace_id, "order_group_id": order_group_id,
                 "case_count": len(cases), "cases": cases}
+
+
+@router.get("/cases/by-trace/{trace_id}/all")
+def get_cases_by_trace_all(trace_id: str) -> Dict[str, Any]:
+    return _cases_by_trace_view(trace_id, for_operator=False)
+
+
+@router.get("/cases/by-trace/{trace_id}/all/operator-view")
+def get_cases_by_trace_all_operator(trace_id: str,
+                                    role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    return _cases_by_trace_view(trace_id, for_operator=True)
 
 
 @router.get("/cases/{case_id}/journey")

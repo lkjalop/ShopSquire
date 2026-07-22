@@ -49,13 +49,21 @@ def test_commit_auto_drafts_internal_rfq_when_flag_enabled(monkeypatch):
     assert body["state"] == "QUOTE_DRAFTED"
     assert "draft" not in body["state_json"]
 
-    r = client.get(f"{_BASE}/{cid}?view=operator")
+    r = client.get(f"{_BASE}/{cid}/operator-view")
     assert r.status_code == 200
     draft = r.json()["state_json"]["draft"]
     assert draft["commercial_scope"]["item_ref"] == "GAM-0002"
     assert draft["commercial_scope"]["quantity"] == 6
     assert draft["recipient_domain"] == "creatorfleet.example"
     assert draft["content_hash"]
+
+    buyer = client.get(f"{_BASE}/{cid}").json()["state_json"]
+    assert "draft" not in buyer
+    assert buyer["procurement_trace"]["quantity"] == 6
+    assert buyer["procurement_trace"]["channel"]
+    assert "recipient_email" not in buyer["procurement_trace"]
+    assert "body" not in buyer["procurement_trace"]
+    assert "supplier_terms" not in buyer["procurement_trace"]
 
 
 def test_commit_records_pending_retry_when_internal_draft_fails(monkeypatch):
@@ -166,6 +174,29 @@ def test_by_trace_links_case_to_decision_trace():
     cid = r.json()["case_id"]
     r2 = client.get(f"{_BASE}/by-trace/T-LINK-42")
     assert r2.status_code == 200 and r2.json()["case_id"] == cid and r2.json()["trace_id"] == "T-LINK-42"
+
+
+def test_by_trace_query_string_cannot_escalate_to_operator_view(monkeypatch):
+    monkeypatch.setenv("FULFILLMENT_AUTO_DRAFT_ON_COMMIT", "1")
+    from src.app.models.db import db_session
+    from src.app.services.supplier_catalog import ensure_supplier_coverage
+    with db_session() as db:
+        ensure_supplier_coverage(db)
+    trace_id = f"T-REDACT-{uuid.uuid4()}"
+    cid = client.post(_BASE, json={"uid": "u1", "trace_id": trace_id}).json()["case_id"]
+    client.post(f"{_BASE}/{cid}/assess", json={"requested_qty": 10, "in_stock": 4, "item_ref": "GAM-0002"})
+    client.post(f"{_BASE}/{cid}/commit", json={"uid": "u1"})
+
+    buyer = client.get(f"{_BASE}/by-trace/{trace_id}/all?view=operator").json()["cases"][0]
+
+    assert "draft" not in buyer["state_json"]
+    assert buyer["state_json"]["procurement_trace"]["drafted"] is True
+    assert "body" not in str(buyer["state_json"])
+    operator = client.get(f"{_BASE}/by-trace/{trace_id}/all/operator-view").json()["cases"][0]
+    assert operator["state_json"]["draft"]["body"]
+
+    unauthenticated = TestClient(app).get(f"{_BASE}/by-trace/{trace_id}/all/operator-view")
+    assert unauthenticated.status_code in (401, 403)
 
 
 def test_by_trace_404_when_no_case():

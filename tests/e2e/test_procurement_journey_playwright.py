@@ -66,7 +66,7 @@ def test_full_governed_procurement_journey_api():
 
     # agent drafts → request approval (needs a seeded approved supplier; otherwise NO_APPROVED_SUPPLIER)
     if committed["state"] == "QUOTE_DRAFTED":
-        drafted = _requests.get(f"{_FC}/{cid}?view=operator", headers=_HDR, timeout=20).json()
+        drafted = _requests.get(f"{_FC}/{cid}/operator-view", headers=_HDR, timeout=20).json()
     else:
         drafted = _post(f"{_FC}/{cid}/draft-quote", json={"item_ref": "LAP-021", "quantity": 6})
     if drafted["state"] == "NO_APPROVED_SUPPLIER":
