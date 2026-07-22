@@ -22,7 +22,6 @@ from src.app.models.db import get_db
 from src.app.services.memory import Memory
 from src.app.services.llm_provider import select_ollama_model, ollama_generate, is_complex_query, score_query_complexity
 from src.app.services.search_events import log_search_event
-from src.app.security.model_theft import enforce_model_theft_rate_limit, enforce_model_theft_policy_gate
 from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.decision_log import log_trace_event
 from src.app.services.copywriting import maybe_apply_copywriting
@@ -1356,10 +1355,35 @@ async def _call_recommend_in_process(
     db: Any,
     role: str,
 ) -> tuple[int, Dict[str, Any]]:
-    """Invoke the existing recommendation contract without HTTP self-calls."""
-    from src.app.routers.recommend import suggest
+    """Dispatch through the typed facade, delegating unsupported lanes to legacy."""
+    from src.app.routers.recommend import _record_partial_failure, _with_trace, suggest
+    from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
 
     def _invoke() -> Dict[str, Any]:
+        tenant_id = (request.headers.get("X-Tenant-Id")
+                     or request.headers.get("x-tenant-id") or "default")
+        facade = dispatch_recommendation_core_typed(
+            db, redis,
+            query=str(params.get("query") or ""), uid=str(params.get("uid") or ""),
+            tenant_id=tenant_id,
+            budget_max=params.get("budget_max"), budget_min=params.get("budget_min"),
+            trace_id=str(params.get("trace_id") or uuid.uuid4()),
+            image_labels=params.get("image_labels"), image_ocr=params.get("image_ocr_text"),
+            image_hash=params.get("image_hash"), image_intent=params.get("image_intent"),
+            image_product_identity=params.get("image_product_identity"),
+            image_cv_signals=params.get("image_cv_signals"),
+            intent_hint=params.get("turn_intent"), role=role, request=request,
+            source_ip=(request.client.host if request.client else None),
+            with_trace=_with_trace, record_failure=_record_partial_failure,
+        )
+        if facade.served:
+            return facade.payload or {}
+        if facade.status == "blocked":
+            raise HTTPException(status_code=403, detail={
+                "message": "Request blocked by recommendation guard",
+                "reason": facade.reason,
+                "trace_id": str(params.get("trace_id") or "") or None,
+            })
         return suggest(
             request=request,
             uid=str(params.get("uid") or ""),
@@ -1763,23 +1787,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     except Exception:
         pass
 
-    policy_ok, policy_reason = enforce_model_theft_policy_gate(
-        query=q,
-        uid=uid,
-        source_ip=(request.client.host if request and request.client else None),
-        api_key_id=(request.headers.get("x-api-key") if request else None),
+    from src.app.services.recommendation_ingress import authorize_recommendation_ingress
+    _recommend_ingress = authorize_recommendation_ingress(
+        request=request, redis=redis, query=q, uid=uid,
+        tenant_id=(request.headers.get("X-Tenant-Id")
+                   or request.headers.get("x-tenant-id") if request else None),
+        benign_shopping_query=False,
     )
-    if not policy_ok:
-        raise HTTPException(status_code=429, detail={"message": "model_theft_policy_gate", "reason": policy_reason})
-    allowed_model_use, model_use_reason = enforce_model_theft_rate_limit(
-        redis_client=redis,
-        uid=uid,
-        source_ip=(request.client.host if request and request.client else None),
-        api_key_id=(request.headers.get("x-api-key") if request else None),
-        query=q,
-    )
-    if not allowed_model_use:
-        raise HTTPException(status_code=429, detail={"message": "model_theft_guard", "reason": model_use_reason})
 
     # -----------------------------------------------------------------------
     # Persist recent conversation messages so the recommend pipeline can
@@ -1948,7 +1962,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
 
     # Delegate through the in-process compatibility boundary. The mature suggest
     # contract remains authoritative until facade dispatch is fully hoisted.
-    params = {"uid": uid, "query": _query_for_retrieval}
+    params = {"uid": uid, "query": _query_for_retrieval,
+              "trace_id": _recommend_ingress.trace_id}
     if _deficit_reorder:
         params["reorder_consent_intent"] = "true"  # emphasize the backorder-consent answer downstream
     if turn_intent and turn_intent != "SEARCH":

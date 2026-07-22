@@ -3,6 +3,7 @@ import asyncio
 from starlette.requests import Request
 
 from src.app.routers.chat import _call_recommend_in_process
+from src.app.services.recommendation_facade import FacadeOutcome
 
 
 def _request() -> Request:
@@ -54,3 +55,23 @@ def test_in_process_recommend_preserves_request_and_dependencies(monkeypatch):
     assert captured["db"] is db
     assert captured["role"] == "merchant"
     assert captured["external_research_consent"] is True
+
+
+def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkeypatch):
+    payload = {"results": [{"sku": "V2-1"}], "decision_trace_id": "trace-1"}
+    monkeypatch.setattr(
+        "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
+        lambda *_args, **_kwargs: FacadeOutcome(
+            status="served", payload=payload, lane="SEARCH"),
+    )
+    monkeypatch.setattr(
+        "src.app.routers.recommend.suggest",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy must not run")),
+    )
+
+    status, body = asyncio.run(_call_recommend_in_process(
+        _request(), {"uid": "buyer-1", "query": "gaming laptop", "trace_id": "trace-1"},
+        redis=object(), db=object(), role="merchant"))
+
+    assert status == 200
+    assert body == payload

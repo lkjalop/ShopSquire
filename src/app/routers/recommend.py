@@ -29,7 +29,6 @@ from src.app.services.recommendations import RecommendationService
 from sqlalchemy import text, bindparam
 from src.app.observability.health import dependency_health_snapshot
 from src.app.services.token_budget import TokenBudget, estimate_tokens, estimate_cost, infer_tier
-from src.app.services.tenant_quota import TenantQuotaGuard
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.safety.policies import get_policy, apply_post_policy
 from src.app.safety.redaction import redact_payload
@@ -64,11 +63,8 @@ from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints
 from src.app.services.copywriting import maybe_apply_copywriting
 from src.app.security.image_threat_signals import normalize_ocr_and_detect as _normalize_ocr_and_detect_shared
 from src.app.security.model_theft import (
-    enforce_model_theft_rate_limit,
-    enforce_model_theft_policy_gate,
     build_model_watermark,
     build_output_fingerprint,
-    detect_systematic_probing,
     perturb_confidence_score,
 )
 from src.app.security.dread_scorer import compute_dread
@@ -4482,47 +4478,15 @@ def suggest(
     span.set_attribute("recommend.query_len", len(query or ""))
     span.set_attribute("recommend.has_budget_max", bool(budget_max))
     source_ip = request.client.host if request and request.client else None
-    policy_gate_ok, policy_gate_reason = enforce_model_theft_policy_gate(
-        query=query,
-        uid=uid,
-        source_ip=source_ip,
-        api_key_id=(request.headers.get("x-api-key") if request else None),
-    )
     benign_shopping_query = (not _query_signals_unsupported_intent(query)) and not _query_signals_off_domain(query)
-    if not policy_gate_ok:
-        raise HTTPException(
-            status_code=429,
-            detail={"message": "Request blocked by model theft policy gate", "reason": policy_gate_reason},
-        )
-    allowed_model_use, model_use_reason = enforce_model_theft_rate_limit(
-        redis_client=redis,
-        uid=uid,
-        source_ip=source_ip,
-        api_key_id=(request.headers.get("x-api-key") if request else None),
-        query=query,
+    from src.app.services.recommendation_ingress import authorize_recommendation_ingress
+    ingress = authorize_recommendation_ingress(
+        request=request, redis=redis, query=query, uid=uid, tenant_id=(
+            request.headers.get("X-Tenant-Id") or request.headers.get("x-tenant-id")
+            if request else None),
+        benign_shopping_query=benign_shopping_query,
     )
-    if not allowed_model_use and not benign_shopping_query:
-        raise HTTPException(
-            status_code=429,
-            detail={"message": "Request blocked by model extraction controls", "reason": model_use_reason},
-        )
-    probe_result = detect_systematic_probing(
-        redis_client=redis,
-        uid=uid,
-        source_ip=source_ip,
-        queries=[query],
-    )
-    if bool(probe_result.get("detected")):
-        block_probe = str(os.getenv("MODEL_THEFT_BLOCK_SYSTEMATIC_PROBING", "1")).lower() in ("1", "true", "yes")
-        if block_probe:
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "message": "Request blocked by systematic probing controls",
-                    "reason": probe_result.get("reason"),
-                    "score": probe_result.get("score"),
-                },
-            )
+    probe_result = ingress.probe_result
     # ── RECOMMEND_PIPELINE_V2 — SHADOW only (non-blocking, NOT customer-affecting) ──
     # When RECOMMEND_PIPELINE_V2=1 the scatter-gather pipeline (DB + CLIP-visual +
     # caption-RAG + fraud) runs in a BACKGROUND thread purely to measure parity and
@@ -4589,18 +4553,7 @@ def suggest(
         tenant_id = request.headers.get("X-Tenant-Id") or request.headers.get("x-tenant-id")
     except Exception:
         tenant_id = None
-    try:
-        quota = TenantQuotaGuard(redis)
-        allowed, qmeta = quota.check_and_consume(tenant_id, "recommend_calls", amount=1)
-        if not allowed:
-            raise HTTPException(status_code=429, detail={"error": "tenant_quota_exceeded", **qmeta})
-    except HTTPException:
-        raise
-    except Exception:
-        pass
-    trace_id = _current_trace_id()
-    if not trace_id:
-        trace_id = str(uuid.uuid4())
+    trace_id = ingress.trace_id
     try:
         span.set_attribute("recommend.trace_id", trace_id)
     except Exception:
