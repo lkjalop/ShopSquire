@@ -63,7 +63,20 @@ def test_workload_precedes_audience_context_without_losing_either_profile():
     assert "game developer" in first["persona_hint"].lower()
     assert set(first["profile_trace"]) == {"game_development", "university"}
     assert first["requirements"]["gpu_vram_gb"] == [(">=", 6.0)]
+    assert "battery_hours" not in first["requirements"]
+    assert first["context_use_cases"] == ["university"]
+    assert first["workload_use_cases"] == ["game_development"]
+    assert first["context_preferences"]["university"]["battery_hours"] == [(">=", 8.0)]
     assert first["requirements"] == second["requirements"]
+
+
+def test_audience_profile_is_baseline_when_no_workload_is_known():
+    result = resolve(["university"])
+
+    assert result["workload_use_cases"] == []
+    assert result["context_use_cases"] == ["university"]
+    assert result["requirements"]["battery_hours"] == [(">=", 8.0)]
+    assert result["context_preferences"] == {}
 
 
 def test_ai_ml_is_most_demanding():

@@ -205,14 +205,26 @@ def resolve(use_cases: Optional[List[str]],
             resolved.append(n)
     resolved = _ordered_use_cases(resolved)
 
+    profiles = _kb().get("use_cases") or {}
+    workload_use_cases = [uc for uc in resolved
+                          if str((profiles.get(uc) or {}).get("intent_role") or "workload")
+                          != "audience_context"]
+    context_use_cases = [uc for uc in resolved if uc not in workload_use_cases]
+    mixed_with_workload = bool(workload_use_cases and context_use_cases)
+
     merged: Dict[str, Any] = {}
     profile_trace: Dict[str, Dict[str, Any]] = {}
+    context_preferences: Dict[str, Dict[str, Any]] = {}
     for uc in resolved:
         prof = _profile_constraints(uc)
         profile_trace[uc] = {"requirements": {k: [list(p) for p in c.predicates()]
                                               for k, c in prof.items()},
-                             "label": ((_kb().get("use_cases") or {}).get(uc) or {}).get("label", uc)}
-        merged = merge_maps(merged, prof)
+                             "label": (profiles.get(uc) or {}).get("label", uc),
+                             "intent_role": (profiles.get(uc) or {}).get("intent_role", "workload")}
+        if mixed_with_workload and uc in context_use_cases:
+            context_preferences[uc] = {k: c.predicates() for k, c in prof.items()}
+        else:
+            merged = merge_maps(merged, prof)
     # SALVAGE: per-title (game/software) requirements from the proven legacy DBs
     title = _salvage_title_requirements(query) if query else {"requirements": {}, "trace": {}}
     if title["requirements"]:
@@ -232,5 +244,8 @@ def resolve(use_cases: Optional[List[str]],
     final_reqs = _inject_registry_capabilities(project(merged), resolved, vertical)
     return {"requirements": final_reqs, "constraints": as_dicts(merged),
             "conflicts": constraint_conflicts(merged), "use_cases": resolved,
+            "workload_use_cases": workload_use_cases,
+            "context_use_cases": context_use_cases,
+            "context_preferences": context_preferences,
             "profile_trace": profile_trace, "title_requirements": title["trace"],
             "persona_hint": persona_hint, "primary_use_case": primary_use_case}

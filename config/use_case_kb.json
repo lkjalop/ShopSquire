@@ -18,6 +18,8 @@
   "use_cases": {
     "gaming": {
       "label": "Gaming",
+      "intent_role": "workload",
+      "resolution_priority": 100,
       "nqe_persona": "You are helping a gamer find their ideal gaming laptop.",
       "required_specs": {
         "gpu_tier": "discrete",
@@ -143,6 +145,8 @@
     },
     "engineering_student": {
       "label": "Engineering / Architecture Student",
+      "intent_role": "workload",
+      "resolution_priority": 100,
       "nqe_persona": "You are helping an engineering or architecture student who runs CAD, simulation, or rendering software.",
       "required_specs": {
         "ram_gb_min": 16,
@@ -193,6 +197,8 @@
     },
     "creative": {
       "label": "Content Creator / Video Editor",
+      "intent_role": "workload",
+      "resolution_priority": 100,
       "nqe_persona": "You are helping a content creator, video editor, or graphic designer choose a laptop.",
       "required_specs": {
         "ram_gb_min": 16,
@@ -240,6 +246,8 @@
     },
     "corporate": {
       "label": "Corporate / Business Professional",
+      "intent_role": "workload",
+      "resolution_priority": 80,
       "nqe_persona": "You are helping a business professional find a laptop for corporate work including meetings, office applications, and travel.",
       "required_specs": {
         "ram_gb_min": 8,
@@ -294,6 +302,8 @@
     },
     "calls_productivity": {
       "label": "Calls / Video Conferencing / Productivity",
+      "intent_role": "workload",
+      "resolution_priority": 90,
       "nqe_persona": "You are helping someone find a laptop primarily for video calls, Microsoft Teams, Zoom, and everyday productivity.",
       "required_specs": {
         "ram_gb_min": 8,
@@ -344,6 +354,8 @@
     },
     "ai_ml_workstation": {
       "label": "AI / ML / Data Science Workstation",
+      "intent_role": "workload",
+      "resolution_priority": 100,
       "nqe_persona": "You are helping an AI/ML engineer or data scientist find a laptop powerful enough for model training and inference.",
       "required_specs": {
         "ram_gb_min": 32,
@@ -395,6 +407,8 @@
     },
     "general": {
       "label": "General / Everyday Use",
+      "intent_role": "workload",
+      "resolution_priority": 50,
       "nqe_persona": "You are helping someone find a reliable everyday laptop or tablet for browsing, email, streaming and documents.",
       "required_specs": {
         "ram_gb_min": 8,
@@ -422,6 +436,8 @@
     },
     "primary_school": {
       "label": "Primary / Elementary School",
+      "intent_role": "audience_context",
+      "resolution_priority": 10,
       "nqe_persona": "You are helping a parent find a durable, affordable first laptop or tablet for a young child.",
       "required_specs": {
         "ram_gb_min": 4,

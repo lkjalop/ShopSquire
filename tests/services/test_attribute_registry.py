@@ -63,6 +63,41 @@ def test_boolean_literals():
     assert normalize_value(EL["gpu_discrete"], "maybe") is None
 
 
+def test_graphics_memory_models_do_not_conflate_unified_memory_with_vram():
+    unified, dropped = normalize_specs({
+        "graphics_architecture": "unified",
+        "graphics_memory_model": "unified memory",
+        "unified_memory_gb": 24,
+        "native_metal": True,
+        "native_cuda": False,
+        "graphics_capability_source": "https://support.apple.com/en-us/121552",
+    }, EL)
+
+    assert not dropped
+    assert unified["graphics_architecture"] == "unified"
+    assert unified["graphics_memory_model"] == "unified_memory"
+    assert unified["unified_memory_gb"] == 24
+    assert unified["native_metal"] is True
+    assert unified["native_cuda"] is False
+    assert "gpu_vram_gb" not in unified
+
+
+def test_dedicated_and_external_graphics_are_distinct_architectures():
+    dedicated, _ = normalize_specs({
+        "graphics_architecture": "dedicated",
+        "graphics_memory_model": "dedicated video memory",
+        "gpu_vram_gb": 8,
+    }, EL)
+    external, _ = normalize_specs({
+        "graphics_architecture": "egpu",
+        "graphics_memory_model": "external video memory",
+        "gpu_vram_gb": 12,
+    }, EL)
+
+    assert dedicated["graphics_architecture"] == "dedicated_discrete"
+    assert external["graphics_architecture"] == "external_discrete"
+
+
 # ── spec-dict normalization ───────────────────────────────────────────────────
 
 def test_normalize_specs_maps_aliases_and_reports_drops():
