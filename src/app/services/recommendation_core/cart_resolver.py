@@ -393,7 +393,13 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
             t_str = str(t or "").strip()
             if not t_str:
                 continue
-            sku = _bind_name_to_sku(t_str, lines, distinctive)
+            # The grammar uses ``__last__`` for a bare continuation such as
+            # "actually make it 15".  It is safe to resolve only when there is
+            # exactly one cart line; with multiple lines the shopper must name
+            # the target rather than letting order-dependent state pick one.
+            sku = lines[0]["sku"] if t_str == "__last__" and len(lines) == 1 else None
+            if t_str != "__last__":
+                sku = _bind_name_to_sku(t_str, lines, distinctive)
             # SHOPPER-AMBIGUITY gate: the model can resolve an under-specified reference by GUESSING a
             # specific line ('add 5 more Lenovo' → it picks the FIRST Lenovo). Judge by the SHOPPER'S
             # words, not the model's target: if the query matches MULTIPLE cart lines and does NOT

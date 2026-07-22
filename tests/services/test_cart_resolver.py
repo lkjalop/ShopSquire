@@ -68,6 +68,32 @@ def test_compound_action_question_uses_fast_grammar_and_answers_reconfirmation()
     assert plan.ops[0].quantity == 15
 
 
+def test_bare_quantity_continuation_binds_the_only_cart_line():
+    cart = [{
+        "sku": "LAP-MSI",
+        "name": 'MSI Thin A15 15" Gaming Laptop',
+        "quantity": 20,
+    }]
+
+    plan = resolve_cart_mutation(
+        _env("Actually make it 15, and do I need to reconfirm the delivery plan?", cart=cart)
+    )
+
+    assert plan.source == "grammar"
+    assert not plan.needs_clarification
+    assert plan.ops[0].action == "set_quantity"
+    assert plan.ops[0].target_skus == ("LAP-MSI",)
+    assert plan.ops[0].quantity == 15
+
+
+def test_bare_quantity_continuation_does_not_guess_across_cart_lines():
+    plan = resolve_cart_mutation(_env("Actually make it 15"))
+
+    assert not plan.ops
+    assert plan.needs_clarification
+    assert "__last__" in plan.ambiguous
+
+
 def test_replacement_is_catalog_clamped_and_total_budget_sets_affordable_quantity():
     cart = [{"sku": "GAM-0006", "name": "Dell G16 Gaming Laptop", "quantity": 20}]
     catalog = lambda _tenant: [{  # noqa: E731 - injected finite catalog projection
