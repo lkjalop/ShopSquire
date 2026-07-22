@@ -6,6 +6,7 @@ import json
 import base64
 from typing import Dict, Optional, Tuple, List
 import logging
+import time
 from src.app.security.url_guard import ensure_safe_outbound_url
 
 # ── Vision prompt templates (mode-selectable) ──
@@ -189,6 +190,8 @@ class ManagedCVProvider:
         # when Ollama is not running.  Individual production deployments can
         # raise this via CV_VISION_TIMEOUT_SEC.
         timeout = float(os.getenv("CV_VISION_TIMEOUT_SEC", "4") or 4)
+        total_timeout = float(os.getenv("CV_VISION_TOTAL_TIMEOUT_SEC", str(timeout)) or timeout)
+        deadline = time.monotonic() + max(1.0, total_timeout)
 
         # Fast connectivity probe: hit /api/tags with a 2-second timeout before
         # attempting any model inference.  This avoids 6 × timeout hangs when
@@ -220,6 +223,10 @@ class ManagedCVProvider:
 
         last_err = None
         for model_name in model_candidates[:2]:  # cap at 2 models after connectivity confirmed
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.1:
+                last_err = last_err or "vision_total_deadline_exceeded"
+                break
             req = urllib.request.Request(
                 url=url,
                 data=json.dumps(
@@ -235,7 +242,7 @@ class ManagedCVProvider:
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with urllib.request.urlopen(req, timeout=max(0.1, min(timeout, remaining))) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     output = str(data.get("response") or "")
                 # Parse below; if parsing fails we'll still fall back to heuristics.

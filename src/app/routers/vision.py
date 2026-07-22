@@ -967,11 +967,19 @@ async def triage(
                         }
 
                 if not product_identity:
-                    stage_b = identify_product_from_image(
-                        analysis_content,
-                        user_query=filename_hint or None,
-                        trace_id=None,
-                        timeout_s=float(os.getenv("CV_IDENTITY_STAGE_B_TIMEOUT_S", "6.0") or 6.0),
+                    identity_timeout = float(os.getenv("CV_IDENTITY_STAGE_B_TIMEOUT_S", "6.0") or 6.0)
+                    stage_b = await _asyncio.wait_for(
+                        _asyncio.get_running_loop().run_in_executor(
+                            None,
+                            _functools.partial(
+                                identify_product_from_image,
+                                analysis_content,
+                                user_query=filename_hint or None,
+                                trace_id=None,
+                                timeout_s=identity_timeout,
+                            ),
+                        ),
+                        timeout=identity_timeout + 0.5,
                     )
                     if isinstance(stage_b, dict):
                         brand = str(stage_b.get("brand") or "").strip()
@@ -983,8 +991,12 @@ async def triage(
                                 "confidence": float(stage_b.get("confidence") or 0.0),
                                 "source": "vision_stage_b",
                             }
+        except _asyncio.TimeoutError:
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("identity_stage_b_timeout")
         except Exception:
-            pass
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("identity_stage_b_error")
 
     if product_identity:
         resp["product_identity"] = product_identity
