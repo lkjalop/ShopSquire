@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
@@ -81,14 +82,17 @@ def match_use_case_from_query(query: str) -> Optional[str]:
     """
     from src.app.platform.store_profile import get_store_profile
 
-    q = (query or "").lower()
+    def _phrase(value: Any) -> str:
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).split())
+
+    q = _phrase(query)
     profile = get_store_profile()
     keyword_map: Dict[str, List[str]] = profile.get("use_case_keyword_map") or {}
     priority: List[str] = profile.get("use_case_keyword_priority") or []
 
     scores: dict = {}
     for key, keywords in keyword_map.items():
-        score = sum(1 for kw in keywords if kw in q)
+        score = sum(1 for kw in keywords if _phrase(kw) in q)
         if score > 0:
             scores[key] = score
 

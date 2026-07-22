@@ -39,6 +39,9 @@ class TestElectronicsUseCaseMatch:
         with _vertical("electronics"):
             assert match_use_case_from_query("25 laptops for gaming development") == "game_development"
             assert match_use_case_from_query("Unity game development workstation") == "game_development"
+            assert match_use_case_from_query(
+                "20 laptops for a university game-development lab using Unity"
+            ) == "game_development"
 
     def test_medical_student(self):
         with _vertical("electronics"):
