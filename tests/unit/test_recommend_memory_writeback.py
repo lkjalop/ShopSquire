@@ -167,7 +167,8 @@ class TestPersistTurnState:
         )
         inp = self._make_input(
             constraints={"budget_max": 2000, "use_case": "creative", "brands": ["Apple"],
-                         "order_quantity": 25},
+                         "order_quantity": 25, "_budget_scope": "total",
+                         "_total_budget_max": 41000},
         )
         persist_turn_state(inp, hooks)
 
@@ -176,6 +177,29 @@ class TestPersistTurnState:
         assert kv_saved["confirmed_slots"]["use_case"] == "creative"
         assert kv_saved["confirmed_slots"]["brands"] == ["Apple"]
         assert kv_saved["confirmed_slots"]["order_quantity"] == 25
+        assert kv_saved["confirmed_slots"]["budget_scope"] == "total"
+        assert kv_saved["confirmed_slots"]["total_budget_cents"] == 4_100_000
+
+    def test_explicit_per_unit_budget_clears_stale_total(self):
+        mem = self._make_mem()
+        mem.get_kv.return_value = {
+            "confirmed_slots": {"budget_scope": "total", "total_budget_cents": 4_100_000}
+        }
+        ctx = MagicMock()
+        hooks = TurnPersistenceHooks(
+            mem=mem, suggest_ctx=ctx,
+            log_trace_event=MagicMock(),
+            trace_meta_payload=lambda **kw: {},
+        )
+        inp = self._make_input(
+            constraints={"budget_max": 2300, "_budget_scope": "per_unit"},
+        )
+
+        persist_turn_state(inp, hooks)
+
+        confirmed = mem.set_kv.call_args[0][1]["confirmed_slots"]
+        assert confirmed["budget_scope"] == "per_unit"
+        assert "total_budget_cents" not in confirmed
 
     def test_persists_sourcing_intent_for_continuity(self):
         # Phase 1: the buyer's sourcing PREVIEW must be remembered in kv_state so the next turn can

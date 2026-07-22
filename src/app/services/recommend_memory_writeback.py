@@ -294,6 +294,17 @@ def _persist_turn_state_inner(inp: TurnPersistenceInput, hooks: TurnPersistenceH
     _quantity = inp.constraints.get("order_quantity") or inp.constraints.get("quantity")
     if isinstance(_quantity, (int, float)) and 1 <= int(_quantity) <= 1000:
         confirmed_slots_out["order_quantity"] = int(_quantity)
+    _budget_scope = inp.constraints.get("_budget_scope")
+    if _budget_scope in {"total", "per_unit"}:
+        confirmed_slots_out["budget_scope"] = _budget_scope
+        if _budget_scope == "per_unit":
+            confirmed_slots_out.pop("total_budget_cents", None)
+    _total_budget = inp.constraints.get("_total_budget_max")
+    if isinstance(_total_budget, (int, float)) and 0 < float(_total_budget) <= 1_000_000_000:
+        # Store money with explicit units.  budget_max is the normalized per-unit value;
+        # retaining the buyer's original total prevents a later engine from treating that
+        # per-unit ceiling as the order total.
+        confirmed_slots_out["total_budget_cents"] = int(round(float(_total_budget) * 100))
     if inp.constraints.get("brands"):
         confirmed_slots_out["brands"] = list(inp.constraints.get("brands") or [])[:8]
     if inp.constraints.get("specs"):

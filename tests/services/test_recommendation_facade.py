@@ -172,7 +172,8 @@ def test_default_tenant_bridges_bounded_legacy_session_fields_only():
     r.store["session:u1:kv_state"] = json.dumps({
         "last_valid_shortlist_skus": ["LAP-1", "LAP-2"],
         "last_valid_constraints_snapshot": {"budget_min": 1200, "budget_max": 1500},
-        "confirmed_slots": {"order_quantity": 25},
+        "confirmed_slots": {"order_quantity": 25, "budget_scope": "total",
+                            "total_budget_cents": 4_100_000},
         "untrusted_extra": "must-not-cross",
     })
     bridged = F._read_session_slice(r, "u1", "default")
@@ -184,6 +185,8 @@ def test_default_tenant_bridges_bounded_legacy_session_fields_only():
         "accepted_constraints": {
             "budget_min_cents": 120000,
             "budget_max_cents": 150000,
+            "total_budget_cents": 4_100_000,
+            "budget_scope": "total",
             "requirements": {},
             "quantity": 25,
         },

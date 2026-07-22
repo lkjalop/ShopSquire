@@ -434,12 +434,20 @@ def _read_session_slice(redis, uid: str, tenant_id: str, db: Any = None) -> Dict
             bmin = confirmed.get("budget_min", snapshot.get("budget_min"))
             bmax = confirmed.get("budget_max", snapshot.get("budget_max"))
             quantity = confirmed.get("order_quantity")
+            total_budget_cents = confirmed.get("total_budget_cents")
+            budget_scope = confirmed.get("budget_scope")
             try:
                 bmin = int(round(float(bmin) * 100)) if bmin is not None else None
                 bmax = int(round(float(bmax) * 100)) if bmax is not None else None
                 quantity = int(quantity) if quantity is not None else None
+                total_budget_cents = (int(total_budget_cents)
+                                      if total_budget_cents is not None else None)
             except (TypeError, ValueError):
-                bmin = bmax = quantity = None
+                bmin = bmax = quantity = total_budget_cents = None
+            if total_budget_cents is not None and total_budget_cents <= 0:
+                total_budget_cents = None
+            if budget_scope not in {"total", "per_unit"}:
+                budget_scope = None
             active_pr = legacy.get("active_pr")
             if isinstance(active_pr, dict):
                 procurement_active = bool(active_pr.get("pr_id") and not active_pr.get("finalized"))
@@ -458,6 +466,8 @@ def _read_session_slice(redis, uid: str, tenant_id: str, db: Any = None) -> Dict
                 "accepted_constraints": {
                     "budget_min_cents": bmin,
                     "budget_max_cents": bmax,
+                    "total_budget_cents": total_budget_cents,
+                    "budget_scope": budget_scope,
                     "requirements": {},
                     "quantity": quantity,
                 },
