@@ -139,6 +139,7 @@ export default function CartPanel({
   const items = cart?.items || [];
   const bundle = cart?.bundle_savings;
   const [sourcingNote, setSourcingNote] = useState<string | null>(null);
+  const [sourcedSplitKey, setSourcedSplitKey] = useState<string | null>(null);
   const [checkingSourcing, setCheckingSourcing] = useState(false);
   // Pre-payment split-fulfilment confirmation. The card reports whether the cart splits (a supplier-backed
   // second shipment exists) and whether the buyer has confirmed the plan; checkout is gated on that confirm.
@@ -149,6 +150,7 @@ export default function CartPanel({
     () => (cart?.items || []).map((i) => `${i.sku}:${i.quantity}`).sort().join('|'),
     [cart],
   );
+  const sourcingNeedsReview = Boolean(sourcedSplitKey && sourcedSplitKey !== splitKey);
   const nameForSku = (sku: string): string => {
     const it = (cart?.items || []).find((x) => x.sku === sku);
     return it ? productDisplayName(it) : sku;
@@ -193,6 +195,7 @@ export default function CartPanel({
       const cases = sourcedCasesFrom(res);
       const caseCount = sourcedCaseCountFrom(res);
       if (traceId && caseCount > 0) onSourcingTraceId?.(traceId);
+      setSourcedSplitKey(splitKey);
       if (res.idempotent) {
         setSourcingNote(`${caseCount} sourcing request(s) were already confirmed earlier. No duplicate RFQ was created; open the original case in Admin to review its draft and audit.`);
         return;
@@ -214,6 +217,8 @@ export default function CartPanel({
         // the case via /cases/by-trace/{source_trace_id}; traceId already IS that trace.
       } else if (caseCount > 0) {
         setSourcingNote(`${committed} of ${caseCount} sourcing request(s) committed. The remaining case(s) need operator retry; no draft is claimed for them.`);
+      } else if (res.status === 'superseded') {
+        setSourcingNote('The previous supplier request was retired because the updated cart is fully in stock. Nothing new was drafted or sent.');
       }
     } catch {
       setSourcingNote('The delivery plan was confirmed, but sourcing could not be recorded. Retry or ask an operator; no supplier message was sent.');
@@ -383,7 +388,12 @@ export default function CartPanel({
                     Clear previous ({priorSkus!.length})
                   </button>
                 )}
-                {sourcingNote
+                {sourcingNeedsReview
+                  ? <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-confirm-updated-plan"
+                            disabled={checkingSourcing} onClick={confirmPlanSourcing}>
+                      {checkingSourcing ? 'Updating plan…' : 'Confirm updated delivery plan'}
+                    </button>
+                  : sourcingNote
                   ? <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-proceed"
                             onClick={proceedToCheckout}>Continue to checkout</button>
                   : splitBlocksCheckout
@@ -400,11 +410,18 @@ export default function CartPanel({
               </div>
             </div>
           </div>
-          {sourcingNote && (
+          {sourcingNote && !sourcingNeedsReview && (
             <div data-testid="cart-sourcing-note" role="status"
                  style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #fcd34d',
                           background: '#fffbeb', fontSize: 13 }}>
               {sourcingNote}
+            </div>
+          )}
+          {sourcingNeedsReview && (
+            <div data-testid="cart-sourcing-stale" role="status"
+                 style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #f59e0b',
+                          background: '#fffbeb', fontSize: 13 }}>
+              Your cart changed after the supplier plan was confirmed. Confirm the updated plan before checkout; the prior RFQ will be superseded and nothing is sent automatically.
             </div>
           )}
         </>
