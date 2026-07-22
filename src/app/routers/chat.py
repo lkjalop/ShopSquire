@@ -725,6 +725,14 @@ def _extract_brand_mentions(query: str) -> List[str]:
     return out
 
 
+def _include_adaptive_metadata(out: Dict[str, Any], source: Dict[str, Any]) -> None:
+    """Copy only adaptive levers that actually ran; absence is a public contract."""
+    for key in ("sales_response_nudge", "ranking_experiment", "storefront_emphasis"):
+        value = source.get(key)
+        if isinstance(value, dict):
+            out[key] = value
+
+
 def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any]:
     img = image_obj if isinstance(image_obj, dict) else {}
     sec = img.get("security") if isinstance(img.get("security"), dict) else {}
@@ -2795,9 +2803,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # reject a stale/stretch product whose requested quantity would exceed the accepted
         # total instead of blindly carrying requested_quantity into the cart.
         "bulk_budget": data.get("bulk_budget") if isinstance(data.get("bulk_budget"), dict) else None,
-        "sales_response_nudge": data.get("sales_response_nudge") if isinstance(data.get("sales_response_nudge"), dict) else None,
-        "ranking_experiment": data.get("ranking_experiment") if isinstance(data.get("ranking_experiment"), dict) else None,
-        "storefront_emphasis": data.get("storefront_emphasis") if isinstance(data.get("storefront_emphasis"), dict) else None,
         # Buyer-safe procurement projection from /recommend/suggest. The recommend
         # layer owns case creation/redaction; chat must preserve it so the storefront
         # can render the commitment gate instead of hiding a real shortfall.
@@ -2832,6 +2837,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "needs_human_review": bool(image_security_posture.get("needs_human_review")),
         "security_route": str(image_security_posture.get("route") or "allow"),
     }
+    # Adaptive fields are evidence that a governed lever actually ran. Omitting them when
+    # disabled is part of the API contract; emitting null makes clients and audits infer an
+    # experiment surface exists even though no assignment or adaptation occurred.
+    _include_adaptive_metadata(out, data)
     if isinstance(out.get("assistant_message"), str):
         out["assistant_message"] = ResponseNormalizer.polish_llm_text(
             str(out.get("assistant_message") or ""),
