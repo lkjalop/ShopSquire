@@ -2018,7 +2018,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                           source: 'recommendation_result_fallback',
                         }
                       : null;
-                    const intent = si || constraintsSi || synthesizedIntent;
+                    // Event-level shopper profiling may record a broad audience label (for
+                    // example "student") before the recommendation pipeline resolves the
+                    // workload.  The persisted decision intent is authoritative for the final
+                    // use case and budget; merge it over the richer event profile instead of
+                    // presenting the early audience label as the workload.
+                    const decisionIntent: any = (trace as any)?.intent_analysis || {};
+                    const intentBase: any = si || constraintsSi || synthesizedIntent || {};
+                    const intent = (Object.keys(intentBase).length > 0 || Object.keys(decisionIntent).length > 0)
+                      ? { ...intentBase, ...decisionIntent }
+                      : null;
                     const hasAny = intent || abandonEvts.length > 0 || outcomeEvts.length > 0;
                     if (!hasAny) return (
                       <div className={styles.empty}>
