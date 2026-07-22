@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from typing import Any, Dict, List, Optional
 import asyncio as _asyncio
+import concurrent.futures as _futures
 import functools as _functools
 import json
 import os
@@ -25,6 +26,28 @@ from src.app.security.threat_hunter_leads import build_threat_hunter_leads
 from src.app.services.faq_bank import match_faq
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
+
+_IMAGE_WORKERS = max(1, min(int(os.getenv("CV_IMAGE_WORKERS", "3") or 3), 8))
+_IMAGE_EXECUTOR = _futures.ThreadPoolExecutor(
+    max_workers=_IMAGE_WORKERS,
+    thread_name_prefix="vision-bounded",
+)
+
+
+async def _run_bounded_image_work(fn, *, timeout: float):
+    """Run blocking image work without growing the default executor queue.
+
+    Cancelling or timing out the await cancels work that has not started. Work already
+    executing must still obey its provider/subprocess deadline; Python cannot kill a
+    running native thread safely.
+    """
+    loop = _asyncio.get_running_loop()
+    future = loop.run_in_executor(_IMAGE_EXECUTOR, fn)
+    try:
+        return await _asyncio.wait_for(future, timeout=max(0.1, float(timeout)))
+    finally:
+        if not future.done():
+            future.cancel()
 
 # Product photo heuristic: labels that suggest a clean, undamaged product shot
 _PRODUCT_LABEL_KW = {
@@ -556,11 +579,9 @@ async def triage(
     try:
         from src.app.rules.barcode_decode import decode_barcodes
         if fast:
-            _loop = _asyncio.get_event_loop()
             try:
-                qr = await _asyncio.wait_for(
-                    _loop.run_in_executor(
-                        None,
+                qr = await _run_bounded_image_work(
+                    _functools.partial(
                         decode_barcodes,
                         # SECURITY control: decode the QR on the FULL-RES upload (feeds the
                         # qr_external_url_detected -> text_only wipe). A small malicious QR can be
@@ -574,11 +595,9 @@ async def triage(
                 analysis_state["analysis_pending"] = True
                 analysis_state["degraded_reasons"].append("qr_decode_deferred")
         else:
-            _loop = _asyncio.get_event_loop()
             try:
-                qr = await _asyncio.wait_for(
-                    _loop.run_in_executor(
-                        None,
+                qr = await _run_bounded_image_work(
+                    _functools.partial(
                         decode_barcodes,
                         # SECURITY control: decode the QR on the FULL-RES upload (feeds the
                         # qr_external_url_detected -> text_only wipe). A small malicious QR can be
@@ -664,15 +683,11 @@ async def triage(
                                 # Run in a thread executor so the synchronous HTTP calls inside
                                 # analyze_linked_artifact do not block the event loop.
                                 try:
-                                    _loop = _asyncio.get_event_loop()
-                                    linked = await _asyncio.wait_for(
-                                        _loop.run_in_executor(
-                                            None,
-                                            _functools.partial(
-                                                linked_artifact_analysis.analyze_linked_artifact,
-                                                url=data,
-                                                timeout=3.0,
-                                            ),
+                                    linked = await _run_bounded_image_work(
+                                        _functools.partial(
+                                            linked_artifact_analysis.analyze_linked_artifact,
+                                            url=data,
+                                            timeout=3.0,
                                         ),
                                         timeout=4.0,
                                     )
@@ -764,11 +779,10 @@ async def triage(
     if not fast:
         try:
             from src.app.security.adversarial_image_detector import detect_adversarial
-            _loop = _asyncio.get_event_loop()
-            adv = await _asyncio.wait_for(
+            adv = await _run_bounded_image_work(
                 # SECURITY control on FULL-RES bytes: downscaling attenuates adversarial
                 # perturbations, so this must see raw_content (like steg), not analysis_content.
-                _loop.run_in_executor(None, detect_adversarial, raw_content),
+                _functools.partial(detect_adversarial, raw_content),
                 timeout=8.0,
             )
             if hasattr(adv, "is_adversarial") and adv.is_adversarial:
@@ -783,9 +797,8 @@ async def triage(
     if not fast:
         try:
             from src.app.security.steg_detector import detect_steganography
-            _loop = _asyncio.get_event_loop()
-            steg = await _asyncio.wait_for(
-                _loop.run_in_executor(None, detect_steganography, raw_content),
+            steg = await _run_bounded_image_work(
+                _functools.partial(detect_steganography, raw_content),
                 timeout=8.0,
             )
             steg_score = float(getattr(steg, "steg_score", 0.0) or 0.0)
@@ -830,15 +843,12 @@ async def triage(
             # Run one cheap CPU OCR pass before the multi-contrast ladder. This preserves security
             # coverage when the VLM is unavailable without paying for OCR on ordinary product photos.
             try:
-                stage_a = await _asyncio.wait_for(
-                    _asyncio.get_event_loop().run_in_executor(
-                        None,
-                        _functools.partial(
-                            extract_text_stage_a,
-                            analysis_content,
-                            provider=os.getenv("CV_SELECTIVE_OCR_PROVIDER", "tesseract"),
-                            fallback=None,
-                        ),
+                stage_a = await _run_bounded_image_work(
+                    _functools.partial(
+                        extract_text_stage_a,
+                        analysis_content,
+                        provider=os.getenv("CV_SELECTIVE_OCR_PROVIDER", "tesseract"),
+                        fallback=None,
                     ),
                     timeout=float(os.getenv("CV_SELECTIVE_OCR_TIMEOUT_S", "3.0") or 3.0),
                 )
@@ -861,15 +871,12 @@ async def triage(
             # Risk-triggered deep OCR for low-evidence or overlay-heavy images.
             from src.app.cv.cv_pipeline import run_risk_triggered_multicontrast_ocr
             try:
-                deep = await _asyncio.wait_for(
-                    _asyncio.get_event_loop().run_in_executor(
-                        None,
-                        _functools.partial(
-                            run_risk_triggered_multicontrast_ocr,
-                            analysis_content,
-                            ocr_provider=None,
-                            enabled=True,
-                        ),
+                deep = await _run_bounded_image_work(
+                    _functools.partial(
+                        run_risk_triggered_multicontrast_ocr,
+                        analysis_content,
+                        ocr_provider=None,
+                        enabled=True,
                     ),
                     timeout=float(os.getenv("CV_DEEP_OCR_TIMEOUT_S", "6.0") or 6.0),
                 )
@@ -968,16 +975,13 @@ async def triage(
 
                 if not product_identity:
                     identity_timeout = float(os.getenv("CV_IDENTITY_STAGE_B_TIMEOUT_S", "6.0") or 6.0)
-                    stage_b = await _asyncio.wait_for(
-                        _asyncio.get_running_loop().run_in_executor(
-                            None,
-                            _functools.partial(
-                                identify_product_from_image,
-                                analysis_content,
-                                user_query=filename_hint or None,
-                                trace_id=None,
-                                timeout_s=identity_timeout,
-                            ),
+                    stage_b = await _run_bounded_image_work(
+                        _functools.partial(
+                            identify_product_from_image,
+                            analysis_content,
+                            user_query=filename_hint or None,
+                            trace_id=None,
+                            timeout_s=identity_timeout,
                         ),
                         timeout=identity_timeout + 0.5,
                     )
