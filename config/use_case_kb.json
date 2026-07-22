@@ -71,6 +71,8 @@
     },
     "game_development": {
       "label": "Game Development / Real-time 3D",
+      "intent_role": "workload",
+      "resolution_priority": 100,
       "nqe_persona": "You are helping a game developer choose a machine for engine editors, asset creation, builds, and testing.",
       "required_specs": {
         "gpu_tier": "discrete_6gb",
@@ -91,6 +93,8 @@
     },
     "university": {
       "label": "University / Student",
+      "intent_role": "audience_context",
+      "resolution_priority": 10,
       "nqe_persona": "You are helping a university student find a reliable laptop for academic work.",
       "required_specs": {
         "ram_gb_min": 8,
@@ -445,6 +449,8 @@
     },
     "high_school": {
       "label": "High School Student",
+      "intent_role": "audience_context",
+      "resolution_priority": 10,
       "nqe_persona": "You are helping a high school student find a dependable laptop for homework, research and some creative apps.",
       "required_specs": {
         "ram_gb_min": 8,

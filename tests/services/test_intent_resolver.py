@@ -53,6 +53,19 @@ def test_multi_intent_merges_most_demanding_floor():
     assert not r["conflicts"]                           # floors only → no conflict possible
 
 
+def test_workload_precedes_audience_context_without_losing_either_profile():
+    first = resolve(["university", "game_development"])
+    second = resolve(["game_development", "university"])
+
+    assert first["use_cases"] == ["game_development", "university"]
+    assert second["use_cases"] == first["use_cases"]
+    assert first["primary_use_case"] == "game_development"
+    assert "game developer" in first["persona_hint"].lower()
+    assert set(first["profile_trace"]) == {"game_development", "university"}
+    assert first["requirements"]["gpu_vram_gb"] == [(">=", 6.0)]
+    assert first["requirements"] == second["requirements"]
+
+
 def test_ai_ml_is_most_demanding():
     req = resolve(["ai_ml_workstation"])["requirements"]
     assert req["ram_gb"] == [(">=", 32.0)] and req["gpu_vram_gb"] == [(">=", 8.0)]

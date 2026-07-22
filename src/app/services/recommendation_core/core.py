@@ -213,6 +213,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                             query=envelope.query,
                             vertical=_vertical_name(decision.node_handle))
     resolved_reqs = intent["requirements"]
+    # Requirements merge across every use case; ordering controls only which named intent leads
+    # capability prose and clarification.
+    decision = dataclasses.replace(decision, use_cases=tuple(intent["use_cases"]))
     # review-8 #4 (accessory req-slot leak): a use-case/workload's device floors describe the
     # DEVICE, not an accessory bought FOR it. If the requested product is not a workload-host
     # device ('a mouse for gaming', 'a bag for my gaming laptop' route to accessory nodes), keep
@@ -308,6 +311,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     resp.extras["plan"] = plan.as_dict()
     # the resolver's reasoning, surfaced for the 'Why Recommended' decision-trace tab
     resp.extras["intent"] = {"use_cases": intent["use_cases"],
+                             "primary_use_case": intent.get("primary_use_case"),
                              "profiles": intent["profile_trace"],
                              "title_requirements": intent.get("title_requirements") or {},
                              "persona_hint": intent["persona_hint"],

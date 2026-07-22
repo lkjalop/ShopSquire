@@ -130,6 +130,24 @@ def test_router_clamps_requirements(db):
     assert d.requirements == {"refresh_hz": [(">=", 144.0)]}   # bad key/op/bounds all dropped
 
 
+def test_core_uses_workload_as_primary_context_when_audience_is_also_present(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-11-2", "requirements": {},
+        "use_cases": ["university", "game_development"], "confidence": 0.9,
+    })
+
+    response = recommend_turn(
+        db,
+        _env("I study game development and need a laptop for engine builds"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert response.extras["intent"]["primary_use_case"] == "game_development"
+    assert response.extras["decision"]["use_cases"] == ["game_development", "university"]
+    assert response.extras["constraints_used"]["requirements"]["gpu_vram_gb"] == [[">=", 6.0]]
+    assert "university general" not in response.message.lower()
+
+
 def test_refusal_needs_the_sold_set_not_the_model(db):
     # forklift: bi-18 offered by candidates, model proposes OFF_CATALOG, sold set grants it
     d = route_turn(db, _env("do you sell forklifts?"), llm_fn=_route_stub("OFF_CATALOG", "bi-18"))

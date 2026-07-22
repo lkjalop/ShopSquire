@@ -70,6 +70,22 @@ def normalize_use_case(raw: str) -> Optional[str]:
     return alias if alias in (kb.get("use_cases") or {}) else None
 
 
+def _ordered_use_cases(use_cases: List[str]) -> List[str]:
+    """Order explanation context by profile-owned priority, preserving ties."""
+    profiles = _kb().get("use_cases") or {}
+    indexed = list(enumerate(use_cases))
+
+    def key(item):
+        index, use_case = item
+        try:
+            priority = int((profiles.get(use_case) or {}).get("resolution_priority") or 0)
+        except (TypeError, ValueError):
+            priority = 0
+        return (-priority, index)
+
+    return [use_case for _, use_case in sorted(indexed, key=key)]
+
+
 def _profile_constraints(use_case: str):
     """One use-case's required_specs → ConstraintMap, every bound provenance-tagged
     'use_case:<key>' (M2-B1: ranges + provenance replace the (op,thr) one-slot)."""
@@ -187,6 +203,7 @@ def resolve(use_cases: Optional[List[str]],
         n = normalize_use_case(uc)
         if n and n not in resolved:
             resolved.append(n)
+    resolved = _ordered_use_cases(resolved)
 
     merged: Dict[str, Any] = {}
     profile_trace: Dict[str, Dict[str, Any]] = {}
@@ -206,8 +223,9 @@ def resolve(use_cases: Optional[List[str]],
         merged = merge_maps(merged, from_op_map(dict(model_requirements), "stated"))
 
     persona_hint = None
-    if resolved:
-        persona_hint = ((_kb().get("use_cases") or {}).get(resolved[0]) or {}).get("nqe_persona")
+    primary_use_case = resolved[0] if resolved else None
+    if primary_use_case:
+        persona_hint = ((_kb().get("use_cases") or {}).get(primary_use_case) or {}).get("nqe_persona")
 
     # inject the registry's boolean/enum capability predicates AFTER the numeric projection
     # (they can't ride the constraint machinery); MERGE-not-override, so legacy/stated/title win.
@@ -215,4 +233,4 @@ def resolve(use_cases: Optional[List[str]],
     return {"requirements": final_reqs, "constraints": as_dicts(merged),
             "conflicts": constraint_conflicts(merged), "use_cases": resolved,
             "profile_trace": profile_trace, "title_requirements": title["trace"],
-            "persona_hint": persona_hint}
+            "persona_hint": persona_hint, "primary_use_case": primary_use_case}
