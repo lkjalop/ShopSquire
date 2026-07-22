@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -217,6 +218,71 @@ def _merge_replay_session(prior: dict, core) -> dict:
     return out
 
 
+def _phase_telemetry(core, *, case_id: str, turn: int, total_latency_ms: float,
+                     timed_out: bool, fallback_used: bool, model_mode: str) -> dict:
+    """Expose non-overlapping attribution where the core can prove it.
+
+    Retrieval is also included as a diagnostic sub-phase of the plan, so callers must not sum
+    route + plan + retrieval. V2 narration is not enrolled yet and is reported as such rather
+    than stamped with a misleading zero.
+    """
+    stages = []
+    try:
+        stages = [s.as_dict() for s in (core.stage_results or [])]
+    except Exception:
+        stages = []
+    route_ms = sum(float(s.get("latency_ms") or 0.0) for s in stages
+                   if str(s.get("stage") or "") == "route+intent")
+    plan_ms = sum(float(s.get("latency_ms") or 0.0) for s in stages
+                  if str(s.get("stage") or "").startswith("plan:"))
+    post_ms = sum(float(s.get("latency_ms") or 0.0) for s in stages
+                  if not str(s.get("stage") or "").startswith(("route+intent", "plan:")))
+    evidence = {}
+    try:
+        evidence = core.extras.get("evidence") or {}
+    except Exception:
+        pass
+    return {
+        "case_id": f"{case_id}:{turn}",
+        "total_ms": round(float(total_latency_ms), 1),
+        "route_intent_ms": round(route_ms, 1),
+        "plan_ms": round(plan_ms, 1),
+        "retrieval_ms": round(float(evidence.get("latency_ms") or 0.0), 1),
+        "post_stage_ms": round(post_ms, 1),
+        "narration_ms": None,
+        "narration_mode": "not_enrolled",
+        "timed_out": bool(timed_out),
+        "fallback_used": bool(fallback_used),
+        "model_mode": str(model_mode or "unknown"),
+        "stages": stages,
+    }
+
+
+def _p95(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(float(value) for value in values)
+    return round(ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)], 1)
+
+
+def _summarize_phase_telemetry(rows: list[dict]) -> dict:
+    phase_keys = ("total_ms", "route_intent_ms", "plan_ms", "retrieval_ms", "post_stage_ms")
+    return {
+        "cases": len(rows),
+        "p95_ms": {key: _p95([row[key] for row in rows if row.get(key) is not None])
+                   for key in phase_keys},
+        "timeouts": sum(1 for row in rows if row.get("timed_out")),
+        "fallbacks": sum(1 for row in rows if row.get("fallback_used")),
+        "fallback_p95_ms": _p95([row["total_ms"] for row in rows if row.get("fallback_used")]),
+        "model_modes": {
+            mode: sum(1 for row in rows if row.get("model_mode") == mode)
+            for mode in sorted({str(row.get("model_mode")) for row in rows})
+        },
+        "narration": {"mode": "not_enrolled", "measured": False},
+        "note": "retrieval_ms is contained within plan_ms and must not be added to total",
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only")
@@ -237,7 +303,7 @@ def main() -> None:
 
     labels = load_labels()   # sealed relevance labels (empty until filled — gate stays honest-red)
     s = sessionmaker(bind=get_engine())()
-    results, rows, quality_rows, diag_rows = [], [], [], []
+    results, rows, quality_rows, diag_rows, telemetry_rows = [], [], [], [], []
     t_start = time.monotonic()
     try:
         for f in sorted(CORPUS_DIR.glob("*.json")):
@@ -302,13 +368,18 @@ def main() -> None:
                              if isinstance(p, dict) and p.get("sku")]
                     authz = catalog_authorization(s, shown, tenant_id="default")
                     decision_source = str(dec.get("source") or "default")
+                    fallback_used = (decision_source == "default"
+                                     or decision_source.startswith("fallback:"))
                     quality_rows.append(evaluate_case_quality(
                         _quality_case(f"{case['id']}:{t['turn']}", req, core), v2, labels,
                         catalog=authz, split=args.label_split, latency_ms=latency_ms,
                         timed_out=bool(model_call["timed_out"]),
-                        fallback_used=(decision_source == "default"
-                                       or decision_source.startswith("fallback:")),
+                        fallback_used=fallback_used,
                         model_mode=decision_source))
+                    telemetry_rows.append(_phase_telemetry(
+                        core, case_id=case["id"], turn=t["turn"],
+                        total_latency_ms=latency_ms, timed_out=bool(model_call["timed_out"]),
+                        fallback_used=fallback_used, model_mode=decision_source))
                     if args.diagnose:
                         diag_rows.append(_diagnose_case(case["id"], t["turn"],
                                                         req.get("query", ""), core, v2))
@@ -377,6 +448,8 @@ def main() -> None:
             "quality": quality,
             "quality_cases": quality_rows,
             "divergences": results,
+            "telemetry": _summarize_phase_telemetry(telemetry_rows),
+            "telemetry_cases": telemetry_rows,
             "diagnosis": (_aggregate_diagnosis(diag_rows) if diag_rows else None),
             "elapsed_seconds": round(time.monotonic() - t_start, 1),
         }, indent=2, default=str) + "\n", encoding="utf-8")

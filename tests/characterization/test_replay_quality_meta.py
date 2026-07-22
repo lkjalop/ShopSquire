@@ -7,7 +7,9 @@ from tests.characterization.shadow_replay import (
     _diagnose_case,
     _expects_products,
     _merge_replay_session,
+    _phase_telemetry,
     _quality_case,
+    _summarize_phase_telemetry,
 )
 
 
@@ -71,3 +73,42 @@ def test_replay_session_preserves_prior_subject_on_explanation_turn():
         extras={"decision": {"lane": "EXPLAIN"}, "constraints_used": {}},
     )
     assert _merge_replay_session(prior, core) == prior
+
+
+def test_phase_telemetry_separates_route_plan_and_retrieval_without_fake_narration():
+    stages = [
+        SimpleNamespace(as_dict=lambda: {"stage": "route+intent", "latency_ms": 5100.0}),
+        SimpleNamespace(as_dict=lambda: {"stage": "plan:retrieve+fit_check", "latency_ms": 40.0}),
+        SimpleNamespace(as_dict=lambda: {"stage": "bulk", "latency_ms": 2.0}),
+    ]
+    core = SimpleNamespace(stage_results=stages, extras={"evidence": {"latency_ms": 12.0}})
+
+    row = _phase_telemetry(
+        core, case_id="case", turn=0, total_latency_ms=5200.0,
+        timed_out=False, fallback_used=False, model_mode="model",
+    )
+
+    assert row["route_intent_ms"] == 5100.0
+    assert row["plan_ms"] == 40.0
+    assert row["retrieval_ms"] == 12.0
+    assert row["post_stage_ms"] == 2.0
+    assert row["narration_ms"] is None
+    assert row["narration_mode"] == "not_enrolled"
+
+
+def test_phase_telemetry_summary_reports_fallback_latency_and_model_modes():
+    summary = _summarize_phase_telemetry([
+        {"total_ms": 100.0, "route_intent_ms": 80.0, "plan_ms": 15.0,
+         "retrieval_ms": 5.0, "post_stage_ms": 2.0, "timed_out": False,
+         "fallback_used": False, "model_mode": "model"},
+        {"total_ms": 200.0, "route_intent_ms": 170.0, "plan_ms": 20.0,
+         "retrieval_ms": 7.0, "post_stage_ms": 3.0, "timed_out": True,
+         "fallback_used": True, "model_mode": "fallback:model_unavailable"},
+    ])
+
+    assert summary["p95_ms"]["total_ms"] == 200.0
+    assert summary["timeouts"] == 1
+    assert summary["fallbacks"] == 1
+    assert summary["fallback_p95_ms"] == 200.0
+    assert summary["model_modes"] == {"fallback:model_unavailable": 1, "model": 1}
+    assert summary["narration"]["measured"] is False
