@@ -27,7 +27,10 @@ _NUM = r"(\d(?:[\d,]*\d)?(?:\.\d+)?)(?!,?\d)(?:\s*(k|m|grand)\b)?"
 # inch phrasings ("15 in") are < the 50-dollar floor every branch applies, so they can never become money.
 _UNIT_GUARD = (r"(?!\s*(?:kg|kgs|lb|lbs|g|gb|tb|mb|kb|hz|ghz|mhz|khz|fps|inch|inches|cm|mm|w|"
                r"watts|wh|mah|mp|cores?|nits|ppi|dpi)\b)")
-_CUR = r"[\$€£]"
+# Currency markers accepted before a money amount. ISO codes are bounded to the
+# currencies supported by the commerce adapters; accepting any three letters
+# would turn model/spec identifiers into money.
+_CUR = r"(?:[\$€£]|(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b)"
 
 
 @dataclass(frozen=True)
