@@ -31,8 +31,26 @@ def authorize_replenishment(
     now: datetime | None = None, min_confidence: float = 0.7,
     max_demand_age_seconds: int = 7 * 86400, max_atp_age_seconds: int = 86400,
     min_source_diversity: int = 2,
+    tenant_id: str | None = None, sku: str | None = None,
+    taxonomy_node: str | None = None, currency: str | None = None,
 ) -> Dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    expected_tenant = str(tenant_id or "").strip()
+    expected_sku = str(sku or "").strip()
+    expected_taxonomy = str(taxonomy_node or "").strip()
+    expected_currency = str(currency or "").strip().upper()
+
+    def _same_tenant(fact: Dict[str, Any]) -> bool:
+        return not expected_tenant or str(fact.get("tenant_id") or "").strip() == expected_tenant
+
+    def _same_subject(fact: Dict[str, Any]) -> bool:
+        if not expected_sku and not expected_taxonomy:
+            return True
+        fact_sku = str(fact.get("sku") or fact.get("subject_id") or "").strip()
+        fact_taxonomy = str(fact.get("taxonomy_node") or "").strip()
+        return bool((expected_sku and fact_sku == expected_sku)
+                    or (expected_taxonomy and fact_taxonomy == expected_taxonomy))
+
     eligible = []
     for fact in demand_facts or []:
         observed = _time(fact.get("observed_at") or fact.get("detected_at"))
@@ -44,6 +62,8 @@ def authorize_replenishment(
         if observed is None or (current - observed).total_seconds() > max_demand_age_seconds:
             continue
         if not fact.get("source_system") or not fact.get("provenance_chain"):
+            continue
+        if not _same_tenant(fact) or not _same_subject(fact):
             continue
         eligible.append(fact)
 
@@ -58,13 +78,19 @@ def authorize_replenishment(
         and float(atp.get("confidence") or 0.0) >= min_confidence
         and bool(atp.get("source_system"))
         and bool(atp.get("provenance_chain"))
+        and _same_tenant(atp)
+        and _same_subject(atp)
     )
+    economics_currency = str(economics.get("currency") or "").strip().upper()
     margin_authoritative = (
         bool(economics.get("available")) and bool(economics.get("clears_floor"))
         and str(economics.get("cost_basis") or "")
         == "validated_landed_supplier_quote"
         and bool(economics.get("source_record_id"))
         and bool(economics.get("provenance_chain"))
+        and _same_tenant(economics)
+        and _same_subject(economics)
+        and (not expected_currency or economics_currency == expected_currency)
     )
     reasons = []
     if len(sources) < int(min_source_diversity):

@@ -95,7 +95,8 @@ def _finding_is_upward(f: Dict[str, Any]) -> bool:
 
 
 def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, Any],
-                             economics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                             economics: Optional[Dict[str, Any]] = None,
+                             tenant_id: Optional[str] = None) -> Dict[str, Any]:
     """Deterministic, explainable finding→action synthesis (NO LLM, NO product vocabulary). Maps the
     strongest active market finding to a bounded recommendation for the operator's procurement decision.
     Honest default when there is no external signal — and the shortfall recommendation is real either way.
@@ -123,7 +124,10 @@ def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, An
                and f.get("scope") in (None, "this_item", "this_product", "taxonomy")]
     from src.app.services.market_action_policy import authorize_replenishment
     policy = authorize_replenishment(
-        demand_facts=_demand, atp=avail, economics=economics or {})
+        demand_facts=_demand, atp=avail, economics=economics or {},
+        tenant_id=tenant_id, sku=str(avail.get("sku") or "") or None,
+        taxonomy_node=str(avail.get("taxonomy_node") or "") or None,
+        currency=str((economics or {}).get("currency") or avail.get("currency") or "") or None)
     if short > 0 and any(_finding_is_upward(f) for f in _demand) and policy["allowed"]:
         return {"action": "secure inventory ahead of demand",
                 "rationale": "independent demand growth, ATP deficit, lead time, and margin evidence support replenishment",
@@ -163,7 +167,7 @@ def _emit_market_intelligence(
                 _mdb, query=query, result_skus=[sku] if sku else [], max_findings=4,
                 tenant_id=tenant_id, force=True)
         findings = list(context.get("market_findings") or [])[:4]
-        rec = _recommend_market_action(findings, avail)
+        rec = _recommend_market_action(findings, avail, tenant_id=tenant_id)
         scoped_count = sum(1 for f in findings if f.get("scope") in
                            (None, "this_item", "this_product", "taxonomy"))
         _emit_trace(trace_id, "market_intelligence_assessed", "Market_Intelligence_Agent",
