@@ -1657,6 +1657,16 @@ def _resolve_nqe_product_category(
         pt = _normalize_product_type_label(candidate)
         if pt:
             return pt
+    # Prefer an explicit product noun over broad entity aliases.  For example,
+    # "laptops, no Apple" is a laptop query; an entity taxonomy may otherwise
+    # interpret Apple as fresh produce and contaminate NQE/RAG evidence.
+    try:
+        from src.app.services.query_classifier import coarse_product_category
+        explicit_category = _normalize_product_type_label(coarse_product_category(query))
+        if explicit_category:
+            return explicit_category
+    except Exception:
+        pass
     # Use the category router for automatic detection from query text
     try:
         from src.app.services.category_router import detect_category, detect_entities

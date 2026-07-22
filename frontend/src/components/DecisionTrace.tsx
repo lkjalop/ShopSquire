@@ -1007,7 +1007,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // + default quarantine flags), which reads as if an image were scanned. Detect the real thing so the tab
   // can label image-security as upload-only COVERAGE instead of implying this text query was scanned.
   const hadImage = (() => {
-    if (Array.isArray(imageTriage) && imageTriage.length > 0) return true;
+    const allEvts = events.length > 0 ? events : displayEvents;
+    const imageEvent = allEvts.some((event: any) => {
+      const eventType = String(event?.event_type || '').toLowerCase();
+      const payload = event?.payload || {};
+      if (payload?.has_image === true || Number(payload?.image_count || 0) > 0) return true;
+      return ['image_context_received', 'cv_analysis', 'image_analysis_completed', 'image_intent_routing']
+        .includes(eventType) && payload?.has_image !== false;
+    });
+    if (imageEvent) return true;
     const s: any = security || {};
     if (s.image_security && Object.keys(s.image_security).length > 0) return true;
     if (Array.isArray(s.image_triage) && s.image_triage.length > 0) return true;
@@ -1238,6 +1246,21 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   }
 
   function getSecurityIncidentBrief() {
+    if (!hadImage) {
+      return {
+        decision: 'Allowed - text-only controls completed',
+        triggers: ['This turn contained text only; no image-forensics finding was produced.'],
+        agentBriefs: [],
+        businessImpact: 'No image artifact was uploaded, so QR, OCR, steganography, and adversarial-image findings do not apply.',
+        actions: ['Continue under the text input, policy, rate-limit, and authorization controls recorded for this turn.'],
+        pushRecommendation: 'No image incident to push',
+        threatHunterLeads: [],
+        ownerScopeMeta: null,
+        ownerReason: '',
+        exposureScope: '',
+        humanVerificationRequired: false,
+      };
+    }
     const payloadFindings: any[] = triageItems.flatMap((item: any) => item?.security?.payload_findings || item?.payload_findings || []);
     const threatHunterLeads: any[] = triageItems.flatMap((item: any) => item?.security?.threat_hunter_leads || item?.threat_hunter_leads || []);
     const primaryFinding = payloadFindings[0] || {};
@@ -2808,7 +2831,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   )}
 
                   {/* Image Triage Signals */}
-                  {triageItems && triageItems.length > 0 && (
+                  {hadImage && triageItems && triageItems.length > 0 && (
                     <>
                       <div className={styles.sectionTitle}>Image Triage Signals</div>
                       {triageItems.map((t: any, idx: number) => {
