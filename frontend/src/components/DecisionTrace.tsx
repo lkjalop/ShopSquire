@@ -2493,7 +2493,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                           </div>
                         );
                       })()}
-                      {(() => {
+                      {hadImage && (() => {
                         const severityLabel = formatDisplayText(security.severity, 'review').toLowerCase();
                         const killChainPhase = formatDisplayText(
                           security.pasta?.current_stage || security.pasta?.stage || security.pasta_stage,
