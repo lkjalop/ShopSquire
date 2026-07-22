@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { evidenceRows } from '../lib/evidenceDisplay';
 import styles from './DecisionTrace.module.css';
+import { procurementDraftPending, procurementGateDisplay } from '../lib/procurementGateDisplay';
 import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResult } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
 import { explainProcEvent } from '../lib/procEventExplain';
-import { procurementGateDisplay } from '../lib/procurementGateDisplay';
 
 type TraceEvent = {
   id?: string;
@@ -311,6 +311,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // Procurement agent-row drill-down: row index → expanded (the payload is the evidence — one click deep).
   const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
+  const [procDetailRetry, setProcDetailRetry] = useState(0);
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
   // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
@@ -570,7 +571,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   useEffect(() => {
     if (activeTab !== 'procurement' || !effectiveTraceId) return;
     loadProcurementDetail();
-  }, [activeTab, effectiveTraceId, procurementCaseId, procurementRevision, loadProcurementDetail]);
+  }, [activeTab, effectiveTraceId, procurementCaseId, procurementRevision, procDetailRetry, loadProcurementDetail]);
+
+  // Auto-drafting runs after buyer commitment. The first detail read can therefore observe COMMITTED
+  // before the persisted draft exists. Retry that narrow state a few times so opening Procurement
+  // directly does not require the operator to switch tabs to reveal an RFQ that materialized seconds later.
+  useEffect(() => {
+    if (activeTab !== 'procurement' || !procurementCaseId || !procurementDraftPending(procCase)) return;
+    if (procDetailRetry >= 4) return;
+    const timer = window.setTimeout(() => setProcDetailRetry((value) => value + 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, procurementCaseId, procCase, procDetailRetry]);
 
   // Each trace resolves its own procurement case. Drop any prior turn's resolved case id when the trace
   // changes so a normal (no-procurement) trace doesn't inherit a stale case id — which would keep the tab
@@ -578,7 +589,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // trace genuinely carries procurement signals.
   useEffect(() => {
     setProcurementCaseId(null);
+    setProcCase(null);
+    setProcCases([]);
+    setProcJourney(null);
     setProcHistory(null);
+    setPendingSplit(null);
+    setProcDetailRetry(0);
   }, [effectiveTraceId]);
 
   useEffect(() => {

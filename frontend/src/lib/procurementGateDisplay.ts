@@ -3,6 +3,13 @@ export type ProcurementGateDisplay = {
   reasons: { code: string; label: string; action: string }[];
 };
 
+export function procurementDraftPending(procCase: unknown): boolean {
+  if (!procCase || typeof procCase !== 'object') return false;
+  const record = procCase as Record<string, any>;
+  return String(record.state || '').toUpperCase() === 'COMMITTED'
+    && !record.state_json?.draft;
+}
+
 const REASON_COPY: Record<string, { label: string; action: string }> = {
   below_supplier_moq: {
     label: 'Supplier minimum quantity is not met.',

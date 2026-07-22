@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { procurementGateDisplay } from '../procurementGateDisplay';
+import { procurementDraftPending, procurementGateDisplay } from '../procurementGateDisplay';
 
 describe('procurementGateDisplay', () => {
   it('turns MOQ and date reasons into operator actions', () => {
@@ -14,5 +14,15 @@ describe('procurementGateDisplay', () => {
     ]);
     expect(view.reasons[0].action).toContain('Consolidate demand');
     expect(view.reasons[1].action).toContain('required-by date');
+  });
+});
+
+describe('procurementDraftPending', () => {
+  it('retries a committed case until its auto-draft materializes', () => {
+    expect(procurementDraftPending({ state: 'COMMITTED', state_json: {} })).toBe(true);
+    expect(procurementDraftPending({
+      state: 'QUOTE_DRAFTED', state_json: { draft: { subject: 'RFQ' } },
+    })).toBe(false);
+    expect(procurementDraftPending(null)).toBe(false);
   });
 });
