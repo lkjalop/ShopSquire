@@ -41,3 +41,32 @@ def test_chat_query_forwards_narration_job_id(monkeypatch):
     assert body.get("requested_quantity") == 25
     assert body.get("bulk_budget") == {"scope": "total", "total": 41000.0,
                                         "quantity": 25, "per_unit_cap": 1640}
+
+
+async def _fake_no_match_with_brand_exclusion(*args, **kwargs):
+    return 200, {
+        "results": [],
+        "assistant_message": "No exact in-catalog match right now.",
+        "decision_trace_id": "trace-no-match",
+        "next_questions": [],
+        "confirmed_slots": {"brand_excludes": ["Apple"]},
+        "turn_intent": "SEARCH",
+    }
+
+
+def test_no_match_followups_do_not_contradict_brand_exclusion(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process",
+                        _fake_no_match_with_brand_exclusion)
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/chat/query",
+        json={"uid": "u-chat-no-apple", "query": "game development laptops, no Apple"},
+        headers={"x-api-key": "local-merchant-key"},
+    )
+
+    assert response.status_code == 200
+    questions = response.json().get("next_questions") or []
+    assert "relax_brand" not in {question.get("id") for question in questions}
+    assert all("Apple" not in str(question.get("text") or "") for question in questions)

@@ -2468,9 +2468,25 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     {"id": "widen_medium", "label": "Widen more (+$400)", "value": "expand_budget:+400"},
                 ],
             },
-            {"id": "relax_brand", "text": "Are you open to brands beyond Apple/Windows-first picks?", "goal": "increase_match_space"},
-            {"id": "priority_tradeoff", "text": "Prioritize gaming FPS or rendering/export speed first?", "goal": "resolve_tradeoff"},
         ]
+        # Ask to relax only a positive hard brand filter. An explicit exclusion is already a
+        # resolved buyer constraint; asking them to consider the excluded brand contradicts the
+        # same response. Brand names and vertical policy stay in the bounded core payload.
+        _confirmed = data.get("confirmed_slots") if isinstance(data.get("confirmed_slots"), dict) else {}
+        _decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+        _hard_brand = _decision.get("brand_filter") or _confirmed.get("brand_filter")
+        _excluded = _decision.get("exclude_brand") or _confirmed.get("brand_excludes")
+        if _hard_brand and not _excluded:
+            next_questions.append({
+                "id": "relax_brand",
+                "text": "Should I relax the current brand constraint?",
+                "goal": "increase_match_space",
+            })
+        next_questions.append({
+            "id": "priority_tradeoff",
+            "text": "Prioritize interactive performance or rendering/export speed first?",
+            "goal": "resolve_tradeoff",
+        })
     # Budget stated but NO in-budget match (nearest-above fallback shows OVER-budget products): still expose
     # the WIDEN option. The old trigger only fired when products was empty, so a budget query that fell back
     # to over-budget picks hid the widen chip (the brittle path GPT-5.5 flagged). Deterministic: budget set +
