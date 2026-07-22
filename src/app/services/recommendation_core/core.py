@@ -281,7 +281,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             requirements_inherited = True
         # BULK continuation: inherit quantity + total budget when THIS turn didn't state them
         # ('how many can I get?' keeps the prior 6 units + $19k); a stated value this turn wins.
-        if decision.quantity is None and acc.get("quantity"):
+        if (decision.quantity is None and decision.subject_action == "continue"
+                and acc.get("quantity")):
             decision = dataclasses.replace(decision, quantity=int(acc["quantity"]))
         if (decision.total_budget_cents is None
                 and _parsed_turn_budget is None

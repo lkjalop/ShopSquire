@@ -341,7 +341,7 @@ def _explicitly_excluded_brand(db, query: str) -> Optional[str]:
             continue
         brand = _re.escape(canonical.lower())
         patterns = (
-            rf"\b(?:not|except|excluding|exclude|without)\s+{brand}\b",
+            rf"\b(?:no|not|except|excluding|exclude|without)\s+{brand}\b",
             rf"\b(?:no|nothing)\s+from\s+{brand}\b",
             rf"\banything\s+but\s+{brand}\b",
         )

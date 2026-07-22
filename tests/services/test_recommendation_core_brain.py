@@ -796,6 +796,18 @@ def test_search_lane_continuation_inherits_prior_bulk_quantity(db):
     assert resp.extras["requested_quantity"] == 25
 
 
+def test_fresh_search_does_not_inherit_prior_bulk_quantity(db):
+    payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+               "quantity": None, "subject_action": "switch", "confidence": 0.9}
+    session = {"prior_node": "el-6-6", "accepted_constraints": {"quantity": 25}}
+    resp = recommend_turn(
+        db,
+        _env("show me laptops for professional game development", session=session),
+        llm_fn=lambda p, t: json.dumps(payload),
+    )
+    assert resp.extras.get("requested_quantity") is None
+
+
 def test_model_cannot_invent_budget_on_keep_total_followup(db):
     payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
                "quantity": None, "total_budget": 950, "budget_scope": "total",
