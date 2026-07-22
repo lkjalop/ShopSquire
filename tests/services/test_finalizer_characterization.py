@@ -56,6 +56,21 @@ def test_currency_guard_prunes_every_repeated_product_projection():
     assert out["currency_policy"]["excluded_mismatched"] == 2
 
 
+def test_currency_guard_prunes_nested_buckets_when_root_slate_is_already_empty():
+    from src.app.services.recommend_response_finalizer import enforce_response_currency
+
+    payload = {
+        "results": [],
+        "products": [],
+        "price_buckets": {"within_budget": [
+            {"sku": "USD-1", "currency": "USD", "price": 1200},
+        ]},
+    }
+    out = enforce_response_currency(payload, "AUD")
+    assert out["price_buckets"]["within_budget"] == []
+    assert out["currency_policy"]["excluded_mismatched"] == 1
+
+
 def test_char_recovery_answer_exact_string():
     msg = R._recovery_answer({"budget_max": 1400, "brands": ["asus"]})
     assert msg == (

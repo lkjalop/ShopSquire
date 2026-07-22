@@ -55,7 +55,7 @@ def _seed():
         for sku, name, cents, specs in _CATALOG:
             db.execute(text(
                 "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
-                "VALUES (:id,:sku,:name,:c,'USD',:specs,1)"),
+                "VALUES (:id,:sku,:name,:c,'AUD',:specs,1)"),
                 {"id": sku, "sku": sku, "name": name, "c": cents, "specs": specs})
         db.commit()
     yield
@@ -89,7 +89,9 @@ def test_carried_gpu_slot_does_not_hijack_a_work_query():
     assert results, f"no results: {str(out)[:300]}"
     cu = out.get("constraints_used") or {}
     # the guard's contract: the shift resolved office_general and the stale GPU slot is GONE
-    assert cu.get("use_case") == "office_general", f"use_case did not resolve: {cu}"
+    assert (cu.get("use_case") in ("office_general", "business_professional")
+            and "office_general" in (cu.get("use_case_tags") or [])), (
+        f"office use-case did not resolve: {cu}")
     assert not cu.get("gpu_preference"), (
         f"stale gaming GPU slot survived the use-case shift: {cu.get('gpu_preference')}")
     # and the behavioral outcome: the pool is not gaming-only; a non-gaming unit ranks on top

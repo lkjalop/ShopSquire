@@ -51,6 +51,18 @@ def enforce_response_currency(payload: Dict[str, Any], currency: str) -> Dict[st
     target = str(currency or "USD").strip().upper()
     roots = [item for key in ("results", "products")
              for item in (payload.get(key) or []) if isinstance(item, dict)]
+    if not roots:
+        # A prior stage may already have emptied the authoritative slate while leaving repeated
+        # projections (price buckets, tiers, lanes) behind. Discover those projections so the
+        # final currency gate cannot advertise a product that the root slate rejected.
+        def _nested_products(value: Any) -> List[Dict[str, Any]]:
+            if isinstance(value, list):
+                return [row for item in value for row in _nested_products(item)]
+            if isinstance(value, dict):
+                found = ([value] if value.get("sku") and value.get("currency") else [])
+                return found + [row for item in value.values() for row in _nested_products(item)]
+            return []
+        roots = _nested_products(payload)
     eligible, excluded = filter_products_by_currency(roots, target)
     allowed_skus = {str(item.get("sku")) for item in eligible if item.get("sku")}
     had_products = any(item.get("sku") for item in roots)
