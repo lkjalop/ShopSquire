@@ -650,6 +650,95 @@ def best_supplier_cost(db, sku: str, *, tenant_id: str = "default",
     }
 
 
+def record_validated_supplier_offer(
+    db,
+    *,
+    tenant_id: str,
+    supplier_id: str,
+    sku: str,
+    purchase_unit_cost_cents: int,
+    landed_unit_cost_cents: int,
+    currency: str,
+    source_record_id: str,
+    effective_from: str,
+    effective_to: Optional[str] = None,
+    confidence: float = 1.0,
+    provenance_chain: Optional[List[str]] = None,
+) -> str:
+    """Stage one authoritative landed supplier quote in the caller's transaction.
+
+    The caller owns the commit so quote validation and economics materialization can
+    succeed or fail together. Only an explicit landed cost belongs here; estimates
+    continue to use ``seed_demo_supplier_offers`` and remain simulation-only.
+    """
+    import json as _json
+    import uuid
+
+    required = {
+        "tenant_id": tenant_id,
+        "supplier_id": supplier_id,
+        "sku": sku,
+        "currency": currency,
+        "source_record_id": source_record_id,
+        "effective_from": effective_from,
+    }
+    missing = [key for key, value in required.items() if not str(value or "").strip()]
+    if missing:
+        raise ValueError(f"validated supplier offer missing: {', '.join(missing)}")
+    purchase = int(purchase_unit_cost_cents or 0)
+    landed = int(landed_unit_cost_cents or 0)
+    if purchase <= 0 or landed <= 0 or landed < purchase:
+        raise ValueError("validated supplier offer costs are invalid")
+    offer_id = str(uuid.uuid4())
+    params = {
+        "id": offer_id,
+        "tenant": str(tenant_id),
+        "supplier": str(supplier_id),
+        "sku": str(sku),
+        "purchase": purchase,
+        "landed": landed,
+        "currency": str(currency).upper(),
+        "record": str(source_record_id),
+        "effective_from": str(effective_from),
+        "effective_to": str(effective_to) if effective_to else None,
+        "confidence": max(0.0, min(1.0, float(confidence or 0))),
+        "provenance": _json.dumps(list(provenance_chain or [])),
+    }
+    # A newer validated quote supersedes earlier active quotes from this supplier
+    # for the same tenant/SKU/currency. Demo estimates remain available as clearly
+    # marked scenario evidence and are not rewritten.
+    db.execute(text("""
+        UPDATE supplier_offer
+        SET status='superseded', effective_to=:effective_from
+        WHERE tenant_id=:tenant AND supplier_id=:supplier AND sku=:sku
+          AND currency=:currency AND status='active'
+          AND simulation_only=0 AND source_record_id<>:record
+    """), params)
+    db.execute(text("""
+        INSERT INTO supplier_offer (
+          id, tenant_id, supplier_id, sku, cost_kind, purchase_unit_cost_cents,
+          freight_unit_cents, duty_unit_cents, handling_unit_cents,
+          landed_unit_cost_cents, currency, tax_basis, effective_from, effective_to,
+          source_system, source_record_id, provenance_json, confidence,
+          simulation_only, status
+        ) VALUES (
+          :id,:tenant,:supplier,:sku,'validated_landed_quote',:purchase,
+          0,0,0,:landed,:currency,'supplier-stated-landed',:effective_from,:effective_to,
+          'supplier_quote_reply',:record,:provenance,:confidence,0,'active'
+        ) ON CONFLICT(tenant_id, supplier_id, sku, source_record_id) DO UPDATE SET
+          purchase_unit_cost_cents=excluded.purchase_unit_cost_cents,
+          landed_unit_cost_cents=excluded.landed_unit_cost_cents,
+          currency=excluded.currency,
+          effective_from=excluded.effective_from,
+          effective_to=excluded.effective_to,
+          provenance_json=excluded.provenance_json,
+          confidence=excluded.confidence,
+          simulation_only=0,
+          status='active'
+    """), params)
+    return offer_id
+
+
 def _demo_cost_ratio_basis_points(sku: str, supplier_id: str) -> int:
     """Stable 82-88% purchase-cost estimate; demo data, never a market claim."""
     import hashlib

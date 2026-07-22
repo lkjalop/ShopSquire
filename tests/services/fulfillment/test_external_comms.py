@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -26,8 +26,8 @@ def AG(): return Actor(A.AGENT, "Procurement_Agent")
 def BU(): return Actor(A.BUYER, "u1")
 def HU(): return Actor(A.HUMAN_OPERATOR, "owner-01")
 
-_DRAFT = {"content_hash": "H1", "recipient_domain": "approved-supplier.example",
-          "commercial_scope": {"item_ref": "SKU-1", "quantity": 6}}
+_DRAFT = {"content_hash": "H1", "recipient_domain": "approved-supplier.example", "supplier_ref": "SUP-7",
+           "commercial_scope": {"item_ref": "SKU-1", "quantity": 6}}
 
 
 def _to_approved(db):
@@ -156,6 +156,53 @@ def test_validate_unexpired_quote_advances(db):
     r = ec.validate_quote(db, case_id=cid, actor=HU(), today="2026-06-27", now_iso="2026-06-27 09:00:00")
     assert r.ok and wf.current_state(db, cid) == S.QUOTE_VALIDATED
     assert wf.repository.current_version(db, cid).state_json["validated_quote"]["validation"]["in_scope"] is True
+
+
+def test_validate_explicit_landed_quote_materializes_authoritative_supplier_offer(db):
+    from src.app.services.supplier_catalog import best_supplier_cost, ensure_tables
+
+    ensure_tables(db)
+    cid = _to_sent(db)
+    raw = (
+        "Quantity: 6\nUnit price: AUD 1,115 per unit\n"
+        "Landed unit cost: AUD 1,245.50\nDispatch by 3 July 2026\nValid until 15 August 2026"
+    )
+    ec.receive_reply(db, case_id=cid, raw_body=raw, sender_domain="approved-supplier.example",
+                     provider_ref="QUOTE-AUTH-1", trusted_fn=lambda d: True,
+                     now_iso="2026-06-26 09:26:00")
+    ec.record_parsed(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:26:10")
+
+    result = ec.validate_quote(db, case_id=cid, actor=HU(), today="2026-06-27",
+                               now_iso="2026-06-27T09:00:00+00:00", tenant_id="default")
+
+    assert result.ok
+    offer = best_supplier_cost(db, "SKU-1", tenant_id="default", currency="AUD")
+    assert offer is not None
+    assert offer["supplier_id"] == "SUP-7"
+    assert offer["purchase_unit_cost_cents"] == 111500
+    assert offer["unit_cost_cents"] == 124550
+    assert offer["simulation_only"] is False
+    assert offer["cost_kind"] == "validated_landed_quote"
+    assert offer["source_record_id"] == "QUOTE-AUTH-1"
+
+
+def test_validate_ordinary_unit_quote_does_not_create_authoritative_offer(db):
+    from src.app.services.supplier_catalog import ensure_tables
+
+    ensure_tables(db)
+    cid = _to_sent(db)
+    reply = sb.generate_reply(case_ref=cid, scenario="full_quote", requested_qty=6)
+    ec.receive_reply(db, case_id=cid, raw_body=reply["body"], sender_domain=reply["sender_domain"],
+                     provider_ref=reply["provider_ref"], trusted_fn=lambda d: True,
+                     now_iso="2026-06-26 09:26:00")
+    ec.record_parsed(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:26:10")
+
+    result = ec.validate_quote(db, case_id=cid, actor=HU(), today="2026-06-27",
+                               now_iso="2026-06-27T09:00:00+00:00")
+
+    assert result.ok
+    count = db.execute(text("SELECT COUNT(*) FROM supplier_offer WHERE simulation_only=0")).scalar()
+    assert count == 0
 
 
 def test_validate_expired_quote_is_hard_rejected(db):

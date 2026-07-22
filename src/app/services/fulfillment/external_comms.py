@@ -396,6 +396,44 @@ def validate_quote(db, *, case_id: str, actor: Actor, today: Optional[str] = Non
     note = {"in_scope": (quoted <= requested if requested else True),
             "shortfall_covered": quoted, "requested": requested,
             "confidence": pq.get("confidence"), "contradictory": pq.get("contradictory")}
+    landed = int(pq.get("landed_unit_cost_cents") or 0)
+    if landed:
+        draft = (cur.state_json.get("draft") if cur else None) or {}
+        inbound = (cur.state_json.get("inbound") if cur else None) or {}
+        supplier_id = str(draft.get("supplier_ref") or "").strip()
+        sku = str(scope.get("item_ref") or "").strip()
+        provider_ref = str(inbound.get("provider_ref") or "").strip()
+        currency = str(pq.get("landed_cost_currency") or pq.get("currency") or "").upper()
+        source_record_id = provider_ref or f"case:{case_id}:supplier-quote"
+        try:
+            from src.app.services.supplier_catalog import record_validated_supplier_offer
+            record_validated_supplier_offer(
+                db,
+                tenant_id=tenant_id,
+                supplier_id=supplier_id,
+                sku=sku,
+                purchase_unit_cost_cents=int(pq.get("unit_amount_cents") or 0),
+                landed_unit_cost_cents=landed,
+                currency=currency,
+                source_record_id=source_record_id,
+                effective_from=now_iso or f"{day}T00:00:00+00:00",
+                effective_to=pq.get("quote_expires_at"),
+                confidence=float(pq.get("confidence") or 0),
+                provenance_chain=[
+                    f"fulfillment_case/{case_id}",
+                    f"supplier_reply/{source_record_id}",
+                    "human_validation/supplier_quote_validated",
+                ],
+            )
+        except Exception:
+            # Do not create a validated case whose authoritative landed economics
+            # silently failed to materialize. The prior parsed state is already
+            # durable; an operator can retry validation after the ledger is fixed.
+            db.rollback()
+            return workflow.TransitionResult(
+                False, case_id, cur.state if cur else None,
+                "supplier_offer_persist_failed", http_status=409,
+            )
     return workflow.transition(
         db, case_id=case_id, event="supplier_quote_validated", actor=actor, reason_code="human_validated",
         evidence=note, state_patch={"validated_quote": {**pq, "validation": note}},
