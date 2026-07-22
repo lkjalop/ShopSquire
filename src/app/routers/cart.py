@@ -193,10 +193,19 @@ def _save_cart_versioned(db, cart_id: str, items: List[Dict], expected_version: 
     return getattr(res, "rowcount", 0) == 1
 
 
+def _store_currency() -> str:
+    try:
+        from src.app.platform.store_profile import profile_slot
+        return str(profile_slot("currency", default="USD") or "USD").upper()
+    except Exception:
+        return "USD"
+
+
 def _hydrate(items: List[Dict]) -> Dict:
     repo = CatalogRepository()
     out_items = []
     subtotal = 0
+    currencies: set[str] = set()
     for it in items:
         sku = it.get("sku")
         qty = int(it.get("quantity") or 1)
@@ -208,11 +217,14 @@ def _hydrate(items: List[Dict]) -> Dict:
             # surface a phantom "Unknown / $0" row that clutters the cart (demo-cart-hygiene fix).
             continue
         price = int(product.price_cents or 0)
+        product_currency = str(getattr(product, "currency", None) or _store_currency()).upper()
+        currencies.add(product_currency)
         subtotal += price * qty
         row = {
             "sku": sku,
             "quantity": qty,
             "price_cents": price,
+            "currency": product_currency,
             "name": product.name,
             "specs": product.specs if isinstance(product.specs, dict) else None,
         }
@@ -228,10 +240,14 @@ def _hydrate(items: List[Dict]) -> Dict:
             row["available_now"] = int(it.get("available_now") or 0)
         out_items.append(row)
     bundle_savings = evaluate_bundle_savings(out_items)
+    settlement_currency = next(iter(currencies)) if len(currencies) == 1 else (
+        "MIXED" if currencies else _store_currency()
+    )
     return {
         "items": out_items,
         "subtotal_cents": subtotal,
-        "currency": "USD",
+        "currency": settlement_currency,
+        "currency_conflict": len(currencies) > 1,
         "bundle_savings": bundle_savings,
     }
 
@@ -361,7 +377,9 @@ def stash_cart_undo(payload: UndoStashPayload, redis=Depends(get_redis),
     if not lines:
         return {"stashed": False, "count": 0}
     try:
-        redis.setex(_undo_key(payload.uid), _undo_ttl(), json.dumps({"items": lines, "saved_at": _now_ts()}))
+        redis.setex(_undo_key(payload.uid), _undo_ttl(), json.dumps({
+            "items": lines, "restore_mode": "replace", "saved_at": _now_ts(),
+        }))
     except Exception:
         return {"stashed": False, "count": 0}
     return {"stashed": True, "count": len(lines), "ttl_seconds": _undo_ttl()}
@@ -370,8 +388,11 @@ def stash_cart_undo(payload: UndoStashPayload, redis=Depends(get_redis),
 @router.post("/undo")
 def undo_cart_clear(uid: str, redis=Depends(get_redis),
                     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    """Restore the most-recently cleared cart from its Redis snapshot (within the grace window). Merges the
-    stashed lines back into the current cart and consumes the snapshot. 404 if nothing is restorable."""
+    """Restore the exact pre-change cart snapshot and consume it.
+
+    Undo is replacement, not addition. Adding a prior quantity to a currently
+    amended line can create hidden demand while the UI shows the snapshot value.
+    """
     _guard_cart_request(surface="cart.undo", uid=uid, sku_values=[], quantity_values=[])
     key = _undo_key(uid)
     try:
@@ -385,9 +406,9 @@ def undo_cart_clear(uid: str, redis=Depends(get_redis),
     except (json.JSONDecodeError, AttributeError, TypeError):
         raise HTTPException(status_code=404, detail="no_undo_available")
 
-    cart_id, items, _ = _get_or_create_cart(uid)
-    by_sku = {it.get("sku"): it for it in items}
+    cart_id, _items, _ = _get_or_create_cart(uid)
     ts = _now_ts()
+    restored_items: List[Dict[str, Any]] = []
     restored = 0
     for line in (snap.get("items") or []):
         sku = line.get("sku")
@@ -396,19 +417,18 @@ def undo_cart_clear(uid: str, redis=Depends(get_redis),
             continue
         # Restore = re-instate exactly what was cleared, bypassing the stock gate (the removal freed the
         # stock, and this is the buyer's own cart being put back — any true shortfall is caught at checkout).
-        if sku in by_sku:
-            by_sku[sku]["quantity"] = int(by_sku[sku].get("quantity") or 0) + qty
-        else:
-            new_line = {"sku": sku, "quantity": qty, "added_at": ts}
-            items.append(new_line)
-            by_sku[sku] = new_line
+        new_line = {"sku": sku, "quantity": qty, "added_at": line.get("added_at") or ts}
+        for meta_key in ("sourcing_required", "shortfall", "available_now"):
+            if meta_key in line:
+                new_line[meta_key] = line[meta_key]
+        restored_items.append(new_line)
         restored += 1
-    _save_cart(cart_id, items)
+    _save_cart(cart_id, restored_items)
     try:
         redis.delete(key)
     except Exception:
         pass
-    hydrated = _hydrate(items)
+    hydrated = _hydrate(restored_items)
     hydrated = _with_bundle_state(cart_id=cart_id, uid=uid, role=role, hydrated=hydrated)
     hydrated["undo"] = {"available": False, "count": 0}
     return {"cart_id": cart_id, "restored": restored, **hydrated}
@@ -430,7 +450,8 @@ def split_offer(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_
         hydrated = _hydrate(items)
         rows = hydrated.get("items") or []
         if not rows:
-            return {"cart_id": cart_id, "subtotal_cents": 0, "currency": "USD", "split": None}
+            return {"cart_id": cart_id, "subtotal_cents": 0,
+                    "currency": hydrated.get("currency", _store_currency()), "split": None}
         skus = [str(r["sku"]) for r in rows if r.get("sku")]
         stock = _batch_stock_levels(skus)
         try:
@@ -715,11 +736,24 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
 
 
 @router.post("/clear")
-def clear_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+def clear_cart(uid: str, redis=Depends(get_redis),
+               role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("cart.clear"):
         signal = _guard_cart_request(surface="cart.clear", uid=uid, sku_values=[], quantity_values=[])
-        cart_id, _, _ = _get_or_create_cart(uid)
+        cart_id, prior_items, _ = _get_or_create_cart(uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.clear", signal=signal)
+        if prior_items:
+            try:
+                redis.setex(_undo_key(uid), _undo_ttl(), json.dumps({
+                    "items": prior_items, "restore_mode": "replace", "saved_at": _now_ts(),
+                }))
+            except Exception:
+                pass
+        else:
+            try:
+                redis.delete(_undo_key(uid))
+            except Exception:
+                pass
         _save_cart(cart_id, [])
         # A cleared cart is a NEW shopping intent — yesterday's approved bundle discount must not ride
         # along onto whatever the buyer builds next (the stale "-$17,627 discount I didn't select" bug).
@@ -733,7 +767,7 @@ def clear_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_O
             "cart_id": cart_id,
             "items": [],
             "subtotal_cents": 0,
-            "currency": "USD",
+            "currency": _store_currency(),
             "trace_id": _cart_trace_id(cart_id),
             "decision_trace_id": _cart_trace_id(cart_id),
         }

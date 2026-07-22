@@ -191,8 +191,8 @@ def _stash_undo(redis, uid: str, items: List[Dict[str, Any]]) -> None:
     try:
         from src.app.routers.cart import _undo_key, _undo_ttl
         redis.setex(_undo_key(uid), _undo_ttl(),
-                    json.dumps({"items": [{"sku": it.get("sku"), "quantity": it.get("quantity"),
-                                           "name": it.get("name")} for it in items]}))
+                    json.dumps({"items": [dict(it) for it in items],
+                                "restore_mode": "replace", "saved_at": _now().strftime(_TS_FMT)}))
     except Exception as exc:
         logger.debug("undo stash skipped: %s", repr(exc)[:100])
 

@@ -130,6 +130,23 @@ def test_add_item_in_stock(client_with_stock):
     assert any(it["sku"] == "SKU-INSTOCK-5" for it in body.get("items", []))
 
 
+def test_cart_currency_comes_from_catalog_product(client_with_stock):
+    from src.app.models.db import db_session
+    uid = "aud-cart-user"
+    with db_session() as db:
+        db.execute("UPDATE products SET currency='AUD' WHERE sku='SKU-INSTOCK-5'")
+        db.commit()
+
+    response = client_with_stock.post(
+        "/api/v1/cart/items",
+        json={"uid": uid, "sku": "SKU-INSTOCK-5", "quantity": 2},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["currency"] == "AUD"
+    assert response.json()["items"][0]["currency"] == "AUD"
+
+
 def test_add_item_out_of_stock_rejected(client_with_stock):
     resp = client_with_stock.post(
         "/api/v1/cart/items",
@@ -229,6 +246,49 @@ def test_cart_undo_roundtrip(client_with_stock):
         after = client_with_stock.get("/api/v1/cart", params={"uid": "undo-user"}).json()
         assert after["undo"]["available"] is False
         assert client_with_stock.post("/api/v1/cart/undo", params={"uid": "undo-user"}).status_code == 404
+    finally:
+        client_with_stock.app.dependency_overrides.pop(get_redis, None)
+
+
+def test_cart_undo_replaces_current_quantity_instead_of_adding_hidden_demand(client_with_stock):
+    from src.app.deps import get_redis
+    fake = _FakeRedis()
+    client_with_stock.app.dependency_overrides[get_redis] = lambda: fake
+    uid = "undo-replace-user"
+    try:
+        client_with_stock.post("/api/v1/cart/undo/stash",
+                               json={"uid": uid, "items": [{"sku": "SKU-INSTOCK-5", "quantity": 4}]})
+        added = client_with_stock.post("/api/v1/cart/items",
+                                       json={"uid": uid, "sku": "SKU-INSTOCK-5", "quantity": 2})
+        assert added.status_code == 200
+
+        restored = client_with_stock.post("/api/v1/cart/undo", params={"uid": uid})
+
+        assert restored.status_code == 200
+        line = next(item for item in restored.json()["items"] if item["sku"] == "SKU-INSTOCK-5")
+        assert line["quantity"] == 4
+    finally:
+        client_with_stock.app.dependency_overrides.pop(get_redis, None)
+
+
+def test_clear_replaces_stale_undo_snapshot_with_the_cart_being_cleared(client_with_stock):
+    from src.app.deps import get_redis
+    fake = _FakeRedis()
+    client_with_stock.app.dependency_overrides[get_redis] = lambda: fake
+    uid = "clear-refreshes-undo"
+    try:
+        client_with_stock.post("/api/v1/cart/undo/stash",
+                               json={"uid": uid, "items": [{"sku": "STALE", "quantity": 99}]})
+        client_with_stock.post("/api/v1/cart/items",
+                               json={"uid": uid, "sku": "SKU-INSTOCK-5", "quantity": 3})
+
+        cleared = client_with_stock.post("/api/v1/cart/clear", params={"uid": uid})
+        restored = client_with_stock.post("/api/v1/cart/undo", params={"uid": uid})
+
+        assert cleared.status_code == 200
+        assert [(item["sku"], item["quantity"]) for item in restored.json()["items"]] == [
+            ("SKU-INSTOCK-5", 3),
+        ]
     finally:
         client_with_stock.app.dependency_overrides.pop(get_redis, None)
 
