@@ -7,6 +7,7 @@ intermediate updates (thinking, retrieval, reranking, final answer).
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import json
 import os
 import time
@@ -57,6 +58,8 @@ async def _run_with_heartbeats(awaitable, *, interval_s: float) -> AsyncIterator
     finally:
         if not task.done():
             task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 @router.post("/stream")

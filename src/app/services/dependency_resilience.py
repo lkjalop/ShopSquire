@@ -49,6 +49,7 @@ def call_with_resilience(
             st.open_until = 0.0
             return out
         except FuturesTimeout as e:
+            fut.cancel()
             last_exc = TimeoutError(f"timeout:{dep}")
         except Exception as e:
             last_exc = e

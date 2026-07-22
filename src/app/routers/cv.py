@@ -1246,6 +1246,10 @@ async def upload(
         # Tier 2 can fail when optional deps (OCR/vision/QR libs) are missing or the
         # Ollama endpoint/model is not available. Degrade gracefully instead of 400'ing.
         try:
+            try:
+                _upload_timeout = max(1.0, min(float(os.getenv("CV_UPLOAD_TIMEOUT_SEC", "15") or 15), 30.0))
+            except (TypeError, ValueError):
+                _upload_timeout = 15.0
             t2 = call_with_resilience(
                 "cv.tier2",
                 lambda: run_tier2(
@@ -1264,8 +1268,8 @@ async def upload(
                     },
                     pack_id=pack_id,
                 ),
-                timeout_s=90.0,
-                retries=1,
+                timeout_s=_upload_timeout,
+                retries=0,
             )
         except Exception as exc:
             t2 = {
