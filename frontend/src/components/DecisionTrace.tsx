@@ -3628,7 +3628,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                         onClick={() => setProcExpanded((prev) => ({ ...prev, [i]: !prev[i] }))}
                                         title="Click to inspect this step's full recorded payload">
                                       <td style={{ width: 18, color: '#9ca3af' }}>{isOpen ? '▾' : '▸'}</td>
-                                      <td>{(e as any).source_id || '—'}</td>
+                                      <td title={`Recorded producer: ${(e as any).source_id || 'unknown'}`}>
+                                        {componentSource(e)}
+                                      </td>
                                       <td>{displayEventType(e)}</td>
                                       <td>{exec ? (
                                         <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
