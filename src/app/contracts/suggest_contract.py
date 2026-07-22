@@ -86,6 +86,9 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "capability_conflict",
     # bulk_budget: quantity/total/per-unit viability and authorized trade-off menu.
     "bulk_budget",
+    # sourcing_intent: buyer-safe procurement preview. It contains no supplier identity and
+    # materializes a fulfillment case only after the buyer confirms the cart.
+    "sourcing_intent",
     # routing_source: model versus bounded fallback provenance used by promotion telemetry.
     "routing_source",
 })
