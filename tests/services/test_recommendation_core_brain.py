@@ -133,7 +133,8 @@ def test_router_clamps_requirements(db):
 def test_core_uses_workload_as_primary_context_when_audience_is_also_present(db):
     raw = json.dumps({
         "lane": "SEARCH", "handle": "el-6-11-2", "requirements": {},
-        "use_cases": ["university", "game_development"], "confidence": 0.9,
+        "use_cases": ["game_development"], "audience_contexts": ["university"],
+        "confidence": 0.9,
     })
 
     response = recommend_turn(
@@ -144,8 +145,26 @@ def test_core_uses_workload_as_primary_context_when_audience_is_also_present(db)
 
     assert response.extras["intent"]["primary_use_case"] == "game_development"
     assert response.extras["decision"]["use_cases"] == ["game_development", "university"]
+    assert response.extras["decision"]["audience_contexts"] == ["university"]
     assert response.extras["constraints_used"]["requirements"]["gpu_vram_gb"] == [[">=", 6.0]]
     assert "university general" not in response.message.lower()
+
+
+def test_router_clamps_audience_context_independently(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-11-2", "requirements": {},
+        "use_cases": ["game_development", "university"],
+        "audience_contexts": ["invented_audience", "university"],
+        "confidence": 0.9,
+    })
+
+    decision = route_turn(
+        db, _env("university game development laptop"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.use_cases == ("game_development", "university")
+    assert decision.audience_contexts == ("university",)
 
 
 def test_router_clamps_and_core_applies_game_development_variant(db):

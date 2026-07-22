@@ -167,6 +167,7 @@ class TurnDecision:
     # end-to-end (M2-B1); the router itself emits one predicate per key (the model's clamp).
     requirements: Dict[str, List[Tuple[str, float]]] = field(default_factory=dict)
     use_cases: Tuple[str, ...] = ()              # model-classified, clamped to KB keys
+    audience_contexts: Tuple[str, ...] = ()      # context only; never weakens workload floors
     use_case_variants: Dict[str, str] = field(default_factory=dict)  # use-case -> registry variant
     refusal_granted: bool = False                # sells_within()==False confirmed the refusal
     confidence: float = 0.0
@@ -231,6 +232,7 @@ class TurnDecision:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
                 "requirements": {k: [list(p) for p in v] for k, v in self.requirements.items()},
                 "use_cases": list(self.use_cases), "refusal_granted": self.refusal_granted,
+                "audience_contexts": list(self.audience_contexts),
                 "use_case_variants": dict(self.use_case_variants),
                 "confidence": round(self.confidence, 3), "source": self.source,
                 "requested_product_node": self.requested_product_node,
@@ -531,6 +533,9 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
 @lru_cache(maxsize=8)
 def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...]) -> str:
     """Stable prefix first, allowing the model server to reuse its prompt/KV prefix."""
+    from src.app.services.recommendation_core.intent_resolver import audience_context_keys
+    context_keys = tuple(audience_context_keys())
+    workload_keys = tuple(key for key in use_case_keys if key not in context_keys)
     return (
         "Route one commerce turn into bounded JSON. The model interprets language; the platform "
         "validates every category, product, constraint and action.\n"
@@ -560,10 +565,13 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "service/location request uses SEARCH with handle=null, request_scope=service_or_place, "
         "and confidence=0; lane itself is "
         "never null. Prefer an [in catalog] sibling only when meaning is otherwise equivalent.\n"
-        f"USE_CASE keys: {', '.join(use_case_keys)}. Name zero or more; do not invent hardware "
+        f"WORKLOAD_USE_CASE keys: {', '.join(workload_keys)}. Name zero or more in use_cases; "
+        "do not put the buyer's school/audience context there and do not invent hardware "
         "floors because the platform resolves those from evidence. When a listed bounded variant "
         "materially describes the PRIMARY workload, return its exact scalar name in "
         "use_case_variant. It must belong to one selected use case. Use null when uncertain.\n"
+        f"AUDIENCE_CONTEXT keys: {', '.join(context_keys)}. Put explicit buyer context in "
+        "audience_contexts. Context affects explanation/preferences and never weakens workload floors.\n"
         f"REQUIREMENT keys: {', '.join(req_keys)}. Extract only explicit numeric specs in an "
         "object mapping key to [operator,number]. Price and item count are not specs.\n"
         "REFINE: brand=hard-only, prefer_brand=soft, exclude_brand=negation, sort=price_asc, "
@@ -575,7 +583,7 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "for explicit limits, soft for approximate targets, ambiguous when the wording is unclear.\n"
         "Return ONLY this JSON shape (use null/empty values when absent): "
         '{"lane":"SEARCH","handle":null,"wanted_category":null,"request_scope":"uncertain",'
-        '"use_cases":[],"use_case_variant":null,"requirements":{},'
+        '"use_cases":[],"audience_contexts":[],"use_case_variant":null,"requirements":{},'
         '"refine":{"brand":null,"prefer_brand":null,"exclude_brand":null,"sort":null,'
         '"brand_action":"keep"},'
         '"compare_targets":[],"quantity":null,"total_budget":null,"budget_scope":null,'
@@ -836,14 +844,26 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 existing.append((op, value))
         requirements[key] = existing
 
-    from src.app.services.recommendation_core.intent_resolver import normalize_use_case
+    from src.app.services.recommendation_core.intent_resolver import (audience_context_keys,
+                                                                      normalize_use_case)
+    context_vocabulary = frozenset(audience_context_keys())
     use_cases: List[str] = []
     for uc in (data.get("use_cases") or []):
         n = normalize_use_case(str(uc))
         if n and n not in use_cases:
             use_cases.append(n)
+    audience_contexts: List[str] = []
+    raw_contexts = data.get("audience_contexts")
+    if not isinstance(raw_contexts, (list, tuple)):
+        raw_contexts = []
+    for value in list(use_cases) + list(raw_contexts):
+        normalized = normalize_use_case(str(value))
+        if normalized in context_vocabulary and normalized not in audience_contexts:
+            audience_contexts.append(normalized)
+    use_cases = [value for value in use_cases if value not in context_vocabulary]
     from src.app.services import use_case_registry as use_cases_registry
     use_cases = use_cases_registry.apply_use_case_exclusions(use_cases)
+    use_cases.extend(value for value in audience_contexts if value not in use_cases)
     use_case_variants: Dict[str, str] = {}
     scalar_variant = str(data.get("use_case_variant") or "").strip()
     raw_variants = data.get("use_case_variants")
@@ -1128,6 +1148,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
                         requirements=requirements, use_cases=tuple(use_cases),
+                        audience_contexts=tuple(audience_contexts),
                         use_case_variants=use_case_variants,
                         refusal_granted=refusal_granted, confidence=conf, source=routing_source,
                         requested_product_node=(node.handle if node else None),

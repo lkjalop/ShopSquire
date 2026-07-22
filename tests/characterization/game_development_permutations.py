@@ -70,15 +70,22 @@ def run() -> dict:
             decision = dict(response.extras.get("decision") or {})
             requirements = dict((response.extras.get("constraints_used") or {}).get("requirements") or {})
             product_rows = [product.as_dict() for product in response.products]
+            shelf = dict(response.extras.get("shelf") or {})
+            bands = list(shelf.get("bands") or [])
+            primary_skus = {
+                str(sku) for band in bands if band.get("id") == "best_fit"
+                for sku in (band.get("skus") or [])
+            }
+            primary_rows = [row for row in product_rows if str(row.get("sku")) in primary_skus]
             workload_cases = list(intent.get("workload_use_cases") or [])
             context_cases = list(intent.get("context_use_cases") or [])
             variants = dict(intent.get("use_case_variants") or {})
             product_failures = [
-                row["sku"] for row in product_rows
+                row["sku"] for row in primary_rows
                 if ((row.get("workload_fit") or {}).get("overall") not in (None, "meets"))
             ]
             over_budget = [
-                row["sku"] for row in product_rows
+                row["sku"] for row in primary_rows
                 if row.get("price_cents") is not None
                 and int(row["price_cents"]) > int(case.budget_max * 100)
             ]
@@ -116,6 +123,10 @@ def run() -> dict:
                 "requirements": requirements,
                 "has_dedicated_graphics_floor": has_gpu_floor,
                 "products": product_rows,
+                "shelf_bands": [{"id": band.get("id"), "skus": band.get("skus") or []}
+                                for band in bands],
+                "recommendation_outcome": ("best_fit" if primary_skus else
+                                           (str(bands[0].get("id")) if bands else "delegated")),
                 "evidence": response.extras.get("evidence") or {},
                 "errors": errors,
                 "specialization_resolution": variants.get(case.workload) or "unresolved",

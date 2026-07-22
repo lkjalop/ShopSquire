@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 """LIVE image+text procurement battery against the running backend (:8080).
 
-Two-phase, model-pinned design (learned the hard way): the recommend ROUTER and the
-vision VLM are the SAME local model (qwen3-vl:8b), and triage also loads glm-ocr which
-EVICTS the router from VRAM -> the chat turn right after a triage silently short-circuits
-to 0 products (~250ms, no error). So:
+Two-phase, model-pinned design: image triage can evict the text router on a constrained
+GPU, so triage and recommendation turns run in separate phases.
 
   PHASE 1  triage every image ONCE (real VLM qwen3-vl:8b + QR/steg/adversarial/OCR/PCI),
            cache the triage JSON to runs/triage_cache/. glm-ocr thrash is contained here.
@@ -38,7 +36,7 @@ from src.app.security import steg_detector as SD
 
 BASE = "http://127.0.0.1:8080"
 OLLAMA = "http://127.0.0.1:11434"
-ROUTER_MODEL = "qwen3-vl:8b"          # OLLAMA_DEFAULT_MODEL — the recommend router
+ROUTER_MODEL = os.getenv("ROUTER_MODEL", "qwen3:14b")
 H = {**default_headers(), "Content-Type": "application/json"}
 HDR_MP = default_headers()
 CLIENT = httpx.Client(timeout=120.0)

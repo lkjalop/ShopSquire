@@ -60,6 +60,14 @@ def known_use_cases() -> List[str]:
     return sorted(set((_kb().get("use_cases") or {}).keys()) | set(_registry_keys()))
 
 
+def audience_context_keys() -> List[str]:
+    """Closed non-workload context vocabulary exposed separately to the model router."""
+    return sorted(
+        key for key, profile in (_kb().get("use_cases") or {}).items()
+        if str((profile or {}).get("intent_role") or "workload") == "audience_context"
+    )
+
+
 def normalize_use_case(raw: str) -> Optional[str]:
     """Map a model-returned key or alias to a real use_case (legacy KB or registry), or None."""
     kb = _kb()
