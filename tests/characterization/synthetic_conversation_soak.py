@@ -50,6 +50,7 @@ class TurnSpec:
     expect_products: Optional[bool] = None
     expect_cart_ops: Optional[int] = None
     budget_scope: Optional[str] = None
+    calibration_class: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,7 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             TurnSpec("I also want to play Minecraft after school", lane_in=("FILTER", "SEARCH"),
                      node_contains="Laptop", expect_products=True),
             TurnSpec("but not Apple", lane_in=("FILTER",), excluded_brand="Apple",
+                     calibration_class="brand_refinement",
                      node_contains="Laptop", expect_products=True),
             TurnSpec("why is the first one suitable for me?", lane_in=("EXPLAIN",),
                      node_contains="Laptop", excluded_brand="Apple", expect_products=True),
@@ -121,6 +123,7 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             TurnSpec("a larger easy-to-read screen matters more than speed", lane_in=("FILTER", "SEARCH"),
                      node_contains="Laptop", expect_products=True),
             TurnSpec("not an Apple one please", lane_in=("FILTER",), excluded_brand="Apple",
+                     calibration_class="brand_refinement",
                      node_contains="Laptop", expect_products=True),
             TurnSpec("why would the first one be easy for me to use?", lane_in=("EXPLAIN",),
                      node_contains="Laptop", excluded_brand="Apple", expect_products=True),
@@ -132,6 +135,7 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
                      budget_max=500, lane_in=("SEARCH", "FILTER"), node_contains="Graphics Tablet",
                      expect_products=True),
             TurnSpec("show the cheapest drawing tablet", lane_in=("FILTER",),
+                     calibration_class="sort_refinement",
                      node_contains="Graphics Tablet", expect_products=True),
             TurnSpec("why is the first one enough for a high school art student?", lane_in=("EXPLAIN",),
                      node_contains="Graphics Tablet", expect_products=True),
@@ -151,6 +155,7 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             TurnSpec("exclude Apple and keep the same budget", lane_in=("PROCUREMENT", "FILTER"),
                      node_contains="Laptop", excluded_brand="Apple"),
             TurnSpec("what is the delivery and sourcing tradeoff?", lane_in=("PROCUREMENT", "EXPLAIN"),
+                     calibration_class="active_procurement_explanation",
                      node_contains="Laptop"),
             TurnSpec("prepare the supplier quote for the current quantity", lane_in=("PROCUREMENT",),
                      node_contains="Laptop"),
@@ -166,6 +171,7 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             TurnSpec("why is that allocation the best fit?", lane_in=("EXPLAIN", "PROCUREMENT"),
                      node_contains="Laptop"),
             TurnSpec("if we select a $3500 workstation, use the maximum quantity the same total can afford",
+                     calibration_class="total_budget_affordability_action",
                      lane_in=("PROCUREMENT", "FILTER"), node_contains="Laptop"),
         )),
         JourneySpec("gaming", "enthusiast-gamer", "18-34", (
@@ -396,6 +402,30 @@ def _dimension_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     return dimensions
 
 
+def _routing_calibration_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Report authored routing expectations without re-parsing shopper language."""
+    misses = [row for row in rows if any(
+        str(error).startswith("lane:") for error in row.get("errors", []))]
+    return {
+        "misses": len(misses),
+        "by_class": dict(Counter(
+            str(row.get("calibration_class") or "unclassified") for row in misses)),
+        "classes": [
+            {
+                "class": str(row.get("calibration_class") or "unclassified"),
+                "query": row.get("query"),
+                "actual_lane": row.get("lane"),
+                "expected": [
+                    str(error).split("expected:", 1)[1]
+                    for error in row.get("errors", [])
+                    if str(error).startswith("lane:") and "expected:" in str(error)
+                ],
+            }
+            for row in misses
+        ],
+    }
+
+
 def _effective_decision(core, prior_session: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     dec = dict(core.extras.get("decision") or {})
     prior = dict(prior_session or {})
@@ -510,6 +540,7 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
                     "journey": ji, "turn": ti, "family": journey.family,
                     "persona": journey.persona, "age_group": journey.age_group,
                     "kind": spec.kind, "query": spec.query,
+                    "calibration_class": spec.calibration_class,
                 }
                 try:
                     if spec.kind == "cart":
@@ -572,6 +603,7 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
             "failures_by_code": dict(Counter(e.split(":", 1)[0] for r in failures for e in r["errors"])),
             "failures_by_family": dict(Counter(r["family"] for r in failures)),
             "dimensions": _dimension_summary(rows),
+            "routing_calibration": _routing_calibration_summary(rows),
             "aggregate_invariant_rate_deprecated": True,
         },
         "failures": failures,
