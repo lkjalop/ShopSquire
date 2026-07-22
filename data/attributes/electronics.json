@@ -370,6 +370,42 @@
   "_derivations_comment": "review-8 #5: cross-key derivations run AFTER normalize+extract, fill ONLY missing target keys, and are clamped through the target's bounds. gpu_discrete=false ⇒ gpu_vram_gb=0 turns an integrated laptop from UNKNOWN into an honest FAIL on a game's VRAM floor (the 'why lenovo looks bad' screenshot).",
   "derivations": [
     {
+      "target": "graphics_architecture",
+      "when": {
+        "gpu_discrete": true
+      },
+      "set": "dedicated_discrete",
+      "only_if_missing": true,
+      "provenance": "gpu_discrete=true -> dedicated discrete graphics"
+    },
+    {
+      "target": "graphics_memory_model",
+      "when": {
+        "gpu_discrete": true
+      },
+      "set": "dedicated_vram",
+      "only_if_missing": true,
+      "provenance": "gpu_discrete=true -> dedicated VRAM memory model"
+    },
+    {
+      "target": "graphics_architecture",
+      "when": {
+        "gpu_discrete": false
+      },
+      "set": "integrated_shared",
+      "only_if_missing": true,
+      "provenance": "gpu_discrete=false -> integrated shared graphics"
+    },
+    {
+      "target": "graphics_memory_model",
+      "when": {
+        "gpu_discrete": false
+      },
+      "set": "shared_system",
+      "only_if_missing": true,
+      "provenance": "gpu_discrete=false -> shared system memory model"
+    },
+    {
       "target": "gpu_vram_gb",
       "set": 0,
       "when": {

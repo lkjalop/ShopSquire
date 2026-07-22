@@ -70,6 +70,28 @@ def test_workload_precedes_audience_context_without_losing_either_profile():
     assert first["requirements"] == second["requirements"]
 
 
+def test_clamped_game_development_variants_replace_the_coarse_floor():
+    light = resolve(["game_development"], vertical="electronics",
+                    use_case_variants={"game_development": "two_d_light"})
+    unreal = resolve(["game_development"], vertical="electronics",
+                     use_case_variants={"game_development": "unreal_realtime"})
+
+    assert light["use_case_variants"] == {"game_development": "two_d_light"}
+    assert light["requirements"]["gpu_vram_gb"] == [(">=", 0.0)]
+    assert light["requirements"]["ram_gb"] == [(">=", 16.0)]
+    assert unreal["requirements"]["gpu_vram_gb"] == [(">=", 8.0)]
+    assert unreal["requirements"]["ram_gb"] == [(">=", 32.0)]
+    assert unreal["requirements"]["storage_gb"] == [(">=", 1024.0)]
+
+
+def test_unknown_variant_is_dropped_and_coarse_profile_remains():
+    result = resolve(["game_development"], vertical="electronics",
+                     use_case_variants={"game_development": "invented"})
+
+    assert result["use_case_variants"] == {}
+    assert result["requirements"]["gpu_vram_gb"] == [(">=", 6.0)]
+
+
 def test_audience_profile_is_baseline_when_no_workload_is_known():
     result = resolve(["university"])
 

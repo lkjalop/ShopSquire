@@ -148,6 +148,42 @@ def test_core_uses_workload_as_primary_context_when_audience_is_also_present(db)
     assert "university general" not in response.message.lower()
 
 
+def test_router_clamps_and_core_applies_game_development_variant(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-11-2", "requirements": {},
+        "use_cases": ["game_development"],
+        "use_case_variant": "unreal_realtime",
+        "confidence": 0.9,
+    })
+
+    response = recommend_turn(
+        db, _env("laptop for complex Unreal Engine work"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert response.extras["decision"]["use_case_variants"] == {
+        "game_development": "unreal_realtime"
+    }
+    requirements = response.extras["constraints_used"]["requirements"]
+    assert requirements["gpu_vram_gb"] == [[">=", 8.0]]
+    assert requirements["ram_gb"] == [[">=", 32.0]]
+    assert requirements["storage_gb"] == [[">=", 1024.0]]
+
+
+def test_router_drops_invented_use_case_variant(db):
+    raw = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-11-2", "requirements": {},
+        "use_cases": ["game_development"],
+        "use_case_variants": {"game_development": "ultra_magic"},
+        "confidence": 0.9,
+    })
+
+    decision = route_turn(db, _env("game development laptop"),
+                          llm_fn=lambda _prompt, _timeout: raw)
+
+    assert decision.use_case_variants == {}
+
+
 def test_game_development_primary_slate_excludes_known_integrated_gpu_when_fit_exists(db):
     from src.app.services.taxonomy_registry import upsert_classification
 

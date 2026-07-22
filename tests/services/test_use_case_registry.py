@@ -56,6 +56,19 @@ def test_variant_tightens_requirements():
     assert aaa["budget_band_hint"] == [1500, 3000]
 
 
+def test_game_development_excludes_playing_games_without_code_rules():
+    assert R.apply_use_case_exclusions(["gaming", "game_development", "university"]) == [
+        "game_development", "university"
+    ]
+    assert R.apply_use_case_exclusions(["gaming"]) == ["gaming"]
+
+
+def test_variant_routing_guide_is_data_owned():
+    guide = R.variant_routing_guide(["game_development"])
+    assert "unreal" in guide["game_development"]["unreal_realtime"]
+    assert "short course" in guide["game_development"]["unity_course"]
+
+
 def test_high_school_is_intent_variants_with_content_advisory():
     """The user's insight: high_school floor depends on intent (schooling vs gaming), and a minor
     requesting mature-game specs gets an ADVISORY, never a block."""

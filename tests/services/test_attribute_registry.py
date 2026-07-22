@@ -1,7 +1,9 @@
 """Attribute layer: data-driven defs, unit conversion, clamping, honest drops, unit-anchored
 extraction with GB-ambiguity surfaced (never guessed), and tri-state requirement evaluation."""
 from src.app.services.attribute_registry import (
+    apply_derivations,
     defs_union,
+    derivations_union,
     evaluate_requirements,
     extract_keyed_quantity_requirements,
     extract_quantities,
@@ -96,6 +98,19 @@ def test_dedicated_and_external_graphics_are_distinct_architectures():
 
     assert dedicated["graphics_architecture"] == "dedicated_discrete"
     assert external["graphics_architecture"] == "external_discrete"
+
+
+def test_graphics_architecture_is_derived_from_validated_discrete_fact():
+    dedicated = apply_derivations(
+        {"gpu_discrete": True}, derivations_union(("electronics",)), EL)
+    integrated = apply_derivations(
+        {"gpu_discrete": False}, derivations_union(("electronics",)), EL)
+
+    assert dedicated["graphics_architecture"] == "dedicated_discrete"
+    assert dedicated["graphics_memory_model"] == "dedicated_vram"
+    assert integrated["graphics_architecture"] == "integrated_shared"
+    assert integrated["graphics_memory_model"] == "shared_system"
+    assert integrated["gpu_vram_gb"] == 0
 
 
 # ── spec-dict normalization ───────────────────────────────────────────────────

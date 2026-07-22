@@ -46,15 +46,29 @@ def test_drawing_casual_vs_heavy():
     assert q and {o["id"] for o in q["options"]} == {"base", "pen_precision"}   # standard vs heavy painting
 
 
-# ── budget given → state an assumption, don't nag ───────────────────────────────
+# ── budget alone cannot resolve a material workload specialization ─────────────
 
-def test_with_budget_states_assumption_not_ask():
+def test_with_budget_still_asks_for_material_workload_variant():
     env = _env(budget_max=1500)
     resp = CoreResponse(envelope=env, lane="SEARCH")
     core._maybe_variant_clarify(env, _decision(), resp)
+    question = _clar(resp, "variant_gaming")
+    assert question
+    assert question["reason"] == "missing_material_capability_slot"
+    assert question["missing_slots"] == ["use_case_variant"]
+
+
+def test_model_resolved_variant_does_not_ask_again():
+    env = _env(query="laptop for complex Unreal work", budget_max=3000)
+    resp = CoreResponse(envelope=env, lane="SEARCH")
+    decision = _decision(use_cases=["game_development"])
+    decision.use_case_variants = {"game_development": "unreal_realtime"}
+
+    core._maybe_variant_clarify(env, decision, resp)
+
     assert not resp.clarify
-    assert resp.extras["assumption"]["use_case"] == "gaming"
-    assert resp.extras["assumption"]["variant"] is None
+    assert resp.extras["assumption"]["variant"] == "unreal_realtime"
+    assert resp.extras["assumption"]["reason"] == "workload_variant_explicitly_resolved"
 
 
 # ── the query already names a level → pin it silently ───────────────────────────

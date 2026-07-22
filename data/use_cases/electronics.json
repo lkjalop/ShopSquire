@@ -16,6 +16,7 @@
   "use_cases": {
     "gaming": {
       "label": "Gaming",
+      "description": "Playing games as the primary workload; not building, designing, compiling or rendering games.",
       "keywords": ["game", "gaming", "fps", "esports", "play"],
       "host_nodes": ["el-6-11-2", "el-6-11-1"],
       "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 4]},
@@ -25,6 +26,47 @@
         "casual":      {"requirements": {"gpu_vram_gb": [">=", 4], "refresh_hz": [">=", 60]}, "budget_band_hint": [800, 1300]},
         "competitive": {"requirements": {"gpu_vram_gb": [">=", 6], "refresh_hz": [">=", 144]}, "budget_band_hint": [1200, 2000]},
         "aaa_heavy":   {"requirements": {"gpu_vram_gb": [">=", 8], "ram_gb": [">=", 16]}, "budget_band_hint": [1500, 3000]}
+      }
+    },
+    "game_development": {
+      "label": "Game development",
+      "description": "Building, designing, compiling, rendering or testing games and game-engine projects; not merely playing games.",
+      "excludes": ["gaming"],
+      "keywords": ["game development", "game design", "game engine", "unity", "unreal", "godot"],
+      "host_nodes": ["el-6-11-2", "el-6-6"],
+      "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 6]},
+      "budget_band_hint": [1600, 3000],
+      "variants": {
+        "two_d_light": {
+          "keywords": ["2d", "godot", "pixel art", "lightweight"],
+          "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 0]},
+          "budget_band_hint": [900, 1600]
+        },
+        "unity_course": {
+          "keywords": ["short course", "bootcamp", "unity", "small 3d"],
+          "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 4]},
+          "budget_band_hint": [1200, 2200]
+        },
+        "unreal_realtime": {
+          "keywords": ["unreal", "ue5", "shader compilation", "commercial 3d"],
+          "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+          "budget_band_hint": [2200, 4000]
+        },
+        "offline_rendering": {
+          "keywords": ["blender render", "offline rendering", "ray tracing", "render scenes"],
+          "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+          "budget_band_hint": [2200, 4500]
+        },
+        "vr_development": {
+          "keywords": ["vr", "virtual reality", "headset testing"],
+          "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+          "budget_band_hint": [2500, 4500]
+        },
+        "local_ai_tools": {
+          "keywords": ["local ai", "texture generation", "npc prototypes", "generative ai"],
+          "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+          "budget_band_hint": [2500, 5000]
+        }
       }
     },
     "drawing": {

@@ -60,6 +60,69 @@ def list_variants(vertical: str, coarse: str) -> List[str]:
     return sorted((uc.get("variants") or {}).keys())
 
 
+def variant_vocabulary(use_cases: Optional[List[str]] = None) -> Dict[str, List[str]]:
+    """Closed variant vocabulary across installed vertical registries.
+
+    The router may not know the final taxonomy node before classification, so it receives the
+    union of real data-owned variants. Duplicate use-case keys are merged; invented values remain
+    impossible because the selected value is clamped again against the resolved vertical.
+    """
+    wanted = set(use_cases or [])
+    out: Dict[str, set[str]] = {}
+    for vertical in _VERTICALS:
+        for use_case in list_use_cases(vertical):
+            if wanted and use_case not in wanted:
+                continue
+            variants = list_variants(vertical, use_case)
+            if variants:
+                out.setdefault(use_case, set()).update(variants)
+    return {key: sorted(values) for key, values in sorted(out.items())}
+
+
+def routing_guide(use_cases: Optional[List[str]] = None) -> Dict[str, str]:
+    """Compact data-owned meanings for semantically adjacent use-case keys."""
+    wanted = set(use_cases or [])
+    out: Dict[str, str] = {}
+    for vertical in _VERTICALS:
+        rows = load_use_cases(vertical).get("use_cases") or {}
+        for key, row in rows.items():
+            if wanted and key not in wanted:
+                continue
+            description = str((row or {}).get("description") or "").strip()
+            if description:
+                out.setdefault(key, description)
+    return dict(sorted(out.items()))
+
+
+def variant_routing_guide(use_cases: Optional[List[str]] = None) -> Dict[str, Dict[str, str]]:
+    """Variant names plus compact data-owned evidence phrases for model classification."""
+    wanted = set(use_cases or [])
+    out: Dict[str, Dict[str, str]] = {}
+    for vertical in _VERTICALS:
+        rows = load_use_cases(vertical).get("use_cases") or {}
+        for key, row in rows.items():
+            if wanted and key not in wanted:
+                continue
+            variants = (row or {}).get("variants") or {}
+            for variant, detail in variants.items():
+                keywords = [str(value).strip() for value in (detail or {}).get("keywords") or []
+                            if str(value).strip()]
+                out.setdefault(key, {})[variant] = " | ".join(keywords[:5])
+    return {key: dict(sorted(values.items())) for key, values in sorted(out.items())}
+
+
+def apply_use_case_exclusions(use_cases: List[str]) -> List[str]:
+    """Apply registry-declared semantic exclusions while preserving model order."""
+    selected = list(dict.fromkeys(use_cases))
+    excluded: set[str] = set()
+    for vertical in _VERTICALS:
+        rows = load_use_cases(vertical).get("use_cases") or {}
+        for key in selected:
+            for value in (rows.get(key) or {}).get("excludes") or []:
+                excluded.add(str(value))
+    return [key for key in selected if key not in excluded]
+
+
 def resolve(vertical: str, coarse: str, variant: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """A coarse use-case (+ optional variant) → merged CAPABILITY REQUIREMENTS, or None when the
     coarse key is unknown. Merge: variant requirements ADD/OVERRIDE the baseline (per-attribute);

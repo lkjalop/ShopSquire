@@ -211,11 +211,13 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     stated_keys = set(decision.requirements)   # what the SHOPPER explicitly asked for (pre-KB)
     intent = resolve_intent(list(decision.use_cases), dict(decision.requirements),
                             query=envelope.query,
-                            vertical=_vertical_name(decision.node_handle))
+                            vertical=_vertical_name(decision.node_handle),
+                            use_case_variants=dict(decision.use_case_variants))
     resolved_reqs = intent["requirements"]
     # Requirements merge across every use case; ordering controls only which named intent leads
     # capability prose and clarification.
-    decision = dataclasses.replace(decision, use_cases=tuple(intent["use_cases"]))
+    decision = dataclasses.replace(decision, use_cases=tuple(intent["use_cases"]),
+                                   use_case_variants=dict(intent.get("use_case_variants") or {}))
     # review-8 #4 (accessory req-slot leak): a use-case/workload's device floors describe the
     # DEVICE, not an accessory bought FOR it. If the requested product is not a workload-host
     # device ('a mouse for gaming', 'a bag for my gaming laptop' route to accessory nodes), keep
@@ -311,6 +313,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     resp.extras["plan"] = plan.as_dict()
     # the resolver's reasoning, surfaced for the 'Why Recommended' decision-trace tab
     resp.extras["intent"] = {"use_cases": intent["use_cases"],
+                             "use_case_variants": intent.get("use_case_variants") or {},
                              "primary_use_case": intent.get("primary_use_case"),
                              "workload_use_cases": intent.get("workload_use_cases") or [],
                              "context_use_cases": intent.get("context_use_cases") or [],
@@ -327,6 +330,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "node_handle": decision.node_handle,
         "requirements": {k: [list(p) for p in v] for k, v in decision.requirements.items()},
         "use_cases": intent["use_cases"],
+        "use_case_variants": intent.get("use_case_variants") or {},
         "brands": [decision.brand_filter] if decision.brand_filter else [],
         "brand_excludes": [decision.exclude_brand] if decision.exclude_brand else [],
         "preferred_brands": [decision.preferred_brand] if decision.preferred_brand else [],
@@ -779,6 +783,14 @@ def _maybe_variant_clarify(envelope: TurnEnvelope, decision: TurnDecision,
         named = R.list_variants(vertical, uc)
         if not named:
             continue
+        selected = (getattr(decision, "use_case_variants", None) or {}).get(uc)
+        if selected in named:
+            resp.extras["assumption"] = {
+                "use_case": uc, "variant": selected,
+                "reason": "workload_variant_explicitly_resolved",
+                "note": f"Using the {selected.replace('_', ' ')} capability profile.",
+            }
+            return
         choices = [("base", R.resolve(vertical, uc, None) or {})]
         choices += [(v, R.resolve(vertical, uc, v) or {}) for v in named]
         lows = [c[1]["budget_band_hint"][0] for c in choices
@@ -793,12 +805,6 @@ def _maybe_variant_clarify(envelope: TurnEnvelope, decision: TurnDecision,
             resp.extras["assumption"] = {"use_case": uc, "variant": pinned,
                                          "note": f"Assuming {pinned.replace('_', ' ')} — say if not."}
             return
-        if envelope.budget_max_cents is not None or envelope.budget_min_cents is not None:
-            resp.extras["assumption"] = {           # the budget picks the tier — state, don't ask
-                "use_case": uc, "variant": None,
-                "note": f"Your budget picks the {uc.replace('_', ' ')} level — tell me if you meant "
-                        f"a different one."}
-            return
         opts = []
         for vid, r in choices:
             b = r.get("budget_band_hint")
@@ -808,6 +814,8 @@ def _maybe_variant_clarify(envelope: TurnEnvelope, decision: TurnDecision,
             opts.append({"id": vid, "label": lbl})
         resp.clarify.append({
             "id": f"variant_{uc}", "goal": "pick_use_case_variant",
+            "reason": "missing_material_capability_slot",
+            "missing_slots": ["use_case_variant"],
             "text": f"For {uc.replace('_', ' ')}, which level fits? It changes the pick and the price.",
             "options": opts})
         return

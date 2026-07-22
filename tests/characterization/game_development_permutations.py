@@ -37,17 +37,18 @@ class Case:
     budget_max: float = 3000
     expects_dedicated_floor: bool = True
     also_use_cases: Tuple[str, ...] = ()
+    expected_variant: Optional[str] = None
 
 
 CASES = (
-    Case("professional", "I build commercial games in Unreal Engine 5 and Blender for paid client work; laptop under $3500"),
-    Case("university", "I'm at university studying game development using Unreal and Blender; laptop under $2500", context="university"),
-    Case("short_course", "I am taking a short game-development course using Unity for small 3D projects; laptop under $1800"),
-    Case("two_d", "I develop lightweight 2D games in Godot, no 3D rendering; laptop under $1200", expects_dedicated_floor=False),
-    Case("unreal", "Laptop for complex Unreal Engine 5 game development and shader compilation under $3200"),
-    Case("rendering", "I build games and render Blender scenes on the same laptop, budget $3000"),
-    Case("vr", "I develop and test VR games in Unity and Unreal; laptop budget $3500"),
-    Case("local_ai", "I develop games and run local AI tools for textures and NPC prototypes, budget $3500", also_use_cases=("ai_ml_workstation",)),
+    Case("professional", "I build commercial games in Unreal Engine 5 and Blender for paid client work; laptop under $3500", expected_variant="unreal_realtime"),
+    Case("university", "I'm at university studying game development using Unreal and Blender; laptop under $2500", context="university", expected_variant="unreal_realtime"),
+    Case("short_course", "I am taking a short game-development course using Unity for small 3D projects; laptop under $1800", expected_variant="unity_course"),
+    Case("two_d", "I develop lightweight 2D games in Godot, no 3D rendering; laptop under $1200", expects_dedicated_floor=False, expected_variant="two_d_light"),
+    Case("unreal", "Laptop for complex Unreal Engine 5 game development and shader compilation under $3200", expected_variant="unreal_realtime"),
+    Case("rendering", "I build games and render Blender scenes on the same laptop, budget $3000", expected_variant="offline_rendering"),
+    Case("vr", "I develop and test VR games in Unity and Unreal; laptop budget $3500", expected_variant="vr_development"),
+    Case("local_ai", "Laptop for developing games and running local AI tools for textures and NPC prototypes, budget $3500", expected_variant="local_ai_tools"),
 )
 
 
@@ -66,10 +67,12 @@ def run() -> dict:
             response = recommend_turn(db, env)
             elapsed = round((time.perf_counter() - started) * 1000, 1)
             intent = dict(response.extras.get("intent") or {})
+            decision = dict(response.extras.get("decision") or {})
             requirements = dict((response.extras.get("constraints_used") or {}).get("requirements") or {})
             product_rows = [product.as_dict() for product in response.products]
             workload_cases = list(intent.get("workload_use_cases") or [])
             context_cases = list(intent.get("context_use_cases") or [])
+            variants = dict(intent.get("use_case_variants") or {})
             product_failures = [
                 row["sku"] for row in product_rows
                 if ((row.get("workload_fit") or {}).get("overall") not in (None, "meets"))
@@ -79,7 +82,9 @@ def run() -> dict:
                 if row.get("price_cents") is not None
                 and int(row["price_cents"]) > int(case.budget_max * 100)
             ]
-            has_gpu_floor = "gpu_vram_gb" in requirements
+            gpu_predicates = requirements.get("gpu_vram_gb") or []
+            has_gpu_floor = any(str(op) in (">", ">=") and float(value) > 0
+                                for op, value in gpu_predicates)
             errors = []
             if case.workload not in workload_cases:
                 errors.append("workload_not_resolved")
@@ -88,8 +93,12 @@ def run() -> dict:
                     errors.append(f"secondary_workload_not_resolved:{expected}")
             if case.context and case.context not in context_cases:
                 errors.append(f"context_not_resolved:{case.context}")
+            if case.expected_variant and variants.get(case.workload) != case.expected_variant:
+                errors.append(f"specialization_not_resolved:{case.expected_variant}")
             if case.expects_dedicated_floor and not has_gpu_floor:
                 errors.append("dedicated_graphics_floor_missing")
+            if not case.expects_dedicated_floor and has_gpu_floor:
+                errors.append("unexpected_dedicated_graphics_floor")
             if product_failures:
                 errors.append("primary_contains_capability_failure")
             if over_budget:
@@ -98,16 +107,18 @@ def run() -> dict:
                 "key": case.key,
                 "query": case.query,
                 "lane": response.lane,
+                "node_handle": decision.get("node_handle"),
+                "routing_source": decision.get("source"),
                 "latency_ms": elapsed,
                 "workload_use_cases": workload_cases,
                 "context_use_cases": context_cases,
+                "use_case_variants": variants,
                 "requirements": requirements,
                 "has_dedicated_graphics_floor": has_gpu_floor,
                 "products": product_rows,
+                "evidence": response.extras.get("evidence") or {},
                 "errors": errors,
-                # The current contract has no bounded project-complexity/tier slot. This marker
-                # prevents a conservative common floor from being mistaken for tier awareness.
-                "specialization_resolution": "baseline_only",
+                "specialization_resolution": variants.get(case.workload) or "unresolved",
             })
             print(f"{case.key}: {response.lane} {elapsed:.0f}ms errors={errors}", flush=True)
     finally:
@@ -116,10 +127,7 @@ def run() -> dict:
         "meta": {
             "purpose": "classification and capability diagnostics, not relevance labels",
             "cases": len(rows),
-            "known_contract_gap": (
-                "TurnDecision does not yet carry a clamped workload specialization/tier; "
-                "2D, Unreal, rendering and VR therefore share the generic game-development floor."
-            ),
+            "specialization_contract": "model selects a registry value; router and resolver clamp it",
         },
         "summary": {
             "passed": sum(not row["errors"] for row in rows),

@@ -112,6 +112,35 @@ def _profile_constraints(use_case: str):
     return out
 
 
+def _registry_profile_constraints(vertical: Optional[str], use_case: str,
+                                  variant: Optional[str]):
+    """A selected, registry-real variant becomes the authoritative profile for that use case.
+
+    This is intentionally activated only for an explicitly clamped variant. Coarse use cases keep
+    their characterized legacy profile until their data migration is separately accepted.
+    """
+    if not vertical or not variant:
+        return None
+    try:
+        from src.app.services import use_case_registry as R
+        if variant not in R.list_variants(vertical, use_case):
+            return None
+        resolved = R.resolve(vertical, use_case, variant) or {}
+    except Exception:
+        return None
+    from src.app.services.recommendation_core.constraints import from_op, merge
+    source = f"use_case:{use_case}:{variant}"
+    out: Dict[str, Any] = {}
+    for key, predicate in (resolved.get("requirements") or {}).items():
+        if not isinstance(predicate, (list, tuple)) or len(predicate) != 2:
+            continue
+        constraint = from_op(str(key), str(predicate[0]), predicate[1], source)
+        if constraint is not None:
+            out[constraint.key] = (merge(out[constraint.key], constraint)
+                                   if constraint.key in out else constraint)
+    return out
+
+
 def _legacy_min_to_fit(reqs: Dict[str, Any]) -> Dict[str, Tuple[str, float]]:
     """Convert legacy match_game/software_requirements → fit requirements, using the MINIMUM
     floors for retrieval (the min-vs-recommended P0 lesson: recommended floors zero the
@@ -159,7 +188,8 @@ def _salvage_title_requirements(query: str) -> Dict[str, Any]:
 
 
 def _inject_registry_capabilities(reqs: Dict[str, Any], use_cases: List[str],
-                                  vertical: Optional[str]) -> Dict[str, Any]:
+                                  vertical: Optional[str],
+                                  use_case_variants: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Partial KB step 3: inject the new registry's capability predicates — boolean/enum like
     touchscreen/form_factor, which the NUMERIC constraint machinery and the legacy KB can't
     express and the router's quantity-only extraction can't emit — for the routed vertical +
@@ -174,7 +204,7 @@ def _inject_registry_capabilities(reqs: Dict[str, Any], use_cases: List[str],
         return reqs
     out = dict(reqs)
     for uc in use_cases:
-        r = R.resolve(vertical, uc)
+        r = R.resolve(vertical, uc, (use_case_variants or {}).get(uc))
         for k, pred in ((r or {}).get("requirements") or {}).items():
             if k in out:
                 continue                       # legacy/stated/title already set it — don't override
@@ -186,7 +216,8 @@ def _inject_registry_capabilities(reqs: Dict[str, Any], use_cases: List[str],
 def resolve(use_cases: Optional[List[str]],
             model_requirements: Optional[Dict[str, Any]] = None,
             query: Optional[str] = None,
-            vertical: Optional[str] = None) -> Dict[str, Any]:
+            vertical: Optional[str] = None,
+            use_case_variants: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """The resolver (M2-B1: RANGES + provenance + surfaced conflicts). Returns:
       requirements  — {key: [(op, thr), ...]} — KB profiles ∪ per-title ∪ model-stated merged
                       by INTERSECTION (floors max, ceilings min; a floor AND a ceiling coexist
@@ -212,11 +243,23 @@ def resolve(use_cases: Optional[List[str]],
     context_use_cases = [uc for uc in resolved if uc not in workload_use_cases]
     mixed_with_workload = bool(workload_use_cases and context_use_cases)
 
+    clamped_variants: Dict[str, str] = {}
+    if vertical:
+        try:
+            from src.app.services import use_case_registry as R
+            for uc in resolved:
+                candidate = str((use_case_variants or {}).get(uc) or "").strip()
+                if candidate and candidate in R.list_variants(vertical, uc):
+                    clamped_variants[uc] = candidate
+        except Exception:
+            clamped_variants = {}
+
     merged: Dict[str, Any] = {}
     profile_trace: Dict[str, Dict[str, Any]] = {}
     context_preferences: Dict[str, Dict[str, Any]] = {}
     for uc in resolved:
-        prof = _profile_constraints(uc)
+        prof = (_registry_profile_constraints(vertical, uc, clamped_variants.get(uc))
+                or _profile_constraints(uc))
         profile_trace[uc] = {"requirements": {k: [list(p) for p in c.predicates()]
                                               for k, c in prof.items()},
                              "label": (profiles.get(uc) or {}).get("label", uc),
@@ -241,11 +284,13 @@ def resolve(use_cases: Optional[List[str]],
 
     # inject the registry's boolean/enum capability predicates AFTER the numeric projection
     # (they can't ride the constraint machinery); MERGE-not-override, so legacy/stated/title win.
-    final_reqs = _inject_registry_capabilities(project(merged), resolved, vertical)
+    final_reqs = _inject_registry_capabilities(project(merged), resolved, vertical,
+                                                clamped_variants)
     return {"requirements": final_reqs, "constraints": as_dicts(merged),
             "conflicts": constraint_conflicts(merged), "use_cases": resolved,
             "workload_use_cases": workload_use_cases,
             "context_use_cases": context_use_cases,
             "context_preferences": context_preferences,
+            "use_case_variants": clamped_variants,
             "profile_trace": profile_trace, "title_requirements": title["trace"],
             "persona_hint": persona_hint, "primary_use_case": primary_use_case}
