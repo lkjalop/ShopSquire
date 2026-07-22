@@ -15,7 +15,9 @@ from src.app.services.supplier_catalog import (
     domain_for_supplier,
     ensure_supplier_coverage,
     ensure_tables,
+    best_supplier_cost,
     seed_demo,
+    seed_demo_supplier_offers,
 )
 
 
@@ -46,6 +48,35 @@ def test_cheapest_wholesale_cents_picks_lowest(db):
     seed_demo(db, skus=["LAP-021"])  # SUP-7=1115.00, SUP-3=1180.00 → cheapest = 111500c
     assert cheapest_wholesale_cents(db, "LAP-021") == 111500
     assert cheapest_wholesale_cents(db, "no-such-sku") is None
+
+
+def test_demo_supplier_offers_are_per_sku_tenant_currency_and_simulation_only(db):
+    db.execute(text(
+        "CREATE TABLE products (sku TEXT PRIMARY KEY, name TEXT, price_cents INT, "
+        "currency TEXT, specs TEXT, active INTEGER DEFAULT 1)"
+    ))
+    db.execute(text(
+        "INSERT INTO products VALUES "
+        "('LAP-A','Work Laptop',100000,'AUD','{}',1),"
+        "('LAP-B','Creator Laptop',200000,'AUD','{}',1)"
+    ))
+    db.commit()
+    ensure_supplier_coverage(db)
+
+    first = seed_demo_supplier_offers(db, tenant_id="tenant-a")
+    second = seed_demo_supplier_offers(db, tenant_id="tenant-a")
+
+    assert first["offers"] == 2
+    assert second["offers"] == 0
+    a = best_supplier_cost(db, "LAP-A", tenant_id="tenant-a", currency="AUD")
+    b = best_supplier_cost(db, "LAP-B", tenant_id="tenant-a", currency="AUD")
+    assert a and b
+    assert a["unit_cost_cents"] != b["unit_cost_cents"]
+    assert a["cost_basis"] == "demo_estimated_landed_cost"
+    assert a["simulation_only"] is True
+    assert a["currency"] == "AUD"
+    assert best_supplier_cost(db, "LAP-A", tenant_id="tenant-b", currency="AUD") is None
+    assert best_supplier_cost(db, "LAP-A", tenant_id="tenant-a", currency="USD") is None
 
 
 def test_seed_demo_vendor_contacts_registers_verified_email():

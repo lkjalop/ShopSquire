@@ -83,12 +83,21 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     # attributable costs may still be absent. Keep it as an estimate, but authorize
     # discount headroom only when the validated response supplies landed unit cost.
     su = vq.get("landed_unit_cost_cents")
+    currency = str(vq.get("landed_cost_currency") or vq.get("currency") or
+                   ((st.get("draft") or {}).get("commercial_scope") or {}).get("currency") or
+                   "AUD").upper()
+    cost_meta: Dict[str, Any] = {}
     cost_basis = "validated_landed_supplier_quote" if su is not None else None
     if su is None and vq.get("unit_amount_cents") is not None:
         su = vq.get("unit_amount_cents")
         cost_basis = "validated_supplier_quote_unlanded"
     if su is None:
-        su = _catalog_wholesale(db, st, tenant_id)  # supplier-catalog fallback when no live quote
+        cost_meta = _catalog_supplier_cost(db, st, tenant_id, currency)
+        su = cost_meta.get("unit_cost_cents")
+        if su is not None:
+            cost_basis = str(cost_meta.get("cost_basis") or "approved_supplier_offer")
+    if su is None:
+        su = _catalog_wholesale(db, st, tenant_id)  # legacy supplier-level fallback
         if su is not None:
             cost_basis = "approved_supplier_catalog"
     qty = po.get("quantity")
@@ -115,10 +124,14 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
         return {}
     out = econ.to_dict()
     landed = cost_basis == "validated_landed_supplier_quote"
-    out.update({"available": True, "cost_basis": cost_basis,
+    simulation_only = bool(cost_meta.get("simulation_only"))
+    out.update({"available": True, "cost_basis": cost_basis, "currency": currency,
                 "landed_cost_complete": landed,
                 "discount_headroom_authorized": landed,
-                "cost_is_estimated": not landed, "currency_conversion_applied": False})
+                "cost_is_estimated": not landed, "simulation_only": simulation_only,
+                "cost_provenance": cost_meta.get("provenance_chain") or [],
+                "cost_confidence": cost_meta.get("confidence"),
+                "currency_conversion_applied": False})
     return out
 
 
@@ -167,6 +180,20 @@ def _catalog_wholesale(db, state_json: Dict[str, Any], tenant_id: str) -> Option
     if not sku:
         return None
     return supplier_catalog.cheapest_wholesale_cents(db, sku)
+
+
+def _catalog_supplier_cost(db, state_json: Dict[str, Any], tenant_id: str,
+                           currency: str) -> Dict[str, Any]:
+    """Tenant/SKU/currency cost offer, including whether it is simulation-only."""
+    from src.app.services import commerce_catalog, supplier_catalog
+    if not commerce_catalog.catalog_enabled():
+        return {}
+    sku = _case_sku(state_json)
+    if not sku:
+        return {}
+    return supplier_catalog.best_supplier_cost(
+        db, sku, tenant_id=tenant_id, currency=currency,
+    ) or {}
 
 
 def _selected_retail_unit(state_json: Dict[str, Any]) -> Optional[int]:

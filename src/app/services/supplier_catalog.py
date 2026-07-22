@@ -40,6 +40,32 @@ CREATE TABLE IF NOT EXISTS supplier_products (
     PRIMARY KEY (supplier_id, sku)
 )
 """
+_SUPPLIER_OFFER_DDL = """
+CREATE TABLE IF NOT EXISTS supplier_offer (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    supplier_id TEXT NOT NULL,
+    sku TEXT NOT NULL,
+    cost_kind TEXT NOT NULL,
+    purchase_unit_cost_cents INTEGER NOT NULL,
+    freight_unit_cents INTEGER DEFAULT 0,
+    duty_unit_cents INTEGER DEFAULT 0,
+    handling_unit_cents INTEGER DEFAULT 0,
+    landed_unit_cost_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    tax_basis TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    effective_to TEXT,
+    source_system TEXT NOT NULL,
+    source_record_id TEXT NOT NULL,
+    provenance_json TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    simulation_only INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, supplier_id, sku, source_record_id)
+)
+"""
 # Per-(supplier, SKU) commercial terms — richer than the supplier-level defaults. All optional/additive
 # (migrated in idempotently) and vertical-blind (cents / days / qty / opaque region & contract strings).
 _SUPPLIER_PRODUCTS_COLUMNS = (
@@ -62,6 +88,8 @@ CREATE TABLE IF NOT EXISTS trusted_supplier_domains (
 _INDEXES = (
     "CREATE INDEX IF NOT EXISTS ix_supplier_products_sku ON supplier_products(sku)",
     "CREATE INDEX IF NOT EXISTS ix_tsd_supplier ON trusted_supplier_domains(supplier_id)",
+    "CREATE INDEX IF NOT EXISTS ix_supplier_offer_lookup "
+    "ON supplier_offer(tenant_id, sku, currency, status, effective_from)",
 )
 
 # Deterministic demo suppliers — SUP-7 is the clear winner (cheaper, faster, more reliable).
@@ -169,6 +197,7 @@ def apply_demo_supplier_channels(db) -> int:
 def ensure_tables(db) -> None:
     db.execute(text(_SUPPLIERS_DDL))
     db.execute(text(_SUPPLIER_PRODUCTS_DDL))
+    db.execute(text(_SUPPLIER_OFFER_DDL))
     db.execute(text(_TRUSTED_DDL))
     _ensure_supplier_products_columns(db)
     _ensure_suppliers_columns(db)
@@ -570,6 +599,127 @@ def cheapest_wholesale_cents(db, sku: str) -> Optional[int]:
         return int(round(float(row[0]) * 100))
     except Exception:
         return None
+
+
+def best_supplier_cost(db, sku: str, *, tenant_id: str = "default",
+                       currency: str = "AUD") -> Optional[Dict[str, Any]]:
+    """Current tenant/SKU supplier cost with provenance.
+
+    A demo estimate is deliberately returned as ``simulation_only``.  Callers may
+    display scenario margin from it, but only a separately validated landed quote
+    may authorize a buyer discount or a replenishment action.
+    """
+    if db is None or not str(sku or "").strip() or not str(tenant_id or "").strip():
+        return None
+    try:
+        row = db.execute(text("""
+            SELECT supplier_id, landed_unit_cost_cents, purchase_unit_cost_cents,
+                   freight_unit_cents, duty_unit_cents, handling_unit_cents,
+                   currency, cost_kind, tax_basis, source_system, source_record_id,
+                   provenance_json, confidence, simulation_only, effective_from, effective_to
+            FROM supplier_offer
+            WHERE tenant_id=:tenant AND sku=:sku AND currency=:currency
+              AND status='active'
+              AND effective_from <= CURRENT_TIMESTAMP
+              AND (effective_to IS NULL OR effective_to > CURRENT_TIMESTAMP)
+            ORDER BY simulation_only ASC, landed_unit_cost_cents ASC, effective_from DESC
+            LIMIT 1
+        """), {"tenant": str(tenant_id), "sku": str(sku),
+                 "currency": str(currency).upper()}).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    try:
+        import json as _json
+        provenance = _json.loads(row[11] or "[]")
+    except Exception:
+        provenance = []
+    kind = str(row[7] or "")
+    return {
+        "supplier_id": str(row[0]), "unit_cost_cents": int(row[1]),
+        "purchase_unit_cost_cents": int(row[2]), "freight_unit_cents": int(row[3] or 0),
+        "duty_unit_cents": int(row[4] or 0), "handling_unit_cents": int(row[5] or 0),
+        "currency": str(row[6]),
+        "cost_basis": ("demo_estimated_landed_cost" if kind == "demo_estimate"
+                       else "approved_supplier_offer"),
+        "cost_kind": kind, "tax_basis": str(row[8]), "source_system": str(row[9]),
+        "source_record_id": str(row[10]), "provenance_chain": provenance,
+        "confidence": float(row[12] or 0), "simulation_only": bool(row[13]),
+        "effective_from": row[14], "effective_to": row[15],
+    }
+
+
+def _demo_cost_ratio_basis_points(sku: str, supplier_id: str) -> int:
+    """Stable 82-88% purchase-cost estimate; demo data, never a market claim."""
+    import hashlib
+    digest = hashlib.sha256(f"{supplier_id}:{sku}:demo-cost-v1".encode("utf-8")).digest()
+    return 8200 + (int.from_bytes(digest[:2], "big") % 601)
+
+
+def seed_demo_supplier_offers(db, *, tenant_id: str = "default", commit: bool = True) -> Dict[str, int]:
+    """Create one per-SKU demo cost estimate for each active catalog product.
+
+    The estimate uses the product's own retail price and currency, adds bounded
+    freight/handling, and records its method/provenance.  It is suitable for demo
+    dashboards and soak scenarios only; it is not a supplier quotation.
+    """
+    if db is None or not str(tenant_id or "").strip():
+        raise ValueError("tenant_id is required")
+    ensure_tables(db)
+    try:
+        rows = db.execute(text("""
+            SELECT p.sku, p.price_cents, COALESCE(p.currency,'AUD'), sp.supplier_id
+            FROM products p
+            JOIN supplier_products sp ON sp.sku=p.sku AND COALESCE(sp.active,1)=1
+            JOIN suppliers s ON s.id=sp.supplier_id AND COALESCE(s.active,1)=1
+            WHERE COALESCE(p.active,1)=1 AND p.price_cents IS NOT NULL
+            ORDER BY p.sku, COALESCE(s.reliability_score,0) DESC, sp.supplier_id
+        """)).fetchall()
+    except Exception:
+        rows = []
+    seen: set[str] = set()
+    inserted = 0
+    import json as _json
+    import uuid
+    for sku_raw, retail_raw, currency_raw, supplier_raw in rows:
+        sku, supplier = str(sku_raw), str(supplier_raw)
+        if sku in seen:
+            continue
+        seen.add(sku)
+        retail = int(retail_raw or 0)
+        if retail <= 0:
+            continue
+        ratio_bp = _demo_cost_ratio_basis_points(sku, supplier)
+        purchase = max(1, int(round(retail * ratio_bp / 10000)))
+        freight = max(300, int(round(retail * 0.006)))
+        handling = max(100, int(round(retail * 0.002)))
+        landed = purchase + freight + handling
+        source_record = f"demo-cost-v1:{supplier}:{sku}"
+        result = db.execute(text("""
+            INSERT INTO supplier_offer (
+              id, tenant_id, supplier_id, sku, cost_kind, purchase_unit_cost_cents,
+              freight_unit_cents, duty_unit_cents, handling_unit_cents,
+              landed_unit_cost_cents, currency, tax_basis, effective_from,
+              source_system, source_record_id, provenance_json, confidence,
+              simulation_only, status
+            ) VALUES (
+              :id,:tenant,:supplier,:sku,'demo_estimate',:purchase,:freight,0,:handling,
+              :landed,:currency,'retail-tax-basis-normalized','2026-07-01T00:00:00+00:00',
+              'demo_supplier_cost_model',:record,:provenance,0.35,1,'active'
+            ) ON CONFLICT(tenant_id, supplier_id, sku, source_record_id) DO NOTHING
+        """), {"id": str(uuid.uuid4()), "tenant": str(tenant_id), "supplier": supplier,
+                 "sku": sku, "purchase": purchase, "freight": freight, "handling": handling,
+                 "landed": landed, "currency": str(currency_raw or "AUD").upper(),
+                 "record": source_record,
+                 "provenance": _json.dumps([
+                     f"products/{sku}/retail_price", "demo_cost_policy/v1",
+                     f"purchase_ratio_basis_points/{ratio_bp}",
+                 ])})
+        inserted += int(getattr(result, "rowcount", 0) or 0)
+    if commit:
+        db.commit()
+    return {"offers": inserted, "catalog_products": len(seen), "simulation_only": inserted}
 
 
 # Verified vendor contacts for the demo suppliers — so a draft resolves a CONTACT EMAIL (not just the

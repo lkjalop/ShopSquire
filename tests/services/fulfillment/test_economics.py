@@ -216,3 +216,33 @@ def test_from_case_wholesale_fallback_from_supplier_catalog(db, monkeypatch):
     econ = E.from_case(db, cid, floor_margin_pct=0.10)
     assert econ["supplier_unit_cost_cents"] == 111500  # from supplier catalog, not a quote
     assert econ["retail_unit_cents"] == 200000
+
+
+def test_from_case_demo_offer_is_visible_but_never_authorizes_discount(db, monkeypatch):
+    from sqlalchemy import text
+    from src.app.services import commerce_catalog as cc
+    from src.app.services.supplier_catalog import (
+        ensure_supplier_coverage, seed_demo_supplier_offers,
+    )
+    monkeypatch.setenv("COMMERCE_CATALOG_ENABLED", "1")
+    cid = _to_selected(db, wholesale_cents=None)
+    db.execute(text(
+        "CREATE TABLE IF NOT EXISTS products (sku TEXT PRIMARY KEY, name TEXT, price_cents INT, "
+        "currency TEXT, specs TEXT, active INT)"
+    ))
+    db.execute(text(
+        "INSERT OR REPLACE INTO products VALUES ('LAP-021','Demo Laptop',200000,'AUD','{}',1)"
+    ))
+    db.commit()
+    ensure_supplier_coverage(db)
+    seed_demo_supplier_offers(db, tenant_id="default")
+    cc.upsert_price(db, sku="LAP-021", list_cents=200000, currency="AUD", source="t")
+    db.commit()
+
+    econ = E.from_case(db, cid, floor_margin_pct=0.10)
+
+    assert econ["cost_basis"] == "demo_estimated_landed_cost"
+    assert econ["cost_is_estimated"] is True
+    assert econ["simulation_only"] is True
+    assert econ["discount_headroom_authorized"] is False
+    assert econ["currency"] == "AUD"
