@@ -12,6 +12,26 @@ from src.app.security.guardrails import guardrail_profile_for_user
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
+
+def _store_currency() -> str:
+    from src.app.platform.store_profile import profile_slot
+
+    value = str(profile_slot("currency", default="USD") or "USD").strip().upper()
+    return value if len(value) == 3 and value.isalpha() else "USD"
+
+
+def _currency_eligible(products: list[dict]) -> list[dict]:
+    """Hide unconverted rows at the storefront boundary.
+
+    Cross-currency products may be admitted later with a bounded FX quote. Until then, exposing
+    them beside settlement-currency products invites invalid numeric comparisons and cart totals.
+    """
+    expected = _store_currency()
+    return [
+        product for product in products
+        if str(product.get("currency") or "").strip().upper() == expected
+    ]
+
 def _coerce_specs(raw: object) -> dict:
     if isinstance(raw, dict):
         return raw
@@ -128,7 +148,7 @@ def _load_products_from_db() -> list[dict]:
 
 def _get_products() -> list[dict]:
     # Production path only: catalog must come from the database.
-    return _load_products_from_db()
+    return _currency_eligible(_load_products_from_db())
 
 
 def _load_product_by_sku_from_db(sku: str) -> dict | None:
@@ -211,7 +231,7 @@ def _load_product_by_sku_from_db(sku: str) -> dict | None:
 
 def _find_product_by_sku(sku: str) -> dict | None:
     db_hit = _load_product_by_sku_from_db(sku)
-    if db_hit:
+    if db_hit and _currency_eligible([db_hit]):
         return db_hit
     for p in _get_products():
         if str(p.get("sku")) == str(sku):
