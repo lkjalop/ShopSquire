@@ -279,9 +279,15 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         if not decision.requirements and isinstance(prior_reqs, dict) and prior_reqs:
             decision = dataclasses.replace(decision, requirements=dict(prior_reqs))
             requirements_inherited = True
-        # BULK continuation: inherit quantity + total budget when THIS turn didn't state them
-        # ('how many can I get?' keeps the prior 6 units + $19k); a stated value this turn wins.
+        # Quantity is consequential and has its own continuity boundary. Subject continuity is
+        # not enough: a fresh SEARCH that the model mislabels as "continue" must not resurrect
+        # an old 20-unit order. Carry an omitted quantity only inside a known current-order /
+        # procurement workflow; descriptive product follow-ups do not need quantity arithmetic.
+        active_lane = str((envelope.session or {}).get("active_workflow_lane")
+                          or (envelope.session or {}).get("prior_lane") or "").strip().upper()
         if (decision.quantity is None and decision.subject_action == "continue"
+                and (decision.procurement_context == "current_order"
+                     or active_lane == "PROCUREMENT")
                 and acc.get("quantity")):
             decision = dataclasses.replace(decision, quantity=int(acc["quantity"]))
         if (decision.total_budget_cents is None

@@ -227,6 +227,9 @@ class TurnDecision:
     # continue | switch | uncertain (review-10 P0.2) — the model's LANE-INDEPENDENT continuation
     # signal; drives prior-subject inheritance and suppresses fragment-drift on an explicit switch.
     subject_action: str = "uncertain"
+    # current_order | general_policy | none. Kept separate from subject continuity so an omitted
+    # quantity can only be inherited for a real active procurement workflow.
+    procurement_context: str = "none"
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -247,7 +250,8 @@ class TurnDecision:
                 "compare_targets": list(self.compare_targets),
                 "quantity": self.quantity, "total_budget_cents": self.total_budget_cents,
                 "budget_scope": self.budget_scope, "budget_cap_mode": self.budget_cap_mode,
-                "subject_action": self.subject_action}
+                "subject_action": self.subject_action,
+                "procurement_context": self.procurement_context}
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
@@ -1170,4 +1174,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         compare_targets=compare_targets,
                         quantity=quantity, total_budget_cents=total_budget_cents,
                         budget_scope=budget_scope, budget_cap_mode=budget_cap_mode,
-                        subject_action=subject_action)
+                        subject_action=subject_action,
+                        procurement_context=procurement_context)

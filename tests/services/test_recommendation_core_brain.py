@@ -784,13 +784,29 @@ def test_explicit_bulk_fields_survive_when_model_omits_them(db):
     assert legacy["bulk_budget"]["floor_cents"] == shown_floor
 
 
-def test_search_lane_continuation_inherits_prior_bulk_quantity(db):
+def test_descriptive_search_continuation_does_not_inherit_bulk_quantity(db):
     payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
                "quantity": None, "subject_action": "continue", "confidence": 0.9}
     session = {"prior_node": "el-6-6", "accepted_constraints": {"quantity": 25}}
     resp = recommend_turn(
         db,
         _env("which of these has the best battery life?", session=session),
+        llm_fn=lambda p, t: json.dumps(payload),
+    )
+    assert resp.extras.get("requested_quantity") is None
+
+
+def test_current_procurement_continuation_inherits_prior_bulk_quantity(db):
+    payload = {"lane": "PROCUREMENT", "handle": "el-6-6", "requirements": {},
+               "quantity": None, "subject_action": "continue",
+               "procurement_context": "current_order", "confidence": 0.9}
+    session = {
+        "prior_node": "el-6-6", "active_workflow_lane": "PROCUREMENT",
+        "accepted_constraints": {"quantity": 25},
+    }
+    resp = recommend_turn(
+        db,
+        _env("which supplier is handling the current request?", session=session),
         llm_fn=lambda p, t: json.dumps(payload),
     )
     assert resp.extras["requested_quantity"] == 25
