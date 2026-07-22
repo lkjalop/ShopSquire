@@ -744,6 +744,62 @@ def test_router_prompt_marks_sold_candidates(db):
     assert "Do not copy the schema's example values" in seen["p"]
 
 
+def test_named_catalog_brand_repairs_unstocked_persona_category(db):
+    """A school-context word must not turn a named stocked graphics tablet into a toy.
+
+    The repair is driven by the tenant catalog's brand + approved taxonomy evidence.  Neither
+    Wacom nor either category is encoded in the router.
+    """
+    from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
+
+    db.execute(text(
+        "INSERT INTO products (id, sku, name, price_cents, currency, specs, brand) VALUES "
+        "('w1','WAC-1','Wacom Intuos Small Graphics Tablet',7900,'USD','{}','Wacom')"
+    ))
+    add_sold_node(db, node_handle="el-7-9-12-7")
+    upsert_classification(db, sku="WAC-1", node_handle="el-7-9-12-7",
+                          source="test", status="approved")
+
+    seen = {}
+    def wrong_persona_route(prompt, _timeout):
+        seen["prompt"] = prompt
+        return json.dumps({"lane": "SEARCH", "handle": "tg-5-2-11",
+                           "use_cases": ["digital_art"], "requirements": {},
+                           "confidence": 0.8})
+
+    decision = route_turn(
+        db,
+        _env("a Wacom drawing tablet for high school digital art under $500"),
+        llm_fn=wrong_persona_route,
+    )
+
+    assert "el-7-9-12-7" in seen["prompt"]
+    assert decision.node_handle == "el-7-9-12-7"
+    assert decision.source == "model+catalog_brand_anchor"
+
+
+def test_brand_anchor_does_not_replace_different_product_category(db):
+    """A brand association is corroboration, not permission to rewrite a different product."""
+    from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
+
+    db.execute(text(
+        "INSERT INTO products (id, sku, name, price_cents, currency, specs, brand) VALUES "
+        "('a1','APL-1','Apple Laptop',190000,'USD','{}','Apple')"
+    ))
+    upsert_classification(db, sku="APL-1", node_handle="el-6-6",
+                          source="test", status="approved")
+    add_sold_node(db, node_handle="el-6-6")
+
+    decision = route_turn(
+        db,
+        _env("do you sell Apple phones?"),
+        llm_fn=_route_stub("OFF_CATALOG", "el-4-5"),
+    )
+
+    assert decision.node_handle == "el-4-5"
+    assert decision.refusal_granted is True
+
+
 def test_router_clamps_wrong_requirements_container_to_empty(db):
     """A BYO model may return the right keys with the wrong JSON shape; degrade, never raise."""
     def malformed(_prompt, _timeout):

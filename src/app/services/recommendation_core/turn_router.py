@@ -366,6 +366,58 @@ def _stocked_handles(db, tenant_id: str, handles: List[str]) -> frozenset:
     return frozenset(out)
 
 
+def _catalog_brand_anchor_nodes(db, tenant_id: str, query: str) -> tuple:
+    """Approved taxonomy nodes for a catalog brand explicitly named by the buyer.
+
+    This is catalog evidence, not an intent parser: the model still chooses the category.  The
+    returned nodes only let the post-model clamp repair an unstocked category when one unique
+    approved brand node also shares a product noun with the query.  That prevents persona words
+    (for example, a school context) from turning a named stocked product into an unrelated toy,
+    without teaching the core any merchant brands or product categories.
+    """
+    q = " ".join(str(query or "").strip().lower().split())
+    if not q or db is None:
+        return ()
+    try:
+        from sqlalchemy import text as _t
+        brands = db.execute(_t(
+            "SELECT DISTINCT brand FROM products "
+            "WHERE brand IS NOT NULL AND brand != '' AND active=:active"
+        ), {"active": True}).fetchall()
+        named = []
+        for (raw_brand,) in brands:
+            brand = str(raw_brand or "").strip()
+            if brand and _re.search(rf"\b{_re.escape(brand.lower())}\b", q):
+                named.append(brand)
+        if len(named) != 1 or _explicitly_excluded_brand(db, query):
+            return ()
+        rows = db.execute(_t(
+            "SELECT DISTINCT pc.node_handle FROM product_classification pc "
+            "JOIN products p ON p.sku=pc.sku "
+            "WHERE pc.tenant_id=:tenant AND pc.status='approved' "
+            "AND LOWER(p.brand)=:brand AND p.active=:active"
+        ), {"tenant": str(tenant_id), "brand": named[0].lower(), "active": True}).fetchall()
+    except Exception as exc:
+        logger.debug("catalog brand anchor lookup failed: %s", repr(exc)[:120])
+        return ()
+
+    stop = {"and", "the", "for", "with", "from", "product", "products", "device", "devices"}
+    query_tokens = set(_re.findall(r"[a-z0-9]+", q)) - stop
+    anchors = []
+    for (handle,) in rows:
+        node = get_node(str(handle or ""))
+        if node is None:
+            continue
+        node_tokens = set(_re.findall(r"[a-z0-9]+", node.name.lower())) - stop
+        # Singular/plural normalization is sufficient here: this is a bounded corroboration
+        # check beside the model, not a second semantic router.
+        normalized_query = {token.rstrip("s") for token in query_tokens}
+        normalized_node = {token.rstrip("s") for token in node_tokens}
+        if normalized_query & normalized_node:
+            anchors.append(node)
+    return tuple(sorted({node.handle: node for node in anchors}.values(), key=lambda n: n.handle))
+
+
 def _prior_context_block(prior: Optional[Dict[str, Any]]) -> str:
     """Multi-turn context (context-rot fix): show the classifier the PRIOR subject so a
     subject-dropping follow-up ('only 6 people, $19000', 'how many can I get?') stays in the same
@@ -602,6 +654,13 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     if _prior is not None and all(n.handle != _prior.handle for n, _ in cands):
         _top = max((sc for _, sc in cands), default=3.0)
         cands = [(_prior, _top + 0.5)] + cands
+    brand_anchors = _catalog_brand_anchor_nodes(db, envelope.tenant_id, envelope.query)
+    if brand_anchors:
+        _top = max((sc for _, sc in cands), default=3.0)
+        for offset, anchor in enumerate(brand_anchors):
+            if all(node.handle != anchor.handle for node, _score in cands):
+                cands.append((anchor, _top + 1.0 - offset * 0.01))
+        cands.sort(key=lambda pair: (-pair[1], pair[0].handle))
     defs = defs_union(DEFAULT_VERTICALS)
     fit_keys = [k for k, d in defs.items() if d.kind == "quantity"]
     from src.app.services.recommendation_core.intent_resolver import known_use_cases
@@ -966,6 +1025,20 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                                      for candidate, _score in semantic)):
                     node = semantic[0][0]
                     routing_source = "model+taxonomy_semantic"
+
+    # CATALOG-ENTITY RECONCILIATION: a model may over-weight a persona/context word and choose an
+    # unstocked taxonomy sibling even though the buyer explicitly named a catalog brand whose
+    # approved products all ground to one corroborating category.  Correct only that narrow,
+    # evidence-complete case.  A sold model choice stands; multiple brand categories abstain; and
+    # a category without a query noun match never enters brand_anchors in the first place.
+    if (node is not None and len(brand_anchors) == 1
+            and node.handle != brand_anchors[0].handle
+            and sells_within(db, node.handle, tenant_id=envelope.tenant_id) is False):
+        anchor = brand_anchors[0]
+        logger.info("unstocked model category %s contradicted named-brand catalog anchor %s",
+                    node.handle, anchor.handle)
+        node = anchor
+        routing_source = "model+catalog_brand_anchor"
 
     workloads: List[str] = []
     relationship = "buy"
