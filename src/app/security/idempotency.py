@@ -27,6 +27,10 @@ _CRITICAL_PREFIXES = tuple(
     ).split(",") if p.strip()
 )
 
+# These endpoints own stream-aware replay/single-flight semantics. Capturing their body iterator
+# here would buffer the entire response before headers reach the client, defeating SSE heartbeats.
+_STREAM_PASSTHROUGH_PATHS = frozenset({"/api/v1/chat/stream"})
+
 
 class IdempotencyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
@@ -57,6 +61,8 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
+        if path in _STREAM_PASSTHROUGH_PATHS:
+            return await call_next(request)
         critical = any(path.startswith(p) for p in _CRITICAL_PREFIXES)
 
         try:

@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from starlette.responses import StreamingResponse
 
 import src.app.security.idempotency as idem
 from src.app.security.idempotency import IdempotencyMiddleware
@@ -60,6 +61,28 @@ def test_noncritical_path_degrades_when_store_unavailable(monkeypatch):
     client = TestClient(app)
     r = client.post("/api/v1/notes", json={"x": 1}, headers={"Idempotency-Key": "k1"})
     assert r.status_code == 200 and calls["count"] == 1   # processed, not 503
+
+
+def test_chat_sse_bypasses_response_capture():
+    app = FastAPI()
+    app.add_middleware(IdempotencyMiddleware)
+
+    @app.post("/api/v1/chat/stream")
+    async def stream():
+        async def frames():
+            yield "event: thinking\ndata: {}\n\n"
+            yield "event: done\ndata: {}\n\n"
+        return StreamingResponse(frames(), media_type="text/event-stream")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/chat/stream", headers={"Idempotency-Key": "shared-stream-query-key"},
+    )
+    assert response.status_code == 200
+    assert "event: thinking" in response.text
+    middleware = app.middleware_stack.app
+    assert isinstance(middleware, IdempotencyMiddleware)
+    assert middleware.cache == {}
 
 
 def test_critical_path_fails_closed_when_store_unavailable(monkeypatch):
