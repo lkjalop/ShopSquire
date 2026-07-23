@@ -48,6 +48,16 @@ def test_router_prompt_distinguishes_policy_from_active_procurement_changes():
     assert "requires a quantity, supplier" in prompt
 
 
+def test_router_prompt_uses_sparse_json_to_bound_decode_work():
+    prompt = _instruction_prefix(("ram_gb",), ("office",))
+
+    assert "Always include lane" in prompt
+    assert "Omit optional fields" in prompt
+    assert "no [in catalog] candidate fits" in prompt
+    assert "include either its offered unstocked handle" in prompt.lower()
+    assert '"handle":null' not in prompt
+
+
 def test_soft_preferred_brand_is_not_a_hard_filter(db):
     from src.app.services.taxonomy_registry import add_sold_node
     add_sold_node(db, node_handle="el-6-6")

@@ -334,6 +334,40 @@ def test_off_catalog_null_handle_is_repaired_through_taxonomy_then_sellability(d
     assert sold.lane == "SEARCH" and not sold.refusal_granted
 
 
+def test_off_catalog_semantic_repair_accepts_separated_unsold_leader(db, monkeypatch):
+    """A distant sold neighbor must not veto a clearly separated unsold subject."""
+    monkeypatch.setattr(
+        "src.app.services.taxonomy_embedding_index.semantic_top_k",
+        lambda wanted, *, top_k: [("el-6-2", 0.76), ("el-6-11-2", 0.61)],
+    )
+    raw = json.dumps({
+        "lane": "OFF_CATALOG", "wanted_category": "Computing > GPU Servers",
+    })
+
+    decision = route_turn(db, _env("quote rackmount accelerator servers"),
+                          llm_fn=lambda _prompt, _timeout: raw)
+
+    assert decision.node_handle == "el-6-2"
+    assert decision.lane == "OFF_CATALOG" and decision.refusal_granted
+    assert decision.source == "model+taxonomy_semantic"
+
+
+def test_off_catalog_semantic_repair_abstains_on_ambiguous_sold_neighbor(db, monkeypatch):
+    monkeypatch.setattr(
+        "src.app.services.taxonomy_embedding_index.semantic_top_k",
+        lambda wanted, *, top_k: [("el-6-2", 0.71), ("el-6-11-2", 0.68)],
+    )
+    raw = json.dumps({
+        "lane": "OFF_CATALOG", "wanted_category": "Computing > Accelerator Systems",
+    })
+
+    decision = route_turn(db, _env("quote accelerator systems"),
+                          llm_fn=lambda _prompt, _timeout: raw)
+
+    assert decision.node_handle is None
+    assert decision.lane == "SEARCH" and not decision.refusal_granted
+
+
 def test_off_catalog_exact_category_avoids_semantic_repair(db, monkeypatch):
     monkeypatch.setattr(
         "src.app.services.taxonomy_embedding_index.semantic_top_k",

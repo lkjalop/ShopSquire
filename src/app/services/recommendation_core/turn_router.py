@@ -54,6 +54,9 @@ from src.app.services.taxonomy_registry import (get_node, primary_sold_node, sea
 
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
+_SEMANTIC_REFUSAL_MIN_SCORE = 0.72
+_SEMANTIC_REFUSAL_MIN_MARGIN = 0.08
+
 # Model-facing synonyms for the one bounded procurement lane. These are aliases, not new
 # capabilities: the facade still delegates PROCUREMENT to the established fulfillment path.
 _LANE_ALIASES = {
@@ -696,14 +699,16 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "BULK: quantity is unit count; total_budget is whole-order dollars; budget_scope is "
         "per_unit, total or null. Never reinterpret per-unit as total. budget_cap_mode is hard "
         "for explicit limits, soft for approximate targets, ambiguous when the wording is unclear.\n"
-        "Return ONLY this JSON shape (use null/empty values when absent): "
-        '{"lane":"SEARCH","handle":null,"wanted_category":null,"request_scope":"uncertain",'
-        '"use_cases":[],"audience_contexts":[],"use_case_variant":null,"requirements":{},'
-        '"refine":{"brand":null,"prefer_brand":null,"exclude_brand":null,"sort":null,'
-        '"brand_action":"keep"},'
-        '"compare_targets":[],"quantity":null,"total_budget":null,"budget_scope":null,'
-        '"budget_cap_mode":"hard","subject_action":null,"procurement_context":"none",'
-        '"confidence":0.0}.\n')
+        "For a product request where no [in catalog] candidate fits, lane MUST be OFF_CATALOG. "
+        "Include either its offered unstocked handle or a specific wanted_category; do not emit "
+        "a nodeless SEARCH. SEARCH with no handle is only for a non-product service or place.\n"
+        "Return ONLY one sparse JSON object. Always include lane. Omit optional fields when "
+        "their value would be null, empty, unchanged, or unknown; the platform supplies bounded "
+        "defaults. Allowed optional keys: handle, wanted_category, request_scope, use_cases, "
+        "audience_contexts, use_case_variant, requirements, refine, compare_targets, quantity, "
+        "total_budget, budget_scope, budget_cap_mode, subject_action, procurement_context, "
+        "confidence. Inside refine, emit only changed keys from brand, prefer_brand, "
+        "exclude_brand, sort, brand_action. Never add prose or keys outside this contract.\n")
 
 
 def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
@@ -1208,11 +1213,36 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                     "taxonomy_repair_outcome": repair_outcome,
                 })
                 _ROUTER_CALL_STATE.metrics = router_metrics
-                if (semantic and all(refusal_allowed(db, candidate.handle,
-                                                     tenant_id=envelope.tenant_id)
-                                     for candidate, _score in semantic)):
-                    node = semantic[0][0]
-                    routing_source = "model+taxonomy_semantic"
+                if semantic:
+                    refusal_status = [
+                        (candidate, float(score), refusal_allowed(
+                            db, candidate.handle, tenant_id=envelope.tenant_id,
+                        ))
+                        for candidate, score in semantic
+                    ]
+                    top_candidate, top_score, top_unsold = refusal_status[0]
+                    all_unsold = all(is_unsold for _candidate, _score, is_unsold
+                                     in refusal_status)
+                    best_nonrefusal = max(
+                        (score for _candidate, score, is_unsold in refusal_status
+                         if not is_unsold),
+                        default=None,
+                    )
+                    separated_unsold_leader = bool(
+                        top_unsold
+                        and top_score >= _SEMANTIC_REFUSAL_MIN_SCORE
+                        and (best_nonrefusal is None
+                             or top_score - best_nonrefusal >= _SEMANTIC_REFUSAL_MIN_MARGIN)
+                    )
+                    if all_unsold or separated_unsold_leader:
+                        node = top_candidate
+                        routing_source = "model+taxonomy_semantic"
+                        router_metrics = getattr(_ROUTER_CALL_STATE, "metrics", {}) or {}
+                        router_metrics["taxonomy_repair_outcome"] = (
+                            "accepted_all_unsold" if all_unsold
+                            else "accepted_separated_unsold_leader"
+                        )
+                        _ROUTER_CALL_STATE.metrics = router_metrics
 
     # CATALOG-ENTITY RECONCILIATION: a model may over-weight a persona/context word and choose an
     # unstocked taxonomy sibling even though the buyer explicitly named a catalog brand whose
