@@ -31,6 +31,7 @@ from src.app.services.price_conversion import cents_to_dollars, dollars_to_cents
 from src.app.security.dread_scorer import compute_dread
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
+from src.app.services.recommendation_core.envelope import LANES as RECOMMENDATION_LANES
 
 import logging
 
@@ -2297,6 +2298,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             "needs_human_review": False,
             "security_route": "allow",
         }
+
+    # The pre-dispatch classifier is only an ingress hint. Once the typed facade returns a
+    # bounded lane, project that authoritative decision through chat and Decision Trace instead
+    # of retaining a contradictory heuristic label (for example POLICY_QUESTION -> SEARCH).
+    backend_turn_intent = str(data.get("turn_intent") or "").strip().upper()
+    if backend_turn_intent in RECOMMENDATION_LANES:
+        turn_intent = backend_turn_intent
 
     # Map results into canonical product shape
     results = data.get("results") or []

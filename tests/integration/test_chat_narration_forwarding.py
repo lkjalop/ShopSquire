@@ -70,3 +70,29 @@ def test_no_match_followups_do_not_contradict_brand_exclusion(monkeypatch):
     questions = response.json().get("next_questions") or []
     assert "relax_brand" not in {question.get("id") for question in questions}
     assert all("Apple" not in str(question.get("text") or "") for question in questions)
+
+
+async def _fake_policy_answer(*args, **kwargs):
+    return 200, {
+        "results": [],
+        "assistant_message": "Approved returns policy.",
+        "decision_trace_id": "trace-policy-v2",
+        "turn_intent": "POLICY_QUESTION",
+        "routing_source": "model",
+        "next_questions": [],
+    }
+
+
+def test_chat_projects_authoritative_facade_lane(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process", _fake_policy_answer)
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/chat/query",
+        json={"uid": "u-chat-policy", "query": "What's your returns policy?"},
+        headers={"x-api-key": "local-merchant-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["turn_intent"] == "POLICY_QUESTION"
