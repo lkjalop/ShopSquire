@@ -48,10 +48,12 @@ $env:CV_SELECTIVE_OCR_TIMEOUT_S        = "3"      # bounded before the deeper OC
 # taxonomy embedder warm for the main journey; selective IMAGE V2 loads vision only on demand.
 # Record image acts last, or expect the following text turn to pay one router reload.
 $env:CV_WARMUP_ON_START                = "0"
-# Serve the bounded V2 core for its eligible recommendation lanes. Procurement and unsupported
-# lanes still delegate through the facade to their mature handlers; cart mutations remain
-# confirmation-gated because RECOMMEND_CART_AUTO_APPLY is intentionally not enabled here.
+# Serve the bounded V2 core for its eligible recommendation lanes. The procurement switch below
+# enrolls only read-only product selection and sourcing advice; fulfillment_cases still owns case
+# creation, RFQ drafts, approvals, and all external sends. Unsupported lanes continue to delegate,
+# and cart mutations remain confirmation-gated because auto-apply is intentionally disabled.
 $env:RECOMMEND_CORE_MODE               = "primary"
+$env:RECOMMEND_PROCUREMENT_ADVICE_MODE = "on"
 $env:ROUTER_PREWARM_ON_START           = "1"
 $env:ROUTER_PREWARM_BLOCKING           = "1"
 $env:ROUTER_PREWARM_REQUIRED           = "1"
