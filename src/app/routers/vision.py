@@ -1314,4 +1314,12 @@ async def triage(
     except Exception:
         pass
 
+    if not fast and provider_name == "ollama":
+        try:
+            from src.app.services.model_residency import schedule_router_restore
+
+            resp["router_restore_scheduled"] = schedule_router_restore()
+        except Exception:
+            resp["router_restore_scheduled"] = False
+
     return resp
