@@ -6,6 +6,7 @@ not part of hermetic CI: it proves the real Vite/FastAPI/Ollama integration.
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
@@ -38,12 +39,15 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         composer.press("Enter")
         page.get_by_text("your cart is now empty", exact=False).wait_for(timeout=20_000)
 
-        composer.fill("I need 20 laptops for game development with a total budget of AUD 41000")
+        # Use a satisfiable office workload for the execution proof. Capability/no-fit behavior
+        # for game development is tested separately; a closed-loop test must not purchase a
+        # nearest-fit machine that failed the workload floor merely to reach procurement.
+        composer.fill("I need 20 business laptops for office work with a total budget of AUD 41000")
         composer.press("Enter")
-        page.get_by_text("Top Recommendations", exact=True).wait_for(timeout=45_000)
-        page.get_by_text("Top Recommendations", exact=True).locator("xpath=..").get_by_role(
-            "button", name="Add", exact=True,
-        ).first.click()
+        page.get_by_text("Fulfilment options for your bulk order", exact=True).wait_for(
+            timeout=45_000,
+        )
+        page.get_by_role("button", name="Add", exact=True).first.click()
         page.get_by_text("Delivery plan", exact=False).first.wait_for(timeout=20_000)
         assert page.locator('[data-testid^="qty-"]').first.inner_text() == "20"
 
@@ -58,7 +62,9 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         assert original_trace_id
         assert "Preferred channel" in before
         assert "Ordering terms" in before
-        assert "Quantity: 5" in before or "5 supplier-shortfall" in before
+        initial_shortfall_match = re.search(r"(\d+) supplier-shortfall", before)
+        assert initial_shortfall_match, before
+        initial_shortfall = int(initial_shortfall_match.group(1))
 
         page.locator('button[title="Close"]').last.click()
         composer.fill("actually make it 18")
@@ -81,7 +87,9 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         page.wait_for_timeout(2_000)
         after = modal.inner_text()
         assert modal.get_attribute("data-trace-id") == original_trace_id
-        assert "Quantity: 3" in after or "3 supplier-shortfall" in after
+        revised_shortfall_match = re.search(r"(\d+) supplier-shortfall", after)
+        assert revised_shortfall_match, after
+        assert int(revised_shortfall_match.group(1)) == max(0, initial_shortfall - 2)
         assert "prior draft superseded" in after
         assert "state transitions" in after
         assert not console_errors

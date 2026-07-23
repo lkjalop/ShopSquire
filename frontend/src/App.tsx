@@ -1712,7 +1712,11 @@ export default function App() {
         // SSE deadlines (review-6 #11): the connect timeout only aborts if headers are slow; the
         // body read loop needs its OWN idle + total deadlines or a hung server stalls forever
         // (the `thinking` event arrives instantly, resolving fetch and clearing the old timer).
-        const _SSE_CONNECT_MS = 3500;   // headers not here in 3.5s → fall back to /chat/query
+        // Local/browser CORS setup can spend ~3s in middleware + preflight before streaming
+        // headers arrive. A 3.5s cutoff raced healthy streams and started a duplicate fallback
+        // that merely waited on the same idempotent producer. Heartbeat/idle/total limits below
+        // still bound execution; this deadline only allows the connection to become established.
+        const _SSE_CONNECT_MS = 10000;
         const _SSE_IDLE_MS = 20000;     // no chunk for 20s → server hung, abort → fallback
         const _SSE_TOTAL_MS = 90000;    // whole-turn ceiling
         const tryStreamChat = async (): Promise<any | null> => {

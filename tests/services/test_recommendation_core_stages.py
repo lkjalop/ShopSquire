@@ -114,6 +114,33 @@ def test_fit_closest_match_mode_when_nothing_meets(db):
     assert cards                                        # never an empty grid (valorant fix)
 
 
+def test_bulk_economics_never_prices_an_unknown_candidate_as_capable(db):
+    """An unknown/closest card may be shown for inspection, but it cannot authorize order math."""
+    from src.app.services.recommendation_core.core import recommend_turn
+    from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
+    import json
+
+    add_sold_node(db, node_handle="el-6-6")
+    for sku in ("LAP-1", "LAP-2", "LAP-3"):
+        upsert_classification(db, sku=sku, node_handle="el-6-6", confidence=1.0,
+                              source="test", status="approved")
+    payload = {
+        "lane": "PROCUREMENT", "handle": "el-6-6",
+        "requirements": {"gpu_vram_gb": [">=", 8]},
+        "quantity": 20, "total_budget": 30000, "budget_scope": "total",
+        "confidence": 0.9,
+    }
+    response = recommend_turn(
+        db,
+        _env(query="20 laptops with 8GB VRAM, $30000 total", budget_max=30000),
+        llm_fn=lambda _p, _t: json.dumps(payload),
+    )
+
+    assert response.fit_summary["meets"] == 0
+    assert response.extras["bulk"]["floor_cents"] == 209_900
+    assert response.extras["bulk"]["verdict"] == "over_budget"
+
+
 def test_variant_attributes_specs_win_title_backfills():
     v = VariantView(sku="X", title="Something 240Hz 17in", specs={"refresh_hz": 165})
     attrs = variant_attributes(v)

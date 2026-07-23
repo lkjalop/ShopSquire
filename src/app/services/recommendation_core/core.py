@@ -1005,7 +1005,10 @@ def _maybe_bulk_economics(db, envelope: TurnEnvelope, decision: TurnDecision,
         int(card.price_cents)
         for card in resp.products
         if card.price_cents is not None
-        and str((card.fit or {}).get("overall") or "unknown") != "fails"
+        # Unknown means the catalog lacks enough evidence to authorize this workload. It may
+        # appear in a clearly labeled nearest-fit tier, but must never become the financial
+        # capability floor or turn an unsuitable bulk order into a false "fits" verdict.
+        and str((card.fit or {}).get("overall") or "unknown") == "meets"
     ]
     if shown_prices:
         floor = min(shown_prices)
