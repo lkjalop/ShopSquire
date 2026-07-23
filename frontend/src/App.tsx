@@ -12,7 +12,7 @@ import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
 import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
-import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
+import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { procurementAwareTraceId } from './lib/trace';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
@@ -695,7 +695,10 @@ export default function App() {
   }, [displayProducts]);
 
   // Dual STT (browser + Whisper)
-  const stt = useDualSTT();
+  const stt = useDualSTT({
+    apiUrl: getApiBase(),
+    apiKey: String((import.meta as any).env?.VITE_API_KEY || ''),
+  });
 
   // Sync STT transcript into input
   useEffect(() => {

@@ -252,6 +252,18 @@ def _looks_like_base64(value: str) -> bool:
 
 def redact_for_trace(payload: Any) -> Any:
     """Redact sensitive or bulky payloads for trace persistence."""
+    safe_media_scalars = {
+        "has_image",
+        "image_count",
+        "images_count",
+        "image_untrusted",
+        "image_degraded_mode",
+        "image_pending",
+        "analysis_degraded",
+        "analysis_pending",
+        "security_risk",
+    }
+
     def _redact(v):
         if isinstance(v, str):
             v2 = unicode_normalize(v)
@@ -265,6 +277,11 @@ def redact_for_trace(payload: Any) -> Any:
             out = {}
             for k, vv in v.items():
                 key = str(k).lower()
+                if key in safe_media_scalars and (
+                    vv is None or isinstance(vv, (bool, int, float))
+                ):
+                    out[k] = vv
+                    continue
                 if any(tok in key for tok in ("image", "photo", "file", "bytes", "blob", "data_url", "base64", "attachment")):
                     out[k] = "[REDACTED_BLOB]"
                 else:

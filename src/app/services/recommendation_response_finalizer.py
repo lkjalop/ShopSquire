@@ -41,31 +41,61 @@ def finalize_core_response(
     summary = [
         {
             "sku": str(item.get("sku") or ""),
-            "name": str(item.get("name") or ""),
+            "name": str(item.get("name") or item.get("title") or ""),
             "price": item.get("price"),
             "price_cents": item.get("price_cents"),
             "currency": item.get("currency"),
             "reason_codes": list(item.get("reason_codes") or [])[:3],
+            "reasons": [str(reason) for reason in (item.get("why") or item.get("reasons") or [])][:5],
+            "score_norm": item.get("score_norm"),
+            "workload_fit": item.get("workload_fit") if isinstance(item.get("workload_fit"), dict) else None,
         }
         for item in products
     ]
+    canonical_identity = {
+        "trace_id": trace_id,
+        "ordered_skus": [item["sku"] for item in summary if item.get("sku")],
+    }
+    out["canonical_identity"] = canonical_identity
     right_panel = out.get("right_panel") if isinstance(out.get("right_panel"), dict) else {}
     try:
         right_panel = json.loads(json.dumps(right_panel, default=str))
     except Exception:
         right_panel = {"mode": str(right_panel.get("mode") or "")}
     right_panel.setdefault("anchor_sections", [])
+    right_panel["canonical_identity"] = canonical_identity
+    out["right_panel"] = right_panel
     lane = str(out.get("turn_intent") or "").strip().upper() or None
     routing_source = str(out.get("routing_source") or "").strip() or None
     decision = out.get("decision") if isinstance(out.get("decision"), dict) else {}
+    constraints = (
+        dict(out.get("constraints_used") or {})
+        if isinstance(out.get("constraints_used"), dict)
+        else {}
+    )
     execution_steps = [dict(item) for item in (out.get("execution_steps") or [])
                        if isinstance(item, dict)][:24]
+    security = dict(out.get("security") or {}) if isinstance(out.get("security"), dict) else {}
+    security.setdefault("policy_route", "allow")
+    security.setdefault("checked_boundary", "recommendation_facade")
+    security.setdefault(
+        "has_image",
+        bool(out.get("image_security") or out.get("image_observations")
+             or out.get("multimodal_fusion")),
+    )
     intent_analysis = {
         "intent": lane,
         "lane": lane,
         "routing_source": routing_source,
         "subject_action": decision.get("subject_action"),
         "procurement_context": decision.get("procurement_context"),
+        "use_case_key": constraints.get("use_case"),
+        "workloads": constraints.get("workloads") or [],
+        "requirements": constraints.get("requirements") or {},
+        "budget_min": constraints.get("budget_min"),
+        "budget_max": constraints.get("budget_max"),
+        "quantity": constraints.get("order_quantity") or out.get("requested_quantity"),
+        "currency": constraints.get("currency"),
     }
     evidence_items = [
         {"type": "candidate", "id": item["sku"], "score": 1.0}
@@ -83,7 +113,10 @@ def finalize_core_response(
             trace_id=trace_id, event_type="recommendation_result", source_type="stage",
             source_id="Trace_Persistence", target_type="ui", target_id="right_panel",
             payload={"products_summary": summary, "right_panel_contract": right_panel,
-                     "intent_analysis": intent_analysis, "execution_steps": execution_steps},
+                     "canonical_identity": canonical_identity,
+                     "execution_mode": str(out.get("execution_mode") or "v2_served"),
+                     "intent_analysis": intent_analysis, "constraints_used": constraints,
+                     "execution_steps": execution_steps, "security": security},
         )
         persisted = log_decision(
             agent_name="Recommendation_Core",
@@ -97,11 +130,15 @@ def finalize_core_response(
             },
             proposed_action={
                 "decision_mode": str(out.get("decision_mode") or "catalog_recommendation"),
+                "execution_mode": str(out.get("execution_mode") or "v2_served"),
                 "products_summary": summary,
                 "results": summary,
+                "canonical_identity": canonical_identity,
                 "right_panel_contract": right_panel,
                 "reasoning": out.get("assistant_message") or out.get("message"),
                 "intent_analysis": intent_analysis,
+                "constraints_used": constraints,
+                "security": security,
                 "evidence_items": evidence_items,
             },
             decision_id=trace_id, tenant_id=str(tenant_id or "default"),

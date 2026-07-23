@@ -9,7 +9,7 @@ from src.app.config import load_feature_flags, get_settings
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.models.db import db_session, get_engine, get_db
 from fastapi import Request, Depends
-from sqlalchemy import text, create_engine
+from sqlalchemy import inspect as sa_inspect, text, create_engine
 import asyncio
 from src.app.models.decision_audit import DecisionAudit
 from src.app.services.persistence import write_audit_and_event
@@ -2338,6 +2338,31 @@ def decision_compliance(
 # Bitemporal Audit Trail
 # ---------------------------------------------------------------------------
 
+_DECISION_AUDIT_COLUMNS = (
+    "id", "agent_name", "valid_from", "valid_to", "system_from", "system_to",
+    "input_data", "retrieved_context", "proposed_action", "policy_version",
+    "approval_required", "execution_status", "tenant_id", "actor_id",
+    "actor_role", "event_type",
+)
+
+
+def _fetch_decision_audit_rows(db, trace_id: str):
+    """Read a decision across both current and pre-hardening demo schemas."""
+    bind = db.get_bind()
+    available = {
+        str(column.get("name") or "")
+        for column in sa_inspect(bind).get_columns("decision_logs")
+    }
+    projection = ", ".join(
+        column if column in available else f"NULL AS {column}"
+        for column in _DECISION_AUDIT_COLUMNS
+    )
+    return db.execute(
+        text(f"SELECT {projection} FROM decision_logs WHERE id = :tid"),
+        {"tid": trace_id},
+    ).fetchall()
+
+
 @router.get("/{trace_id}/audit-trail")
 def decision_audit_trail(
     trace_id: str,
@@ -2355,15 +2380,7 @@ def decision_audit_trail(
     # 1. Fetch decision_logs rows for this trace
     decisions: list[dict] = []
     try:
-        rows = db.execute(
-            text(
-                "SELECT id, agent_name, valid_from, valid_to, system_from, system_to, "
-                "input_data, retrieved_context, proposed_action, policy_version, "
-                "approval_required, execution_status, tenant_id, actor_id, actor_role, event_type "
-                "FROM decision_logs WHERE id = :tid"
-            ),
-            {"tid": trace_id},
-        ).fetchall()
+        rows = _fetch_decision_audit_rows(db, trace_id)
         for r in rows:
             decisions.append({
                 "id": r[0], "agent_name": r[1],
@@ -2379,7 +2396,7 @@ def decision_audit_trail(
                 "actor_role": r[14], "event_type": r[15],
             })
     except Exception:
-        pass
+        logger.exception("Decision audit read failed for trace %s", trace_id)
 
     # 2. Fetch trace events
     trace_events = _fetch_trace_events(trace_id)

@@ -1421,7 +1421,10 @@ async def _call_recommend_in_process(
             source_ip=(request.client.host if request.client else None),
         )
         if facade.served:
-            return facade.payload or {}
+            served = dict(facade.payload or {})
+            served.setdefault("execution_mode", "v2_served")
+            served.setdefault("execution_lane", facade.lane)
+            return served
         if facade.status == "blocked":
             status_code = 429 if str(facade.reason).startswith("quota:") else 403
             raise HTTPException(status_code=status_code, detail={
@@ -1429,9 +1432,14 @@ async def _call_recommend_in_process(
                 "reason": facade.reason,
                 "trace_id": str(params.get("trace_id") or "") or None,
             })
-        return delegate_legacy_recommendation(
+        delegated = delegate_legacy_recommendation(
             request=request, params=params, redis=redis, db=db, role=role,
         )
+        delegated = dict(delegated or {})
+        delegated.setdefault("execution_mode", "legacy_delegated")
+        delegated.setdefault("delegation_reason", facade.reason or facade.status)
+        delegated.setdefault("execution_lane", facade.lane)
+        return delegated
 
     try:
         data = await run_in_threadpool(_invoke)
@@ -1461,6 +1469,20 @@ async def chat_query(
         lambda: _chat_query_impl(request, payload, redis, db, role))
 
 
+def _effective_chat_query(payload: Dict[str, Any]) -> tuple[str, bool, Any]:
+    """Normalize typed and transcribed input before any routing decision.
+
+    A transcript is provenance, not a second semantic channel. When the browser
+    submits both fields, the typed query remains authoritative and both must be
+    semantically identical by frontend contract.
+    """
+    source = payload or {}
+    typed = str(source.get("query") or "").strip()
+    voice = source.get("voice_transcript")
+    voice_text = str(voice or "").strip() if isinstance(voice, str) else ""
+    return typed or voice_text, bool(voice_text), source.get("voice_confidence")
+
+
 async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str) -> Dict:
     """Chat query wrapper that delegates to recommendation endpoint and
     returns a canonical UI-friendly shape.
@@ -1470,16 +1492,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     New:     { query, uid, images?: [{labels, ocr_text, hash, damage_score, confidence}],
                image_intent?, voice_transcript?, voice_confidence?, recent_messages? }
     """
-    q = (payload or {}).get("query") or ""
-    submitted_query = str(q or "")
-
-    # -----------------------------------------------------------------------
-    # Merge voice transcript into query when present
-    # -----------------------------------------------------------------------
-    voice_transcript = (payload or {}).get("voice_transcript")
-    voice_confidence = (payload or {}).get("voice_confidence")
-    if isinstance(voice_transcript, str) and voice_transcript.strip() and not q.strip():
-        q = voice_transcript.strip()
+    q, voice_used, voice_confidence = _effective_chat_query(payload)
+    submitted_query = q
+    voice_transcript = q if voice_used else None
 
     # -----------------------------------------------------------------------
     # Normalize multimodal image payload (new array format → legacy flat)
@@ -2427,10 +2442,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     "scores": intent_routing_result.get("scores", {}),
                 },
             )
-        if has_image:
+        if has_image or voice_transcript:
             log_trace_event(
                 trace_id=decision_trace_id, event_type="multimodal_fusion",
-                source_type="agent", source_id="Chat_Multimodal",
+                source_type="stage", source_id="Multimodal_Fusion",
                 target_type="chat", target_id=None,
                 payload={
                     "image_count": len(images_array) if images_array else (1 if has_image else 0),
@@ -2439,9 +2454,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     "ocr_text": str(image_ocr_text_in or "")[:200],
                 },
             )
+        if has_image:
             log_trace_event(
                 trace_id=decision_trace_id, event_type="image_security_scan",
-                source_type="agent", source_id="Image_Security_Sidecar",
+                source_type="gate", source_id="Image_Security_Sidecar",
                 target_type="chat", target_id=None,
                 payload={
                     "qr_detected": bool(image_cv_signals_in.get("qr_code_detected")),

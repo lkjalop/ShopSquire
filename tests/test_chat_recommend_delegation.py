@@ -2,7 +2,7 @@ import asyncio
 
 from starlette.requests import Request
 
-from src.app.routers.chat import _call_recommend_in_process
+from src.app.routers.chat import _call_recommend_in_process, _effective_chat_query
 from src.app.services.recommendation_facade import FacadeOutcome
 
 
@@ -48,6 +48,7 @@ def test_in_process_recommend_preserves_request_and_dependencies(monkeypatch):
 
     assert status == 200
     assert body["requested_quantity"] == 20
+    assert body["execution_mode"] == "legacy_delegated"
     assert captured["uid"] == "buyer-1"
     assert captured["turn_intent"] == "PROCUREMENT"
     assert captured["request"].headers["x-tenant-id"] == "tenant-a"
@@ -74,4 +75,59 @@ def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkey
         redis=object(), db=object(), role="merchant"))
 
     assert status == 200
-    assert body == payload
+    assert body["results"] == payload["results"]
+    assert body["decision_trace_id"] == "trace-1"
+    assert body["execution_mode"] == "v2_served"
+    assert body["execution_lane"] == "SEARCH"
+
+
+def test_typed_and_spoken_input_share_one_semantic_dispatch_contract(monkeypatch):
+    typed_query, typed_voice, _ = _effective_chat_query({
+        "query": "compare Dell G16 and Lenovo Legion",
+    })
+    spoken_query, spoken_voice, confidence = _effective_chat_query({
+        "voice_transcript": "compare Dell G16 and Lenovo Legion",
+        "voice_confidence": 0.94,
+    })
+    assert typed_query == spoken_query
+    assert typed_voice is False
+    assert spoken_voice is True
+    assert confidence == 0.94
+
+    def fake_facade(*_args, **kwargs):
+        assert kwargs["query"] == typed_query
+        return FacadeOutcome(
+            status="served",
+            lane="COMPARE",
+            payload={
+                "trace_id": kwargs["trace_id"],
+                "decision_trace_id": kwargs["trace_id"],
+                "turn_intent": "COMPARE",
+                "constraints_used": {"named_products": ["Dell G16", "Lenovo Legion"]},
+                "results": [{"sku": "DELL-G16"}, {"sku": "LENOVO-LEGION"}],
+                "canonical_identity": {
+                    "trace_id": kwargs["trace_id"],
+                    "ordered_skus": ["DELL-G16", "LENOVO-LEGION"],
+                },
+            },
+        )
+
+    monkeypatch.setattr(
+        "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
+        fake_facade,
+    )
+    outputs = []
+    for query in (typed_query, spoken_query):
+        status, body = asyncio.run(_call_recommend_in_process(
+            _request(),
+            {"uid": "buyer-1", "query": query, "trace_id": "trace-parity"},
+            redis=object(), db=object(), role="merchant",
+        ))
+        assert status == 200
+        outputs.append(body)
+
+    for key in (
+        "turn_intent", "constraints_used", "results",
+        "trace_id", "decision_trace_id", "canonical_identity",
+    ):
+        assert outputs[0][key] == outputs[1][key]

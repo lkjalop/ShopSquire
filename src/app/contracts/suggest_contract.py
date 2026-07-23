@@ -91,6 +91,9 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "sourcing_intent",
     # routing_source: model versus bounded fallback provenance used by promotion telemetry.
     "routing_source",
+    # V2 ownership + immutable presentation identity. These make mixed-mode migration visible and
+    # let every consumer prove it rendered the same trace-bound ordered product slate.
+    "execution_mode", "execution_lane", "delegation_reason", "canonical_identity",
     # Approved policy provenance: the answer came from the tenant StoreProfile, never invented
     # by the model. These fields were added with the independently owned policy lane.
     "policy_source", "policy_answered",

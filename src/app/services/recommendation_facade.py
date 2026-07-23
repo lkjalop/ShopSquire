@@ -553,6 +553,8 @@ def dispatch_recommendation_core_typed(
         from src.app.services.recommendation_response_finalizer import finalize_core_response
 
         def with_trace(payload: Dict[str, Any], active_trace_id: str) -> Dict[str, Any]:
+            payload = dict(payload or {})
+            payload.setdefault("execution_mode", "v2_served")
             return finalize_core_response(
                 payload, active_trace_id, query=query, tenant_id=tenant_id or "default", uid=uid,
             )

@@ -192,7 +192,7 @@ function getSummary(evt: TraceEvent): string {
   if (tool) return `Tool: ${tool}`;
   const query = inlineText(evt.payload?.query);
   if (query) return `Query: ${query.slice(0, 50)}...`;
-  if (evt.source_id) return String(evt.source_id);
+  if (evt.source_id) return componentSource(evt);
   const original = evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type;
   return String(original || 'event').replace(/_/g, ' ');
 }
@@ -203,12 +203,37 @@ function humanizeKey(key: string): string {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function legacyComponentOntology(sourceId: string): {
+  label: string;
+  kind: 'model' | 'stage' | 'gate' | 'connector' | 'observer';
+  authority: string;
+} {
+  const raw = String(sourceId || '').trim();
+  const normalized = raw.toLowerCase();
+  const readable = humanizeKey(raw.replace(/_agent$/i, ''));
+
+  if (/(ollama|qwen|llm|model)/.test(normalized)) {
+    return { label: readable || 'Model', kind: 'model', authority: 'proposes' };
+  }
+  if (/(policy|guard|security|authoriz|approval|send_gate|clamp)/.test(normalized)) {
+    return { label: readable || 'Policy', kind: 'gate', authority: 'authorizes' };
+  }
+  if (/(connector|transport|api|edi|cxml|email|portal|webhook)/.test(normalized)) {
+    return { label: readable || 'Integration', kind: 'connector', authority: 'executes' };
+  }
+  if (/(trace|persist|audit|telemetry|metric|market_intelligence|feedback)/.test(normalized)) {
+    return { label: readable || 'Observer', kind: 'observer', authority: 'observes' };
+  }
+  return { label: readable || 'Pipeline', kind: 'stage', authority: 'executes' };
+}
+
 function componentSource(evt: TraceEvent): string {
   const label = inlineText(evt.payload?._component_label);
   const kind = inlineText(evt.payload?._component_kind);
   const authority = inlineText(evt.payload?._component_authority);
   if (label) return `${label}${kind ? ` (${kind}${authority ? ` · ${authority}` : ''})` : ''}`;
-  return String(evt.source_id || '?');
+  const component = legacyComponentOntology(String(evt.source_id || ''));
+  return `${component.label} (${component.kind} - ${component.authority})`;
 }
 
 function renderValue(value: any) {
@@ -348,8 +373,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [payloadActionStatus, setPayloadActionStatus] = useState<Record<string, string>>({});
   const [linkedArtifactResults, setLinkedArtifactResults] = useState<Record<string, any>>({});
   const [runtimeSecurityResults, setRuntimeSecurityResults] = useState<Record<string, any>>({});
-  const [posthocType, setPosthocType] = useState<string>('fraud_confirmed');
-  const [posthocValue, setPosthocValue] = useState<string>('true');
+  const [posthocType, setPosthocType] = useState<string>('');
+  const [posthocValue, setPosthocValue] = useState<string>('unknown');
   const [posthocNote, setPosthocNote] = useState<string>('');
   const [posthocStatus, setPosthocStatus] = useState<string | null>(null);
   const [eventFilter, setEventFilter] = useState<'all' | 'turn_envelope_diff'>('all');
@@ -879,6 +904,18 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     : (Array.isArray((recommendationEventPayload as any)?.products_summary)
       ? ((recommendationEventPayload as any)?.products_summary || [])
       : []);
+  const canonicalIdentity: any = (recommendationEventPayload as any)?.canonical_identity
+    || (recommendationEventPayload as any)?.right_panel_contract?.canonical_identity
+    || null;
+  const visibleOrderedSkus = whyProducts.map((item: any) => String(item?.sku || '')).filter(Boolean);
+  const canonicalOrderedSkus = Array.isArray(canonicalIdentity?.ordered_skus)
+    ? canonicalIdentity.ordered_skus.map((sku: any) => String(sku || '')).filter(Boolean)
+    : [];
+  const canonicalIdentityVerified = Boolean(
+    canonicalIdentity
+    && String(canonicalIdentity.trace_id || '') === String(traceId || '')
+    && JSON.stringify(visibleOrderedSkus) === JSON.stringify(canonicalOrderedSkus),
+  );
 
   const normalizeSecurityPayload = (value: any) => {
     if (!value || typeof value !== 'object') return null;
@@ -1455,6 +1492,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       setPosthocStatus('No decision id available');
       return;
     }
+    if (!posthocType) {
+      setPosthocStatus('Select an outcome first');
+      return;
+    }
     try {
       const resp = await fetch(apiUrl('/api/v1/posthoc/record'), {
         method: 'POST',
@@ -1718,6 +1759,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   <div className={styles.kvRow}><span>Latency</span><span>{proposalExecutionStep?.latency_ms != null ? `${Math.round(proposalExecutionStep.latency_ms)}ms` : (ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--')}</span></div>
                   <div className={styles.kvRow}><span>Intent</span><span>{ms.intent_summary || '--'}</span></div>
                   <div className={styles.kvRow}>
+                    <span>Execution owner</span>
+                    <span>{humanizeKey(String((recommendationEventPayload as any)?.execution_mode || 'legacy_or_unrecorded'))}</span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span>Canonical slate</span>
+                    <span>{canonicalIdentity ? (canonicalIdentityVerified ? 'Verified' : 'Mismatch - review required') : 'Not recorded'}</span>
+                  </div>
+                  <div className={styles.kvRow}>
                     <span>Tier Decision</span>
                     <span>
                       {proposalExecutionStep ? 'Model proposal + platform authorization' : ms?.decision?.action ? (
@@ -1737,9 +1786,24 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   )}
                   {explain && typeof explain.summary === 'object' && (
                     <div className={styles.explainBullets}>
-                      <div className={styles.kvRow}><span>Reasoning</span><span>{explain.summary.reasoning || '?'}</span></div>
-                      <div className={styles.kvRow}><span>Risks</span><span>{explain.summary.risks ? JSON.stringify(explain.summary.risks) : '?'}</span></div>
-                      <div className={styles.kvRow}><span>Next Steps</span><span>{explain.summary.next_steps ? JSON.stringify(explain.summary.next_steps) : '?'}</span></div>
+                      <div className={styles.kvRow}>
+                        <span>Reasoning</span>
+                        <span>{proposalExecutionStep
+                          ? 'The model interpreted the request; platform gates clamped it to authorized catalog, budget, and capability facts.'
+                          : (explain.summary.reasoning || 'Not recorded')}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Risks</span>
+                        <span>{Array.isArray(explain.summary.risks) && explain.summary.risks.length > 0
+                          ? explain.summary.risks.join(', ')
+                          : 'None recorded'}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Next Steps</span>
+                        <span>{Array.isArray(explain.summary.next_steps) && explain.summary.next_steps.length > 0
+                          ? explain.summary.next_steps.join(', ')
+                          : 'No consequential action proposed'}</span>
+                      </div>
                     </div>
                   )}
 
@@ -1766,7 +1830,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     <>
                       <div className={styles.kvRow}><span>Decision</span><span>{qualityPayload.decision || '?'}</span></div>
                       <div className={styles.kvRow}><span>Reasons</span><span>{Array.isArray(qualityPayload.reasons) && qualityPayload.reasons.length ? qualityPayload.reasons.join(', ') : '?'}</span></div>
-                      <div className={styles.kvRow}><span>Risk?Adjusted Score</span><span>{qualityPayload.metrics?.risk_adjusted_score ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>Risk-adjusted Score</span><span>{qualityPayload.metrics?.risk_adjusted_score ?? 'Not recorded'}</span></div>
                       <div className={styles.kvRow}><span>Precision Target</span><span>{qualityPayload.metrics?.precision_target ?? '?'}</span></div>
                       <div className={styles.kvRow}><span>Recall Target</span><span>{qualityPayload.metrics?.recall_target ?? '?'}</span></div>
                       <div className={styles.kvRow}><span>Thresholds</span><span>{qualityPayload.thresholds ? JSON.stringify(qualityPayload.thresholds) : '?'}</span></div>
@@ -1811,9 +1875,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   {trace.recommendation && (
                     <>
                       <div className={styles.sectionTitle}>Recommendation</div>
-                      <div className={styles.kvRow}><span>Product</span><span>{trace.recommendation.product_id || '?'}</span></div>
-                      <div className={styles.kvRow}><span>Score</span><span>{trace.recommendation.score ?? '?'}</span></div>
-                      <div className={styles.kvRow}><span>Reasoning</span><span>{trace.recommendation.reasoning || '?'}</span></div>
+                      <div className={styles.kvRow}>
+                        <span>Product</span>
+                        <span>{whyProducts[0]?.title || whyProducts[0]?.name || whyProducts[0]?.sku
+                          || trace.recommendation.product_id || 'Not recorded'}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Score</span>
+                        <span>{whyProducts[0]?.score_norm ?? trace.recommendation.score ?? 'Not recorded'}</span>
+                      </div>
+                      <div className={styles.kvRow}><span>Reasoning</span><span>{trace.recommendation.reasoning || 'Not recorded'}</span></div>
                     </>
                   )}
                   <div className={styles.sectionTitle}>Turn Envelope Diff</div>
@@ -1871,9 +1942,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                       </table>
                     </>
                   )}
-                  <div className={styles.sectionTitle}>Post?hoc Outcome</div>
+                  <div className={styles.sectionTitle}>Post-hoc Outcome</div>
                   <div className={styles.posthocRow}>
                     <select value={posthocType} onChange={(e) => setPosthocType(e.target.value)}>
+                      <option value="">Select outcome...</option>
                       <option value="fraud_confirmed">Fraud Confirmed</option>
                       <option value="fraud_cleared">Fraud Cleared</option>
                       <option value="refund_reversed">Refund Reversed</option>
@@ -1893,7 +1965,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     onChange={(e) => setPosthocNote(e.target.value)}
                   />
                   <div className={styles.posthocActions}>
-                    <button className={styles.copyBtn} onClick={submitPosthoc}>Record Outcome</button>
+                    <button className={styles.copyBtn} onClick={submitPosthoc} disabled={!posthocType}>Record Outcome</button>
                     {posthocStatus && <span className={styles.copyStatus}>{posthocStatus}</span>}
                   </div>
                 </div>
@@ -2238,7 +2310,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 <div className={styles.summaryPane}>
                   {(() => {
                     const imgEvt = events.find(e => eventMatches(e, ['image_intent_routing', 'cv_analysis', 'intent_classify', 'image_context_received']));
-                    const fusionEvt = events.find(e => eventMatches(e, ['multimodal_fusion', 'synthesis_reasoning', 'proposal_build', 'right_panel_anchor_sections', 'recommendation_result']));
+                    const fusionEvt = events.find(e => eventMatches(e, 'multimodal_fusion'))
+                      || events.find(e => eventMatches(e, ['synthesis_reasoning', 'proposal_build', 'right_panel_anchor_sections', 'recommendation_result']));
                     const secEvt = events.find(e => eventMatches(e, ['image_security_scan', 'security_scan', 'image_security_posture']));
                     const hasTracePanel = Boolean(trace?.right_panel && (Array.isArray((trace as any)?.right_panel?.anchor_sections) || (trace as any)?.right_panel?.mode));
                     const hasData = imgEvt || fusionEvt || secEvt || hasTracePanel;
@@ -2397,8 +2470,23 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                               </tbody>
                             </table>
                           </>
+                        ) : typedExecutionSteps.some((step: any) => step?.latency_ms != null) ? (
+                          <table className={styles.smallTable}>
+                            <thead><tr><th>Component</th><th>Kind</th><th>Latency</th></tr></thead>
+                            <tbody>
+                              {typedExecutionSteps
+                                .filter((step: any) => step?.latency_ms != null)
+                                .map((step: any, index: number) => (
+                                  <tr key={step.id || `timing-${index}`}>
+                                    <td>{formatDisplayText(step.label, 'Unnamed component')}</td>
+                                    <td>{humanizeKey(String(step.kind || 'stage'))}</td>
+                                    <td>{`${Number(step.latency_ms).toFixed(1)}ms`}</td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
                         ) : (
-                          <div className={styles.muted}>No stage timing data recorded for this trace.</div>
+                          <div className={styles.muted}>No component timing data recorded for this trace.</div>
                         )}
                       </>
                     );
