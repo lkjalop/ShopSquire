@@ -1471,6 +1471,34 @@ def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision
     resp.set_message(advice["message"], MsgPriority.LANE_BASE)
 
 
+def _exec_inventory_summary(db, envelope: TurnEnvelope, decision: TurnDecision,
+                            resp: CoreResponse, limit: int) -> None:
+    """Explain only catalog-backed stock values already authorized by retrieval."""
+    if not resp.products:
+        resp.set_message(
+            "I could not match that stock question to an active catalog item. "
+            "Name the product or model and I will check it.",
+            MsgPriority.LANE_BASE,
+        )
+        resp.extras["inventory_source"] = "catalog_read_model"
+        resp.extras["inventory_answered"] = False
+        return
+    lines = []
+    for product in resp.products[:3]:
+        if product.stock is None:
+            lines.append(f"{product.title or product.sku}: stock is not currently verified")
+        elif product.stock > 0:
+            lines.append(f"{product.title or product.sku}: {product.stock} available")
+        else:
+            lines.append(f"{product.title or product.sku}: currently out of stock")
+    resp.extras["inventory_source"] = "catalog_read_model"
+    resp.extras["inventory_answered"] = any(item.stock is not None for item in resp.products[:3])
+    resp.set_message(
+        "Current catalog availability: " + "; ".join(lines) + ".",
+        MsgPriority.LANE_BASE,
+    )
+
+
 _EXECUTORS: Dict[str, Any] = {
     "retrieve": _exec_retrieve,
     "fit_check": _exec_fit_check,
@@ -1479,4 +1507,5 @@ _EXECUTORS: Dict[str, Any] = {
     "policy_answer": _exec_policy_answer,
     "handoff_support": _exec_handoff_support,
     "handoff_procurement": _exec_handoff_procurement,
+    "inventory_summary": _exec_inventory_summary,
 }

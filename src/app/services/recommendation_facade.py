@@ -70,6 +70,8 @@ def _lane_is_enrolled(lane: str) -> bool:
     flag = {
         "PROCUREMENT": "RECOMMEND_PROCUREMENT_ADVICE_MODE",
         "POLICY_QUESTION": "RECOMMEND_POLICY_ANSWER_MODE",
+        "SUPPORT_CLAIM": "RECOMMEND_SUPPORT_HANDOFF_MODE",
+        "INVENTORY": "RECOMMEND_INVENTORY_READ_MODE",
     }.get(lane)
     return bool(
         flag

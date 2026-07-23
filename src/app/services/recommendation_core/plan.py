@@ -35,7 +35,7 @@ _LANE_PLANS: Dict[str, List[str]] = {
     "FILTER": ["retrieve", "fit_check"],
     "COMPARE": ["retrieve", "fit_check"],
     "EXPLAIN": ["retrieve", "fit_check"],
-    "INVENTORY": ["retrieve"],
+    "INVENTORY": ["retrieve", "inventory_summary"],
     "OFF_CATALOG": ["off_catalog_honesty"],
     "POLICY_QUESTION": ["policy_answer"],
     "SUPPORT_CLAIM": ["handoff_support"],

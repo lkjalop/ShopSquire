@@ -5,5 +5,7 @@ $env:FEATURE_FLAGS_PATH = "config/feature_flags.voice-pilot.json"
 $env:VOICE_PROVIDER_TIMEOUT_SECONDS = "12"
 $env:VOICE_MAX_AUDIO_BYTES = "5242880"
 $env:VOICE_COLD_CEILING_SECONDS = "20"
+$env:RECOMMEND_SUPPORT_HANDOFF_MODE = "on"
+$env:RECOMMEND_INVENTORY_READ_MODE = "on"
 
 & "$PSScriptRoot\start_demo.ps1"

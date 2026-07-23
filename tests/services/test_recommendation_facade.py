@@ -135,6 +135,38 @@ def test_policy_answer_requires_its_own_serve_flag(monkeypatch):
     assert served.lane == "POLICY_QUESTION"
 
 
+@pytest.mark.parametrize(
+    ("lane", "flag"),
+    [
+        ("SUPPORT_CLAIM", "RECOMMEND_SUPPORT_HANDOFF_MODE"),
+        ("INVENTORY", "RECOMMEND_INVENTORY_READ_MODE"),
+    ],
+)
+def test_read_only_domain_lanes_require_independent_flags(monkeypatch, lane, flag):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+    monkeypatch.delenv(flag, raising=False)
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.core.recommend_turn",
+        _rec(lane=lane, products=0),
+    )
+    delegated = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="domain question", uid="u1",
+        tenant_id="t1", budget_min=None, budget_max=None, trace_id="tr-domain-1",
+        with_trace=_wt, record_failure=lambda *a, **k: None,
+    )
+    assert delegated.status == "delegate"
+    assert delegated.reason == "lane_not_enrolled"
+
+    monkeypatch.setenv(flag, "on")
+    served = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="domain question", uid="u1",
+        tenant_id="t1", budget_min=None, budget_max=None, trace_id="tr-domain-2",
+        with_trace=_wt, record_failure=lambda *a, **k: None,
+    )
+    assert served.status == "served"
+    assert served.lane == lane
+
+
 def test_typed_outcome_distinguishes_served_delegate_and_blocked(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "off")
     delegated = F.dispatch_recommendation_core_typed(

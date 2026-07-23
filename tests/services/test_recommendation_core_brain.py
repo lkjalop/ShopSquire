@@ -428,6 +428,14 @@ def test_procurement_plan_retrieves_before_advisory_handoff():
     ]
 
 
+def test_inventory_plan_retrieves_then_explains_authoritative_stock():
+    decision = TurnDecision(
+        lane="INVENTORY", node_handle="el-6-6", requirements={},
+    )
+
+    assert derive_plan(decision).steps == ["retrieve", "inventory_summary"]
+
+
 def test_procurement_turn_returns_authorized_slate_without_executing(db):
     payload = {
         "lane": "PROCUREMENT", "handle": "el-6-6", "requirements": {},
