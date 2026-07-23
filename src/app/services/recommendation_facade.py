@@ -19,9 +19,10 @@ production boundary. This module is that boundary, built right:
     → canary:N : stable per-user bucketing → N% to core, rest to legacy.
     → primary  : core serves every CANARY-eligible lane.
   lane gate (finding #6)
-    → only SEARCH/FILTER/COMPARE/EXPLAIN/OFF_CATALOG are core-served; cart, claims, policy,
-      inventory, procurement, and image turns fall through to legacy, which handles them
-      properly. (Cost: a non-core lane under canary/primary runs the router then falls
+    → SEARCH/FILTER/COMPARE/EXPLAIN/OFF_CATALOG are canary-served. Independently gated,
+      read-only PROCUREMENT advice and approved POLICY answers can be enrolled without
+      widening the search canary. Cart, claims, inventory, and rollback-image turns still
+      delegate. (Cost: a non-core lane under canary/primary runs the router then falls
       through — double work on a small traffic slice; safety over latency, documented.)
   postflight
     → the caller's with_trace() runs sanitization + REAL trace persistence (the persisted
@@ -46,13 +47,9 @@ from src.app.services.recommendation_core.envelope import TurnEnvelope
 
 logger = logging.getLogger("shopsquire.recommendation_facade")
 
-# the lanes the core is trusted to serve live; everything else → legacy (finding #6).
-# PROCUREMENT is DELIBERATELY excluded (review-10 P1b decision): the V2 lane is ADVISE-ONLY today
-# (bulk economics + a 'draft a quote for review' offer, nothing sent) while legacy owns the mature
-# RFQ machinery (PR→CASE→PO, draft-quote, human-gated fanout). Serving V2 PROCUREMENT would REGRESS
-# the buy-side, so it falls through to legacy until a V2-advises→legacy-executes bridge exists. The
-# smart bulk-economics moment demos via the core-direct path, not the canary. Likewise CART_MUTATE
-# has its OWN ladder (RECOMMEND_CART_SERVE) and INVENTORY/SUPPORT/POLICY/image stay legacy.
+# Search lanes share one canary ladder. Other safe read-only lanes require their own switches;
+# execution authority stays in the mature domain routers. This prevents a policy/procurement
+# extraction from silently broadening the recommendation rollout.
 CANARY_LANES = frozenset({"SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG"})
 _SHADOW_QUEUE_KEY = "shadow:core:queue"          # legacy list (fallback + migration drain)
 _SHADOW_STREAM_KEY = "shadow:core:stream"        # R10.4b: the durable path
@@ -63,17 +60,20 @@ FacadeStatus = Literal["served", "delegate", "blocked", "degraded", "error"]
 
 
 def _lane_is_enrolled(lane: str) -> bool:
-    """Keep procurement promotion independent from the search canary ladder.
+    """Keep read-only lane promotion independent from the search canary ladder.
 
-    This switch authorizes only the V2 recommendation/advice response. Fulfillment cases,
-    supplier drafts, approvals, and sends remain owned by the existing fulfillment domain.
+    These switches authorize only bounded responses. Consequential execution remains owned by
+    the existing fulfillment/support domain routers.
     """
     if lane in CANARY_LANES:
         return True
-    return (
-        lane == "PROCUREMENT"
-        and os.getenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", "off").strip().lower()
-        in {"1", "true", "yes", "on"}
+    flag = {
+        "PROCUREMENT": "RECOMMEND_PROCUREMENT_ADVICE_MODE",
+        "POLICY_QUESTION": "RECOMMEND_POLICY_ANSWER_MODE",
+    }.get(lane)
+    return bool(
+        flag
+        and os.getenv(flag, "off").strip().lower() in {"1", "true", "yes", "on"}
     )
 
 

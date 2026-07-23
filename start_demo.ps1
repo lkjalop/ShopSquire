@@ -54,6 +54,7 @@ $env:CV_WARMUP_ON_START                = "0"
 # and cart mutations remain confirmation-gated because auto-apply is intentionally disabled.
 $env:RECOMMEND_CORE_MODE               = "primary"
 $env:RECOMMEND_PROCUREMENT_ADVICE_MODE = "on"
+$env:RECOMMEND_POLICY_ANSWER_MODE      = "on" # approved StoreProfile FAQ only; never model-authored terms
 $env:ROUTER_PREWARM_ON_START           = "1"
 $env:ROUTER_PREWARM_BLOCKING           = "1"
 $env:ROUTER_PREWARM_REQUIRED           = "1"

@@ -141,6 +141,31 @@ def test_bulk_economics_never_prices_an_unknown_candidate_as_capable(db):
     assert response.extras["bulk"]["verdict"] == "over_budget"
 
 
+def test_policy_lane_uses_approved_store_profile_answer(db, monkeypatch):
+    from src.app.services.recommendation_core.core import recommend_turn
+    from src.app.services.taxonomy_registry import add_sold_node
+    import json
+
+    add_sold_node(db, node_handle="el-6-6")
+    monkeypatch.setattr(
+        "src.app.services.answer_quality.policy_faq_answer",
+        lambda _query: "Approved returns policy from the tenant store profile.",
+    )
+    response = recommend_turn(
+        db,
+        _env(query="What is your returns policy?"),
+        llm_fn=lambda _p, _t: json.dumps({
+            "lane": "POLICY_QUESTION", "handle": None, "request_scope": "service_or_place",
+            "use_cases": [], "confidence": 0.95,
+        }),
+    )
+
+    assert response.lane == "POLICY_QUESTION"
+    assert response.message == "Approved returns policy from the tenant store profile."
+    assert response.extras["policy_source"] == "store_profile"
+    assert response.extras["policy_answered"] is True
+
+
 def test_variant_attributes_specs_win_title_backfills():
     v = VariantView(sku="X", title="Something 240Hz 17in", specs={"refresh_hz": 165})
     attrs = variant_attributes(v)

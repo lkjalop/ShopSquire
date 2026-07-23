@@ -1433,10 +1433,21 @@ def _exec_clarify(db, envelope: TurnEnvelope, decision: TurnDecision,
 
 def _exec_policy_answer(db, envelope: TurnEnvelope, decision: TurnDecision,
                         resp: CoreResponse, limit: int) -> None:
-    # capability honesty rides the registry until the policy lane lands in a later step
+    # Policy prose is merchant-approved StoreProfile data, never model-authored terms.
+    # A missing answer remains explicit so the core cannot invent a return/payment promise.
+    from src.app.services.answer_quality import policy_faq_answer
+
     resp.extras["policy_topic"] = envelope.query[:120]
-    resp.set_message(("Good question — our policy details are being routed to the right lane; "
-                      "here's what I can confirm from the store profile."), MsgPriority.LANE_BASE)
+    approved = policy_faq_answer(envelope.query)
+    resp.extras["policy_source"] = "store_profile"
+    resp.extras["policy_answered"] = bool(approved)
+    resp.set_message(
+        approved or (
+            "That policy detail is not in the store's approved answers yet. "
+            "A teammate must confirm it; I won't invent the terms."
+        ),
+        MsgPriority.LANE_BASE,
+    )
 
 
 def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
