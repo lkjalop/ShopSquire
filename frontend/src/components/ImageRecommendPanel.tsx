@@ -130,7 +130,6 @@ export interface Props {
   canonicalProducts?: ProductCard[] | null;
   canonicalSummary?: string;
   /** Temporary rollback switch. Production callers must use the canonical shared turn. */
-  allowLegacySuggest?: boolean;
 }
 
 /* ---------- constants ---------- */
@@ -757,7 +756,10 @@ function buildLocalTimeoutFallback(
 }
 
 /* ---------- component ---------- */
-export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd, canonicalProducts, canonicalSummary, allowLegacySuggest = false }: Props) {
+const LEGACY_IMAGE_SUGGEST_ROLLBACK =
+  String(import.meta.env.VITE_ENABLE_LEGACY_IMAGE_SUGGEST_ROLLBACK || '').trim() === '1';
+
+export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd, canonicalProducts, canonicalSummary }: Props) {
   const [groups, setGroups] = useState<ImageGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -862,7 +864,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
       }
       return;
     }
-    if (!allowLegacySuggest) {
+    if (!LEGACY_IMAGE_SUGGEST_ROLLBACK) {
       ++buildSeqRef.current;
       setGroups([]);
       setLoading(false);
@@ -1235,14 +1237,14 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
 
     setGroups(built);
     setLoading(false);
-  }, [allowLegacySuggest, canonicalProducts, canonicalSummary, imageContexts, userQuery, sessionSuspiciousCount,
+  }, [canonicalProducts, canonicalSummary, imageContexts, userQuery, sessionSuspiciousCount,
       onTraceId, runBrandFallbackChain, traceId]);
 
   const handleWiden = useCallback(async (groupIdx: number, widenAmount: number) => {
     const group = groups[groupIdx];
     if (!group?.widenState || group.offDomain) return;
     const newMax = (group.widenState.budgetMax || 1500) + widenAmount;
-    if (!allowLegacySuggest) {
+    if (!LEGACY_IMAGE_SUGGEST_ROLLBACK) {
       onClarify?.(`${stripBudgetHints(userQuery)} increase the maximum budget to $${newMax}`.trim());
       return;
     }
@@ -1264,12 +1266,12 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
       });
       if (result.traceId) onTraceId?.(result.traceId);
     } catch { /* ignore */ }
-  }, [allowLegacySuggest, groups, userQuery, onClarify, onTraceId]);
+  }, [groups, userQuery, onClarify, onTraceId]);
 
   const handleShowNearest = useCallback(async (groupIdx: number) => {
     const group = groups[groupIdx];
     if (!group || group.offDomain) return;
-    if (!allowLegacySuggest) {
+    if (!LEGACY_IMAGE_SUGGEST_ROLLBACK) {
       onClarify?.(buildNearestQuery(userQuery, group.friendlyBrand));
       return;
     }
@@ -1295,7 +1297,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
       });
       if (result.traceId) onTraceId?.(result.traceId);
     } catch { /* ignore */ }
-  }, [allowLegacySuggest, groups, userQuery, onClarify, onTraceId]);
+  }, [groups, userQuery, onClarify, onTraceId]);
 
   useEffect(() => {
     if (imageContexts.length > 0 || userQuery) {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 describe('Image recommendation authority boundary', () => {
-  it('has no production caller that enables the legacy suggest rollback', () => {
+  it('keeps the legacy suggest rollback out of the component API', () => {
     const srcRoot = path.resolve(__dirname, '..', '..');
     const files: string[] = [];
 
@@ -19,5 +19,9 @@ describe('Image recommendation authority boundary', () => {
       /allowLegacySuggest\s*=\s*\{?\s*true\s*\}?/.test(fs.readFileSync(file, 'utf8')),
     );
     expect(offenders).toEqual([]);
+
+    const panel = fs.readFileSync(path.resolve(__dirname, '..', 'ImageRecommendPanel.tsx'), 'utf8');
+    expect(panel).not.toMatch(/allowLegacySuggest\??:/);
+    expect(panel).toContain('VITE_ENABLE_LEGACY_IMAGE_SUGGEST_ROLLBACK');
   });
 });
