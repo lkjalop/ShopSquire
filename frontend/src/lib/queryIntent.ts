@@ -18,10 +18,10 @@ export function detectPanelMode(query: string): RightPanelMode {
   if (/compare|vs|versus|difference|which is better|pros.?cons|side.?by.?side|head.?to.?head/.test(q)) return 'compare';
   // Detailed/specs triggers
   if (/specs|specification|details|detailed|features|info|information|describe|tell me about|breakdown/.test(q)) return 'list';
-  // CV/return triggers (when images attached - handled separately)
-  if (/return|complaint|damaged|broken|defective|refund|issue|problem/.test(q)) return 'cv';
   // FAQ triggers
   if (/faq|how do i|what is|shipping|warranty|policy|support/.test(q) && !shoppingIntent) return 'faq';
+  // CV/return triggers (when images attached - handled separately)
+  if (/return|complaint|damaged|broken|defective|refund|issue|problem/.test(q)) return 'cv';
   // Product search (default when products mentioned)
   if (shoppingIntent) return 'grid';
   return 'none';
@@ -68,6 +68,7 @@ export function shouldRouteToComplaint(opts: {
 }): boolean {
   if (opts.hasImages || opts.explicitVisualIntent || opts.hasImageContext) return false;
   if (opts.damageSignal) return true;  // real post-purchase issue → complaint, even with product words
-  const weak = opts.mode === 'cv' || opts.complaintIntent || opts.explicitComplaintIntent;
-  return weak && !opts.shoppingIntent;  // a weak complaint word must not hijack a shopping query
+  // `explicitComplaintIntent` is intentionally not authoritative here: it is a broad
+  // image-context hint that also matches benign policy questions such as "return policy".
+  return opts.complaintIntent && !opts.shoppingIntent;
 }

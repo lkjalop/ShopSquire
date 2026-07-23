@@ -103,7 +103,9 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         page.get_by_role("button", name="Procurement", exact=False).click()
         page.get_by_text("Drafted supplier RFQ", exact=False).first.wait_for(timeout=30_000)
         modal = page.get_by_test_id("decision-trace-modal")
-        page.wait_for_timeout(2_000)
+        # The RFQ projection and the bitemporal case journey are fetched independently.
+        # Wait for both instead of relying on a fixed delay that races a healthy backend.
+        modal.get_by_text("state transitions", exact=False).wait_for(timeout=20_000)
         after = modal.inner_text()
         assert modal.get_attribute("data-trace-id") == original_trace_id
         revised_shortfall_match = re.search(r"(\d+) supplier-shortfall", after)

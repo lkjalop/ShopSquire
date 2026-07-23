@@ -2082,6 +2082,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const intent = (Object.keys(intentBase).length > 0 || Object.keys(decisionIntent).length > 0)
                       ? { ...intentBase, ...decisionIntent }
                       : null;
+                    const intentLane = intent?.lane || intent?.intent || null;
                     const hasAny = intent || abandonEvts.length > 0 || outcomeEvts.length > 0;
                     if (!hasAny) return (
                       <div className={styles.empty}>
@@ -2101,6 +2102,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                           <>
                             <div className={styles.sectionTitle}>Shopper Intent Profile</div>
                             <div className={styles.intentBadgeRow}>
+                              {intentLane && (
+                                <span className={styles.intentBadge} style={{ background: '#334155' }}>
+                                  Lane: {String(intentLane).replace(/_/g, ' ').toLowerCase()}
+                                </span>
+                              )}
                               {intent.persona && (
                                 <span className={styles.intentBadge} style={{ background: personaColor }}>
                                   Persona: {intent.persona}

@@ -212,8 +212,13 @@ def test_typed_default_finalizer_persists_canonical_trace(monkeypatch):
     assert outcome.payload["decision_trace_id"] == "tr-final"
     assert outcome.payload["_trace_recommendation_persisted"] is True
     assert events[0]["trace_id"] == "tr-final"
+    assert events[0]["source_type"] == "stage"
+    assert events[0]["payload"]["intent_analysis"]["lane"] == "FILTER"
+    assert events[0]["payload"]["execution_steps"]
     assert decisions[0]["decision_id"] == "tr-final"
     assert decisions[0]["tenant_id"] == "t1"
+    assert decisions[0]["proposed_action"]["intent_analysis"]["lane"] == "FILTER"
+    assert decisions[0]["retrieved_context"]["execution_steps"]
 
 
 def test_typed_facade_records_quota_once_for_served_response(monkeypatch):

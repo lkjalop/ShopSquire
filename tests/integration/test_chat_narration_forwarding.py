@@ -95,4 +95,8 @@ def test_chat_projects_authoritative_facade_lane(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["turn_intent"] == "POLICY_QUESTION"
+    body = response.json()
+    assert body["turn_intent"] == "POLICY_QUESTION"
+    assert "returns" in body["assistant_message"].lower()
+    assert body["next_questions"] == []
+    assert body["needs_disambiguation"] is False

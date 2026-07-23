@@ -164,6 +164,10 @@ def test_policy_lane_uses_approved_store_profile_answer(db, monkeypatch):
     assert response.message == "Approved returns policy from the tenant store profile."
     assert response.extras["policy_source"] == "store_profile"
     assert response.extras["policy_answered"] is True
+    from src.app.services.recommendation_core.legacy_adapter import to_legacy
+    payload = to_legacy(response)
+    assert payload["policy_source"] == "store_profile"
+    assert payload["policy_answered"] is True
 
 
 def test_variant_attributes_specs_win_title_backfills():

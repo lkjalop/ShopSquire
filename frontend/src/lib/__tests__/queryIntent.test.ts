@@ -26,6 +26,14 @@ describe('shouldRouteToComplaint (chat-firing misroute guard)', () => {
   it('routes a non-shopping return request to complaint', () => {
     expect(shouldRouteToComplaint({ ...base, complaintIntent: true })).toBe(true);
   });
+  it('does not let a broad return-word hint hijack a policy question', () => {
+    expect(shouldRouteToComplaint({
+      ...base,
+      mode: 'cv',
+      explicitComplaintIntent: true,
+      complaintIntent: false,
+    })).toBe(false);
+  });
   it('never routes image/visual turns here', () => {
     expect(shouldRouteToComplaint({ ...base, damageSignal: true, hasImages: true })).toBe(false);
     expect(shouldRouteToComplaint({ ...base, complaintIntent: true, explicitVisualIntent: true })).toBe(false);
@@ -64,6 +72,9 @@ describe('detectPanelMode', () => {
   it('prefers shopping grid over faq when both could match', () => {
     // "warranty" is an faq trigger but a shopping query keeps grid
     expect(detectPanelMode('cheap laptop with good warranty')).toBe('grid');
+  });
+  it('uses the faq panel for a returns-policy question', () => {
+    expect(detectPanelMode('what is your returns policy')).toBe('faq');
   });
 });
 

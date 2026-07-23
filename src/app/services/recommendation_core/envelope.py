@@ -13,9 +13,13 @@ grounding status so degradation is explicit, never implied.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+
+logger = logging.getLogger("shopsquire.recommendation_core.envelope")
 
 LANES = ("SEARCH", "FILTER", "COMPARE", "EXPLAIN", "SUPPORT_CLAIM", "CART_MUTATE",
          "PROCUREMENT", "OFF_CATALOG", "POLICY_QUESTION", "INVENTORY")
@@ -122,9 +126,12 @@ class TurnEnvelope:
                 parsed = parse_budget(query)
                 if parsed is not None:
                     budget_min, budget_max = parsed.budget_min, parsed.budget_max
-            except Exception:
+            except Exception as exc:
                 # Input normalization is best-effort; no budget remains an honest core state.
-                pass
+                logger.debug(
+                    "Budget grammar normalization skipped: %s",
+                    repr(exc)[:120],
+                )
         normalized_hint = str(intent_hint or "").strip().upper()
         if normalized_hint not in LANES:
             normalized_hint = None

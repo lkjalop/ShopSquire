@@ -181,8 +181,11 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                     requested_product_node=prior.handle,
                     subject_from_session=True,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(
+                "Prior subject continuation skipped: %s",
+                repr(exc)[:120],
+            )
     # The HTTP contract may not pre-parse a textual budget.  The model maps its value and
     # scope; deterministic arithmetic turns that bounded proposal into the per-unit ceiling
     # used by evidence retrieval.  A total budget for N units is never treated as per-unit.

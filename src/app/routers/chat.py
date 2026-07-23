@@ -2509,6 +2509,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     except Exception:
         pass
     next_questions = data.get("next_questions") or []
+    # A completed policy answer is informational, not a failed product search. Legacy chat
+    # post-processing used to append budget/performance refinements solely because the slate
+    # was empty, contradicting the authoritative facade lane.
+    if turn_intent == "POLICY_QUESTION":
+        next_questions = []
     # Grounding ladder: guarantee the SPECIFIC identity clarification ("Is this a
     # Razer?") leads when the ladder couldn't confirm the product — robust against
     # the NQE cap/transform ordering that can drop it on some paths.
@@ -2524,7 +2529,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         pass
     if turn_intent in ("EXPLAIN", "SUPPORT_CLAIM"):
         next_questions = [x for x in next_questions if isinstance(x, dict) and not _is_budget_question(x)]
-    if not next_questions and not products and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM"):
+    if not next_questions and not products and turn_intent not in (
+        "EXPLAIN", "SUPPORT_CLAIM", "POLICY_QUESTION",
+    ):
         # Fallback follow-ups when no candidates are found but backend did not emit NQE prompts.
         next_questions = [
             {
@@ -2859,7 +2866,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # P0 multi-intent plan (present only on a genuine mixed turn; None otherwise). Carries the scoped
         # new-line picks + adversarial verdict + needs_confirmation so the UI confirms qty/budget, not guesses.
         "multi_intent": multi_intent,
-        "needs_disambiguation": bool(data.get("needs_disambiguation") or (not products and next_questions)),
+        "needs_disambiguation": False if turn_intent == "POLICY_QUESTION" else bool(
+            data.get("needs_disambiguation") or (not products and next_questions)
+        ),
         "nqe_selection_applied": data.get("nqe_selection_applied") or {},
         "confirmed_slots": _extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else {}),
         "llm_model": data.get("llm_model"),
