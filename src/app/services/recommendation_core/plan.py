@@ -40,7 +40,10 @@ _LANE_PLANS: Dict[str, List[str]] = {
     "POLICY_QUESTION": ["policy_answer"],
     "SUPPORT_CLAIM": ["handoff_support"],
     "CART_MUTATE": ["retrieve"],           # cart rail lives on chat; here it degrades to search
-    "PROCUREMENT": ["handoff_procurement"],
+    # Procurement recommendation is still read-only, but it must produce the same authorized
+    # catalog slate as a search before projecting bulk/sourcing advice. Consequential execution
+    # remains in fulfillment_cases behind its existing confirmation and send gates.
+    "PROCUREMENT": ["retrieve", "fit_check", "handoff_procurement"],
 }
 
 

@@ -379,6 +379,43 @@ def test_procurement_accepts_registry_handle_from_category_slot(db):
     assert decision.source == "model+taxonomy_handle"
 
 
+def test_procurement_plan_retrieves_before_advisory_handoff():
+    decision = TurnDecision(
+        lane="PROCUREMENT", node_handle="el-6-6", requirements={}, quantity=20,
+    )
+
+    assert derive_plan(decision).steps == ["retrieve", "handoff_procurement"]
+
+    with_requirements = dataclasses.replace(
+        decision, requirements={"ram_gb": ((">=", 16.0),)},
+    )
+    assert derive_plan(with_requirements).steps == [
+        "retrieve", "fit_check", "handoff_procurement",
+    ]
+
+
+def test_procurement_turn_returns_authorized_slate_without_executing(db):
+    payload = {
+        "lane": "PROCUREMENT", "handle": "el-6-6", "requirements": {},
+        "quantity": 20, "total_budget": 41000, "budget_scope": "total",
+        "subject_action": "switch", "confidence": 0.9,
+    }
+    envelope = dataclasses.replace(
+        _env("quote 20 laptops with an AUD 41000 total budget"),
+        currency="USD", budget_max_cents=4_100_000,
+    )
+
+    response = recommend_turn(db, envelope, llm_fn=lambda _p, _t: json.dumps(payload))
+
+    assert response.lane == "PROCUREMENT"
+    assert response.products
+    assert response.extras["requested_quantity"] == 20
+    assert response.extras["execution_authority"] == "fulfillment_cases"
+    assert response.extras["external_send_gate"] == "human_approval"
+    assert response.extras["plan"]["steps"] == ["retrieve", "handoff_procurement"]
+    assert all((product.price_cents or 0) <= 205_000 for product in response.products)
+
+
 def test_nothing_from_brand_is_a_continuation_not_subject_switch(db):
     raw = json.dumps({
         "lane": "SEARCH", "handle": "el-6-6", "wanted_category": None,

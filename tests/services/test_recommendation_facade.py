@@ -86,6 +86,31 @@ def test_material_clarification_can_cross_delegated_lane_without_execution(monke
     assert outcome.payload["next_questions"][0]["reason"] == "missing_material_budget_scope"
 
 
+def test_procurement_advice_requires_its_own_serve_flag(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+    monkeypatch.delenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", raising=False)
+    monkeypatch.setattr("src.app.services.recommendation_core.core.recommend_turn",
+                        _rec(lane="PROCUREMENT"))
+
+    delegated = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="quote 20 laptops", uid="u1",
+        tenant_id="t1", budget_min=None, budget_max=41000, trace_id="tr1",
+        with_trace=_wt, record_failure=lambda *a, **k: None,
+    )
+    assert delegated.status == "delegate"
+    assert delegated.reason == "lane_not_enrolled"
+
+    monkeypatch.setenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", "on")
+    served = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="quote 20 laptops", uid="u1",
+        tenant_id="t1", budget_min=None, budget_max=41000, trace_id="tr2",
+        with_trace=_wt, record_failure=lambda *a, **k: None,
+    )
+    assert served.status == "served"
+    assert served.lane == "PROCUREMENT"
+    assert served.payload["products"]
+
+
 def test_typed_outcome_distinguishes_served_delegate_and_blocked(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "off")
     delegated = F.dispatch_recommendation_core_typed(

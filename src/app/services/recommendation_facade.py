@@ -62,6 +62,21 @@ _SHADOW_STREAM_MAX = 10000
 FacadeStatus = Literal["served", "delegate", "blocked", "degraded", "error"]
 
 
+def _lane_is_enrolled(lane: str) -> bool:
+    """Keep procurement promotion independent from the search canary ladder.
+
+    This switch authorizes only the V2 recommendation/advice response. Fulfillment cases,
+    supplier drafts, approvals, and sends remain owned by the existing fulfillment domain.
+    """
+    if lane in CANARY_LANES:
+        return True
+    return (
+        lane == "PROCUREMENT"
+        and os.getenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", "off").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+
 @dataclass(frozen=True)
 class FacadeOutcome:
     """Typed dispatch result for callers that must distinguish why V2 did not serve."""
@@ -707,12 +722,12 @@ def dispatch_recommendation_core_typed(
             str(item.get("reason") or "").startswith("missing_material_")
             for item in (core.clarify or []) if isinstance(item, dict)
         )
-        if core.lane not in CANARY_LANES and material_clarification and not core.products:
+        if not _lane_is_enrolled(core.lane) and material_clarification and not core.products:
             payload = with_trace(to_legacy(core), trace_id)
             return outcome("served", payload=payload, lane="CLARIFY")
 
         # ── LANE GATE (finding #6): non-core lanes fall through to legacy ───────
-        if core.lane not in CANARY_LANES:
+        if not _lane_is_enrolled(core.lane):
             logger.debug("core lane %s not canary-eligible — falling through to legacy", core.lane)
             _fallback_metric(f"lane:{core.lane}")
             return outcome("delegate", reason="lane_not_enrolled", lane=core.lane)
