@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { apiUrl, safeJson } from '../lib/api';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 import styles from './ImageRecommendPanel.module.css';
 
@@ -133,10 +132,7 @@ export interface Props {
 }
 
 /* ---------- constants ---------- */
-const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
-const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
 const WIDEN_STEPS = [200, 400];
-const RECOMMEND_TIMEOUT_MS = 9000;
 
 const LOCAL_FAST_FALLBACK_PRODUCTS: ProductCard[] = [
   {
@@ -645,88 +641,12 @@ function conciseLaneReason(products: ProductCard[], query: string, brand: string
 }
 
 async function fetchSuggest(
-  query: string,
-  ctx: ImageAnalysisContext | null,
-  budgetMax?: number,
-  budgetMin?: number,
+  _query: string,
+  _ctx: ImageAnalysisContext | null,
+  _budgetMax?: number,
+  _budgetMin?: number,
 ): Promise<SuggestResult> {
-  const params = new URLSearchParams({ uid: DEFAULT_UID, query: query || 'show me laptops' });
-  if (ctx) {
-    const labels = [...(ctx.labels || [])];
-    const srcName = String(ctx.source_name || '').toLowerCase();
-    const triageIntent = String(ctx.intent_routing?.intent || '').trim();
-    const damageScore = typeof ctx.damage_score === 'number' ? ctx.damage_score : 0;
-    if (srcName) labels.push(srcName.replace(/\.[a-z0-9]+$/i, ''));
-    params.set('image_labels', labels.join(','));
-    params.set('image_ocr_text', (ctx.ocr_text || '').slice(0, 500));
-    if (triageIntent) params.set('image_intent', triageIntent);
-    // Strip non-primitive signal values (e.g. steg_details.decoded_content) to avoid URL overflow (Bad Request)
-    const _rawSigs = ctx.cv_signals || {};
-    const _safeSigs: Record<string, any> = {};
-    for (const [k, v] of Object.entries(_rawSigs)) {
-      if (v !== null && v !== undefined && typeof v !== 'object' && typeof v !== 'function') {
-        _safeSigs[k] = v;
-      }
-    }
-    if (triageIntent === 'cv_triage') _safeSigs.intent_cv_triage = true;
-    if (damageScore > 0) _safeSigs.damage_score = damageScore;
-    params.set('image_cv_signals', JSON.stringify(_safeSigs));
-  }
-  if (budgetMax) params.set('budget_max', String(budgetMax));
-  if (budgetMin) params.set('budget_min', String(budgetMin));
-  params.set('copywriting_enabled', 'false');
-  params.set('fast_path', 'true');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), RECOMMEND_TIMEOUT_MS);
-
-  try {
-    const resp = await fetch(apiUrl(`/api/v1/recommend/suggest?${params.toString()}`), {
-      credentials: 'include',
-      headers: {
-        ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
-        'x-skip-observer': '1',
-      },
-      signal: controller.signal,
-    });
-    const data = await safeJson(resp);
-    if (!resp.ok || !data) throw new Error(data?.detail || `recommend_failed (${resp.status})`);
-    persistOperatorMetrics(
-      data?.timing_breakdown,
-      data.decision_trace_id || data.trace_id || data.decision_id || null,
-      ctx ? 'visual_search' : 'text_fallback',
-    );
-    return {
-      products: parseProducts(data),
-      summary: data.assistant_message || '',
-      nextQuestions: Array.isArray(data.next_questions) ? data.next_questions : [],
-      traceId: data.decision_trace_id || data.trace_id || data.decision_id || null,
-      rightPanel: data?.right_panel || null,
-      securityMatrix: data?.security_matrix || data?.right_panel?.security_matrix || null,
-      safeImageHints: data?.safe_image_hints || null,
-      rankedProducts: Array.isArray(data?.ranked_products) ? data.ranked_products : [],
-      imageSecurity: data?.image_security || null,
-      raw: data,
-      offDomain: Boolean(data?.catalog_relevance?.off_domain),
-      lowSupport: Boolean(data?.catalog_relevance?.low_support),
-      domainBadge: data?.catalog_relevance?.off_domain
-        ? (data?.catalog_relevance?.low_support ? 'Low catalog support' : 'Off-domain image')
-        : null,
-      fillBadge: data?.image_lane_fill?.applied
-        ? `Filled to 3 using in-catalog ${String(data?.image_lane_fill?.image_category || 'catalog')} alternatives`
-        : null,
-      linkedArtifactSummary: typeof data?.linked_artifact?.linked_reason_summary === 'string' ? data.linked_artifact.linked_reason_summary : null,
-      linkedArtifactPolicyAction: typeof data?.linked_artifact?.linked_policy_action === 'string' ? data.linked_artifact.linked_policy_action : null,
-      linkedArtifactVerdictLabel: typeof data?.linked_artifact?.linked_verdict_label === 'string' ? data.linked_artifact.linked_verdict_label : null,
-      linkedArtifactConfidenceBand: typeof data?.linked_artifact?.linked_confidence_band === 'string' ? data.linked_artifact.linked_confidence_band : null,
-    };
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      throw new Error(`recommend_timeout_${RECOMMEND_TIMEOUT_MS}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
+  throw new Error('independent_image_recommendation_removed');
 }
 
 function buildLocalTimeoutFallback(
@@ -756,9 +676,6 @@ function buildLocalTimeoutFallback(
 }
 
 /* ---------- component ---------- */
-const LEGACY_IMAGE_SUGGEST_ROLLBACK =
-  String(import.meta.env.VITE_ENABLE_LEGACY_IMAGE_SUGGEST_ROLLBACK || '').trim() === '1';
-
 export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd, canonicalProducts, canonicalSummary }: Props) {
   const [groups, setGroups] = useState<ImageGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -864,7 +781,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
       }
       return;
     }
-    if (!LEGACY_IMAGE_SUGGEST_ROLLBACK) {
+    {
       ++buildSeqRef.current;
       setGroups([]);
       setLoading(false);
@@ -1244,7 +1161,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     const group = groups[groupIdx];
     if (!group?.widenState || group.offDomain) return;
     const newMax = (group.widenState.budgetMax || 1500) + widenAmount;
-    if (!LEGACY_IMAGE_SUGGEST_ROLLBACK) {
+    {
       onClarify?.(`${stripBudgetHints(userQuery)} increase the maximum budget to $${newMax}`.trim());
       return;
     }
@@ -1271,7 +1188,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
   const handleShowNearest = useCallback(async (groupIdx: number) => {
     const group = groups[groupIdx];
     if (!group || group.offDomain) return;
-    if (!LEGACY_IMAGE_SUGGEST_ROLLBACK) {
+    {
       onClarify?.(buildNearestQuery(userQuery, group.friendlyBrand));
       return;
     }
