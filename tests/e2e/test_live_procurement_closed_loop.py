@@ -66,6 +66,25 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         assert initial_shortfall_match, before
         initial_shortfall = int(initial_shortfall_match.group(1))
 
+        # Every trace projection must remain navigable on the same immutable trace. Individual
+        # tabs may truthfully report no activity, but none may crash, detach, or replace identity.
+        trace_tabs = [
+            "Events", "Execution", "Summary", "Why Recommended", "Intent", "Multimodal",
+            "Complexity", "Memory", "Security Matrix", "Procurement", "Audit Trail", "Raw",
+        ]
+        evidence_tab = modal.get_by_role("button", name=re.compile(r"^Evidence\b"))
+        if evidence_tab.count():
+            trace_tabs.insert(-2, "Evidence")
+        for tab_name in trace_tabs:
+            # Procurement and Evidence append a status badge/count to their accessible name.
+            # Reacquire the modal because asynchronous trace projections can refresh its DOM.
+            modal = page.get_by_test_id("decision-trace-modal")
+            modal.get_by_role("button", name=re.compile(rf"^{re.escape(tab_name)}\b")).click()
+            page.wait_for_timeout(300)
+            assert modal.get_attribute("data-trace-id") == original_trace_id
+            assert "Failed to load" not in modal.inner_text()
+        modal.get_by_role("button", name=re.compile(r"^Procurement\b")).click()
+
         page.locator('button[title="Close"]').last.click()
         composer.fill("actually make it 18")
         composer.press("Enter")
