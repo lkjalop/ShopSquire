@@ -39,7 +39,7 @@ def test_voice_asr_accepts_typed_json_and_reports_provenance(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "src.app.routers.voice.WhisperLocalASRAdapter.transcribe_chunk",
+        "src.app.routers.voice.WhisperCloudASRAdapter.transcribe_chunk",
         fake_transcribe,
     )
     audio = base64.b64encode(b"valid voice bytes" * 4).decode("ascii")

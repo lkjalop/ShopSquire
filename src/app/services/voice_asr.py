@@ -26,10 +26,10 @@ class ASRAdapter:
         raise NotImplementedError
 
 
-class WhisperLocalASRAdapter(ASRAdapter):
-    """Bounded Whisper-compatible ASR adapter."""
+class WhisperCloudASRAdapter(ASRAdapter):
+    """Bounded hosted Whisper-compatible ASR adapter."""
 
-    name: str = "whisper-local"
+    name: str = "whisper-cloud"
 
     def __init__(self) -> None:
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
@@ -110,6 +110,11 @@ class WhisperLocalASRAdapter(ASRAdapter):
         # Never fabricate a transcript. The browser transcript remains
         # authoritative when the optional correction provider is unavailable.
         return cloud
+
+
+# Temporary import compatibility for callers outside this repository. Remove
+# after the voice pilot rollback period.
+WhisperLocalASRAdapter = WhisperCloudASRAdapter
 
 
 def decode_base64_audio(b64: str, *, max_bytes: Optional[int] = None) -> bytes:

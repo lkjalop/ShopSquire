@@ -21,7 +21,7 @@ from src.app.security.auth import (
     require_role,
 )
 from src.app.services.decision_log import log_trace_event
-from src.app.services.voice_asr import WhisperLocalASRAdapter, decode_base64_audio
+from src.app.services.voice_asr import WhisperCloudASRAdapter, decode_base64_audio
 from src.app.services.voice_tts import ElevenLabsTTSAdapter
 
 router = APIRouter(prefix="/api/v1/voice", tags=["voice"])
@@ -63,7 +63,7 @@ def asr(
         raise HTTPException(status_code=400, detail="invalid_audio")
 
     started = time.monotonic()
-    adapter = WhisperLocalASRAdapter()
+    adapter = WhisperCloudASRAdapter()
     out = adapter.transcribe_chunk(
         audio, lang_hint=request.language, format_hint=request.format,
     )
@@ -109,17 +109,37 @@ def tts(
     cap = flags.get("CAPABILITIES", {}).get("voice", {"asr": False, "tts": False})
     if not cap.get("tts"):
         raise HTTPException(status_code=503, detail="TTS disabled")
-    _tenant(x_tenant_id)
+    tenant_id = _tenant(x_tenant_id)
     started = time.monotonic()
     adapter = ElevenLabsTTSAdapter()
     out = adapter.synthesize(request.text, voice=request.voice)
+    latency_ms = round((time.monotonic() - started) * 1000.0, 1)
+    try:
+        log_trace_event(
+            trace_id=None,
+            event_type="voice_tts",
+            source_type="connector",
+            source_id=str(out.get("provider") or adapter.name),
+            target_type="stage",
+            target_id="chat_output",
+            payload={
+                "tenant_id": tenant_id,
+                "role": role,
+                "text_chars": len(request.text),
+                "status": str(out.get("status") or "unavailable"),
+                "latency_ms": latency_ms,
+            },
+        )
+    except Exception:
+        # Telemetry cannot make optional playback unavailable.
+        pass
     return VoiceTTSResponse(
         audio_base64=str(out.get("audio_base64") or ""),
         confidence=float(out.get("confidence") or 0.0),
         provider=str(out.get("provider") or "none"),
         mime_type=out.get("mime_type"),
         status=str(out.get("status") or ("ready" if out.get("audio_base64") else "unavailable")),
-        latency_ms=round((time.monotonic() - started) * 1000.0, 1),
+        latency_ms=latency_ms,
     )
 
 
