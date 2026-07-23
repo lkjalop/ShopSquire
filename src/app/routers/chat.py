@@ -1401,7 +1401,10 @@ async def _call_recommend_in_process(
     role: str,
 ) -> tuple[int, Dict[str, Any]]:
     """Dispatch through the typed facade, delegating unsupported lanes to legacy."""
-    from src.app.services.legacy_recommendation_delegate import delegate_legacy_recommendation
+    from src.app.services.recommendation_delegation_policy import (
+        legacy_delegate_enabled,
+        v2_only_unavailable_response,
+    )
     from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
 
     def _invoke() -> Dict[str, Any]:
@@ -1432,6 +1435,16 @@ async def _call_recommend_in_process(
                 "reason": facade.reason,
                 "trace_id": str(params.get("trace_id") or "") or None,
             })
+        if not legacy_delegate_enabled():
+            return v2_only_unavailable_response(
+                status=facade.status,
+                reason=facade.reason,
+                lane=facade.lane,
+                trace_id=str(params.get("trace_id") or ""),
+            )
+        from src.app.services.legacy_recommendation_delegate import (
+            delegate_legacy_recommendation,
+        )
         delegated = delegate_legacy_recommendation(
             request=request, params=params, redis=redis, db=db, role=role,
         )

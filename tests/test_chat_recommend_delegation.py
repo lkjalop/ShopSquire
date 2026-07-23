@@ -81,6 +81,34 @@ def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkey
     assert body["execution_lane"] == "SEARCH"
 
 
+def test_v2_only_pilot_never_invokes_legacy_delegate(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_LEGACY_DELEGATE_ENABLED", "0")
+    monkeypatch.setattr(
+        "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
+        lambda *_args, **_kwargs: FacadeOutcome(
+            status="delegate", reason="lane_not_enrolled", lane="SUPPORT_CLAIM",
+        ),
+    )
+    monkeypatch.setattr(
+        "src.app.services.legacy_recommendation_delegate.delegate_legacy_recommendation",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("strict V2 pilot must not invoke legacy")
+        ),
+    )
+
+    status, body = asyncio.run(_call_recommend_in_process(
+        _request(),
+        {"uid": "buyer-1", "query": "help with a damaged order", "trace_id": "trace-v2-only"},
+        redis=object(), db=object(), role="merchant",
+    ))
+
+    assert status == 200
+    assert body["execution_mode"] == "v2_unavailable"
+    assert body["execution_lane"] == "SUPPORT_CLAIM"
+    assert body["products"] == []
+    assert body["action_executed"] is False
+
+
 def test_typed_and_spoken_input_share_one_semantic_dispatch_contract(monkeypatch):
     typed_query, typed_voice, _ = _effective_chat_query({
         "query": "compare Dell G16 and Lenovo Legion",
