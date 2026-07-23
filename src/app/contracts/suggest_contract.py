@@ -91,6 +91,9 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "sourcing_intent",
     # routing_source: model versus bounded fallback provenance used by promotion telemetry.
     "routing_source",
+    # Approved policy provenance: the answer came from the tenant StoreProfile, never invented
+    # by the model. These fields were added with the independently owned policy lane.
+    "policy_source", "policy_answered",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):

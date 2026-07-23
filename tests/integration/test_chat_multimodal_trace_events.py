@@ -3,32 +3,8 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
-class _FakeResp:
-    def __init__(self, body: dict, status_code: int = 200):
-        self._body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self._body
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"http_{self.status_code}")
-
-
-class _FakeAsyncClient:
-    def __init__(self, timeout: float = 8.0):
-        self.timeout = timeout
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def get(self, url, params=None, headers=None):
-        return _FakeResp(
-            {
+def _legacy_image_response(**_kwargs):
+    return {
                 "results": [
                     {
                         "sku": "IMG-1",
@@ -45,15 +21,20 @@ class _FakeAsyncClient:
                 "assistant_message": "Found 1 visual match.",
                 "decision_trace_id": "trace-chat-mm-1",
                 "next_questions": [],
-            },
-            status_code=200,
-        )
+            }
 
 
 def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch):
     from src.app.routers import chat as chat_router
+    from src.app.services import legacy_recommendation_delegate
 
-    monkeypatch.setattr(chat_router.httpx, "AsyncClient", _FakeAsyncClient)
+    # Chat now dispatches in-process through the typed facade and an isolated legacy delegate;
+    # mocking the removed HTTP loopback would no longer exercise the production boundary.
+    monkeypatch.setattr(
+        legacy_recommendation_delegate,
+        "delegate_legacy_recommendation",
+        _legacy_image_response,
+    )
     monkeypatch.setattr(
         chat_router,
         "classify_image_intent",
