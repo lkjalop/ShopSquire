@@ -973,7 +973,10 @@ async def triage(
                             "source": "filename_or_label_hint",
                         }
 
-                if not product_identity:
+                stage_b_enabled = str(
+                    os.getenv("CV_IDENTITY_STAGE_B_ENABLED", "0") or "0"
+                ).strip().lower() in ("1", "true", "yes", "on")
+                if not product_identity and stage_b_enabled:
                     identity_timeout = float(os.getenv("CV_IDENTITY_STAGE_B_TIMEOUT_S", "6.0") or 6.0)
                     stage_b = await _run_bounded_image_work(
                         _functools.partial(
@@ -995,6 +998,9 @@ async def triage(
                                 "confidence": float(stage_b.get("confidence") or 0.0),
                                 "source": "vision_stage_b",
                             }
+                elif not product_identity:
+                    analysis_state["analysis_degraded"] = True
+                    analysis_state["degraded_reasons"].append("identity_unresolved_after_provider")
         except _asyncio.TimeoutError:
             analysis_state["analysis_degraded"] = True
             analysis_state["degraded_reasons"].append("identity_stage_b_timeout")
