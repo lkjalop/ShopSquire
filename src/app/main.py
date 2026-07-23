@@ -354,7 +354,17 @@ def create_app() -> FastAPI:
                     import logging as _pl
                     _pl.getLogger("shopsquire.startup").warning("decision-log pre-warm failed: %s", _pw_exc)
 
-            _th.Thread(target=_prewarm_decision_log, name="decision-log-prewarm", daemon=True).start()
+            _app_env_for_audit = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+            _audit_prewarm_on = str(os.getenv(
+                "DECISION_LOG_PREWARM_ON_START",
+                "0" if _app_env_for_audit in ("test", "testing") else "1",
+            )).strip().lower() in ("1", "true", "yes", "on")
+            if _audit_prewarm_on:
+                _th.Thread(
+                    target=_prewarm_decision_log,
+                    name="decision-log-prewarm",
+                    daemon=True,
+                ).start()
         except Exception:
             pass
         # Router-model preload OFF-THREAD: absorb the cold-load spike AND keep the router model

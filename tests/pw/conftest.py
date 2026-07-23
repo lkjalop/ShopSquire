@@ -62,6 +62,11 @@ def test_server():
     os.environ.setdefault("TEST_BYPASS_POLICY_GATE", "1")
     os.environ.setdefault("TEST_TOLERANT_GET_ERRORS", "1")
     os.environ["TEST_FAST_HEALTH"] = "1"
+    os.environ["APP_ENV"] = "test"
+    os.environ["DECISION_LOG_PREWARM_ON_START"] = "0"
+    # This fixture owns its tiny deterministic catalog; startup seeders would be duplicate writers
+    # against the same SQLite file and are irrelevant to image-route assertions.
+    os.environ["AUTO_SEED_CATALOG_ON_START"] = "0"
     os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     os.environ["CV_PROVIDER"] = "basic"
     os.environ["CV_VISION_ENABLED"] = "0"
@@ -139,10 +144,6 @@ def test_server():
     config = uvicorn.Config(app=app, host=host, port=port, log_level="error")
     server = uvicorn.Server(config)
 
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    print("[pw.conftest] uvicorn thread started")
-
     # Seed demo data using direct SQLite access (most reliable under mixed test-suite engine resets).
     try:
         import sqlite3
@@ -160,6 +161,13 @@ def test_server():
         con.close()
     except Exception:
         pass
+
+    # Start application writers only after the direct SQLite seed transaction is closed. Starting
+    # uvicorn first allowed startup audit/baseline jobs to race this seed and lock the private DB,
+    # leaving the fixture alive but permanently unready.
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    print("[pw.conftest] uvicorn thread started")
 
     # Wait for readiness (extended timeout). Print attempts for debugging.
     base_url = f"http://{host}:{port}"
