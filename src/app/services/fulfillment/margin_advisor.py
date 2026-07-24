@@ -80,7 +80,7 @@ def assess(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     if last_inv is not None:
         rationale.append(f"Last invoiced from this supplier ~{last_inv / 100:.0f}.")
 
-    return {
+    result = {
         "available": True,
         "verdict": verdict,
         "economics": econ,
@@ -90,6 +90,83 @@ def assess(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
         "supplier_last_invoice_cents": last_inv,
         "rationale": rationale,
     }
+    result["deal_projection"] = _deal_projection(
+        db, case_id, economics=econ, verdict=verdict,
+        max_discount_cents=max_discount,
+        discount_authorized=discount_authorized,
+        tenant_id=tenant_id,
+    )
+    return result
+
+
+def _deal_projection(
+    db,
+    case_id: str,
+    *,
+    economics: Dict[str, Any],
+    verdict: str,
+    max_discount_cents: int,
+    discount_authorized: bool,
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Stable operator projection; estimated supplier tiers never authorize buyer pricing."""
+    retail_unit = int(economics.get("retail_unit_cents") or 0)
+    supplier_unit = int(economics.get("supplier_unit_cost_cents") or 0)
+    quantity = int(economics.get("quantity") or 0)
+    breaks = []
+    for row in _case_price_breaks(db, case_id, tenant_id):
+        try:
+            min_qty = int(row.get("min_qty") or 0)
+            discount_pct = float(row.get("discount_pct") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if min_qty <= 0 or discount_pct <= 0 or discount_pct >= 100:
+            continue
+        adjusted_cost = int(round(supplier_unit * (1.0 - discount_pct / 100.0)))
+        margin_pct = (
+            round((retail_unit - adjusted_cost) / retail_unit, 4)
+            if retail_unit > 0 else 0.0
+        )
+        breaks.append({
+            "min_qty": min_qty,
+            "discount_pct": discount_pct,
+            "estimated_supplier_unit_cents": adjusted_cost,
+            "margin_pct": margin_pct,
+            "projected_profit_cents_at_min_qty": max(
+                0, (retail_unit - adjusted_cost) * min_qty,
+            ),
+            "pricing_authorized": False,
+        })
+    return {
+        "verdict": verdict,
+        "currency": str(economics.get("currency") or "AUD"),
+        "quantity": quantity,
+        "list_unit_cents": retail_unit,
+        "wholesale_unit_cents": supplier_unit,
+        "gross_per_unit_cents": retail_unit - supplier_unit,
+        "margin_pct": float(economics.get("margin_pct") or 0.0),
+        "projected_profit_cents": int(economics.get("gross_profit_cents") or 0),
+        "max_discount_cents": int(max_discount_cents if discount_authorized else 0),
+        "discount_authorized": bool(discount_authorized),
+        "cost_basis": economics.get("cost_basis"),
+        "cost_is_estimated": bool(economics.get("cost_is_estimated", True)),
+        "landed_cost_complete": bool(economics.get("landed_cost_complete", False)),
+        "simulation_only": bool(economics.get("simulation_only", False)),
+        "bulk_breaks": breaks,
+    }
+
+
+def _case_price_breaks(db, case_id: str, tenant_id: str) -> list[Dict[str, Any]]:
+    try:
+        from src.app.services.fulfillment import workflow
+        cur = workflow.repository.current_version(db, case_id, tenant_id)
+        state = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
+        terms = (state.get("draft") or {}).get("supplier_terms") or {}
+        rows = terms.get("price_breaks") or []
+        return [dict(row) for row in rows if isinstance(row, dict)]
+    except Exception as exc:
+        logger.debug("price-break projection failed for %s: %s", case_id, exc)
+        return []
 
 
 def _supplier_last_invoice_cents(db, case_id: str, tenant_id: str) -> Optional[int]:

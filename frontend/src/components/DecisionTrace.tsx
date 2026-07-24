@@ -6,6 +6,7 @@ import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResu
 import { getOwnerApiKey } from '../lib/browserSession';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
 import { explainProcEvent } from '../lib/procEventExplain';
+import { dealEconomicsStatus, formatDealMoney } from '../lib/dealEconomicsDisplay';
 
 type TraceEvent = {
   id?: string;
@@ -3432,6 +3433,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const mi: any = miEvent?.payload || null;
                     const draft: any = (procCase?.state_json?.draft) || null;
                     const procurementTrace: any = (procCase?.state_json?.procurement_trace) || null;
+                    const dealProjection: any = procCase?.margin_advice?.deal_projection || null;
+                    const dealStatus = dealProjection ? dealEconomicsStatus(dealProjection) : null;
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     const gateView = procurementGateDisplay(draft?.send_gate || draft?.gate);
                     return (
@@ -3441,6 +3444,44 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             first, the event table is demoted below, and raw JSON stays behind the per-event
                             "Raw recorded payload" disclosure. */}
                         {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
+
+                        {canSeeOperatorDraft && dealProjection && dealStatus && (
+                          <div data-testid="proc-deal-economics" style={{ border: '1px solid #86efac', background: '#f0fdf4', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                              <strong>Live deal economics</strong>
+                              <span style={{ color: dealProjection.verdict === 'below_floor' ? '#b91c1c' : '#166534', fontWeight: 700 }}>
+                                {dealStatus.verdict}
+                              </span>
+                            </div>
+                            <div style={{ color: '#4b5563', marginTop: 3 }}>
+                              Operator-only · {dealStatus.costLabel}
+                              {dealProjection.simulation_only ? ' · demo scenario' : ''}
+                            </div>
+                            <div className={styles.kvRow}><span>List / unit</span><span>{formatDealMoney(dealProjection.list_unit_cents, dealProjection.currency)}</span></div>
+                            <div className={styles.kvRow}><span>Supplier cost / unit</span><span>{formatDealMoney(dealProjection.wholesale_unit_cents, dealProjection.currency)}</span></div>
+                            <div className={styles.kvRow}><span>Gross / unit</span><span>{formatDealMoney(dealProjection.gross_per_unit_cents, dealProjection.currency)}</span></div>
+                            <div className={styles.kvRow}><span>List margin</span><span>{(Number(dealProjection.margin_pct || 0) * 100).toFixed(1)}%</span></div>
+                            <div className={styles.kvRow}><span>Projected gross ({Number(dealProjection.quantity || 0)} unit{Number(dealProjection.quantity || 0) === 1 ? '' : 's'})</span><span>{formatDealMoney(dealProjection.projected_profit_cents, dealProjection.currency)}</span></div>
+                            <div data-testid="proc-discount-authorization" style={{ marginTop: 7, padding: '6px 8px', borderRadius: 6, background: dealProjection.discount_authorized ? '#dcfce7' : '#fef3c7', color: dealProjection.discount_authorized ? '#166534' : '#92400e', fontWeight: 600 }}>
+                              {dealStatus.discountLabel}
+                            </div>
+                            {Array.isArray(dealProjection.bulk_breaks) && dealProjection.bulk_breaks.length > 0 && (
+                              <div style={{ marginTop: 8 }}>
+                                <div style={{ fontWeight: 700 }}>Supplier volume scenarios</div>
+                                {dealProjection.bulk_breaks.map((tier: any) => (
+                                  <div key={`${tier.min_qty}-${tier.discount_pct}`} className={styles.kvRow}>
+                                    <span>{tier.min_qty}+ units · {Number(tier.discount_pct || 0).toFixed(0)}% supplier break</span>
+                                    <span>{(Number(tier.margin_pct || 0) * 100).toFixed(1)}% estimated margin</span>
+                                  </div>
+                                ))}
+                                <div style={{ color: '#6b7280', fontSize: 12 }}>Scenario only · not an authorized buyer discount or supplier commitment.</div>
+                              </div>
+                            )}
+                            <div style={{ borderTop: '1px dashed #86efac', marginTop: 8, paddingTop: 7, color: '#166534' }}>
+                              Model proposes · policy authorizes · connector executes · human approves supplier send
+                            </div>
+                          </div>
+                        )}
 
                         {canSeeOperatorDraft && procHistory?.case_count > 1 && (
                           <div data-testid="proc-amendment-history" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '8px 10px', marginBottom: 12, fontSize: 13 }}>

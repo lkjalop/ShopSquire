@@ -55,6 +55,11 @@ test('procurement decision trace — drafted supplier RFQ + audit, re-routes per
     await expect(page.getByTestId('proc-rfq-recipient')).toContainText('SUP-BIZ');
     await expect(page.getByTestId('proc-rfq-subject')).toContainText('LAP-433AB371');
     await expect(page.getByTestId('proc-rfq-body')).toContainText(/quote/i);
+    await expect(page.getByTestId('proc-deal-economics')).toBeVisible();
+    await expect(page.getByTestId('proc-deal-economics')).toContainText(/Operator-only/i);
+    await expect(page.getByTestId('proc-discount-authorization')).toContainText(
+      /locked until landed cost is validated|Authorized headroom/i,
+    );
     // the bitemporal audit trail is right there — no window-hopping
     await expect(page.getByTestId('proc-audit-trail')).toBeVisible();
     await expect(page.getByTestId('proc-audit-trail')).toContainText(/QUOTE DRAFTED|COMMITTED/i);
