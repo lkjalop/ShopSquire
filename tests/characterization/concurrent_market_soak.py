@@ -57,7 +57,7 @@ def _write_user(session_factory, *, tenant: str, user: int, turns: int, seed: in
             "sku": sku,
             "campaign_id": campaign,
             "channel": "synthetic",
-            "value": 1199.0 if event == "purchase" else None,
+            "value": 119900 if event == "purchase" else None,
             "currency": "AUD" if event == "purchase" else None,
             "quantity": 1,
             "consent_state": "granted",
@@ -86,30 +86,68 @@ def main() -> int:
     parser.add_argument("--users", type=int, default=10)
     parser.add_argument("--turns", type=int, default=5)
     parser.add_argument("--workers", type=int, default=10)
+    parser.add_argument("--tenants", type=int, default=2)
     parser.add_argument("--seed", type=int, default=20260720)
     parser.add_argument("--persist", action="store_true")
     parser.add_argument("--output", default="tmp/synthetic_soak/concurrent_market_soak.json")
     args = parser.parse_args()
-    tenant = f"synthetic-market-{uuid.uuid4().hex[:10]}"
+    tenants = [
+        f"synthetic-market-{uuid.uuid4().hex[:10]}"
+        for _ in range(max(1, int(args.tenants)))
+    ]
     engine = get_engine()
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
     with ThreadPoolExecutor(max_workers=min(args.workers, args.users)) as pool:
-        futures = [pool.submit(_write_user, sessions, tenant=tenant, user=user,
-                               turns=args.turns, seed=args.seed) for user in range(args.users)]
+        futures = [
+            pool.submit(
+                _write_user, sessions, tenant=tenant, user=user,
+                turns=args.turns, seed=args.seed + tenant_index * 10000)
+            for tenant_index, tenant in enumerate(tenants)
+            for user in range(args.users)
+        ]
         workers = [future.result() for future in as_completed(futures)]
     db = sessions()
     try:
-        report = summarize_marketing_facts(db, tenant_id=tenant)
+        tenant_reports = {
+            tenant: summarize_marketing_facts(db, tenant_id=tenant)
+            for tenant in tenants
+        }
+        expected_per_tenant = args.users * args.turns
+        isolation_ok = all(
+            item["event_count"] == expected_per_tenant
+            for item in tenant_reports.values())
+        report = {
+            "event_count": sum(item["event_count"] for item in tenant_reports.values()),
+            "tenants": tenant_reports,
+            "data_quality": {
+                key: min(
+                    float(item["data_quality"].get(key) or 0.0)
+                    for item in tenant_reports.values())
+                for key in (
+                    "source_identity_rate", "provenance_time_rate",
+                    "consent_state_rate", "monetary_currency_rate")
+            },
+            "insights": [
+                insight
+                for item in tenant_reports.values()
+                for insight in item.get("insights") or []
+            ],
+        }
         report["lab"] = {
             "users": args.users, "turns_per_user": args.turns, "workers": args.workers,
-            "expected_events": args.users * args.turns,
+            "tenant_count": len(tenants),
+            "expected_events": expected_per_tenant * len(tenants),
             "written_events": sum(item["written"] for item in workers),
             "write_errors": [error for item in workers for error in item["errors"]],
-            "synthetic_tenant": tenant,
+            "synthetic_tenants": tenants,
+            "tenant_isolation_ok": isolation_ok,
             "production_canary_equivalent": False,
         }
         if not args.persist:
-            db.execute(text("DELETE FROM marketing_event_fact WHERE tenant_id=:tenant"), {"tenant": tenant})
+            for tenant in tenants:
+                db.execute(text(
+                    "DELETE FROM marketing_event_fact WHERE tenant_id=:tenant"),
+                    {"tenant": tenant})
             db.commit()
             report["lab"]["cleaned_up"] = True
     finally:
@@ -120,7 +158,11 @@ def main() -> int:
     print(json.dumps({"output": str(output), "event_count": report["event_count"],
                       "quality": report["data_quality"], "insights": report["insights"],
                       "errors": report["lab"]["write_errors"]}))
-    return 1 if report["lab"]["write_errors"] or report["event_count"] != args.users * args.turns else 0
+    return 1 if (
+        report["lab"]["write_errors"]
+        or report["event_count"] != report["lab"]["expected_events"]
+        or not report["lab"]["tenant_isolation_ok"]
+    ) else 0
 
 
 if __name__ == "__main__":
