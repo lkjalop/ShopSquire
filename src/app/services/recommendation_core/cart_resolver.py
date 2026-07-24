@@ -54,6 +54,7 @@ _ACTIONS = frozenset({"clear_all", "clear_previous", "remove_items", "set_quanti
                       "replace_item"})
 # actions that target specific named lines (vs. whole-cart intents)
 _TARGETED = frozenset({"remove_items", "set_quantity", "keep_only", "replace_item"})
+_COMPOUND_TARGET_INTENT = re.compile(r"(?:\band\b|[,;])", re.IGNORECASE)
 # BOUNDS (GPT-5.6 review-5 #9): a cart edit is a handful of changes, never a script. The model's
 # output is capped BEFORE any op is considered; a runaway/hostile 500-op response is truncated,
 # not iterated. Prompt lines are capped so a huge cart cannot balloon the prompt.
@@ -409,7 +410,8 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
     # current line. Ambiguous references continue to the model/clarification path.
     if (_REMOVE_INTENT.search(envelope.query)
             and not _QUANTITY_SIGNAL_INTENT.search(envelope.query)
-            and not _CLEAR_ALL_SCOPE_INTENT.search(envelope.query)):
+            and not _CLEAR_ALL_SCOPE_INTENT.search(envelope.query)
+            and not _COMPOUND_TARGET_INTENT.search(envelope.query)):
         named_sku = _bind_name_to_sku(
             envelope.query,
             lines,
