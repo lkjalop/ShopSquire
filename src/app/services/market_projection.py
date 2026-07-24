@@ -116,6 +116,7 @@ def operator_product_projection(db, *, sku: str, tenant_id: str = "default") -> 
         "available": True,
         "tenant_id": tenant_id,
         "sku": key,
+        "name": str(getattr(view, "title", "") or key),
         "currency": str(view.currency or "USD"),
         "list_cents": list_cents,
         "wholesale_cents": wholesale_cents,

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text as sql_text
 from prometheus_client import generate_latest
+from pydantic import BaseModel, Field
 
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
@@ -31,6 +32,10 @@ from src.app.services.bi_query_agent import run_query_agent
 
 
 router = APIRouter(prefix="/api/v1/admin/bi", tags=["admin", "bi"])
+
+
+class NewsletterDraftRequest(BaseModel):
+    skus: List[str] = Field(default_factory=list, max_length=10)
 
 
 def _parse_prometheus_samples(metric_name: str) -> List[tuple[Dict[str, str], float]]:
@@ -512,6 +517,28 @@ def submit_product_action_proposal(
         "human_gate": "required",
         "executed": False,
     }
+
+
+@router.post("/newsletter-draft")
+def newsletter_draft_api(
+    request: NewsletterDraftRequest,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Create an editable evidence-bounded draft; never publish or send it."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.market_projection import operator_product_projection
+    from src.app.services.newsletter_draft import build_newsletter_draft
+
+    tenant_id = str(current_tenant_id() or "default")
+    projections = []
+    with db_session() as db:
+        for sku in dict.fromkeys(str(value).strip() for value in request.skus if str(value).strip()):
+            item = operator_product_projection(db, sku=sku, tenant_id=tenant_id)
+            if item.get("available"):
+                projections.append(item)
+    draft = build_newsletter_draft(projections)
+    return {"tenant_id": tenant_id, **draft}
 
 
 @router.get("/supplier-scorecard")

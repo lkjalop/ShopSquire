@@ -94,3 +94,36 @@ def test_commercial_proposal_submission_fails_closed(monkeypatch):
     )
     assert response.status_code == 409
     assert response.json()["detail"]["reasons"] == ["untrusted_or_stale_atp"]
+
+
+def test_newsletter_endpoint_returns_human_gated_draft(monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.app.main import create_app
+
+    monkeypatch.setattr(
+        market_projection,
+        "operator_product_projection",
+        lambda *a, **k: {
+            "available": True,
+            "sku": k["sku"],
+            "name": "Qualified Product",
+            "projection": {"dead_stock": True, "dsi_days": 120},
+            "action_proposals": {
+                "discount": {
+                    "eligible": True,
+                    "recommended_discount_pct": 0.05,
+                }
+            },
+        },
+    )
+    response = TestClient(create_app()).post(
+        "/api/v1/admin/bi/newsletter-draft",
+        headers={"x-api-key": "local-owner-key"},
+        json={"skus": ["SKU-1"]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["featured_skus"] == ["SKU-1"]
+    assert body["status"] == "draft"
+    assert body["send_gate"] == "human"
+    assert body["sent"] is False

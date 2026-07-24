@@ -349,6 +349,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [procDetailRetry, setProcDetailRetry] = useState(0);
   const [marketEconomics, setMarketEconomics] = useState<Record<string, any>>({});
   const [commercialProposalStatus, setCommercialProposalStatus] = useState<Record<string, string>>({});
+  const [newsletterDraft, setNewsletterDraft] = useState<any | null>(null);
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
   // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
@@ -901,6 +902,23 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         ...current,
         [key]: String(error?.message || 'Unable to queue proposal'),
       }));
+    }
+  };
+
+  const createNewsletterDraft = async () => {
+    setNewsletterDraft({ status: 'loading' });
+    try {
+      const response = await fetch(apiUrl('/api/v1/admin/bi/newsletter-draft'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skus: marketProjectionSkus }),
+      });
+      const body: any = await safeJson(response);
+      if (!response.ok) throw new Error(body?.detail || 'Unable to create draft');
+      setNewsletterDraft(body);
+    } catch (error: any) {
+      setNewsletterDraft({ status: 'error', message: String(error?.message || 'Unable to create draft') });
     }
   };
 
@@ -3531,6 +3549,28 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                       </div>
                     );
                   })}
+                  {marketProjectionEvents.length > 0 && effectiveApiKey && (
+                    <div style={{ borderTop: '1px solid #d1d5db', paddingTop: 10, marginTop: 10 }}>
+                      <button type="button" onClick={createNewsletterDraft}
+                              disabled={newsletterDraft?.status === 'loading'}>
+                        Create catalogue draft
+                      </button>
+                      {newsletterDraft && newsletterDraft.status !== 'loading' && (
+                        <div data-testid="newsletter-draft" style={{ marginTop: 8, padding: 10, border: '1px solid #d1d5db', borderRadius: 6 }}>
+                          <div style={{ fontWeight: 700 }}>Catalogue draft · {humanizeKey(newsletterDraft.status)}</div>
+                          {newsletterDraft.message && <div>{newsletterDraft.message}</div>}
+                          {(newsletterDraft.featured_skus || []).map((sku: string) => (
+                            <div key={sku} style={{ marginTop: 6 }}>
+                              <strong>{sku}</strong>: {newsletterDraft.blurbs?.[sku]}
+                            </div>
+                          ))}
+                          <div style={{ color: '#92400e', fontSize: 11, marginTop: 6 }}>
+                            Human review required. This draft is not scheduled, published, or sent.
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
