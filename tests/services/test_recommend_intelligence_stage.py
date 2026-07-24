@@ -102,6 +102,31 @@ def test_market_intel_shadow_observes_without_mutating(aligned_engine, monkeypat
     assert mi[0]["payload"]["insights"] == 1 and "demand_peak" in mi[0]["payload"]["signal_labels"]
 
 
+def test_market_projection_emits_scoped_non_sensitive_evidence(aligned_engine, monkeypatch):
+    monkeypatch.setattr(
+        "src.app.services.market_projection.projections",
+        lambda *a, **k: {
+            "A": {
+                "units_per_day": 2.5, "dsi_days": 12, "stock_on_hand": 30,
+                "dead_stock": False, "stockout": False, "bulk_frequency": {
+                    "bulk_order_count": 2, "orders_per_30d": 0.667,
+                }, "confidence": "seeded_demo", "as_of": "2026-07-24T00:00:00+00:00",
+            },
+        })
+    traced = []
+    monkeypatch.setattr(
+        "src.app.services.recommend_intelligence_stage.log_trace_event",
+        lambda **kw: traced.append(kw))
+    st = _state(flags={"ATTRIBUTION_ENABLED": False})
+    run_intelligence_stage(st, mem=_FakeMem())
+    projection = [t for t in traced if t.get("event_type") == "market_projection"]
+    assert projection and projection[0]["target_id"] == "A"
+    assert projection[0]["source_type"] == "stage"
+    assert projection[0]["payload"]["forecast_units_30d"] == 75
+    assert projection[0]["payload"]["economics_included"] is False
+    assert "wholesale_cents" not in projection[0]["payload"]
+
+
 def test_stage_never_raises_on_bad_state(aligned_engine):
     st = _state(results=None, flags={"ATTRIBUTION_ENABLED": True, "HIPPOGRAPH_FEEDBACK_ENABLED": True})
     # should not raise even with results=None

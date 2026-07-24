@@ -163,6 +163,56 @@ def _market_intelligence(state: IntelligenceStageState, results: List[Dict[str, 
         record_partial_failure("market_intelligence", exc, trace_id=state.trace_id)
 
 
+def _market_projections(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> None:
+    """Emit non-sensitive, SKU-scoped projection evidence for every shown product."""
+    if state.simulate or not state.trace_id or not results:
+        return
+    try:
+        from src.app.models.db import db_session
+        from src.app.platform.tenant_context import current_tenant_id
+        from src.app.services.market_projection import projections
+        tenant_id = str(current_tenant_id() or "default")
+        with db_session() as db:
+            by_sku = projections(db, tenant_id=tenant_id, window_days=30)
+        emitted = []
+        for rank, row in enumerate(results[:10], start=1):
+            sku = str((row or {}).get("sku") or "").strip()
+            projection = by_sku.get(sku)
+            if not projection:
+                continue
+            units_per_day = float(projection.get("units_per_day") or 0.0)
+            payload = {
+                "tenant_id": tenant_id,
+                "sku": sku,
+                "rank": rank,
+                "demand_trend": (
+                    "dead_stock" if projection.get("dead_stock")
+                    else "observed_sales" if units_per_day > 0
+                    else "insufficient_data"
+                ),
+                "forecast_units_30d": round(units_per_day * 30.0, 2),
+                "velocity_dsi_days": projection.get("dsi_days"),
+                "stock_position": (
+                    "stockout" if projection.get("stockout")
+                    else "surplus" if projection.get("dead_stock")
+                    else "balanced"
+                ),
+                "stock_on_hand": projection.get("stock_on_hand"),
+                "bulk_frequency": projection.get("bulk_frequency"),
+                "confidence": projection.get("confidence"),
+                "as_of": projection.get("as_of"),
+                "economics_included": False,
+            }
+            emitted.append(payload)
+            log_trace_event(
+                trace_id=state.trace_id, event_type="market_projection", source_type="stage",
+                source_id="MarketProjectionStage", target_type="sku", target_id=sku, payload=payload)
+        if emitted:
+            state.payload["market_projections"] = emitted
+    except Exception as exc:
+        record_partial_failure("market_projection", exc, trace_id=state.trace_id)
+
+
 def _shadow_counterfactual(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> None:
     """Measurable shadow (Track B, 2026-07-09): compute what the hippograph ranking nudge WOULD
     have done — on a COPY, never mutating results — and record the would-be impact. This is the
@@ -349,6 +399,7 @@ def run_intelligence_stage(state: IntelligenceStageState, *, mem) -> List[Dict[s
     the turn was exposed to — the exposure a later conversion attributes back to (M6 close-loop)."""
     results = state.results
     _market_intelligence(state, results, mem=mem)
+    _market_projections(state, results)
     _shadow_counterfactual(state, results)              # Track B: bench would-be uplift, no execution
     results = _nudge(state, results)                    # experiment (hippograph recall) nudge
     results = _sales_response_nudge(state, results)     # M5 demand-aware nudge (Phase-3)
