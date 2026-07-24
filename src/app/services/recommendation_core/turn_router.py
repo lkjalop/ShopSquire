@@ -1059,6 +1059,15 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # total_budget dollars → cents within bounds. Whatever the model returns is BOUNDED (this clamp
     # IS the model-agnosticism — a weak/foreign model can't break it); a miss → None (ask/inherit).
     import math as _math
+    from src.app.services.bulk_intent import extract_quantity_span
+    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+
+    unit_nouns = {
+        segment.strip().lower()
+        for candidate, _score in cands
+        for segment in candidate.full_path.split(">")
+        if segment.strip()
+    }
     quantity = None
     _qv = data.get("quantity")
     if (isinstance(_qv, (int, float)) and not isinstance(_qv, bool) and _math.isfinite(_qv)
@@ -1072,6 +1081,24 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 and isinstance(_cnt[1], (int, float)) and not isinstance(_cnt[1], bool)
                 and _math.isfinite(_cnt[1]) and 1 <= int(_cnt[1]) <= 100_000):
             quantity = int(_cnt[1])
+    explicit_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
+    if explicit_quantity is not None:
+        quantity = explicit_quantity[0]
+    # A model or the permissive count grammar may copy a currency amount into
+    # quantity. Reject that contradiction while preserving contextual amendments
+    # such as "make it 15", whose target is resolved from session state.
+    parsed_query_budget = parse_budget(envelope.query)
+    budget_values = {
+        int(value)
+        for value in (
+            getattr(parsed_query_budget, "budget_min", None),
+            getattr(parsed_query_budget, "budget_max", None),
+        )
+        if value is not None
+    }
+    if quantity is not None and quantity in budget_values:
+        logger.info("ignored quantity proposal colliding with budget: %s", quantity)
+        quantity = None
     total_budget_cents = None
     _tb = data.get("total_budget")
     if (isinstance(_tb, (int, float)) and not isinstance(_tb, bool) and _math.isfinite(_tb)
@@ -1079,20 +1106,6 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         total_budget_cents = int(round(float(_tb) * 100))
     _bs = str(data.get("budget_scope") or "").strip().lower()
     budget_scope = _bs if _bs in ("per_unit", "total") else "unknown"
-    if quantity is None:
-        # Model omission fallback: explicit counts are recovered by the one canonical, vertical-blind
-        # grammar. Product nouns come from registry-real taxonomy candidates, not code vocabulary.
-        from src.app.services.bulk_intent import extract_quantity_span
-        unit_nouns = {
-            segment.strip().lower()
-            for candidate, _score in cands
-            for segment in candidate.full_path.split(">")
-            if segment.strip()
-        }
-        parsed_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
-        if parsed_quantity is not None:
-            quantity = parsed_quantity[0]
-    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
     explicit_budget_scope = classify_budget_scope(envelope.query)
     if explicit_budget_scope != "unknown":
         # Buyer words authorize scope; the model may interpret an amount but cannot override

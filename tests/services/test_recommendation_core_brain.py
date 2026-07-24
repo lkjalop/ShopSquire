@@ -436,6 +436,25 @@ def test_inventory_plan_retrieves_then_explains_authoritative_stock():
     assert derive_plan(decision).steps == ["retrieve", "inventory_summary"]
 
 
+def test_currency_amount_cannot_authorize_model_proposed_quantity(db):
+    raw = json.dumps({
+        "lane": "FILTER", "handle": "el-6-6", "requirements": {},
+        "quantity": 700, "total_budget": 700, "budget_scope": "per_unit",
+        "subject_action": "continue", "confidence": 0.9,
+    })
+    decision = route_turn(
+        db,
+        _env(
+            "keep it under $700 and prioritise reliable video calls",
+            session={"prior_node": "el-6-6"},
+        ),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.quantity is None
+    assert decision.budget_scope == "per_unit"
+
+
 def test_procurement_turn_returns_authorized_slate_without_executing(db):
     payload = {
         "lane": "PROCUREMENT", "handle": "el-6-6", "requirements": {},
