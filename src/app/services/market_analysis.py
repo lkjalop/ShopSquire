@@ -512,6 +512,72 @@ def detect_bundle_opportunity(signals, *, min_co_occurrence: int = 3, top_k: int
     return out
 
 
+def detect_velocity_dsi(sales_rows, inventory_rows, *, window_days: int = 30) -> Dict[str, Dict[str, Any]]:
+    """Compute vertical-neutral unit velocity and days-sales-of-inventory by opaque SKU.
+
+    Inputs are already scoped/time-bounded rows. No product names, categories, or
+    database dialect assumptions enter the detector.
+    """
+    days = max(1, int(window_days or 30))
+    sold: Dict[str, int] = {}
+    stock: Dict[str, int] = {}
+    for row in sales_rows or []:
+        sku = str((row or {}).get("sku") or "").strip()
+        if sku:
+            sold[sku] = sold.get(sku, 0) + max(0, int((row or {}).get("quantity") or 0))
+    for row in inventory_rows or []:
+        sku = str((row or {}).get("sku") or "").strip()
+        if sku:
+            available = (row or {}).get("available")
+            if available is None:
+                available = max(
+                    0, int((row or {}).get("on_hand") or 0) - int((row or {}).get("reserved") or 0))
+            stock[sku] = stock.get(sku, 0) + max(0, int(available or 0))
+    out: Dict[str, Dict[str, Any]] = {}
+    for sku in sorted(set(sold) | set(stock)):
+        units = sold.get(sku, 0)
+        on_hand = stock.get(sku, 0)
+        daily = units / float(days)
+        dsi = (on_hand / daily) if daily > 0 else None
+        out[sku] = {
+            "sku": sku,
+            "window_days": days,
+            "units_sold": units,
+            "stock_on_hand": on_hand,
+            "units_per_day": round(daily, 4),
+            "velocity": round(units / float(on_hand), 4) if on_hand > 0 else None,
+            "dsi_days": round(dsi, 2) if dsi is not None else None,
+            "dead_stock": bool(on_hand > 0 and units == 0),
+            "stockout": bool(on_hand == 0),
+        }
+    return out
+
+
+def detect_bulk_order_frequency(case_rows, *, window_days: int = 90) -> Dict[str, Dict[str, Any]]:
+    """Count distinct bulk sourcing cases per opaque subject over a bounded window."""
+    grouped: Dict[str, set[str]] = {}
+    units: Dict[str, int] = {}
+    for row in case_rows or []:
+        item = row or {}
+        subject = str(item.get("sku") or item.get("category") or item.get("subject_id") or "").strip()
+        case_id = str(item.get("case_id") or item.get("order_id") or "").strip()
+        quantity = max(0, int(item.get("quantity") or item.get("requested_qty") or 0))
+        if not subject or not case_id or quantity < 2:
+            continue
+        grouped.setdefault(subject, set()).add(case_id)
+        units[subject] = units.get(subject, 0) + quantity
+    return {
+        subject: {
+            "subject_id": subject,
+            "window_days": max(1, int(window_days or 90)),
+            "bulk_order_count": len(case_ids),
+            "bulk_units_requested": units.get(subject, 0),
+            "orders_per_30d": round(len(case_ids) * 30.0 / max(1, int(window_days or 90)), 3),
+        }
+        for subject, case_ids in sorted(grouped.items())
+    }
+
+
 def _safe(fn: Callable, *args, **kw) -> List[MarketFinding]:
     try:
         return fn(*args, **kw)
