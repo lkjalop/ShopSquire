@@ -156,6 +156,32 @@ def test_typed_sort_on_child_of_prior_subject_is_authorized_as_filter(db):
     assert d.node_handle == "el-6-6"
 
 
+def test_sparse_procurement_proposal_recovers_only_named_sold_subject(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    payload = {
+        "lane": "PROCUREMENT",
+        "quantity": 20,
+        "total_budget": 16000,
+        "budget_scope": "total",
+        "procurement_context": "current_order",
+        "requirements": {},
+        "confidence": 0.9,
+    }
+    d = route_turn(
+        db,
+        _env("I need 20 work laptops with a total order budget of $16000"),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert d.lane == "PROCUREMENT"
+    assert d.node_handle == "el-6-6"
+    assert d.quantity == 20
+    assert d.total_budget_cents == 1_600_000
+    assert d.source == "model+catalog_subject_rescue"
+
+
 @pytest.mark.parametrize("model_lane", ["BULK", "BULK_QUOTE", "QUOTE", "RFQ"])
 def test_procurement_lane_synonyms_are_clamped_to_existing_lane(db, model_lane):
     from src.app.services.taxonomy_registry import add_sold_node

@@ -1279,6 +1279,23 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         )
                         _ROUTER_CALL_STATE.metrics = router_metrics
 
+    # A sparse model response can correctly classify lane, quantity, and budget while omitting
+    # the product handle. Recover a subject only when the shopper's words name a tenant-sold
+    # category and the lexical candidate itself is verified sold. This is catalog authorization
+    # of an incomplete proposal, not a second intent router; off-domain and unsold requests abstain.
+    if (node is None and lane == "PROCUREMENT" and not str(data.get("handle") or "").strip()
+            and request_scope != "service_or_place"
+            and _query_names_sold_category(db, envelope)):
+        node = next(
+            (
+                candidate for candidate, _score in cands
+                if sells_within(db, candidate.handle, tenant_id=envelope.tenant_id) is True
+            ),
+            None,
+        )
+        if node is not None:
+            routing_source = "model+catalog_subject_rescue"
+
     if typed_sort_refinement:
         routing_source = f"{routing_source}+typed_sort_refinement"
 
