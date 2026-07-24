@@ -328,8 +328,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const _TABS = ['events', 'summary', 'why', 'intent', 'multimodal', 'complexity', 'memory', 'security', 'procurement', 'evidence', 'audit', 'raw'] as const;
-  const [activeTab, setActiveTab] = useState<'events' | 'execution' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'evidence' | 'audit' | 'raw'>(
+  const _TABS = ['events', 'summary', 'why', 'intent', 'multimodal', 'complexity', 'memory', 'security', 'market', 'procurement', 'evidence', 'audit', 'raw'] as const;
+  const [activeTab, setActiveTab] = useState<'events' | 'execution' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'market' | 'procurement' | 'evidence' | 'audit' | 'raw'>(
     (initialTab && (_TABS as readonly string[]).includes(initialTab)) ? (initialTab as typeof _TABS[number]) : 'events');
   // When this decision opened a procurement journey, badge the Procurement tab so the operator sees it
   // exists instead of having to click through blind. FulfilmentTraceLink resolves the case; it reports up.
@@ -347,6 +347,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
   const [procDetailRetry, setProcDetailRetry] = useState(0);
+  const [marketEconomics, setMarketEconomics] = useState<Record<string, any>>({});
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
   // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
@@ -854,6 +855,29 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     eventFilter === 'all'
       ? allDisplayEvents
       : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
+  const marketProjectionEvents = allDisplayEvents.filter((event) => eventMatches(event, 'market_projection'));
+  const marketProjectionSkus = marketProjectionEvents
+    .map((event) => String(event?.payload?.sku || '').trim()).filter(Boolean);
+  const marketProjectionSkuKey = Array.from(new Set(marketProjectionSkus)).join('|');
+
+  useEffect(() => {
+    if (activeTab !== 'market' || !effectiveApiKey || !marketProjectionSkuKey) {
+      if (activeTab === 'market' && !effectiveApiKey) setMarketEconomics({});
+      return;
+    }
+    let alive = true;
+    Promise.all(marketProjectionSkuKey.split('|').map(async (sku) => {
+      const response = await fetch(
+        apiUrl(`/api/v1/admin/bi/product-projection?sku=${encodeURIComponent(sku)}`),
+        { credentials: 'include', headers: authHeaders });
+      if (!response.ok) return [sku, null] as const;
+      return [sku, await safeJson(response)] as const;
+    })).then((pairs) => {
+      if (!alive) return;
+      setMarketEconomics(Object.fromEntries(pairs.filter(([, value]) => value)));
+    }).catch(() => { if (alive) setMarketEconomics({}); });
+    return () => { alive = false; };
+  }, [activeTab, effectiveApiKey, marketProjectionSkuKey]);
 
   const ms = trace?.model_selection || {};
   const persistedExecutionEvent = [...allDisplayEvents].reverse().find((evt: any) =>
@@ -1584,6 +1608,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
               <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
               <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
+              <button className={activeTab === 'market' ? styles.activeTab : ''} onClick={() => setActiveTab('market')}>
+                Market Intelligence{marketProjectionEvents.length > 0 ? <span style={{ marginLeft: 5, color: '#2563eb', fontWeight: 700 }}>●</span> : null}
+              </button>
               <button className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => setActiveTab('procurement')}>
                 Procurement{hasProcurementSignal ? <span title="Procurement activity is present in this decision (open to see the drafted RFQ + audit)" style={{ marginLeft: 5, color: '#059669', fontWeight: 700 }}>●</span> : null}
               </button>
@@ -3400,6 +3427,43 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                       })}
                     </>
                   )}
+                </div>
+              )}
+
+              {activeTab === 'market' && (
+                <div className={styles.summaryPane} data-testid="market-intelligence-tab">
+                  <h3 style={{ marginTop: 0 }}>Market Intelligence</h3>
+                  <p style={{ color: '#6b7280', marginTop: 0 }}>
+                    Transaction-derived demand and stock evidence scoped to products shown in this decision.
+                    Economics is available only to authenticated operators.
+                  </p>
+                  {marketProjectionEvents.length === 0 ? (
+                    <div className={styles.empty}>No scoped market projection was recorded for this decision.</div>
+                  ) : marketProjectionEvents.map((event, index) => {
+                    const item: any = event.payload || {};
+                    const economics: any = marketEconomics[String(item.sku || '')] || null;
+                    return (
+                      <div key={`${item.sku || 'projection'}-${index}`} data-testid={`market-projection-${item.sku}`}
+                           style={{ border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontWeight: 700 }}>
+                          <span>{item.sku}</span><span>rank {item.rank ?? '—'}</span>
+                        </div>
+                        <div className={styles.kvRow}><span>Demand</span><span>{humanizeKey(item.demand_trend)} · {item.forecast_units_30d ?? 0} units / 30d</span></div>
+                        <div className={styles.kvRow}><span>Inventory</span><span>{item.stock_on_hand ?? '—'} on hand · DSI {item.velocity_dsi_days ?? '—'} days</span></div>
+                        <div className={styles.kvRow}><span>Bulk frequency</span><span>{item.bulk_frequency?.bulk_order_count ?? 0} cases / {item.bulk_frequency?.window_days ?? 90}d</span></div>
+                        <div className={styles.kvRow}><span>Evidence</span><span>{humanizeKey(item.confidence)} · as of {formatTime(item.as_of)}</span></div>
+                        {economics && (
+                          <div data-testid={`market-economics-${item.sku}`} style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #bfdbfe' }}>
+                            <div className={styles.kvRow}><span>Operator margin</span><span>{economics.gross_margin_pct != null ? `${(Number(economics.gross_margin_pct) * 100).toFixed(1)}%` : 'unavailable'}</span></div>
+                            <div className={styles.kvRow}><span>Projected gross / 30d</span><span>{economics.projected_profit_30d_cents != null ? `${economics.currency} ${(Number(economics.projected_profit_30d_cents) / 100).toLocaleString()}` : 'unavailable'}</span></div>
+                            <div style={{ color: '#92400e', fontSize: 12 }}>
+                              {economics.discount_authorized ? 'Validated landed cost permits governed discount review.' : 'Scenario only: discount headroom is locked until landed cost is validated.'}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
