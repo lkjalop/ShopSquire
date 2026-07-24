@@ -201,6 +201,18 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             TurnSpec("clear my cart", kind="cart", expect_cart_ops=1),
             TurnSpec("clear all items again", kind="cart", expect_cart_ops=1),
         ), cart=_CART),
+        JourneySpec("cart_arithmetic", "bulk-game-development-buyer", "25-54", (
+            TurnSpec('clear "Asus TUF Gaming F16 16-inch" please',
+                     kind="cart", expect_cart_ops=1),
+            TurnSpec("add 5 units to the IdeaPad", kind="cart", expect_cart_ops=1),
+            TurnSpec("take 5 units off the IdeaPad", kind="cart", expect_cart_ops=1),
+            TurnSpec("double the HP OMEN quantity", kind="cart", expect_cart_ops=1),
+            TurnSpec("halve the HP OMEN quantity", kind="cart", expect_cart_ops=1),
+        ), cart=(
+            {"sku": "ASUS-TUF", "name": "Asus TUF Gaming F16 16-inch Laptop", "quantity": 20},
+            {"sku": "HP-OMEN", "name": "HP OMEN MAX 16-inch Laptop", "quantity": 10},
+            {"sku": "IDEAPAD", "name": "Lenovo IdeaPad Slim 3i Laptop", "quantity": 20},
+        )),
     ]
 
 

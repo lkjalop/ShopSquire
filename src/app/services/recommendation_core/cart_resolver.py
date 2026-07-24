@@ -74,28 +74,84 @@ _MAX_QTY_SANITY = 1_000_000
 _CLEAR_INTENT = re.compile(
     r"\b(clear|empty|wipe|reset|remove (everything|all|it all)|delete (everything|all)|"
     r"get rid of (everything|all)|start over|scrap it all)\b", re.IGNORECASE)
+_CLEAR_ALL_SCOPE_INTENT = re.compile(
+    r"(?:\b(?:clear|empty|wipe|reset)\b.{0,24}\b(?:cart|basket|everything|all items?|"
+    r"whole cart|it all)\b)|(?:\b(?:cart|basket)\b.{0,16}\b(?:clear|empty|wipe|reset)\b)|"
+    r"\b(?:start over|scrap it all|remove everything|delete everything|get rid of everything)\b",
+    re.IGNORECASE,
+)
+_CLEAR_PREVIOUS_SCOPE_INTENT = re.compile(
+    r"\b(?:clear|remove|delete|drop|get rid of)\b.{0,48}"
+    r"\b(?:old|previous|prior|earlier|carried)\b",
+    re.IGNORECASE,
+)
 _KEEP_INTENT = re.compile(
     r"\b(keep|only|just|except|all but|everything but|nothing but|leave (only|just))\b", re.IGNORECASE)
 _REPLACE_INTENT = re.compile(r"\b(replace|swap|switch|substitute|instead of|in place of)\b", re.IGNORECASE)
 _REMOVE_INTENT = re.compile(
-    r"\b(remove|delete|drop|ditch|discard|take out|get rid of|do not want|don't want)\b",
+    r"\b(clear|remove|delete|drop|ditch|discard|take out|get rid of|do not want|don't want)\b",
     re.IGNORECASE,
 )
 _QUANTITY_CHANGE_INTENT = re.compile(
-    r"\b(make|set|change|reduce|increase|raise|lower|cut)\b", re.IGNORECASE)
+    r"\b(make|set|change|reduce|increase|raise|lower|cut|add|subtract|double|halve|"
+    r"multiply|divide)\b", re.IGNORECASE)
 _QUANTITY_SIGNAL_INTENT = re.compile(
-    r"\b(?:make|set|change|reduce|increase|raise|lower|cut)\b|"
+    r"\b(?:make|set|change|reduce|increase|raise|lower|cut|add|subtract|double|halve|"
+    r"multiply|divide)\b|"
+    r"\b(?:take|remove)\s+[0-9]{1,6}\s+units?\b|"
     r"\b[0-9]{1,6}\s+(?:more|fewer|less)\b|\bto\s+[0-9]{1,6}\b",
     re.IGNORECASE,
 )
+_RELATIVE_QTY_INTENT = re.compile(
+    r"\b(?:add|increase|raise|reduce|decrease|lower|cut|subtract)\b.{0,32}\bby\b|"
+    r"\b(?:add|take|remove)\s+[0-9]{1,6}\s+units?\b|"
+    r"\b[0-9]{1,6}\s+(?:more|fewer|less)\b|"
+    r"\b(?:double|halve|multiply|divide)\b",
+    re.IGNORECASE,
+)
 _AFFORDABLE_QTY_INTENT = re.compile(
-    r"\b(max(?:imum)? affordable|fit (?:it|them|the order) (?:in|within|under) (?:the )?budget|"
+    r"\b(max(?:imum)? affordable|max(?:imum)? quantity.{0,24}(?:afford|budget)|"
+    r"fit (?:it|them|the order) (?:in|within|under) (?:the )?budget|"
     r"keep (?:it|the order|the total) (?:in|within|under|at) (?:the )?(?:same )?(?:total )?budget|"
     r"adjust (?:the )?(?:unit )?quantity|how many (?:can|could) (?:i|we) afford)\b",
     re.IGNORECASE,
 )
 
 CatalogCandidatesFn = Callable[[str], List[Dict[str, Any]]]
+
+
+def _relative_quantity_instruction(query: str) -> Optional[Tuple[str, int]]:
+    """Parse only unambiguous integer arithmetic; product identity remains model-bound."""
+    text = str(query or "")
+    if re.search(r"\bdouble\b", text, re.IGNORECASE):
+        return "multiply", 2
+    if re.search(r"\b(?:halve|half)\b", text, re.IGNORECASE):
+        return "divide", 2
+    match = re.search(r"\bmultiply\b.{0,36}\bby\s+([0-9]{1,6})\b", text, re.IGNORECASE)
+    if match:
+        return "multiply", int(match.group(1))
+    match = re.search(r"\bdivide\b.{0,36}\bby\s+([0-9]{1,6})\b", text, re.IGNORECASE)
+    if match:
+        return "divide", int(match.group(1))
+    match = re.search(
+        r"\b(?:add|increase|raise)\b.{0,36}?\b(?:by\s+)?([0-9]{1,6})\b|"
+        r"\b([0-9]{1,6})\s+more\b",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return "add", int(match.group(1) or match.group(2))
+    # "reduce to 15" is absolute, not subtraction. Relative reductions require by/off/fewer/less.
+    match = re.search(
+        r"\b(?:subtract|reduce|decrease|lower|cut)\b.{0,36}?\bby\s+([0-9]{1,6})\b|"
+        r"\b(?:take|remove)\s+([0-9]{1,6})\s+units?\b.{0,12}\boff\b|"
+        r"\b([0-9]{1,6})\s+(?:fewer|less)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return "subtract", int(next(value for value in match.groups() if value is not None))
+    return None
 
 
 def _resolver_model() -> str:
@@ -158,10 +214,32 @@ def _cart_lines(envelope: TurnEnvelope) -> List[Dict[str, Any]]:
             qty = int(line.get("quantity") or line.get("qty") or 1)
         except (TypeError, ValueError):
             qty = 1
-        out.append({"sku": sku, "name": name, "quantity": qty,
+        try:
+            price_cents = int(line.get("price_cents")) if line.get("price_cents") is not None else None
+        except (TypeError, ValueError):
+            price_cents = None
+        out.append({"sku": sku, "name": name, "quantity": qty, "price_cents": price_cents,
                     "sourcing_required": bool(line.get("sourcing_required")),
                     "available_now": line.get("available_now")})
     return out
+
+
+def _total_budget_cents(envelope: TurnEnvelope) -> Optional[int]:
+    """Return an explicit or accepted whole-order cap without reinterpreting unit budgets."""
+    from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+
+    if classify_budget_scope(envelope.query) == "total":
+        parsed = parse_budget(envelope.query)
+        if parsed is not None and parsed.budget_max is not None:
+            return int(parsed.budget_max) * 100
+    accepted = (envelope.session or {}).get("accepted_constraints") or {}
+    if str(accepted.get("budget_scope") or "").lower() != "total":
+        return None
+    try:
+        value = int(accepted.get("total_budget_cents"))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 def _line_token_index(lines: List[Dict[str, Any]]) -> List[Tuple[str, set]]:
@@ -283,7 +361,9 @@ def _build_prompt(envelope: TurnEnvelope, lines: List[Dict[str, Any]]) -> str:
         "was added now).\n"
         "- remove_items: remove specific named lines (list their names in \"targets\").\n"
         "- set_quantity: change one named line to a number (\"targets\":[name], "
-        "\"quantity\":<int>).\n"
+        "\"quantity\":<int>, \"quantity_mode\":\"set\"). For relative changes, return the "
+        "OPERAND and one of quantity_mode:add|subtract|multiply|divide; the platform computes "
+        "the result from the current cart quantity.\n"
         "- keep_only: remove everything EXCEPT the named lines (list keepers in \"targets\").\n\n"
         "- replace_item: replace one existing named line with a different product the shopper "
         "named (\"targets\":[old name], \"replacement\":new product name). Set "
@@ -297,11 +377,17 @@ def _build_prompt(envelope: TurnEnvelope, lines: List[Dict[str, Any]]) -> str:
         "- A trailing integer in 'make/set/change <existing line> <N> instead' is a quantity, "
         "not a replacement product. Emit set_quantity unless the shopper names a distinct new "
         "product after replace/swap/instead of.\n"
+        "- 'add 5', 'take 5 off', 'double', and 'halve' are relative. Do not calculate the final "
+        "quantity yourself; use quantity_mode plus the operand.\n"
+        "- Relative examples: add 5 => quantity_mode:add, quantity:5; take 5 off => "
+        "quantity_mode:subtract, quantity:5; double => quantity_mode:multiply, quantity:2; "
+        "halve => quantity_mode:divide, quantity:2.\n"
         "- Put the shopper's own words for each target in \"targets\"; the platform matches "
         "them to real lines.\n\n"
         'Return JSON: {"ops": [{"action": "<action>", "targets": ["<name>", ...], '
         '"replacement": "<new product or null>", "quantity": <int or null>, '
-        '"quantity_mode": "max_affordable|preserve|null"}], "confidence": <0.0-1.0>}\nJSON:'
+        '"quantity_mode": "set|add|subtract|multiply|divide|max_affordable|preserve|null"}], '
+        '"confidence": <0.0-1.0>}\nJSON:'
     )
 
 
@@ -341,6 +427,33 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
     if isinstance(raw_ops, list) and len(raw_ops) > _MAX_OPS:
         logger.debug("cart resolver ops capped: %d → %d", len(raw_ops), _MAX_OPS)
         raw_ops = raw_ops[:_MAX_OPS]
+    if (not raw_ops and _REMOVE_INTENT.search(envelope.query or "")
+            and not _QUANTITY_SIGNAL_INTENT.search(envelope.query or "")
+            and not _CLEAR_ALL_SCOPE_INTENT.search(envelope.query or "")):
+        # Recover a model omission only when the shopper's complete wording binds to exactly one
+        # real line. No match or multiple matches fall through; this fallback cannot authorize a
+        # whole-cart consequence or guess among similar products.
+        named_sku = _bind_name_to_sku(envelope.query, lines, _distinctive_index(_line_token_index(lines)))
+        if named_sku is not None:
+            raw_ops = [{
+                "action": "remove_items",
+                "targets": [envelope.query],
+            }]
+            conf = 1.0
+            source = "grammar"
+    relative_instruction = _relative_quantity_instruction(envelope.query)
+    if not raw_ops and relative_instruction is not None:
+        mode, operand = relative_instruction
+        # The shopper's words supply bounded arithmetic; binding below still has to resolve one
+        # real cart SKU. This recovers a model omission without trusting invented identity.
+        raw_ops = [{
+            "action": "set_quantity",
+            "targets": [envelope.query],
+            "quantity_mode": mode,
+            "quantity": operand,
+        }]
+        conf = 1.0
+        source = "grammar"
     line_index = _line_token_index(lines)
     distinctive = _distinctive_index(line_index)
     distinctive_map = dict(distinctive)
@@ -377,9 +490,22 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
 
         # whole-cart intents carry no targets to bind. Track C: a destructive clear must be backed by
         # the shopper's own clear-intent words — never execute a model-hallucinated empty-the-cart.
-        if action in ("clear_all", "clear_previous"):
-            if not _CLEAR_INTENT.search(envelope.query or ""):
-                ambiguous.append("clear the whole cart")   # surface for confirmation, don't auto-wipe
+        if action == "clear_all":
+            if _CLEAR_ALL_SCOPE_INTENT.search(envelope.query or ""):
+                ops.append(CartOp(action=action))
+                continue
+            # A named `clear Product X` is a line removal, not whole-cart authority.
+            named_sku = _bind_name_to_sku(envelope.query, lines, distinctive)
+            if named_sku is not None:
+                ops.append(CartOp(action="remove_items", target_skus=(named_sku,)))
+            elif _CLEAR_INTENT.search(envelope.query or ""):
+                ambiguous.append("which cart item to remove")
+            else:
+                ambiguous.append("clear the whole cart")
+            continue
+        if action == "clear_previous":
+            if not _CLEAR_PREVIOUS_SCOPE_INTENT.search(envelope.query or ""):
+                ambiguous.append("which previous cart items to remove")
                 continue
             ops.append(CartOp(action=action))
             continue
@@ -420,6 +546,7 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
         # operation its bounded fields can authorize: one bound line + integer quantity. An
         # actual replace/swap/instead-of request still follows the replacement gate below.
         if action == "replace_item" and not _REPLACE_INTENT.search(envelope.query or ""):
+            relative_instruction = _relative_quantity_instruction(envelope.query)
             qraw = raw_op.get("quantity")
             if qraw is None and len(bound) == 1 and _QUANTITY_CHANGE_INTENT.search(envelope.query or ""):
                 current_qty = int(next((line["quantity"] for line in lines
@@ -441,21 +568,43 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
             # the sanity ceiling are dropped; the real per-line gate (cart.py._MAX_LINE_QTY=500)
             # stays authoritative and rejects with the shopper's true number.
             qraw = raw_op.get("quantity")
-            if isinstance(qraw, bool) or not isinstance(qraw, (int, float)):
-                continue
-            if isinstance(qraw, float) and not qraw.is_integer():
-                continue
-            qty = int(qraw)
-            if qty < 0 or qty > _MAX_QTY_SANITY:
-                continue
+            if relative_instruction is not None:
+                mode, operand = relative_instruction
+            else:
+                if isinstance(qraw, bool) or not isinstance(qraw, (int, float)):
+                    continue
+                if isinstance(qraw, float) and not qraw.is_integer():
+                    continue
+                mode = str(raw_op.get("quantity_mode") or "set").strip().lower()
+                operand = int(qraw)
             if len(bound) != 1:
                 continue                      # zero or multiple targets → surfaced via `ambiguous`
+            current_line = next((line for line in lines if line["sku"] == bound[0]), {})
+            current_qty = int(current_line.get("quantity") or 0)
+            if mode == "set":
+                qty = operand
+            elif mode == "add":
+                qty = current_qty + operand
+            elif mode == "subtract":
+                qty = current_qty - operand
+            elif mode == "multiply":
+                qty = current_qty * operand
+            elif mode == "divide":
+                if operand <= 0 or current_qty % operand:
+                    ambiguous.append("a whole-unit result for the relative quantity change")
+                    continue
+                qty = current_qty // operand
+            else:
+                ambiguous.append("a supported quantity operation")
+                continue
+            if qty < 0 or qty > _MAX_QTY_SANITY:
+                continue
             if qty == 0:
                 ops.append(CartOp(action="remove_items", target_skus=(bound[0],)))
             else:
-                current_line = next((line for line in lines if line["sku"] == bound[0]), {})
-                current_qty = int(current_line.get("quantity") or 0)
                 ops.append(CartOp(action="set_quantity", target_skus=(bound[0],), quantity=qty,
+                                  budget_max_cents=_total_budget_cents(envelope),
+                                  unit_price_cents=current_line.get("price_cents"),
                                   previous_quantity=current_qty,
                                   allow_sourcing=(qty > current_qty
                                                   or bool(current_line.get("sourcing_required")))))
@@ -483,12 +632,7 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
                 unit_price = 0
             old_line = next((line for line in lines if line["sku"] == bound[0]), None)
             qty = int((old_line or {}).get("quantity") or 1)
-            budget_max_cents: Optional[int] = None
-            from src.app.services.budget_grammar import classify_budget_scope, parse_budget
-            parsed = parse_budget(envelope.query)
-            if (parsed and parsed.budget_max is not None
-                    and classify_budget_scope(envelope.query) == "total"):
-                budget_max_cents = int(parsed.budget_max) * 100
+            budget_max_cents = _total_budget_cents(envelope)
             mode = str(raw_op.get("quantity_mode") or "").strip().lower()
             if mode == "max_affordable" and _AFFORDABLE_QTY_INTENT.search(envelope.query or ""):
                 if not budget_max_cents or unit_price <= 0:

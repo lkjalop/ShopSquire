@@ -372,6 +372,55 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
 
             # 4. VERSIONED CAS WRITE — succeeds only if no concurrent writer bumped the version
             # during our op loop; rowcount 0 → stale, nothing written.
+            # Re-authorize any carried whole-order budget against current catalog prices
+            # inside the transaction. Session memory proposes the cap; current data decides.
+            budget_caps = [
+                int(op.budget_max_cents) for op in plan.ops
+                if op.budget_max_cents is not None
+            ]
+            if budget_caps:
+                cap = min(budget_caps)
+                from src.app.services.catalog_read_model import get_variants
+                final_skus = [str(item.get("sku") or "") for item in working if item.get("sku")]
+                variants = get_variants(db, final_skus, tenant_id=tenant_id)
+                by_sku = {variant.sku: variant for variant in variants}
+                missing_prices = [
+                    sku for sku in final_skus
+                    if sku not in by_sku or by_sku[sku].price_cents is None
+                ]
+                if missing_prices:
+                    error = {"error": "total_budget_unverifiable", "skus": missing_prices}
+                    _finish(plan_id, "rejected", error, db=db)
+                    db.commit()
+                    return {"status": "rejected", "plan_id": plan_id, "error": error}
+                for op in plan.ops:
+                    if (op.action == "set_quantity" and op.target_skus
+                            and op.unit_price_cents is not None):
+                        current_price = int(by_sku[op.target_skus[0]].price_cents)
+                        if current_price != int(op.unit_price_cents):
+                            error = {
+                                "error": "cart_line_price_changed",
+                                "sku": op.target_skus[0],
+                                "proposed_unit_price_cents": int(op.unit_price_cents),
+                                "current_unit_price_cents": current_price,
+                            }
+                            _finish(plan_id, "rejected", error, db=db)
+                            db.commit()
+                            return {"status": "rejected", "plan_id": plan_id, "error": error}
+                proposed_total = sum(
+                    int(by_sku[str(item["sku"])].price_cents) * int(item.get("quantity") or 0)
+                    for item in working
+                )
+                if proposed_total > cap:
+                    error = {
+                        "error": "total_budget_exceeded",
+                        "budget_max_cents": cap,
+                        "proposed_total_cents": proposed_total,
+                    }
+                    _finish(plan_id, "rejected", error, db=db)
+                    db.commit()
+                    return {"status": "rejected", "plan_id": plan_id, "error": error}
+
             if not _save_cart_versioned(db, cart_id, working, version):
                 _finish(plan_id, "stale_cart", {"reason": "cart_changed_during_apply"}, db=db)
                 db.commit()

@@ -136,6 +136,26 @@ def test_propose_then_apply_single_set(wired):
     assert S.get_plan(prop["plan_id"])["status"] == "applied"
 
 
+def test_set_quantity_preserves_whole_order_budget_at_apply_time(wired):
+    uid = "u-budget-set"
+    items = _cart(uid, ("SKU-A", 1), ("SKU-B", 1))
+    plan = CartMutationPlan(ops=(CartOp(
+        "set_quantity", ("SKU-A",), 2,
+        budget_max_cents=20_000, unit_price_cents=10_000,
+    ),), confidence=0.9)
+    prop = S.propose_plan(
+        tenant_id="t1", uid=uid, plan=plan, cart_items=items,
+        query="add one A but keep the same $200 total budget",
+    )
+
+    out = S.apply_plan(prop["plan_id"], tenant_id="t1", uid=uid)
+
+    assert out["status"] == "rejected"
+    assert out["error"]["error"] == "total_budget_exceeded"
+    assert out["error"]["proposed_total_cents"] == 30_000
+    assert _skus(uid) == {"SKU-A": 1, "SKU-B": 1}
+
+
 def test_replace_item_applies_atomically_and_respects_total_budget(wired):
     uid = "u-replace"
     items = _cart(uid, ("SKU-A", 4))

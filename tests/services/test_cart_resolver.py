@@ -128,6 +128,43 @@ def test_replacement_is_catalog_clamped_and_total_budget_sets_affordable_quantit
     assert op.previous_quantity == 20
 
 
+def test_replacement_uses_inherited_total_budget_when_current_turn_omits_budget():
+    cart = [{"sku": "GAM-0006", "name": "Dell G16 Gaming Laptop", "quantity": 20}]
+    catalog = lambda _tenant: [{  # noqa: E731
+        "sku": "LAP-PROART5070",
+        "name": "ASUS ProArt 16 RTX 5070",
+        "brand": "ASUS",
+        "price_cents": 489400,
+        "active": True,
+    }]
+    envelope = TurnEnvelope.from_suggest_params(
+        query=("Replace the Dell G16 with the ASUS ProArt 16 RTX 5070 and use the maximum "
+               "quantity the same total can afford."),
+        uid="u1",
+        tenant_id="t1",
+        cart=cart,
+        session={"accepted_constraints": {
+            "total_budget_cents": 5_400_000,
+            "budget_scope": "total",
+            "quantity": 20,
+        }},
+    )
+    plan = resolve_cart_mutation(
+        envelope,
+        llm_fn=_fixed_llm({"ops": [{
+            "action": "replace_item",
+            "targets": ["Dell G16"],
+            "replacement": "ASUS ProArt 16 RTX 5070",
+            "quantity_mode": "max_affordable",
+        }], "confidence": 0.95}),
+        catalog_candidates_fn=catalog,
+    )
+
+    assert not plan.ambiguous
+    assert plan.ops[0].quantity == 11
+    assert plan.ops[0].budget_max_cents == 5_400_000
+
+
 def test_replacement_fails_closed_when_catalog_name_is_ambiguous():
     cart = [{"sku": "OLD", "name": "Old Workstation", "quantity": 2}]
     catalog = lambda _tenant: [  # noqa: E731
@@ -172,6 +209,58 @@ def test_clear_previous():
         _env("clear the old items from my previous session"),
         llm_fn=_fixed_llm({"ops": [{"action": "clear_previous"}]}))
     assert [o.action for o in plan.ops] == ["clear_previous"]
+
+
+def test_named_clear_cannot_authorize_clear_all_and_removes_only_named_line():
+    """Regression: `clear "Asus TUF..."` must never wipe the whole cart.
+
+    Even if the model proposes clear_all, the platform binds the shopper's named
+    target to one real cart line and narrows the consequence to remove_items.
+    """
+    cart = [
+        {"sku": "ASUS-TUF", "name": 'Asus TUF Gaming F16 16" FHD+ 144Hz Gaming Laptop',
+         "quantity": 20},
+        {"sku": "HP-OMEN", "name": 'HP OMEN MAX 16" RTX 5080 Gaming Laptop',
+         "quantity": 20},
+    ]
+    plan = resolve_cart_mutation(
+        _env('clear "Asus TUF Gaming F16 16\\" FHD+ 144Hz Gam" please', cart=cart),
+        llm_fn=_fixed_llm({"ops": [{"action": "clear_all"}], "confidence": 0.96}),
+    )
+
+    assert not plan.ambiguous
+    assert [(op.action, op.target_skus) for op in plan.ops] == [
+        ("remove_items", ("ASUS-TUF",)),
+    ]
+
+
+def test_named_clear_that_does_not_bind_asks_and_never_wipes():
+    plan = resolve_cart_mutation(
+        _env('clear "the old gaming one" please'),
+        llm_fn=_fixed_llm({"ops": [{"action": "clear_all"}], "confidence": 0.96}),
+    )
+
+    assert not plan.ops
+    assert plan.needs_clarification
+    assert "which cart item" in plan.ambiguous[0]
+
+
+def test_named_clear_recovers_model_omission_only_when_one_real_line_binds():
+    cart = [
+        {"sku": "ASUS-TUF", "name": 'Asus TUF Gaming F16 16" FHD+ 144Hz Gaming Laptop',
+         "quantity": 20},
+        {"sku": "HP-OMEN", "name": 'HP OMEN MAX 16" RTX 5080 Gaming Laptop',
+         "quantity": 20},
+    ]
+    plan = resolve_cart_mutation(
+        _env('clear "Asus TUF Gaming F16 16\\" FHD+ 144Hz Gam" please', cart=cart),
+        llm_fn=_fixed_llm({"ops": [], "confidence": 0.2}),
+    )
+
+    assert not plan.ambiguous
+    assert [(op.action, op.target_skus) for op in plan.ops] == [
+        ("remove_items", ("ASUS-TUF",)),
+    ]
 
 
 def test_keep_only_binds_keeper():
@@ -273,6 +362,50 @@ def test_reducing_an_existing_sourced_line_preserves_sourcing_authorization():
     assert plan.ops[0].previous_quantity == 25
     assert plan.ops[0].quantity == 15
     assert plan.ops[0].allow_sourcing is True
+
+
+def test_relative_quantity_modes_are_recomputed_from_the_current_cart():
+    cart = [{
+        "sku": "LAP-IDEAP3I9",
+        "name": "Lenovo IdeaPad Slim 3i Laptop",
+        "quantity": 20,
+    }]
+    cases = [
+        ("add 5 units to the IdeaPad", "add", 5, 25),
+        ("take 5 units off the IdeaPad", "subtract", 5, 15),
+        ("double the IdeaPad quantity", "multiply", 2, 40),
+        ("halve the IdeaPad quantity", "divide", 2, 10),
+    ]
+
+    for query, mode, operand, expected in cases:
+        plan = resolve_cart_mutation(
+            _env(query, cart=cart),
+            llm_fn=_fixed_llm({"ops": [{
+                "action": "set_quantity",
+                "targets": ["IdeaPad"],
+                "quantity_mode": mode,
+                "quantity": operand,
+            }], "confidence": 0.95}),
+        )
+        assert not plan.ambiguous, query
+        assert plan.ops[0].quantity == expected, query
+
+
+def test_relative_quantity_is_authorized_from_shopper_words_not_model_arithmetic():
+    cart = [{
+        "sku": "LAP-IDEAP3I9",
+        "name": "Lenovo IdeaPad Slim 3i Laptop",
+        "quantity": 20,
+    }]
+    plan = resolve_cart_mutation(
+        _env("add 5 units to the IdeaPad", cart=cart),
+        llm_fn=_fixed_llm({"ops": [{
+            "action": "set_quantity", "targets": ["IdeaPad"], "quantity": 25,
+        }], "confidence": 0.95}),
+    )
+
+    assert not plan.ambiguous
+    assert plan.ops[0].quantity == 25
 
 
 def test_set_quantity_overflow_dropped_not_clamped():
