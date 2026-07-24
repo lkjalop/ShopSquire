@@ -443,6 +443,23 @@ def margin_intelligence_api(
         raise HTTPException(status_code=500, detail=f"margin_intelligence_failed: {exc}")
 
 
+@router.get("/product-projection")
+def product_projection_api(
+    sku: str = Query(..., min_length=1, max_length=160),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Operator-only projection; wholesale and margin never enter the public trace."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.market_projection import operator_product_projection
+    with db_session() as db:
+        result = operator_product_projection(
+            db, sku=sku, tenant_id=str(current_tenant_id() or "default"))
+    if not result.get("available"):
+        raise HTTPException(status_code=404, detail=result.get("reason") or "projection_unavailable")
+    return result
+
+
 @router.get("/supplier-scorecard")
 def supplier_scorecard_api(
     window_days: int = Query(default=60, ge=7, le=365),

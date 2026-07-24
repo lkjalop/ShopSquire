@@ -85,3 +85,48 @@ def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dic
         item["as_of"] = inputs["as_of"]
         item["confidence"] = "seeded_demo" if inputs["sales"] else "insufficient_data"
     return velocity
+
+
+def operator_product_projection(db, *, sku: str, tenant_id: str = "default") -> Dict[str, Any]:
+    """Join the non-sensitive projection to operator-only catalog economics."""
+    from src.app.services.catalog_read_model import get_variant
+    from src.app.services.supplier_catalog import best_supplier_cost
+
+    key = str(sku or "").strip()
+    view = get_variant(db, key, tenant_id=tenant_id)
+    if view is None:
+        return {"available": False, "sku": key, "reason": "unknown_sku"}
+    projection = projections(db, tenant_id=tenant_id, window_days=30).get(key, {})
+    cost = best_supplier_cost(
+        db, key, tenant_id=tenant_id, currency=str(view.currency or "USD")) or {}
+    list_cents = int(view.price_cents) if view.price_cents is not None else None
+    wholesale_cents = (
+        int(cost["unit_cost_cents"]) if cost.get("unit_cost_cents") is not None else None)
+    gross = (
+        list_cents - wholesale_cents
+        if list_cents is not None and wholesale_cents is not None else None)
+    margin_pct = (
+        round(gross / float(list_cents), 4) if gross is not None and list_cents else None)
+    forecast_units = float(projection.get("units_per_day") or 0.0) * 30.0
+    authorized = bool(
+        cost.get("cost_kind") == "validated_landed_quote"
+        and not cost.get("simulation_only")
+        and cost.get("source_record_id"))
+    return {
+        "available": True,
+        "tenant_id": tenant_id,
+        "sku": key,
+        "currency": str(view.currency or "USD"),
+        "list_cents": list_cents,
+        "wholesale_cents": wholesale_cents,
+        "gross_per_unit_cents": gross,
+        "gross_margin_pct": margin_pct,
+        "forecast_units_30d": round(forecast_units, 2),
+        "projected_profit_30d_cents": (
+            int(round(gross * forecast_units)) if gross is not None else None),
+        "discount_headroom_cents": None,
+        "discount_authorized": authorized,
+        "cost_basis": cost.get("cost_basis") or "unavailable",
+        "simulation_only": bool(cost.get("simulation_only", not authorized)),
+        "projection": projection,
+    }
