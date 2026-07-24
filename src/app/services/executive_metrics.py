@@ -189,28 +189,39 @@ def inventory_productivity(
     stock = max(0, int(available_units)) if available_units is not None else None
     weekly = sold * 7.0 / days
     annualized = sold * 365.0 / days
-    sufficient = stock is not None and sold > 0
-    status = "estimated" if sufficient else "insufficient_data"
-    reason = None if sufficient else (
+    wos_sufficient = stock is not None and sold > 0
+    turns_sufficient = stock is not None and stock > 0 and sold > 0
+    base_reason = None if wos_sufficient else (
         "no_sales_velocity" if stock is not None else "missing_current_atp")
     common = dict(
         tenant_id=tenant_id, subject_type="sku", subject_id=sku,
-        as_of=stamp, status=status, confidence=min(1.0, len(records) / 2.0),
-        coverage=1.0 if sufficient else 0.0, source_count=len(set(records)),
+        as_of=stamp, confidence=min(1.0, len(records) / 2.0),
+        source_count=len(set(records)),
         source_records=records, provenance_chain=records,
         definition_version="inventory_productivity_v1", visibility="operator",
-        reason=reason,
         metadata={"inventory_basis": "current_atp_not_average_inventory"},
     )
     return [
         MetricEvidence(
             metric="weeks_of_supply",
-            value=(stock / weekly) if sufficient and weekly > 0 else None,
-            unit="weeks", **common),
+            value=(stock / weekly) if wos_sufficient and weekly > 0 else None,
+            unit="weeks",
+            status="estimated" if wos_sufficient else "insufficient_data",
+            coverage=1.0 if wos_sufficient else 0.0,
+            reason=base_reason,
+            **common),
         MetricEvidence(
             metric="inventory_turns",
-            value=(annualized / stock) if sufficient and stock > 0 else None,
-            unit="turns_per_year", **common),
+            value=(annualized / stock) if turns_sufficient else None,
+            unit="turns_per_year",
+            status="estimated" if turns_sufficient else "insufficient_data",
+            coverage=1.0 if turns_sufficient else 0.0,
+            reason=(
+                None if turns_sufficient
+                else "zero_current_atp_denominator" if stock == 0 and sold > 0
+                else base_reason
+            ),
+            **common),
     ]
 
 

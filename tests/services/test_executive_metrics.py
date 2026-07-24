@@ -31,6 +31,20 @@ def test_inventory_productivity_is_explicitly_estimated_from_point_atp():
                for item in metrics)
 
 
+def test_zero_atp_is_stockout_wos_but_not_an_inventory_turns_denominator():
+    metrics = {
+        item.metric: item for item in inventory_productivity(
+            tenant_id="tenant-a", sku="SKU-1", units_sold=30, window_days=30,
+            available_units=0, source_records=["orders/o1", "wms/a1"])
+    }
+
+    assert metrics["weeks_of_supply"].value == 0
+    assert metrics["weeks_of_supply"].status == "estimated"
+    assert metrics["inventory_turns"].value is None
+    assert metrics["inventory_turns"].status == "insufficient_data"
+    assert metrics["inventory_turns"].reason == "zero_current_atp_denominator"
+
+
 def test_ppv_requires_matched_quote_po_invoice_identity():
     unavailable = ppv_evidence(
         tenant_id="tenant-a", sku="SKU-1",
