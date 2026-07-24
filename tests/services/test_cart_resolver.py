@@ -576,6 +576,28 @@ def test_uniquely_matching_brand_binds():
     assert [(o.action, o.target_skus) for o in plan.ops] == [("remove_items", ("LAP-HPENVY01",))]
 
 
+def test_named_remove_survives_invalid_model_response():
+    plan = resolve_cart_mutation(
+        _env('remove "HP Envy x360"'),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+    assert [(o.action, o.target_skus) for o in plan.ops] == [
+        ("remove_items", ("LAP-HPENVY01",)),
+    ]
+    assert plan.source == "grammar"
+
+
+def test_take_named_item_out_survives_invalid_model_response():
+    plan = resolve_cart_mutation(
+        _env("please take the HP Envy out"),
+        llm_fn=lambda _prompt, _timeout: "not-json",
+    )
+    assert [(o.action, o.target_skus) for o in plan.ops] == [
+        ("remove_items", ("LAP-HPENVY01",)),
+    ]
+    assert plan.source == "grammar"
+
+
 # ── Track C: whole-cart op authorization by the shopper's OWN words ─────────────────────────────
 
 def test_clear_all_requires_shopper_clear_intent():

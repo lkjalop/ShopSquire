@@ -157,6 +157,55 @@ def _finish(plan_id: str, status: str, result: Dict[str, Any], *, db=None) -> No
         own.commit()
 
 
+def _affordability_resolution(
+    *,
+    plan: CartMutationPlan,
+    working: List[Dict[str, Any]],
+    by_sku: Dict[str, Any],
+    cap_cents: int,
+    proposed_total_cents: int,
+) -> Optional[Dict[str, Any]]:
+    """Build choices only for one explicit quantity change; compound math must be replanned."""
+    quantity_ops = [
+        op for op in plan.ops
+        if op.action == "set_quantity" and len(op.target_skus) == 1 and op.quantity is not None
+    ]
+    if len(quantity_ops) != 1:
+        return None
+    op = quantity_ops[0]
+    sku = str(op.target_skus[0])
+    variant = by_sku.get(sku)
+    if variant is None or variant.price_cents is None:
+        return None
+    unit_cents = int(variant.price_cents)
+    requested = int(op.quantity or 0)
+    if unit_cents <= 0 or requested <= 0:
+        return None
+    other_total = sum(
+        int(by_sku[str(item["sku"])].price_cents) * int(item.get("quantity") or 0)
+        for item in working
+        if str(item.get("sku") or "") != sku
+    )
+    available_for_line = max(0, int(cap_cents) - other_total)
+    max_affordable = available_for_line // unit_cents
+    cheaper_unit_cap = available_for_line // requested
+    return {
+        "kind": "total_budget_exceeded",
+        "sku": sku,
+        "product_name": str(getattr(variant, "title", "") or sku),
+        "currency": str(getattr(variant, "currency", "") or ""),
+        "requested_quantity": requested,
+        "max_affordable_quantity": max_affordable,
+        "current_unit_price_cents": unit_cents,
+        "cheaper_unit_price_max_cents": cheaper_unit_cap,
+        "budget_max_cents": int(cap_cents),
+        "proposed_total_cents": int(proposed_total_cents),
+        "other_lines_total_cents": other_total,
+        "choices": ["reduce_quantity", "increase_budget", "choose_cheaper_product"],
+        "requires_confirmation": True,
+    }
+
+
 _CARRIED_AGE_HOURS = 1.0   # mirrors cart-age labelling: a line idle >1h reads as carried
 
 
@@ -417,6 +466,15 @@ def apply_plan(plan_id: str, *, tenant_id: str, uid: str, redis=None) -> Dict[st
                         "budget_max_cents": cap,
                         "proposed_total_cents": proposed_total,
                     }
+                    resolution = _affordability_resolution(
+                        plan=plan,
+                        working=working,
+                        by_sku=by_sku,
+                        cap_cents=cap,
+                        proposed_total_cents=proposed_total,
+                    )
+                    if resolution is not None:
+                        error["resolution"] = resolution
                     _finish(plan_id, "rejected", error, db=db)
                     db.commit()
                     return {"status": "rejected", "plan_id": plan_id, "error": error}

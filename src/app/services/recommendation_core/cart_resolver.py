@@ -89,7 +89,8 @@ _KEEP_INTENT = re.compile(
     r"\b(keep|only|just|except|all but|everything but|nothing but|leave (only|just))\b", re.IGNORECASE)
 _REPLACE_INTENT = re.compile(r"\b(replace|swap|switch|substitute|instead of|in place of)\b", re.IGNORECASE)
 _REMOVE_INTENT = re.compile(
-    r"\b(clear|remove|delete|drop|ditch|discard|take out|get rid of|do not want|don't want)\b",
+    r"\b(clear|remove|delete|drop|ditch|discard|take out|get rid of|do not want|don't want)\b|"
+    r"\btake\b.{0,80}\bout\b",
     re.IGNORECASE,
 )
 _QUANTITY_CHANGE_INTENT = re.compile(
@@ -403,6 +404,24 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
     if not envelope.query:
         return EMPTY_PLAN
 
+    # Cheap, authoritative fast path for one explicitly named removal. The language gate only
+    # identifies the requested operation class; SKU identity still has to bind to exactly one
+    # current line. Ambiguous references continue to the model/clarification path.
+    if (_REMOVE_INTENT.search(envelope.query)
+            and not _QUANTITY_SIGNAL_INTENT.search(envelope.query)
+            and not _CLEAR_ALL_SCOPE_INTENT.search(envelope.query)):
+        named_sku = _bind_name_to_sku(
+            envelope.query,
+            lines,
+            _distinctive_index(_line_token_index(lines)),
+        )
+        if named_sku is not None:
+            return CartMutationPlan(
+                ops=(CartOp(action="remove_items", target_skus=(named_sku,)),),
+                confidence=1.0,
+                source="grammar",
+            )
+
     source = "grammar"
     data = _grammar_cart_data(envelope) if llm_fn is None else None
     if not isinstance(data, dict):
@@ -416,7 +435,15 @@ def resolve_cart_mutation(envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = N
             logger.debug("cart resolver model/parse failure: %s", repr(exc)[:100])
             data = None
     if not isinstance(data, dict):
-        return EMPTY_PLAN
+        # A failed/invalid model response must not suppress a deterministic, uniquely-bound
+        # named removal. Consequence authorization and SKU binding below still apply; an
+        # ambiguous or absent target remains an empty/clarification plan.
+        if (_REMOVE_INTENT.search(envelope.query or "")
+                and not _QUANTITY_SIGNAL_INTENT.search(envelope.query or "")
+                and not _CLEAR_ALL_SCOPE_INTENT.search(envelope.query or "")):
+            data = {"ops": [], "confidence": 0.0}
+        else:
+            return EMPTY_PLAN
 
     try:
         conf = max(0.0, min(1.0, float(data.get("confidence") or 0.0)))

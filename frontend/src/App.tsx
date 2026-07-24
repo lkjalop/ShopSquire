@@ -12,6 +12,9 @@ import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
 import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
+import AffordabilityResolutionCard, {
+  type AffordabilityResolution,
+} from './components/AffordabilityResolutionCard';
 import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { procurementAwareTraceId } from './lib/trace';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
@@ -93,6 +96,7 @@ type ChatMessage = {
   // V2 cart lane (C2): a CONFIRM-tier mutation plan — nothing has touched the cart yet; the
   // Confirm button applies it via POST /cart/mutations/{plan_id}/apply (idempotent, stale-guarded).
   cartConfirm?: { planId: string; ops: { action: string; target_skus?: string[]; quantity?: number; replacement_sku?: string; replacement_name?: string; budget_max_cents?: number; unit_price_cents?: number; previous_quantity?: number; allow_sourcing?: boolean }[]; expiresAt?: string };
+  affordabilityResolution?: AffordabilityResolution;
   evidence?: any;                        // N1: evidence block from the orchestrator → source chips + Evidence tab
   webConsentPrompt?: { query: string };  // N3 Mode-B: consent chip — never auto-search on an imperative
 };
@@ -792,7 +796,22 @@ export default function App() {
         setChatOpen(true);
         setMessages((prev) => [...prev, {
           role: 'assistant' as const,
-          content: `That selection changes the order math: ${bulkQty} × ${productName} is $${(bulkQty * unitCents / 100).toLocaleString()}, above your $${(totalCents / 100).toLocaleString()} total budget. I have not changed the cart. At this price the budget covers ${affordable} unit${affordable === 1 ? '' : 's'}; ask me to use that quantity, choose a lower-priced option, or approve a higher total.`,
+          content: 'That selection exceeds the preserved total budget. Nothing was added.',
+          affordabilityResolution: {
+            kind: 'total_budget_exceeded',
+            sku,
+            product_name: productName,
+            currency: String((picked as any)?.currency || 'AUD'),
+            requested_quantity: bulkQty,
+            max_affordable_quantity: affordable,
+            current_unit_price_cents: unitCents,
+            cheaper_unit_price_max_cents: Math.floor(totalCents / bulkQty),
+            budget_max_cents: totalCents,
+            proposed_total_cents: bulkQty * unitCents,
+            other_lines_total_cents: 0,
+            choices: ['reduce_quantity', 'increase_budget', 'choose_cheaper_product'],
+            requires_confirmation: true,
+          },
           timestamp: new Date(),
         }]);
         return;
@@ -977,9 +996,16 @@ export default function App() {
           content: 'That confirmation window expired, so nothing was changed. Ask again and I\'ll set it up fresh.',
           timestamp: new Date() }]);
       } else {
-        const err = (out as any)?.error?.error || status || 'not applied';
+        const error = (out as any)?.error;
+        const err = error?.error || status || 'not applied';
+        const resolution = error?.resolution?.kind === 'total_budget_exceeded'
+          ? error.resolution as AffordabilityResolution
+          : undefined;
         setMessages(prev => [...prev, { role: 'assistant' as const,
-          content: `I couldn't apply that (${err}) — nothing in your cart was changed.`,
+          content: resolution
+            ? 'That quantity exceeds the preserved total budget. Nothing in your cart was changed.'
+            : `I couldn't apply that (${err}) — nothing in your cart was changed.`,
+          ...(resolution ? { affordabilityResolution: resolution } : {}),
           timestamp: new Date() }]);
       }
     } catch (e: any) {
@@ -987,6 +1013,26 @@ export default function App() {
         content: `I couldn't apply that change (${String(e?.message || e)}) — nothing in your cart was changed.`,
         timestamp: new Date() }]);
     }
+  };
+
+  const chooseAffordabilityResolution = (
+    msg: ChatMessage,
+    choice: AffordabilityResolution['choices'][number],
+  ) => {
+    const resolution = msg.affordabilityResolution;
+    if (!resolution) return;
+    setMessages(prev => prev.map(item => item === msg
+      ? { ...item, affordabilityResolution: undefined }
+      : item));
+    const name = JSON.stringify(resolution.product_name);
+    const budget = Math.round(resolution.budget_max_cents / 100);
+    const proposed = Math.round(resolution.proposed_total_cents / 100);
+    const query = choice === 'reduce_quantity'
+      ? `Set ${name} to ${resolution.max_affordable_quantity} units and keep the total budget at $${budget}.`
+      : choice === 'increase_budget'
+        ? `Increase the total budget to $${proposed} and set ${name} to ${resolution.requested_quantity} units.`
+        : `Show cheaper alternatives to ${name} that can supply ${resolution.requested_quantity} units within a total budget of $${budget}.`;
+    void handleSend({ queryOverride: query });
   };
 
   // V2 cart lane: undo via the SERVER-side snapshot the transactional apply stashed
@@ -2501,6 +2547,12 @@ export default function App() {
                           ✋ Not now
                         </button>
                       </div>
+                    )}
+                    {msg.affordabilityResolution && (
+                      <AffordabilityResolutionCard
+                        resolution={msg.affordabilityResolution}
+                        onChoose={(choice) => chooseAffordabilityResolution(msg, choice)}
+                      />
                     )}
                   </div>
                 ))}

@@ -153,6 +153,21 @@ def test_set_quantity_preserves_whole_order_budget_at_apply_time(wired):
     assert out["status"] == "rejected"
     assert out["error"]["error"] == "total_budget_exceeded"
     assert out["error"]["proposed_total_cents"] == 30_000
+    assert out["error"]["resolution"] == {
+        "kind": "total_budget_exceeded",
+        "sku": "SKU-A",
+        "product_name": "Acme Alpha Unit",
+        "currency": "USD",
+        "requested_quantity": 2,
+        "max_affordable_quantity": 1,
+        "current_unit_price_cents": 10_000,
+        "cheaper_unit_price_max_cents": 5_000,
+        "budget_max_cents": 20_000,
+        "proposed_total_cents": 30_000,
+        "other_lines_total_cents": 10_000,
+        "choices": ["reduce_quantity", "increase_budget", "choose_cheaper_product"],
+        "requires_confirmation": True,
+    }
     assert _skus(uid) == {"SKU-A": 1, "SKU-B": 1}
 
 

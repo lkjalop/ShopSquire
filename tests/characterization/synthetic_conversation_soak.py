@@ -49,6 +49,7 @@ class TurnSpec:
     excluded_brand: Optional[str] = None
     expect_products: Optional[bool] = None
     expect_cart_ops: Optional[int] = None
+    expect_cart_clarification: bool = False
     budget_scope: Optional[str] = None
     calibration_class: Optional[str] = None
 
@@ -212,6 +213,25 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
             {"sku": "ASUS-TUF", "name": "Asus TUF Gaming F16 16-inch Laptop", "quantity": 20},
             {"sku": "HP-OMEN", "name": "HP OMEN MAX 16-inch Laptop", "quantity": 10},
             {"sku": "IDEAPAD", "name": "Lenovo IdeaPad Slim 3i Laptop", "quantity": 20},
+        )),
+        JourneySpec("cart_targeting", "buyer-amending-a-mixed-cart", "mixed", (
+            TurnSpec('remove "HP Envy x360 14-inch Laptop"',
+                     kind="cart", expect_cart_ops=1),
+            TurnSpec("take the Asus TUF out please",
+                     kind="cart", expect_cart_ops=1),
+            TurnSpec("reduce the Lenovo to 12",
+                     kind="cart", expect_cart_ops=0, expect_cart_clarification=True),
+            TurnSpec("set the IdeaPad Slim 3i to 12; do I need to reconfirm sourcing?",
+                     kind="cart", expect_cart_ops=1),
+            TurnSpec("remove the ThinkPad L13",
+                     kind="cart", expect_cart_ops=1),
+            TurnSpec("add 3 more units to the Lenovo",
+                     kind="cart", expect_cart_ops=1),
+        ), cart=(
+            {"sku": "HP-ENVY", "name": "HP Envy x360 14-inch Laptop", "quantity": 15},
+            {"sku": "ASUS-TUF", "name": "Asus TUF Gaming F16 16-inch Laptop", "quantity": 20},
+            {"sku": "LEN-THINK", "name": "Lenovo ThinkPad L13 Gen 6 Laptop", "quantity": 20},
+            {"sku": "LEN-IDEA", "name": "Lenovo IdeaPad Slim 3i Laptop", "quantity": 25},
         )),
     ]
 
@@ -608,8 +628,11 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
                         plan = resolve_cart_mutation(env)
                         errors.extend([] if len(plan.ops) == int(spec.expect_cart_ops or 0) else
                                       [f"cart_ops:{len(plan.ops)}:expected:{spec.expect_cart_ops}"])
-                        if plan.needs_clarification:
-                            errors.append("cart_unexpected_clarification")
+                        if plan.needs_clarification != spec.expect_cart_clarification:
+                            errors.append(
+                                "cart_clarification:"
+                                f"{plan.needs_clarification}:expected:{spec.expect_cart_clarification}"
+                            )
                         cart = _apply_cart_plan(cart, plan)
                         record.update({"lane": "CART_MUTATE", "ops": plan.as_dict(),
                                        "cart_size": len(cart)})
