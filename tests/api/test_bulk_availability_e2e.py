@@ -9,16 +9,23 @@ x-skip-observer avoids the cold-start observer latency.
 """
 from __future__ import annotations
 
+import uuid
+
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
 
 
 def _seed_catalog():
+    from sqlalchemy import text
     from src.app.models.db import db_session
     from scripts.seed_gaming_laptops import ensure_gaming_catalog
     with db_session() as db:
         ensure_gaming_catalog(db)
+        # The tenant test profile is AUD-authoritative. Keep this legacy seed in
+        # that currency so the currency clamp, rather than an unrelated USD/AUD
+        # mismatch, does not erase the availability fixture.
+        db.execute(text("UPDATE products SET currency='AUD' WHERE sku LIKE 'GAM-%'"))
         db.commit()
 
 
@@ -27,7 +34,10 @@ def test_bulk_availability_query_wired_end_to_end():
     client = TestClient(create_app())
     r = client.get(
         "/api/v1/recommend/suggest",
-        params={"uid": "bulk-avail-e2e", "query": "10 gaming laptops under $1800, can you deliver in 4 weeks?"},
+        params={
+            "uid": f"bulk-avail-e2e-{uuid.uuid4()}",
+            "query": "10 gaming laptops under $1800, can you deliver in 4 weeks?",
+        },
         headers={"x-skip-observer": "1", "x-api-key": "local-merchant-key"},
     )
     assert r.status_code == 200, r.text
