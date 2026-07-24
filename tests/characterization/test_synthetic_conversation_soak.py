@@ -1,15 +1,61 @@
+import json
+
+import pytest
+
 from tests.characterization.synthetic_conversation_soak import (
+    JourneySpec,
     TurnSpec,
     _apply_cart_plan,
     _dimension_summary,
     _effective_decision,
     _error_dimension,
     _percentile,
+    _resume_checkpoint,
     _session_from,
     build_context_journeys,
     build_journeys,
     build_lifecycle_journeys,
 )
+
+
+def test_resume_checkpoint_keeps_only_complete_matching_journeys(tmp_path):
+    checkpoint = tmp_path / "soak.partial.jsonl"
+    rows = [
+        {"seed": 7, "suite": "breadth", "journey": 0, "turn": 0},
+        {"seed": 7, "suite": "breadth", "journey": 0, "turn": 1},
+        {"seed": 7, "suite": "breadth", "journey": 1, "turn": 0},
+    ]
+    checkpoint.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8",
+    )
+    journeys = [
+        JourneySpec("done", "p", "a", (TurnSpec("one"), TurnSpec("two"))),
+        JourneySpec("partial", "p", "a", (TurnSpec("one"), TurnSpec("two"))),
+    ]
+
+    kept, complete = _resume_checkpoint(
+        checkpoint, seed=7, suite="breadth", journeys=journeys,
+    )
+
+    assert complete == {0}
+    assert [(row["journey"], row["turn"]) for row in kept] == [(0, 0), (0, 1)]
+    assert len(checkpoint.read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_resume_checkpoint_rejects_a_different_run(tmp_path):
+    checkpoint = tmp_path / "soak.partial.jsonl"
+    checkpoint.write_text(
+        json.dumps({"seed": 8, "suite": "breadth", "journey": 0, "turn": 0}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="different seed or suite"):
+        _resume_checkpoint(
+            checkpoint,
+            seed=7,
+            suite="breadth",
+            journeys=[JourneySpec("one", "p", "a", (TurnSpec("one"),))],
+        )
 
 
 def test_build_journeys_hits_exact_turn_target_and_is_deterministic():

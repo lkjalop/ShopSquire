@@ -325,6 +325,44 @@ def _percentile(values: List[float], p: float) -> float:
     return round(xs[rank], 1)
 
 
+def _resume_checkpoint(
+    path: Path,
+    *,
+    seed: int,
+    suite: str,
+    journeys: Sequence[JourneySpec],
+) -> tuple[List[Dict[str, Any]], set[int]]:
+    """Keep only complete journeys from a checkpoint belonging to this exact run."""
+    if not path.exists():
+        return [], set()
+    parsed: List[Dict[str, Any]] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("seed") != seed or row.get("suite") != suite:
+            raise ValueError(f"checkpoint {path} belongs to a different seed or suite")
+        parsed.append(row)
+
+    complete: set[int] = set()
+    kept: List[Dict[str, Any]] = []
+    for journey_index, journey in enumerate(journeys):
+        records = sorted(
+            (row for row in parsed if row.get("journey") == journey_index),
+            key=lambda row: int(row.get("turn", -1)),
+        )
+        if [row.get("turn") for row in records] == list(range(len(journey.turns))):
+            complete.add(journey_index)
+            kept.extend(records)
+
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, default=str) + "\n" for row in kept),
+        encoding="utf-8",
+    )
+    return kept, complete
+
+
 def _session_from(core, prior: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     dec = core.extras.get("decision") or {}
     used = core.extras.get("constraints_used") or {}
@@ -511,6 +549,7 @@ def _apply_cart_plan(cart: List[Dict[str, Any]], plan) -> List[Dict[str, Any]]:
 def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
              turns_per_journey: Optional[int] = None,
              checkpoint_path: Optional[Path] = None,
+             resume: bool = False,
              journeys_override: Optional[Sequence[JourneySpec]] = None,
              suite: str = "breadth") -> Dict[str, Any]:
     journeys = (list(journeys_override) if journeys_override is not None else
@@ -520,12 +559,20 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
     session_factory = sessionmaker(bind=get_engine())
     db = session_factory()
     rows: List[Dict[str, Any]] = []
+    completed_journeys: set[int] = set()
     started = time.time()
     if checkpoint_path:
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        checkpoint_path.unlink(missing_ok=True)
+        if resume:
+            rows, completed_journeys = _resume_checkpoint(
+                checkpoint_path, seed=seed, suite=suite, journeys=journeys,
+            )
+        else:
+            checkpoint_path.unlink(missing_ok=True)
     try:
         for ji, journey in enumerate(journeys):
+            if ji in completed_journeys:
+                continue
             session: Dict[str, Any] = {}
             cart = [dict(x) for x in journey.cart]
             for ti, spec in enumerate(journey.turns):
@@ -538,6 +585,7 @@ def run_soak(turn_target: int, seed: int, only_family: Optional[str] = None, *,
                 t0 = time.perf_counter()
                 errors: List[str] = []
                 record: Dict[str, Any] = {
+                    "seed": seed, "suite": suite,
                     "journey": ji, "turn": ti, "family": journey.family,
                     "persona": journey.persona, "age_group": journey.age_group,
                     "kind": spec.kind, "query": spec.query,
@@ -620,6 +668,10 @@ def main() -> int:
     ap.add_argument("--turns-per-journey", type=int)
     ap.add_argument("--suite", choices=("breadth", "context", "lifecycle"), default="breadth")
     ap.add_argument("--output")
+    ap.add_argument(
+        "--resume", action="store_true",
+        help="resume complete journeys from the matching partial JSONL checkpoint",
+    )
     ap.add_argument("--fail-on-invariant", action="store_true")
     args = ap.parse_args()
     out = Path(args.output) if args.output else (
@@ -628,13 +680,13 @@ def main() -> int:
     if args.suite == "breadth":
         report = run_soak(max(1, args.turns), args.seed, args.only_family,
                           turns_per_journey=args.turns_per_journey,
-                          checkpoint_path=checkpoint)
+                          checkpoint_path=checkpoint, resume=args.resume)
     else:
         journeys = (build_context_journeys(max(1, args.turns // 10), args.seed)
                     if args.suite == "context"
                     else build_lifecycle_journeys(max(1, args.turns // 15), args.seed))
         report = run_soak(args.turns, args.seed, checkpoint_path=checkpoint,
-                          journeys_override=journeys, suite=args.suite)
+                          resume=args.resume, journeys_override=journeys, suite=args.suite)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     checkpoint.unlink(missing_ok=True)
