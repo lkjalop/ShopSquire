@@ -115,7 +115,7 @@ def test_market_projection_emits_scoped_non_sensitive_evidence(aligned_engine, m
         })
     traced = []
     monkeypatch.setattr(
-        "src.app.services.recommend_intelligence_stage.log_trace_event",
+        "src.app.services.market_projection.log_trace_event",
         lambda **kw: traced.append(kw))
     st = _state(flags={"ATTRIBUTION_ENABLED": False})
     run_intelligence_stage(st, mem=_FakeMem())

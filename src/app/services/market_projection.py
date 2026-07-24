@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Sequence
 
 from sqlalchemy import text
 
+from src.app.services.decision_log import log_trace_event
 from src.app.services.market_analysis import detect_bulk_order_frequency, detect_velocity_dsi
 
 
@@ -33,12 +34,25 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
     case_rows: list[Dict[str, Any]] = []
     try:
         rows = db.execute(text(
-            "SELECT sku, quantity, event_time FROM sales_metrics")).fetchall()
+            "SELECT sku, quantity, occurred_at FROM marketing_event_fact "
+            "WHERE tenant_id=:tenant AND event_type='purchase' AND status='active'"),
+            {"tenant": tenant_id}).fetchall()
         sales_rows = _recent([
             {"sku": row[0], "quantity": row[1], "event_time": row[2]} for row in rows
         ], "event_time", since)
     except Exception:
         pass
+    # sales_metrics is a legacy, unscoped demo fixture. It may inform only the
+    # default demo tenant; it must never bleed into a real tenant projection.
+    if not sales_rows and tenant_id == "default":
+        try:
+            rows = db.execute(text(
+                "SELECT sku, quantity, event_time FROM sales_metrics")).fetchall()
+            sales_rows = _recent([
+                {"sku": row[0], "quantity": row[1], "event_time": row[2]} for row in rows
+            ], "event_time", since)
+        except Exception:
+            pass
     try:
         rows = db.execute(text(
             "SELECT sku, on_hand, reserved, available, updated_at FROM inventory_level "
@@ -85,6 +99,56 @@ def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dic
         item["as_of"] = inputs["as_of"]
         item["confidence"] = "seeded_demo" if inputs["sales"] else "insufficient_data"
     return velocity
+
+
+def projection_evidence(
+    db, *, tenant_id: str, results: Sequence[Dict[str, Any]], window_days: int = 30,
+) -> list[Dict[str, Any]]:
+    """Build buyer-safe, tenant/SKU-scoped evidence for an ordered slate."""
+    by_sku = projections(db, tenant_id=tenant_id, window_days=window_days)
+    evidence: list[Dict[str, Any]] = []
+    for rank, row in enumerate(results[:10], start=1):
+        sku = str((row or {}).get("sku") or "").strip()
+        projection = by_sku.get(sku)
+        if not projection:
+            continue
+        units_per_day = float(projection.get("units_per_day") or 0.0)
+        evidence.append({
+            "tenant_id": tenant_id,
+            "sku": sku,
+            "rank": rank,
+            "demand_trend": (
+                "dead_stock" if projection.get("dead_stock")
+                else "observed_sales" if units_per_day > 0
+                else "insufficient_data"
+            ),
+            "forecast_units_30d": round(units_per_day * 30.0, 2),
+            "velocity_dsi_days": projection.get("dsi_days"),
+            "stock_position": (
+                "stockout" if projection.get("stockout")
+                else "surplus" if projection.get("dead_stock")
+                else "balanced"
+            ),
+            "stock_on_hand": projection.get("stock_on_hand"),
+            "bulk_frequency": projection.get("bulk_frequency"),
+            "confidence": projection.get("confidence"),
+            "as_of": projection.get("as_of"),
+            "economics_included": False,
+        })
+    return evidence
+
+
+def emit_projection_events(
+    db, *, trace_id: str, tenant_id: str, results: Sequence[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    """Persist the same scoped evidence for legacy and V2 recommendation paths."""
+    evidence = projection_evidence(db, tenant_id=tenant_id, results=results)
+    for payload in evidence:
+        log_trace_event(
+            trace_id=trace_id, event_type="market_projection", source_type="stage",
+            source_id="MarketProjectionStage", target_type="sku",
+            target_id=str(payload["sku"]), payload=payload)
+    return evidence
 
 
 def operator_product_projection(db, *, sku: str, tenant_id: str = "default") -> Dict[str, Any]:

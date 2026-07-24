@@ -149,4 +149,16 @@ def finalize_core_response(
     except Exception as exc:
         out["_trace_recommendation_persisted"] = False
         logger.warning("core response trace persistence failed for %s: %s", trace_id, exc)
+    if products:
+        try:
+            from src.app.models.db import db_session
+            from src.app.services.market_projection import emit_projection_events
+            with db_session() as db:
+                market_projections = emit_projection_events(
+                    db, trace_id=trace_id, tenant_id=str(tenant_id or "default"),
+                    results=products)
+            if market_projections:
+                out["market_projections"] = market_projections
+        except Exception as exc:
+            logger.warning("core market projection failed for %s: %s", trace_id, exc)
     return out

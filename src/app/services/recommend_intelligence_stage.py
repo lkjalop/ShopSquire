@@ -170,43 +170,11 @@ def _market_projections(state: IntelligenceStageState, results: List[Dict[str, A
     try:
         from src.app.models.db import db_session
         from src.app.platform.tenant_context import current_tenant_id
-        from src.app.services.market_projection import projections
+        from src.app.services.market_projection import emit_projection_events
         tenant_id = str(current_tenant_id() or "default")
         with db_session() as db:
-            by_sku = projections(db, tenant_id=tenant_id, window_days=30)
-        emitted = []
-        for rank, row in enumerate(results[:10], start=1):
-            sku = str((row or {}).get("sku") or "").strip()
-            projection = by_sku.get(sku)
-            if not projection:
-                continue
-            units_per_day = float(projection.get("units_per_day") or 0.0)
-            payload = {
-                "tenant_id": tenant_id,
-                "sku": sku,
-                "rank": rank,
-                "demand_trend": (
-                    "dead_stock" if projection.get("dead_stock")
-                    else "observed_sales" if units_per_day > 0
-                    else "insufficient_data"
-                ),
-                "forecast_units_30d": round(units_per_day * 30.0, 2),
-                "velocity_dsi_days": projection.get("dsi_days"),
-                "stock_position": (
-                    "stockout" if projection.get("stockout")
-                    else "surplus" if projection.get("dead_stock")
-                    else "balanced"
-                ),
-                "stock_on_hand": projection.get("stock_on_hand"),
-                "bulk_frequency": projection.get("bulk_frequency"),
-                "confidence": projection.get("confidence"),
-                "as_of": projection.get("as_of"),
-                "economics_included": False,
-            }
-            emitted.append(payload)
-            log_trace_event(
-                trace_id=state.trace_id, event_type="market_projection", source_type="stage",
-                source_id="MarketProjectionStage", target_type="sku", target_id=sku, payload=payload)
+            emitted = emit_projection_events(
+                db, trace_id=state.trace_id, tenant_id=tenant_id, results=results)
         if emitted:
             state.payload["market_projections"] = emitted
     except Exception as exc:

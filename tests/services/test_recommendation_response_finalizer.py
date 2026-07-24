@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from src.app.services import recommendation_response_finalizer as finalizer
 
 
@@ -13,6 +15,19 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
 
     monkeypatch.setattr(finalizer, "log_trace_event", fake_trace)
     monkeypatch.setattr(finalizer, "log_decision", fake_decision)
+    emitted = {}
+
+    @contextmanager
+    def fake_session():
+        yield object()
+
+    def fake_market(db, **kwargs):
+        emitted.update(kwargs)
+        return [{"sku": "SKU-B", "tenant_id": kwargs["tenant_id"]}]
+
+    monkeypatch.setattr("src.app.models.db.db_session", fake_session)
+    monkeypatch.setattr(
+        "src.app.services.market_projection.emit_projection_events", fake_market)
 
     payload = {
         "turn_intent": "COMPARE",
@@ -66,3 +81,7 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
         "gpu_vram_gb": [[">=", 8]],
     }
     assert proposed["execution_mode"] == "v2_served"
+    assert emitted["trace_id"] == "trace-voice-1"
+    assert emitted["tenant_id"] == "tenant-a"
+    assert [item["sku"] for item in emitted["results"]] == ["SKU-B", "SKU-A"]
+    assert out["market_projections"] == [{"sku": "SKU-B", "tenant_id": "tenant-a"}]

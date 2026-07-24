@@ -29,12 +29,14 @@ def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
     # real source tables the backfill reads
-    s.execute(text("CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT)"))
+    s.execute(text(
+        "CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT, "
+        "updated_at TEXT, tenant_id TEXT)"))
     # search_events must carry the columns the backfill SELECTs (id, query, result_count, event_time,
     # uid_hash, session_id) — the adapter was extended with uid_hash/session_id and this minimal fixture
     # wasn't, so the SELECT errored and 0 rows ingested (the real cause of the 0-findings, not date rot).
     s.execute(text("CREATE TABLE search_events (id TEXT, event_time TEXT, query TEXT, result_count INTEGER, "
-                   "uid_hash TEXT, session_id TEXT)"))
+                   "uid_hash TEXT, session_id TEXT, tenant_id TEXT)"))
     attribution.ensure_tables(s)
     # a demand spike across days + a zero-result catalog gap → real findings. Dates are RELATIVE to today
     # (last 5 days, oldest first; spike on the newest) so the fixture never ages out of the pipeline's
@@ -45,10 +47,13 @@ def db():
         for j in range(n):
             # distinct uid_hash per searcher — detect_inventory_demand_mismatch gates on DISTINCT users
             # (anti-flood), so anonymous zero-result rows never manufacture the catalog-gap finding.
-            s.execute(text("INSERT INTO search_events (id, query, result_count, event_time, uid_hash) "
-                           "VALUES (:id,'widget',0,:t,:u)"),
+            s.execute(text("INSERT INTO search_events "
+                           "(id, query, result_count, event_time, uid_hash, tenant_id) "
+                           "VALUES (:id,'widget',0,:t,:u,'default')"),
                       {"id": f"{day}-{j}", "t": f"{day}T10:00:00", "u": f"u{j}"})
-    s.execute(text("INSERT INTO orders VALUES ('O1',119900,'paid',:d)"), {"d": days[-1]})
+    s.execute(text(
+        "INSERT INTO orders (id,total_cents,status,created_at,updated_at,tenant_id) "
+        "VALUES ('O1',119900,'paid',:d,:d,'default')"), {"d": days[-1]})
     s.commit()
     try:
         yield s
