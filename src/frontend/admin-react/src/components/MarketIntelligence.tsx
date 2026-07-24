@@ -9,9 +9,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   experimentEvaluate, experimentPromote, experimentRevert, experimentState,
+  fetchExecutiveMetrics,
   governancePulse, marketDigest, marketState, refreshMarket, replayAdvance, replayReset, replayState,
   supportResponse,
   type ExperimentState, type GovernancePulse, type MarketDigest, type ReplayState, type SupportResponse,
+  type ExecutiveMetricProjection,
 } from '../api';
 
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
@@ -25,6 +27,7 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
   const [day, setDay] = useState(7);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [executiveMetrics, setExecutiveMetrics] = useState<ExecutiveMetricProjection | null>(null);
 
   const [mode, setMode] = useState<'replay' | 'live'>('replay');
 
@@ -33,6 +36,11 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
     fn().then(setSt).catch((e) => setError(e.message));
   }, [mode]);
   useEffect(() => { if (authReady) load(); }, [load, authVersion, authReady]);
+  useEffect(() => {
+    if (authReady) {
+      fetchExecutiveMetrics().then(setExecutiveMetrics).catch(() => setExecutiveMetrics(null));
+    }
+  }, [authVersion, authReady, st]);
 
   const refreshLive = async () => {
     setBusy(true); setError(null);
@@ -155,6 +163,47 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
       </div>
 
       {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
+
+      <section data-testid="executive-metric-evidence"
+               style={{ borderTop: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', padding: '12px 0', marginBottom: 14 }}>
+        <h4 style={{ margin: '0 0 8px' }}>Executive metrics</h4>
+        <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 8 }}>
+          Tenant-scoped evidence. Estimated, simulated, insufficient and unavailable values are never presented as observed.
+        </div>
+        {!executiveMetrics ? (
+          <div>Metric evidence unavailable.</div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 8 }}>
+              <span>Canonical events <strong>{executiveMetrics.data_quality.event_count ?? 0}</strong></span>
+              <span>RFM customers <strong>{executiveMetrics.estimates.customer_estimate_count ?? 0}</strong> <small>(estimate)</small></span>
+              <span>High churn <strong>{executiveMetrics.estimates.high_churn_estimate_count ?? 0}</strong> <small>(estimate)</small></span>
+            </div>
+            <table style={{ width: '100%' }}>
+              <thead><tr><th>SKU</th><th>Metric</th><th>Value</th><th>Status</th><th>Evidence</th></tr></thead>
+              <tbody>
+                {executiveMetrics.metrics.slice(0, 30).map((metric, index) => (
+                  <tr key={`${metric.subject_id}-${metric.metric}-${index}`}>
+                    <td>{metric.subject_id}</td>
+                    <td>{metric.metric.replace(/_/g, ' ')}</td>
+                    <td>{metric.value == null ? 'Unavailable' : `${Number(metric.value).toFixed(2)} ${metric.unit || ''}`}</td>
+                    <td>{metric.status.replace(/_/g, ' ')}</td>
+                    <td>
+                      <details>
+                        <summary>{metric.source_count} source(s) · {(metric.confidence * 100).toFixed(0)}% confidence</summary>
+                        <div>Definition: {metric.definition_version}</div>
+                        <div>As of: {new Date(metric.as_of).toLocaleString()}</div>
+                        {metric.reason && <div>Reason: {metric.reason.replace(/_/g, ' ')}</div>}
+                        {metric.provenance_chain.map((source) => <div key={source}><code>{source}</code></div>)}
+                      </details>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </section>
 
       <div style={{ display: 'flex', gap: 24 }}>
         <div>

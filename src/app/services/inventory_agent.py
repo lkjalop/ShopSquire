@@ -729,37 +729,24 @@ class InventoryAgent:
 
     def _persist_supplier_score_audit(self, sku: str, supplier_id: str, score: float, payload: Dict[str, Any]) -> None:
         try:
+            from src.app.platform.tenant_context import current_tenant_id
+            tenant_id = str(current_tenant_id() or "default")
             with db_session() as db:
-                try:
-                    db.execute(
-                        text(
-                            """
-                            CREATE TABLE IF NOT EXISTS supplier_score_audits (
-                                id TEXT PRIMARY KEY,
-                                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                                sku TEXT,
-                                supplier_id TEXT,
-                                score REAL,
-                                payload TEXT
-                            )
-                            """
-                        )
-                    )
-                except Exception:
-                    pass
                 db.execute(
                     text(
                         """
-                        INSERT INTO supplier_score_audits (id, sku, supplier_id, score, payload)
-                        VALUES (:id, :sku, :supplier_id, :score, :payload)
+                        INSERT INTO supplier_score_audits
+                          (id, tenant_id, sku, supplier_id, score, payload)
+                        VALUES (:id, :tenant_id, :sku, :supplier_id, :score, :payload)
                         """
                     ),
                     {
                         "id": str(uuid.uuid4()),
+                        "tenant_id": tenant_id,
                         "sku": sku,
                         "supplier_id": supplier_id,
                         "score": float(score),
-                        "payload": str(payload),
+                        "payload": json.dumps(payload, default=str),
                     },
                 )
                 try:

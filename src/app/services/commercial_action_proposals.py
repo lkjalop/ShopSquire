@@ -92,6 +92,7 @@ def propose_replenishment(
     atp: Dict[str, Any],
     economics: Dict[str, Any],
     now: datetime | None = None,
+    forecast_quality: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     verdict = authorize_replenishment(
         demand_facts=demand_facts,
@@ -101,6 +102,7 @@ def propose_replenishment(
         tenant_id=tenant_id,
         sku=sku,
         currency=currency,
+        forecast_quality=forecast_quality,
     )
     authorized = bool(verdict.get("allowed"))
     return {
@@ -118,6 +120,7 @@ def propose_replenishment(
         "send_gate": "human" if authorized else "blocked",
         "auto_sent": False,
         "authority": "operator_advisory_only",
+        "forecast_quality_shadow": verdict.get("forecast_quality_shadow"),
     }
 
 
@@ -134,6 +137,7 @@ def product_action_proposals(
     demand_facts = _demand_growth_facts(db, tenant_id=tenant_id, sku=sku, now=now)
     atp = _latest_atp_deficit(db, tenant_id=tenant_id, sku=sku)
     economics = _policy_economics(operator_projection, tenant_id=tenant_id, sku=sku)
+    forecast_quality = _latest_forecast_quality(db, tenant_id=tenant_id, sku=sku)
     return {
         "discount": propose_surplus_discount(
             sku=sku,
@@ -148,7 +152,37 @@ def product_action_proposals(
             atp=atp,
             economics=economics,
             now=now,
+            forecast_quality=forecast_quality,
         ),
+    }
+
+
+def _latest_forecast_quality(db, *, tenant_id: str, sku: str) -> Dict[str, Any]:
+    try:
+        rows = db.execute(text("""
+            SELECT metric_name, value_numeric, coverage, status, as_of
+            FROM executive_metric_snapshot
+            WHERE tenant_id=:tenant AND subject_type='sku' AND subject_id=:sku
+              AND metric_name IN ('forecast_wape','forecast_coverage')
+            ORDER BY as_of DESC
+        """), {"tenant": tenant_id, "sku": sku}).fetchall()
+    except Exception:
+        return {"status": "unavailable", "reason": "metric_snapshot_unavailable"}
+    values: Dict[str, Any] = {}
+    status = "unavailable"
+    for name, value, coverage, row_status, _as_of in rows:
+        if str(name) in values:
+            continue
+        values[str(name)] = float(value) if value is not None else None
+        values[f"{name}_coverage"] = float(coverage or 0.0)
+        status = str(row_status or status)
+    return {
+        "status": status,
+        "wape": values.get("forecast_wape"),
+        "coverage": (
+            values.get("forecast_coverage")
+            if values.get("forecast_coverage") is not None
+            else values.get("forecast_wape_coverage", 0.0)),
     }
 
 

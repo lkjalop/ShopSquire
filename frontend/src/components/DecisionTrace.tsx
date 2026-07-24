@@ -347,9 +347,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
   const [procDetailRetry, setProcDetailRetry] = useState(0);
-  const [marketEconomics, setMarketEconomics] = useState<Record<string, any>>({});
-  const [commercialProposalStatus, setCommercialProposalStatus] = useState<Record<string, string>>({});
-  const [newsletterDraft, setNewsletterDraft] = useState<any | null>(null);
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
   // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
@@ -858,69 +855,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       ? allDisplayEvents
       : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
   const marketProjectionEvents = allDisplayEvents.filter((event) => eventMatches(event, 'market_projection'));
-  const marketProjectionSkus = marketProjectionEvents
-    .map((event) => String(event?.payload?.sku || '').trim()).filter(Boolean);
-  const marketProjectionSkuKey = Array.from(new Set(marketProjectionSkus)).join('|');
-
-  useEffect(() => {
-    if (activeTab !== 'market' || !effectiveApiKey || !marketProjectionSkuKey) {
-      if (activeTab === 'market' && !effectiveApiKey) setMarketEconomics({});
-      return;
-    }
-    let alive = true;
-    Promise.all(marketProjectionSkuKey.split('|').map(async (sku) => {
-      const response = await fetch(
-        apiUrl(`/api/v1/admin/bi/product-projection?sku=${encodeURIComponent(sku)}`),
-        { credentials: 'include', headers: authHeaders });
-      if (!response.ok) return [sku, null] as const;
-      return [sku, await safeJson(response)] as const;
-    })).then((pairs) => {
-      if (!alive) return;
-      setMarketEconomics(Object.fromEntries(pairs.filter(([, value]) => value)));
-    }).catch(() => { if (alive) setMarketEconomics({}); });
-    return () => { alive = false; };
-  }, [activeTab, effectiveApiKey, marketProjectionSkuKey]);
-
-  const queueCommercialProposal = async (sku: string, action: 'discount' | 'replenishment') => {
-    const key = `${sku}:${action}`;
-    setCommercialProposalStatus((current) => ({ ...current, [key]: 'Submitting...' }));
-    try {
-      const response = await fetch(
-        apiUrl(`/api/v1/admin/bi/product-projection/${encodeURIComponent(sku)}/proposals/${action}`),
-        { method: 'POST', credentials: 'include', headers: authHeaders });
-      const body: any = await safeJson(response);
-      if (!response.ok) {
-        const reasons = body?.detail?.reasons || [];
-        throw new Error(reasons.length ? reasons.map(humanizeKey).join(', ') : 'Proposal is not authorized');
-      }
-      setCommercialProposalStatus((current) => ({
-        ...current,
-        [key]: `Queued for human review (${body.approval_id})`,
-      }));
-    } catch (error: any) {
-      setCommercialProposalStatus((current) => ({
-        ...current,
-        [key]: String(error?.message || 'Unable to queue proposal'),
-      }));
-    }
-  };
-
-  const createNewsletterDraft = async () => {
-    setNewsletterDraft({ status: 'loading' });
-    try {
-      const response = await fetch(apiUrl('/api/v1/admin/bi/newsletter-draft'), {
-        method: 'POST',
-        credentials: 'include',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skus: marketProjectionSkus }),
-      });
-      const body: any = await safeJson(response);
-      if (!response.ok) throw new Error(body?.detail || 'Unable to create draft');
-      setNewsletterDraft(body);
-    } catch (error: any) {
-      setNewsletterDraft({ status: 'error', message: String(error?.message || 'Unable to create draft') });
-    }
-  };
 
   const ms = trace?.model_selection || {};
   const persistedExecutionEvent = [...allDisplayEvents].reverse().find((evt: any) =>
@@ -3478,13 +3412,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   <h3 style={{ marginTop: 0 }}>Market Intelligence</h3>
                   <p style={{ color: '#6b7280', marginTop: 0 }}>
                     Transaction-derived demand and stock evidence scoped to products shown in this decision.
-                    Economics is available only to authenticated operators.
+                    Commercial economics and action controls are available only in the operator console.
                   </p>
                   {marketProjectionEvents.length === 0 ? (
                     <div className={styles.empty}>No scoped market projection was recorded for this decision.</div>
                   ) : marketProjectionEvents.map((event, index) => {
                     const item: any = event.payload || {};
-                    const economics: any = marketEconomics[String(item.sku || '')] || null;
                     return (
                       <div key={`${item.sku || 'projection'}-${index}`} data-testid={`market-projection-${item.sku}`}
                            style={{ border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 8, padding: 12, marginBottom: 10 }}>
@@ -3495,82 +3428,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         <div className={styles.kvRow}><span>Inventory</span><span>{item.stock_on_hand ?? '—'} on hand · DSI {item.velocity_dsi_days ?? '—'} days</span></div>
                         <div className={styles.kvRow}><span>Bulk frequency</span><span>{item.bulk_frequency?.bulk_order_count ?? 0} cases / {item.bulk_frequency?.window_days ?? 90}d</span></div>
                         <div className={styles.kvRow}><span>Evidence</span><span>{humanizeKey(item.confidence)} · as of {formatTime(item.as_of)}</span></div>
-                        {economics && (
-                          <div data-testid={`market-economics-${item.sku}`} style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #bfdbfe' }}>
-                            <div className={styles.kvRow}><span>Operator margin</span><span>{economics.gross_margin_pct != null ? `${(Number(economics.gross_margin_pct) * 100).toFixed(1)}%` : 'unavailable'}</span></div>
-                            <div className={styles.kvRow}><span>Projected gross / 30d</span><span>{economics.projected_profit_30d_cents != null ? `${economics.currency} ${(Number(economics.projected_profit_30d_cents) / 100).toLocaleString()}` : 'unavailable'}</span></div>
-                            <div style={{ color: '#92400e', fontSize: 12 }}>
-                              {economics.discount_authorized ? 'Validated landed cost permits governed discount review.' : 'Scenario only: discount headroom is locked until landed cost is validated.'}
-                            </div>
-                            {(['discount', 'replenishment'] as const).map((action) => {
-                              const proposal: any = economics.action_proposals?.[action] || {};
-                              const eligible = action === 'discount' ? proposal.eligible : proposal.authorized;
-                              const statusKey = `${item.sku}:${action}`;
-                              return (
-                                <div key={action} data-testid={`commercial-proposal-${action}-${item.sku}`}
-                                     style={{ marginTop: 8, padding: 8, border: '1px solid #d1d5db', background: '#fff', borderRadius: 6 }}>
-                                  <div style={{ fontWeight: 700 }}>
-                                    {action === 'discount' ? 'Surplus discount proposal' : 'Replenishment proposal'}
-                                  </div>
-                                  {action === 'discount' && eligible && (
-                                    <div style={{ fontSize: 12 }}>
-                                      Recommend {(Number(proposal.recommended_discount_pct || 0) * 100).toFixed(1)}%;
-                                      margin after {(Number(proposal.margin_after_pct || 0) * 100).toFixed(1)}%.
-                                    </div>
-                                  )}
-                                  {action === 'replenishment' && eligible && (
-                                    <div style={{ fontSize: 12 }}>
-                                      {proposal.shortfall} units · {proposal.lead_time_days} day lead · {proposal.demand_source_count} demand sources.
-                                    </div>
-                                  )}
-                                  {!eligible && (
-                                    <div style={{ color: '#6b7280', fontSize: 12 }}>
-                                      Blocked: {(proposal.reasons || ['insufficient evidence']).map(humanizeKey).join(', ')}
-                                    </div>
-                                  )}
-                                  <button
-                                    type="button"
-                                    disabled={!eligible || commercialProposalStatus[statusKey] === 'Submitting...'}
-                                    onClick={() => queueCommercialProposal(String(item.sku), action)}
-                                    style={{ marginTop: 6 }}>
-                                    Request human review
-                                  </button>
-                                  {commercialProposalStatus[statusKey] && (
-                                    <div style={{ marginTop: 4, fontSize: 12 }}>{commercialProposalStatus[statusKey]}</div>
-                                  )}
-                                  <div style={{ color: '#92400e', fontSize: 11, marginTop: 4 }}>
-                                    Approval records authorization only; no price, message, or purchase order is applied here.
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
-                  {marketProjectionEvents.length > 0 && effectiveApiKey && (
-                    <div style={{ borderTop: '1px solid #d1d5db', paddingTop: 10, marginTop: 10 }}>
-                      <button type="button" onClick={createNewsletterDraft}
-                              disabled={newsletterDraft?.status === 'loading'}>
-                        Create catalogue draft
-                      </button>
-                      {newsletterDraft && newsletterDraft.status !== 'loading' && (
-                        <div data-testid="newsletter-draft" style={{ marginTop: 8, padding: 10, border: '1px solid #d1d5db', borderRadius: 6 }}>
-                          <div style={{ fontWeight: 700 }}>Catalogue draft · {humanizeKey(newsletterDraft.status)}</div>
-                          {newsletterDraft.message && <div>{newsletterDraft.message}</div>}
-                          {(newsletterDraft.featured_skus || []).map((sku: string) => (
-                            <div key={sku} style={{ marginTop: 6 }}>
-                              <strong>{sku}</strong>: {newsletterDraft.blurbs?.[sku]}
-                            </div>
-                          ))}
-                          <div style={{ color: '#92400e', fontSize: 11, marginTop: 6 }}>
-                            Human review required. This draft is not scheduled, published, or sent.
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
 

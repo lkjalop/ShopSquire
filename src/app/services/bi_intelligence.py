@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import math
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+
+logger = logging.getLogger("shopsquire.bi_intelligence")
 
 
 def _safe_num(v: Any, default: float = 0.0) -> float:
@@ -16,148 +20,253 @@ def _safe_num(v: Any, default: float = 0.0) -> float:
         return float(default)
 
 
-def margin_intelligence(window_days: int = 90) -> Dict[str, Any]:
+def _utc(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _in_window(value: Any, *, days: int, now: datetime | None = None) -> bool:
+    parsed = _utc(value)
+    if parsed is None:
+        return False
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return current - timedelta(days=max(1, int(days))) <= parsed <= current + timedelta(minutes=5)
+
+
+def _unavailable(metric: str, *, tenant_id: str, window_days: int, reason: str) -> Dict[str, Any]:
+    return {
+        "metric": metric,
+        "tenant_id": tenant_id,
+        "window_days": int(window_days),
+        "status": "unavailable",
+        "reason": reason,
+    }
+
+
+def margin_intelligence(window_days: int = 90, *, tenant_id: str) -> Dict[str, Any]:
+    """Returns-adjusted revenue by SKU.
+
+    Gross margin remains unavailable until a validated landed-cost fact can be
+    matched to the sale. This endpoint must not silently treat seeded cost as COGS.
+    """
+    tenant = str(tenant_id or "").strip()
+    if not tenant:
+        raise ValueError("tenant_id is required")
     try:
         with db_session() as db:
             rows = db.execute(
                 text(
                     """
-                    SELECT sku,
-                           SUM(COALESCE(revenue_cents,0)) AS revenue_cents,
-                           SUM(COALESCE(cost_cents,0)) AS cost_cents,
-                           SUM(COALESCE(quantity,1)) AS qty
-                    FROM sales_metrics
-                    WHERE datetime(event_time) >= datetime('now', :window)
-                    GROUP BY sku
-                    ORDER BY revenue_cents DESC
-                    LIMIT 500
+                    SELECT event_type, sku, value, quantity, currency, occurred_at
+                    FROM marketing_event_fact
+                    WHERE tenant_id=:tenant AND status='active'
+                      AND event_type IN ('purchase','return','refund')
+                    ORDER BY occurred_at DESC
+                    LIMIT 10000
                     """
                 ),
-                {"window": f"-{max(7, int(window_days))} days"},
+                {"tenant": tenant},
             ).fetchall()
-    except Exception:
-        rows = []
-    by_sku: List[Dict[str, Any]] = []
-    for r in rows or []:
-        sku = str(r[0] or "").strip()
-        rev = _safe_num(r[1])
-        cost = _safe_num(r[2])
-        qty = max(1.0, _safe_num(r[3], 1.0))
-        margin = rev - cost
-        margin_pct = (margin / rev) if rev > 0 else 0.0
-        by_sku.append(
-            {
-                "sku": sku,
-                "revenue_cents": int(rev),
-                "cost_cents": int(cost),
-                "qty": int(qty),
-                "margin_cents": int(margin),
-                "margin_pct": round(margin_pct, 4),
-                "discount_risk": bool(margin_pct < 0.1 and rev > 0),
-            }
-        )
-    low_margin = [x for x in by_sku if x["discount_risk"]]
-    return {"window_days": int(window_days), "sku_count": len(by_sku), "low_margin_count": len(low_margin), "top": by_sku[:100]}
-
-
-def supplier_scorecard(window_days: int = 60) -> Dict[str, Any]:
-    try:
-        with db_session() as db:
-            rows = db.execute(
-                text(
-                    """
-                    SELECT supplier_id,
-                           AVG(COALESCE(score,0)) AS quality_score,
-                           AVG(COALESCE(json_extract(payload,'$.lead_time'), 0)) AS lead_time_avg,
-                           AVG(COALESCE(json_extract(payload,'$.on_time_rate'), 0)) AS on_time_avg,
-                           AVG(COALESCE(json_extract(payload,'$.defect_rate'), 0)) AS defect_rate_avg,
-                           COUNT(*) AS audits
-                    FROM supplier_score_audits
-                    WHERE datetime(created_at) >= datetime('now', :window)
-                    GROUP BY supplier_id
-                    ORDER BY quality_score DESC
-                    """
-                ),
-                {"window": f"-{max(7, int(window_days))} days"},
-            ).fetchall()
-    except Exception:
-        rows = []
-    out = []
-    for r in rows or []:
-        sid = str(r[0] or "").strip()
-        if not sid:
+    except Exception as exc:
+        logger.warning("margin intelligence unavailable for tenant %s: %s", tenant, exc)
+        return _unavailable(
+            "margin_intelligence", tenant_id=tenant, window_days=window_days,
+            reason="canonical_marketing_facts_unavailable",
+        ) | {"sku_count": 0, "low_margin_count": 0, "top": []}
+    rows = [row for row in rows if _in_window(row[5], days=window_days)]
+    aggregates: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for event_type, raw_sku, value, quantity, currency, _occurred_at in rows:
+        sku = str(raw_sku or "").strip()
+        ccy = str(currency or "").strip().upper()
+        if not sku or not ccy or value is None:
             continue
-        on_time = max(0.0, min(1.0, _safe_num(r[3])))
-        defect = max(0.0, min(1.0, _safe_num(r[4])))
-        score = (0.45 * on_time) + (0.35 * max(0.0, 1.0 - defect)) + (0.20 * max(0.0, min(1.0, _safe_num(r[1]) / 2.0)))
+        bucket = aggregates.setdefault((sku, ccy), {
+            "sku": sku, "currency": ccy, "revenue_cents": 0,
+            "returned_cents": 0, "net_revenue_cents": 0, "qty": 0,
+        })
+        amount = max(0, int(round(float(value))))
+        units = max(1, int(quantity or 1))
+        if str(event_type) == "purchase":
+            bucket["revenue_cents"] += amount
+            bucket["qty"] += units
+        else:
+            bucket["returned_cents"] += amount
+            bucket["qty"] = max(0, int(bucket["qty"]) - units)
+        bucket["net_revenue_cents"] = (
+            int(bucket["revenue_cents"]) - int(bucket["returned_cents"]))
+    by_sku: List[Dict[str, Any]] = []
+    for bucket in aggregates.values():
+        by_sku.append(bucket | {
+            "cost_cents": None,
+            "margin_cents": None,
+            "margin_pct": None,
+            "discount_risk": None,
+            "economics_status": "insufficient_data",
+            "economics_reason": "matched_landed_cogs_required",
+        })
+    by_sku.sort(key=lambda item: int(item["net_revenue_cents"]), reverse=True)
+    return {
+        "tenant_id": tenant,
+        "window_days": int(window_days),
+        "status": "observed" if by_sku else "insufficient_data",
+        "sku_count": len(by_sku),
+        "low_margin_count": None,
+        "top": by_sku[:100],
+    }
+
+
+def supplier_scorecard(window_days: int = 60, *, tenant_id: str) -> Dict[str, Any]:
+    tenant = str(tenant_id or "").strip()
+    if not tenant:
+        raise ValueError("tenant_id is required")
+    try:
+        with db_session() as db:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT supplier_id, score, payload, created_at
+                    FROM supplier_score_audits
+                    WHERE tenant_id=:tenant
+                    ORDER BY created_at DESC
+                    LIMIT 10000
+                    """
+                ),
+                {"tenant": tenant},
+            ).fetchall()
+    except Exception as exc:
+        logger.warning("supplier scorecard unavailable for tenant %s: %s", tenant, exc)
+        return _unavailable(
+            "supplier_scorecard", tenant_id=tenant, window_days=window_days,
+            reason="tenant_scoped_supplier_audits_unavailable",
+        ) | {"suppliers": []}
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for supplier_id, score, raw_payload, created_at in rows:
+        if not _in_window(created_at, days=window_days):
+            continue
+        try:
+            payload = json.loads(raw_payload or "{}") if isinstance(raw_payload, str) else dict(raw_payload or {})
+        except (TypeError, ValueError):
+            payload = {}
+        sid = str(supplier_id or "").strip()
+        if sid:
+            grouped.setdefault(sid, []).append({"score": score, "payload": payload})
+    out = []
+    for sid, audits in grouped.items():
+        on_times = [_safe_num(item["payload"].get("on_time_rate")) for item in audits]
+        defects = [_safe_num(item["payload"].get("defect_rate")) for item in audits]
+        leads = [_safe_num(item["payload"].get("lead_time")) for item in audits]
+        quality = [_safe_num(item.get("score")) for item in audits]
+        on_time = max(0.0, min(1.0, sum(on_times) / max(1, len(on_times))))
+        defect = max(0.0, min(1.0, sum(defects) / max(1, len(defects))))
+        quality_avg = sum(quality) / max(1, len(quality))
+        score = (0.45 * on_time) + (0.35 * max(0.0, 1.0 - defect)) + (
+            0.20 * max(0.0, min(1.0, quality_avg / 2.0)))
         out.append(
             {
                 "supplier_id": sid,
                 "score": round(score, 4),
-                "quality_score_raw": round(_safe_num(r[1]), 4),
-                "lead_time_avg": round(_safe_num(r[2]), 2),
+                "quality_score_raw": round(quality_avg, 4),
+                "lead_time_avg": round(sum(leads) / max(1, len(leads)), 2),
                 "on_time_avg": round(on_time, 4),
                 "defect_rate_avg": round(defect, 4),
-                "audits": int(_safe_num(r[5], 0)),
+                "audits": len(audits),
             }
         )
-    return {"window_days": int(window_days), "suppliers": out}
+    out.sort(key=lambda item: float(item["score"]), reverse=True)
+    return {
+        "tenant_id": tenant,
+        "window_days": int(window_days),
+        "status": "observed" if out else "insufficient_data",
+        "suppliers": out,
+    }
 
 
-def clv_prediction(window_days: int = 365) -> Dict[str, Any]:
+def clv_prediction(window_days: int = 365, *, tenant_id: str) -> Dict[str, Any]:
+    """Tenant-scoped RFM estimate, not a trained lifetime-value prediction."""
+    tenant = str(tenant_id or "").strip()
+    if not tenant:
+        raise ValueError("tenant_id is required")
     try:
         with db_session() as db:
             rows = db.execute(
                 text(
                     """
-                    SELECT uid_hash,
-                           COUNT(*) AS orders_n,
-                           SUM(COALESCE(order_total_cents,0)) AS revenue_cents,
-                           MAX(event_time) AS last_order_at
-                    FROM customer_orders
-                    WHERE datetime(event_time) >= datetime('now', :window)
-                    GROUP BY uid_hash
-                    LIMIT 5000
+                    SELECT event_type, subject_hash, value, currency, occurred_at
+                    FROM marketing_event_fact
+                    WHERE tenant_id=:tenant AND status='active'
+                      AND event_type IN ('purchase','return','refund')
+                    ORDER BY occurred_at DESC
+                    LIMIT 20000
                     """
                 ),
-                {"window": f"-{max(30, int(window_days))} days"},
+                {"tenant": tenant},
             ).fetchall()
-    except Exception:
-        rows = []
+    except Exception as exc:
+        logger.warning("RFM value unavailable for tenant %s: %s", tenant, exc)
+        return _unavailable(
+            "rfm_value_estimate", tenant_id=tenant, window_days=window_days,
+            reason="canonical_customer_events_unavailable",
+        ) | {"users": [], "method": "rfm_heuristic_v1"}
     now = datetime.now(timezone.utc)
-    users = []
-    for r in rows or []:
-        uid = str(r[0] or "").strip()
-        if not uid:
+    aggregates: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for event_type, subject_hash, value, currency, occurred_at in rows:
+        uid = str(subject_hash or "").strip()
+        ccy = str(currency or "").strip().upper()
+        occurred = _utc(occurred_at)
+        if not uid or not ccy or value is None or occurred is None:
             continue
-        orders_n = max(1.0, _safe_num(r[1], 1.0))
-        revenue = max(0.0, _safe_num(r[2]))
-        last = str(r[3] or "")
-        recency_days = 30.0
-        try:
-            dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
-            recency_days = max(0.0, (now - dt).total_seconds() / 86400.0)
-        except Exception:
-            pass
-        avg_order = revenue / orders_n
+        if not _in_window(occurred, days=window_days, now=now):
+            continue
+        bucket = aggregates.setdefault((uid, ccy), {
+            "uid_hash": uid, "currency": ccy, "orders_n": 0,
+            "revenue_cents": 0, "returned_cents": 0, "last_order_at": None,
+        })
+        if str(event_type) == "purchase":
+            bucket["orders_n"] += 1
+            bucket["revenue_cents"] += max(0, int(round(float(value))))
+            if bucket["last_order_at"] is None or occurred > bucket["last_order_at"]:
+                bucket["last_order_at"] = occurred
+        else:
+            bucket["returned_cents"] += max(0, int(round(float(value))))
+    users = []
+    for bucket in aggregates.values():
+        orders_n = int(bucket["orders_n"])
+        if orders_n <= 0 or bucket["last_order_at"] is None:
+            continue
+        revenue = max(0, int(bucket["revenue_cents"]) - int(bucket["returned_cents"]))
+        recency_days = max(0.0, (now - bucket["last_order_at"]).total_seconds() / 86400.0)
+        avg_order = revenue / float(orders_n)
         retention = math.exp(-recency_days / 120.0)
         clv = avg_order * orders_n * (1.0 + retention)
         users.append(
             {
-                "uid_hash": uid,
+                "uid_hash": bucket["uid_hash"],
+                "currency": bucket["currency"],
                 "orders_n": int(orders_n),
                 "revenue_cents": int(revenue),
                 "recency_days": round(recency_days, 2),
                 "retention_score": round(retention, 4),
-                "predicted_clv_cents": int(clv),
+                "estimated_value_cents": int(clv),
+                "estimate_status": "estimated",
             }
         )
-    users.sort(key=lambda x: x["predicted_clv_cents"], reverse=True)
-    return {"window_days": int(window_days), "users": users[:500]}
+    users.sort(key=lambda x: x["estimated_value_cents"], reverse=True)
+    return {
+        "tenant_id": tenant,
+        "window_days": int(window_days),
+        "status": "estimated" if users else "insufficient_data",
+        "method": "rfm_heuristic_v1",
+        "users": users[:500],
+    }
 
 
-def churn_prediction(window_days: int = 180) -> Dict[str, Any]:
-    clv = clv_prediction(window_days=window_days)
+def churn_prediction(window_days: int = 180, *, tenant_id: str) -> Dict[str, Any]:
+    clv = clv_prediction(window_days=window_days, tenant_id=tenant_id)
     out = []
     for u in clv.get("users", []):
         recency = float(u.get("recency_days") or 0.0)
@@ -170,12 +279,20 @@ def churn_prediction(window_days: int = 180) -> Dict[str, Any]:
         out.append(
             {
                 "uid_hash": u.get("uid_hash"),
+                "currency": u.get("currency"),
                 "rfm": {"recency_days": round(recency, 2), "frequency_per_month": round(frequency, 3), "avg_order_cents": int(monetary)},
                 "churn_risk": round(max(0.0, min(1.0, risk)), 4),
+                "estimate_status": "estimated",
             }
         )
     out.sort(key=lambda x: x["churn_risk"], reverse=True)
-    return {"window_days": int(window_days), "users": out[:500]}
+    return {
+        "tenant_id": str(tenant_id),
+        "window_days": int(window_days),
+        "status": "estimated" if out else clv.get("status", "insufficient_data"),
+        "method": "rfm_risk_heuristic_v1",
+        "users": out[:500],
+    }
 
 
 def seasonal_anomaly_with_causal_attribution(series: List[float], covariates: Dict[str, List[float]] | None = None) -> Dict[str, Any]:

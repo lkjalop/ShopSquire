@@ -101,3 +101,16 @@ def test_mismatched_demand_cannot_satisfy_source_diversity():
     assert verdict["allowed"] is False
     assert verdict["demand_source_count"] == 1
     assert "insufficient_independent_demand_sources" in verdict["reasons"]
+
+
+def test_forecast_quality_is_shadow_only_and_does_not_change_authorization():
+    verdict = authorize_replenishment(
+        demand_facts=[_demand("ga4"), _demand("orders")],
+        atp=_atp(), economics=_economics(), now=NOW,
+        forecast_quality={"status": "observed", "wape": 0.8, "coverage": 1.0},
+    )
+    assert verdict["allowed"] is True
+    assert verdict["forecast_quality_shadow"] == {
+        "mode": "shadow", "status": "observed", "wape": 0.8,
+        "coverage": 1.0, "would_pass": False,
+    }

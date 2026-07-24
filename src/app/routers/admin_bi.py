@@ -21,6 +21,7 @@ from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_
 from src.app.config import get_settings, load_feature_flags
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.schemas.ui_contracts import TransactionTimeseriesResponse
+from src.app.schemas.metric_evidence import MetricEvidence, OperatorMetricProjection
 from src.app.services.bi_intelligence import (
     margin_intelligence,
     supplier_scorecard,
@@ -32,6 +33,51 @@ from src.app.services.bi_query_agent import run_query_agent
 
 
 router = APIRouter(prefix="/api/v1/admin/bi", tags=["admin", "bi"])
+
+
+@router.get("/executive-metrics", response_model=OperatorMetricProjection)
+def executive_metrics_api(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> OperatorMetricProjection:
+    """Operator projection only; buyer traces never fetch this endpoint."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.market_metrics import summarize_marketing_facts
+    from src.app.services.market_projection import projections
+
+    tenant_id = str(current_tenant_id() or "default")
+    with db_session() as db:
+        product_metrics = projections(db, tenant_id=tenant_id, window_days=30)
+        try:
+            marketing = summarize_marketing_facts(db, tenant_id=tenant_id)
+        except Exception as exc:
+            logger.warning("marketing metric projection unavailable for %s: %s", tenant_id, exc)
+            marketing = {"data_quality": {}, "event_count": 0}
+    metrics = []
+    for projection in product_metrics.values():
+        for payload in projection.get("metrics") or []:
+            metrics.append(MetricEvidence.model_validate(payload))
+    rfm = clv_prediction(window_days=365, tenant_id=tenant_id)
+    churn = churn_prediction(window_days=180, tenant_id=tenant_id)
+    return OperatorMetricProjection(
+        tenant_id=tenant_id,
+        metrics=metrics,
+        data_quality={
+            **dict(marketing.get("data_quality") or {}),
+            "event_count": int(marketing.get("event_count") or 0),
+        },
+        estimates={
+            "rfm_method": rfm.get("method"),
+            "rfm_status": rfm.get("status"),
+            "customer_estimate_count": len(rfm.get("users") or []),
+            "churn_method": churn.get("method"),
+            "churn_status": churn.get("status"),
+            "high_churn_estimate_count": sum(
+                float(row.get("churn_risk") or 0.0) >= 0.7
+                for row in churn.get("users") or []),
+        },
+        actions=[],
+    )
 
 
 class NewsletterDraftRequest(BaseModel):
@@ -442,8 +488,10 @@ def margin_intelligence_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        return margin_intelligence(window_days=window_days)
+        return margin_intelligence(
+            window_days=window_days, tenant_id=str(current_tenant_id() or "default"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"margin_intelligence_failed: {exc}")
 
@@ -547,8 +595,10 @@ def supplier_scorecard_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        return supplier_scorecard(window_days=window_days)
+        return supplier_scorecard(
+            window_days=window_days, tenant_id=str(current_tenant_id() or "default"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"supplier_scorecard_failed: {exc}")
 
@@ -559,8 +609,10 @@ def clv_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        return clv_prediction(window_days=window_days)
+        return clv_prediction(
+            window_days=window_days, tenant_id=str(current_tenant_id() or "default"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"clv_prediction_failed: {exc}")
 
@@ -571,8 +623,10 @@ def churn_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        return churn_prediction(window_days=window_days)
+        return churn_prediction(
+            window_days=window_days, tenant_id=str(current_tenant_id() or "default"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"churn_prediction_failed: {exc}")
 
@@ -638,11 +692,21 @@ def executive_pulse_api(
             out["kpis"]["refund_pct"] = round((100.0 * refunded / max(1, orders)), 2)
             out["kpis"]["chargeback_pct"] = round((100.0 * chargeback / max(1, orders)), 2)
 
-            margin = margin_intelligence(window_days=max(7, (dt_end - dt_start).days))
+            from src.app.platform.tenant_context import current_tenant_id
+            margin = margin_intelligence(
+                window_days=max(7, (dt_end - dt_start).days),
+                tenant_id=str(current_tenant_id() or "default"),
+            )
             top = margin.get("top") or []
             total_rev_c = sum(int(x.get("revenue_cents") or 0) for x in top)
-            total_margin_c = sum(int(x.get("margin_cents") or 0) for x in top)
-            out["kpis"]["gross_margin_pct"] = round((100.0 * total_margin_c / max(1, total_rev_c)), 2)
+            known_margin = [x for x in top if x.get("margin_cents") is not None]
+            if known_margin and total_rev_c > 0:
+                total_margin_c = sum(int(x["margin_cents"]) for x in known_margin)
+                out["kpis"]["gross_margin_pct"] = round(
+                    (100.0 * total_margin_c / total_rev_c), 2)
+            else:
+                out["kpis"]["gross_margin_pct"] = None
+                out["kpis"]["gross_margin_status"] = "unavailable"
 
             dec_rows = db.execute(
                 sql_text(

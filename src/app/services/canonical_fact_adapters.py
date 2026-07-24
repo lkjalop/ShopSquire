@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from typing import Any, Dict, Iterable
 
 from sqlalchemy import text
@@ -27,9 +26,10 @@ def _record(writer, db, fact: Dict[str, Any]) -> tuple[int, int]:
         return 0, 1
 
 
-def _iso(value: Any) -> str:
+def _iso(value: Any) -> str | None:
+    """Preserve source event time; ingestion time must never impersonate it."""
     raw = str(value or "").strip()
-    return raw or datetime.now(timezone.utc).isoformat()
+    return raw or None
 
 
 def _subject_hash(value: Any) -> str | None:
@@ -59,17 +59,20 @@ def _order_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
         order_id, draft_id, customer_id, guest_hash, total, currency, status, created, updated, raw_lines = row
         event_type = "return" if str(status) == "returned" else (
             "refund" if str(status) in {"refunded", "chargebacked"} else "purchase")
-        for index, line in enumerate(_lines(raw_lines)):
+        lines = list(_lines(raw_lines))
+        for index, line in enumerate(lines):
             sku = str(line.get("sku") or "").strip()
             quantity = max(1, int(line.get("quantity") or 1))
             if not sku:
                 continue
             unit = int(line.get("price_cents") or 0)
+            allocated_value = unit * quantity if unit else (
+                int(total) if len(lines) == 1 and total is not None else None)
             record_id = f"{order_id}:{status}:{index}:{sku}"
             accepted, quarantined = _record(record_marketing_event, db, {
                 "tenant_id": tenant_id, "deduplication_id": f"orders:{record_id}",
                 "event_type": event_type, "subject_hash": str(guest_hash or "") or _subject_hash(customer_id),
-                "session_id": str(order_id), "sku": sku, "value": unit * quantity if unit else total,
+                "session_id": str(order_id), "sku": sku, "value": allocated_value,
                 "currency": str(currency or "USD").upper(), "quantity": quantity,
                 "consent_state": "not_required", "source_system": "orders",
                 "source_record_id": record_id, "occurred_at": _iso(updated or created),
@@ -85,13 +88,15 @@ def _interaction_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
     rows = db.execute(text("""
         SELECT id, event_time, uid_hash, sku, action, surface, trace_id, context_json
         FROM recommend_interactions ORDER BY event_time DESC LIMIT :lim
-    """), {"lim": int(limit)}).fetchall()
+    """), {"lim": max(1000, int(limit) * 20)}).fetchall()
     event_map = {
         "view": "view_item", "impression": "view_item", "click": "select_item",
         "add": "add_to_cart", "add_to_cart": "add_to_cart", "accepted": "add_to_cart",
     }
     written = rejected = 0
     for row in rows:
+        if written + rejected >= int(limit):
+            break
         rid, event_time, uid_hash, sku, action, surface, trace_id, raw_context = row
         try:
             context = json.loads(raw_context or "{}") if isinstance(raw_context, str) else (raw_context or {})

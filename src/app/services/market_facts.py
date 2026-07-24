@@ -118,13 +118,13 @@ def record_atp_fact(db, fact: Dict[str, Any], *, commit: bool = True,
     tenant = _required(fact.get("tenant_id"), "tenant_id")
     dedup = _required(fact.get("deduplication_id"), "deduplication_id")
     source = _required(fact.get("source_system"), "source_system")
-    observed = _required(fact.get("observed_at"), "observed_at")
     rejected = _validate_fact("atp", fact, now=now)
     if rejected:
         _quarantine(db, "atp", fact, rejected)
         if commit:
             db.commit()
         raise MarketFactRejected(rejected)
+    observed = _required(fact.get("observed_at"), "observed_at")
     params = _with_defaults(fact, (
         "material_id", "sku", "variant_id", "taxonomy_node", "location_id",
         "requested_quantity", "requested_date", "on_hand_quantity", "committed_quantity",
@@ -169,13 +169,13 @@ def record_marketing_event(db, fact: Dict[str, Any], *, commit: bool = True,
     dedup = _required(fact.get("deduplication_id"), "deduplication_id")
     source = _required(fact.get("source_system"), "source_system")
     event_type = _required(fact.get("event_type"), "event_type")
-    occurred = _required(fact.get("occurred_at"), "occurred_at")
     rejected = _validate_fact("marketing", fact, now=now)
     if rejected:
         _quarantine(db, "marketing", fact, rejected)
         if commit:
             db.commit()
         raise MarketFactRejected(rejected)
+    occurred = _required(fact.get("occurred_at"), "occurred_at")
     params = _with_defaults(fact, (
         "subject_hash", "session_id", "sku", "variant_id", "taxonomy_node", "campaign_id",
         "creative_id", "channel", "value", "currency", "quantity", "consent_state",

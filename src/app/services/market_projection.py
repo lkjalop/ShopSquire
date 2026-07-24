@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, Sequence
 from sqlalchemy import text
 
 from src.app.services.decision_log import log_trace_event
+from src.app.services.executive_metrics import gmroi_unavailable, inventory_productivity
 from src.app.services.market_analysis import detect_bulk_order_frequency, detect_velocity_dsi
 
 
@@ -34,11 +35,13 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
     case_rows: list[Dict[str, Any]] = []
     try:
         rows = db.execute(text(
-            "SELECT sku, quantity, occurred_at FROM marketing_event_fact "
+            "SELECT sku, quantity, occurred_at, source_system, source_record_id "
+            "FROM marketing_event_fact "
             "WHERE tenant_id=:tenant AND event_type='purchase' AND status='active'"),
             {"tenant": tenant_id}).fetchall()
         sales_rows = _recent([
-            {"sku": row[0], "quantity": row[1], "event_time": row[2]} for row in rows
+            {"sku": row[0], "quantity": row[1], "event_time": row[2],
+             "source_system": row[3], "source_record_id": row[4]} for row in rows
         ], "event_time", since)
     except Exception:
         pass
@@ -53,16 +56,32 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
             ], "event_time", since)
         except Exception:
             pass
+    inventory_status = "unavailable"
     try:
         rows = db.execute(text(
-            "SELECT sku, on_hand, reserved, available, updated_at FROM inventory_level "
-            "WHERE COALESCE(tenant_id,'default')=:tenant"), {"tenant": tenant_id}).fetchall()
+            "SELECT sku, location_id, on_hand_quantity, committed_quantity, "
+            "confirmed_quantity, observed_at, source_system, confidence, source_record_id "
+            "FROM inventory_atp_fact WHERE tenant_id=:tenant AND status='active' "
+            "ORDER BY observed_at DESC"), {"tenant": tenant_id}).fetchall()
+        latest: Dict[tuple[str, str], Any] = {}
+        for row in rows:
+            key = (str(row[0] or ""), str(row[1] or "default"))
+            latest.setdefault(key, row)
         inventory_rows = [
-            {"sku": row[0], "on_hand": row[1], "reserved": row[2],
-             "available": row[3], "updated_at": row[4]} for row in rows
+            {
+                "sku": row[0], "location_id": row[1],
+                "on_hand": int(row[2] or 0), "reserved": int(row[3] or 0),
+                "available": int(
+                    row[4] if row[4] is not None else int(row[2] or 0) - int(row[3] or 0)),
+                "updated_at": row[5], "source_system": row[6],
+                "confidence": float(row[7] or 0.0), "source_record_id": row[8],
+            }
+            for row in latest.values()
+            if _as_utc(row[5]) and _as_utc(row[5]) >= now - timedelta(days=1)
         ]
+        inventory_status = "observed" if inventory_rows else "insufficient_data"
     except Exception:
-        pass
+        inventory_status = "unavailable"
     try:
         rows = db.execute(text(
             "SELECT f.id, v.state_json, v.valid_from FROM fulfillment_case f "
@@ -84,7 +103,16 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
         case_rows = _recent(case_rows, "occurred_at", now - timedelta(days=90))
     except Exception:
         pass
-    return {"sales": sales_rows, "inventory": inventory_rows, "cases": case_rows, "as_of": now.isoformat()}
+    sales_status = (
+        "observed" if sales_rows and tenant_id != "default"
+        else "simulated" if sales_rows
+        else "insufficient_data"
+    )
+    return {
+        "sales": sales_rows, "inventory": inventory_rows, "cases": case_rows,
+        "as_of": now.isoformat(), "sales_status": sales_status,
+        "inventory_status": inventory_status,
+    }
 
 
 def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dict[str, Dict[str, Any]]:
@@ -97,7 +125,38 @@ def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dic
             "bulk_units_requested": 0, "orders_per_30d": 0.0,
         })
         item["as_of"] = inputs["as_of"]
-        item["confidence"] = "seeded_demo" if inputs["sales"] else "insufficient_data"
+        statuses = {inputs["sales_status"], inputs["inventory_status"]}
+        item["status"] = (
+            "observed" if statuses == {"observed"}
+            else "simulated" if "simulated" in statuses
+            else "insufficient_data"
+        )
+        item["confidence"] = (
+            "high" if item["status"] == "observed"
+            else "demo_only" if item["status"] == "simulated"
+            else "insufficient_data"
+        )
+        item["source_status"] = {
+            "sales": inputs["sales_status"], "inventory": inputs["inventory_status"]}
+        source_records = [
+            f"{row.get('source_system')}/{row.get('source_record_id')}"
+            for row in [*inputs["sales"], *inputs["inventory"]]
+            if str(row.get("sku") or "") == sku and row.get("source_record_id")
+        ]
+        item["metrics"] = [
+            metric.model_dump(mode="json")
+            for metric in inventory_productivity(
+                tenant_id=tenant_id, sku=sku,
+                units_sold=int(item.get("units_sold") or 0),
+                window_days=window_days,
+                available_units=(
+                    int(item["stock_on_hand"])
+                    if item.get("stock_on_hand") is not None else None),
+                source_records=source_records,
+            )
+        ]
+        item["metrics"].append(
+            gmroi_unavailable(tenant_id=tenant_id, subject_id=sku).model_dump(mode="json"))
     return velocity
 
 
@@ -131,6 +190,9 @@ def projection_evidence(
             ),
             "stock_on_hand": projection.get("stock_on_hand"),
             "bulk_frequency": projection.get("bulk_frequency"),
+            "metrics": projection.get("metrics", []),
+            "status": projection.get("status"),
+            "source_status": projection.get("source_status"),
             "confidence": projection.get("confidence"),
             "as_of": projection.get("as_of"),
             "economics_included": False,

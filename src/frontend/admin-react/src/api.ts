@@ -91,6 +91,39 @@ export async function fetchAnalytics(days: number): Promise<{ days: number; seri
   return http(`/api/v1/admin/analytics?days=${days}`);
 }
 
+export type MetricEvidence = {
+  metric: string;
+  tenant_id: string;
+  subject_type: string;
+  subject_id: string;
+  value: number | null;
+  unit?: string | null;
+  currency?: string | null;
+  as_of: string;
+  status: 'observed' | 'estimated' | 'simulated' | 'insufficient_data' | 'unavailable';
+  confidence: number;
+  coverage: number;
+  source_count: number;
+  source_records: string[];
+  provenance_chain: string[];
+  definition_version: string;
+  visibility: 'buyer' | 'operator' | 'auditor';
+  reason?: string | null;
+  metadata: Record<string, any>;
+};
+
+export type ExecutiveMetricProjection = {
+  tenant_id: string;
+  metrics: MetricEvidence[];
+  data_quality: Record<string, number | null>;
+  estimates: Record<string, any>;
+  actions: any[];
+};
+
+export async function fetchExecutiveMetrics(): Promise<ExecutiveMetricProjection> {
+  return http(`/api/v1/admin/bi/executive-metrics`);
+}
+
 export type TransactionTimeseriesPoint = {
   bucket: string | null;
   orders: number;

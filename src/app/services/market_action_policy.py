@@ -33,6 +33,7 @@ def authorize_replenishment(
     min_source_diversity: int = 2,
     tenant_id: str | None = None, sku: str | None = None,
     taxonomy_node: str | None = None, currency: str | None = None,
+    forecast_quality: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     expected_tenant = str(tenant_id or "").strip()
@@ -103,6 +104,21 @@ def authorize_replenishment(
         reasons.append("untrusted_or_stale_atp")
     if not margin_authoritative:
         reasons.append("unverified_or_unprofitable_cost_basis")
+    quality = forecast_quality or {}
+    quality_status = str(quality.get("status") or "unavailable")
+    quality_wape = quality.get("wape")
+    quality_coverage = float(quality.get("coverage") or 0.0)
+    forecast_quality_shadow = {
+        "mode": "shadow",
+        "status": quality_status,
+        "wape": quality_wape,
+        "coverage": quality_coverage,
+        "would_pass": bool(
+            quality_status == "observed"
+            and quality_wape is not None
+            and float(quality_wape) <= 0.35
+            and quality_coverage >= 0.5),
+    }
     return {
         "allowed": not reasons,
         "decision": "replenish_advisory" if not reasons else "insufficient_evidence",
@@ -113,5 +129,6 @@ def authorize_replenishment(
         "lead_time_days": lead_time or None,
         "atp_authoritative": atp_authoritative,
         "economics_authoritative": margin_authoritative,
+        "forecast_quality_shadow": forecast_quality_shadow,
         "authority": "operator_advisory_only",
     }

@@ -70,3 +70,45 @@ def test_real_order_inventory_and_supplier_quote_materialize_canonical_facts():
     backfill_canonical_facts(db, tenant_id="tenant-a")
     assert db.execute(text("SELECT COUNT(*) FROM market_fact_quarantine")).scalar_one() == 2
     db.close()
+
+
+def test_multiline_order_without_line_prices_does_not_duplicate_order_total():
+    db = sessionmaker(bind=create_engine("sqlite+pysqlite:///:memory:", future=True))()
+    _migration(db, "20260721_market_fact_contract.py", "fact_contract_multi")
+    _migration(db, "20260722_market_fact_governance.py", "fact_governance_multi")
+    _migration(db, "20260723_market_fact_quarantine_dedup.py", "fact_quarantine_multi")
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(text("CREATE TABLE orders (id TEXT, draft_order_id TEXT, customer_id TEXT, "
+                    "guest_email_hash TEXT, total_cents INT, currency TEXT, status TEXT, "
+                    "created_at TEXT, updated_at TEXT)"))
+    db.execute(text("CREATE TABLE draft_orders (id TEXT, tenant_id TEXT, line_items TEXT)"))
+    lines = json.dumps([
+        {"sku": "SKU-1", "quantity": 1},
+        {"sku": "SKU-2", "quantity": 1},
+    ])
+    db.execute(text("INSERT INTO draft_orders VALUES ('d1','tenant-a',:lines)"), {"lines": lines})
+    db.execute(text("INSERT INTO orders VALUES "
+                    "('o1','d1','u1',NULL,20000,'AUD','paid',:now,:now)"), {"now": now})
+    db.commit()
+    from src.app.services.canonical_fact_adapters import _order_facts
+    assert _order_facts(db, "tenant-a", 10) == (2, 0)
+    assert db.execute(text(
+        "SELECT value FROM marketing_event_fact ORDER BY sku")).fetchall() == [(None,), (None,)]
+    db.close()
+
+
+def test_missing_source_timestamp_is_quarantined_not_replaced_with_ingestion_time():
+    db = sessionmaker(bind=create_engine("sqlite+pysqlite:///:memory:", future=True))()
+    _migration(db, "20260721_market_fact_contract.py", "fact_contract_missing_time")
+    _migration(db, "20260722_market_fact_governance.py", "fact_governance_missing_time")
+    _migration(db, "20260723_market_fact_quarantine_dedup.py", "fact_quarantine_missing_time")
+    db.execute(text("CREATE TABLE inventory_level (sku TEXT, tenant_id TEXT, location_id TEXT, "
+                    "on_hand INT, reserved INT, available INT, source TEXT, updated_at TEXT)"))
+    db.execute(text("INSERT INTO inventory_level VALUES "
+                    "('SKU-1','tenant-a','SYD',7,2,5,'wms',NULL)"))
+    db.commit()
+    from src.app.services.canonical_fact_adapters import _inventory_facts
+    assert _inventory_facts(db, "tenant-a", 10) == (0, 1)
+    assert db.execute(text(
+        "SELECT reason_code FROM market_fact_quarantine")).scalar_one() == "invalid_event_time"
+    db.close()
