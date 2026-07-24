@@ -21,7 +21,9 @@ from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_
 from src.app.config import get_settings, load_feature_flags
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.schemas.ui_contracts import TransactionTimeseriesResponse
-from src.app.schemas.metric_evidence import MetricEvidence, OperatorMetricProjection
+from src.app.schemas.metric_evidence import (
+    AuditorMetricProjection, MetricEvidence, OperatorMetricProjection,
+)
 from src.app.services.bi_intelligence import (
     margin_intelligence,
     supplier_scorecard,
@@ -35,17 +37,10 @@ from src.app.services.bi_query_agent import run_query_agent
 router = APIRouter(prefix="/api/v1/admin/bi", tags=["admin", "bi"])
 
 
-@router.get("/executive-metrics", response_model=OperatorMetricProjection)
-def executive_metrics_api(
-    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
-) -> OperatorMetricProjection:
-    """Operator projection only; buyer traces never fetch this endpoint."""
-    _ = role
-    from src.app.platform.tenant_context import current_tenant_id
+def _executive_metric_projection(tenant_id: str) -> OperatorMetricProjection:
     from src.app.services.market_metrics import summarize_marketing_facts
     from src.app.services.market_projection import projections
 
-    tenant_id = str(current_tenant_id() or "default")
     with db_session() as db:
         product_metrics = projections(db, tenant_id=tenant_id, window_days=30)
         try:
@@ -77,6 +72,39 @@ def executive_metrics_api(
                 for row in churn.get("users") or []),
         },
         actions=[],
+    )
+
+
+@router.get("/executive-metrics", response_model=OperatorMetricProjection)
+def executive_metrics_api(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> OperatorMetricProjection:
+    """Operator projection only; buyer traces never fetch this endpoint."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    return _executive_metric_projection(str(current_tenant_id() or "default"))
+
+
+@router.get("/executive-metrics/audit", response_model=AuditorMetricProjection)
+def executive_metrics_audit_api(
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> AuditorMetricProjection:
+    """Auditor projection adds rejected evidence; it remains read-only."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = str(current_tenant_id() or "default")
+    operator = _executive_metric_projection(tenant_id)
+    with db_session() as db:
+        try:
+            quarantined = int(db.execute(sql_text(
+                "SELECT COUNT(*) FROM market_fact_quarantine WHERE tenant_id=:tenant"
+            ), {"tenant": tenant_id}).scalar_one() or 0)
+        except Exception:
+            quarantined = 0
+    return AuditorMetricProjection(
+        **operator.model_dump(),
+        quarantined_evidence_count=quarantined,
+        policy_decisions=[],
     )
 
 
