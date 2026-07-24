@@ -36,6 +36,15 @@ def evaluate_text_gates(query: str) -> Dict[str, Any]:
 def slot_gap_clarify(*, has_products: bool, budget_known: bool,
                      has_requirements: bool, has_use_case: bool = False) -> Optional[Dict[str, Any]]:
     if not has_products:
+        # Empty retrieval is when a clarify matters MOST, not least: a missing slot on a zero-result
+        # turn is a recoverable dead-end, so ask ONE narrowing question instead of returning nothing.
+        # A fully-specified empty turn stays None (an honest no-match, not a slot gap).
+        if not budget_known:
+            return {"id": "ask_budget_empty", "goal": "recover_empty", "reason": "empty_budget_slot",
+                    "text": "I didn't find a match yet — what budget range should I stay within so I can look again?"}
+        if not has_requirements and not has_use_case:
+            return {"id": "ask_use_case_empty", "goal": "recover_empty", "reason": "empty_use_case_slot",
+                    "text": "I didn't find a match yet — what will you mainly use it for? That changes which specs matter."}
         return None
     if not budget_known:
         return {"id": "ask_budget", "text": "What budget range should I stay within?",
