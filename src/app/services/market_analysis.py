@@ -26,6 +26,7 @@ Vertical-blind: finding_type/entity_ref/evidence are opaque to product vocabular
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -718,6 +719,19 @@ def _ensure_finding_columns(db) -> None:
 
 
 def ensure_finding_table(db) -> None:
+    from sqlalchemy import inspect as _sa_inspect
+    inspector = _sa_inspect(db.connection())
+    if inspector.has_table("market_finding"):
+        _ensure_finding_columns(db)
+        return
+    dialect = str(getattr(db.get_bind().dialect, "name", "")).lower()
+    allow_dev_ddl = os.getenv("ALLOW_RUNTIME_DDL", "1").strip().lower() in {
+        "1", "true", "yes", "on"}
+    if dialect != "sqlite" or not allow_dev_ddl:
+        raise RuntimeError(
+            "market_finding schema missing; run Alembic migrations before market analysis")
+    # Compatibility for isolated in-memory unit tests only. PostgreSQL and deployed
+    # environments are migration-owned and never create schema on a request path.
     db.execute(text(_FINDING_DDL))
     _ensure_finding_columns(db)
     for stmt in _FINDING_INDEXES:

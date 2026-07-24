@@ -55,6 +55,17 @@ def test_upgrade_creates_all_tables_and_is_idempotent(mig):
     assert _EXPECTED_TABLES <= set(inspect(eng).get_table_names())
 
 
+def test_runtime_ddl_can_be_disabled_for_deployed_environments(monkeypatch):
+    from sqlalchemy.orm import sessionmaker
+    from src.app.services.market_analysis import ensure_finding_table
+
+    monkeypatch.setenv("ALLOW_RUNTIME_DDL", "0")
+    session = sessionmaker(bind=create_engine("sqlite://", future=True))()
+    with pytest.raises(RuntimeError, match="run Alembic migrations"):
+        ensure_finding_table(session)
+    session.close()
+
+
 def test_indexes_created(mig):
     eng = create_engine("sqlite://", future=True)
     with eng.begin() as conn:
