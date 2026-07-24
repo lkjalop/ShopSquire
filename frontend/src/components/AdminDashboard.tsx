@@ -875,6 +875,41 @@ function IntegrationHealthTab() {
           </div>
         )}
       </div>
+      <div style={{ marginTop: 22 }}>
+        <h3 style={{ fontSize: 15, margin: '0 0 10px' }}>Source onboarding</h3>
+        <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>
+          Evidence contracts required before business metrics or governed actions can become available.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+          {(sourceHealth?.onboarding || []).map((source: any) => (
+            <div key={source.family} style={{
+              border: '1px solid rgba(148,163,184,0.18)',
+              borderRadius: 8,
+              padding: '11px 12px',
+              background: 'rgba(15,23,42,0.45)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                <strong style={{ fontSize: 13 }}>{source.label}</strong>
+                <span style={{
+                  color: source.status === 'connected' ? '#22c55e' : '#f59e0b',
+                  fontSize: 11, whiteSpace: 'nowrap',
+                }}>
+                  {source.status === 'connected' ? 'Connected' : 'Not configured'}
+                </span>
+              </div>
+              <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 7 }}>
+                Enables: {(source.required_for || []).join(', ')}
+              </div>
+              <details style={{ marginTop: 7, fontSize: 11, color: '#cbd5e1' }}>
+                <summary style={{ cursor: 'pointer' }}>Required evidence</summary>
+                <div style={{ marginTop: 5, color: '#94a3b8' }}>
+                  {(source.required_fields || []).join(' · ')}
+                </div>
+              </details>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

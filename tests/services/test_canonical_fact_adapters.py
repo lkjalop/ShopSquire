@@ -79,7 +79,14 @@ def test_real_order_inventory_and_supplier_quote_materialize_canonical_facts():
         "inventory_atp",
         "marketing_event",
     }
-    assert canonical_source_health(db, tenant_id="tenant-b")["status"] == "unconfigured"
+    onboarding = {row["family"]: row for row in health["onboarding"]}
+    assert onboarding["inventory_atp"]["status"] == "connected"
+    assert onboarding["landed_inventory_valuation"]["status"] == "not_configured"
+    assert "GMROI" in onboarding["landed_inventory_valuation"]["required_for"]
+    assert onboarding["matched_procurement_documents"]["status"] == "not_configured"
+    empty = canonical_source_health(db, tenant_id="tenant-b")
+    assert empty["status"] == "unconfigured"
+    assert all(row["status"] == "not_configured" for row in empty["onboarding"])
     db.close()
 
 

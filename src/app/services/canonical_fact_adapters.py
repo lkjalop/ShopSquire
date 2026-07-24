@@ -278,10 +278,59 @@ def canonical_source_health(db, *, tenant_id: str) -> Dict[str, Any]:
             else "stale" if age_hours is None or age_hours > 24
             else "healthy"
         )
+    expected = {
+        "inventory_atp": {
+            "label": "ERP / WMS availability",
+            "required_for": ["ATP coverage", "weeks of supply", "replenishment"],
+            "required_fields": ["sku", "location", "on_hand", "committed", "observed_at"],
+        },
+        "marketing_event": {
+            "label": "Consented commerce events",
+            "required_for": ["conversion", "attribution", "RFM estimates"],
+            "required_fields": [
+                "event_type", "occurred_at", "deduplication_id",
+                "consent_state", "provenance_chain",
+            ],
+        },
+        "landed_inventory_valuation": {
+            "label": "Landed inventory valuation",
+            "required_for": ["GMROI", "margin after returns"],
+            "required_fields": [
+                "sku", "location", "quantity", "landed_unit_cost",
+                "currency", "valuation_at", "source_document_id",
+            ],
+        },
+        "matched_procurement_documents": {
+            "label": "Matched quote / PO / invoice",
+            "required_for": ["purchase price variance"],
+            "required_fields": [
+                "match_id", "quote_id", "purchase_order_id", "invoice_id",
+                "unit_cost", "currency",
+            ],
+        },
+        "sealed_forecast_actual": {
+            "label": "Sealed forecast versus actual",
+            "required_for": ["forecast WAPE", "earned autonomy"],
+            "required_fields": [
+                "pair_key", "target_window", "forecast", "actual",
+                "provenance_chain", "sealed_by",
+            ],
+        },
+    }
+    configured_families = {row["family"] for row in sources.values()}
+    onboarding = [
+        {
+            "family": family,
+            **contract,
+            "status": "connected" if family in configured_families else "not_configured",
+        }
+        for family, contract in expected.items()
+    ]
     ordered = sorted(sources.values(), key=lambda row: (row["family"], row["source_system"]))
     return {
         "tenant_id": str(tenant_id),
         "sources": ordered,
+        "onboarding": onboarding,
         "active_records": sum(row["active_records"] for row in ordered),
         "quarantined_records": sum(row["quarantined_records"] for row in ordered),
         "status": (
