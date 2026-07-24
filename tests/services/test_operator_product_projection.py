@@ -32,3 +32,65 @@ def test_product_projection_endpoint_requires_operator_auth():
     response = TestClient(create_app()).get(
         "/api/v1/admin/bi/product-projection", params={"sku": "SKU-1"})
     assert response.status_code in {401, 403}
+
+
+def test_commercial_proposal_submission_queues_review_without_execution(monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.app.main import create_app
+
+    monkeypatch.setattr(
+        market_projection,
+        "operator_product_projection",
+        lambda *a, **k: {
+            "available": True,
+            "action_proposals": {
+                "discount": {
+                    "eligible": True,
+                    "reasons": [],
+                    "human_gate": "required",
+                    "auto_applied": False,
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.app.routers.approvals.enqueue_approval",
+        lambda *a, **k: "approval-1",
+    )
+    response = TestClient(create_app()).post(
+        "/api/v1/admin/bi/product-projection/SKU-1/proposals/discount",
+        headers={"x-api-key": "local-owner-key"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "queued": True,
+        "approval_id": "approval-1",
+        "action_type": "discount",
+        "human_gate": "required",
+        "executed": False,
+    }
+
+
+def test_commercial_proposal_submission_fails_closed(monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.app.main import create_app
+
+    monkeypatch.setattr(
+        market_projection,
+        "operator_product_projection",
+        lambda *a, **k: {
+            "available": True,
+            "action_proposals": {
+                "replenishment": {
+                    "authorized": False,
+                    "reasons": ["untrusted_or_stale_atp"],
+                }
+            },
+        },
+    )
+    response = TestClient(create_app()).post(
+        "/api/v1/admin/bi/product-projection/SKU-1/proposals/replenishment",
+        headers={"x-api-key": "local-owner-key"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["reasons"] == ["untrusted_or_stale_atp"]

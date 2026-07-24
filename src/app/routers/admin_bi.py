@@ -460,6 +460,60 @@ def product_projection_api(
     return result
 
 
+@router.post("/product-projection/{sku}/proposals/{action_type}")
+def submit_product_action_proposal(
+    sku: str,
+    action_type: str,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Queue an eligible commercial proposal for human review.
+
+    Approval records authorization only. This endpoint never applies a discount,
+    sends a supplier message, or creates a purchase order.
+    """
+    action = str(action_type or "").strip().lower()
+    if action not in {"discount", "replenishment"}:
+        raise HTTPException(status_code=404, detail="unknown_commercial_action")
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.routers.approvals import enqueue_approval
+    from src.app.services.market_projection import operator_product_projection
+
+    tenant_id = str(current_tenant_id() or "default")
+    with db_session() as db:
+        projection = operator_product_projection(db, sku=sku, tenant_id=tenant_id)
+    if not projection.get("available"):
+        raise HTTPException(status_code=404, detail=projection.get("reason") or "projection_unavailable")
+    proposal = (projection.get("action_proposals") or {}).get(action) or {}
+    eligible = (
+        bool(proposal.get("eligible"))
+        if action == "discount" else bool(proposal.get("authorized"))
+    )
+    if not eligible:
+        raise HTTPException(status_code=409, detail={
+            "reason": "proposal_not_authorized",
+            "action_type": action,
+            "reasons": proposal.get("reasons") or [],
+        })
+    approval_id = enqueue_approval(
+        f"commercial_{action}",
+        {
+            "tenant_id": tenant_id,
+            "sku": str(sku),
+            "proposal": proposal,
+            "execution": "not_implemented_by_approval",
+        },
+        reason="human_review_required",
+        created_by=role,
+    )
+    return {
+        "queued": True,
+        "approval_id": approval_id,
+        "action_type": action,
+        "human_gate": "required",
+        "executed": False,
+    }
+
+
 @router.get("/supplier-scorecard")
 def supplier_scorecard_api(
     window_days: int = Query(default=60, ge=7, le=365),

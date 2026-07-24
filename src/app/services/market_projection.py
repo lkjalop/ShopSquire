@@ -112,7 +112,7 @@ def operator_product_projection(db, *, sku: str, tenant_id: str = "default") -> 
         cost.get("cost_kind") == "validated_landed_quote"
         and not cost.get("simulation_only")
         and cost.get("source_record_id"))
-    return {
+    result = {
         "available": True,
         "tenant_id": tenant_id,
         "sku": key,
@@ -126,7 +126,14 @@ def operator_product_projection(db, *, sku: str, tenant_id: str = "default") -> 
             int(round(gross * forecast_units)) if gross is not None else None),
         "discount_headroom_cents": None,
         "discount_authorized": authorized,
-        "cost_basis": cost.get("cost_basis") or "unavailable",
+        "cost_basis": cost.get("cost_kind") or cost.get("cost_basis") or "unavailable",
+        "cost_source_system": cost.get("source_system"),
+        "cost_source_record_id": cost.get("source_record_id"),
+        "cost_provenance_chain": list(cost.get("provenance_chain") or []),
         "simulation_only": bool(cost.get("simulation_only", not authorized)),
         "projection": projection,
     }
+    from src.app.services.commercial_action_proposals import product_action_proposals
+    result["action_proposals"] = product_action_proposals(
+        db, sku=key, tenant_id=tenant_id, operator_projection=result)
+    return result

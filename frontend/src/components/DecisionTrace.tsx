@@ -348,6 +348,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
   const [procDetailRetry, setProcDetailRetry] = useState(0);
   const [marketEconomics, setMarketEconomics] = useState<Record<string, any>>({});
+  const [commercialProposalStatus, setCommercialProposalStatus] = useState<Record<string, string>>({});
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
   // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
@@ -878,6 +879,30 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     }).catch(() => { if (alive) setMarketEconomics({}); });
     return () => { alive = false; };
   }, [activeTab, effectiveApiKey, marketProjectionSkuKey]);
+
+  const queueCommercialProposal = async (sku: string, action: 'discount' | 'replenishment') => {
+    const key = `${sku}:${action}`;
+    setCommercialProposalStatus((current) => ({ ...current, [key]: 'Submitting...' }));
+    try {
+      const response = await fetch(
+        apiUrl(`/api/v1/admin/bi/product-projection/${encodeURIComponent(sku)}/proposals/${action}`),
+        { method: 'POST', credentials: 'include', headers: authHeaders });
+      const body: any = await safeJson(response);
+      if (!response.ok) {
+        const reasons = body?.detail?.reasons || [];
+        throw new Error(reasons.length ? reasons.map(humanizeKey).join(', ') : 'Proposal is not authorized');
+      }
+      setCommercialProposalStatus((current) => ({
+        ...current,
+        [key]: `Queued for human review (${body.approval_id})`,
+      }));
+    } catch (error: any) {
+      setCommercialProposalStatus((current) => ({
+        ...current,
+        [key]: String(error?.message || 'Unable to queue proposal'),
+      }));
+    }
+  };
 
   const ms = trace?.model_selection || {};
   const persistedExecutionEvent = [...allDisplayEvents].reverse().find((evt: any) =>
@@ -3459,6 +3484,48 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             <div style={{ color: '#92400e', fontSize: 12 }}>
                               {economics.discount_authorized ? 'Validated landed cost permits governed discount review.' : 'Scenario only: discount headroom is locked until landed cost is validated.'}
                             </div>
+                            {(['discount', 'replenishment'] as const).map((action) => {
+                              const proposal: any = economics.action_proposals?.[action] || {};
+                              const eligible = action === 'discount' ? proposal.eligible : proposal.authorized;
+                              const statusKey = `${item.sku}:${action}`;
+                              return (
+                                <div key={action} data-testid={`commercial-proposal-${action}-${item.sku}`}
+                                     style={{ marginTop: 8, padding: 8, border: '1px solid #d1d5db', background: '#fff', borderRadius: 6 }}>
+                                  <div style={{ fontWeight: 700 }}>
+                                    {action === 'discount' ? 'Surplus discount proposal' : 'Replenishment proposal'}
+                                  </div>
+                                  {action === 'discount' && eligible && (
+                                    <div style={{ fontSize: 12 }}>
+                                      Recommend {(Number(proposal.recommended_discount_pct || 0) * 100).toFixed(1)}%;
+                                      margin after {(Number(proposal.margin_after_pct || 0) * 100).toFixed(1)}%.
+                                    </div>
+                                  )}
+                                  {action === 'replenishment' && eligible && (
+                                    <div style={{ fontSize: 12 }}>
+                                      {proposal.shortfall} units · {proposal.lead_time_days} day lead · {proposal.demand_source_count} demand sources.
+                                    </div>
+                                  )}
+                                  {!eligible && (
+                                    <div style={{ color: '#6b7280', fontSize: 12 }}>
+                                      Blocked: {(proposal.reasons || ['insufficient evidence']).map(humanizeKey).join(', ')}
+                                    </div>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={!eligible || commercialProposalStatus[statusKey] === 'Submitting...'}
+                                    onClick={() => queueCommercialProposal(String(item.sku), action)}
+                                    style={{ marginTop: 6 }}>
+                                    Request human review
+                                  </button>
+                                  {commercialProposalStatus[statusKey] && (
+                                    <div style={{ marginTop: 4, fontSize: 12 }}>{commercialProposalStatus[statusKey]}</div>
+                                  )}
+                                  <div style={{ color: '#92400e', fontSize: 11, marginTop: 4 }}>
+                                    Approval records authorization only; no price, message, or purchase order is applied here.
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
