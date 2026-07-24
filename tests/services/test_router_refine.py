@@ -110,6 +110,52 @@ def test_hard_filter_suppresses_duplicate_soft_band(db):
     assert d.brand_filter == "Apple" and d.preferred_brand is None
 
 
+def test_typed_sort_on_same_prior_subject_is_authorized_as_filter(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="show the cheapest laptop",
+        uid="u1",
+        tenant_id="default",
+        session={"prior_node": "el-6-6"},
+    )
+    d = route_turn(
+        db,
+        envelope,
+        llm_fn=_stub(brand=None, prefer_brand=None, sort="price_asc"),
+    )
+
+    assert d.lane == "FILTER"
+    assert d.sort == "price_asc"
+    assert d.subject_action == "continue"
+    assert "typed_sort_refinement" in d.source
+
+
+def test_typed_sort_on_child_of_prior_subject_is_authorized_as_filter(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="show the cheapest gaming laptop",
+        uid="u1",
+        tenant_id="default",
+        session={"prior_node": "el-6"},
+    )
+    payload = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "use_cases": [],
+        "requirements": {},
+        "refine": {"sort": "price_asc"},
+        "confidence": 0.9,
+    }
+    d = route_turn(db, envelope, llm_fn=lambda _prompt, _timeout: json.dumps(payload))
+
+    assert d.lane == "FILTER"
+    assert d.node_handle == "el-6-6"
+
+
 @pytest.mark.parametrize("model_lane", ["BULK", "BULK_QUOTE", "QUOTE", "RFQ"])
 def test_procurement_lane_synonyms_are_clamped_to_existing_lane(db, model_lane):
     from src.app.services.taxonomy_registry import add_sold_node

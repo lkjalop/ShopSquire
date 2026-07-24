@@ -53,6 +53,28 @@ def test_equality_pins_both_bounds():
     assert c.predicates() == [(">=", 16.0), ("<=", 16.0)]
 
 
+def test_categorical_and_boolean_predicates_remain_typed():
+    form = from_op("form_factor", "in", ["convertible", "tablet"], "use_case:drawing")
+    touch = from_op("touchscreen", "==", True, "use_case:drawing")
+    assert form.predicates() == [("in", ("convertible", "tablet"))]
+    assert touch.predicates() == [("==", True)]
+    projected = project({"form_factor": form, "touchscreen": touch})
+    from src.app.services.attribute_registry import evaluate_requirements
+    assert evaluate_requirements(
+        {"form_factor": "tablet", "touchscreen": True}, projected)["overall"] == "meets"
+    assert evaluate_requirements(
+        {"form_factor": "laptop", "touchscreen": True}, projected)["overall"] == "fails"
+
+
+def test_discrete_intersection_conflict_is_surfaced():
+    merged = merge(
+        from_op("form_factor", "in", ["convertible", "tablet"], "profile"),
+        from_op("form_factor", "==", "desktop", "stated"),
+    )
+    assert merged.is_conflict
+    assert merged.predicates() == []
+
+
 def test_strict_edge_tie_is_conflict():
     # '> 16' merged with '<= 16' is an empty range
     c = merge(from_op("ram_gb", ">", 16, "stated"), from_op("ram_gb", "<=", 16, "stated"))

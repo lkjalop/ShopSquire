@@ -36,18 +36,29 @@ class RequirementConstraint:
     lower_strict: bool = False        # True ⇔ '>' rather than '>='
     upper_strict: bool = False        # True ⇔ '<' rather than '<='
     preferred: Optional[float] = None
+    discrete: Tuple[Tuple[str, Any], ...] = ()
     provenance: Tuple[str, ...] = ()
 
     @property
     def is_conflict(self) -> bool:
         """Empty range: lower > upper, or lower == upper with a strict edge."""
+        allowed: Optional[set[Any]] = None
+        for op, value in self.discrete:
+            current = (
+                set(value) if op == "in" and isinstance(value, (list, tuple, set))
+                else {value} if op == "==" else None
+            )
+            if current is not None:
+                allowed = current if allowed is None else allowed & current
+        if allowed is not None and not allowed:
+            return True
         if self.lower is None or self.upper is None:
             return False
         if self.lower > self.upper:
             return True
         return self.lower == self.upper and (self.lower_strict or self.upper_strict)
 
-    def predicates(self) -> List[Tuple[str, float]]:
+    def predicates(self) -> List[Tuple[str, Any]]:
         """The (op, threshold) list the tri-state evaluator consumes — 0, 1, or 2 entries.
         A conflicted constraint yields NO predicates: contradictory info must not gate."""
         if self.is_conflict:
@@ -57,32 +68,49 @@ class RequirementConstraint:
             out.append((">" if self.lower_strict else ">=", self.lower))
         if self.upper is not None:
             out.append(("<" if self.upper_strict else "<=", self.upper))
+        out.extend(self.discrete)
         return out
 
     def describe(self) -> str:
         lo = f"{'>' if self.lower_strict else '≥'}{self.lower:g}" if self.lower is not None else ""
         hi = f"{'<' if self.upper_strict else '≤'}{self.upper:g}" if self.upper is not None else ""
         body = " and ".join(b for b in (lo, hi) if b) or "any"
+        if self.discrete:
+            body = " and ".join(
+                [body] + [f"{op} {value!r}" for op, value in self.discrete]
+            )
         return f"{self.key} {body}" + (" (CONFLICT)" if self.is_conflict else "")
 
     def as_dict(self) -> Dict[str, Any]:
         return {"key": self.key, "lower": self.lower, "upper": self.upper,
                 "lower_strict": self.lower_strict, "upper_strict": self.upper_strict,
-                "preferred": self.preferred, "provenance": list(self.provenance),
+                "preferred": self.preferred,
+                "discrete": [[op, list(value) if isinstance(value, tuple) else value]
+                             for op, value in self.discrete],
+                "provenance": list(self.provenance),
                 "conflict": self.is_conflict}
 
 
-def from_op(key: str, op: str, value: float, source: str) -> RequirementConstraint:
+def from_op(key: str, op: str, value: Any, source: str) -> RequirementConstraint:
     """Normalize one (op, value) bound to a range. '==' pins both bounds."""
-    v = float(value)
     if op in _LOWER_OPS:
+        v = float(value)
         return RequirementConstraint(key=key, lower=v, lower_strict=(op == ">"),
                                      provenance=(source,))
     if op in _UPPER_OPS:
+        v = float(value)
         return RequirementConstraint(key=key, upper=v, upper_strict=(op == "<"),
                                      provenance=(source,))
     if op == "==":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return RequirementConstraint(
+                key=key, discrete=(("==", value),), provenance=(source,))
+        v = float(value)
         return RequirementConstraint(key=key, lower=v, upper=v, provenance=(source,))
+    if op == "in":
+        choices = tuple(value) if isinstance(value, (list, tuple, set)) else (value,)
+        return RequirementConstraint(
+            key=key, discrete=(("in", choices),), provenance=(source,))
     raise ValueError(f"unknown op {op!r} for {key}")
 
 
@@ -108,6 +136,7 @@ def merge(a: RequirementConstraint, b: RequirementConstraint) -> RequirementCons
     return RequirementConstraint(key=a.key, lower=lower, upper=upper,
                                  lower_strict=lower_strict, upper_strict=upper_strict,
                                  preferred=preferred,
+                                 discrete=tuple(dict.fromkeys(a.discrete + b.discrete)),
                                  provenance=tuple(dict.fromkeys(a.provenance + b.provenance)))
 
 
@@ -122,7 +151,7 @@ def from_op_map(op_map: Dict[str, Any], source: str) -> ConstraintMap:
     for key, spec in (op_map or {}).items():
         preds = spec if isinstance(spec, list) else [spec]
         for op, thr in preds:
-            c = from_op(key, str(op), float(thr), source)
+            c = from_op(key, str(op), thr, source)
             out[key] = merge(out[key], c) if key in out else c
     return out
 
@@ -136,7 +165,7 @@ def merge_maps(*maps: ConstraintMap) -> ConstraintMap:
     return out
 
 
-def project(cs: ConstraintMap) -> Dict[str, List[Tuple[str, float]]]:
+def project(cs: ConstraintMap) -> Dict[str, List[Tuple[str, Any]]]:
     """ConstraintMap → {key: [(op, thr), ...]} for evaluate_requirements. Conflicted keys
     project to NOTHING (contradictory info must not gate a product in or out)."""
     return {k: c.predicates() for k, c in (cs or {}).items() if not c.is_conflict}

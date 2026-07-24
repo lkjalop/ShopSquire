@@ -695,7 +695,10 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "REFINE: brand=hard-only, prefer_brand=soft, exclude_brand=negation, sort=price_asc, "
         "price_desc or null. brand_action=keep when brands are unmentioned, set when adding or "
         "replacing a brand constraint, clear only when the shopper explicitly removes all brand "
-        "constraints. compare_targets contains only specifically named products.\n"
+        "constraints. compare_targets contains only specifically named products. When a prior "
+        "product subject exists and the message only changes brand, sort, budget, capability "
+        "filters, or quantity without switching category, use FILTER (or PROCUREMENT for the "
+        "active order). A sort-only continuation is FILTER, not a new SEARCH.\n"
         "BULK: quantity is unit count; total_budget is whole-order dollars; budget_scope is "
         "per_unit, total or null. Never reinterpret per-unit as total. budget_cap_mode is hard "
         "for explicit limits, soft for approximate targets, ambiguous when the wording is unclear.\n"
@@ -1013,6 +1016,25 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     sort = str(refine.get("sort") or "").strip().lower() or None
     if sort not in SORTS:
         sort = None
+    # A model may correctly extract a bounded sort operation while calling the turn a fresh
+    # SEARCH. The typed operation and grounded subject make this mechanically decidable:
+    # sorting the same known category is a FILTER; sorting a different category remains SEARCH.
+    prior_sort_node = get_node(str((envelope.session or {}).get("prior_node") or ""))
+    same_sort_subject = bool(
+        node is not None and prior_sort_node is not None
+        and (
+            node.handle == prior_sort_node.handle
+            or node.handle.startswith(prior_sort_node.handle + "-")
+            or prior_sort_node.handle.startswith(node.handle + "-")
+        )
+    )
+    typed_sort_refinement = bool(
+        sort is not None and lane == "SEARCH" and same_sort_subject
+    )
+    if typed_sort_refinement:
+        lane = "FILTER"
+        subject_action = "continue"
+        subject_from_session = True
     brand_filter = _clamp_brand(db, refine.get("brand"))
     preferred_brand = _clamp_brand(db, refine.get("prefer_brand"))
     if preferred_brand and preferred_brand == brand_filter:
@@ -1256,6 +1278,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                             else "accepted_separated_unsold_leader"
                         )
                         _ROUTER_CALL_STATE.metrics = router_metrics
+
+    if typed_sort_refinement:
+        routing_source = f"{routing_source}+typed_sort_refinement"
 
     # CATALOG-ENTITY RECONCILIATION: a model may over-weight a persona/context word and choose an
     # unstocked taxonomy sibling even though the buyer explicitly named a catalog brand whose
