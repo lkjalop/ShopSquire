@@ -49,7 +49,6 @@ from src.app.services.checkout_upsell import recommend_checkout_upsell, ensure_r
 from src.app.services.bundle_pricing import evaluate_bundle_savings
 from src.app.services.recommendation_identity_graph import register_identity_observations, ensure_identity_graph_tables
 from src.app.services.recommendation_bandit import record_bandit_reward, ensure_recommend_bandit_tables
-from src.app.services.recommendation_als import train_recommend_als
 from src.app.flows.nqe import NextQuestionEngine, NQEInput, detect_games_in_text, detect_software_in_text
 from src.app.flows.catalog import QuestionTemplateCatalog
 from src.app.rag.retrieve import Retriever
@@ -12081,17 +12080,6 @@ def _build_sku_explanation_payload(
     }
 
 
-@router.get("/narration/{job_id}")
-def get_narration_job(job_id: str, redis=Depends(get_redis)) -> Dict[str, Any]:
-    """Poll an async-narration job (RECOMMEND_NARRATION_MODE=async). Returns
-    {status: pending|done|error, assistant_message}. Unknown/expired -> pending."""
-    from src.app.services.recommend_narration_jobs import get_narration
-    out = get_narration(redis, job_id)
-    if not isinstance(out, dict):
-        return {"status": "pending", "assistant_message": None}
-    return out
-
-
 @router.get("/why_product")
 def explain_why_product(
     request: Request,
@@ -12357,26 +12345,6 @@ def recommend_feedback(
         pass
 
     return {"status": "ok", "event_id": eid, "outcome": outcome}
-
-
-@router.post("/cf/train")
-def train_recommend_cf(
-    lookback_days: int = 120,
-    topk_per_user: int = 80,
-    factors: int = 12,
-    iters: int = 6,
-    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
-) -> Dict[str, Any]:
-    try:
-        out = train_recommend_als(
-            lookback_days=max(30, min(int(lookback_days or 120), 365)),
-            topk_per_user=max(20, min(int(topk_per_user or 80), 200)),
-            factors=max(6, min(int(factors or 12), 64)),
-            iters=max(2, min(int(iters or 6), 25)),
-        )
-        return {"status": "ok", "job": out}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"cf_train_failed: {exc}")
 
 
 @router.get("/nqe_slots")

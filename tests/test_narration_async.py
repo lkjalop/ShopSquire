@@ -40,7 +40,11 @@ class _SyncExecutor:
 def test_submit_runs_and_persists_done():
     r = _FakeRedis()
     jid = submit_narration(_SyncExecutor(), r, lambda *a, **k: ("the prose", None), "q", [], {})
-    assert get_narration(r, jid) == {"status": "done", "assistant_message": "the prose"}
+    assert get_narration(r, jid) == {
+        "status": "done",
+        "assistant_message": "the prose",
+        "storage_backend": "redis",
+    }
 
 
 def test_job_error_persists_error_status():

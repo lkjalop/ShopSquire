@@ -42,6 +42,7 @@ from src.app.routers.approvals import router as approvals_router
 from src.app.routers.fulfillment_cases import router as fulfillment_cases_router
 from src.app.routers.kyv_admin import router as kyv_admin_router
 from src.app.routers.recommend import router as recommend_router
+from src.app.routers.recommend_aux import router as recommend_aux_router
 from src.app.routers.products_compare import router as products_router
 from src.app.routers.orchestrator_api import router as orchestrator_router
 from src.app.routers.orders import router as orders_router
@@ -1918,6 +1919,7 @@ def create_app() -> FastAPI:
     except Exception:
         pass
     app.include_router(recommend_router)
+    app.include_router(recommend_aux_router)
     # Product catalog and detail endpoints
     try:
         app.include_router(products_router)
