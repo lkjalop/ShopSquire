@@ -8,7 +8,10 @@ from alembic.operations import Operations
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from src.app.services.canonical_fact_adapters import backfill_canonical_facts
+from src.app.services.canonical_fact_adapters import (
+    backfill_canonical_facts,
+    canonical_source_health,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +72,14 @@ def test_real_order_inventory_and_supplier_quote_materialize_canonical_facts():
     assert db.execute(text("SELECT COUNT(*) FROM market_fact_quarantine")).scalar_one() == 2
     backfill_canonical_facts(db, tenant_id="tenant-a")
     assert db.execute(text("SELECT COUNT(*) FROM market_fact_quarantine")).scalar_one() == 2
+    health = canonical_source_health(db, tenant_id="tenant-a")
+    assert health["active_records"] == 3
+    assert health["quarantined_records"] == 2
+    assert {row["family"] for row in health["sources"]} == {
+        "inventory_atp",
+        "marketing_event",
+    }
+    assert canonical_source_health(db, tenant_id="tenant-b")["status"] == "unconfigured"
     db.close()
 
 

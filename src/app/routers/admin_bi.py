@@ -108,6 +108,20 @@ def executive_metrics_audit_api(
     )
 
 
+@router.get("/executive-metrics/source-health")
+def executive_metric_source_health(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Read-only reconciliation and quarantine status; never executes source actions."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.canonical_fact_adapters import canonical_source_health
+
+    tenant_id = str(current_tenant_id() or "default")
+    with db_session() as db:
+        return canonical_source_health(db, tenant_id=tenant_id)
+
+
 class NewsletterDraftRequest(BaseModel):
     skus: List[str] = Field(default_factory=list, max_length=10)
 

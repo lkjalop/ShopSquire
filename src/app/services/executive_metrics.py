@@ -70,6 +70,112 @@ def forecast_quality(
     ]
 
 
+def persist_forecast_actual_pair(
+    db,
+    *,
+    tenant_id: str,
+    pair_key: str,
+    subject_id: str,
+    forecast_value: float,
+    actual_value: float,
+    unit: str,
+    target_start: datetime,
+    target_end: datetime,
+    forecast_created_at: datetime,
+    actual_observed_at: datetime,
+    source_system: str,
+    source_records: Sequence[str],
+    provenance_chain: Sequence[str],
+    sealed_by: str,
+    sealed_at: datetime | None = None,
+    commit: bool = True,
+) -> int:
+    """Persist one independently sealed pair; duplicates are idempotent.
+
+    A pair without reviewer identity or provenance is not evidence and is rejected
+    before it can affect the forecast-quality snapshot.
+    """
+    required = {
+        "tenant_id": tenant_id,
+        "pair_key": pair_key,
+        "subject_id": subject_id,
+        "unit": unit,
+        "source_system": source_system,
+        "sealed_by": sealed_by,
+    }
+    missing = sorted(key for key, value in required.items() if not str(value or "").strip())
+    if missing:
+        raise ValueError(f"missing forecast pair fields: {','.join(missing)}")
+    records = [str(value) for value in source_records if str(value)]
+    provenance = [str(value) for value in provenance_chain if str(value)]
+    if not records or not provenance:
+        raise ValueError("forecast pair requires source records and provenance")
+    result = db.execute(text("""
+        INSERT INTO forecast_actual_pair (
+          id, tenant_id, pair_key, subject_type, subject_id, forecast_value,
+          actual_value, unit, target_start, target_end, forecast_created_at,
+          actual_observed_at, source_system, source_records_json, provenance_json,
+          sealed_at, sealed_by, status
+        ) VALUES (
+          :id, :tenant, :pair_key, 'sku', :subject_id, :forecast_value,
+          :actual_value, :unit, :target_start, :target_end, :forecast_created_at,
+          :actual_observed_at, :source_system, :source_records, :provenance,
+          :sealed_at, :sealed_by, 'active'
+        ) ON CONFLICT(tenant_id, pair_key) DO NOTHING
+    """), {
+        "id": str(uuid.uuid4()),
+        "tenant": str(tenant_id),
+        "pair_key": str(pair_key),
+        "subject_id": str(subject_id),
+        "forecast_value": max(0.0, float(forecast_value)),
+        "actual_value": max(0.0, float(actual_value)),
+        "unit": str(unit),
+        "target_start": target_start,
+        "target_end": target_end,
+        "forecast_created_at": forecast_created_at,
+        "actual_observed_at": actual_observed_at,
+        "source_system": str(source_system),
+        "source_records": json.dumps(records),
+        "provenance": json.dumps(provenance),
+        "sealed_at": sealed_at or _now(),
+        "sealed_by": str(sealed_by),
+    })
+    if commit:
+        db.commit()
+    return max(0, int(result.rowcount or 0))
+
+
+def forecast_quality_from_sealed(
+    db,
+    *,
+    tenant_id: str,
+    subject_id: str,
+    as_of: datetime | None = None,
+) -> list[MetricEvidence]:
+    """Compute quality only from active pairs carrying a durable human seal."""
+    rows = db.execute(text("""
+        SELECT forecast_value, actual_value, pair_key
+        FROM forecast_actual_pair
+        WHERE tenant_id=:tenant AND subject_type='sku' AND subject_id=:subject
+          AND status='active' AND sealed_by IS NOT NULL AND sealed_by <> ''
+        ORDER BY target_end
+    """), {"tenant": tenant_id, "subject": subject_id}).fetchall()
+    observations = [
+        {
+            "forecast": float(row[0]),
+            "actual": float(row[1]),
+            "source_record_id": str(row[2]),
+        }
+        for row in rows
+    ]
+    return forecast_quality(
+        tenant_id=tenant_id,
+        subject_id=subject_id,
+        observations=observations,
+        as_of=as_of,
+    )
+
+
 def inventory_productivity(
     *, tenant_id: str, sku: str, units_sold: int, window_days: int,
     available_units: int | None, source_records: Iterable[str] = (),

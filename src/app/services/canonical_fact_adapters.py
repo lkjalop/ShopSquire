@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable
 
 from sqlalchemy import text
@@ -204,3 +205,88 @@ def backfill_canonical_facts(db, *, tenant_id: str, limit: int = 1000,
     return {"tenant_id": str(tenant_id), "written": sum(counts.values()),
             "written_by_source": counts, "quarantined": sum(rejected_counts.values()),
             "quarantined_by_source": rejected_counts, "errors": errors}
+
+
+def canonical_source_health(db, *, tenant_id: str) -> Dict[str, Any]:
+    """Read-only onboarding/reconciliation status for one tenant's governed feeds."""
+    if not str(tenant_id or "").strip():
+        raise ValueError("tenant_id is required")
+    sources: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for family, table, time_column in (
+        ("inventory_atp", "inventory_atp_fact", "observed_at"),
+        ("marketing_event", "marketing_event_fact", "occurred_at"),
+    ):
+        try:
+            rows = db.execute(text(
+                f"SELECT source_system, COUNT(*), MAX({time_column}) FROM {table} "
+                "WHERE tenant_id=:tenant AND status='active' GROUP BY source_system"
+            ), {"tenant": tenant_id}).fetchall()
+        except Exception:
+            rows = []
+        for source, count, latest in rows:
+            key = (family, str(source or "unknown"))
+            sources[key] = {
+                "family": family,
+                "source_system": key[1],
+                "active_records": int(count or 0),
+                "latest_observed_at": str(latest or "") or None,
+                "quarantined_records": 0,
+                "quarantine_reasons": {},
+            }
+    try:
+        quarantines = db.execute(text("""
+            SELECT family, COALESCE(source_system,'unknown'), reason_code, COUNT(*),
+                   MAX(quarantined_at)
+            FROM market_fact_quarantine
+            WHERE tenant_id=:tenant
+            GROUP BY family, COALESCE(source_system,'unknown'), reason_code
+        """), {"tenant": tenant_id}).fetchall()
+    except Exception:
+        quarantines = []
+    for family, source, reason, count, latest in quarantines:
+        normalized_family = {
+            "atp": "inventory_atp",
+            "marketing": "marketing_event",
+        }.get(str(family), str(family))
+        key = (normalized_family, str(source))
+        row = sources.setdefault(key, {
+            "family": key[0],
+            "source_system": key[1],
+            "active_records": 0,
+            "latest_observed_at": None,
+            "quarantined_records": 0,
+            "quarantine_reasons": {},
+        })
+        row["quarantined_records"] += int(count or 0)
+        row["quarantine_reasons"][str(reason)] = int(count or 0)
+        row["latest_quarantined_at"] = str(latest or "") or None
+    now = datetime.now(timezone.utc)
+    for row in sources.values():
+        latest = row.get("latest_observed_at")
+        age_hours = None
+        if latest:
+            try:
+                stamp = datetime.fromisoformat(str(latest).replace("Z", "+00:00"))
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                age_hours = max(0.0, (now - stamp.astimezone(timezone.utc)).total_seconds() / 3600)
+            except ValueError:
+                age_hours = None
+        row["age_hours"] = round(age_hours, 2) if age_hours is not None else None
+        row["status"] = (
+            "quarantined_only" if not row["active_records"] and row["quarantined_records"]
+            else "stale" if age_hours is None or age_hours > 24
+            else "healthy"
+        )
+    ordered = sorted(sources.values(), key=lambda row: (row["family"], row["source_system"]))
+    return {
+        "tenant_id": str(tenant_id),
+        "sources": ordered,
+        "active_records": sum(row["active_records"] for row in ordered),
+        "quarantined_records": sum(row["quarantined_records"] for row in ordered),
+        "status": (
+            "unconfigured" if not ordered
+            else "degraded" if any(row["status"] != "healthy" for row in ordered)
+            else "healthy"
+        ),
+    }
