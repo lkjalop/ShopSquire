@@ -1479,10 +1479,14 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health():
+        from src.app.services.runtime_modes import runtime_mode_snapshot
+
+        runtime_modes = runtime_mode_snapshot()
         if str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on"):
             return {
                 "status": "ok",
                 "mode": "fast_test_health",
+                "runtime_modes": runtime_modes,
                 "dependencies": {
                     "backend": {"status": "healthy", "mode": "fast_test_health"},
                 },
@@ -1495,7 +1499,12 @@ def create_app() -> FastAPI:
         status = "ok"
         if any(v.get("status") == "unhealthy" for v in deps.values() if isinstance(v, dict)):
             status = "degraded"
-        return {"status": status, "dependencies": deps, "timestamp": snapshot.get("timestamp")}
+        return {
+            "status": status,
+            "runtime_modes": runtime_modes,
+            "dependencies": deps,
+            "timestamp": snapshot.get("timestamp"),
+        }
 
     @app.get("/healthz")
     def healthz():
@@ -1514,6 +1523,7 @@ def create_app() -> FastAPI:
         config_report = {"ok": True, "missing": [], "warnings": [], "contract": {}}
         components: dict[str, dict[str, Any]] = {
             "backend": {"status": "ready", "details": {"liveness": "ok"}},
+            "runtime_profile": {"status": "unknown", "details": {}},
             "frontend": {"status": "skipped", "details": {"mode": "deep_only"}},
             "ollama": {"status": "skipped", "details": {"mode": "deep_only"}},
             "cv_ocr": {"status": "skipped", "details": {"mode": "deep_only"}},
@@ -1537,6 +1547,19 @@ def create_app() -> FastAPI:
         except Exception:
             ok = False
             reasons.append("config_contract_check_failed")
+
+        try:
+            from src.app.services.runtime_modes import runtime_mode_snapshot
+
+            runtime_modes = runtime_mode_snapshot()
+            _set_component("runtime_profile", bool(runtime_modes["ready"]), runtime_modes)
+            if not bool(runtime_modes["ready"]):
+                ok = False
+                reasons.append("runtime_profile_mismatch")
+        except Exception:
+            ok = False
+            reasons.append("runtime_profile_check_failed")
+            _set_component("runtime_profile", False, {"error": "runtime_profile_check_failed"})
 
         try:
             eng = getattr(app.state, "engine", None)

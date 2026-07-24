@@ -52,6 +52,7 @@ $env:CV_WARMUP_ON_START                = "0"
 # enrolls only read-only product selection and sourcing advice; fulfillment_cases still owns case
 # creation, RFQ drafts, approvals, and all external sends. Unsupported lanes continue to delegate,
 # and cart mutations remain confirmation-gated because auto-apply is intentionally disabled.
+$env:SHOPSQUIRE_RUNTIME_PROFILE        = "demo_v2"
 $env:RECOMMEND_CORE_MODE               = "primary"
 $env:RECOMMEND_PROCUREMENT_ADVICE_MODE = "on"
 $env:RECOMMEND_POLICY_ANSWER_MODE      = "on" # approved StoreProfile FAQ only; never model-authored terms
