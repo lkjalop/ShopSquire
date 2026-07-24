@@ -3596,6 +3596,19 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                               {procCase?.state_json?.availability?.requested_qty != null && (
                                 <div className={styles.kvRow}><span>Cart demand</span><span>{procCase.state_json.availability.requested_qty} requested · {procCase.state_json.availability.in_stock ?? 0} in stock · {procCase.state_json.availability.shortfall ?? draft.commercial_scope?.quantity ?? 0} sourced</span></div>
                               )}
+                              {Array.isArray(procCase?.state_json?.availability?.lines)
+                                && procCase.state_json.availability.lines.map((line: any) => (
+                                  <div key={`availability-${line.sku}`} data-testid={`proc-availability-${line.sku}`}
+                                       style={{ borderTop: '1px solid #e5e7eb', marginTop: 6, paddingTop: 6 }}>
+                                    <div className={styles.kvRow}>
+                                      <span>Combined availability</span>
+                                      <span>{line.local_now ?? 0} local · {line.network_transfer ?? 0} network transfer · {line.supplier_rfq_qty ?? 0} RFQ</span>
+                                    </div>
+                                    <div style={{ color: '#6b7280', fontSize: 12 }}>
+                                      Supplier availability is unconfirmed until the RFQ receives a response.
+                                    </div>
+                                  </div>
+                                ))}
                               <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
                               {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
                               {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{gateView.label}</span></div>}

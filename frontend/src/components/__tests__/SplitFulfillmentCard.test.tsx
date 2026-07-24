@@ -57,6 +57,23 @@ describe('SplitFulfillmentCard', () => {
     expect(container.querySelector('[data-testid="split-fulfillment-card"]')).toBeNull();
   });
 
+  it('separates confirmed network transfers from the unconfirmed supplier RFQ', async () => {
+    (api.getSplitOffer as any).mockResolvedValue({
+      ...SPLIT,
+      split: {
+        ...SPLIT.split,
+        now: [{ sku: 'LAP-1', qty: 5, unit_cents: 139900 }],
+        transfers: [{ sku: 'LAP-1', qty: 17, unit_cents: 139900 }],
+        later: [{ sku: 'LAP-1', qty: 3, unit_cents: 139900, eta_days: 6, supplier_ref: 'SUP-BIZ' }],
+      },
+    });
+    render(<SplitFulfillmentCard uid="u1" refreshKey="LAP-1:25" nameFor={nameFor} />);
+    await waitFor(() => expect(screen.getByTestId('split-transfer-LAP-1')).toBeInTheDocument());
+    expect(screen.getByTestId('split-transfer-LAP-1')).toHaveTextContent('confirmed internal stock');
+    expect(screen.getByText('Requires supplier RFQ')).toBeInTheDocument();
+    expect(screen.getByTestId('split-eta-LAP-1')).toHaveTextContent(/supplier lead time ~6 days/);
+  });
+
   it('stays hidden and reports no split when the offer fetch fails (best-effort, never blocks the cart)', async () => {
     (api.getSplitOffer as any).mockRejectedValue(new Error('split_offer_failed (503)'));
     const onSplitState = vi.fn();

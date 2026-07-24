@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.app.services.multi_location_availability import (
-    assess_network_availability, network_availability, stock_by_location,
+    assess_network_availability, combined_availability, network_availability, stock_by_location,
 )
 
 
@@ -64,6 +64,17 @@ def test_network_shortfall_when_even_network_is_short():
     assert r["fillable_from_network"] is False
     assert r["shortfall"] == 13           # 30 - 17 → the bit a supplier reorder must cover
     assert r["total_in_network"] == 17
+
+
+def test_combined_availability_separates_local_transfer_and_unconfirmed_rfq():
+    out = combined_availability(
+        "X", 30, by_location={"sydney": 5, "melbourne": 12, "warehouse": 8},
+        preferred_location="sydney")
+    assert out["local_now"] == 5
+    assert out["network_transfer"] == 20
+    assert out["supplier_rfq_qty"] == 5
+    assert out["supplier_availability"] == "unconfirmed_rfq"
+    assert sum(x["qty"] for x in out["transfer_plan"]) == 20
 
 
 def test_assess_network_availability_end_to_end(db):

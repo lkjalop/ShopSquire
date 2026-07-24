@@ -95,6 +95,42 @@ def network_availability(sku: str, requested_qty: int, *, by_location: Dict[str,
     return result
 
 
+def combined_availability(sku: str, requested_qty: int, *, by_location: Dict[str, int],
+                          preferred_location: Optional[str] = None) -> Dict[str, Any]:
+    """Normalize local stock, network transfers, and residual supplier RFQ demand."""
+    network = network_availability(
+        sku, requested_qty, by_location=by_location, preferred_location=preferred_location)
+    requested = max(0, int(requested_qty or 0))
+    preferred_qty = network.get("preferred_qty")
+    local_now = (
+        min(requested, int(network.get("total_in_network") or 0))
+        if preferred_qty is None
+        else min(requested, max(0, int(preferred_qty or 0)))
+    )
+    transfers = [
+        {"from_location": str(item.get("from_location") or ""),
+         "qty": max(0, int(item.get("qty") or 0))}
+        for item in (network.get("transfer_plan") or [])
+        if isinstance(item, dict) and int(item.get("qty") or 0) > 0
+    ]
+    transfer_qty = min(max(0, requested - local_now), sum(item["qty"] for item in transfers))
+    rfq_qty = max(0, requested - local_now - transfer_qty)
+    return {
+        "sku": str(sku),
+        "requested": requested,
+        "preferred_location": network.get("preferred_location"),
+        "local_now": local_now,
+        "network_transfer": transfer_qty,
+        "transfer_plan": transfers,
+        "total_in_network": int(network.get("total_in_network") or 0),
+        "by_location": dict(network.get("by_location") or {}),
+        "supplier_rfq_qty": rfq_qty,
+        "fillable_from_network": rfq_qty == 0,
+        # This is a request quantity, never a claim that a supplier has live ATP.
+        "supplier_availability": "unconfirmed_rfq",
+    }
+
+
 def assess_network_availability(db, skus: List[str], requested_qty: int, *,
                                 preferred_location: Optional[str] = None,
                                 tenant_id: str = DEFAULT_TENANT,

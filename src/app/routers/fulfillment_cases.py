@@ -579,8 +579,28 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
         except Exception:
             stock = {}
         for l in resolved:
-            if l.get("in_stock") in (None, 0):
-                l["in_stock"] = int(stock.get(str(l.get("item_ref")), 0))
+            sku = str(l.get("item_ref") or "")
+            requested = int(l.get("requested_qty") or 0)
+            try:
+                from src.app.services.multi_location_availability import (
+                    combined_availability, stock_by_location)
+                locations = stock_by_location(db, [sku])
+                from src.app.platform.store_profile import profile_slot
+                preferred = str(
+                    profile_slot("default_fulfillment_location", default="") or "").strip() or None
+                aggregate = int(stock.get(sku, 0))
+                by_location = locations.get(sku) or {
+                    str(preferred or "aggregate"): aggregate
+                }
+                combined = combined_availability(
+                    sku, requested, by_location=by_location,
+                    preferred_location=(preferred if locations.get(sku) else None))
+                l["availability"] = combined
+                l["in_stock"] = int(combined["total_in_network"])
+                l["source_qty"] = int(combined["supplier_rfq_qty"])
+            except Exception:
+                if l.get("in_stock") in (None, 0):
+                    l["in_stock"] = int(stock.get(sku, 0))
         # supersede=True → buyer is amending a confirmed order: retire the active pre-send cases + re-source.
         if body.supersede:
             # NETWORK-AWARE churn brake: amendment-churn spins up supplier RFQ redrafts (a DDoS vector). Combine

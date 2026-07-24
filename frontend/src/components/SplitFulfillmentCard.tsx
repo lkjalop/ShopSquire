@@ -41,7 +41,7 @@ export default function SplitFulfillmentCard({
 
   // Only surface when there IS a supplier-backed second shipment to disclose (the pre-payment beat). A
   // fully-in-stock cart ships in one go — no split card, no extra confirmation.
-  if (!plan || plan.fully_in_stock) return null;
+  if (!plan || (plan.fully_in_stock && !plan.transfers?.length)) return null;
 
   const d = plan.delivery;
   const money = (c: number) => `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -72,14 +72,29 @@ export default function SplitFulfillmentCard({
         </div>
       ))}
 
+      {!!plan.transfers?.length && (
+        <>
+          <div style={{ fontWeight: 600, color: '#1d4ed8', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 8 }}>
+            Transfers from our network
+          </div>
+          {plan.transfers.map((l) => (
+            <div key={`transfer-${l.sku}`} data-testid={`split-transfer-${l.sku}`}
+                 style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+              <span>{l.qty} × {nameFor(l.sku)}</span>
+              <span style={{ color: '#1d4ed8' }}>confirmed internal stock</span>
+            </div>
+          ))}
+        </>
+      )}
+
       <div style={{ fontWeight: 600, color: '#92400e', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 8 }}>
-        Follows from supplier
+        Requires supplier RFQ
       </div>
       {plan.later.map((l) => (
         <div key={`later-${l.sku}`} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
           <span>{l.qty} × {nameFor(l.sku)}</span>
           <span style={{ color: '#92400e' }} data-testid={`split-eta-${l.sku}`}>
-            {l.eta_days != null ? `~${l.eta_days} days` : 'once replenished'}
+            {l.eta_days != null ? `supplier lead time ~${l.eta_days} days` : 'availability unconfirmed'}
             {l.supplier_ref ? ` · ${l.supplier_ref}` : ''}
           </span>
         </div>
@@ -92,7 +107,11 @@ export default function SplitFulfillmentCard({
       </div>
 
       <div style={{ marginTop: 10 }}>
-        {confirmed ? (
+        {plan.fully_in_stock ? (
+          <div data-testid="split-network-covered" style={{ color: '#065f46', fontWeight: 600 }}>
+            Covered by confirmed internal inventory — no supplier RFQ required.
+          </div>
+        ) : confirmed ? (
           <div data-testid="split-confirmed" style={{ color: '#065f46', fontWeight: 600 }}>
             ✓ Delivery plan confirmed — you can check out.
           </div>

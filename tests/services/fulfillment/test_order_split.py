@@ -58,6 +58,28 @@ def test_plan_order_split_routes_mixed_lines_to_distinct_suppliers(db):
     assert by_sku["NET-1"]["status"] == "fillable_from_stock"
 
 
+def test_plan_order_split_preserves_combined_availability_for_case_trace(db):
+    _seed_product(db, "GAM-0002", "Gaming Laptop")
+    ensure_supplier_coverage(db)
+    availability = {
+        "sku": "GAM-0002", "requested": 20, "local_now": 4,
+        "network_transfer": 11, "supplier_rfq_qty": 5,
+        "total_in_network": 15, "by_location": {"sydney": 4, "warehouse": 11},
+        "transfer_plan": [{"from_location": "warehouse", "qty": 11}],
+        "supplier_availability": "unconfirmed_rfq",
+    }
+    plan = plan_order_split(db, lines=[{
+        "item_ref": "GAM-0002", "requested_qty": 20, "in_stock": 15,
+        "source_qty": 5, "availability": availability,
+    }])
+    assert plan["lines"][0]["shortfall"] == 5
+    assert plan["lines"][0]["availability"] == availability
+    created = create_grouped_cases(db, plan=plan, uid="u1")
+    current = wf.repository.current_version(db, created["cases"][0]["case_id"])
+    assert current.state_json["availability"]["lines"][0]["network_transfer"] == 11
+    assert current.state_json["availability"]["shortfall"] == 5
+
+
 def test_plan_order_split_marks_missing_supplier_without_contacting_external_party(db):
     plan = plan_order_split(db, lines=[
         {"item_ref": "UNKNOWN-SKU", "requested_qty": 12, "in_stock": 0},

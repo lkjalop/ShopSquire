@@ -38,19 +38,23 @@ class SplitLine:
     unit_cents: int = 0
     supplier_lead_time_days: Optional[int] = None   # the assigned supplier's real lead time (the ETA)
     supplier_ref: Optional[str] = None
+    availability: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
 class SplitPlan:
     now: List[Dict[str, Any]] = field(default_factory=list)     # {sku, qty, unit_cents}
     later: List[Dict[str, Any]] = field(default_factory=list)   # {sku, qty, unit_cents, eta_days, supplier_ref}
+    transfers: List[Dict[str, Any]] = field(default_factory=list)
+    availability: List[Dict[str, Any]] = field(default_factory=list)
     subtotal_cents: int = 0
     delivery: Dict[str, Any] = field(default_factory=dict)
     fully_in_stock: bool = True
     rationale: str = ""
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"now": self.now, "later": self.later, "subtotal_cents": self.subtotal_cents,
+        return {"now": self.now, "later": self.later, "transfers": self.transfers,
+                "availability": self.availability, "subtotal_cents": self.subtotal_cents,
                 "delivery": self.delivery, "fully_in_stock": self.fully_in_stock, "rationale": self.rationale}
 
 
@@ -60,19 +64,39 @@ def compute_split(lines: List[SplitLine], *, policy: Optional[DeliveryPolicy] = 
     pol = policy or DeliveryPolicy()
     now: List[Dict[str, Any]] = []
     later: List[Dict[str, Any]] = []
+    transfers: List[Dict[str, Any]] = []
+    availability: List[Dict[str, Any]] = []
     subtotal = 0
     for l in lines:
         req = max(0, int(l.requested_qty or 0))
+        combined = dict(l.availability or {})
         stock = max(0, int(l.in_stock or 0))
         subtotal += int(l.unit_cents or 0) * req
-        avail = min(req, stock)
-        back = max(0, req - stock)
+        local_now = min(req, max(0, int(combined.get("local_now", stock) or 0)))
+        transfer_qty = min(max(0, req - local_now), max(0, int(combined.get("network_transfer") or 0)))
+        back = max(0, int(combined.get("supplier_rfq_qty", req - local_now - transfer_qty) or 0))
+        avail = local_now
         if avail > 0:
             now.append({"sku": l.sku, "qty": avail, "unit_cents": int(l.unit_cents or 0)})
+        if transfer_qty > 0:
+            transfers.append({
+                "sku": l.sku, "qty": transfer_qty, "unit_cents": int(l.unit_cents or 0),
+                "to_location": combined.get("preferred_location"),
+                "transfer_plan": list(combined.get("transfer_plan") or []),
+            })
         if back > 0:
             later.append({"sku": l.sku, "qty": back, "unit_cents": int(l.unit_cents or 0),
                           "eta_days": (int(l.supplier_lead_time_days) if l.supplier_lead_time_days is not None else None),
                           "supplier_ref": l.supplier_ref})
+        availability.append({
+            "sku": l.sku, "requested": req, "local_now": local_now,
+            "network_transfer": transfer_qty, "supplier_rfq_qty": back,
+            "total_in_network": int(combined.get("total_in_network", stock) or 0),
+            "by_location": dict(combined.get("by_location") or {}),
+            "preferred_location": combined.get("preferred_location"),
+            "transfer_plan": list(combined.get("transfer_plan") or []),
+            "supplier_availability": "unconfirmed_rfq",
+        })
 
     fully = not later
     free = bool(pol.free_shipping_threshold_cents) and subtotal >= pol.free_shipping_threshold_cents
@@ -80,7 +104,7 @@ def compute_split(lines: List[SplitLine], *, policy: Optional[DeliveryPolicy] = 
     # a second shipment only exists when there IS a backordered part AND the store allows backorder
     has_second = bool(later) and pol.backorder_enabled
     fee_later = 0 if (free or not has_second) else int(pol.split_shipment_fee_cents)
-    shipments = (1 if now else 0) + (1 if has_second else 0)
+    shipments = (1 if (now or transfers) else 0) + (1 if has_second else 0)
 
     # a real, plain-English rationale using the supplier ETAs (max ETA across backordered lines).
     max_eta = max([int(x["eta_days"]) for x in later if x.get("eta_days") is not None], default=None)
@@ -90,8 +114,11 @@ def compute_split(lines: List[SplitLine], *, policy: Optional[DeliveryPolicy] = 
         rationale = "Some items exceed on-hand stock and this store does not backorder — reduce the qty or source separately."
     else:
         eta_txt = f" in ~{max_eta} days (supplier lead time)" if max_eta is not None else " once replenished"
-        rationale = (f"Ship the {sum(x['qty'] for x in now)} in-stock unit(s) now; the remaining "
-                     f"{sum(x['qty'] for x in later)} follow{eta_txt}.")
+        local_qty = sum(x["qty"] for x in now)
+        transfer_total = sum(x["qty"] for x in transfers)
+        transfer_txt = f"; {transfer_total} transfer from other locations" if transfer_total else ""
+        rationale = (f"{local_qty} unit(s) are ready at the preferred location{transfer_txt}; "
+                     f"{sum(x['qty'] for x in later)} require a supplier RFQ{eta_txt}.")
 
     delivery = {
         "currency": pol.currency,
@@ -103,7 +130,8 @@ def compute_split(lines: List[SplitLine], *, policy: Optional[DeliveryPolicy] = 
         "shipments": shipments,
         "backorder_enabled": pol.backorder_enabled,
     }
-    return SplitPlan(now=now, later=later, subtotal_cents=subtotal, delivery=delivery,
+    return SplitPlan(now=now, later=later, transfers=transfers, availability=availability,
+                     subtotal_cents=subtotal, delivery=delivery,
                      fully_in_stock=fully, rationale=rationale)
 
 

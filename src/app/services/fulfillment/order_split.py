@@ -106,6 +106,8 @@ def _resolve_lines(db, lines: List[Dict[str, Any]]) -> Dict[str, Any]:
             by_sku[ir] = len(resolved)
             line = {"item_ref": ir, "requested_qty": qty, "in_stock": _int(ln.get("in_stock")),
                     "phrase": ln.get("phrase")}
+            if isinstance(ln.get("availability"), dict):
+                line["availability"] = dict(ln["availability"])
             if source_qty > 0:
                 line["source_qty"] = source_qty
             resolved.append(line)
@@ -223,6 +225,8 @@ def plan_order_split(db, *, lines: List[Dict[str, Any]], tenant_id: str = "defau
             "shortfall": shortfall,
             "status": "fillable_from_stock" if shortfall <= 0 else "needs_sourcing",
         }
+        if isinstance(raw.get("availability"), dict):
+            line["availability"] = dict(raw["availability"])
         if shortfall <= 0 or not item_ref:
             line_out.append(line)
             continue
@@ -333,8 +337,12 @@ def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
                                 requested_by="recommend")
             if not cid:
                 continue
+            line_availability = [
+                dict(l.get("availability") or {}) for l in lines if isinstance(l.get("availability"), dict)]
             patch = {"availability": {"requested_qty": total_qty, "shortfall": total_short,
-                                      "in_stock": max(0, total_qty - total_short), "item_ref": order_lines[0]["item_ref"]},
+                                      "in_stock": max(0, total_qty - total_short),
+                                      "item_ref": order_lines[0]["item_ref"],
+                                      "lines": line_availability},
                      "order_group_id": group_id, "order_lines": order_lines,
                      "supplier_ref": g.get("supplier_ref"), "recipient_domain": g.get("recipient_domain")}
             if requirements:

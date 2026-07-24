@@ -443,6 +443,7 @@ def split_offer(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_
     never silently split a shipment or add a fee. A fully-in-stock cart returns a single-shipment plan."""
     from src.app.services.fulfillment.fulfillment_split import (
         SplitLine, compute_split, delivery_policy_from_profile)
+    from src.app.services.multi_location_availability import combined_availability, stock_by_location
     from src.app.services.supplier_catalog import lead_times_for_skus
 
     with tracer.start_as_current_span("cart.split_offer"):
@@ -454,9 +455,15 @@ def split_offer(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_
                     "currency": hydrated.get("currency", _store_currency()), "split": None}
         skus = [str(r["sku"]) for r in rows if r.get("sku")]
         stock = _batch_stock_levels(skus)
+        by_location: Dict[str, Dict[str, int]] = {}
+        preferred_location = None
         try:
             with db_session() as db:
                 leads = lead_times_for_skus(db, skus)
+                by_location = stock_by_location(db, skus)
+            from src.app.platform.store_profile import profile_slot
+            preferred_location = str(
+                profile_slot("default_fulfillment_location", default="") or "").strip() or None
         except Exception:
             leads = {}
         lines = [
@@ -467,6 +474,13 @@ def split_offer(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_
                 unit_cents=int(r.get("price_cents") or 0),
                 supplier_lead_time_days=(leads.get(str(r.get("sku"))) or {}).get("lead_time_days"),
                 supplier_ref=(leads.get(str(r.get("sku"))) or {}).get("supplier_ref"),
+                availability=combined_availability(
+                    str(r.get("sku")), int(r.get("quantity") or 1),
+                    by_location=(
+                        by_location.get(str(r.get("sku")))
+                        or {str(preferred_location or "aggregate"): int(stock.get(str(r.get("sku")), 0))}
+                    ),
+                    preferred_location=(preferred_location if by_location.get(str(r.get("sku"))) else None)),
             )
             for r in rows if r.get("sku")
         ]

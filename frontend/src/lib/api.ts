@@ -161,6 +161,12 @@ export interface SplitDelivery {
 }
 export interface SplitPlan {
   now: SplitShipmentLine[]; later: SplitShipmentLine[]; subtotal_cents: number;
+  transfers?: Array<SplitShipmentLine & { to_location?: string | null; transfer_plan?: Array<{ from_location: string; qty: number }> }>;
+  availability?: Array<{
+    sku: string; requested: number; local_now: number; network_transfer: number;
+    supplier_rfq_qty: number; total_in_network: number; preferred_location?: string | null;
+    by_location?: Record<string, number>; supplier_availability: 'unconfirmed_rfq';
+  }>;
   delivery: SplitDelivery; fully_in_stock: boolean; rationale: string;
 }
 export interface SplitOfferResult {
