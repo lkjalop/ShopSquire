@@ -105,15 +105,34 @@ def _is_non_dev_env() -> bool:
 
 
 def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
-    """Return CV OCR runtime readiness, including OS-level binary checks."""
+    """Return CV OCR runtime readiness, including OS-level binary checks.
+
+    Probes ONLY the packages the selected provider can use: importing paddleocr
+    loads the full Paddle framework (whose model-source check stalls ~10-15s when
+    its source is blocked), so the boot-path probe must never pay that cost for a
+    provider that doesn't need it (glm-ocr/embedded run via Ollama — no local OCR).
+    An unprobed package is ABSENT from deps ("not probed"), never reported False
+    ("probed and missing"). The exhaustive all-dependency introspection lives in
+    the role-gated cv_readiness diagnostic, not on the boot path."""
     selected = (provider or os.getenv("CV_OCR_PROVIDER", "auto") or "auto").strip().lower()
+    no_local_ocr = selected in ("disabled", "none", "off", "embedded", "glm-ocr", "glm_ocr", "ollama-ocr")
+
+    def _probe(*pkgs: str) -> None:
+        for pkg in pkgs:
+            try:
+                __import__(pkg)
+                deps[pkg] = True
+            except Exception:
+                deps[pkg] = False
+
     deps: dict[str, bool] = {}
-    for pkg in ("pytesseract", "cv2", "paddleocr", "pyzbar"):
-        try:
-            __import__(pkg)
-            deps[pkg] = True
-        except Exception:
-            deps[pkg] = False
+    _probe("pyzbar")  # QR-decode runtime is provider-independent and cheap
+    if selected == "tesseract":
+        _probe("pytesseract")
+    elif selected == "paddle":
+        _probe("paddleocr", "cv2")
+    elif not no_local_ocr:  # auto: probe the cheap leg now; paddle only if it's needed (below)
+        _probe("pytesseract")
 
     runtime: dict[str, Any] = {}
     reasons: list[str] = []
@@ -146,7 +165,7 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
     else:
         runtime["pyzbar_runtime"] = False
 
-    if selected in ("disabled", "none", "off", "embedded", "glm-ocr", "glm_ocr", "ollama-ocr"):
+    if no_local_ocr:
         ready = True  # glm-ocr uses Ollama — no local binary required
     elif selected == "tesseract":
         ready = bool(deps.get("pytesseract") and runtime.get("tesseract_bin"))
@@ -157,10 +176,12 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
         if not ready:
             reasons.append("paddle_provider_not_ready")
     else:
-        ready = bool(
-            (deps.get("paddleocr") and deps.get("cv2"))
-            or (deps.get("pytesseract") and runtime.get("tesseract_bin"))
-        )
+        # auto: the cheap tesseract leg was probed above; pay the paddle import
+        # only when that leg cannot serve.
+        ready = bool(deps.get("pytesseract") and runtime.get("tesseract_bin"))
+        if not ready:
+            _probe("paddleocr", "cv2")
+            ready = bool(deps.get("paddleocr") and deps.get("cv2"))
         if not ready:
             reasons.append("no_available_ocr_provider")
 
