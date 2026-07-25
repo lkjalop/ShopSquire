@@ -845,7 +845,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const allDisplayEvents: TraceEvent[] = events.length > 0 ? events : (trace ? [
     { event_type: 'query_received', source_id: 'input', payload: { query: trace.input_query }, timestamp: trace.timestamp },
     ...(trace.intent_analysis ? [{ event_type: 'intent_analysis', source_id: 'nlp', payload: trace.intent_analysis, timestamp: trace.timestamp }] : []),
-    ...(trace.agent_chain || []).map((a: any, i: number) => ({ event_type: 'agent_step', source_id: a.agent || `agent-${i}`, payload: a, timestamp: trace.timestamp })),
+    // Typed execution_steps are the authority surface; fall back to the legacy agent_chain
+    // only when they are absent. Neither is labelled 'agent' — the component ontology
+    // (model/gate/connector/observer/stage) classifies each source_id, and an ordinary stage
+    // such as Recommendation_Core is a stage, not a model-directed agent.
+    ...((trace.execution_steps && trace.execution_steps.length > 0)
+      ? trace.execution_steps.map((s: any, i: number) => ({
+          event_type: 'pipeline_step', source_id: s.source_id || s.step || s.name || `step-${i}`,
+          payload: s, timestamp: trace.timestamp }))
+      : (trace.agent_chain || []).map((a: any, i: number) => ({
+          event_type: 'pipeline_step', source_id: a.source_id || a.agent || `step-${i}`,
+          payload: a, timestamp: trace.timestamp }))),
     ...(trace.model_selection ? [{ event_type: 'model_invoke', source_id: trace.model_selection.selected || 'llm', payload: trace.model_selection, latency_ms: trace.model_selection.latency_ms ?? undefined, timestamp: trace.timestamp }] : []),
     ...(trace.policy_gates ? [{ event_type: 'policy_gate', source_id: 'policy', payload: trace.policy_gates, timestamp: trace.timestamp }] : []),
     ...(trace.recommendation ? [{ event_type: 'success', source_id: 'output', payload: trace.recommendation, timestamp: trace.timestamp }] : []),
