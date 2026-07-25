@@ -24,6 +24,9 @@ describe('Image recommendation authority boundary', () => {
     expect(panel).not.toMatch(/allowLegacySuggest\??:/);
     expect(panel).not.toContain('/api/v1/recommend/suggest');
     expect(panel).not.toContain('VITE_ENABLE_LEGACY_IMAGE_SUGGEST_ROLLBACK');
-    expect(panel).toContain('independent_image_recommendation_removed');
+    // The independent recommendation path is fully EXCISED, not merely neutralized:
+    // no fetchSuggest function/call sites and no local fallback catalogue remain.
+    expect(panel).not.toContain('fetchSuggest');
+    expect(panel).not.toContain('LOCAL_FAST_FALLBACK_PRODUCTS');
   });
 });
