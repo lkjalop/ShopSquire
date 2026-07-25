@@ -1,8 +1,12 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from src.app.services.executive_metrics import (
     forecast_quality, gmroi_unavailable, inventory_productivity, ppv_evidence,
 )
+
+_FIXED = datetime(2026, 7, 24, tzinfo=timezone.utc)
 
 
 def test_forecast_quality_exposes_wape_bias_and_coverage():
@@ -68,3 +72,65 @@ def test_gmroi_remains_unavailable_without_average_landed_cost_inventory():
     metric = gmroi_unavailable(tenant_id="tenant-a", subject_id="SKU-1")
     assert metric.status == "unavailable"
     assert metric.reason == "average_landed_cost_inventory_valuation_required"
+
+
+# ── invariants (stakeholder guarantees, example-based property tests) ─────────
+
+@pytest.mark.parametrize("units_sold,window_days,available_units", [
+    (0, 30, 0), (1, 30, 1), (30, 30, 14), (500, 7, 3), (5, 90, 200),
+    (10_000, 1, 1), (3, 45, 0), (250, 30, 999),
+])
+def test_wos_and_turns_are_never_negative(units_sold, window_days, available_units):
+    """CFO/ops invariant: a productivity metric is either >= 0 or explicitly None
+    (insufficient) — a negative weeks-of-supply or turns figure is never emitted."""
+    for item in inventory_productivity(
+        tenant_id="t", sku="S", units_sold=units_sold, window_days=window_days,
+        available_units=available_units, source_records=["orders/o1"], as_of=_FIXED):
+        if item.value is not None:
+            assert item.value >= 0, (item.metric, item.value)
+        else:
+            assert item.status == "insufficient_data" and item.reason
+
+
+def test_missing_current_atp_blocks_both_productivity_metrics():
+    """Ops invariant: stale/absent ATP must BLOCK action, not estimate around it."""
+    metrics = {m.metric: m for m in inventory_productivity(
+        tenant_id="t", sku="S", units_sold=30, window_days=30,
+        available_units=None, source_records=["orders/o1"], as_of=_FIXED)}
+    for name in ("weeks_of_supply", "inventory_turns"):
+        assert metrics[name].value is None
+        assert metrics[name].status == "insufficient_data"
+        assert metrics[name].reason == "missing_current_atp"
+
+
+@pytest.mark.parametrize("q_ccy,po_ccy,inv_ccy", [
+    ("AUD", "AUD", "USD"), ("USD", "AUD", "AUD"), ("AUD", "USD", "EUR"),
+])
+def test_ppv_never_aggregates_across_currencies(q_ccy, po_ccy, inv_ccy):
+    """CFO/security invariant: a matched identity is not enough — mixed currency
+    must fall to unavailable, never a cross-currency subtraction."""
+    metric = ppv_evidence(
+        tenant_id="t", sku="S",
+        quote={"match_id": "A", "currency": q_ccy, "unit_cost_cents": 100},
+        purchase_order={"match_id": "A", "currency": po_ccy, "unit_cost_cents": 100},
+        invoice={"match_id": "A", "currency": inv_ccy, "unit_cost_cents": 110})
+    assert metric.status == "unavailable"
+    assert metric.value is None
+
+
+@pytest.mark.parametrize("tenant,subject", [
+    ("t1", "S1"), ("t2", "S2"), ("acme", "LAP-1"), ("", "")])
+def test_gmroi_is_unconditionally_unavailable(tenant, subject):
+    """Unknown landed-cost valuation => GMROI unavailable, for every tenant/subject."""
+    metric = gmroi_unavailable(tenant_id=tenant, subject_id=subject)
+    assert metric.status == "unavailable" and metric.value is None
+
+
+def test_productivity_is_deterministic_for_identical_inputs():
+    """Duplicate/replayed events must not move a metric: identical inputs =>
+    identical values (idempotency at the formula boundary)."""
+    kw = dict(tenant_id="t", sku="S", units_sold=30, window_days=30,
+              available_units=14, source_records=["orders/o1"], as_of=_FIXED)
+    a = {m.metric: (m.value, m.status) for m in inventory_productivity(**kw)}
+    b = {m.metric: (m.value, m.status) for m in inventory_productivity(**kw)}
+    assert a == b
