@@ -93,6 +93,34 @@ def test_pr_id_lands_on_the_sourcing_preview():
     assert si.get("mode") == "deferred_to_cart" and si.get("pr_id") == "PR-default-20260630-abc12345"
 
 
+def test_canonical_slate_mode_does_not_parse_audience_as_order_line(monkeypatch):
+    monkeypatch.setattr(
+        "src.app.services.fulfillment.order_split.parse_order_lines",
+        lambda _query: pytest.fail("canonical slate must not reparse the shopper sentence"),
+    )
+    payload = {}
+    stage.run_fulfillment_stage(
+        results=[{"sku": "LAP-CANON", "name": "Authorized Laptop"}],
+        constraints={"order_quantity": 20, "use_case": "game_development"},
+        payload=payload,
+        uid="u1",
+        trace_id="T1",
+        query="A game development studio for 20 students; I need 20 laptops",
+        flags={"FULFILLMENT_CASES_ENABLED": True, "FULFILLMENT_DEFER_TO_CART": True},
+        allow_query_order_split=False,
+    )
+
+    intent = payload["sourcing_intent"]
+    assert intent["lines"] == [{
+        "item_ref": "LAP-CANON",
+        "quantity": 20,
+        "shortfall": 16,
+        "name": "Authorized Laptop",
+    }]
+    assert "unresolved_phrases" not in intent
+    assert intent["requirements"]["use_case"] == "game_development"
+
+
 def test_flag_on_bulk_shortfall_opens_case_at_gate1():
     payload, _line = _run(flags={"FULFILLMENT_CASES_ENABLED": True}, qty=10)
     fc = payload.get("fulfillment_case")

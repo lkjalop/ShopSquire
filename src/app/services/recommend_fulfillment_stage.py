@@ -198,6 +198,7 @@ def run_fulfillment_stage(
     query: Optional[str] = None,
     pr_id: Optional[str] = None,
     tenant_id: Optional[str] = None,
+    allow_query_order_split: bool = True,
 ) -> str:
     """Compute bulk availability (sets payload['availability']) and, when enabled, open a procurement
     case on a real shortfall. Returns the availability summary line (or '')."""
@@ -209,7 +210,7 @@ def run_fulfillment_stage(
     # Multi-line order: a MIXED buyer request ("15 laptops + 10 monitors + 5 headsets") → grouped cases
     # (one per supplier) instead of a single bulk case. Flag-gated (same as single-case creation); a
     # single-line query falls through to the normal path. Best-effort — never breaks the recommend reply.
-    if query and _flag(flags, "FULFILLMENT_CASES_ENABLED"):
+    if allow_query_order_split and query and _flag(flags, "FULFILLMENT_CASES_ENABLED"):
         try:
             line = (_fluid_multiline_intent(query=query, constraints=constraints, trace_id=trace_id,
                                             payload=payload, pr_id=pr_id)

@@ -1138,6 +1138,10 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
         flags=flags,
         query=envelope.query,
         tenant_id=envelope.tenant_id,
+        # The shared core has already authorized one canonical slate. Re-parsing the raw
+        # sentence as a cart manifest can turn audience phrases such as "20 students"
+        # into phantom line items and replace the selected SKU with a legacy alias.
+        allow_query_order_split=False,
     )
     for key in ("availability", "fulfillment_options", "sourcing_intent"):
         if projection.get(key) is not None:

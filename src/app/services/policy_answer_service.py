@@ -12,7 +12,7 @@ def policy_answer(query: str, *, tenant_id: str) -> Dict[str, Any]:
         "tenant_id": tenant_id,
         "topic": str(query or "")[:120],
         "answered": bool(approved),
-        "source": "approved_store_profile",
+        "source": "store_profile",
         "message": approved or (
             "That policy detail is not in the store's approved answers yet. "
             "A teammate must confirm it; I won't invent the terms."
