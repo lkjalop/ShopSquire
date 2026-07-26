@@ -347,6 +347,28 @@ def pytest_sessionstart(session):
             Base.metadata.create_all(_session_eng)
         except Exception:
             pass
+        # Migration-owned auxiliary table used by endpoint tests. Production
+        # creates this through Alembic; the ephemeral unit-test DB does not run
+        # the migration chain.
+        try:
+            from sqlalchemy import text as _sql_text  # noqa: PLC0415
+            with _session_eng.begin() as _connection:
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS nqe_feedback_events (
+                        id TEXT PRIMARY KEY,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        tenant_id TEXT NOT NULL,
+                        trace_id TEXT NOT NULL,
+                        question_id TEXT NOT NULL,
+                        variant TEXT NOT NULL,
+                        converted BOOLEAN NOT NULL,
+                        latency_ms INTEGER NOT NULL,
+                        answer_value TEXT,
+                        helpful BOOLEAN
+                    )
+                """))
+        except Exception:
+            pass
     except Exception:
         pass
 

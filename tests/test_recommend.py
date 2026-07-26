@@ -286,7 +286,7 @@ def test_recommend_off_domain_query_routes_to_guard():
         "TEST_FORCE_BAD_SKU": False,
     })
     r = client.get("/api/v1/recommend/suggest", params={"uid": "u1", "query": "can i get your number if i buy a laptop worth $5000"})
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     body = r.json()
     assert body.get("status") == "off_domain_request"
     assert body.get("results") == []

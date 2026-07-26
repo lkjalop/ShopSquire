@@ -2,6 +2,7 @@ from src.app.routers.recommend import router as legacy_router
 from src.app.routers.recommendation_checkout import router as checkout_router
 from src.app.routers.recommendation_feedback import router as feedback_router
 from src.app.routers.recommendation_explain import router as explain_router
+from src.app.routers.recommendation_nqe import router as nqe_router
 
 
 def _paths(router) -> set[str]:
@@ -14,6 +15,9 @@ def test_extracted_recommendation_endpoints_have_single_router_owner():
     assert "/api/v1/recommend/interaction" not in legacy_paths
     assert "/api/v1/recommend/feedback" not in legacy_paths
     assert "/api/v1/recommend/why_product" not in legacy_paths
+    assert "/api/v1/recommend/nqe_slots" not in legacy_paths
+    assert "/api/v1/recommend/nqe_feedback" not in legacy_paths
+    assert "/api/v1/recommend/admin/nqe_feedback_summary" not in legacy_paths
 
     assert "/api/v1/recommend/checkout_upsell" in _paths(checkout_router)
     assert {
@@ -21,3 +25,8 @@ def test_extracted_recommendation_endpoints_have_single_router_owner():
         "/api/v1/recommend/feedback",
     }.issubset(_paths(feedback_router))
     assert "/api/v1/recommend/why_product" in _paths(explain_router)
+    assert {
+        "/api/v1/recommend/nqe_slots",
+        "/api/v1/recommend/nqe_feedback",
+        "/api/v1/recommend/admin/nqe_feedback_summary",
+    }.issubset(_paths(nqe_router))

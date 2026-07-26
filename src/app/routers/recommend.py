@@ -12342,7 +12342,6 @@ def recommend_feedback(
     return {"status": "ok", "event_id": eid, "outcome": outcome}
 
 
-@router.get("/nqe_slots")
 def nqe_slots(request: Request, uid: str, query: str, redis=Depends(get_redis)) -> Dict[str, Any]:
     """Lightweight rule-first slot detector for NQE: returns missing slots and confidences.
 
@@ -12403,7 +12402,6 @@ def nqe_slots(request: Request, uid: str, query: str, redis=Depends(get_redis)) 
     return {"slots": slots, "context": context}
 
 
-@router.post("/nqe_feedback")
 def nqe_feedback(
     payload: Dict[str, Any] = Body(default_factory=dict),
     db=Depends(get_db),
@@ -12498,7 +12496,6 @@ def nqe_feedback(
     return {"status": "ok", "trace_id": trace_id, "question_id": question_id}
 
 
-@router.get("/admin/nqe_feedback_summary")
 def nqe_feedback_summary(
     tenant_id: str | None = None,
     days: int = 30,
