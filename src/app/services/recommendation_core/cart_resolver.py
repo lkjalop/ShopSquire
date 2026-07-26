@@ -125,6 +125,22 @@ CatalogCandidatesFn = Callable[[str], List[Dict[str, Any]]]
 def _relative_quantity_instruction(query: str) -> Optional[Tuple[str, int]]:
     """Parse only unambiguous integer arithmetic; product identity remains model-bound."""
     text = str(query or "")
+
+    def _money_scoped(match: re.Match[str]) -> bool:
+        """A budget adjustment is not unit arithmetic.
+
+        Mixed turns commonly contain both operations ("increase the total budget to
+        80000 and make quantity 40").  The model/grammar supplies the absolute cart
+        quantity; this fallback must ignore the money-scoped verb and amount.
+        """
+        segment = text[match.start():match.end()]
+        return bool(re.search(
+            r"(?:\bbudget\b|\bspend\b|\bprice\b|\btotal\s+(?:budget|spend|price)\b|"
+            r"\b(?:aud|usd|cad|nzd|sgd|hkd|gbp|eur|jpy)\b|[$€£])",
+            segment,
+            re.IGNORECASE,
+        ))
+
     if re.search(r"\bdouble\b", text, re.IGNORECASE):
         return "multiply", 2
     if re.search(r"\b(?:halve|half)\b", text, re.IGNORECASE):
@@ -135,24 +151,26 @@ def _relative_quantity_instruction(query: str) -> Optional[Tuple[str, int]]:
     match = re.search(r"\bdivide\b.{0,36}\bby\s+([0-9]{1,6})\b", text, re.IGNORECASE)
     if match:
         return "divide", int(match.group(1))
-    match = re.search(
+    matches = re.finditer(
         r"\b(?:add|increase|raise)\b.{0,36}?\b(?:by\s+)?([0-9]{1,6})\b|"
         r"\b([0-9]{1,6})\s+more\b",
         text,
         re.IGNORECASE,
     )
-    if match:
-        return "add", int(match.group(1) or match.group(2))
+    for match in matches:
+        if not _money_scoped(match):
+            return "add", int(match.group(1) or match.group(2))
     # "reduce to 15" is absolute, not subtraction. Relative reductions require by/off/fewer/less.
-    match = re.search(
+    matches = re.finditer(
         r"\b(?:subtract|reduce|decrease|lower|cut)\b.{0,36}?\bby\s+([0-9]{1,6})\b|"
         r"\b(?:take|remove)\s+([0-9]{1,6})\s+units?\b.{0,12}\boff\b|"
         r"\b([0-9]{1,6})\s+(?:fewer|less)\b",
         text,
         re.IGNORECASE,
     )
-    if match:
-        return "subtract", int(next(value for value in match.groups() if value is not None))
+    for match in matches:
+        if not _money_scoped(match):
+            return "subtract", int(next(value for value in match.groups() if value is not None))
     return None
 
 

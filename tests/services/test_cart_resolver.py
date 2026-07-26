@@ -87,6 +87,27 @@ def test_named_quantity_word_with_budget_and_question_binds_one_line():
     assert plan.ops[0].quantity == 35
 
 
+def test_budget_increase_does_not_become_relative_quantity_change():
+    cart = [{
+        "sku": "LAP-ASUS",
+        "name": 'Asus TUF Gaming F16 16" Laptop',
+        "quantity": 28,
+        "price_cents": 191_900,
+    }]
+    plan = resolve_cart_mutation(_env(
+        "increase the total budget to AUD 80000 and make the Asus quantity 40, "
+        "then explain the supplier shortfall",
+        cart=cart,
+    ))
+
+    assert plan.source == "grammar"
+    assert not plan.needs_clarification
+    assert plan.ops[0].action == "set_quantity"
+    assert plan.ops[0].target_skus == ("LAP-ASUS",)
+    assert plan.ops[0].quantity == 40
+    assert plan.ops[0].budget_max_cents == 8_000_000
+
+
 def test_bare_quantity_continuation_binds_the_only_cart_line():
     cart = [{
         "sku": "LAP-MSI",
