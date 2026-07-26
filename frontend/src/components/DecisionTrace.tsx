@@ -3481,7 +3481,21 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         <div className={styles.kvRow}><span>Demand</span><span>{humanizeKey(item.demand_trend)} · {item.forecast_units_30d ?? 0} units / 30d</span></div>
                         <div className={styles.kvRow}><span>Inventory</span><span>{item.stock_on_hand ?? '—'} on hand · DSI {item.velocity_dsi_days ?? '—'} days</span></div>
                         <div className={styles.kvRow}><span>Bulk frequency</span><span>{item.bulk_frequency?.bulk_order_count ?? 0} cases / {item.bulk_frequency?.window_days ?? 90}d</span></div>
-                        <div className={styles.kvRow}><span>Evidence</span><span>{humanizeKey(item.confidence)} · as of {formatTime(item.as_of)}</span></div>
+                        <div className={styles.kvRow}><span>Evidence</span><span>{humanizeKey(item.status || item.confidence)} · as of {formatTime(item.as_of)}</span></div>
+                        <div className={styles.kvRow}><span>Sources</span><span>{humanizeKey(item.source_status?.sales)} sales · {humanizeKey(item.source_status?.inventory)} inventory</span></div>
+                        <div className={styles.kvRow}><span>Authority</span><span>Advisory evidence only · deterministic gates authorize actions</span></div>
+                        {Array.isArray(item.metrics) && item.metrics.length > 0 && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: 'pointer', fontSize: 12, color: '#4b5563' }}>Metric provenance</summary>
+                            {item.metrics.map((metric: any, metricIndex: number) => (
+                              <div key={`${metric.metric || 'metric'}-${metricIndex}`} style={{ borderTop: '1px solid #dbeafe', paddingTop: 6, marginTop: 6 }}>
+                                <div className={styles.kvRow}><span>{humanizeKey(metric.metric)}</span><span>{metric.value ?? 'unavailable'} {metric.unit || ''}</span></div>
+                                <div className={styles.kvRow}><span>Status</span><span>{humanizeKey(metric.status)} · confidence {Math.round(Number(metric.confidence || 0) * 100)}%</span></div>
+                                <div className={styles.kvRow}><span>Lineage</span><span>{Array.isArray(metric.provenance_chain) && metric.provenance_chain.length ? metric.provenance_chain.join(' → ') : 'not supplied'}</span></div>
+                              </div>
+                            ))}
+                          </details>
+                        )}
                       </div>
                     );
                   })}

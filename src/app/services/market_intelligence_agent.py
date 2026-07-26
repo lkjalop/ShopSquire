@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from src.app.schemas.market_evidence import MarketEvidence
+
 _SEVERITY_RANK = {"critical": 1.0, "warn": 0.7, "info": 0.4}
 _USEFUL_INSIGHT_KINDS = ("product", "finding", "brand", "segment")
 
@@ -26,22 +28,66 @@ def _catalog_subject_scope(db, *, tenant_id: str, result_skus: List[str]) -> tup
         return [], []
 
 
-def _finding_dict(f: Any) -> Dict[str, Any]:
+def _normalized_direction(value: Any) -> str:
+    token = str(value or "").strip().lower()
+    if token in {"up", "increase", "increasing", "spike", "growth", "surge"}:
+        return "up"
+    if token in {"down", "decrease", "decreasing", "drop", "slowdown", "decline"}:
+        return "down"
+    if token in {"stable", "flat", "steady"}:
+        return "stable"
+    if token in {"mixed", "conflicting"}:
+        return "mixed"
+    return "unknown"
+
+
+def _finding_dict(f: Any, *, tenant_id: str) -> Dict[str, Any]:
     evidence = getattr(f, "evidence", None) or {}
-    return {
-        "finding_type": getattr(f, "finding_type", None),
-        "entity_ref": getattr(f, "entity_ref", None),
-        "severity": getattr(f, "severity", None),
-        "confidence": getattr(f, "confidence", None),
-        "summary": getattr(f, "summary", None),
-        "subject_type": evidence.get("subject_type"),
-        "subject_id": evidence.get("subject_id"),
-        "taxonomy_node": evidence.get("taxonomy_node"),
-        "source_system": evidence.get("source_system"),
-        "observed_at": evidence.get("observed_at"),
-        "provenance_chain": evidence.get("provenance_chain"),
-        "status": evidence.get("status", "active"),
-    }
+    entity_ref = str(getattr(f, "entity_ref", None) or "")
+    provenance = [str(item) for item in (evidence.get("provenance_chain") or []) if str(item)]
+    complete = bool(
+        evidence.get("source_system")
+        and evidence.get("source_record_id")
+        and evidence.get("lineage_root")
+        and provenance
+        and evidence.get("observed_at")
+    )
+    requested_status = str(evidence.get("status") or "").strip().lower()
+    status = requested_status if requested_status in {
+        "observed", "estimated", "simulated", "insufficient_data", "quarantined"
+    } else ("observed" if complete else "insufficient_data")
+    typed = MarketEvidence(
+        finding_type=str(getattr(f, "finding_type", None) or "unknown"),
+        tenant_id=tenant_id,
+        subject_type=str(evidence.get("subject_type") or ("sku" if entity_ref else "global")),
+        subject_id=str(evidence.get("subject_id") or entity_ref or "global"),
+        taxonomy_node=evidence.get("taxonomy_node"),
+        direction=_normalized_direction(evidence.get("direction")),
+        status=status,
+        authority=(
+            "authoritative"
+            if complete and evidence.get("authority") == "authoritative"
+            else "advisory"
+        ),
+        confidence=float(getattr(f, "confidence", 0.0) or 0.0),
+        source_system=evidence.get("source_system"),
+        source_record_id=evidence.get("source_record_id"),
+        lineage_root=evidence.get("lineage_root"),
+        provenance_chain=provenance,
+        observed_at=evidence.get("observed_at"),
+        summary=str(getattr(f, "summary", None) or ""),
+        metadata={
+            "severity": getattr(f, "severity", None),
+            "window": getattr(f, "window", None),
+            "entity_ref": getattr(f, "entity_ref", None),
+        },
+    )
+    result = typed.model_dump(mode="json")
+    result["entity_ref"] = getattr(f, "entity_ref", None)
+    result["severity"] = getattr(f, "severity", None)
+    result["scope"] = evidence.get("scope")
+    result["provenance_complete"] = typed.provenance_complete
+    return result
 
 
 def _subject_match(f: Any, *, result_skus: List[str], taxonomy_nodes: Optional[List[str]] = None,
@@ -149,7 +195,7 @@ def gather_market_context(db, *, query: Optional[str], uid_hash: Optional[str] =
                                      ancestor_nodes=ancestor_nodes)[:int(max_findings)]
             out["market_findings"] = []
             for finding in scoped:
-                item = _finding_dict(finding)
+                item = _finding_dict(finding, tenant_id=tenant_id)
                 match = _subject_match(finding, result_skus=seed_skus, taxonomy_nodes=taxonomy_nodes,
                                        ancestor_nodes=ancestor_nodes)
                 item["scope"] = match[1] if match else None

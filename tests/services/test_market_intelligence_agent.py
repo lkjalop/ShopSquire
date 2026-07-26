@@ -144,3 +144,43 @@ def test_agent_never_reads_another_tenants_findings(db):
     ctx = gather_market_context(db, query="what is trending", tenant_id="tenant-a")
 
     assert ctx["market_findings"] == []
+
+
+def test_market_finding_boundary_emits_typed_provenance(db):
+    persist_findings(db, [MarketFinding(
+        "demand_shift", "SKU-1", "warn", 0.88, "Demand is rising",
+        {
+            "subject_type": "sku", "subject_id": "SKU-1", "direction": "spike",
+            "source_system": "orders", "source_record_id": "aggregate-7d",
+            "lineage_root": "orders", "provenance_chain": ["orders/aggregate-7d"],
+            "observed_at": "2026-07-26T01:00:00Z", "status": "observed",
+        }, "7d",
+    )], tenant_id="tenant-a")
+    db.commit()
+
+    ctx = gather_market_context(
+        db, query="is SKU-1 trending", result_skus=["SKU-1"], tenant_id="tenant-a")
+
+    finding = ctx["market_findings"][0]
+    assert finding["tenant_id"] == "tenant-a"
+    assert finding["subject_type"] == "sku"
+    assert finding["direction"] == "up"
+    assert finding["lineage_root"] == "orders"
+    assert finding["authority"] == "advisory"
+    assert finding["status"] == "observed"
+    assert finding["provenance_complete"] is True
+
+
+def test_legacy_finding_without_lineage_is_visible_but_insufficient(db):
+    persist_findings(db, [
+        MarketFinding("demand_shift", "SKU-1", "warn", 0.7, "Legacy finding", {}, "7d")
+    ], tenant_id="tenant-a")
+    db.commit()
+
+    ctx = gather_market_context(
+        db, query="is SKU-1 trending", result_skus=["SKU-1"], tenant_id="tenant-a")
+
+    finding = ctx["market_findings"][0]
+    assert finding["status"] == "insufficient_data"
+    assert finding["authority"] == "advisory"
+    assert finding["provenance_complete"] is False
