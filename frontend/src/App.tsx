@@ -19,6 +19,7 @@ import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, set
 import { procurementAwareTraceId } from './lib/trace';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
+import { sourcingIntentAfterSelection } from './lib/sourcing';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -821,6 +822,7 @@ export default function App() {
       const priorOther = (cart?.items || []).filter((i: any) => i.sku && i.sku !== sku);
       const priorUnits = priorOther.reduce((s: number, i: any) => s + (Number(i.quantity) || 1), 0);
       await setCartQty(sku, bulkQty, true);
+      setSourcingIntent((intent) => sourcingIntentAfterSelection(intent, sku));
       switchRightPanelMode('cart');
       setChatOpen(true);
       const addedProduct = products.find((p) => p.sku === sku);
@@ -839,6 +841,7 @@ export default function App() {
     try {
       const j = await addCartItem(uid, sku, Math.max(1, Math.floor(qty)));
       setCart(j);
+      setSourcingIntent((intent) => sourcingIntentAfterSelection(intent, sku));
       // Track 2b — real conversion: add-to-cart is the demo storefront's terminal buy-intent action (no
       // separate checkout page), so it registers as a conversion for the session (de-duped per session →
       // one conversion regardless of how many items are added). Feeds the channel conversion-rate panel.

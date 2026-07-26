@@ -1,5 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { sourcedCasesFrom, sourcedCaseCountFrom } from '../sourcing';
+import {
+  sourcedCasesFrom,
+  sourcedCaseCountFrom,
+  sourcingIntentAfterSelection,
+} from '../sourcing';
+
+describe('sourcingIntentAfterSelection', () => {
+  const intent = {
+    mode: 'deferred_to_cart',
+    pr_id: 'pr-stable',
+    planned_case_count: 1,
+    requirements: { use_case: 'game_development' },
+    unresolved_phrases: [{ phrase: 'unknown dock', quantity: 1 }],
+    lines: [{ item_ref: 'LAP-MSI', name: 'MSI laptop', quantity: 20, shortfall: 5 }],
+  };
+
+  it('keeps a preview whose product matches the selected cart SKU', () => {
+    expect(sourcingIntentAfterSelection(intent, 'LAP-MSI')).toBe(intent);
+  });
+
+  it('invalidates stale product lines but preserves sourcing context for cart confirmation', () => {
+    expect(sourcingIntentAfterSelection(intent, 'LAP-ASUS')).toEqual({
+      mode: 'deferred_to_cart',
+      pr_id: 'pr-stable',
+      requirements: { use_case: 'game_development' },
+      unresolved_phrases: [],
+      lines: [],
+      planned_case_count: undefined,
+    });
+  });
+});
 
 describe('sourcedCasesFrom / sourcedCaseCountFrom', () => {
   it('reads top-level cases on a first confirm', () => {

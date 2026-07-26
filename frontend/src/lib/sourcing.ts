@@ -1,4 +1,25 @@
-import type { ConfirmCartResult } from './api';
+import type { ConfirmCartResult, SourcingIntent } from './api';
+
+/**
+ * A sourcing preview describes the recommendation slate, not an arbitrary later cart selection.
+ * Preserve its turn requirements and stable PR identity for cart confirmation, but invalidate the
+ * visible lines when the buyer adds a different SKU. The cart's availability projection is then the
+ * only product-specific sourcing truth shown to the buyer.
+ */
+export function sourcingIntentAfterSelection(
+  intent: SourcingIntent | null,
+  selectedSku: string,
+): SourcingIntent | null {
+  if (!intent || !selectedSku) return intent;
+  const lines = Array.isArray(intent.lines) ? intent.lines : [];
+  if (lines.some((line) => String(line.item_ref || '') === selectedSku)) return intent;
+  return {
+    ...intent,
+    lines: [],
+    planned_case_count: undefined,
+    unresolved_phrases: [],
+  };
+}
 
 /**
  * Which procurement cases did a cart-sourcing confirm actually produce?
