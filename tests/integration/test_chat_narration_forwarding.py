@@ -19,6 +19,11 @@ async def _fake_recommend(*args, **kwargs):
             "requested_quantity": 25,
             "bulk_budget": {"scope": "total", "total": 41000.0, "quantity": 25,
                             "per_unit_cap": 1640},
+            "shelf": {"bands": [{"id": "closest_fit", "skus": ["GAM-0002"]}]},
+            "capability": {"verdict": "below_budget"},
+            "slate_disposition": "clear",
+            "secondary_lanes": ["EXPLAIN"],
+            "explanation": {"sku": "GAM-0002", "verdict": "fails"},
             "next_questions": [],
         }
 
@@ -41,6 +46,11 @@ def test_chat_query_forwards_narration_job_id(monkeypatch):
     assert body.get("requested_quantity") == 25
     assert body.get("bulk_budget") == {"scope": "total", "total": 41000.0,
                                         "quantity": 25, "per_unit_cap": 1640}
+    assert body["shelf"]["bands"][0]["id"] == "closest_fit"
+    assert body["capability"]["verdict"] == "below_budget"
+    assert body["slate_disposition"] == "clear"
+    assert body["secondary_lanes"] == ["EXPLAIN"]
+    assert body["explanation"]["verdict"] == "fails"
 
 
 async def _fake_no_match_with_brand_exclusion(*args, **kwargs):

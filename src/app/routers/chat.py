@@ -2922,6 +2922,20 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # /chat/query, not /suggest) loses the comparison AGAIN.
         "off_catalog": data.get("off_catalog"),
         "workload_fit": data.get("workload_fit"),
+        # Canonical V2 presentation contract. These fields must survive the chat edge or the
+        # browser falls back to an unlabeled legacy-looking slate even when the core correctly
+        # separated best-fit, stretch, and noncompliant alternatives.
+        "shelf": data.get("shelf") if isinstance(data.get("shelf"), dict) else None,
+        "capability": (
+            data.get("capability") if isinstance(data.get("capability"), dict) else None
+        ),
+        "slate_disposition": str(data.get("slate_disposition") or "replace"),
+        "secondary_lanes": (
+            data.get("secondary_lanes") if isinstance(data.get("secondary_lanes"), list) else []
+        ),
+        "explanation": (
+            data.get("explanation") if isinstance(data.get("explanation"), dict) else None
+        ),
         "voice_used": bool(voice_transcript),
         "budget_viability": budget_viability,
         "use_case_analysis": use_case_analysis,
