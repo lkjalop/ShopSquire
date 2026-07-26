@@ -42,7 +42,7 @@ def _dispatch(monkeypatch, mode, *, lane="SEARCH", uid="u1", query="gaming lapto
 def test_mode_resolution():
     import os
     for raw, exp in [("off", ("off", 0)), ("primary", ("primary", 0)), ("shadow", ("shadow", 0)),
-                     ("canary:25", ("canary", 25)), ("canary", ("canary", 0)),
+                     ("pilot", ("pilot", 0)), ("canary:25", ("canary", 25)), ("canary", ("canary", 0)),
                      ("canary:150", ("canary", 100)), ("garbage", ("off", 0)), ("", ("off", 0))]:
         os.environ["RECOMMEND_CORE_MODE"] = raw
         assert F._resolve_mode() == exp
@@ -289,6 +289,26 @@ def test_canary_splits_traffic(monkeypatch):
     # a user in the 100% bucket is served; 0% bucket falls through
     assert _dispatch(monkeypatch, "canary:100", uid="in") is not None
     assert _dispatch(monkeypatch, "canary:0", uid="out") is None
+
+
+def test_pilot_mode_is_exact_and_tenant_qualified(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_PILOT_SUBJECTS", "t1:alice,t2:bob")
+
+    assert _dispatch(monkeypatch, "pilot", uid="alice") is not None
+    outside = _dispatch(monkeypatch, "pilot", uid="bob")
+    assert outside is None
+
+    monkeypatch.setenv("RECOMMEND_CORE_PILOT_SUBJECTS", "t2:alice")
+    assert _dispatch(monkeypatch, "pilot", uid="alice") is None
+
+
+def test_pilot_mode_fails_closed_and_off_is_immediate_rollback(monkeypatch):
+    monkeypatch.delenv("RECOMMEND_CORE_PILOT_SUBJECTS", raising=False)
+    assert _dispatch(monkeypatch, "pilot", uid="alice") is None
+
+    monkeypatch.setenv("RECOMMEND_CORE_PILOT_SUBJECTS", "t1:alice")
+    assert _dispatch(monkeypatch, "pilot", uid="alice") is not None
+    assert _dispatch(monkeypatch, "off", uid="alice") is None
 
 
 # ── the real guard blocks core ingress (finding #1/#10) ───────────────────────

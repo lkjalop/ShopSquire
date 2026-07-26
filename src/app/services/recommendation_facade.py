@@ -104,7 +104,7 @@ def _fallback_metric(reason: str) -> None:
 
 
 def _resolve_mode() -> tuple[str, int]:
-    """(mode, canary_pct). RECOMMEND_CORE_MODE = off | shadow | canary:<pct> | primary."""
+    """(mode, canary_pct). Modes: off | shadow | pilot | canary:<pct> | primary."""
     raw = str(os.getenv("RECOMMEND_CORE_MODE", "") or "").strip().lower()
     if raw.startswith("canary"):
         pct = 0
@@ -114,7 +114,7 @@ def _resolve_mode() -> tuple[str, int]:
             except ValueError:
                 pct = 0
         return "canary", pct
-    if raw in ("shadow", "primary", "off"):
+    if raw in ("shadow", "pilot", "primary", "off"):
         return raw, 0
     return "off", 0
 
@@ -128,6 +128,26 @@ def _in_canary_bucket(key: str, pct: int) -> bool:
         return True
     h = int(hashlib.sha256(str(key or "anon").encode("utf-8")).hexdigest(), 16)
     return (h % 100) < pct
+
+
+def _in_pilot_cohort(key: str) -> bool:
+    """Exact, tenant-qualified pilot membership.
+
+    RECOMMEND_CORE_PILOT_SUBJECTS is a comma-separated list of ``tenant:user``
+    identities. Empty or malformed configuration serves nobody. Wildcards are
+    deliberately unsupported so a pilot cannot widen silently.
+    """
+    configured = set()
+    for raw_item in str(
+        os.getenv("RECOMMEND_CORE_PILOT_SUBJECTS", "") or ""
+    ).split(","):
+        item = raw_item.strip()
+        if ":" not in item:
+            continue
+        tenant_id, subject_id = item.split(":", 1)
+        if tenant_id.strip() and subject_id.strip():
+            configured.add(f"{tenant_id.strip()}:{subject_id.strip()}")
+    return str(key or "") in configured
 
 
 def _enqueue_shadow(redis, *, envelope: "TurnEnvelope", cart_only: bool = False) -> None:
@@ -756,7 +776,10 @@ def dispatch_recommendation_core_typed(
     # ride the shared envelope; the lane and every consequential decision remain clamped below.
     # canary bucket on tenant:uid (GPT-5.6 #5c22575.4) — same user in different tenants can
     # legitimately land different sides; anon users bucket by tenant.
-    if mode == "canary" and not _in_canary_bucket(f"{tenant}:{uid or 'anon'}", pct):
+    cohort_key = f"{tenant}:{uid or 'anon'}"
+    if mode == "pilot" and not _in_pilot_cohort(cohort_key):
+        return outcome("delegate", reason="outside_pilot_cohort")
+    if mode == "canary" and not _in_canary_bucket(cohort_key, pct):
         return outcome("delegate", reason="outside_canary_bucket")
 
     try:
