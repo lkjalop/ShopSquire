@@ -1521,31 +1521,23 @@ def _exec_clarify(db, envelope: TurnEnvelope, decision: TurnDecision,
 
 def _exec_policy_answer(db, envelope: TurnEnvelope, decision: TurnDecision,
                         resp: CoreResponse, limit: int) -> None:
-    # Policy prose is merchant-approved StoreProfile data, never model-authored terms.
-    # A missing answer remains explicit so the core cannot invent a return/payment promise.
-    from src.app.services.answer_quality import policy_faq_answer
+    from src.app.services.policy_answer_service import policy_answer
 
-    resp.extras["policy_topic"] = envelope.query[:120]
-    approved = policy_faq_answer(envelope.query)
-    resp.extras["policy_source"] = "store_profile"
-    resp.extras["policy_answered"] = bool(approved)
-    resp.set_message(
-        approved or (
-            "That policy detail is not in the store's approved answers yet. "
-            "A teammate must confirm it; I won't invent the terms."
-        ),
-        MsgPriority.LANE_BASE,
-    )
+    answer = policy_answer(envelope.query, tenant_id=envelope.tenant_id)
+    resp.extras["policy_topic"] = answer["topic"]
+    resp.extras["policy_source"] = answer["source"]
+    resp.extras["policy_answered"] = answer["answered"]
+    resp.extras["action_executed"] = answer["action_executed"]
+    resp.set_message(answer["message"], MsgPriority.LANE_BASE)
 
 
 def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
                           resp: CoreResponse, limit: int) -> None:
-    resp.extras["needs_human_review"] = True
-    # review-10: 'received' + 'I've logged this' FALSELY implies a persisted claim — nothing is
-    # filed here yet. Be honest until an idempotent handoff returns a real claim ID + audit event.
-    resp.extras["claim_status"] = "pending_handoff"
-    resp.set_message(("I'll pass this to a human to review — nothing is filed automatically yet. "
-                      "You'll be contacted with next steps."), MsgPriority.LANE_BASE)
+    from src.app.services.support_handoff_advice import prepare_support_handoff
+
+    advice = prepare_support_handoff(envelope.query, tenant_id=envelope.tenant_id)
+    resp.extras.update({key: value for key, value in advice.items() if key != "message"})
+    resp.set_message(advice["message"], MsgPriority.LANE_BASE)
 
 
 def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision,
@@ -1558,30 +1550,13 @@ def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision
 
 def _exec_inventory_summary(db, envelope: TurnEnvelope, decision: TurnDecision,
                             resp: CoreResponse, limit: int) -> None:
-    """Explain only catalog-backed stock values already authorized by retrieval."""
-    if not resp.products:
-        resp.set_message(
-            "I could not match that stock question to an active catalog item. "
-            "Name the product or model and I will check it.",
-            MsgPriority.LANE_BASE,
-        )
-        resp.extras["inventory_source"] = "catalog_read_model"
-        resp.extras["inventory_answered"] = False
-        return
-    lines = []
-    for product in resp.products[:3]:
-        if product.stock is None:
-            lines.append(f"{product.title or product.sku}: stock is not currently verified")
-        elif product.stock > 0:
-            lines.append(f"{product.title or product.sku}: {product.stock} available")
-        else:
-            lines.append(f"{product.title or product.sku}: currently out of stock")
-    resp.extras["inventory_source"] = "catalog_read_model"
-    resp.extras["inventory_answered"] = any(item.stock is not None for item in resp.products[:3])
-    resp.set_message(
-        "Current catalog availability: " + "; ".join(lines) + ".",
-        MsgPriority.LANE_BASE,
-    )
+    from src.app.services.inventory_read_advice import inventory_summary
+
+    advice = inventory_summary(resp.products, tenant_id=envelope.tenant_id)
+    resp.extras["inventory_source"] = advice["source"]
+    resp.extras["inventory_answered"] = advice["answered"]
+    resp.extras["action_executed"] = advice["action_executed"]
+    resp.set_message(advice["message"], MsgPriority.LANE_BASE)
 
 
 _EXECUTORS: Dict[str, Any] = {
