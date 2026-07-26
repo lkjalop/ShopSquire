@@ -29,6 +29,13 @@ def runtime_mode_snapshot() -> dict[str, Any]:
         "cart_mutation": "on" if _enabled("RECOMMEND_CART_SERVE") else "off",
         "procurement_advice": _mode("RECOMMEND_PROCUREMENT_ADVICE_MODE"),
         "policy_answers": _mode("RECOMMEND_POLICY_ANSWER_MODE"),
+        "support_handoff": _mode("RECOMMEND_SUPPORT_HANDOFF_MODE"),
+        "inventory_read": _mode("RECOMMEND_INVENTORY_READ_MODE"),
+        "legacy_delegate": (
+            "on"
+            if _mode("RECOMMEND_LEGACY_DELEGATE_ENABLED", "1") in _TRUE
+            else "off"
+        ),
         "supplier_transport": _mode("FULFILLMENT_SUPPLIER_TRANSPORT", "unset"),
         "supplier_autonomy": "on" if _enabled("FULFILLMENT_AUTONOMOUS_SEND") else "off",
         "image_authority": _mode("IMAGE_RECOMMENDATION_MODE", "canonical"),
@@ -39,6 +46,10 @@ def runtime_mode_snapshot() -> dict[str, Any]:
             "recommendation_core": {"primary"},
             "cart_mutation": {"on"},
             "procurement_advice": {"on"},
+            "policy_answers": {"on"},
+            "support_handoff": {"on"},
+            "inventory_read": {"on"},
+            "legacy_delegate": {"off"},
         }
         for key, allowed in required.items():
             actual = active[key]

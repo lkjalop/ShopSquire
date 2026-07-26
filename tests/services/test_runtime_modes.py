@@ -16,6 +16,10 @@ def test_demo_profile_fails_when_cart_lane_is_not_enabled(monkeypatch):
     monkeypatch.setenv("SHOPSQUIRE_RUNTIME_PROFILE", "demo_v2")
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
     monkeypatch.setenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", "on")
+    monkeypatch.setenv("RECOMMEND_POLICY_ANSWER_MODE", "on")
+    monkeypatch.setenv("RECOMMEND_SUPPORT_HANDOFF_MODE", "on")
+    monkeypatch.setenv("RECOMMEND_INVENTORY_READ_MODE", "on")
+    monkeypatch.setenv("RECOMMEND_LEGACY_DELEGATE_ENABLED", "0")
     monkeypatch.delenv("RECOMMEND_CART_SERVE", raising=False)
 
     result = runtime_mode_snapshot()
@@ -33,8 +37,13 @@ def test_demo_profile_is_ready_only_with_declared_v2_modes(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
     monkeypatch.setenv("RECOMMEND_CART_SERVE", "1")
     monkeypatch.setenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", "on")
+    monkeypatch.setenv("RECOMMEND_POLICY_ANSWER_MODE", "on")
+    monkeypatch.setenv("RECOMMEND_SUPPORT_HANDOFF_MODE", "on")
+    monkeypatch.setenv("RECOMMEND_INVENTORY_READ_MODE", "on")
+    monkeypatch.setenv("RECOMMEND_LEGACY_DELEGATE_ENABLED", "0")
 
     result = runtime_mode_snapshot()
 
     assert result["ready"] is True
     assert result["mismatches"] == []
+    assert result["active"]["legacy_delegate"] == "off"
