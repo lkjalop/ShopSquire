@@ -1775,7 +1775,11 @@ def test_why_product_endpoint_returns_explanation_and_logs_event():
         ev = client.get(f"/api/v1/trace/{trace_id}/events")
         assert ev.status_code == 200
         events = ev.json().get("events") or []
-        assert any(str(e.get("source_id") or "") == "Selection_Explain_Agent" for e in events)
+        assert any(
+            str(e.get("source_type") or "") == "stage"
+            and str(e.get("source_id") or "") == "recommendation_explanation"
+            for e in events
+        )
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve
 

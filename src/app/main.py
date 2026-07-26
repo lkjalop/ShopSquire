@@ -44,6 +44,7 @@ from src.app.routers.kyv_admin import router as kyv_admin_router
 from src.app.routers.recommend import router as recommend_router
 from src.app.routers.recommend_aux import router as recommend_aux_router
 from src.app.routers.recommendation_checkout import router as recommendation_checkout_router
+from src.app.routers.recommendation_explain import router as recommendation_explain_router
 from src.app.routers.recommendation_feedback import router as recommendation_feedback_router
 from src.app.routers.products_compare import router as products_router
 from src.app.routers.orchestrator_api import router as orchestrator_router
@@ -1976,6 +1977,7 @@ def create_app() -> FastAPI:
     app.include_router(recommend_router)
     app.include_router(recommend_aux_router)
     app.include_router(recommendation_checkout_router)
+    app.include_router(recommendation_explain_router)
     app.include_router(recommendation_feedback_router)
     # Product catalog and detail endpoints
     try:

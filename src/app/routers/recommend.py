@@ -12062,7 +12062,6 @@ def _build_sku_explanation_payload(
     }
 
 
-@router.get("/why_product")
 def explain_why_product(
     request: Request,
     uid: str,
