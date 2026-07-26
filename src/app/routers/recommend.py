@@ -11859,7 +11859,6 @@ def suggest(
     return _final_response
 
 
-@router.get("/checkout_upsell")
 def checkout_upsell(
     uid: str,
     cart_skus: str,
