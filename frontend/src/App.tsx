@@ -17,6 +17,7 @@ import AffordabilityResolutionCard, {
 } from './components/AffordabilityResolutionCard';
 import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { nextSourcingTraceId, procurementAwareTraceId } from './lib/trace';
+import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
@@ -1942,8 +1943,10 @@ export default function App() {
         {
           const _rq = Number((data as any).requested_quantity);
           setPendingBulkQty(Number.isFinite(_rq) && _rq > 1 ? Math.min(1000, Math.floor(_rq)) : null);
-          const _bb = (data as any).bulk_budget;
-          setPendingBulkBudget(_bb && typeof _bb === 'object' && !Array.isArray(_bb) ? _bb : null);
+          setPendingBulkBudget(normalizePendingBulkBudget(
+            (data as any).bulk_budget,
+            (data as any).confirmed_slots,
+          ));
         }
         setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
         setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);

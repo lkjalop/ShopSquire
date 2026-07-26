@@ -170,7 +170,10 @@ export default function CartPanel({
   // current cart. Returns null when a supplier was already engaged (past the send gate) — that is an
   // operator-driven amendment and must not be auto-superseded.
   const sourceCurrentCart = async () => {
-    const cid = sourcingOrderId || cart?.cart_id;
+    // A cart survives "clear my cart", so cart_id alone cannot identify one procurement journey.
+    // Prefer the immutable recommendation trace when the core did not issue an explicit procurement
+    // request id; subsequent amendments keep that trace pinned and therefore retain continuity.
+    const cid = sourcingOrderId || traceId || cart?.cart_id;
     if (!cid) return null;
     // Pass the current decision trace so the sourcing case records source_trace_id — the Decision Trace
     // → Procurement tab resolves the drafted RFQ by-trace (was null → 404 → empty tab).

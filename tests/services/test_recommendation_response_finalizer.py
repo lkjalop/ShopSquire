@@ -164,3 +164,47 @@ def test_finalizer_adds_sanitize_persist_and_projection_timings(monkeypatch):
     timing_events = [event for event in events if event["event_type"] == "timing_breakdown"]
     assert len(timing_events) == 1
     assert timing_events[0]["payload"]["timing_breakdown"] == timing
+
+
+def test_finalizer_does_not_authorize_products_already_presented_as_failed_fit(
+    monkeypatch,
+):
+    monkeypatch.setattr(finalizer, "security_sanitize", lambda payload: dict(payload))
+    monkeypatch.setattr(finalizer, "log_trace_event", lambda **_kwargs: None)
+    monkeypatch.setattr(finalizer, "log_decision", lambda **_kwargs: True)
+
+    payload = {
+        "turn_intent": "PROCUREMENT",
+        "products": [
+            {
+                "sku": "CLOSE-1",
+                "name": "Closest but unsuitable",
+                "workload_fit": {"overall": "fails"},
+            },
+        ],
+        "shelf": {
+            "bands": [
+                {
+                    "id": "closest_fit",
+                    "label": "Closest within budget - requirements not met",
+                    "skus": ["CLOSE-1"],
+                },
+                {
+                    "id": "stretch",
+                    "label": "Meets your needs - outside budget",
+                    "skus": ["FIT-1"],
+                },
+            ],
+        },
+    }
+
+    out = finalizer.finalize_core_response(
+        payload,
+        "trace-failed-fit",
+        query="50 game development laptops",
+        tenant_id="tenant-a",
+        uid="buyer-a",
+    )
+
+    assert out["right_panel"]["anchor_sections"] == []
+    assert out["right_panel"]["canonical_identity"]["ordered_skus"] == ["CLOSE-1"]

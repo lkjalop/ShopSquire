@@ -74,7 +74,9 @@ def finalize_core_response(
     except Exception:
         right_panel = {"mode": str(right_panel.get("mode") or "")}
     right_panel.setdefault("anchor_sections", [])
-    if not right_panel["anchor_sections"] and summary:
+    shelf = out.get("shelf") if isinstance(out.get("shelf"), dict) else {}
+    shelf_bands = shelf.get("bands") if isinstance(shelf.get("bands"), list) else []
+    if not right_panel["anchor_sections"] and summary and not shelf_bands:
         right_panel["anchor_sections"] = [{
             "title": "Authorized recommendation",
             "match_basis": ["catalog eligibility", "budget", "capability"],

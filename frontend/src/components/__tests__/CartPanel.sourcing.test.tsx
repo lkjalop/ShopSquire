@@ -39,6 +39,37 @@ beforeEach(() => {
 });
 
 describe('CartPanel sourcing amendments', () => {
+  it('uses the recommendation trace as a fresh order identity before the persistent cart id', async () => {
+    (api.getSplitOffer as any).mockResolvedValue(splitOffer(20));
+    (api.confirmCartSourcing as any).mockResolvedValue({
+      case_count: 1,
+      cases: [{ case_id: 'case-new' }],
+      idempotent: false,
+    });
+    (api.commitFulfillmentCase as any).mockResolvedValue({ state: 'QUOTE_DRAFTED' });
+
+    render(<CartPanel
+      uid="u1"
+      cart={cart(20)}
+      onRefresh={vi.fn()}
+      onRemove={vi.fn()}
+      onClear={vi.fn()}
+      onAdd={vi.fn()}
+      traceId="trace-new-order"
+    />);
+
+    fireEvent.click(await screen.findByTestId('split-confirm'));
+
+    await waitFor(() => expect(api.confirmCartSourcing).toHaveBeenCalledWith(
+      'u1',
+      'trace-new-order',
+      [{ item_ref: 'LAP-1', quantity: 20 }],
+      'trace-new-order',
+      false,
+      undefined,
+    ));
+  });
+
   it('blocks checkout and retires the prior RFQ when amended demand is fully in stock', async () => {
     (api.getSplitOffer as any)
       .mockResolvedValueOnce(splitOffer(20))
