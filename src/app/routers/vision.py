@@ -14,7 +14,7 @@ from src.app.models.event_log import ensure_event_log_table
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.cv_triage_basic import BasicCVTriage
-from src.app.services.cv_provider import ManagedCVProvider
+from src.app.services.cv_provider import ManagedCVProvider, VisionProviderBusy
 from src.app.services.cv_ocr import extract_text as extract_text_stage_a
 from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.intake_gate import strict_image_ingest_gate
@@ -466,6 +466,12 @@ async def triage(
             ocr_meta = {}
             analysis_state["analysis_degraded"] = True
             analysis_state["degraded_reasons"].append("vision_provider_timeout")
+        except VisionProviderBusy:
+            labels, extracted_text, product_identity = [], "", None
+            ocr_meta = {}
+            analysis_state["analysis_pending"] = True
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("vision_provider_busy")
         except Exception:
             labels, extracted_text, product_identity = [], "", None
             ocr_meta = {}

@@ -7,6 +7,7 @@ import base64
 from typing import Dict, Optional, Tuple, List
 import logging
 import time
+import threading
 from src.app.security.url_guard import ensure_safe_outbound_url
 
 # ── Vision prompt templates (mode-selectable) ──
@@ -31,6 +32,15 @@ _PRODUCT_IDENTITY_PROMPT = (
     '"labels":["gaming","rgb_keyboard","dragon_logo"],"text":"GT76 10SF"}.'
 )
 from src.app.services.cv_ocr import extract_text as extract_text_stage_a
+
+
+class VisionProviderBusy(RuntimeError):
+    """The bounded vision provider is at capacity; callers should retry later."""
+
+
+_VISION_PROVIDER_GATE = threading.BoundedSemaphore(
+    max(1, min(int(os.getenv("CV_VISION_MAX_CONCURRENCY", "1") or 1), 4))
+)
 
 
 class ManagedCVProvider:
@@ -138,6 +148,8 @@ class ManagedCVProvider:
                     except Exception:
                         pass
                 return labels, text, product_identity
+            except VisionProviderBusy:
+                raise
             except Exception:
                 # Fall through to local OCR so the pipeline still has text evidence.
                 logging.getLogger(__name__).exception("cv_provider.ollama_failed")
@@ -180,6 +192,21 @@ class ManagedCVProvider:
         import urllib.request
         import urllib.error
 
+        queue_timeout = max(
+            0.0,
+            min(float(os.getenv("CV_VISION_QUEUE_TIMEOUT_SEC", "0.25") or 0.25), 5.0),
+        )
+        if not _VISION_PROVIDER_GATE.acquire(timeout=queue_timeout):
+            raise VisionProviderBusy("vision_provider_capacity_exhausted")
+        try:
+            return self._ollama_labels_and_text_authorized(image_bytes, mode=mode)
+        finally:
+            _VISION_PROVIDER_GATE.release()
+
+    def _ollama_labels_and_text_authorized(
+        self, image_bytes: bytes, *, mode: str = "triage",
+    ) -> Tuple[List[str], str, Optional[Dict]]:
+        """Call Ollama after process-level vision admission has been granted."""
         img_b64 = base64.b64encode(image_bytes).decode("ascii")
         prompt = _PRODUCT_IDENTITY_PROMPT if mode == "visual_search" else _TRIAGE_PROMPT
         _ollama_url_env = (os.getenv("OLLAMA_URL", "") or "").strip().rstrip("/")
