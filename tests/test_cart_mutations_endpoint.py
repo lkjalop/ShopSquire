@@ -134,6 +134,10 @@ def _suggest_cart_payload(**over):
                           "expires_at": "2099-01-01 00:00:00"},
         "cart_updated": False,
         "decision_trace_id": "tid-cc-1",
+        "timing_breakdown": {
+            "route_total_ms": 1200.0,
+            "finalization_ms": 12.5,
+        },
     }
     base.update(over)
     return base
@@ -149,6 +153,10 @@ def test_chat_short_circuit_forwards_confirmation_card():
     assert cm["ops"][0]["action"] == "clear_all"
     assert out["cart_updated"] is False
     assert out["trace_id"] == "tid-cc-1"
+    assert out["timing_breakdown"] == {
+        "route_total_ms": 1200.0,
+        "finalization_ms": 12.5,
+    }
 
 
 def test_chat_short_circuit_forwards_explicit_budget_memory():

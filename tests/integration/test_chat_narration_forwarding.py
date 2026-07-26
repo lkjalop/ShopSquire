@@ -24,6 +24,11 @@ async def _fake_recommend(*args, **kwargs):
             "slate_disposition": "clear",
             "secondary_lanes": ["EXPLAIN"],
             "explanation": {"sku": "GAM-0002", "verdict": "fails"},
+            "timing_breakdown": {
+                "route_total_ms": 8123.4,
+                "router_decode_ms": 7300.0,
+                "fulfillment_preview_ms": 901.2,
+            },
             "next_questions": [],
         }
 
@@ -51,6 +56,11 @@ def test_chat_query_forwards_narration_job_id(monkeypatch):
     assert body["slate_disposition"] == "clear"
     assert body["secondary_lanes"] == ["EXPLAIN"]
     assert body["explanation"]["verdict"] == "fails"
+    assert body["timing_breakdown"] == {
+        "route_total_ms": 8123.4,
+        "router_decode_ms": 7300.0,
+        "fulfillment_preview_ms": 901.2,
+    }
 
 
 async def _fake_no_match_with_brand_exclusion(*args, **kwargs):

@@ -413,6 +413,11 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
         "trace_id": tid,
         "next_questions": [],
         "confirmed_slots": _extract_confirmed_slots(query=q, response=data),
+        "timing_breakdown": (
+            data.get("timing_breakdown")
+            if isinstance(data.get("timing_breakdown"), dict)
+            else {}
+        ),
         "blocked": False,
         "needs_human_review": False,
         "security_route": "allow",
@@ -2942,6 +2947,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # Canonical V2 execution ontology.  Persisting this on the chat response lets the same
         # immutable trace prove model proposal, deterministic authorization, and stage execution.
         "execution_steps": data.get("execution_steps") or [],
+        # Preserve phase-level latency through the chat edge. The storefront and replay harness
+        # use this single payload to distinguish queue/load/prefill/decode from retrieval,
+        # evidence, fulfillment preview, and final response shaping.
+        "timing_breakdown": (
+            data.get("timing_breakdown")
+            if isinstance(data.get("timing_breakdown"), dict)
+            else {}
+        ),
         # Async narration handoff: when recommend ran in async/skip mode it returns the deterministic
         # grounded answer now + a job id for the richer LLM prose. Forward both so the storefront can
         # poll /api/v1/recommend/narration/{job_id} and replace the message in place (no blocking wait).
