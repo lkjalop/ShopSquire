@@ -48,6 +48,16 @@ CORPUS_DIR = REPO_ROOT / "tests" / "golden" / "suggest_corpus"
 BATTERY = REPO_ROOT / "tests" / "characterization" / "batteries" / "starter_battery.json"
 
 
+def _product_expectations(battery: list[dict]) -> dict[tuple[str, int], bool]:
+    """Return immutable product expectations keyed by case and turn."""
+    return {
+        (str(case["id"]), turn_index): bool(turn["expects_products"])
+        for case in battery
+        for turn_index, turn in enumerate(case.get("turns") or [])
+        if "expects_products" in turn
+    }
+
+
 def _decision_slice(core):
     """The routed decision breadcrumbs the metrics need (node + requirements). Returns None when
     the breadcrumbs are ABSENT (degraded response) — callers must treat that differently from a
@@ -81,11 +91,19 @@ def _expects_products(core) -> bool:
 
 
 def _quality_case(case_id: str, req: dict, core) -> dict:
-    """Case metadata the intrinsic quality gate needs (P1.2). budget_max comes from the request."""
+    """Case metadata the intrinsic quality gate needs (P1.2).
+
+    ``expects_products`` is an immutable battery assertion when supplied. Inferring the
+    relevance denominator from model output lets a clarification remove its own case from
+    coverage, making identical labels report different coverage across sealed runs.
+    """
     bmax = req.get("budget_max")
     return {"id": case_id,
             "budget_max": (float(bmax) if bmax not in (None, "") else None),
-            "expects_products": _expects_products(core)}
+            "expects_products": (
+                bool(req["expects_products"])
+                if "expects_products" in req else _expects_products(core)
+            )}
 
 
 def _diagnose_case(case_id: str, turn: int, query: str, core, v2: dict) -> dict:
@@ -353,8 +371,9 @@ def main() -> None:
     if args.prewarm and not prewarm.get("ready"):
         raise SystemExit(f"sealed replay prewarm failed: {prewarm}")
 
-    expects = {c["id"]: (c.get("known_wrong") or {}).get("expect_v2")
-               for c in json.loads(BATTERY.read_text(encoding="utf-8"))}
+    battery = json.loads(BATTERY.read_text(encoding="utf-8"))
+    expects = {c["id"]: (c.get("known_wrong") or {}).get("expect_v2") for c in battery}
+    product_expectations = _product_expectations(battery)
 
     labels = load_labels()   # sealed relevance labels (empty until filled — gate stays honest-red)
     s = sessionmaker(bind=get_engine())()
@@ -425,8 +444,14 @@ def main() -> None:
                     decision_source = str(dec.get("source") or "default")
                     fallback_used = (decision_source == "default"
                                      or decision_source.startswith("fallback:"))
+                    quality_request = dict(req)
+                    expected_products = product_expectations.get((case["id"], t["turn"]))
+                    if expected_products is not None:
+                        quality_request["expects_products"] = expected_products
                     quality_rows.append(evaluate_case_quality(
-                        _quality_case(f"{case['id']}:{t['turn']}", req, core), v2, labels,
+                        _quality_case(
+                            f"{case['id']}:{t['turn']}", quality_request, core,
+                        ), v2, labels,
                         catalog=authz, split=args.label_split, latency_ms=latency_ms,
                         timed_out=bool(model_call["timed_out"]),
                         fallback_used=fallback_used,

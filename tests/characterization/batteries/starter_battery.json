@@ -4,7 +4,8 @@
   "lane": "search",
   "turns": [
    {
-    "query": "gaming laptop under $2000"
+    "query": "gaming laptop under $2000",
+    "expects_products": true
    }
   ]
  },
@@ -13,7 +14,8 @@
   "lane": "search",
   "turns": [
    {
-    "query": "recommend a laptop for university"
+    "query": "recommend a laptop for university",
+    "expects_products": true
    }
   ]
  },
@@ -23,7 +25,8 @@
   "notes": "PX2 + answer_quality negation fix — 'nothing over' is a CAP, must never leak items above $1900 or answer as a binary over-$X question",
   "turns": [
    {
-    "query": "show me laptops but nothing over $1900"
+    "query": "show me laptops but nothing over $1900",
+    "expects_products": true
    }
   ]
  },
@@ -33,7 +36,8 @@
   "notes": "genuine binary over-$X question — the lane the negation guard must NOT break",
   "turns": [
    {
-    "query": "is $1800 enough for a gaming laptop?"
+    "query": "is $1800 enough for a gaming laptop?",
+    "expects_products": true
    }
   ]
  },
@@ -42,7 +46,8 @@
   "lane": "budget",
   "turns": [
    {
-    "query": "laptop between $1200 and $1800"
+    "query": "laptop between $1200 and $1800",
+    "expects_products": true
    }
   ]
  },
@@ -52,7 +57,8 @@
   "notes": "the audit headline case — must be honest + supplier RFQ offer + 0 products",
   "turns": [
    {
-    "query": "need five rack-mount A100 GPU servers under $80,000"
+    "query": "need five rack-mount A100 GPU servers under $80,000",
+    "expects_products": false
    }
   ]
  },
@@ -62,7 +68,8 @@
   "notes": "paraphrase that bypassed the tail-only override before the finalizer fix",
   "turns": [
    {
-    "query": "quote me a couple of rackmount GPU nodes for our datacenter"
+    "query": "quote me a couple of rackmount GPU nodes for our datacenter",
+    "expects_products": false
    }
   ]
  },
@@ -82,7 +89,8 @@
   },
   "turns": [
    {
-    "query": "do you sell forklifts?"
+    "query": "do you sell forklifts?",
+    "expects_products": false
    }
   ]
  },
@@ -105,7 +113,8 @@
   },
   "turns": [
    {
-    "query": "a laptop with performance close to an A100 for local AI work"
+    "query": "a laptop with performance close to an A100 for local AI work",
+    "expects_products": true
    }
   ]
  },
@@ -115,7 +124,8 @@
   "notes": "min-vs-recommended P0 fix — retrieval filters on MINIMUM, recommended stays in verdicts",
   "turns": [
    {
-    "query": "laptop that can run cyberpunk 2077"
+    "query": "laptop that can run cyberpunk 2077",
+    "expects_products": true
    }
   ]
  },
@@ -135,7 +145,8 @@
   },
   "turns": [
    {
-    "query": "i want to play valorant at 144fps"
+    "query": "i want to play valorant at 144fps",
+    "expects_products": true
    }
   ]
  },
@@ -145,7 +156,8 @@
   "notes": "AI VRAM floors; historically zeroed retrieval then leaked accessories (fixed be37d83)",
   "turns": [
    {
-    "query": "laptop for fine-tuning small language models locally"
+    "query": "laptop for fine-tuning small language models locally",
+    "expects_products": true
    }
   ]
  },
@@ -154,7 +166,8 @@
   "lane": "compare",
   "turns": [
    {
-    "query": "compare the dell g16 against the lenovo legion for gaming"
+    "query": "compare the dell g16 against the lenovo legion for gaming",
+    "expects_products": true
    }
   ]
  },
@@ -164,10 +177,12 @@
   "notes": "multi-turn: session memory must carry the shortlist into the why-question",
   "turns": [
    {
-    "query": "gaming laptop under $2000"
+    "query": "gaming laptop under $2000",
+    "expects_products": true
    },
    {
-    "query": "why is the first one better for me?"
+    "query": "why is the first one better for me?",
+    "expects_products": false
    }
   ]
  },
@@ -177,10 +192,12 @@
   "notes": "multi-turn narrowing — the FILTER lane",
   "turns": [
    {
-    "query": "show me gaming laptops"
+    "query": "show me gaming laptops",
+    "expects_products": true
    },
    {
-    "query": "only ones with 16GB RAM or more"
+    "query": "only ones with 16GB RAM or more",
+    "expects_products": true
    }
   ]
  },
@@ -190,7 +207,8 @@
   "notes": "the 'but not Apple' bug class (fixed 2026-06-24)",
   "turns": [
    {
-    "query": "a good laptop but not Apple"
+    "query": "a good laptop but not Apple",
+    "expects_products": true
    }
   ]
  },
@@ -200,7 +218,8 @@
   "notes": "CONTRACT FORK ON RECORD: this query hits the INVENTORY FAST-PATH, which returns a different top-level shape (answer/recommendations/inventory/nqe/timing) than the full pipeline (assistant_message/products). The X9 deficit routing fix lives on the chat lane, not this endpoint. V2 must unify or deliberately honor this fork.",
   "turns": [
    {
-    "query": "I need 50 units but you only have a few in stock, am I ok waiting for a reorder?"
+    "query": "I need 50 units but you only have a few in stock, am I ok waiting for a reorder?",
+    "expects_products": false
    }
   ]
  },
@@ -209,7 +228,8 @@
   "lane": "procurement",
   "turns": [
    {
-    "query": "we need 25 laptops for our new office, can you do a bulk quote?"
+    "query": "we need 25 laptops for our new office, can you do a bulk quote?",
+    "expects_products": false
    }
   ]
  },
@@ -219,7 +239,8 @@
   "notes": "cart mutation phrased at /suggest — records what THIS endpoint does with it (the full swap flow lives on the chat lane)",
   "turns": [
    {
-    "query": "swap the dell for a lenovo legion in my cart"
+    "query": "swap the dell for a lenovo legion in my cart",
+    "expects_products": false
    }
   ]
  },
@@ -229,7 +250,8 @@
   "notes": "capability-registry honesty (B1) — declared does_not_offer must answer honestly",
   "turns": [
    {
-    "query": "do you offer payment plans?"
+    "query": "do you offer payment plans?",
+    "expects_products": false
    }
   ]
  },
@@ -238,7 +260,8 @@
   "lane": "policy",
   "turns": [
    {
-    "query": "what is your returns policy?"
+    "query": "what is your returns policy?",
+    "expects_products": false
    }
   ]
  },
@@ -248,7 +271,8 @@
   "notes": "post-purchase damage claim — claims/refund rail, not retrieval",
   "turns": [
    {
-    "query": "my laptop arrived with a cracked screen and I want a refund"
+    "query": "my laptop arrived with a cracked screen and I want a refund",
+    "expects_products": false
    }
   ]
  },
@@ -258,7 +282,8 @@
   "notes": "fully off-domain — expect graceful honesty, not a laptop grid",
   "turns": [
    {
-    "query": "recommend a good pizza place near me"
+    "query": "recommend a good pizza place near me",
+    "expects_products": false
    }
   ]
  },
@@ -267,7 +292,8 @@
   "lane": "accessory",
   "turns": [
    {
-    "query": "a laptop bag that fits a 16 inch laptop"
+    "query": "a laptop bag that fits a 16 inch laptop",
+    "expects_products": true
    }
   ]
  },
@@ -276,7 +302,8 @@
   "lane": "persona",
   "turns": [
    {
-    "query": "laptop for video editing and streaming on twitch"
+    "query": "laptop for video editing and streaming on twitch",
+    "expects_products": true
    }
   ]
  }

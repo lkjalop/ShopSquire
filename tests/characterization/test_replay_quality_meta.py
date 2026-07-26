@@ -9,6 +9,7 @@ from tests.characterization.shadow_replay import (
     _merge_replay_session,
     _phase_telemetry,
     _prewarm_models,
+    _product_expectations,
     _quality_case,
     _summarize_phase_telemetry,
 )
@@ -69,6 +70,23 @@ def test_quality_and_diagnose_share_the_decision():
     assert _quality_case("off_domain", {}, core)["expects_products"] is False
     row = _diagnose_case("off_domain", 0, "pizza place near me", core, {"products": []})
     assert row["empty"] is False and row["node_handle"] is None
+
+
+def test_battery_expectation_is_stable_when_model_clarifies():
+    core = _core(node=None, reqs={})
+    assert _quality_case(
+        "budget_band:0", {"expects_products": True}, core,
+    )["expects_products"] is True
+
+
+def test_product_expectations_are_keyed_per_turn():
+    assert _product_expectations([{
+        "id": "followup",
+        "turns": [
+            {"query": "find laptops", "expects_products": True},
+            {"query": "why?", "expects_products": False},
+        ],
+    }]) == {("followup", 0): True, ("followup", 1): False}
 
 
 def test_degraded_core_without_extras_defaults_to_counting():
