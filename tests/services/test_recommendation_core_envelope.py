@@ -182,7 +182,7 @@ def test_timing_breakdown_separates_model_and_core_phases():
             "load_ms": 200,
             "prompt_eval_ms": 2200,
             "decode_ms": 5600,
-            "wall_ms": 8100,
+            "wall_ms": 8500,
             "outcome": "ok",
             "model": "qwen3:14b",
         },
@@ -197,7 +197,8 @@ def test_timing_breakdown_separates_model_and_core_phases():
     assert timing["router_load_ms"] == 200
     assert timing["router_prefill_ms"] == 2200
     assert timing["router_decode_ms"] == 5600
-    assert timing["router_wall_ms"] == 8100
+    assert timing["router_provider_overhead_ms"] == 400
+    assert timing["router_wall_ms"] == 8500
     assert timing["router_outcome"] == "ok"
     assert timing["router_model"] == "qwen3:14b"
     assert timing["retrieval_contained_in_plan"] is True

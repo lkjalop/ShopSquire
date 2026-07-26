@@ -414,6 +414,7 @@ def test_router_call_records_server_phase_metrics(monkeypatch):
     assert metrics["load_ms"] == 1.0
     assert metrics["prompt_eval_ms"] == 2.0
     assert metrics["decode_ms"] == 3.0
+    assert metrics["provider_overhead_ms"] >= 0.0
     assert metrics["prompt_tokens"] == 40
     assert metrics["output_tokens"] == 12
 

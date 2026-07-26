@@ -290,6 +290,7 @@ def _summarize_phase_telemetry(rows: list[dict]) -> dict:
             key: _p95([float((row.get("router_model") or {}).get(key) or 0.0)
                        for row in rows if (row.get("router_model") or {}).get(key) is not None])
             for key in ("queue_ms", "wall_ms", "load_ms", "prompt_eval_ms", "decode_ms",
+                        "provider_overhead_ms",
                         "taxonomy_repair_ms")
         },
         "router_outcomes": {

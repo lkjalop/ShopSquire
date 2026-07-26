@@ -189,6 +189,14 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
         if acquired:
             _ROUTER_GATE.release()
         metrics["wall_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+        metrics["provider_overhead_ms"] = round(max(
+            0.0,
+            float(metrics["wall_ms"])
+            - float(metrics.get("queue_ms") or 0.0)
+            - float(metrics.get("load_ms") or 0.0)
+            - float(metrics.get("prompt_eval_ms") or 0.0)
+            - float(metrics.get("decode_ms") or 0.0),
+        ), 1)
         _ROUTER_CALL_STATE.metrics = metrics
 
 

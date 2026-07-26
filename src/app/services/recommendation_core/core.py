@@ -151,6 +151,19 @@ def build_timing_breakdown(
     )
     retrieval_ms = float((core.extras.get("evidence") or {}).get("latency_ms") or 0.0)
     model = dict(router_metrics or {})
+    router_queue_ms = float(model.get("queue_ms") or 0.0)
+    router_load_ms = float(model.get("load_ms") or 0.0)
+    router_prefill_ms = float(model.get("prompt_eval_ms") or 0.0)
+    router_decode_ms = float(model.get("decode_ms") or 0.0)
+    router_wall_ms = float(model.get("wall_ms") or 0.0)
+    router_provider_overhead_ms = max(
+        0.0,
+        router_wall_ms
+        - router_queue_ms
+        - router_load_ms
+        - router_prefill_ms
+        - router_decode_ms,
+    )
     return {
         "recommendation_total_ms": round(float(total_ms), 1),
         "route_total_ms": round(route_ms, 1),
@@ -158,11 +171,12 @@ def build_timing_breakdown(
         "retrieval_ms": round(retrieval_ms, 1),
         "post_stage_ms": round(post_ms, 1),
         "fulfillment_preview_ms": round(fulfillment_ms, 1),
-        "router_queue_ms": round(float(model.get("queue_ms") or 0.0), 1),
-        "router_load_ms": round(float(model.get("load_ms") or 0.0), 1),
-        "router_prefill_ms": round(float(model.get("prompt_eval_ms") or 0.0), 1),
-        "router_decode_ms": round(float(model.get("decode_ms") or 0.0), 1),
-        "router_wall_ms": round(float(model.get("wall_ms") or 0.0), 1),
+        "router_queue_ms": round(router_queue_ms, 1),
+        "router_load_ms": round(router_load_ms, 1),
+        "router_prefill_ms": round(router_prefill_ms, 1),
+        "router_decode_ms": round(router_decode_ms, 1),
+        "router_provider_overhead_ms": round(router_provider_overhead_ms, 1),
+        "router_wall_ms": round(router_wall_ms, 1),
         "router_outcome": str(model.get("outcome") or "not_called"),
         "router_model": str(model.get("model") or "not_called"),
         "retrieval_contained_in_plan": True,
