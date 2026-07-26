@@ -278,8 +278,18 @@ def resolve(use_cases: Optional[List[str]],
             context_preferences[uc] = {k: c.predicates() for k, c in prof.items()}
         else:
             merged = merge_maps(merged, prof)
-    # SALVAGE: per-title (game/software) requirements from the proven legacy DBs
-    title = _salvage_title_requirements(query) if query else {"requirements": {}, "trace": {}}
+    # The model-proposed workload entities are literal-clamped by the router and resolved
+    # through governed providers below. Do not also run the legacy NQE title vocabulary:
+    # combining both paths lets two independent detectors silently disagree on the floor.
+    # Keep salvage only for offline/direct callers that have no model entity yet.
+    if query and not workload_entities:
+        title = _salvage_title_requirements(query)
+        title["trace"]["resolution_mode"] = "legacy_fallback"
+    else:
+        title = {
+            "requirements": {},
+            "trace": {"resolution_mode": "provider_registry" if workload_entities else "none"},
+        }
     if title["requirements"]:
         merged = merge_maps(merged, title["requirements"])
     # Model-named entities are literal-clamped by the router. Fixtures are always eligible;

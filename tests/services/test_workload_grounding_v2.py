@@ -93,3 +93,26 @@ def test_router_accepts_only_literal_workload_entities(db):
     assert decision.workload_entities == (("game", "Alan Wake 2"),)
     assert decision.model_proposal["workload_entities"][1]["name"] == "Cyberpunk 2077"
     assert "workload_entities:clamped" in decision.authorization_changes
+
+
+def test_model_workload_entity_suppresses_legacy_title_detector(monkeypatch):
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.intent_resolver._salvage_title_requirements",
+        lambda _query: (_ for _ in ()).throw(AssertionError("legacy detector ran")),
+    )
+    monkeypatch.setattr(
+        W, "resolve_named_games",
+        lambda entities, consent: {
+            "requirements": {"ram_gb": (">=", 24.0)},
+            "evidence": [{"kind": "game", "status": "resolved"}],
+            "live_allowed": False,
+        },
+    )
+
+    result = resolve(
+        ["gaming"], query="laptop for a named game",
+        workload_entities=[("game", "Named Game")],
+    )
+
+    assert result["requirements"]["ram_gb"] == [(">=", 24.0)]
+    assert result["title_requirements"]["resolution_mode"] == "provider_registry"
