@@ -23,8 +23,8 @@ def _record(writer, db, fact: Dict[str, Any]) -> tuple[int, int]:
     """Return (written, quarantined); one rejected row must not abort its source batch."""
     try:
         return int(writer(db, fact, commit=False)), 0
-    except MarketFactRejected:
-        return 0, 1
+    except MarketFactRejected as exc:
+        return 0, int(exc.quarantined)
 
 
 def _iso(value: Any) -> str | None:

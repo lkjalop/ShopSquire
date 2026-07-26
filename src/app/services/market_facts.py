@@ -21,6 +21,11 @@ from sqlalchemy import text
 class MarketFactRejected(ValueError):
     """The fact was retained in quarantine but cannot enter the canonical evidence store."""
 
+    def __init__(self, reason: str, *, quarantined: bool = True) -> None:
+        super().__init__(reason)
+        self.reason = str(reason)
+        self.quarantined = bool(quarantined)
+
 
 @lru_cache(maxsize=1)
 def _source_registry() -> Dict[str, Any]:
@@ -82,10 +87,10 @@ def _validate_fact(family: str, fact: Dict[str, Any], *, now: datetime | None = 
     return None
 
 
-def _quarantine(db, family: str, fact: Dict[str, Any], reason: str) -> None:
+def _quarantine(db, family: str, fact: Dict[str, Any], reason: str) -> bool:
     tenant = str(fact.get("tenant_id") or "unknown").strip() or "unknown"
     payload = {k: v for k, v in fact.items() if k != "signature"}
-    db.execute(text("""
+    result = db.execute(text("""
         INSERT INTO market_fact_quarantine (
           id, tenant_id, family, source_system, source_record_id, deduplication_id,
           reason_code, payload_json, quarantined_at
@@ -95,6 +100,7 @@ def _quarantine(db, family: str, fact: Dict[str, Any], reason: str) -> None:
            "source": fact.get("source_system"), "record": fact.get("source_record_id"),
            "dedup": fact.get("deduplication_id"), "reason": reason,
            "payload": json.dumps(payload, default=str), "at": _now()})
+    return int(getattr(result, "rowcount", 0) or 0) > 0
 
 
 def _required(value: Any, field: str) -> str:
@@ -126,10 +132,10 @@ def record_atp_fact(db, fact: Dict[str, Any], *, commit: bool = True,
     source = _required(fact.get("source_system"), "source_system")
     rejected = _validate_fact("atp", fact, now=now)
     if rejected:
-        _quarantine(db, "atp", fact, rejected)
+        quarantined = _quarantine(db, "atp", fact, rejected)
         if commit:
             db.commit()
-        raise MarketFactRejected(rejected)
+        raise MarketFactRejected(rejected, quarantined=quarantined)
     observed = _required(fact.get("observed_at"), "observed_at")
     params = _with_defaults(fact, (
         "material_id", "sku", "variant_id", "taxonomy_node", "location_id",
@@ -177,10 +183,10 @@ def record_marketing_event(db, fact: Dict[str, Any], *, commit: bool = True,
     event_type = _required(fact.get("event_type"), "event_type")
     rejected = _validate_fact("marketing", fact, now=now)
     if rejected:
-        _quarantine(db, "marketing", fact, rejected)
+        quarantined = _quarantine(db, "marketing", fact, rejected)
         if commit:
             db.commit()
-        raise MarketFactRejected(rejected)
+        raise MarketFactRejected(rejected, quarantined=quarantined)
     occurred = _required(fact.get("occurred_at"), "occurred_at")
     params = _with_defaults(fact, (
         "subject_hash", "session_id", "sku", "variant_id", "taxonomy_node", "campaign_id",

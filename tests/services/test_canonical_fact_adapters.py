@@ -71,7 +71,8 @@ def test_real_order_inventory_and_supplier_quote_materialize_canonical_facts():
     assert rejected["errors"] == {}
     assert rejected["quarantined_by_source"]["inventory"] == 2
     assert db.execute(text("SELECT COUNT(*) FROM market_fact_quarantine")).scalar_one() == 2
-    backfill_canonical_facts(db, tenant_id="tenant-a")
+    repeated = backfill_canonical_facts(db, tenant_id="tenant-a")
+    assert repeated["quarantined"] == 0
     assert db.execute(text("SELECT COUNT(*) FROM market_fact_quarantine")).scalar_one() == 2
     health = canonical_source_health(db, tenant_id="tenant-a")
     assert health["active_records"] == 3
