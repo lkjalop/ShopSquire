@@ -35,6 +35,7 @@ _QTY_PRECEDING_OK = frozenset({
     # without these the name-token guard built for "dell 15" wrongly rejected fresh amendments,
     # letting a REMEMBERED qty beat a fresh one — caught live by the T3 memory probe)
     "it", "them", "that", "this", "to", "make", "just", "only", "at", "least", "take", "do",
+    "set", "change", "reduce", "drop", "lower",
 })
 # a word between the number and the unit-noun that means the number is a SPEC, not a quantity.
 _QTY_SPEC_FILLERS = re.compile(r"\b(?:inch(?:es)?|in|\"|gb|tb|mb|hz|ghz|kg|lb|nits?|core|gen)\b", re.I)
@@ -97,6 +98,14 @@ def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) 
             return r
     m = re.search(r"\b(?:need|want|get|buy|order|purchase|looking\s+for|help\s+with)\s+"
                   r"(?:about|around|roughly|approx\w*|maybe|some|say)?\s*(\d{1,4})\b", q)
+    if m:
+        return _ok(m)
+    # Contextual amendments have an already-authorized subject, so no product noun is required.
+    m = re.search(
+        r"\b(?:make|set|change|reduce|drop|lower)(?:\s+(?:it|them|that|this|quantity|units?))?"
+        r"\s+to\s+(\d{1,4})\b",
+        q,
+    )
     if m:
         return _ok(m)
     return None

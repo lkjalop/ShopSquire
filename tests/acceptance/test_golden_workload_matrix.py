@@ -85,10 +85,12 @@ live = pytest.mark.skipif(not _backend_up(), reason="backend :8080 not running")
 
 def _chat(q: str, uid: str) -> dict:
     import httpx
+    import uuid
     from tests.utils import default_headers
     H = {**default_headers(), "Content-Type": "application/json"}
     r = httpx.Client(timeout=120).post("http://127.0.0.1:8080/api/v1/chat/query",
-                                       headers=H, json={"uid": uid, "query": q})
+                                       headers=H,
+                                       json={"uid": f"{uid}-{uuid.uuid4().hex[:10]}", "query": q})
     return r.json() if r.status_code == 200 else {}
 
 

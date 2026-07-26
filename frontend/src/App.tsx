@@ -2059,9 +2059,17 @@ export default function App() {
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
-          // Zero results: only override panel for explicit support/cart flows.
-          // Do NOT switch to 'grid' on zero results — that causes a flicker
-          // on follow-up refine queries where the panel was already in a useful state.
+          const slateDisposition = String((data as any).slate_disposition || 'retain');
+          if (slateDisposition === 'clear') {
+            setDisplayProducts([]);
+            setRecommendationShelf(null);
+            if (['grid', 'list', 'visual_search'].includes(rightPanelMode)) {
+              switchRightPanelMode('none');
+            }
+          }
+          // A material clarification may retain the prior slate as context. An authoritative
+          // zero-result response clears it above so old products cannot appear to satisfy new
+          // constraints.
           if (panelContract?.mode === 'support') switchRightPanelMode('faq');
           else if (cartUpsellIntent) switchRightPanelMode('cart');
           // else: keep current panel mode unchanged

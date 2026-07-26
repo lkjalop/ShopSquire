@@ -28,9 +28,11 @@ def db():
     s.execute(text(
         "INSERT INTO products (id, sku, name, price_cents, specs, brand) VALUES "
         "('p1','LAP-1','MSI Thin 15in FHD 120Hz Gaming Laptop',169900,"
-        "'{\"ram_gb\": 16, \"gpu_vram_gb\": 8, \"refresh_hz\": 120}','MSI'), "
+        "'{\"ram_gb\": 16, \"gpu_vram_gb\": 8, \"refresh_hz\": 120, "
+        "\"storage_gb\": 512}','MSI'), "
         "('p2','LAP-2','Asus TUF 16in 120Hz Gaming Laptop',209900,"
-        "'{\"ram_gb\": 32, \"gpu_vram_gb\": 12, \"refresh_hz\": 120}','Asus')"))
+        "'{\"ram_gb\": 32, \"gpu_vram_gb\": 12, \"refresh_hz\": 120, "
+        "\"storage_gb\": 1024}','Asus')"))
     from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
     add_sold_node(s, node_handle="el-6-6")      # Laptops sold
     add_sold_node(s, node_handle="el-6-11-2")   # Gaming Laptops sold
@@ -50,6 +52,83 @@ def _route_stub(lane, handle, requirements=None, conf=0.9, refine=None):
 def _env(q, **kw):
     kw.setdefault("currency", "USD")
     return TurnEnvelope.from_suggest_params(query=q, uid="u1", **kw)
+
+
+def test_ambiguous_workload_product_type_stops_before_retrieval(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-2-2-7-2-2")
+    model = {
+        "lane": "PROCUREMENT",
+        "handle": "el-2-2-7-2-2",
+        "quantity": 20,
+        "total_budget": 55000,
+        "budget_scope": "total",
+        "use_cases": ["game_development"],
+        "confidence": 0.9,
+    }
+
+    response = recommend_turn(
+        db,
+        _env("Equipment for a 20-person gaming studio, $55,000 total."),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.products == []
+    assert response.clarify[0]["reason"] == "missing_material_product_type"
+    assert {o["label"] for o in response.clarify[0]["options"]} == {
+        "Gaming Laptops",
+        "Gaming Headsets",
+    }
+
+
+def test_procurement_primary_shelf_excludes_capability_failures(db):
+    model = {
+        "lane": "PROCUREMENT",
+        "handle": "el-6-11-2",
+        "quantity": 2,
+        "requirements": {
+            "gpu_vram_gb": {"operator": ">=", "number": 12},
+            "ram_gb": {"operator": ">=", "number": 32},
+        },
+        "use_cases": ["game_development"],
+        "confidence": 0.9,
+    }
+
+    response = recommend_turn(
+        db,
+        _env("Two laptops for professional game development with 12 GB VRAM and 32 GB RAM"),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert [card.sku for card in response.products] == ["LAP-2"]
+    assert response.extras["shelf"]["bands"][0]["id"] == "best_fit"
+    assert response.extras["shelf"]["bands"][0]["skus"] == ["LAP-2"]
+
+
+def test_compound_refine_and_explain_answers_from_authorized_fit(db):
+    model = {
+        "lane": "EXPLAIN",
+        "handle": "el-6-11-2",
+        "requirements": {
+            "gpu_vram_gb": {"operator": ">=", "number": 12},
+            "ram_gb": {"operator": ">=", "number": 32},
+        },
+        "use_cases": ["game_development"],
+        "confidence": 0.9,
+    }
+
+    response = recommend_turn(
+        db,
+        _env("I need at least 12 GB VRAM and 32 GB RAM. Why is the better fit?"),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.lane == "FILTER"
+    assert response.extras["secondary_lanes"] == ["EXPLAIN"]
+    assert response.extras["explanation"]["sku"] == "LAP-2"
+    assert "Why Asus TUF" in response.message
+    assert "meets all" in response.message
 
 
 # ── router clamps ─────────────────────────────────────────────────────────────
@@ -1016,6 +1095,36 @@ def test_model_cannot_invent_budget_on_keep_total_followup(db):
     assert decision["quantity"] == 15
     assert decision["budget_scope"] == "total"
     assert decision["node_handle"] == "el-6-6"
+
+
+def test_constraint_refinement_preserves_prior_total_budget_for_new_quantity(db):
+    payload = {
+        "lane": "FILTER",
+        "handle": "el-6-6",
+        "requirements": {"ram_gb": [">=", 32], "gpu_vram_gb": [">=", 12]},
+        "quantity": 15,
+        "total_budget": None,
+        "budget_scope": "unknown",
+        "subject_action": "continue",
+        "confidence": 0.9,
+    }
+    session = {
+        "prior_node": "el-6-6",
+        "accepted_constraints": {
+            "quantity": 20,
+            "total_budget_cents": 5_500_000,
+            "budget_scope": "total",
+        },
+    }
+    resp = recommend_turn(
+        db,
+        _env("reduce to 15 with 32 GB RAM and 12 GB VRAM", session=session),
+        llm_fn=lambda p, t: json.dumps(payload),
+    )
+    decision = resp.extras["decision"]
+    assert decision["quantity"] == 15
+    assert decision["total_budget_cents"] == 5_500_000
+    assert decision["budget_scope"] == "total"
 
 
 def test_stocked_handles_within_contains_and_ungrounded(db):

@@ -261,6 +261,89 @@ def test_explicit_product_category_precedes_workload_host_rescue(db):
     assert d.source == "model+catalog_subject_rescue"
 
 
+def test_explain_with_material_refinements_decomposes_to_filter(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-11-2")
+    payload = {
+        "lane": "EXPLAIN",
+        "handle": "el-6-11-2",
+        "quantity": 22,
+        "requirements": {
+            "gpu_vram_gb": [">=", 12],
+            "ram_gb": [">=", 32],
+        },
+        "use_cases": ["game_development"],
+        "subject_action": "continue",
+        "confidence": 0.9,
+    }
+
+    d = route_turn(
+        db,
+        _env("Why those? I need 22 laptops with 12 GB VRAM and 32 GB RAM."),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert d.lane == "FILTER"
+    assert d.secondary_lanes == ("EXPLAIN",)
+    assert d.quantity == 22
+    assert "gpu_vram_gb" in d.requirements
+
+
+def test_ambiguous_equipment_asks_product_type_instead_of_guessing_accessory(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-11-2")
+    add_sold_node(db, node_handle="el-2-2-7-2-2")
+    payload = {
+        "lane": "PROCUREMENT",
+        "handle": "el-2-2-7-2-2",
+        "quantity": 20,
+        "total_budget": 55000,
+        "budget_scope": "total",
+        "use_cases": ["game_development"],
+        "confidence": 0.9,
+    }
+
+    d = route_turn(
+        db,
+        _env("I need equipment for a 20-person gaming studio, $55,000 total."),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert d.node_handle is None
+    assert d.product_type_options == ("el-6-11-2", "el-2-2-7-2-2")
+    assert d.source == "model+product_type_clarify"
+
+
+def test_related_laptop_ancestor_resolves_to_specific_workload_host(db, monkeypatch):
+    from src.app.services.taxonomy_registry import add_sold_node, get_node
+
+    add_sold_node(db, node_handle="el-6-11-2")
+    add_sold_node(db, node_handle="el-6-6")
+    def _host(*_args, **_kwargs):
+        return get_node("el-6-11-2")
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.turn_router._grounded_use_case_host", _host)
+    payload = {
+        "lane": "FILTER",
+        "handle": "el-6-6",
+        "use_cases": ["game_development"],
+        "subject_action": "continue",
+        "confidence": 0.9,
+    }
+
+    d = route_turn(
+        db,
+        _env("Show stronger laptops for game development."),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert d.node_handle == "el-6-11-2"
+    assert d.product_type_options == ()
+    assert d.source == "model+specific_workload_host"
+
+
 @pytest.mark.parametrize("model_lane", ["BULK", "BULK_QUOTE", "QUOTE", "RFQ"])
 def test_procurement_lane_synonyms_are_clamped_to_existing_lane(db, model_lane):
     from src.app.services.taxonomy_registry import add_sold_node

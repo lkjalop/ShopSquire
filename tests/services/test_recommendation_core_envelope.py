@@ -87,6 +87,15 @@ def test_clarify_and_answer_classes_map():
     assert message_class(to_legacy(c)) == "answer_with_clarify"
 
 
+def test_slate_disposition_clears_authoritative_empty_but_retains_for_clarify():
+    assert to_legacy(_core())["slate_disposition"] == "replace"
+    assert to_legacy(_core(products=[]))["slate_disposition"] == "clear"
+    clarifying = _core(products=[], clarify=[{"text": "Which product type?"}])
+    assert to_legacy(clarifying)["slate_disposition"] == "retain"
+    clarifying.extras["decision"] = {"subject_action": "reset"}
+    assert to_legacy(clarifying)["slate_disposition"] == "clear"
+
+
 def test_other_forks_detected_by_shape():
     assert response_shape(to_legacy(_core(), shape="inventory_fast")) == "inventory_fast"
     assert response_shape(to_legacy(_core(), shape="claims")) == "claims"

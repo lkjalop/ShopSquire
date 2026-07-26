@@ -60,6 +60,7 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "narration_mode", "narration_model", "next_questions", "notice", "off_catalog",
     "persona_tone", "policy_notes", "price_buckets", "price_filter", "price_range",
     "recommendation_tiers", "refusal_note", "requested_quantity", "right_panel", "risk_score",
+    "slate_disposition",
     "sales_response_nudge", "security", "session_summary", "source_statuses",
     "storefront_emphasis", "summary_pending", "timing_breakdown", "trace_tags",
     "turn_envelope_diff", "turn_intent", "use_case_analysis", "why_not", "workload_fit",

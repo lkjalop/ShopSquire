@@ -298,6 +298,13 @@ class TurnDecision:
     # current_order | general_policy | none. Kept separate from subject continuity so an omitted
     # quantity can only be inherited for a real active procurement workflow.
     procurement_context: str = "none"
+    # A turn may ask for an explanation while also changing bounded constraints. The primary
+    # lane performs the consequential read (normally FILTER); secondary lanes describe the
+    # additional response obligation without inventing another execution path.
+    secondary_lanes: Tuple[str, ...] = ()
+    # When the model selects a product class that the buyer did not name and it conflicts with
+    # the declared workload host, retrieval must stop and ask which product type they meant.
+    product_type_options: Tuple[str, ...] = ()
     # Audit-only, bounded copy of the model's semantic proposal before platform clamps. This is
     # never consumed by retrieval or execution; it exists so the trace can prove which component
     # proposed a value and which component authorized the final decision.
@@ -325,6 +332,8 @@ class TurnDecision:
                 "budget_scope": self.budget_scope, "budget_cap_mode": self.budget_cap_mode,
                 "subject_action": self.subject_action,
                 "procurement_context": self.procurement_context,
+                "secondary_lanes": list(self.secondary_lanes),
+                "product_type_options": list(self.product_type_options),
                 "model_proposal": dict(self.model_proposal),
                 "authorization_changes": list(self.authorization_changes)}
 
@@ -1005,6 +1014,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             audience_contexts.append(normalized)
     use_cases = [value for value in use_cases if value not in context_vocabulary]
     from src.app.services import use_case_registry as use_cases_registry
+    if not use_cases:
+        use_cases = use_cases_registry.match_use_cases(envelope.query)
     use_cases = use_cases_registry.apply_use_case_exclusions(use_cases)
     use_cases.extend(value for value in audience_contexts if value not in use_cases)
     use_case_variants: Dict[str, str] = {}
@@ -1169,6 +1180,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     _bcm = str(data.get("budget_cap_mode") or "").strip().lower()
     budget_cap_mode = _bcm if _bcm in ("hard", "soft", "ambiguous") else "hard"
 
+    secondary_lanes: Tuple[str, ...] = ()
+    if lane == "EXPLAIN" and (
+            requirements or explicit_quantity is not None or parsed_query_budget is not None):
+        secondary_lanes = ("EXPLAIN",)
+        lane = "FILTER"
+
+    product_type_options: Tuple[str, ...] = ()
+
     # clamp 4 — THE REFUSAL GATE, both directions. The model MAPS; the PLATFORM decides:
     # a purchase-ish turn whose routed node fails sells_within() is refused even if the
     # model hedged the lane to SEARCH (live finding: it mapped forklifts→Material Handling
@@ -1303,7 +1322,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # clamped use case may select only a registry-declared, tenant-sold host. A modifier shared
     # with an accessory category cannot authorize that accessory.
     if (node is None and lane == "PROCUREMENT" and not str(data.get("handle") or "").strip()
-            and request_scope != "service_or_place"):
+            and request_scope != "service_or_place" and not product_type_options):
         named_handles = set(_query_named_sold_handles(db, envelope))
         node = next(
             (
@@ -1320,6 +1339,37 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             node = _grounded_use_case_host(db, envelope, use_cases)
             if node is not None:
                 routing_source = "model+use_case_host"
+
+    if node is not None and use_cases:
+        workload_host = _grounded_use_case_host(db, envelope, use_cases)
+        explicitly_named = set(_query_named_sold_handles(db, envelope))
+        if workload_host is not None and workload_host.handle != node.handle:
+            from src.app.services.catalog_classifier import _plural_expand, _tokens
+            workload_name = list(_tokens(workload_host.name))
+            selected_name = list(_tokens(node.name))
+            same_product_head = bool(
+                workload_name and selected_name
+                and (_plural_expand({workload_name[-1]})
+                     & _plural_expand({selected_name[-1]}))
+            )
+            related = (
+                workload_host.full_path.startswith(node.full_path + " >")
+                or node.full_path.startswith(workload_host.full_path + " >")
+                or same_product_head
+            )
+            if related:
+                node = workload_host
+                routing_source = "model+specific_workload_host"
+            elif (node.handle not in explicitly_named and not explicitly_named
+                  and sells_within(db, node.handle, tenant_id=envelope.tenant_id) is False):
+                node = workload_host
+                if lane == "OFF_CATALOG":
+                    lane = "SEARCH"
+                routing_source = "model+registry_workload_host"
+            elif node.handle not in explicitly_named and not explicitly_named:
+                product_type_options = (workload_host.handle, node.handle)
+                node = None
+                routing_source = "model+product_type_clarify"
 
     if typed_sort_refinement:
         routing_source = f"{routing_source}+typed_sort_refinement"
@@ -1404,6 +1454,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         "budget_scope": budget_scope,
         "subject_action": subject_action,
         "procurement_context": procurement_context,
+        "secondary_lanes": list(secondary_lanes),
+        "product_type_options": list(product_type_options),
     }
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
@@ -1424,5 +1476,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         budget_scope=budget_scope, budget_cap_mode=budget_cap_mode,
                         subject_action=subject_action,
                         procurement_context=procurement_context,
+                        secondary_lanes=secondary_lanes,
+                        product_type_options=product_type_options,
                         model_proposal=proposal,
                         authorization_changes=_authorization_changes(proposal, accepted_audit))

@@ -312,7 +312,7 @@ class CoreResponse:
         if self.off_catalog:
             label = str(self.off_catalog.get("label") or "that category")
             return (f"Honest answer: we don't stock {label}. I can raise a supplier request "
-                    f"if you'd like us to source it.")
+                    f"for a quote if you'd like us to source it.")
         if self.refusal_note:
             return self.refusal_note
         if self.products:

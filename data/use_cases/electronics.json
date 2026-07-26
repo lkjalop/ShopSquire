@@ -129,7 +129,7 @@
     },
     "ai_ml_workstation": {
       "label": "AI / ML workstation",
-      "keywords": ["ai", "ml", "machine learning", "fine-tune", "train models", "llm", "deep learning"],
+      "keywords": ["ai", "ml", "machine learning", "fine-tune", "train models", "llm", "deep learning", "stable diffusion"],
       "host_nodes": ["el-6-11-2"],
       "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
       "budget_band_hint": [1800, 4000]

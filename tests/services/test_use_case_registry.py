@@ -2,6 +2,29 @@
 price DERIVED from the real catalog (never hardcoded), with the drawing→touchscreen→Mac-escalates
 example the user described."""
 from src.app.services import use_case_registry as R
+
+
+def test_match_use_cases_recovers_specific_registry_phrase():
+    assert R.match_use_cases("I want to fine tune a 7b model locally") == [
+        "ai_ml_workstation"
+    ]
+
+
+def test_match_use_cases_prefers_game_development_over_generic_game():
+    assert R.match_use_cases("I need laptops for game development") == [
+        "game_development"
+    ]
+
+
+def test_match_use_cases_ignores_collision_prone_short_abbreviations():
+    assert R.match_use_cases("five A100 servers for my data team") == []
+    assert R.match_use_cases("gaming laptop") == []
+
+
+def test_match_use_cases_recovers_stable_diffusion_workload():
+    assert R.match_use_cases("stable diffusion image generation laptop") == [
+        "ai_ml_workstation"
+    ]
 from src.app.services.catalog_read_model import VariantView
 
 

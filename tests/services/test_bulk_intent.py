@@ -24,6 +24,13 @@ def test_at_least_count_with_hyphenated_workload_modifier():
     assert classify_budget_scope(query) == "total"
 
 
+def test_contextual_quantity_amendment_does_not_need_repeated_product_noun():
+    assert extract_quantity_span(
+        "Those are too weak, maybe reduce to 15 instead",
+        unit_nouns=("laptop",),
+    ) == (15, "15")
+
+
 def test_catalog_fast_path_defers_to_full_economics_for_catalog_command_quantity():
     from types import SimpleNamespace
     from src.app.routers.recommend import _requires_full_path_for_bulk

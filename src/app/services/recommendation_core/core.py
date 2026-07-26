@@ -166,6 +166,19 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             quantity=(decision.quantity if decision.quantity is not None
                       else (int(_accepted["quantity"]) if _accepted.get("quantity") else None)),
         )
+    elif (_parsed_turn_budget is None and decision.lane == "FILTER"
+          and decision.subject_action == "continue"
+          and str(_accepted.get("budget_scope") or "") == "total"
+          and _accepted.get("total_budget_cents") is not None):
+        # A constraint-only continuation keeps the authorized whole-order cap. A new quantity
+        # changes affordability arithmetic, not the meaning or amount of the budget.
+        decision = dataclasses.replace(
+            decision,
+            total_budget_cents=int(_accepted["total_budget_cents"]),
+            budget_scope="total",
+            quantity=(decision.quantity if decision.quantity is not None
+                      else (int(_accepted["quantity"]) if _accepted.get("quantity") else None)),
+        )
     # Constraint-only updates preserve the last authorized sold subject even when a BYO
     # router incorrectly labels the turn as a switch or returns no node. This is a core
     # authorization invariant, not an intent heuristic: the canonical budget parser proves
@@ -318,6 +331,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                       latency_ms=(time.perf_counter() - _t_route) * 1000.0,
                       won_message=False, source=decision.source)
     resp.extras["decision"] = decision.as_dict()
+    resp.extras["secondary_lanes"] = list(decision.secondary_lanes)
     if requested_quantity is not None:
         resp.extras["requested_quantity"] = requested_quantity
     resp.extras["plan"] = plan.as_dict()
@@ -368,6 +382,25 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     resp.extras["gates"] = gates
     if gates["policy_route"] != "allow":
         resp.degraded = True
+    if decision.product_type_options:
+        choices = []
+        for handle in decision.product_type_options:
+            option_node = get_node(handle)
+            if option_node is not None:
+                choices.append({"id": handle, "label": option_node.name})
+        question = {
+            "id": "product_type",
+            "goal": "resolve_product_type",
+            "reason": "missing_material_product_type",
+            "missing_slots": ["product_type"],
+            "text": "Which product type do you need for this workload?",
+            "options": choices,
+        }
+        resp.clarify.append(question)
+        resp.set_message(question["text"], MsgPriority.BULK_SCOPE_CLARIFY)
+        resp.record_stage("clarify:pre_retrieval", status="clarify", won_message=True,
+                          reason=question["reason"])
+        return resp.finalize()
     material_question = material_pre_retrieval_clarify(
         quantity=decision.quantity,
         budget_known=(decision.total_budget_cents is not None
@@ -375,7 +408,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                       or envelope.budget_min_cents is not None),
         budget_scope=decision.budget_scope,
     )
-    if material_question:
+    if material_question and not (
+            decision.lane == "OFF_CATALOG" and decision.refusal_granted):
         resp.clarify.append(material_question)
         resp.set_message(material_question["text"], MsgPriority.BULK_SCOPE_CLARIFY)
         resp.record_stage("clarify:pre_retrieval", status="clarify", won_message=True,
@@ -447,6 +481,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                lambda: _maybe_bulk_economics(db, envelope, decision, resp))
     _run_stage(resp, "fulfillment_preview",
                lambda: _maybe_fulfillment_preview(envelope, decision, resp))
+    _run_stage(resp, "secondary_explanation",
+               lambda: _apply_secondary_explanation(decision, resp))
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
@@ -600,7 +636,7 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
     an honest tradeoff when budget < floor (never a silent empty/mismatch). No-op unless a real
     capability was asserted on a product-search lane and the turn isn't degraded/off-catalog.
     Reads decision.requirements (the authoritative merged predicates)."""
-    if decision.lane not in ("SEARCH", "FILTER"):
+    if decision.lane not in ("SEARCH", "FILTER", "PROCUREMENT"):
         return
     if not decision.requirements or resp.off_catalog or resp.degraded:
         return
@@ -626,7 +662,11 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
                      and (c.fit or {}).get("overall") == "meets"]
         if recovered:
             existing = {c.sku for c in recovered}
-            resp.products = (recovered + [c for c in resp.products if c.sku not in existing])[:limit]
+            authorized_existing = [
+                c for c in resp.products
+                if c.sku not in existing and (c.fit or {}).get("overall") == "meets"
+            ]
+            resp.products = (recovered + authorized_existing)[:limit]
             meets_in_budget = len(recovered)
             fs["meets"] = sum(1 for c in resp.products
                               if (c.fit or {}).get("overall") == "meets")
@@ -703,7 +743,7 @@ def _build_shelf(db, envelope: TurnEnvelope, decision: TurnDecision,
       band 3 preference — a stated brand/variant preference, OMITTED when none was expressed.
     Adaptive (empty bands dropped), deduped (a product in exactly one band, priority 1>2>3),
     every card keeps its honest fit verdict. Runs after the capability banner; never raises."""
-    if decision.lane not in ("SEARCH", "FILTER"):
+    if decision.lane not in ("SEARCH", "FILTER", "PROCUREMENT"):
         return
     if not decision.requirements or resp.off_catalog or resp.degraded:
         return
@@ -1374,7 +1414,7 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     # A wider top-5/top-10 view is still the primary eligible slate, not an
     # unlabeled mixture of valid products and known capability failures. Keep
     # closest alternatives only when the catalog has no meeting product at all.
-    if decision.requirements and decision.lane in ("SEARCH", "FILTER"):
+    if decision.requirements and decision.lane in ("SEARCH", "FILTER", "PROCUREMENT"):
         meeting = [c for c in cards if (c.fit or {}).get("overall") == "meets"]
         if meeting:
             cards = meeting
@@ -1406,6 +1446,31 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
             else:
                 resp.set_message((f"No product in our catalog meets {reqs} — showing the closest "
                                   f"options, ranked by how near they come."), MsgPriority.LANE_BASE)
+
+
+def _apply_secondary_explanation(decision: TurnDecision, resp: CoreResponse) -> None:
+    """Answer a compound EXPLAIN obligation from the authorized product verdict."""
+    if "EXPLAIN" not in decision.secondary_lanes or not resp.products:
+        return
+    top = resp.products[0]
+    verdict = str((top.fit or {}).get("overall") or "")
+    reasons = "; ".join(top.why[:3]) if top.why else "it ranks highest on the authorized slate"
+    if verdict == "meets":
+        explanation = f"Why {top.title} leads: {reasons}."
+    elif verdict:
+        explanation = (
+            f"Why {top.title} is shown: {reasons}. It is an alternative, not a full match."
+        )
+    else:
+        explanation = f"Why {top.title} leads: {reasons}."
+    resp.extras["explanation"] = {
+        "sku": top.sku,
+        "verdict": verdict or None,
+        "basis": list(top.why[:3]),
+    }
+    current = str(resp.message or "").strip()
+    if explanation not in current:
+        resp.message = f"{current} {explanation}".strip()
 
 
 def _exec_fit_check(db, envelope: TurnEnvelope, decision: TurnDecision,

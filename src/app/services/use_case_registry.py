@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -53,6 +54,35 @@ def all_use_case_keys() -> frozenset:
     for v in _VERTICALS:
         keys.update(list_use_cases(v))
     return frozenset(keys)
+
+
+def match_use_cases(query: str) -> List[str]:
+    """Recover an explicit registry phrase when the model omits its use-case field."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(query or "").lower()).strip()
+    if not normalized:
+        return []
+    padded = f" {normalized} "
+    matches: List[Tuple[int, str]] = []
+    for vertical in _VERTICALS:
+        rows = load_use_cases(vertical).get("use_cases") or {}
+        for key, row in rows.items():
+            best = 0
+            for raw_keyword in (row or {}).get("keywords") or []:
+                keyword = re.sub(r"[^a-z0-9]+", " ", str(raw_keyword).lower()).strip()
+                # Single words are too collision-prone for a deterministic fallback. The model
+                # still interprets them; this recovery path accepts only explicit phrases.
+                if len(keyword.split()) < 2:
+                    continue
+                if f" {keyword} " in padded:
+                    best = max(best, len(keyword.split()) * 100 + len(keyword))
+            if best:
+                matches.append((best, str(key)))
+    if not matches:
+        return []
+    top_score = max(score for score, _key in matches)
+    return apply_use_case_exclusions(
+        [key for score, key in matches if score == top_score]
+    )
 
 
 def list_variants(vertical: str, coarse: str) -> List[str]:

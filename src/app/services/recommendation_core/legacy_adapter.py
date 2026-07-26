@@ -17,7 +17,7 @@ HONEST inert defaults — never fabricated values that could be mistaken for sig
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.app.services.recommendation_core.envelope import CoreResponse
 from src.app.services.recommendation_core.trace_ontology import build_execution_steps
@@ -50,22 +50,41 @@ def _universal(core: CoreResponse) -> Dict[str, Any]:
     }
 
 
+def _workload_fit(core: CoreResponse) -> Optional[Dict[str, Any]]:
+    fit = dict(core.fit_summary or {})
+    if fit.get("requirements") and not fit.get("floors"):
+        fit["floors"] = fit["requirements"]
+    if core.products and not fit.get("verdicts"):
+        fit["verdicts"] = [
+            {"sku": card.sku, **dict(card.fit or {})}
+            for card in core.products if card.fit
+        ]
+    return fit or None
+
+
 def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
     products = [p.as_dict() for p in core.products]
     clarifying = bool(core.clarify)
+    subject_action = str((core.extras.get("decision") or {}).get("subject_action") or "")
+    slate_disposition = (
+        "replace" if products
+        else "retain" if clarifying and subject_action != "reset"
+        else "clear"
+    )
     payload: Dict[str, Any] = {
         **_universal(core),
         # ── the outcome (real core output) ────────────────────────────────────
         "assistant_message": core.message,
         "message": core.message,          # branch-duplicate field, kept for consumers
         "products": products,
+        "slate_disposition": slate_disposition,
         "results": products,              # recorded duplication — preserved at the edge
         "off_catalog": core.off_catalog,
         "refusal_note": core.refusal_note,
         "degraded": core.degraded,
         "needs_disambiguation": clarifying,
         "next_questions": core.clarify,
-        "workload_fit": core.fit_summary,
+        "workload_fit": _workload_fit(core),
         # V2 recommendation-core presentation surfaces (Phase 1a-1d) — additive; the frontend
         # renders the 3-band shelf, the capability banner, advisories, and the stated assumption.
         # Absent (None/[]) on the legacy path, so old consumers are unaffected.
