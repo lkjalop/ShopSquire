@@ -121,8 +121,11 @@ def _number_has_size_unit(query: str, value: float) -> bool:
     return any(_re.search(p, q) for p in pats)
 
 
-def _router_model() -> str:
+def active_router_model() -> str:
     return (os.getenv("ROUTER_MODEL") or os.getenv("CLASSIFIER_MODEL") or "qwen3:14b")
+
+
+_router_model = active_router_model
 
 
 def _default_llm_fn(prompt: str, timeout: float) -> str:

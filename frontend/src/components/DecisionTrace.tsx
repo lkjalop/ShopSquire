@@ -229,6 +229,34 @@ export function legacyComponentOntology(sourceId: string): {
   return { label: readable || 'Pipeline', kind: 'stage', authority: 'executes' };
 }
 
+export function resolveWhyAnchorSections(trace: any, events: TraceEvent[]): any[] {
+  const direct = trace?.right_panel?.anchor_sections;
+  if (Array.isArray(direct) && direct.length > 0) return direct;
+
+  const candidates = [...(events || [])].reverse();
+  for (const event of candidates) {
+    const payload = event?.payload || {};
+    const rightPanel = payload?.right_panel_contract || payload?.right_panel;
+    const anchors = rightPanel?.anchor_sections;
+    if (Array.isArray(anchors) && anchors.length > 0) return anchors;
+  }
+  return [];
+}
+
+export function compactAuthorityPath(steps: any[]): string {
+  const groups: Array<{ authority: string; count: number }> = [];
+  for (const step of steps || []) {
+    const authority = String(step?.authority || '').trim();
+    if (!authority) continue;
+    const prior = groups[groups.length - 1];
+    if (prior?.authority === authority) prior.count += 1;
+    else groups.push({ authority, count: 1 });
+  }
+  return groups.map(({ authority, count }) => (
+    authority === 'executes' && count > 1 ? `${authority} (${count} stages)` : authority
+  )).join(' -> ');
+}
+
 function componentSource(evt: TraceEvent): string {
   const label = inlineText(evt.payload?._component_label);
   const kind = inlineText(evt.payload?._component_kind);
@@ -907,11 +935,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     candidates.sort((a, b) => b.score - a.score);
     return candidates[0].payload || null;
   })();
-  const whyAnchorSections: any[] = Array.isArray(trace?.right_panel?.anchor_sections) && trace!.right_panel!.anchor_sections!.length > 0
-    ? (trace!.right_panel!.anchor_sections || [])
-    : (Array.isArray((recommendationEventPayload as any)?.right_panel_contract?.anchor_sections)
-      ? ((recommendationEventPayload as any)?.right_panel_contract?.anchor_sections || [])
-      : []);
+  const whyAnchorSections: any[] = resolveWhyAnchorSections(trace, allDisplayEvents);
   const whyProducts: any[] = Array.isArray(trace?.products) && trace!.products!.length > 0
     ? (trace!.products || [])
     : (Array.isArray((recommendationEventPayload as any)?.products_summary)
@@ -1771,7 +1795,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   <div className={styles.kvRow}><span>Timestamp</span><span>{trace.timestamp}</span></div>
                   <div className={styles.kvRow}><span>Query</span><span>{trace.input_query || '--'}</span></div>
                   <div className={styles.kvRow}><span>Model</span><span>{proposalExecutionStep ? 'Model-directed router' : (ms.selected || '--')}</span></div>
-                  <div className={styles.kvRow}><span>Path</span><span>{typedExecutionSteps.length > 0 ? typedExecutionSteps.map((step: any) => step.authority).join(' -> ') : (Array.isArray(ms.path) ? ms.path.join(' -> ') : '--')}</span></div>
+                  <div className={styles.kvRow}><span>Path</span><span>{typedExecutionSteps.length > 0 ? compactAuthorityPath(typedExecutionSteps) : (Array.isArray(ms.path) ? ms.path.join(' -> ') : '--')}</span></div>
                   <div className={styles.kvRow}><span>Latency</span><span>{proposalExecutionStep?.latency_ms != null ? `${Math.round(proposalExecutionStep.latency_ms)}ms` : (ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--')}</span></div>
                   <div className={styles.kvRow}><span>Intent</span><span>{ms.intent_summary || '--'}</span></div>
                   <div className={styles.kvRow}>
@@ -3975,7 +3999,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                       )}
                       {auditTrail.immutability?.persisted_chain && (
                         <div className={styles.kvRow}><span>Persisted WORM chain</span><span style={{ fontSize: 12 }}>
-                          {auditTrail.immutability.persisted_chain.entries_checked} entries \u00b7 anchor {auditTrail.immutability.persisted_chain.anchor_present ? 'present' : 'pending'}
+                          {auditTrail.immutability.persisted_chain.entries_checked} entries {'\u00b7'} anchor {auditTrail.immutability.persisted_chain.anchor_present ? 'present' : 'pending'}
                         </span></div>
                       )}
 
@@ -3986,9 +4010,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
                       {(auditTrail.decisions || []).length > 0 && (
                         <>
-                          <div className={styles.sectionTitle}>Agent Decisions (Bitemporal)</div>
+                          <div className={styles.sectionTitle}>Component Decisions (Bitemporal)</div>
                           <table className={styles.smallTable}>
-                            <thead><tr><th>Agent</th><th>Valid From</th><th>Valid To</th><th>System From</th><th>Status</th><th>Approval</th></tr></thead>
+                            <thead><tr><th>Component</th><th>Valid From</th><th>Valid To</th><th>System From</th><th>Status</th><th>Approval</th></tr></thead>
                             <tbody>
                               {(auditTrail.decisions || []).map((d: any, i: number) => (
                                 <tr key={i}>

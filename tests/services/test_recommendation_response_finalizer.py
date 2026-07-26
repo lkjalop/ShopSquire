@@ -32,6 +32,13 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     payload = {
         "turn_intent": "COMPARE",
         "execution_mode": "v2_served",
+        "currency": "AUD",
+        "model_selection": {
+            "selected": "qwen3:14b",
+            "source": "model",
+            "authority": "proposes",
+            "latency_ms": 321.0,
+        },
         "results": [
             {
                 "sku": "SKU-B",
@@ -80,6 +87,8 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     }
     assert out["canonical_identity"] == expected
     assert out["right_panel"]["canonical_identity"] == expected
+    assert out["right_panel"]["anchor_sections"][0]["title"] == "Authorized recommendation"
+    assert out["right_panel"]["anchor_sections"][0]["top_products"][0]["sku"] == "SKU-B"
     assert recorded["event"]["payload"]["canonical_identity"] == expected
     assert recorded["event"]["payload"]["right_panel_contract"]["canonical_identity"] == expected
     proposed = recorded["decision"]["proposed_action"]
@@ -105,6 +114,7 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     assert proposed["intent_analysis"]["requirements"] == {
         "gpu_vram_gb": [[">=", 8]],
     }
+    assert proposed["intent_analysis"]["currency"] == "AUD"
     assert proposed["execution_mode"] == "v2_served"
     assert proposed["evidence_items"][-1]["type"] == "workload_requirement"
     assert proposed["evidence_items"][-1]["source"] == "steam"
@@ -112,3 +122,9 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     assert emitted["tenant_id"] == "tenant-a"
     assert [item["sku"] for item in emitted["results"]] == ["SKU-B", "SKU-A"]
     assert out["market_projections"] == [{"sku": "SKU-B", "tenant_id": "tenant-a"}]
+    assert recorded["decision"]["retrieved_context"]["llm"] == {
+        "selected": "qwen3:14b",
+        "source": "model",
+        "authority": "proposes",
+        "latency_ms": 321.0,
+    }

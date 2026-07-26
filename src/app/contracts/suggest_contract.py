@@ -98,6 +98,9 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     # V2 ownership + immutable presentation identity. These make mixed-mode migration visible and
     # let every consumer prove it rendered the same trace-bound ordered product slate.
     "execution_mode", "execution_lane", "delegation_reason", "canonical_identity",
+    # Authoritative settlement currency and truthful model proposal metadata. These prevent the
+    # trace projector from guessing either value after the response has crossed the legacy edge.
+    "currency", "model_selection",
     # Approved policy provenance: the answer came from the tenant StoreProfile, never invented
     # by the model. These fields were added with the independently owned policy lane.
     "policy_source", "policy_answered",

@@ -39,6 +39,21 @@ _EXPLAIN_CACHE: dict[str, tuple[float, Dict]] = {}
 _EXPLAIN_CACHE_TTL_SECONDS = 300.0
 
 
+def _default_model_decision(model_selection: Dict) -> Dict[str, str]:
+    if (
+        model_selection.get("authority") == "proposes"
+        or model_selection.get("source") == "model"
+    ):
+        return {"action": "model_directed"}
+    return {
+        "action": (
+            "escalate_to_big"
+            if bool(model_selection.get("complex"))
+            else "prefer_small"
+        ),
+    }
+
+
 def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict:
     """Reconstruct enough trace context from memory/durable events for fast paths."""
     events = events or []
@@ -1864,10 +1879,7 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
                 ms["selected"] = ms.get("model")
             # Provide explicit escalate/degrade hint if missing
             if ms.get("decision") is None:
-                complex_bool = bool(ms.get("complex"))
-                ms["decision"] = {
-                    "action": "escalate_to_big" if complex_bool else "prefer_small",
-                }
+                ms["decision"] = _default_model_decision(ms)
             if ms.get("selected") is None:
                 action = ((ms.get("decision") or {}).get("action") if isinstance(ms.get("decision"), dict) else None) or "prefer_small"
                 ms["selected"] = f"rule-based ({action})"

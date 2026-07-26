@@ -73,6 +73,33 @@ def test_full_pipeline_shape_passes_contract_with_zero_violations():
     assert validate_response(payload) == []          # stricter than v1's own clarify branches
 
 
+def test_full_pipeline_preserves_authoritative_currency_and_model_proposal():
+    core = _core()
+    core.envelope = _env(currency="AUD")
+    core.extras.update({
+        "constraints_used": {"budget_max_cents": 200000},
+        "decision": {
+            "source": "model",
+            "model_proposal": {"lane": "SEARCH"},
+        },
+        "llm_model": "qwen3:14b",
+        "stage_results": [
+            {"stage": "route+intent", "status": "ok", "latency_ms": 123.0},
+        ],
+    })
+
+    payload = to_legacy(core)
+
+    assert payload["currency"] == "AUD"
+    assert payload["constraints_used"]["currency"] == "AUD"
+    assert payload["model_selection"] == {
+        "selected": "qwen3:14b",
+        "source": "model",
+        "authority": "proposes",
+        "latency_ms": 123.0,
+    }
+
+
 def test_full_pipeline_off_catalog_matches_corpus_class():
     payload = to_legacy(_core(off_catalog={"class": "datacenter_gpu_server",
                                            "label": "rack-mount GPU servers",

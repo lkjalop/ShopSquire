@@ -63,6 +63,23 @@ def finalize_core_response(
     except Exception:
         right_panel = {"mode": str(right_panel.get("mode") or "")}
     right_panel.setdefault("anchor_sections", [])
+    if not right_panel["anchor_sections"] and summary:
+        right_panel["anchor_sections"] = [{
+            "title": "Authorized recommendation",
+            "match_basis": ["catalog eligibility", "budget", "capability"],
+            "summary": (
+                "Products shown after deterministic catalog, budget, and capability checks."
+            ),
+            "top_products": [
+                {
+                    "sku": item["sku"],
+                    "name": item["name"],
+                    "score_norm": item.get("score_norm"),
+                    "reasons": item.get("reasons") or [],
+                }
+                for item in summary[:3]
+            ],
+        }]
     right_panel["canonical_identity"] = canonical_identity
     out["right_panel"] = right_panel
     lane = str(out.get("turn_intent") or "").strip().upper() or None
@@ -92,6 +109,11 @@ def finalize_core_response(
     budget_max_cents = constraints.get("budget_max_cents")
     execution_steps = [dict(item) for item in (out.get("execution_steps") or [])
                        if isinstance(item, dict)][:24]
+    model_selection = (
+        dict(out.get("model_selection") or {})
+        if isinstance(out.get("model_selection"), dict)
+        else {}
+    )
     security = dict(out.get("security") or {}) if isinstance(out.get("security"), dict) else {}
     security.setdefault("policy_route", "allow")
     security.setdefault("checked_boundary", "recommendation_facade")
@@ -152,7 +174,8 @@ def finalize_core_response(
                      "canonical_identity": canonical_identity,
                      "execution_mode": str(out.get("execution_mode") or "v2_served"),
                      "intent_analysis": intent_analysis, "constraints_used": constraints,
-                     "execution_steps": execution_steps, "security": security},
+                     "execution_steps": execution_steps, "security": security,
+                     "model_selection": model_selection},
         )
         persisted = log_decision(
             agent_name="Recommendation_Core",
@@ -163,6 +186,7 @@ def finalize_core_response(
                 "right_panel_contract": right_panel,
                 "intent_analysis": intent_analysis,
                 "execution_steps": execution_steps,
+                "llm": model_selection,
             },
             proposed_action={
                 "decision_mode": str(out.get("decision_mode") or "catalog_recommendation"),
@@ -176,6 +200,7 @@ def finalize_core_response(
                 "constraints_used": constraints,
                 "security": security,
                 "evidence_items": evidence_items,
+                "model_selection": model_selection,
             },
             decision_id=trace_id, tenant_id=str(tenant_id or "default"),
             actor_id=str(uid or "") or None, actor_role="buyer",

@@ -24,7 +24,12 @@ from src.app.services.recommendation_core.evidence import (
 )
 from src.app.services.recommendation_core.fit import build_cards
 from src.app.services.recommendation_core.plan import Plan, derive_plan
-from src.app.services.recommendation_core.turn_router import TurnDecision, route_turn
+from src.app.services.recommendation_core.turn_router import (
+    TurnDecision,
+    active_router_model,
+    last_router_call_metrics,
+    route_turn,
+)
 from src.app.services.taxonomy_registry import (
     ancestors,
     classification_nodes_for_skus,
@@ -349,6 +354,10 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     resp.record_stage("route+intent", status="ok",
                       latency_ms=(time.perf_counter() - _t_route) * 1000.0,
                       won_message=False, source=decision.source)
+    if decision.model_proposal:
+        resp.extras["llm_model"] = (
+            last_router_call_metrics().get("model") or active_router_model()
+        )
     resp.extras["decision"] = decision.as_dict()
     resp.extras["secondary_lanes"] = list(decision.secondary_lanes)
     if requested_quantity is not None:

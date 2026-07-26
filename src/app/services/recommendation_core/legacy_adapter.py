@@ -66,6 +66,24 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
     products = [p.as_dict() for p in core.products]
     clarifying = bool(core.clarify)
     subject_action = str((core.extras.get("decision") or {}).get("subject_action") or "")
+    constraints_used = dict(core.extras.get("constraints_used") or {})
+    constraints_used.setdefault("currency", core.envelope.currency)
+    decision = dict(core.extras.get("decision") or {})
+    route_stage = next(
+        (
+            stage for stage in (core.extras.get("stage_results") or [])
+            if isinstance(stage, dict) and stage.get("stage") == "route+intent"
+        ),
+        {},
+    )
+    model_selection = None
+    if decision.get("model_proposal"):
+        model_selection = {
+            "selected": core.extras.get("llm_model") or "unknown",
+            "source": decision.get("source") or "unknown",
+            "authority": "proposes",
+            "latency_ms": route_stage.get("latency_ms"),
+        }
     slate_disposition = (
         "replace" if products
         else "retain" if clarifying and subject_action != "reset"
@@ -76,6 +94,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         # ── the outcome (real core output) ────────────────────────────────────
         "assistant_message": core.message,
         "message": core.message,          # branch-duplicate field, kept for consumers
+        "currency": core.envelope.currency,
         "products": products,
         "slate_disposition": slate_disposition,
         "results": products,              # recorded duplication — preserved at the edge
@@ -125,8 +144,8 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "complexity_signals": core.extras.get("complexity_signals", {}),
         "confidence_band": core.extras.get("confidence_band", "unscored"),
         "confidence_calibrated": None,
-        "constraints_used": core.extras.get("constraints_used", {}),
-        "decision": core.extras.get("decision", {}),
+        "constraints_used": constraints_used,
+        "decision": decision,
         "intent": core.extras.get("intent", {}),
         "routing_source": (core.extras.get("decision") or {}).get("source"),
         "policy_source": core.extras.get("policy_source"),
@@ -138,6 +157,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "followup_contract": {},
         "intent_execution_plan": core.extras.get("plan", {}),
         "llm_model": core.extras.get("llm_model", "recommendation_core"),
+        "model_selection": model_selection,
         "memory_confidence": None,
         "model_tier": core.extras.get("model_tier", "core"),
         "policy_version": "v1",
