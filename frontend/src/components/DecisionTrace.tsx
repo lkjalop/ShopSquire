@@ -204,7 +204,7 @@ function humanizeKey(key: string): string {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-function legacyComponentOntology(sourceId: string): {
+export function legacyComponentOntology(sourceId: string): {
   label: string;
   kind: 'model' | 'stage' | 'gate' | 'connector' | 'observer';
   authority: string;
@@ -213,16 +213,17 @@ function legacyComponentOntology(sourceId: string): {
   const normalized = raw.toLowerCase();
   const readable = humanizeKey(raw.replace(/_agent$/i, ''));
 
-  if (/(ollama|qwen|llm|model)/.test(normalized)) {
+  if (['recommendation_agent', 'research_agent', 'buyer_intent_agent'].includes(normalized)
+      || /(ollama|qwen|llm|model)/.test(normalized)) {
     return { label: readable || 'Model', kind: 'model', authority: 'proposes' };
   }
   if (/(policy|guard|security|authoriz|approval|send_gate|clamp)/.test(normalized)) {
     return { label: readable || 'Policy', kind: 'gate', authority: 'authorizes' };
   }
-  if (/(connector|transport|api|edi|cxml|email|portal|webhook)/.test(normalized)) {
-    return { label: readable || 'Integration', kind: 'connector', authority: 'executes' };
+  if (/(inventory|market|supplier_channel|retrieval|connector|transport|api|edi|cxml|email|portal|webhook)/.test(normalized)) {
+    return { label: readable || 'Integration', kind: 'connector', authority: 'retrieves' };
   }
-  if (/(trace|persist|audit|telemetry|metric|market_intelligence|feedback)/.test(normalized)) {
+  if (/(trace|persist|audit|telemetry|metric|feedback)/.test(normalized)) {
     return { label: readable || 'Observer', kind: 'observer', authority: 'observes' };
   }
   return { label: readable || 'Pipeline', kind: 'stage', authority: 'executes' };
@@ -3839,7 +3840,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                           <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
                         ) : (
                           <table className={styles.table}>
-                            <thead><tr><th></th><th>Agent</th><th>Event</th><th>Mode</th><th>Detail</th><th>When</th></tr></thead>
+                            <thead><tr><th></th><th>Component</th><th>Event</th><th>Mode</th><th>Detail</th><th>When</th></tr></thead>
                             <tbody>
                               {procEvents.map((e, i) => {
                                 const p: any = (e as any).payload || {};
