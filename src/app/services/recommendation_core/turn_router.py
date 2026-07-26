@@ -193,20 +193,37 @@ def _query_names_sold_category(db, envelope: TurnEnvelope) -> bool:
     """Does the query contain a SOLD node's own name-token (plural-forgiving)?
     'laptop for fine-tuning LLMs' names Laptops → sold → refusal vetoed;
     'do you sell forklifts?' names nothing sold → veto does not apply."""
+    return bool(_query_named_sold_handles(db, envelope))
+
+
+def _query_named_sold_handles(db, envelope: TurnEnvelope) -> Tuple[str, ...]:
+    """Sold categories whose product head is explicitly present in the query."""
     try:
         from src.app.services.catalog_classifier import _plural_expand, _tokens
-        from src.app.services.taxonomy_registry import get_node, sold_nodes
-        sold = sold_nodes(db, tenant_id=envelope.tenant_id)
-        if not sold:
-            return False
-        q_toks = _plural_expand(set(_tokens(envelope.query)))
-        for handle in sold:
-            n = get_node(handle)
-            if n and (set(_tokens(n.name)) & q_toks):
-                return True
-        return False
+
+        query_tokens = _plural_expand(set(_tokens(envelope.query)))
+        matched: List[str] = []
+        for handle in sold_nodes(db, tenant_id=envelope.tenant_id):
+            node = get_node(handle)
+            name_tokens = list(_tokens(node.name)) if node is not None else []
+            if name_tokens and (_plural_expand({name_tokens[-1]}) & query_tokens):
+                matched.append(handle)
+        return tuple(matched)
     except Exception:
-        return False  # veto is a safety refinement; its failure must not block routing
+        return ()
+
+
+def _grounded_use_case_host(db, envelope: TurnEnvelope,
+                            use_cases: List[str]) -> Optional[Any]:
+    """Clamp a model-selected workload to a registry-declared, tenant-sold host."""
+    from src.app.services.use_case_registry import host_nodes_for
+
+    for handle in host_nodes_for(use_cases):
+        node = get_node(handle)
+        if node is not None and sells_within(
+                db, node.handle, tenant_id=envelope.tenant_id) is True:
+            return node
+    return None
 
 
 @dataclass(frozen=True)
@@ -378,12 +395,14 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     tenant-sold taxonomy candidate and recover an explicit quantity/budget scope with
     the shared grammars. The source remains a fallback so promotion metrics count it.
     """
+    named_handles = set(_query_named_sold_handles(db, envelope))
     node = None
     for candidate, _score in cands:
-        if sells_within(db, candidate.handle, tenant_id=envelope.tenant_id) is True:
+        if (candidate.handle in named_handles
+                and sells_within(db, candidate.handle, tenant_id=envelope.tenant_id) is True):
             node = candidate
             break
-    if node is None or not _query_names_sold_category(db, envelope):
+    if node is None:
         return TurnDecision(source=f"fallback:{reason}")
 
     from src.app.services.bulk_intent import extract_quantity_span
@@ -1279,22 +1298,28 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         )
                         _ROUTER_CALL_STATE.metrics = router_metrics
 
-    # A sparse model response can correctly classify lane, quantity, and budget while omitting
-    # the product handle. Recover a subject only when the shopper's words name a tenant-sold
-    # category and the lexical candidate itself is verified sold. This is catalog authorization
-    # of an incomplete proposal, not a second intent router; off-domain and unsold requests abstain.
+    # A sparse model response can correctly classify lane, workload, quantity, and budget while
+    # omitting the product handle. Explicit product categories take precedence. Otherwise a
+    # clamped use case may select only a registry-declared, tenant-sold host. A modifier shared
+    # with an accessory category cannot authorize that accessory.
     if (node is None and lane == "PROCUREMENT" and not str(data.get("handle") or "").strip()
-            and request_scope != "service_or_place"
-            and _query_names_sold_category(db, envelope)):
+            and request_scope != "service_or_place"):
+        named_handles = set(_query_named_sold_handles(db, envelope))
         node = next(
             (
                 candidate for candidate, _score in cands
-                if sells_within(db, candidate.handle, tenant_id=envelope.tenant_id) is True
+                if (candidate.handle in named_handles
+                    and sells_within(
+                        db, candidate.handle, tenant_id=envelope.tenant_id) is True)
             ),
             None,
         )
         if node is not None:
             routing_source = "model+catalog_subject_rescue"
+        elif use_cases:
+            node = _grounded_use_case_host(db, envelope, use_cases)
+            if node is not None:
+                routing_source = "model+use_case_host"
 
     if typed_sort_refinement:
         routing_source = f"{routing_source}+typed_sort_refinement"

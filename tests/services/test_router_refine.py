@@ -182,6 +182,85 @@ def test_sparse_procurement_proposal_recovers_only_named_sold_subject(db):
     assert d.source == "model+catalog_subject_rescue"
 
 
+def test_sparse_procurement_uses_clamped_workload_host_before_lexical_accessory(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    add_sold_node(db, node_handle="el-6-11-2")
+    add_sold_node(db, node_handle="el-2-2-7-2-2")
+    payload = {
+        "lane": "PROCUREMENT",
+        "quantity": 20,
+        "total_budget": 55000,
+        "budget_scope": "total",
+        "procurement_context": "current_order",
+        "use_cases": ["game_development"],
+        "requirements": {},
+        "confidence": 0.9,
+    }
+
+    d = route_turn(
+        db,
+        _env("I'm starting a gaming studio for 20 students, $55,000 total budget"),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert d.lane == "PROCUREMENT"
+    assert d.node_handle == "el-6-11-2"
+    assert d.use_cases == ("game_development",)
+    assert d.source == "model+use_case_host"
+
+
+def test_category_rescue_does_not_treat_modifier_as_product_subject(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-2-2-7-2-2")
+    payload = {
+        "lane": "PROCUREMENT",
+        "quantity": 20,
+        "total_budget": 55000,
+        "budget_scope": "total",
+        "procurement_context": "current_order",
+        "requirements": {},
+        "confidence": 0.9,
+    }
+
+    d = route_turn(
+        db,
+        _env("I'm starting a gaming studio for 20 students, $55,000 total budget"),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert d.lane == "PROCUREMENT"
+    assert d.node_handle is None
+    assert d.source == "model"
+
+
+def test_explicit_product_category_precedes_workload_host_rescue(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-11-2")
+    add_sold_node(db, node_handle="el-2-2-7-2-2")
+    payload = {
+        "lane": "PROCUREMENT",
+        "quantity": 20,
+        "total_budget": 10000,
+        "budget_scope": "total",
+        "use_cases": ["gaming"],
+        "requirements": {},
+        "confidence": 0.9,
+    }
+
+    d = route_turn(
+        db,
+        _env("I need 20 gaming headsets for the studio, $10,000 total"),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert d.node_handle == "el-2-2-7-2-2"
+    assert d.source == "model+catalog_subject_rescue"
+
+
 @pytest.mark.parametrize("model_lane", ["BULK", "BULK_QUOTE", "QUOTE", "RFQ"])
 def test_procurement_lane_synonyms_are_clamped_to_existing_lane(db, model_lane):
     from src.app.services.taxonomy_registry import add_sold_node

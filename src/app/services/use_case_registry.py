@@ -123,6 +123,30 @@ def apply_use_case_exclusions(use_cases: List[str]) -> List[str]:
     return [key for key in selected if key not in excluded]
 
 
+def host_nodes_for(use_cases: List[str]) -> List[str]:
+    """Return registry-declared product hosts for bounded workload use cases."""
+    wanted = [str(value).strip() for value in use_cases if str(value).strip()]
+    hosts: List[str] = []
+    for vertical in _VERTICALS:
+        registry = load_use_cases(vertical)
+        rows = registry.get("use_cases") or {}
+        default_hosts = registry.get("host_nodes") or []
+        if isinstance(default_hosts, str):
+            default_hosts = [default_hosts]
+        for use_case in wanted:
+            row = rows.get(use_case)
+            if not isinstance(row, dict):
+                continue
+            declared = row.get("host_nodes") or default_hosts
+            if isinstance(declared, str):
+                declared = [declared]
+            for handle in declared:
+                normalized = str(handle).strip()
+                if normalized and normalized not in hosts:
+                    hosts.append(normalized)
+    return hosts
+
+
 def resolve(vertical: str, coarse: str, variant: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """A coarse use-case (+ optional variant) → merged CAPABILITY REQUIREMENTS, or None when the
     coarse key is unknown. Merge: variant requirements ADD/OVERRIDE the baseline (per-attribute);
