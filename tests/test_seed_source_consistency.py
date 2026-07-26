@@ -27,3 +27,13 @@ def test_both_seeders_resolve_same_canonical_source():
 
 def test_canonical_source_exists():
     assert Path("docs/laptop-products-new-short.txt").exists()
+
+
+def test_explicit_laptop_name_overrides_stale_hard_drive_section():
+    seed = _load("seed_inventory_category_guard", "scripts/seed_inventory_from_txt.py")
+    category = seed._category(
+        'Lenovo IdeaPad 5 14" 2K OLED 2-in-1 Laptop',
+        'Lenovo IdeaPad 5 14" 2K OLED 2-in-1 Laptop\n16GB RAM\n512GB SSD',
+        "hard_drive",
+    )
+    assert category == "laptop"
