@@ -7,6 +7,7 @@ import { getOwnerApiKey } from '../lib/browserSession';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
 import { explainProcEvent } from '../lib/procEventExplain';
 import { dealEconomicsStatus, formatDealMoney } from '../lib/dealEconomicsDisplay';
+import { shouldShowMissingAnchorReasoning } from '../lib/tracePresentation';
 
 type TraceEvent = {
   id?: string;
@@ -2085,9 +2086,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         ))}
                       </div>
                     ))
-                  ) : (
+                  ) : shouldShowMissingAnchorReasoning(whyAnchorSections, whyProducts) ? (
                     <div className={styles.muted}>No anchor-section reasoning recorded for this trace.</div>
-                  )}
+                  ) : null}
 
                   <div className={styles.sectionTitle}>All Ranked Products</div>
                   {Array.isArray(whyProducts) && whyProducts.length > 0 ? (

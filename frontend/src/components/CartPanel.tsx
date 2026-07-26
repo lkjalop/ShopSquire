@@ -5,6 +5,7 @@ import { apiUrl, safeJson, confirmCartSourcing, commitFulfillmentCase } from '..
 import { sourcedCasesFrom, sourcedCaseCountFrom } from '../lib/sourcing';
 import { withRetry } from '../lib/retry';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
+import { ACCESSORY_UPSELL_TRACE_LABEL } from '../lib/tracePresentation';
 import SplitFulfillmentCard from './SplitFulfillmentCard';
 
 type CartItem = { sku: string; quantity: number; price_cents?: number; name?: string; specs?: Record<string, any> | null };
@@ -513,7 +514,7 @@ export default function CartPanel({
 
       {upsellTraceId && (
         <div className={styles.muted}>
-          Decision Trace available: <span className={styles.sku}>{upsellTraceId}</span>
+          {ACCESSORY_UPSELL_TRACE_LABEL}: <span className={styles.sku}>{upsellTraceId}</span>
         </div>
       )}
     </div>
