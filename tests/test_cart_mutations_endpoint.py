@@ -151,6 +151,19 @@ def test_chat_short_circuit_forwards_confirmation_card():
     assert out["trace_id"] == "tid-cc-1"
 
 
+def test_chat_short_circuit_forwards_explicit_budget_memory():
+    from src.app.routers.chat import _cart_mutation_short_circuit
+    out = _cart_mutation_short_circuit(
+        _suggest_cart_payload(),
+        q="Make it 50 and set the total budget to AUD 110,000.",
+        uid="u",
+        db=None,
+    )
+
+    assert out["confirmed_slots"]["budget_scope"] == "total"
+    assert out["confirmed_slots"]["total_budget_cents"] == 11_000_000
+
+
 def test_chat_short_circuit_forwards_applied_cart():
     from src.app.routers.chat import _cart_mutation_short_circuit
     out = _cart_mutation_short_circuit(

@@ -16,7 +16,7 @@ import AffordabilityResolutionCard, {
   type AffordabilityResolution,
 } from './components/AffordabilityResolutionCard';
 import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
-import { procurementAwareTraceId } from './lib/trace';
+import { nextSourcingTraceId, procurementAwareTraceId } from './lib/trace';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
@@ -983,6 +983,9 @@ export default function App() {
       if (status === 'applied' || status === 'already_applied') {
         const destructive = (out.applied || []).some((a) =>
           ['clear_all', 'keep_only', 'remove_items', 'clear_previous'].includes(String(a.action)));
+        // The previous recommendation's fulfilment alternatives are quantity-specific. Once a
+        // confirmed mutation changes the cart, only the refreshed delivery plan is authoritative.
+        setBulkAlternatives([]);
         const refreshed = await getCart(uid).catch(() => null);
         setCart(refreshed);
         switchRightPanelMode('cart');
@@ -1894,6 +1897,9 @@ export default function App() {
         // guarded); needs_clarification → the ask IS the answer. Product machinery is skipped.
         if (data && (data as any).cart_mutation) {
           const cm = (data as any).cart_mutation;
+          const cartConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
+            ? data.confirmed_slots
+            : null;
           const destructive = Array.isArray(cm.applied) && cm.applied.some((a: any) =>
             ['clear_all', 'keep_only', 'remove_items', 'clear_previous'].includes(String(a.action)));
           setMessages(prev => [...prev, {
@@ -1906,7 +1912,13 @@ export default function App() {
             ...(data.cart_updated && destructive ? { undoServer: true } : {}),
           }]);
           setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || null));
+          if (cartConfirmedSlots && Object.keys(cartConfirmedSlots).length > 0) {
+            setConfirmedSlots(prev => ({ ...prev, ...cartConfirmedSlots }));
+          }
           if (data.cart_updated) {
+            // Quantity-specific alternatives came from the recommendation turn before this
+            // mutation. Keeping them would show the old requested quantity above the new cart.
+            setBulkAlternatives([]);
             await refreshCart();
             switchRightPanelMode('cart');
           }
@@ -1977,15 +1989,19 @@ export default function App() {
         // case or bulk options) keeps the pin so an active plan isn't unlinked.
         const turnHasSourcingPreview = Boolean(
           data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines) && (data.sourcing_intent as any).lines.length > 0);
+        const turnHasFulfillmentOptions = Array.isArray(data.fulfillment_options)
+          && data.fulfillment_options.length > 0;
         const turnHasProcurementContext = turnHasSourcingPreview
           || Boolean(data.fulfillment_case && (data.fulfillment_case as any).case_id)
-          || (Array.isArray(data.fulfillment_options) && data.fulfillment_options.length > 0)
+          || turnHasFulfillmentOptions
           || (Number((data as any).requested_quantity) > 1);
-        if (turnHasSourcingPreview) {
-          setSourcingTraceId(nextTraceId);
-        } else if (!turnHasProcurementContext) {
-          setSourcingTraceId(null);
-        }
+        setSourcingTraceId((current) => nextSourcingTraceId(
+          current,
+          nextTraceId,
+          turnHasSourcingPreview,
+          turnHasFulfillmentOptions,
+          turnHasProcurementContext,
+        ));
         persistOperatorMetrics(data.timing_breakdown, nextTraceId, Array.isArray(chatPayload.images) && chatPayload.images.length > 0 ? 'chat+image' : 'chat');
         try {
           const persona = String(data.buyer_persona || data.buyer_persona_candidate || '').trim();

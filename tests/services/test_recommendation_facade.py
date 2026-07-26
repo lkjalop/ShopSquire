@@ -378,6 +378,54 @@ def test_session_slice_read_tenant_scoped():
     assert F._read_session_slice(None, "u1", "t1") == {}      # no redis → empty, never raises
 
 
+def test_explicit_confirmed_slots_override_stale_session_constraints():
+    session = {
+        "prior_node": "el-6-6",
+        "accepted_constraints": {
+            "budget_max_cents": 55_000_00,
+            "total_budget_cents": 55_000_00,
+            "budget_scope": "total",
+            "quantity": 20,
+            "requirements": {"ram_gb": (">=", 32)},
+        },
+    }
+
+    merged = F._merge_session_overrides(session, {
+        "budget_max": 110_000,
+        "total_budget_cents": 110_000_00,
+        "budget_scope": "total",
+        "order_quantity": 50,
+    })
+
+    assert merged["prior_node"] == "el-6-6"
+    assert merged["accepted_constraints"] == {
+        "budget_max_cents": 110_000_00,
+        "total_budget_cents": 110_000_00,
+        "budget_scope": "total",
+        "quantity": 50,
+        "requirements": {"ram_gb": (">=", 32)},
+    }
+
+
+def test_session_override_merge_discards_unknown_and_invalid_values():
+    merged = F._merge_session_overrides(
+        {"accepted_constraints": {"budget_max_cents": 55_000_00, "quantity": 20}},
+        {
+            "budget_max": -1,
+            "total_budget_cents": "not-a-number",
+            "budget_scope": "lifetime",
+            "order_quantity": 0,
+            "admin_override": True,
+        },
+    )
+
+    assert merged["accepted_constraints"] == {
+        "budget_max_cents": 55_000_00,
+        "quantity": 20,
+    }
+    assert "admin_override" not in merged
+
+
 def test_default_tenant_bridges_bounded_legacy_session_fields_only():
     import json
     r = _Redis()

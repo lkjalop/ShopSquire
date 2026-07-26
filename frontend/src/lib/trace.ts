@@ -14,3 +14,20 @@ export function procurementAwareTraceId(
 ): string | null {
   return hasProcurementContext ? (sourcingTraceId || traceId) : traceId;
 }
+
+/**
+ * Keep the recommendation decision that opened a sourcing journey stable while cart mutations
+ * create their own audit traces. A sourcing journey can begin with either a deferred sourcing
+ * intent or bounded fulfilment alternatives; requiring only the former loses V2 bulk turns.
+ */
+export function nextSourcingTraceId(
+  currentSourcingTraceId: string | null,
+  nextTraceId: string | null,
+  hasSourcingPreview: boolean,
+  hasFulfillmentOptions: boolean,
+  hasProcurementContext: boolean,
+): string | null {
+  if ((hasSourcingPreview || hasFulfillmentOptions) && nextTraceId) return nextTraceId;
+  if (!hasProcurementContext) return null;
+  return currentSourcingTraceId;
+}

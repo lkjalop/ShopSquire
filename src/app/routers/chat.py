@@ -78,6 +78,23 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
         out["budget_min"] = budget.get("budget_min")
     if budget.get("budget_max") is not None:
         out["budget_max"] = budget.get("budget_max")
+    # Preserve whole-order budget semantics across the CART_MUTATE short circuit. Without these
+    # typed fields, a later quantity change falls back to the budget from the original search.
+    try:
+        from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+
+        budget_scope = classify_budget_scope(query)
+        parsed_budget = parse_budget(query)
+        if budget_scope == "total" and parsed_budget and parsed_budget.budget_max is not None:
+            total_budget = int(parsed_budget.budget_max)
+            if total_budget > 0:
+                out["budget_scope"] = "total"
+                out["total_budget_cents"] = total_budget * 100
+                out["budget_max"] = total_budget
+        elif budget_scope == "per_unit":
+            out["budget_scope"] = "per_unit"
+    except Exception:
+        logger.warning("confirmed-slot budget parsing failed", exc_info=True)
     brands = _extract_brand_mentions(query)
     if brands:
         out["brands"] = brands[:6]
@@ -395,6 +412,7 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
         "decision_trace_id": tid,
         "trace_id": tid,
         "next_questions": [],
+        "confirmed_slots": _extract_confirmed_slots(query=q, response=data),
         "blocked": False,
         "needs_human_review": False,
         "security_route": "allow",
@@ -1423,6 +1441,10 @@ async def _call_recommend_in_process(
             external_research_consent=(
                 str(params.get("external_research_consent") or "").lower() == "true"),
             intent_hint=params.get("turn_intent"), role=role, request=request,
+            confirmed_slots=(
+                params.get("confirmed_slots")
+                if isinstance(params.get("confirmed_slots"), dict) else None
+            ),
             source_ip=(request.client.host if request.client else None),
         )
         if facade.served:
@@ -1633,8 +1655,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     try:
         _prior_ss = Memory(redis).get_structured_state(uid) or {}
         _confirmed_in = _prior_ss.get("confirmed_slots") if isinstance(_prior_ss.get("confirmed_slots"), dict) else {}
-        if _confirmed_in:
-            payload["confirmed_slots"] = _confirmed_in
+        _confirmed_request = (
+            payload.get("confirmed_slots")
+            if isinstance(payload.get("confirmed_slots"), dict) else {}
+        )
+        if _confirmed_in or _confirmed_request:
+            payload["confirmed_slots"] = {**_confirmed_in, **_confirmed_request}
         _ls = _prior_ss.get("last_shortlist_skus") or _prior_ss.get("last_valid_shortlist_skus")
         if isinstance(_ls, list):
             _prior_turn_shortlist = [str(s) for s in _ls if s][:5]
@@ -2051,6 +2077,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     break
         except Exception:
             confirmed_slots = {}
+    if confirmed_slots:
+        params["confirmed_slots"] = dict(confirmed_slots)
     if isinstance(nqe_selection, dict):
         try:
             oval = str(nqe_selection.get("option_value") or "").strip().lower()

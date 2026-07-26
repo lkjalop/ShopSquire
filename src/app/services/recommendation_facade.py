@@ -519,6 +519,64 @@ def _read_session_slice(redis, uid: str, tenant_id: str, db: Any = None) -> Dict
         return {}
 
 
+def _merge_session_overrides(
+    session: Optional[Dict[str, Any]],
+    confirmed_slots: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Merge only bounded buyer constraints into the immutable facade session slice."""
+    merged = dict(session or {})
+    if not isinstance(confirmed_slots, dict) or not confirmed_slots:
+        return merged
+
+    accepted = merged.get("accepted_constraints")
+    accepted = dict(accepted) if isinstance(accepted, dict) else {}
+
+    def positive_int(value: Any, *, maximum: int) -> Optional[int]:
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if 0 < parsed <= maximum else None
+
+    for source_key, target_key in (
+        ("budget_min", "budget_min_cents"),
+        ("budget_max", "budget_max_cents"),
+    ):
+        raw = confirmed_slots.get(source_key)
+        if isinstance(raw, bool):
+            continue
+        try:
+            cents = int(round(float(raw) * 100))
+        except (TypeError, ValueError):
+            continue
+        if 0 < cents <= 100_000_000_000_000:
+            accepted[target_key] = cents
+
+    total_budget_cents = positive_int(
+        confirmed_slots.get("total_budget_cents"),
+        maximum=100_000_000_000_000,
+    )
+    if total_budget_cents is not None:
+        accepted["total_budget_cents"] = total_budget_cents
+
+    budget_scope = str(confirmed_slots.get("budget_scope") or "").strip().lower()
+    if budget_scope in {"total", "per_unit"}:
+        accepted["budget_scope"] = budget_scope
+
+    quantity = positive_int(
+        confirmed_slots.get("order_quantity", confirmed_slots.get("quantity")),
+        maximum=100_000,
+    )
+    if quantity is not None:
+        accepted["quantity"] = quantity
+
+    if accepted:
+        merged["accepted_constraints"] = accepted
+    return merged
+
+
 def _run_guard(*, query: str, uid: str, image_labels: Optional[str],
                image_ocr: Optional[str]) -> Dict[str, Any]:
     try:
@@ -541,6 +599,7 @@ def dispatch_recommendation_core_typed(
     external_research_consent: bool = False,
     intent_hint: Optional[str] = None,
     role: str = "",
+    confirmed_slots: Optional[Dict[str, Any]] = None,
     with_trace: Optional[Callable[[Dict[str, Any], str], Dict[str, Any]]] = None,
     record_failure: Optional[Callable[..., Any]] = None,
 ) -> FacadeOutcome:
@@ -645,11 +704,13 @@ def dispatch_recommendation_core_typed(
             if str(_served_guard.get("verdict")) == "allow":
                 cart_slice = _read_cart_slice(db, uid, tenant_id=tenant)
                 if cart_slice:
+                    session = _merge_session_overrides(
+                        _read_session_slice(redis, uid, tenant, db), confirmed_slots)
                     envelope = TurnEnvelope.from_suggest_params(
                         query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                         budget_max=budget_max, trace_id=trace_id, has_image=False,
                         intent_hint=intent_hint,
-                        source_ip=source_ip, session=_read_session_slice(redis, uid, tenant, db),
+                        source_ip=source_ip, session=session,
                         cart=cart_slice, pre_gate=_served_guard,
                         external_research_consent=external_research_consent)
                     cart_payload = _serve_cart_mutation(envelope, role=role,
@@ -673,6 +734,8 @@ def dispatch_recommendation_core_typed(
         if mode == "shadow" or cart_slice:
             # FULL envelope in the job (R10.1/P1.1): budget/session/image ride along so the
             # worker replays the turn production actually saw, not a query-only shadow of it.
+            session = _merge_session_overrides(
+                _read_session_slice(redis, uid, tenant, db), confirmed_slots)
             shadow_env = TurnEnvelope.from_suggest_params(
                 query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                 budget_max=budget_max, trace_id=trace_id,
@@ -680,7 +743,7 @@ def dispatch_recommendation_core_typed(
                 has_image=bool(image_labels or image_hash), source_ip=source_ip,
                 image_observations=image_observations,
                 external_research_consent=external_research_consent,
-                session=_read_session_slice(redis, uid, tenant, db), cart=cart_slice)
+                session=session, cart=cart_slice)
             _enqueue_shadow(redis, envelope=shadow_env, cart_only=(mode != "shadow"))
         if mode == "shadow":
             return outcome("delegate", reason="shadow_only")
@@ -705,7 +768,8 @@ def dispatch_recommendation_core_typed(
         if str(guard.get("verdict")) != "allow":
             return outcome("blocked", reason=f"guard:{guard.get('verdict') or 'unknown'}")
 
-        session = _read_session_slice(redis, uid, tenant, db)
+        session = _merge_session_overrides(
+            _read_session_slice(redis, uid, tenant, db), confirmed_slots)
         # the search core is cart-blind; cart editing already ran above (parallel-run).
         envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
