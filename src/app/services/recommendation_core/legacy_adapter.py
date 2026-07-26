@@ -17,6 +17,7 @@ HONEST inert defaults — never fabricated values that could be mistaken for sig
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, Optional
 
 from src.app.services.recommendation_core.envelope import CoreResponse
@@ -26,14 +27,20 @@ SHAPES = ("full_pipeline", "inventory_fast", "claims", "policy_faq")
 
 
 def to_legacy(core: CoreResponse, *, shape: str = "full_pipeline") -> Dict[str, Any]:
+    started = time.perf_counter()
     core = core.finalize()
     if shape == "inventory_fast":
-        return _inventory_fast(core)
-    if shape == "claims":
-        return _claims(core)
-    if shape == "policy_faq":
-        return _policy_faq(core)
-    return _full_pipeline(core)
+        payload = _inventory_fast(core)
+    elif shape == "claims":
+        payload = _claims(core)
+    elif shape == "policy_faq":
+        payload = _policy_faq(core)
+    else:
+        payload = _full_pipeline(core)
+    timing = dict(payload.get("timing_breakdown") or core.extras.get("timing_breakdown") or {})
+    timing["response_shape_ms"] = round((time.perf_counter() - started) * 1000.0, 1)
+    payload["timing_breakdown"] = timing
+    return payload
 
 
 def _universal(core: CoreResponse) -> Dict[str, Any]:
@@ -167,6 +174,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "referents": {"has_reference": False, "skus": [], "source": None},
         "view_mode": "grid",
         "view_reason": "recommendation_core",
+        "timing_breakdown": dict(core.extras.get("timing_breakdown") or {}),
     }
     return payload
 

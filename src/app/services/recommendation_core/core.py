@@ -122,14 +122,74 @@ def _run_stage(resp: CoreResponse, name: str, fn: Callable[[], None]) -> None:
                       won_message=resp._msg_priority > prio_before)
 
 
+def build_timing_breakdown(
+    core: CoreResponse, *, total_ms: float, router_metrics: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Project one request-scoped timing contract from typed stage results.
+
+    ``retrieval_ms`` is diagnostic and contained within ``plan_ms``. Keeping that relationship
+    explicit prevents operators from adding overlapping phases and inventing a larger total.
+    """
+    stages = [item.as_dict() for item in core.stage_results]
+    route_ms = sum(
+        float(item.get("latency_ms") or 0.0)
+        for item in stages if item.get("stage") == "route+intent"
+    )
+    plan_ms = sum(
+        float(item.get("latency_ms") or 0.0)
+        for item in stages if str(item.get("stage") or "").startswith("plan:")
+    )
+    post_stages = [
+        item for item in stages
+        if item.get("stage") != "route+intent"
+        and not str(item.get("stage") or "").startswith("plan:")
+    ]
+    post_ms = sum(float(item.get("latency_ms") or 0.0) for item in post_stages)
+    fulfillment_ms = sum(
+        float(item.get("latency_ms") or 0.0)
+        for item in post_stages if item.get("stage") == "fulfillment_preview"
+    )
+    retrieval_ms = float((core.extras.get("evidence") or {}).get("latency_ms") or 0.0)
+    model = dict(router_metrics or {})
+    return {
+        "recommendation_total_ms": round(float(total_ms), 1),
+        "route_total_ms": round(route_ms, 1),
+        "plan_ms": round(plan_ms, 1),
+        "retrieval_ms": round(retrieval_ms, 1),
+        "post_stage_ms": round(post_ms, 1),
+        "fulfillment_preview_ms": round(fulfillment_ms, 1),
+        "router_queue_ms": round(float(model.get("queue_ms") or 0.0), 1),
+        "router_load_ms": round(float(model.get("load_ms") or 0.0), 1),
+        "router_prefill_ms": round(float(model.get("prompt_eval_ms") or 0.0), 1),
+        "router_decode_ms": round(float(model.get("decode_ms") or 0.0), 1),
+        "router_wall_ms": round(float(model.get("wall_ms") or 0.0), 1),
+        "router_outcome": str(model.get("outcome") or "not_called"),
+        "router_model": str(model.get("model") or "not_called"),
+        "retrieval_contained_in_plan": True,
+        "stages": stages,
+    }
+
+
 def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                    limit: int = 10) -> CoreResponse:
     """Never raises. The response is always finalized (honesty invariants enforced)."""
+    started = time.perf_counter()
     try:
-        return _recommend_turn(db, envelope, llm_fn=llm_fn, limit=limit)
+        core = _recommend_turn(db, envelope, llm_fn=llm_fn, limit=limit)
     except Exception as exc:  # the never-raise floor: degraded honesty, loudly logged
         logger.exception("recommendation_core turn failed: %s", exc)
-        return degraded_response(envelope, reason=f"core_error:{type(exc).__name__}")
+        core = degraded_response(envelope, reason=f"core_error:{type(exc).__name__}")
+    router_metrics = (
+        last_router_call_metrics()
+        if any(item.stage == "route+intent" for item in core.stage_results)
+        else {}
+    )
+    core.extras["timing_breakdown"] = build_timing_breakdown(
+        core,
+        total_ms=(time.perf_counter() - started) * 1000.0,
+        router_metrics=router_metrics,
+    )
+    return core
 
 
 def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],

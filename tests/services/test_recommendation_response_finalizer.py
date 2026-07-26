@@ -7,7 +7,9 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     recorded = {}
 
     def fake_trace(**kwargs):
-        recorded["event"] = kwargs
+        recorded.setdefault("events", []).append(kwargs)
+        if kwargs.get("event_type") == "recommendation_result":
+            recorded["event"] = kwargs
 
     def fake_decision(**kwargs):
         recorded["decision"] = kwargs
@@ -128,3 +130,37 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
         "authority": "proposes",
         "latency_ms": 321.0,
     }
+
+
+def test_finalizer_adds_sanitize_persist_and_projection_timings(monkeypatch):
+    events = []
+    monkeypatch.setattr(finalizer, "security_sanitize", lambda payload: dict(payload))
+    monkeypatch.setattr(
+        finalizer,
+        "log_trace_event",
+        lambda **kwargs: events.append(kwargs),
+    )
+    monkeypatch.setattr(finalizer, "log_decision", lambda **_kwargs: True)
+
+    payload = {
+        "products": [],
+        "timing_breakdown": {
+            "recommendation_total_ms": 12.0,
+            "route_total_ms": 8.0,
+        },
+    }
+    out = finalizer.finalize_core_response(
+        payload, "trace-timing-1", query="laptop",
+        tenant_id="tenant-a", uid="buyer-a",
+    )
+
+    timing = out["timing_breakdown"]
+    assert timing["recommendation_total_ms"] == 12.0
+    assert timing["route_total_ms"] == 8.0
+    assert timing["sanitize_ms"] >= 0
+    assert timing["trace_persist_ms"] >= 0
+    assert timing["market_projection_ms"] >= 0
+    assert timing["finalization_ms"] >= timing["sanitize_ms"]
+    timing_events = [event for event in events if event["event_type"] == "timing_breakdown"]
+    assert len(timing_events) == 1
+    assert timing_events[0]["payload"]["timing_breakdown"] == timing

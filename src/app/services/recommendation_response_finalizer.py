@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Dict, Optional
 
 from src.app.deps import security_sanitize
@@ -26,12 +27,22 @@ def finalize_core_response(
     tenant_id: str = "default", uid: str = "",
 ) -> Dict[str, Any]:
     """Sanitize and persist one core response without importing the legacy router."""
+    finalization_started = time.perf_counter()
+    sanitize_started = time.perf_counter()
     try:
         out = security_sanitize(dict(payload or {}))
     except Exception:
         logger.exception("core response sanitization failed")
         out = dict(payload or {})
+    timing = dict(out.get("timing_breakdown") or {})
+    timing["sanitize_ms"] = round((time.perf_counter() - sanitize_started) * 1000.0, 1)
+    out["timing_breakdown"] = timing
     if not trace_id:
+        timing["trace_persist_ms"] = 0.0
+        timing["market_projection_ms"] = 0.0
+        timing["finalization_ms"] = round(
+            (time.perf_counter() - finalization_started) * 1000.0, 1,
+        )
         return out
 
     out["trace_id"] = trace_id
@@ -166,6 +177,7 @@ def finalize_core_response(
             "score": 1.0,
         })
 
+    persist_started = time.perf_counter()
     try:
         log_trace_event(
             trace_id=trace_id, event_type="recommendation_result", source_type="stage",
@@ -210,6 +222,8 @@ def finalize_core_response(
     except Exception as exc:
         out["_trace_recommendation_persisted"] = False
         logger.warning("core response trace persistence failed for %s: %s", trace_id, exc)
+    timing["trace_persist_ms"] = round((time.perf_counter() - persist_started) * 1000.0, 1)
+    projection_started = time.perf_counter()
     if products:
         try:
             from src.app.models.db import db_session
@@ -222,4 +236,23 @@ def finalize_core_response(
                 out["market_projections"] = market_projections
         except Exception as exc:
             logger.warning("core market projection failed for %s: %s", trace_id, exc)
+    timing["market_projection_ms"] = round(
+        (time.perf_counter() - projection_started) * 1000.0, 1,
+    )
+    timing["finalization_ms"] = round(
+        (time.perf_counter() - finalization_started) * 1000.0, 1,
+    )
+    out["timing_breakdown"] = timing
+    try:
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="timing_breakdown",
+            source_type="observer",
+            source_id="Recommendation_Timing",
+            target_type="trace",
+            target_id=trace_id,
+            payload={"timing_breakdown": timing},
+        )
+    except Exception as exc:
+        logger.warning("core timing trace persistence failed for %s: %s", trace_id, exc)
     return out

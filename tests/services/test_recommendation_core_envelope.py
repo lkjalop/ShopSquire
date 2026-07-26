@@ -164,6 +164,45 @@ def test_envelope_uses_authoritative_store_currency_when_unspecified():
     assert env.currency == "AUD"
 
 
+def test_timing_breakdown_separates_model_and_core_phases():
+    from src.app.services.recommendation_core.core import build_timing_breakdown
+
+    core = CoreResponse(envelope=_env())
+    core.record_stage("route+intent", latency_ms=8200)
+    core.record_stage("plan:retrieve+fit_check", latency_ms=420)
+    core.record_stage("fulfillment_preview", latency_ms=3100)
+    core.record_stage("shelf", latency_ms=25)
+    core.extras["evidence"] = {"latency_ms": 380}
+
+    timing = build_timing_breakdown(
+        core,
+        total_ms=11850,
+        router_metrics={
+            "queue_ms": 100,
+            "load_ms": 200,
+            "prompt_eval_ms": 2200,
+            "decode_ms": 5600,
+            "wall_ms": 8100,
+            "outcome": "ok",
+            "model": "qwen3:14b",
+        },
+    )
+
+    assert timing["recommendation_total_ms"] == 11850
+    assert timing["route_total_ms"] == 8200
+    assert timing["retrieval_ms"] == 380
+    assert timing["fulfillment_preview_ms"] == 3100
+    assert timing["post_stage_ms"] == 3125
+    assert timing["router_queue_ms"] == 100
+    assert timing["router_load_ms"] == 200
+    assert timing["router_prefill_ms"] == 2200
+    assert timing["router_decode_ms"] == 5600
+    assert timing["router_wall_ms"] == 8100
+    assert timing["router_outcome"] == "ok"
+    assert timing["router_model"] == "qwen3:14b"
+    assert timing["retrieval_contained_in_plan"] is True
+
+
 def test_shown_products_beat_stray_claims_artifacts():
     """R10 census fix: the legacy kitchen-sink can mint incident_id + needs_human_review=True
     on a PRODUCT turn (recorded live in compare_two_models, 15 products). A payload that SHOWS
