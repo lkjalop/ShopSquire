@@ -409,6 +409,10 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
         "cart_updated": bool(data.get("cart_updated")),
         "cart": data.get("cart"),
         "turn_intent": "CART_MUTATE",
+        "execution_mode": data.get("execution_mode") or "v2_served",
+        "execution_lane": data.get("execution_lane") or "CART_MUTATE",
+        "delegation_reason": data.get("delegation_reason"),
+        "action_executed": bool(data.get("action_executed")),
         "decision_trace_id": tid,
         "trace_id": tid,
         "next_questions": [],
@@ -2940,6 +2944,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "complexity": complexity_result,
         "intent_routing": intent_routing_result,
         "turn_intent": turn_intent,
+        # Preserve typed facade ownership at the HTTP/SSE edge. Without these fields the
+        # browser and trace cannot prove whether V2 served, legacy delegated, or the request
+        # failed boundedly in a V2-only pilot.
+        "execution_mode": data.get("execution_mode"),
+        "execution_lane": data.get("execution_lane") or turn_intent,
+        "delegation_reason": data.get("delegation_reason"),
+        "action_executed": bool(data.get("action_executed")),
         # N1/N6 forward-through: the evidence orchestrator's block (legs/citations) is produced in
         # recommend.suggest but was DROPPED here — so the frontend (which hits /chat/query, not
         # /suggest) never saw it and the Evidence tab + Source chips stayed empty. Forward it.

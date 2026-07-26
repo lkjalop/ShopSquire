@@ -29,6 +29,9 @@ async def _fake_recommend(*args, **kwargs):
                 "router_decode_ms": 7300.0,
                 "fulfillment_preview_ms": 901.2,
             },
+            "execution_mode": "v2_served",
+            "execution_lane": "PROCUREMENT",
+            "action_executed": False,
             "next_questions": [],
         }
 
@@ -61,6 +64,9 @@ def test_chat_query_forwards_narration_job_id(monkeypatch):
         "router_decode_ms": 7300.0,
         "fulfillment_preview_ms": 901.2,
     }
+    assert body["execution_mode"] == "v2_served"
+    assert body["execution_lane"] == "PROCUREMENT"
+    assert body["action_executed"] is False
 
 
 async def _fake_no_match_with_brand_exclusion(*args, **kwargs):

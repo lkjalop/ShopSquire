@@ -134,6 +134,9 @@ def _suggest_cart_payload(**over):
                           "expires_at": "2099-01-01 00:00:00"},
         "cart_updated": False,
         "decision_trace_id": "tid-cc-1",
+        "execution_mode": "v2_served",
+        "execution_lane": "CART_MUTATE",
+        "action_executed": False,
         "timing_breakdown": {
             "route_total_ms": 1200.0,
             "finalization_ms": 12.5,
@@ -157,6 +160,9 @@ def test_chat_short_circuit_forwards_confirmation_card():
         "route_total_ms": 1200.0,
         "finalization_ms": 12.5,
     }
+    assert out["execution_mode"] == "v2_served"
+    assert out["execution_lane"] == "CART_MUTATE"
+    assert out["action_executed"] is False
 
 
 def test_chat_short_circuit_forwards_explicit_budget_memory():
