@@ -114,24 +114,6 @@ tracer = get_tracer("recommend-router")
 logger = logging.getLogger("shopsquire.recommend")
 
 
-class RecommendInteractionPayload(BaseModel):
-    uid: str
-    sku: str
-    action: str
-    surface: str = "checkout_upsell"
-    trace_id: str | None = None
-    context: Dict[str, Any] | None = None
-
-
-class RecommendFeedbackPayload(BaseModel):
-    uid: str
-    trace_id: str | None = None
-    sku: str | None = None
-    outcome: str
-    correction_text: str | None = None
-    context: Dict[str, Any] | None = None
-
-
 def _block_response(payload: Dict, code: int = 403):
     # Default is now fail-CLOSED (403). Set SECURITY_BLOCK_MODE=200 ONLY in
     # integration-test environments where you need to inspect the blocked payload
@@ -12160,7 +12142,6 @@ def explain_why_product(
     }
 
 
-@router.post("/interaction")
 def log_recommend_interaction(
     payload: RecommendInteractionPayload,
     db=Depends(get_db),
@@ -12251,7 +12232,6 @@ def log_recommend_interaction(
     return {"status": "ok", "event_id": eid}
 
 
-@router.post("/feedback")
 def recommend_feedback(
     payload: RecommendFeedbackPayload,
     db=Depends(get_db),
