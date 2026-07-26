@@ -67,9 +67,10 @@ def _minimum_constraints(requirements: Dict[str, Any]) -> Dict[str, Tuple[str, f
 
 def resolve_named_games(entities: Iterable[Tuple[str, str]], *, consent: bool) -> Dict[str, Any]:
     """Resolve at most two clamped game names into minimum constraints and trace evidence."""
-    from src.app.services.connectors.steam_requirements import get_game_requirements
+    from src.app.services.connectors.workload_evidence import default_registry
 
     allow_live = live_steam_allowed(consent=consent)
+    registry = default_registry()
     requirements: Dict[str, Tuple[str, float]] = {}
     evidence = []
     seen = set()
@@ -80,7 +81,8 @@ def resolve_named_games(entities: Iterable[Tuple[str, str]], *, consent: bool) -
         if not key or key in seen:
             continue
         seen.add(key)
-        result = get_game_requirements(name, allow_live=allow_live)
+        typed = registry.resolve("game", name, allow_live=allow_live)
+        result = typed.to_dict() if typed is not None else None
         if not result:
             evidence.append({
                 "kind": "game", "requested_name": name, "status": "not_resolved",
@@ -100,8 +102,11 @@ def resolve_named_games(entities: Iterable[Tuple[str, str]], *, consent: bool) -
             "source_url": result.get("source_url"),
             "retrieved_at": result.get("retrieved_at"),
             "cached": bool(result.get("cached")),
+            "confidence": result.get("confidence"),
+            "provenance_chain": list(result.get("provenance_chain") or []),
             "minimum": dict(result.get("minimum") or {}),
             "recommended": dict(result.get("recommended") or {}),
+            "requested_target": dict(result.get("requested_target") or {}),
         })
         if len(evidence) >= 2:
             break

@@ -163,12 +163,15 @@ def apply_workload_requirements(
     ctx["steam_note"] = None
     try:
         if ctx["games"]:
-            from src.app.services.connectors.steam_requirements import get_game_requirements
+            from src.app.services.connectors.workload_evidence import default_registry
             from src.app.services.gpu_translation import desktop_req_to_laptop_tier
+            _registry = default_registry()
             _s_req: Dict[str, Any] = {}
             _s_lines = []
             for slug in ctx["games"][:3]:
-                r = get_game_requirements(str(slug).replace("_", " "))
+                _typed = _registry.resolve(
+                    "game", str(slug).replace("_", " "), allow_live=False)
+                r = _typed.to_dict() if _typed is not None else None
                 if not r:
                     continue
                 mn = r.get("minimum") or {}
@@ -196,7 +199,10 @@ def apply_workload_requirements(
                 if rc.get("gpu"):
                     bits.append(f"recommended graphics {rc['gpu']}")
                 if bits:
-                    _s_lines.append(f"- {r.get('title') or slug}: {'; '.join(bits)}. [steam:{r.get('appid') or slug}]")
+                    _s_lines.append(
+                        f"- {r.get('resolved_name') or r.get('title') or slug}: "
+                        f"{'; '.join(bits)}. "
+                        f"[{r.get('source') or 'workload'}:{r.get('source_record_id') or slug}]")
             ctx["steam_reqs"] = _s_req
             if _s_lines:
                 ctx["steam_note"] = (
