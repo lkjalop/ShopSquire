@@ -58,8 +58,6 @@ def _order_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
     written = rejected = 0
     for row in rows:
         order_id, draft_id, customer_id, guest_hash, total, currency, status, created, updated, raw_lines = row
-        event_type = "return" if str(status) == "returned" else (
-            "refund" if str(status) in {"refunded", "chargebacked"} else "purchase")
         lines = list(_lines(raw_lines))
         for index, line in enumerate(lines):
             sku = str(line.get("sku") or "").strip()
@@ -69,27 +67,60 @@ def _order_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
             unit = int(line.get("price_cents") or 0)
             allocated_value = unit * quantity if unit else (
                 int(total) if len(lines) == 1 and total is not None else None)
-            record_id = f"{order_id}:{status}:{index}:{sku}"
+            # The purchase identity is invariant across paid -> shipped -> delivered. Using
+            # the current state in this key triple-counted revenue when the adapter reran.
+            record_id = f"{order_id}:purchase:{index}:{sku}"
             accepted, quarantined = _record(record_marketing_event, db, {
                 "tenant_id": tenant_id, "deduplication_id": f"orders:{record_id}",
-                "event_type": event_type, "subject_hash": str(guest_hash or "") or _subject_hash(customer_id),
+                "event_type": "purchase",
+                "subject_hash": str(guest_hash or "") or _subject_hash(customer_id),
                 "session_id": str(order_id), "sku": sku, "value": allocated_value,
-                "currency": str(currency or "USD").upper(), "quantity": quantity,
+                "currency": str(currency or "").upper() or None, "quantity": quantity,
                 "consent_state": "not_required", "source_system": "orders",
-                "source_record_id": record_id, "occurred_at": _iso(updated or created),
+                "source_record_id": record_id, "occurred_at": _iso(created),
                 "provenance_chain": [f"orders/{order_id}", f"draft_orders/{draft_id}/line/{index}"],
                 "confidence": 1.0, "freshness_policy": "transactional_record",
             })
             written += accepted
             rejected += quarantined
+            if str(status) in {"returned", "refunded", "chargebacked"}:
+                adjustment_type = "return" if str(status) == "returned" else "refund"
+                adjustment_id = f"{order_id}:reversal:{index}:{sku}"
+                accepted, quarantined = _record(record_marketing_event, db, {
+                    "tenant_id": tenant_id,
+                    "deduplication_id": f"orders:{adjustment_id}",
+                    "event_type": adjustment_type,
+                    "subject_hash": str(guest_hash or "") or _subject_hash(customer_id),
+                    "session_id": str(order_id), "sku": sku, "value": allocated_value,
+                    "currency": str(currency or "").upper() or None, "quantity": quantity,
+                    "consent_state": "not_required", "source_system": "orders",
+                    "source_record_id": adjustment_id, "occurred_at": _iso(updated),
+                    "provenance_chain": [
+                        f"orders/{order_id}",
+                        f"draft_orders/{draft_id}/line/{index}",
+                    ],
+                    "confidence": 1.0, "freshness_policy": "transactional_record",
+                })
+                written += accepted
+                rejected += quarantined
     return written, rejected
 
 
 def _interaction_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
+    # Inspect through the current transaction. Engine-level reflection can open/rollback a
+    # second connection that is the same DB-API connection under in-memory SQLite.
+    columns = {str(name) for name in db.execute(
+        text("SELECT * FROM recommend_interactions WHERE 1=0")).keys()}
+    required = {"tenant_id", "consent_state"}
+    if not required.issubset(columns):
+        raise RuntimeError("recommend_interactions tenant/consent schema unavailable")
     rows = db.execute(text("""
-        SELECT id, event_time, uid_hash, sku, action, surface, trace_id, context_json
-        FROM recommend_interactions ORDER BY event_time DESC LIMIT :lim
-    """), {"lim": max(1000, int(limit) * 20)}).fetchall()
+        SELECT id, event_time, uid_hash, sku, action, surface, trace_id, context_json,
+               tenant_id, consent_state
+        FROM recommend_interactions
+        WHERE tenant_id=:tenant
+        ORDER BY event_time DESC LIMIT :lim
+    """), {"tenant": tenant_id, "lim": int(limit)}).fetchall()
     event_map = {
         "view": "view_item", "impression": "view_item", "click": "select_item",
         "add": "add_to_cart", "add_to_cart": "add_to_cart", "accepted": "add_to_cart",
@@ -98,20 +129,19 @@ def _interaction_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
     for row in rows:
         if written + rejected >= int(limit):
             break
-        rid, event_time, uid_hash, sku, action, surface, trace_id, raw_context = row
+        rid, event_time, uid_hash, sku, action, surface, trace_id, raw_context, row_tenant, consent = row
         try:
             context = json.loads(raw_context or "{}") if isinstance(raw_context, str) else (raw_context or {})
         except (TypeError, ValueError):
             context = {}
-        row_tenant = str(context.get("tenant_id") or "default")
         event_type = event_map.get(str(action or "").lower())
-        if row_tenant != tenant_id or not event_type or not sku:
+        if str(row_tenant) != tenant_id or not event_type or not sku:
             continue
         accepted, quarantined = _record(record_marketing_event, db, {
             "tenant_id": tenant_id, "deduplication_id": f"cart:{rid}", "event_type": event_type,
             "subject_hash": str(uid_hash or "") or None, "session_id": context.get("session_id"),
             "sku": str(sku), "channel": str(surface or "recommendation"),
-            "consent_state": str(context.get("consent_state") or "not_required"),
+            "consent_state": str(consent or "unknown"),
             "source_system": "cart", "source_record_id": str(rid), "occurred_at": _iso(event_time),
             "provenance_chain": [f"recommend_interactions/{rid}", f"trace/{trace_id}"],
             "confidence": 1.0, "freshness_policy": "behavioral_event",
@@ -212,6 +242,7 @@ def canonical_source_health(db, *, tenant_id: str) -> Dict[str, Any]:
     if not str(tenant_id or "").strip():
         raise ValueError("tenant_id is required")
     sources: Dict[tuple[str, str], Dict[str, Any]] = {}
+    source_errors = []
     for family, table, time_column in (
         ("inventory_atp", "inventory_atp_fact", "observed_at"),
         ("marketing_event", "marketing_event_fact", "occurred_at"),
@@ -221,8 +252,14 @@ def canonical_source_health(db, *, tenant_id: str) -> Dict[str, Any]:
                 f"SELECT source_system, COUNT(*), MAX({time_column}) FROM {table} "
                 "WHERE tenant_id=:tenant AND status='active' GROUP BY source_system"
             ), {"tenant": tenant_id}).fetchall()
-        except Exception:
+        except Exception as exc:
             rows = []
+            source_errors.append({
+                "family": family,
+                "source_system": None,
+                "error": type(exc).__name__,
+                "detail": str(exc)[:240],
+            })
         for source, count, latest in rows:
             key = (family, str(source or "unknown"))
             sources[key] = {
@@ -241,8 +278,14 @@ def canonical_source_health(db, *, tenant_id: str) -> Dict[str, Any]:
             WHERE tenant_id=:tenant
             GROUP BY family, COALESCE(source_system,'unknown'), reason_code
         """), {"tenant": tenant_id}).fetchall()
-    except Exception:
+    except Exception as exc:
         quarantines = []
+        source_errors.append({
+            "family": "quarantine",
+            "source_system": None,
+            "error": type(exc).__name__,
+            "detail": str(exc)[:240],
+        })
     for family, source, reason, count, latest in quarantines:
         normalized_family = {
             "atp": "inventory_atp",
@@ -333,8 +376,10 @@ def canonical_source_health(db, *, tenant_id: str) -> Dict[str, Any]:
         "onboarding": onboarding,
         "active_records": sum(row["active_records"] for row in ordered),
         "quarantined_records": sum(row["quarantined_records"] for row in ordered),
+        "source_errors": source_errors,
         "status": (
-            "unconfigured" if not ordered
+            "error" if source_errors
+            else "unconfigured" if not ordered
             else "degraded" if any(row["status"] != "healthy" for row in ordered)
             else "healthy"
         ),

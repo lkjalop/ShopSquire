@@ -53,6 +53,12 @@ def _validate_fact(family: str, fact: Dict[str, Any], *, now: datetime | None = 
         return "source_not_allowlisted"
     if not str(fact.get("source_record_id") or "").strip():
         return "missing_source_record_id"
+    if family == "marketing":
+        event_type = str(fact.get("event_type") or "").strip().lower()
+        has_value = fact.get("value") is not None
+        if event_type in {"purchase", "refund", "return", "chargeback"} and has_value:
+            if not str(fact.get("currency") or "").strip():
+                return "missing_currency"
     provenance = fact.get("provenance_chain")
     if not isinstance(provenance, list) or not provenance or not all(str(x).strip() for x in provenance):
         return "missing_provenance_chain"

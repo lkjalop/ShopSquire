@@ -269,6 +269,8 @@ def ensure_recommend_interactions_table(db) -> None:
                 CREATE TABLE IF NOT EXISTS recommend_interactions (
                     id TEXT PRIMARY KEY,
                     event_time TEXT DEFAULT CURRENT_TIMESTAMP,
+                    tenant_id TEXT NOT NULL DEFAULT 'default',
+                    consent_state TEXT NOT NULL DEFAULT 'unknown',
                     uid_hash TEXT,
                     sku TEXT,
                     action TEXT,

@@ -12182,12 +12182,20 @@ def log_recommend_interaction(
         db.execute(
             text(
                 """
-                INSERT INTO recommend_interactions (id, uid_hash, sku, action, surface, trace_id, context_json)
-                VALUES (:id, :uid_hash, :sku, :action, :surface, :trace_id, :context_json)
+                INSERT INTO recommend_interactions (
+                    id, tenant_id, consent_state, uid_hash, sku, action, surface,
+                    trace_id, context_json
+                )
+                VALUES (
+                    :id, :tenant_id, :consent_state, :uid_hash, :sku, :action,
+                    :surface, :trace_id, :context_json
+                )
                 """
             ),
             {
                 "id": eid,
+                "tenant_id": __ct(),
+                "consent_state": str(safe_ctx.get("consent_state") or "unknown"),
                 "uid_hash": uid_h,
                 "sku": sku,
                 "action": action,
@@ -12277,12 +12285,20 @@ def recommend_feedback(
         db.execute(
             text(
                 """
-                INSERT INTO recommend_interactions (id, uid_hash, sku, action, surface, trace_id, context_json)
-                VALUES (:id, :uid_hash, :sku, :action, :surface, :trace_id, :context_json)
+                INSERT INTO recommend_interactions (
+                    id, tenant_id, consent_state, uid_hash, sku, action, surface,
+                    trace_id, context_json
+                )
+                VALUES (
+                    :id, :tenant_id, :consent_state, :uid_hash, :sku, :action,
+                    :surface, :trace_id, :context_json
+                )
                 """
             ),
             {
                 "id": eid,
+                "tenant_id": __ct(),
+                "consent_state": str(safe_ctx.get("consent_state") or "unknown"),
                 "uid_hash": uid_h,
                 "sku": sku,
                 "action": action,

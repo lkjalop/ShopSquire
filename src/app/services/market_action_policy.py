@@ -21,9 +21,7 @@ def _time(value: Any) -> datetime | None:
 
 def _is_upward(fact: Dict[str, Any]) -> bool:
     direction = str(fact.get("direction") or "").lower()
-    summary = str(fact.get("summary") or "").lower()
-    return direction in {"up", "rising", "growth", "increase"} or any(
-        token in summary for token in ("spike", "growth", "trending up", "increased", "rising"))
+    return direction in {"up", "rising", "growth", "increase", "spike"}
 
 
 def authorize_replenishment(
@@ -49,8 +47,9 @@ def authorize_replenishment(
             return True
         fact_sku = str(fact.get("sku") or fact.get("subject_id") or "").strip()
         fact_taxonomy = str(fact.get("taxonomy_node") or "").strip()
-        return bool((expected_sku and fact_sku == expected_sku)
-                    or (expected_taxonomy and fact_taxonomy == expected_taxonomy))
+        if expected_sku:
+            return fact_sku == expected_sku
+        return bool(expected_taxonomy and fact_taxonomy == expected_taxonomy)
 
     eligible = []
     for fact in demand_facts or []:
@@ -68,7 +67,12 @@ def authorize_replenishment(
             continue
         eligible.append(fact)
 
-    sources = {str(f.get("source_system")) for f in eligible}
+    # Adapter names are not independent evidence when they derive from the same root event.
+    sources = {
+        str(f.get("lineage_root") or "").strip()
+        for f in eligible
+        if str(f.get("lineage_root") or "").strip()
+    }
     shortfall = max(0, int(atp.get("shortfall") or 0))
     lead_time = float(atp.get("lead_time_days") or 0.0)
     atp_observed = _time(atp.get("observed_at"))

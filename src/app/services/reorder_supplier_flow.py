@@ -30,7 +30,8 @@ def plan_reorder_with_supplier_draft(
       * {low_stock: False, status: 'ok_no_reorder'} when stock is above the reorder point;
       * {low_stock: True, forecast, proposed_qty, draft, status: 'awaiting_human_approval'} otherwise.
     Draft-first: NEVER sends. forecast_fn / draft_fn are injected (lazy real defaults) for testability.
-    Never raises (a forecast failure -> proposed_qty 0 + draft still produced for human review)."""
+    Never raises. A forecast failure returns a degraded result and must not create a
+    zero-quantity supplier request."""
     on_hand = int(current_stock or 0)
     low = on_hand <= int(reorder_point or 0)
     if not low:
@@ -50,11 +51,33 @@ def plan_reorder_with_supplier_draft(
         if daily is None and isinstance(fc, dict):
             daily = fc.get("daily")
         projected = sum(float((d or {}).get("mean") or 0.0) for d in (daily or [])[: int(cover_days)])
-    except Exception:
-        projected = 0.0
+    except Exception as exc:
+        return {
+            "sku": sku,
+            "low_stock": True,
+            "forecast": None,
+            "proposed_qty": None,
+            "draft": None,
+            "status": "degraded_no_proposal",
+            "reason": "forecast_unavailable",
+            "error_type": type(exc).__name__,
+        }
 
     # 2) Propose a reorder quantity (cover projected demand minus what's on hand; never negative).
     proposed_qty = max(0, int(math.ceil(projected)) - on_hand)
+    if proposed_qty <= 0:
+        return {
+            "sku": sku,
+            "low_stock": True,
+            "forecast": {
+                "cover_days": int(cover_days),
+                "projected_demand": round(projected, 2),
+            },
+            "proposed_qty": 0,
+            "draft": None,
+            "status": "no_reorder_required",
+            "reason": "forecast_does_not_exceed_available_stock",
+        }
 
     # 3) Draft the supplier message (never sends).
     if draft_fn is None:

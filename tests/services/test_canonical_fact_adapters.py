@@ -36,7 +36,8 @@ def test_real_order_inventory_and_supplier_quote_materialize_canonical_facts():
                     "created_at TEXT, updated_at TEXT)"))
     db.execute(text("CREATE TABLE draft_orders (id TEXT, tenant_id TEXT, line_items TEXT)"))
     db.execute(text("CREATE TABLE recommend_interactions (id TEXT, event_time TEXT, uid_hash TEXT, "
-                    "sku TEXT, action TEXT, surface TEXT, trace_id TEXT, context_json TEXT)"))
+                    "sku TEXT, action TEXT, surface TEXT, trace_id TEXT, context_json TEXT, "
+                    "tenant_id TEXT, consent_state TEXT)"))
     db.execute(text("CREATE TABLE inventory_level (sku TEXT, tenant_id TEXT, location_id TEXT, "
                     "on_hand INT, reserved INT, available INT, source TEXT, updated_at TEXT)"))
     db.execute(text("CREATE TABLE fulfillment_case_version (id TEXT, case_id TEXT, tenant_id TEXT, "
@@ -129,4 +130,65 @@ def test_missing_source_timestamp_is_quarantined_not_replaced_with_ingestion_tim
     assert _inventory_facts(db, "tenant-a", 10) == (0, 1)
     assert db.execute(text(
         "SELECT reason_code FROM market_fact_quarantine")).scalar_one() == "invalid_event_time"
+    db.close()
+
+
+def test_order_status_progression_does_not_duplicate_purchase():
+    db = sessionmaker(bind=create_engine("sqlite+pysqlite:///:memory:", future=True))()
+    _migration(db, "20260721_market_fact_contract.py", "fact_contract_status")
+    _migration(db, "20260722_market_fact_governance.py", "fact_governance_status")
+    _migration(db, "20260723_market_fact_quarantine_dedup.py", "fact_quarantine_status")
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(text("CREATE TABLE orders (id TEXT, draft_order_id TEXT, customer_id TEXT, "
+                    "guest_email_hash TEXT, total_cents INT, currency TEXT, status TEXT, "
+                    "created_at TEXT, updated_at TEXT)"))
+    db.execute(text("CREATE TABLE draft_orders (id TEXT, tenant_id TEXT, line_items TEXT)"))
+    lines = json.dumps([{"sku": "SKU-1", "quantity": 2, "price_cents": 120000}])
+    db.execute(text("INSERT INTO draft_orders VALUES ('d1','tenant-a',:lines)"), {"lines": lines})
+    db.execute(text("INSERT INTO orders VALUES "
+                    "('o1','d1','u1',NULL,240000,'AUD','paid',:now,:now)"), {"now": now})
+    db.commit()
+
+    from src.app.services.canonical_fact_adapters import _order_facts
+    assert _order_facts(db, "tenant-a", 10) == (1, 0)
+    db.execute(text("UPDATE orders SET status='delivered', updated_at=:now WHERE id='o1'"),
+               {"now": now})
+    db.commit()
+    assert _order_facts(db, "tenant-a", 10) == (0, 0)
+    assert db.execute(text(
+        "SELECT COUNT(*) FROM marketing_event_fact WHERE event_type='purchase'"
+    )).scalar_one() == 1
+    db.close()
+
+
+def test_monetary_order_without_currency_is_quarantined():
+    db = sessionmaker(bind=create_engine("sqlite+pysqlite:///:memory:", future=True))()
+    _migration(db, "20260721_market_fact_contract.py", "fact_contract_currency")
+    _migration(db, "20260722_market_fact_governance.py", "fact_governance_currency")
+    _migration(db, "20260723_market_fact_quarantine_dedup.py", "fact_quarantine_currency")
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(text("CREATE TABLE orders (id TEXT, draft_order_id TEXT, customer_id TEXT, "
+                    "guest_email_hash TEXT, total_cents INT, currency TEXT, status TEXT, "
+                    "created_at TEXT, updated_at TEXT)"))
+    db.execute(text("CREATE TABLE draft_orders (id TEXT, tenant_id TEXT, line_items TEXT)"))
+    lines = json.dumps([{"sku": "SKU-1", "quantity": 1, "price_cents": 120000}])
+    db.execute(text("INSERT INTO draft_orders VALUES ('d1','tenant-a',:lines)"), {"lines": lines})
+    db.execute(text("INSERT INTO orders VALUES "
+                    "('o1','d1','u1',NULL,120000,NULL,'paid',:now,:now)"), {"now": now})
+    db.commit()
+
+    from src.app.services.canonical_fact_adapters import _order_facts
+    assert _order_facts(db, "tenant-a", 10) == (0, 1)
+    assert db.execute(text(
+        "SELECT reason_code FROM market_fact_quarantine")).scalar_one() == "missing_currency"
+    db.close()
+
+
+def test_source_health_distinguishes_broken_schema_from_unconfigured():
+    db = sessionmaker(bind=create_engine("sqlite+pysqlite:///:memory:", future=True))()
+    health = canonical_source_health(db, tenant_id="tenant-a")
+    assert health["status"] == "error"
+    assert {item["family"] for item in health["source_errors"]} == {
+        "inventory_atp", "marketing_event", "quarantine",
+    }
     db.close()

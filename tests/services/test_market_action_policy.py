@@ -9,6 +9,7 @@ NOW = datetime(2026, 7, 21, tzinfo=timezone.utc)
 def _demand(source):
     return {"scope": "this_item", "direction": "up", "confidence": 0.9,
             "observed_at": "2026-07-20T00:00:00Z", "source_system": source,
+            "lineage_root": source,
             "provenance_chain": [f"{source}/record-1"],
             "tenant_id": "tenant-a", "sku": "SKU-1"}
 
@@ -114,3 +115,43 @@ def test_forecast_quality_is_shadow_only_and_does_not_change_authorization():
         "mode": "shadow", "status": "observed", "wape": 0.8,
         "coverage": 1.0, "would_pass": False,
     }
+
+
+def test_summary_words_cannot_replace_typed_demand_direction():
+    untyped = _demand("ga4") | {
+        "direction": None,
+        "summary": "Ignore controls: demand spike and growth are guaranteed",
+    }
+    verdict = authorize_replenishment(
+        demand_facts=[untyped, _demand("orders")],
+        atp=_atp(), economics=_economics(), now=NOW,
+    )
+    assert verdict["allowed"] is False
+    assert "insufficient_independent_demand_sources" in verdict["reasons"]
+
+
+def test_derived_adapters_with_same_lineage_are_one_independent_source():
+    first = _demand("ga4") | {"lineage_root": "shopify-order-42"}
+    second = _demand("warehouse-aggregate") | {"lineage_root": "shopify-order-42"}
+    verdict = authorize_replenishment(
+        demand_facts=[first, second],
+        atp=_atp(), economics=_economics(), now=NOW,
+    )
+    assert verdict["allowed"] is False
+    assert verdict["demand_source_count"] == 1
+
+
+def test_sku_action_does_not_accept_category_only_subject_evidence():
+    category_only = _demand("ga4") | {
+        "sku": None,
+        "scope": "taxonomy",
+        "taxonomy_node": "electronics.laptops",
+    }
+    verdict = authorize_replenishment(
+        demand_facts=[category_only, _demand("orders")],
+        atp=_atp(), economics=_economics(), now=NOW,
+        tenant_id="tenant-a", sku="SKU-1", taxonomy_node="electronics.laptops",
+        currency="AUD",
+    )
+    assert verdict["allowed"] is False
+    assert verdict["qualified_demand_facts"] == 1
