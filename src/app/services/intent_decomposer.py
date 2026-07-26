@@ -78,7 +78,8 @@ _REMOVE_STOP_RE = re.compile(
 # reference instead of the positional __last__.
 _NAMED_QTY_RE = re.compile(
     r"\b(?:reduce|change|set|make|lower|bump|cut|increase|update|bring)\s+(?:the\s+|that\s+|my\s+)?"
-    r"(?P<obj>[^,;?!]{3,70}?)\s+(?:down\s+|up\s+)?to\s+(?P<n>\d[\d,]{0,6})\b", re.I)
+    r"(?P<obj>[^,;?!]{3,70}?)\s+(?:(?:down\s+|up\s+)?to|quantit(?:y|ies)\s*(?:to|=)?|"
+    r"qty\s*(?:to|=)?)\s*(?P<n>\d[\d,]{0,6})\b", re.I)
 # referents that are NOT a product-name reference (those fall back to the positional __last__ path)
 _REF_PRONOUNS = {"it", "that", "this", "them", "those", "these", "the order", "order", "quantity", "qty",
                  "the quantity", "the qty", "everything", "all", "budget", "the budget"}

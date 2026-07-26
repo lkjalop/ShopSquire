@@ -68,6 +68,25 @@ def test_compound_action_question_uses_fast_grammar_and_answers_reconfirmation()
     assert plan.ops[0].quantity == 15
 
 
+def test_named_quantity_word_with_budget_and_question_binds_one_line():
+    cart = [{
+        "sku": "LAP-ASUS",
+        "name": 'Asus TUF Gaming F16 16" Laptop',
+        "quantity": 20,
+    }]
+    plan = resolve_cart_mutation(_env(
+        "Actually make the Asus laptop quantity 35 and update the total budget to AUD 85,000. "
+        "Do I need to reconfirm sourcing?",
+        cart=cart,
+    ))
+
+    assert plan.source == "grammar"
+    assert not plan.needs_clarification
+    assert plan.ops[0].action == "set_quantity"
+    assert plan.ops[0].target_skus == ("LAP-ASUS",)
+    assert plan.ops[0].quantity == 35
+
+
 def test_bare_quantity_continuation_binds_the_only_cart_line():
     cart = [{
         "sku": "LAP-MSI",

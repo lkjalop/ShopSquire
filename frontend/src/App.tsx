@@ -830,7 +830,7 @@ export default function App() {
       const staleNote = priorOther.length > 0
         ? ` Your cart already had **${priorOther.length} other item${priorOther.length !== 1 ? 's' : ''} (${priorUnits} unit${priorUnits !== 1 ? 's' : ''})** from earlier — say **"clear my cart"** if you want just this.`
         : '';
-      const bulkMsg = `Added **${bulkQty} × ${addedProduct?.name || sku}** to your cart (from your request). Any shortfall vs stock will be sourced from a supplier — check the delivery plan in the cart.${staleNote}`;
+      const bulkMsg = `Added **${bulkQty} × ${addedProduct?.name || sku}** to your cart (from your request). The delivery plan will show what ships locally, transfers from the network, or needs supplier sourcing.${staleNote}`;
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last && last.role === 'assistant' && last.content === bulkMsg) return prev;
@@ -903,13 +903,14 @@ export default function App() {
     try {
       const j = await setCartItemQty(uid, sku, qty, allowSourcing);
       setCart(j);
-      // honesty: when the confirmed qty exceeds stock, tell the buyer the rest will be sourced.
+      // The cart write reports preferred-location stock, while the delivery planner also considers
+      // network transfers. Do not claim supplier sourcing until that allocation has been computed.
       const sf = (j as any)?.sourcing_shortfall;
       if ((j as any)?.sourcing_required && sf && Number(sf.shortfall) > 0) {
         const nm = products.find((p) => p.sku === sku)?.name || sku;
         setChatOpen(true);
         setMessages((prev) => [...prev, { role: 'assistant' as const, timestamp: new Date(),
-          content: `Set **${nm}** to ${sf.requested}. ${sf.available_now} in stock now — the other ${sf.shortfall} will be sourced from suppliers when you confirm your cart.` }]);
+          content: `Set **${nm}** to ${sf.requested}. ${sf.available_now} are available at the preferred location; check the delivery plan for network-transfer or supplier allocation of the remaining ${sf.shortfall}.` }]);
       }
     } catch (e: any) {
       // Never fail silently — surface WHY (out of stock / qty exceeds available), mirroring add-to-cart.
