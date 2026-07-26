@@ -67,6 +67,44 @@
       },
       "text_extract": true
     },
+    "storage_type": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": [
+        "storage_medium",
+        "drive_type",
+        "disk_type",
+        "storage_interface"
+      ],
+      "values": {
+        "nvme_ssd": ["nvme", "nvme ssd", "pcie ssd", "m.2 nvme"],
+        "sata_ssd": ["ssd", "sata ssd", "2.5 inch ssd"],
+        "sata_hdd": ["hdd", "hard disk", "sata hdd", "mechanical drive"],
+        "ide_hdd": ["ide", "pata", "ide hdd", "pata hdd"],
+        "emmc": ["emmc", "embedded multimedia card"],
+        "ufs": ["ufs", "universal flash storage"],
+        "other": ["other", "unknown storage"]
+      }
+    },
+    "memory_generation": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": [
+        "ram_generation",
+        "ram_type",
+        "memory_type"
+      ],
+      "values": {
+        "ddr3": ["ddr3", "ddr3l"],
+        "ddr4": ["ddr4"],
+        "ddr5": ["ddr5"],
+        "lpddr4x": ["lpddr4", "lpddr4x"],
+        "lpddr5": ["lpddr5"],
+        "lpddr5x": ["lpddr5x"],
+        "unified": ["unified memory", "apple unified memory"],
+        "other": ["other", "unknown memory"]
+      }
+    },
     "refresh_hz": {
       "role": "fit",
       "kind": "quantity",
@@ -151,6 +189,26 @@
       },
       "text_extract": false
     },
+    "weight_kg": {
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "kg",
+      "bounds": [
+        0.01,
+        100
+      ],
+      "key_aliases": [
+        "mass_kg",
+        "product_weight_kg"
+      ],
+      "unit_aliases": {
+        "kg": 1,
+        "g": 0.001,
+        "lb": 0.453592,
+        "lbs": 0.453592
+      },
+      "text_extract": false
+    },
     "gpu_model": {
       "role": "fit",
       "kind": "text",
@@ -168,6 +226,22 @@
         "cpu",
         "processor"
       ]
+    },
+    "cpu_tier": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": [
+        "processor_tier",
+        "cpu_capability_tier",
+        "processor_capability"
+      ],
+      "values": {
+        "entry": ["entry", "basic", "budget"],
+        "mainstream": ["mainstream", "midrange", "mid-range"],
+        "performance": ["performance", "high performance", "enthusiast"],
+        "workstation": ["workstation", "professional", "enterprise compute"],
+        "other": ["other", "unknown cpu"]
+      }
     },
     "gpu_discrete": {
       "role": "fit",

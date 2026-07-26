@@ -59,6 +59,36 @@ def test_enum_aliases_and_unknowns():
     assert normalize_value(FA["material"], "unobtainium") is None
 
 
+def test_vertical_data_normalizes_storage_memory_cpu_and_weight_constraints():
+    attrs, dropped = normalize_specs({
+        "drive_type": "M.2 NVMe",
+        "ram_type": "LPDDR5X",
+        "processor_tier": "high performance",
+        "weight_kg": "4.4lb",
+    }, EL)
+
+    assert not dropped
+    assert attrs == {
+        "storage_type": "nvme_ssd",
+        "memory_generation": "lpddr5x",
+        "cpu_tier": "performance",
+        "weight_kg": 1.9958,
+    }
+
+
+def test_unregistered_attribute_values_remain_unknown_instead_of_being_guessed():
+    attrs, dropped = normalize_specs({
+        "storage_type": "quantum crystal",
+        "memory_generation": "DDR9",
+        "cpu_tier": "supercomputer",
+    }, EL)
+
+    assert attrs == {}
+    assert {entry["canonical"] for entry in dropped} == {
+        "storage_type", "memory_generation", "cpu_tier",
+    }
+
+
 def test_boolean_literals():
     assert normalize_value(EL["gpu_discrete"], "yes") is True
     assert normalize_value(EL["gpu_discrete"], 0) is False
