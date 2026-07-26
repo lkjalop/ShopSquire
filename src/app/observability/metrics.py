@@ -1584,6 +1584,11 @@ recommend_core_fallback_total = Counter(
     "V2 core -> legacy fall-throughs, by reason (lane gate / grounding / failure)",
     labelnames=["reason"],
 )
+recommendation_dispatch_total = Counter(
+    "shopsquire_recommendation_dispatch_total",
+    "Typed recommendation dispatch outcomes, including legacy rollback use",
+    labelnames=["outcome", "lane", "reason"],
+)
 
 
 def record_event(name: str, fields: dict) -> None:
@@ -1609,6 +1614,47 @@ def record_core_fallback(reason: str) -> None:
     """Count a core-eligible turn that fell through to legacy (lane gate / grounding / failure)."""
     try:
         recommend_core_fallback_total.labels(reason=str(reason or "unknown")).inc()
+    except Exception:
+        pass
+
+
+_DISPATCH_OUTCOMES = {
+    "v2_served", "v2_unavailable", "legacy_delegated", "blocked", "error",
+}
+_DISPATCH_REASONS = {
+    "served", "mode_off", "search_mode_off", "shadow_only",
+    "outside_pilot_cohort", "outside_canary_bucket", "lane_not_enrolled",
+    "core_error", "core_degraded", "guard_blocked", "quota_blocked", "unknown",
+}
+_DISPATCH_LANES = {
+    "SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG",
+    "PROCUREMENT", "POLICY_QUESTION", "SUPPORT_CLAIM", "INVENTORY",
+    "CART_MUTATE", "IMAGE", "UNKNOWN",
+}
+
+
+def record_recommendation_dispatch(*, outcome: str, lane: str | None,
+                                   reason: str | None) -> None:
+    """Record bounded rollback/dispatch evidence without high-cardinality labels."""
+    try:
+        bounded_outcome = str(outcome or "error")
+        if bounded_outcome not in _DISPATCH_OUTCOMES:
+            bounded_outcome = "error"
+        bounded_reason = str(reason or "unknown")
+        if bounded_reason.startswith("guard:"):
+            bounded_reason = "guard_blocked"
+        elif bounded_reason.startswith("quota:"):
+            bounded_reason = "quota_blocked"
+        elif bounded_reason not in _DISPATCH_REASONS:
+            bounded_reason = "unknown"
+        bounded_lane = str(lane or "unknown").upper()
+        if bounded_lane not in _DISPATCH_LANES:
+            bounded_lane = "UNKNOWN"
+        recommendation_dispatch_total.labels(
+            outcome=bounded_outcome,
+            lane=bounded_lane,
+            reason=bounded_reason,
+        ).inc()
     except Exception:
         pass
 

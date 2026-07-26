@@ -24,12 +24,17 @@ def _request() -> Request:
 
 def test_in_process_recommend_preserves_request_and_dependencies(monkeypatch):
     captured = {}
+    dispatches = []
 
     def fake_suggest(**kwargs):
         captured.update(kwargs)
         return {"results": [{"sku": "LAP-1"}], "requested_quantity": 20}
 
     monkeypatch.setattr("src.app.routers.recommend.suggest", fake_suggest)
+    monkeypatch.setattr(
+        "src.app.observability.metrics.record_recommendation_dispatch",
+        lambda **fields: dispatches.append(fields),
+    )
     redis = object()
     db = object()
     status, body = asyncio.run(_call_recommend_in_process(
@@ -56,10 +61,16 @@ def test_in_process_recommend_preserves_request_and_dependencies(monkeypatch):
     assert captured["db"] is db
     assert captured["role"] == "merchant"
     assert captured["external_research_consent"] is True
+    assert dispatches == [{
+        "outcome": "legacy_delegated",
+        "lane": "PROCUREMENT",
+        "reason": "mode_off",
+    }]
 
 
 def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkeypatch):
     payload = {"results": [{"sku": "V2-1"}], "decision_trace_id": "trace-1"}
+    dispatches = []
     monkeypatch.setattr(
         "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
         lambda *_args, **_kwargs: FacadeOutcome(
@@ -68,6 +79,10 @@ def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkey
     monkeypatch.setattr(
         "src.app.routers.recommend.suggest",
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy must not run")),
+    )
+    monkeypatch.setattr(
+        "src.app.observability.metrics.record_recommendation_dispatch",
+        lambda **fields: dispatches.append(fields),
     )
 
     status, body = asyncio.run(_call_recommend_in_process(
@@ -79,9 +94,15 @@ def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkey
     assert body["decision_trace_id"] == "trace-1"
     assert body["execution_mode"] == "v2_served"
     assert body["execution_lane"] == "SEARCH"
+    assert dispatches == [{
+        "outcome": "v2_served",
+        "lane": "SEARCH",
+        "reason": "served",
+    }]
 
 
 def test_v2_only_pilot_never_invokes_legacy_delegate(monkeypatch):
+    dispatches = []
     monkeypatch.setenv("RECOMMEND_LEGACY_DELEGATE_ENABLED", "0")
     monkeypatch.setattr(
         "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
@@ -95,6 +116,10 @@ def test_v2_only_pilot_never_invokes_legacy_delegate(monkeypatch):
             AssertionError("strict V2 pilot must not invoke legacy")
         ),
     )
+    monkeypatch.setattr(
+        "src.app.observability.metrics.record_recommendation_dispatch",
+        lambda **fields: dispatches.append(fields),
+    )
 
     status, body = asyncio.run(_call_recommend_in_process(
         _request(),
@@ -107,6 +132,45 @@ def test_v2_only_pilot_never_invokes_legacy_delegate(monkeypatch):
     assert body["execution_lane"] == "SUPPORT_CLAIM"
     assert body["products"] == []
     assert body["action_executed"] is False
+    assert dispatches == [{
+        "outcome": "v2_unavailable",
+        "lane": "SUPPORT_CLAIM",
+        "reason": "lane_not_enrolled",
+    }]
+
+
+def test_legacy_delegate_failure_is_observable(monkeypatch):
+    dispatches = []
+    monkeypatch.setattr(
+        "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
+        lambda *_args, **_kwargs: FacadeOutcome(
+            status="delegate", reason="outside_pilot_cohort", lane="SEARCH",
+        ),
+    )
+    monkeypatch.setattr(
+        "src.app.services.legacy_recommendation_delegate.delegate_legacy_recommendation",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("legacy failed")),
+    )
+    monkeypatch.setattr(
+        "src.app.observability.metrics.record_recommendation_dispatch",
+        lambda **fields: dispatches.append(fields),
+    )
+
+    try:
+        asyncio.run(_call_recommend_in_process(
+            _request(), {"uid": "buyer-1", "query": "gaming laptop"},
+            redis=object(), db=object(), role="merchant",
+        ))
+    except RuntimeError as exc:
+        assert str(exc) == "legacy failed"
+    else:
+        raise AssertionError("delegate failure must propagate to the chat error boundary")
+
+    assert dispatches == [{
+        "outcome": "error",
+        "lane": "SEARCH",
+        "reason": "outside_pilot_cohort",
+    }]
 
 
 def test_typed_and_spoken_input_share_one_semantic_dispatch_contract(monkeypatch):

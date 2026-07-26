@@ -59,9 +59,26 @@ def runtime_mode_snapshot() -> dict[str, Any]:
                     "expected": "|".join(sorted(allowed)),
                     "actual": actual,
                 })
+    legacy_enabled = active["legacy_delegate"] == "on"
+    rollback = (
+        {
+            "behavior": "legacy_suggest",
+            "available": True,
+            "equivalence_observed": False,
+            "reason": "legacy_delegate_enabled",
+        }
+        if legacy_enabled
+        else {
+            "behavior": "bounded_unavailable",
+            "available": True,
+            "equivalence_observed": False,
+            "reason": "legacy_delegate_disabled_without_observed_replacement",
+        }
+    )
     return {
         "profile": profile,
         "ready": not mismatches,
         "active": active,
         "mismatches": mismatches,
+        "rollback": rollback,
     }

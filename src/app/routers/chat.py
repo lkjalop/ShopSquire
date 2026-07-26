@@ -1435,8 +1435,11 @@ async def _call_recommend_in_process(
     from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
 
     def _invoke() -> Dict[str, Any]:
+        from src.app.observability.metrics import record_recommendation_dispatch
+
         tenant_id = (request.headers.get("X-Tenant-Id")
                      or request.headers.get("x-tenant-id") or "default")
+        observed_lane = str(params.get("turn_intent") or "").upper() or None
         facade = dispatch_recommendation_core_typed(
             db, redis,
             query=str(params.get("query") or ""), uid=str(params.get("uid") or ""),
@@ -1457,11 +1460,17 @@ async def _call_recommend_in_process(
             source_ip=(request.client.host if request.client else None),
         )
         if facade.served:
+            record_recommendation_dispatch(
+                outcome="v2_served", lane=facade.lane or observed_lane, reason="served",
+            )
             served = dict(facade.payload or {})
             served.setdefault("execution_mode", "v2_served")
             served.setdefault("execution_lane", facade.lane)
             return served
         if facade.status == "blocked":
+            record_recommendation_dispatch(
+                outcome="blocked", lane=facade.lane or observed_lane, reason=facade.reason,
+            )
             status_code = 429 if str(facade.reason).startswith("quota:") else 403
             raise HTTPException(status_code=status_code, detail={
                 "message": "Request blocked by recommendation guard",
@@ -1469,6 +1478,10 @@ async def _call_recommend_in_process(
                 "trace_id": str(params.get("trace_id") or "") or None,
             })
         if not legacy_delegate_enabled():
+            record_recommendation_dispatch(
+                outcome="v2_unavailable", lane=facade.lane or observed_lane,
+                reason=facade.reason or facade.status,
+            )
             return v2_only_unavailable_response(
                 status=facade.status,
                 reason=facade.reason,
@@ -1478,8 +1491,19 @@ async def _call_recommend_in_process(
         from src.app.services.legacy_recommendation_delegate import (
             delegate_legacy_recommendation,
         )
-        delegated = delegate_legacy_recommendation(
-            request=request, params=params, redis=redis, db=db, role=role,
+        try:
+            delegated = delegate_legacy_recommendation(
+                request=request, params=params, redis=redis, db=db, role=role,
+            )
+        except Exception:
+            record_recommendation_dispatch(
+                outcome="error", lane=facade.lane or observed_lane,
+                reason=facade.reason or facade.status,
+            )
+            raise
+        record_recommendation_dispatch(
+            outcome="legacy_delegated", lane=facade.lane or observed_lane,
+            reason=facade.reason or facade.status,
         )
         delegated = dict(delegated or {})
         delegated.setdefault("execution_mode", "legacy_delegated")

@@ -10,6 +10,9 @@ def test_standard_profile_reports_modes_without_imposing_demo_contract(monkeypat
     assert result["profile"] == "standard"
     assert result["ready"] is True
     assert result["active"]["cart_mutation"] == "off"
+    assert result["rollback"]["behavior"] == "legacy_suggest"
+    assert result["rollback"]["available"] is True
+    assert result["rollback"]["equivalence_observed"] is False
 
 
 def test_demo_profile_fails_when_cart_lane_is_not_enabled(monkeypatch):
@@ -47,3 +50,9 @@ def test_demo_profile_is_ready_only_with_declared_v2_modes(monkeypatch):
     assert result["ready"] is True
     assert result["mismatches"] == []
     assert result["active"]["legacy_delegate"] == "off"
+    assert result["rollback"] == {
+        "behavior": "bounded_unavailable",
+        "available": True,
+        "equivalence_observed": False,
+        "reason": "legacy_delegate_disabled_without_observed_replacement",
+    }
