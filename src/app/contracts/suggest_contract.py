@@ -63,6 +63,9 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "slate_disposition",
     "sales_response_nudge", "security", "session_summary", "source_statuses",
     "storefront_emphasis", "summary_pending", "timing_breakdown", "trace_tags",
+    # V2 bounded proposal and resolved intent are additive audit surfaces consumed by the
+    # response finalizer. They expose model interpretation; they do not grant action authority.
+    "decision", "intent",
     "turn_envelope_diff", "turn_intent", "use_case_analysis", "why_not", "workload_fit",
     # ── Alternate-branch fields (corpus 2026-07-11) — /suggest is a FORKED contract ──
     # inventory fast-path shape: answer/recommendations/inventory instead of
@@ -135,6 +138,8 @@ class SuggestResponse(BaseModel):
     needs_disambiguation: Optional[bool] = None
     next_questions: Optional[List[Any]] = None
     constraints_used: Optional[Dict[str, Any]] = None
+    decision: Optional[Dict[str, Any]] = None
+    intent: Optional[Dict[str, Any]] = None
 
     # ── Async narration handshake ─────────────────────────────────────────────
     llm_summary_job_id: Optional[str] = None

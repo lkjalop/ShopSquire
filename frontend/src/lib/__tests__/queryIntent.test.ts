@@ -6,6 +6,7 @@ import {
   isCartUpsellIntentQuery,
   isComplaintIntent,
   isShoppingIntentQuery,
+  requiresExternalResearchConsent,
   shouldRouteToComplaint,
 } from '../queryIntent';
 
@@ -83,6 +84,19 @@ describe('isCartUpsellIntentQuery', () => {
     expect(isCartUpsellIntentQuery('what else should i buy with this')).toBe(true);
     expect(isCartUpsellIntentQuery('any compatible accessories?')).toBe(true);
     expect(isCartUpsellIntentQuery('show me laptops')).toBe(false);
+  });
+});
+
+describe('requiresExternalResearchConsent', () => {
+  it('recognises explicit external-research requests', () => {
+    expect(requiresExternalResearchConsent('search online for Black Myth Wukong requirements')).toBe(true);
+    expect(requiresExternalResearchConsent('look it up on the web')).toBe(true);
+    expect(requiresExternalResearchConsent('check the internet for current specs')).toBe(true);
+  });
+
+  it('does not treat ordinary catalog search as external consent', () => {
+    expect(requiresExternalResearchConsent('search for a gaming laptop under AUD 3000')).toBe(false);
+    expect(requiresExternalResearchConsent('show me Black Myth Wukong laptops')).toBe(false);
   });
 });
 

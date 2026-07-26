@@ -155,6 +155,23 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     _parsed_turn_budget = parse_budget(envelope.query)
     _explicit_turn_scope = classify_budget_scope(envelope.query)
     _accepted = (envelope.session or {}).get("accepted_constraints") or {}
+    # A consent retry is semantically the same turn. Sparse model output may omit an unchanged
+    # workload title, so adopt a prior title only when every normalized title token still occurs
+    # in the current message. This prevents an old game from contaminating a new query.
+    if not decision.workload_entities and envelope.external_research_consent:
+        prior_entities = _accepted.get("workload_entities") or []
+        query_tokens = set(re.findall(r"[a-z0-9]+", (envelope.query or "").lower()))
+        inherited_entities = []
+        for item in list(prior_entities)[:3]:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                continue
+            kind, name = str(item[0]), str(item[1])
+            name_tokens = set(re.findall(r"[a-z0-9]+", name.lower()))
+            if kind in ("game", "software") and name_tokens and name_tokens <= query_tokens:
+                inherited_entities.append((kind, name))
+        if inherited_entities:
+            decision = dataclasses.replace(
+                decision, workload_entities=tuple(inherited_entities))
     if _parsed_turn_budget is None and decision.total_budget_cents is not None:
         decision = dataclasses.replace(decision, total_budget_cents=None)
     if _parsed_turn_budget is None and _explicit_turn_scope == "total":
@@ -228,7 +245,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     intent = resolve_intent(list(decision.use_cases), dict(decision.requirements),
                             query=envelope.query,
                             vertical=_vertical_name(decision.node_handle),
-                            use_case_variants=dict(decision.use_case_variants))
+                            use_case_variants=dict(decision.use_case_variants),
+                            workload_entities=list(decision.workload_entities),
+                            external_research_consent=envelope.external_research_consent)
     resolved_reqs = intent["requirements"]
     # Requirements merge across every use case; ordering controls only which named intent leads
     # capability prose and clarification.
@@ -359,6 +378,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "brand_excludes": [decision.exclude_brand] if decision.exclude_brand else [],
         "preferred_brands": [decision.preferred_brand] if decision.preferred_brand else [],
         "budget_cap_mode": decision.budget_cap_mode,
+        "workload_entities": [list(item) for item in decision.workload_entities],
         # provenance (R9.1): the trace must say when this turn's constraints came from the
         # SESSION, not the message — and postflight persists what was USED, so a budget-less
         # follow-up refreshes the remembered budget instead of wiping it.

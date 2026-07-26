@@ -1420,6 +1420,8 @@ async def _call_recommend_in_process(
             image_hash=params.get("image_hash"), image_intent=params.get("image_intent"),
             image_product_identity=params.get("image_product_identity"),
             image_cv_signals=params.get("image_cv_signals"),
+            external_research_consent=(
+                str(params.get("external_research_consent") or "").lower() == "true"),
             intent_hint=params.get("turn_intent"), role=role, request=request,
             source_ip=(request.client.host if request.client else None),
         )

@@ -36,6 +36,7 @@ import {
   isCartUpsellIntentQuery,
   isComplaintIntent,
   isShoppingIntentQuery,
+  requiresExternalResearchConsent,
   shouldRouteToComplaint,
   type RightPanelMode,
 } from './lib/queryIntent';
@@ -1325,7 +1326,7 @@ export default function App() {
     // This is simultaneously the UX and the trigger-forcing mitigation: prompt-crafted imperatives
     // cannot make the platform touch the network.
     if (opts?.externalResearchConsent === undefined   // chip answers (true OR false) bypass — no loop
-        && /(?:search|check|look(?:\s+it)?\s+up|google|browse).{0,20}(?:the\s+)?(?:web|online|internet)/i.test(q)) {
+        && requiresExternalResearchConsent(q)) {
       setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
         { role: 'assistant',
           content: 'I can check an APPROVED external source for that (curated allowlist, nothing about you or your order is sent). Want me to?',

@@ -225,7 +225,9 @@ def resolve(use_cases: Optional[List[str]],
             model_requirements: Optional[Dict[str, Any]] = None,
             query: Optional[str] = None,
             vertical: Optional[str] = None,
-            use_case_variants: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+            use_case_variants: Optional[Dict[str, str]] = None,
+            workload_entities: Optional[List[Tuple[str, str]]] = None,
+            external_research_consent: bool = False) -> Dict[str, Any]:
     """The resolver (M2-B1: RANGES + provenance + surfaced conflicts). Returns:
       requirements  — {key: [(op, thr), ...]} — KB profiles ∪ per-title ∪ model-stated merged
                       by INTERSECTION (floors max, ceilings min; a floor AND a ceiling coexist
@@ -280,6 +282,27 @@ def resolve(use_cases: Optional[List[str]],
     title = _salvage_title_requirements(query) if query else {"requirements": {}, "trace": {}}
     if title["requirements"]:
         merged = merge_maps(merged, title["requirements"])
+    # Model-named entities are literal-clamped by the router. Fixtures are always eligible;
+    # live storefront evidence additionally requires buyer consent, operator enablement and
+    # an enrolled source. Only publisher minimums become hard constraints.
+    if workload_entities:
+        try:
+            from src.app.services.recommendation_core.workload_grounding import (
+                resolve_named_games,
+            )
+            grounded = resolve_named_games(
+                workload_entities, consent=external_research_consent)
+            if grounded["requirements"]:
+                merged = merge_maps(
+                    merged,
+                    from_op_map(grounded["requirements"], "workload:publisher"),
+                )
+            title["trace"]["external_workload_evidence"] = {
+                "live_allowed": grounded["live_allowed"],
+                "items": grounded["evidence"],
+            }
+        except Exception as exc:
+            logger.warning("named workload grounding failed: %s", repr(exc)[:120])
     # the model's explicitly-stated requirements ('144fps', 'nothing over 8GB') — provenance
     # 'stated'; a stated ceiling meeting a KB floor becomes a RANGE or a surfaced conflict.
     if model_requirements:

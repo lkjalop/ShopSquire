@@ -12,8 +12,9 @@ Resolution order (fixture-first — CI must NEVER hit the network):
   2. ONLY if ``allow_live=True`` AND the fixture missed: the official Steam storefront
      JSON endpoints (storesearch → appdetails), governed by the per-vertical
      ``external_research_allowlist`` (store.steampowered.com is enrolled for the
-     electronics profile). 6s timeout, one retry, then give up. Live hits return
-     ``cached=False`` and ``retrieved_at=None``.
+     electronics profile). The governed caller also requires explicit consent and a dedicated
+     operator flag. Each request has a short deadline, responses are bounded and title-matched,
+     and live results are TTL-cached. Live hits return ``cached=False`` with retrieval time.
 On ANY failure the connector returns the fixture result or None — it never raises.
 
 IMPORTANT domain knowledge — desktop vs laptop GPUs:
@@ -39,6 +40,8 @@ import json
 import logging
 import os
 import re
+import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -48,12 +51,16 @@ _DEFAULT_FIXTURES_PATH = os.path.join("config", "knowledge_pool", "steam_fixture
 
 _SEARCH_URL = "https://store.steampowered.com/api/storesearch/"
 _DETAILS_URL = "https://store.steampowered.com/api/appdetails"
-_TIMEOUT_S = 6.0
+_TIMEOUT_S = 1.25
+_MAX_RESPONSE_BYTES = 1_000_000
+_LIVE_CACHE_TTL_S = 6 * 60 * 60
+_LIVE_CACHE_MAX = 256
 _USER_AGENT = "ShopSquireResearch/0.1 (+governed web leg; requirements lookup)"
 
 # Fixture cache with mtime-drift invalidation (same pattern as knowledge_pool.py).
 _CACHE: Dict[str, List[Dict[str, Any]]] = {}
 _CACHE_META: Dict[str, Tuple[str, Optional[int], Optional[int]]] = {}
+_LIVE_CACHE: Dict[str, Tuple[float, Optional[Dict[str, Any]]]] = {}
 
 
 # ── fixture lane ─────────────────────────────────────────────────────────────
@@ -97,7 +104,13 @@ def _load_fixtures(force_reload: bool = False) -> Optional[List[Dict[str, Any]]]
 
 
 def _norm_title(s: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", str(s or "").lower()).strip()
+    raw = str(s or "").lower()
+    raw = re.sub(
+        r"\b(?:[a-z]\.){2,}[a-z]?\.?",
+        lambda match: match.group(0).replace(".", ""),
+        raw,
+    )
+    return re.sub(r"[^a-z0-9]+", " ", raw).strip()
 
 
 def _lookup_fixture(title: str) -> Optional[Dict[str, Any]]:
@@ -143,14 +156,39 @@ def _norm_req(d: Any) -> Dict[str, Any]:
     }
 
 
+def _bounded_text(value: Any, limit: int) -> Optional[str]:
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit] if text else None
+
+
+def _bounded_requirements(value: Any) -> Dict[str, Any]:
+    req = _norm_req(value)
+    try:
+        ram = int(req["ram_gb"]) if req["ram_gb"] is not None else None
+    except (TypeError, ValueError):
+        ram = None
+    try:
+        storage = int(req["storage_gb"]) if req["storage_gb"] is not None else None
+    except (TypeError, ValueError):
+        storage = None
+    return {
+        "ram_gb": ram if ram is not None and 1 <= ram <= 512 else None,
+        "gpu": _bounded_text(req.get("gpu"), 240),
+        "storage_gb": storage if storage is not None and 1 <= storage <= 8192 else None,
+        "os": _bounded_text(req.get("os"), 160),
+    }
+
+
 def _fixture_result(game: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "title": game.get("title"),
         "appid": game.get("appid"),
-        "minimum": _norm_req(game.get("minimum")),
-        "recommended": _norm_req(game.get("recommended")),
-        "tags": list(game.get("tags") or []),
-        "review_summary": game.get("review_summary"),
+        "minimum": _bounded_requirements(game.get("minimum")),
+        "recommended": _bounded_requirements(game.get("recommended")),
+        "tags": [_bounded_text(tag, 80) for tag in list(game.get("tags") or [])[:20]
+                 if _bounded_text(tag, 80)],
+        "review_summary": _bounded_text(game.get("review_summary"), 240),
         "source": str(game.get("source") or "steam"),
         "source_url": game.get("source_url"),
         "retrieved_at": game.get("retrieved_at"),
@@ -218,14 +256,34 @@ def _parse_requirements_html(raw: Any) -> Dict[str, Any]:
 # ── live lane (allow_live=True only) ─────────────────────────────────────────
 def _get_json(client: Any, url: str, params: Dict[str, str]) -> Optional[Any]:
     """GET → parsed JSON with ONE retry; None after the second failure (no raise)."""
-    for _attempt in (0, 1):
-        try:
-            resp = client.get(url, params=params)
-            if resp.status_code == 200:
-                return resp.json()
-        except Exception as exc:
-            logger.debug("steam fetch failed %s: %s", url, exc)
+    try:
+        resp = client.get(url, params=params)
+        if resp.status_code != 200:
+            return None
+        content_type = str(resp.headers.get("content-type") or "").lower()
+        if "json" not in content_type:
+            logger.warning("steam response rejected: non-JSON content type %r", content_type)
+            return None
+        content_length = resp.headers.get("content-length")
+        if content_length and int(content_length) > _MAX_RESPONSE_BYTES:
+            return None
+        if len(resp.content) > _MAX_RESPONSE_BYTES:
+            return None
+        return resp.json()
+    except Exception as exc:
+        logger.debug("steam fetch failed %s: %s", url, exc)
     return None
+
+
+def _title_matches(requested: str, resolved: str) -> bool:
+    requested_norm = _norm_title(requested)
+    resolved_norm = _norm_title(resolved)
+    if not requested_norm or not resolved_norm:
+        return False
+    # A token-set match is unsafe for storefront search: "Alan Wake 2" previously matched
+    # a music pack containing "Alan Walker", "Wake Up" and the number 2. Require the requested
+    # normalized phrase (or the resolved base phrase) to be contiguous.
+    return requested_norm in resolved_norm
 
 
 def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
@@ -237,11 +295,22 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
         with httpx.Client(
             timeout=_TIMEOUT_S,
             headers={"User-Agent": _USER_AGENT},
-            follow_redirects=True,
+            follow_redirects=False,
         ) as client:
             found = _get_json(client, _SEARCH_URL, {"term": str(title), "cc": "us", "l": "en"})
             items = (found or {}).get("items") or []
-            appid = items[0].get("id") if items and isinstance(items[0], dict) else None
+            matching = [
+                item for item in items[:10]
+                if isinstance(item, dict) and _title_matches(title, item.get("name"))
+            ]
+            matching.sort(key=lambda item: len(_norm_title(item.get("name")).split()))
+            first = matching[0] if matching else {}
+            if not first:
+                logger.info("steam search mismatch rejected: requested=%r resolved=%r",
+                            title, (items[0].get("name") if items and isinstance(items[0], dict)
+                                    else None))
+                return None
+            appid = first.get("id")
             if not appid:
                 return None
             details = _get_json(client, _DETAILS_URL, {"appids": str(appid)})
@@ -249,6 +318,10 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
             if not (isinstance(entry, dict) and entry.get("success")):
                 return None
             data = entry.get("data") or {}
+            if not _title_matches(title, data.get("name")):
+                logger.info("steam details mismatch rejected: requested=%r resolved=%r",
+                            title, data.get("name"))
+                return None
             pc = data.get("pc_requirements")
             if not isinstance(pc, dict):  # Steam returns [] when the section is absent
                 pc = {}
@@ -258,15 +331,17 @@ def _live_lookup(title: str) -> Optional[Dict[str, Any]]:
                 if isinstance(g, dict) and g.get("description")
             ]
             return {
-                "title": data.get("name") or str(title),
+                "title": _bounded_text(data.get("name") or title, 160),
                 "appid": int(appid),
-                "minimum": _parse_requirements_html(pc.get("minimum") or ""),
-                "recommended": _parse_requirements_html(pc.get("recommended") or ""),
-                "tags": tags,
+                "minimum": _bounded_requirements(
+                    _parse_requirements_html(pc.get("minimum") or "")),
+                "recommended": _bounded_requirements(
+                    _parse_requirements_html(pc.get("recommended") or "")),
+                "tags": [_bounded_text(tag, 80) for tag in tags[:20] if _bounded_text(tag, 80)],
                 "review_summary": None,
                 "source": "steam",
                 "source_url": f"https://store.steampowered.com/app/{int(appid)}/",
-                "retrieved_at": None,
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
                 "cached": False,
             }
     except Exception as exc:
@@ -291,7 +366,17 @@ def get_game_requirements(title: str, *, allow_live: bool = False) -> Optional[d
             return _fixture_result(fixture)
         if not allow_live:
             return None
-        return _live_lookup(title)
+        key = _norm_title(title)
+        cached = _LIVE_CACHE.get(key)
+        now = time.monotonic()
+        if cached and now - cached[0] <= _LIVE_CACHE_TTL_S:
+            return dict(cached[1]) if cached[1] is not None else None
+        result = _live_lookup(title)
+        if len(_LIVE_CACHE) >= _LIVE_CACHE_MAX:
+            oldest = min(_LIVE_CACHE, key=lambda item: _LIVE_CACHE[item][0])
+            _LIVE_CACHE.pop(oldest, None)
+        _LIVE_CACHE[key] = (now, dict(result) if result is not None else None)
+        return result
     except Exception as exc:
         logger.debug("get_game_requirements failed for %r: %s", title, exc)
         return None

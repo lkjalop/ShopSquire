@@ -115,6 +115,17 @@ def test_followup_preserves_prior_brand_constraints_when_not_replaced():
     assert constraints["preferred_brand"] == "Dell"
 
 
+def test_named_workload_entities_roundtrip_for_consent_retry():
+    r = _Redis()
+    env = _env()
+    core = _core(env)
+    core.extras["decision"]["workload_entities"] = [["game", "Black Myth Wukong"]]
+
+    assert write_session(r, env, core) is True
+    constraints = json.loads(r.store["session:t1:u1:kv_state"])["constraints"]
+    assert constraints["workload_entities"] == [["game", "Black Myth Wukong"]]
+
+
 def test_explicit_brand_clear_drops_all_prior_brand_constraints():
     import dataclasses
     r = _Redis()

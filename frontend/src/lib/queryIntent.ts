@@ -32,6 +32,13 @@ export function isCartUpsellIntentQuery(query: string): boolean {
   return /add[\s-]?on|accessor(y|ies)|what else should i buy|what else should i get|compatible|bundle|extra \$?\d+|spend .* extra|upsell/i.test(q);
 }
 
+export function requiresExternalResearchConsent(query: string): boolean {
+  const q = String(query || '');
+  const researchVerb = /\b(?:search|check|look(?:\s+it)?\s+up|google|browse)\b/i;
+  const externalTarget = /\b(?:the\s+)?(?:web|online|internet)\b/i;
+  return researchVerb.test(q) && externalTarget.test(q);
+}
+
 export function detectCVIssueType(query: string): string {
   const q = query.toLowerCase();
   if (/warranty|under warranty|warranty claim|warranty repair|warranty coverage/.test(q)) return 'warranty';

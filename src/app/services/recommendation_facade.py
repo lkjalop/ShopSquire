@@ -538,6 +538,7 @@ def dispatch_recommendation_core_typed(
     image_ocr: Optional[str] = None, source_ip: Optional[str] = None, request: Any = None,
     image_intent: Optional[str] = None, image_product_identity: Optional[str] = None,
     image_cv_signals: Optional[str] = None,
+    external_research_consent: bool = False,
     intent_hint: Optional[str] = None,
     role: str = "",
     with_trace: Optional[Callable[[Dict[str, Any], str], Dict[str, Any]]] = None,
@@ -649,7 +650,8 @@ def dispatch_recommendation_core_typed(
                         budget_max=budget_max, trace_id=trace_id, has_image=False,
                         intent_hint=intent_hint,
                         source_ip=source_ip, session=_read_session_slice(redis, uid, tenant, db),
-                        cart=cart_slice, pre_gate=_served_guard)
+                        cart=cart_slice, pre_gate=_served_guard,
+                        external_research_consent=external_research_consent)
                     cart_payload = _serve_cart_mutation(envelope, role=role,
                                                         with_trace=with_trace, redis=redis)
                     if cart_payload is not None:
@@ -677,6 +679,7 @@ def dispatch_recommendation_core_typed(
                 intent_hint=intent_hint,
                 has_image=bool(image_labels or image_hash), source_ip=source_ip,
                 image_observations=image_observations,
+                external_research_consent=external_research_consent,
                 session=_read_session_slice(redis, uid, tenant, db), cart=cart_slice)
             _enqueue_shadow(redis, envelope=shadow_env, cart_only=(mode != "shadow"))
         if mode == "shadow":
@@ -710,6 +713,7 @@ def dispatch_recommendation_core_typed(
             intent_hint=intent_hint,
             has_image=bool(image_labels or image_hash), source_ip=source_ip,
             image_observations=image_observations,
+            external_research_consent=external_research_consent,
             session=session, pre_gate=guard)
 
         # ── DISPATCH ───────────────────────────────────────────────────────────
@@ -769,6 +773,7 @@ def dispatch_recommendation_core(
     image_ocr: Optional[str] = None, source_ip: Optional[str] = None, request: Any = None,
     image_intent: Optional[str] = None, image_product_identity: Optional[str] = None,
     image_cv_signals: Optional[str] = None,
+    external_research_consent: bool = False,
     intent_hint: Optional[str] = None,
     role: str = "",
     with_trace: Callable[[Dict[str, Any], str], Dict[str, Any]] = lambda payload, _trace: payload,
@@ -781,6 +786,7 @@ def dispatch_recommendation_core(
         image_labels=image_labels, image_hash=image_hash, image_ocr=image_ocr,
         source_ip=source_ip, request=request, image_intent=image_intent,
         image_product_identity=image_product_identity, image_cv_signals=image_cv_signals,
+        external_research_consent=external_research_consent,
         intent_hint=intent_hint, role=role, with_trace=with_trace,
         record_failure=record_failure,
     )

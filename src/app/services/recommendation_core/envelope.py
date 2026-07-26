@@ -93,6 +93,7 @@ class TurnEnvelope:
     has_image: bool = False
     image_observations: List[ImageObservation] = field(default_factory=list)
     source_ip: Optional[str] = None
+    external_research_consent: bool = False
     session: Dict[str, Any] = field(default_factory=dict)   # prior shortlist/slots (read-only)
     # cart: the CURRENT cart lines [{sku,name,quantity}], read once at the facade ingress. The
     # cart-mutation resolver binds the shopper's named targets ('the ThinkPad') to a REAL line
@@ -112,6 +113,7 @@ class TurnEnvelope:
                             trace_id: Optional[str] = None, has_image: bool = False,
                             image_observations: Optional[List[ImageObservation]] = None,
                             source_ip: Optional[str] = None,
+                            external_research_consent: bool = False,
                             intent_hint: Optional[str] = None,
                             session: Optional[Dict[str, Any]] = None,
                             cart: Optional[List[Dict[str, Any]]] = None,
@@ -151,6 +153,7 @@ class TurnEnvelope:
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
                    has_image=bool(has_image or image_observations),
                    image_observations=list(image_observations or []), source_ip=source_ip,
+                   external_research_consent=bool(external_research_consent),
                    session=dict(session or {}),
                    cart=list(cart or []), pre_gate=pre_gate)
 
@@ -164,7 +167,9 @@ class TurnEnvelope:
                 "budget_min_cents": self.budget_min_cents,
                 "budget_max_cents": self.budget_max_cents, "has_image": self.has_image,
                 "image_observations": [item.to_dict() for item in self.image_observations],
-                "source_ip": self.source_ip, "session": dict(self.session),
+                "source_ip": self.source_ip,
+                "external_research_consent": self.external_research_consent,
+                "session": dict(self.session),
                 "cart": list(self.cart), "pre_gate": self.pre_gate}
 
     @classmethod
@@ -185,6 +190,7 @@ class TurnEnvelope:
                    image_observations=[ImageObservation.from_dict(item) for item in
                                        (d.get("image_observations") or []) if isinstance(item, dict)],
                    source_ip=d.get("source_ip"),
+                   external_research_consent=bool(d.get("external_research_consent")),
                    session=dict(d.get("session") or {}), cart=list(d.get("cart") or []),
                    pre_gate=d.get("pre_gate"))
 

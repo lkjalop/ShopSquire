@@ -4583,6 +4583,7 @@ def suggest(
             image_labels=image_labels, image_ocr=image_ocr_text, image_hash=image_hash,
             image_intent=image_intent, image_product_identity=image_product_identity,
             image_cv_signals=image_cv_signals,
+            external_research_consent=bool(external_research_consent),
             intent_hint=turn_intent,
             source_ip=(request.client.host if request and request.client else None),
             request=request, role=role, with_trace=_with_trace,

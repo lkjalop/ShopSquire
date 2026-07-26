@@ -74,6 +74,10 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
                 "budget_max_cents": used.get("budget_max_cents", envelope.budget_max_cents),
                 "requirements": (used.get("requirements") or decision.get("requirements") or {}),
                 "use_cases": intent.get("use_cases") or [],
+                "workload_entities": (used.get("workload_entities")
+                                      or decision.get("workload_entities")
+                                      or prior.get("workload_entities")
+                                      or []),
                 # bulk state (Phase 1f) — so a follow-up 'how many can I get?' inherits the order
                 # size + total budget the shopper set earlier (the facade maps this into
                 # accepted_constraints verbatim).

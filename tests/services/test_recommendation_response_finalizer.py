@@ -43,9 +43,29 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
             {"sku": "SKU-A", "name": "First"},
         ],
         "constraints_used": {
-            "use_case": "gaming",
-            "budget_max": 2000,
+            "use_cases": ["gaming"],
+            "budget_max_cents": 200000,
+            "workload_entities": [["game", "Black Myth Wukong"]],
             "requirements": {"gpu_vram_gb": [[">=", 8]]},
+        },
+        "decision": {
+            "workload_entities": [["game", "Black Myth Wukong"]],
+        },
+        "intent": {
+            "primary_use_case": "gaming",
+            "workload_use_cases": ["gaming"],
+            "title_requirements": {
+                "external_workload_evidence": {
+                    "live_allowed": True,
+                    "items": [{
+                        "status": "resolved",
+                        "resolved_name": "Black Myth: Wukong",
+                        "source": "steam",
+                        "source_url": "https://store.steampowered.com/app/2358720/",
+                        "retrieved_at": "2026-07-26T09:00:00+00:00",
+                    }],
+                },
+            },
         },
         "right_panel": {"mode": "recommendations"},
     }
@@ -70,17 +90,24 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     ]
     assert proposed["products_summary"][0]["score_norm"] == 0.92
     assert proposed["products_summary"][0]["workload_fit"] == {"overall": "meets"}
-    assert recorded["event"]["payload"]["constraints_used"]["use_case"] == "gaming"
+    assert recorded["event"]["payload"]["constraints_used"]["use_cases"] == ["gaming"]
     assert recorded["event"]["payload"]["security"] == {
         "policy_route": "allow",
         "checked_boundary": "recommendation_facade",
         "has_image": False,
     }
     assert proposed["intent_analysis"]["budget_max"] == 2000
+    assert proposed["intent_analysis"]["workloads"] == ["gaming"]
+    assert proposed["intent_analysis"]["workload_entities"] == [
+        ["game", "Black Myth Wukong"],
+    ]
+    assert proposed["intent_analysis"]["workload_evidence"]["live_allowed"] is True
     assert proposed["intent_analysis"]["requirements"] == {
         "gpu_vram_gb": [[">=", 8]],
     }
     assert proposed["execution_mode"] == "v2_served"
+    assert proposed["evidence_items"][-1]["type"] == "workload_requirement"
+    assert proposed["evidence_items"][-1]["source"] == "steam"
     assert emitted["trace_id"] == "trace-voice-1"
     assert emitted["tenant_id"] == "tenant-a"
     assert [item["sku"] for item in emitted["results"]] == ["SKU-B", "SKU-A"]

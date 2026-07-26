@@ -73,6 +73,23 @@ def finalize_core_response(
         if isinstance(out.get("constraints_used"), dict)
         else {}
     )
+    intent_details = (
+        dict(out.get("intent") or {})
+        if isinstance(out.get("intent"), dict)
+        else {}
+    )
+    title_requirements = (
+        dict(intent_details.get("title_requirements") or {})
+        if isinstance(intent_details.get("title_requirements"), dict)
+        else {}
+    )
+    workload_evidence = (
+        dict(title_requirements.get("external_workload_evidence") or {})
+        if isinstance(title_requirements.get("external_workload_evidence"), dict)
+        else {}
+    )
+    budget_min_cents = constraints.get("budget_min_cents")
+    budget_max_cents = constraints.get("budget_max_cents")
     execution_steps = [dict(item) for item in (out.get("execution_steps") or [])
                        if isinstance(item, dict)][:24]
     security = dict(out.get("security") or {}) if isinstance(out.get("security"), dict) else {}
@@ -89,13 +106,21 @@ def finalize_core_response(
         "routing_source": routing_source,
         "subject_action": decision.get("subject_action"),
         "procurement_context": decision.get("procurement_context"),
-        "use_case_key": constraints.get("use_case"),
-        "workloads": constraints.get("workloads") or [],
+        "use_case_key": (intent_details.get("primary_use_case")
+                         or (constraints.get("use_cases") or [None])[0]),
+        "workloads": (intent_details.get("workload_use_cases")
+                      or constraints.get("use_cases") or []),
+        "workload_entities": (decision.get("workload_entities")
+                              or constraints.get("workload_entities") or []),
+        "workload_evidence": workload_evidence,
         "requirements": constraints.get("requirements") or {},
-        "budget_min": constraints.get("budget_min"),
-        "budget_max": constraints.get("budget_max"),
-        "quantity": constraints.get("order_quantity") or out.get("requested_quantity"),
-        "currency": constraints.get("currency"),
+        "budget_min": (budget_min_cents / 100 if isinstance(budget_min_cents, (int, float))
+                       else constraints.get("budget_min")),
+        "budget_max": (budget_max_cents / 100 if isinstance(budget_max_cents, (int, float))
+                       else constraints.get("budget_max")),
+        "quantity": (constraints.get("quantity") or constraints.get("order_quantity")
+                     or out.get("requested_quantity")),
+        "currency": constraints.get("currency") or out.get("currency"),
     }
     evidence_items = [
         {"type": "candidate", "id": item["sku"], "score": 1.0}
@@ -105,6 +130,17 @@ def finalize_core_response(
         evidence_items.append({
             "type": "policy",
             "id": str(out.get("policy_source")),
+            "score": 1.0,
+        })
+    for item in workload_evidence.get("items") or []:
+        if not isinstance(item, dict) or item.get("status") != "resolved":
+            continue
+        evidence_items.append({
+            "type": "workload_requirement",
+            "id": str(item.get("resolved_name") or item.get("requested_name") or ""),
+            "source": item.get("source"),
+            "source_url": item.get("source_url"),
+            "retrieved_at": item.get("retrieved_at"),
             "score": 1.0,
         })
 

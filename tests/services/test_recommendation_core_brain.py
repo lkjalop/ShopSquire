@@ -492,6 +492,53 @@ def test_procurement_accepts_registry_handle_from_category_slot(db):
     assert decision.source == "model+taxonomy_handle"
 
 
+def test_fresh_quantity_free_workload_search_cannot_activate_procurement(db):
+    raw = json.dumps({
+        "lane": "PROCUREMENT", "handle": "el-6-6",
+        "wanted_category": "Electronics > Computers > Laptops",
+        "request_scope": "product",
+        "requirements": {"gpu_tier": [{"op": "eq", "value": "discrete"}]},
+        "use_cases": ["game_development"],
+        "quantity": None,
+        "subject_action": "switch",
+        # A model may claim this, but only server-side workflow state can authorize it.
+        "procurement_context": "current_order",
+        "confidence": 0.9,
+    })
+
+    decision = route_turn(
+        db,
+        _env("professional Unreal Engine 5 game development laptop under AUD 3500"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.lane == "SEARCH"
+    assert decision.node_handle is not None
+    assert "game_development" in decision.use_cases
+
+
+def test_stale_procurement_lane_without_consequential_state_cannot_reactivate(db):
+    raw = json.dumps({
+        "lane": "PROCUREMENT", "handle": "el-6-6",
+        "requirements": {}, "quantity": None,
+        "subject_action": "uncertain",
+        "procurement_context": "current_order",
+        "confidence": 0.9,
+    })
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "accepted_constraints": {},
+    }
+
+    decision = route_turn(
+        db,
+        _env("professional game development laptop", session=session),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.lane == "SEARCH"
+
+
 def test_procurement_plan_retrieves_before_advisory_handoff():
     decision = TurnDecision(
         lane="PROCUREMENT", node_handle="el-6-6", requirements={}, quantity=20,
@@ -1326,7 +1373,11 @@ def test_edge_explain_hint_corrects_policy_misroute_only_with_prior_shortlist(db
 
 
 def test_active_procurement_uses_model_continuity_to_correct_policy_conflict(db):
-    session = {"prior_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"]}
+    session = {
+        "prior_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"],
+        "accepted_constraints": {"quantity": 20},
+        "procurement_case_id": "case-1",
+    }
 
     def model(subject_action, procurement_context):
         return lambda _prompt, _timeout: json.dumps({
@@ -1350,7 +1401,11 @@ def test_active_procurement_uses_model_continuity_to_correct_policy_conflict(db)
 
 
 def test_active_procurement_can_use_bounded_context_judgment_when_subject_is_uncertain(db):
-    session = {"active_workflow_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"]}
+    session = {
+        "active_workflow_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"],
+        "accepted_constraints": {"quantity": 20},
+        "procurement_case_id": "case-1",
+    }
     raw = json.dumps({
         "lane": "POLICY_QUESTION", "handle": None, "requirements": {},
         "subject_action": "uncertain", "procurement_context": "current_order",
@@ -1375,7 +1430,11 @@ def test_active_procurement_can_use_bounded_context_judgment_when_subject_is_unc
 def test_active_procurement_policy_clamp_requires_non_policy_context(
     db, subject_action, procurement_context, expected_lane,
 ):
-    session = {"active_workflow_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"]}
+    session = {
+        "active_workflow_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"],
+        "accepted_constraints": {"quantity": 20},
+        "procurement_case_id": "case-1",
+    }
     raw = json.dumps({
         "lane": "POLICY_QUESTION", "handle": None, "requirements": {},
         "subject_action": subject_action, "procurement_context": procurement_context,

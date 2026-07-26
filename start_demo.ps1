@@ -72,6 +72,9 @@ $env:INTERNAL_SERVICE_ALLOWLIST        = "127.0.0.1:11434,localhost:11434"
 # Evidence tab + source chips. Legs are bounded (2.5s) and additive — message text is untouched.
 $env:EVIDENCE_ORCHESTRATOR_ENABLED     = "1"
 $env:EVIDENCE_LEG_BUDGET_SEC           = "2.5"
+# Named game requirements use the Steam storefront only after the shopper explicitly consents.
+# The connector is source-allowlisted, title-matched, response-bounded and fail-closed.
+$env:STEAM_REQUIREMENTS_LIVE_ENABLED   = "1"
 # Supplier comms stay SAFE for the demo (no real email): sandbox transport + autonomy OFF.
 $env:FULFILLMENT_SUPPLIER_TRANSPORT = "sandbox"
 $env:FULFILLMENT_AUTONOMOUS_RFQ     = "0"

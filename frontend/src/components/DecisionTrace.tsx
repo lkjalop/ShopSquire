@@ -2230,6 +2230,50 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                 </span>
                               )}
                             </div>
+                            {Array.isArray(intent.workload_entities) && intent.workload_entities.length > 0 && (
+                              <>
+                                <div className={styles.sectionTitle}>Named Workloads</div>
+                                <div className={styles.pillRow}>
+                                  {intent.workload_entities.map((entry: any, i: number) => (
+                                    <span key={i} className={styles.pill}>
+                                      {Array.isArray(entry) ? `${entry[0]}: ${entry[1]}` : String(entry?.name || entry)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                            {Array.isArray(intent.workload_evidence?.items) && intent.workload_evidence.items.length > 0 && (
+                              <>
+                                <div className={styles.sectionTitle}>Governed Workload Evidence</div>
+                                <table className={styles.smallTable}>
+                                  <thead>
+                                    <tr><th>Workload</th><th>Status</th><th>Source</th><th>Minimum</th><th>Recommended</th><th>Retrieved</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {intent.workload_evidence.items.map((item: any, i: number) => (
+                                      <tr key={`${item?.resolved_name || item?.requested_name || 'workload'}-${i}`}>
+                                        <td>{item?.resolved_name || item?.requested_name || '?'}</td>
+                                        <td>{item?.status || '?'}</td>
+                                        <td>
+                                          {item?.source_url ? (
+                                            <a href={item.source_url} target="_blank" rel="noreferrer">
+                                              {item?.source || 'approved source'}
+                                            </a>
+                                          ) : (item?.source || 'not resolved')}
+                                        </td>
+                                        <td>{item?.minimum ? Object.entries(item.minimum).map(([k, v]) => `${k}=${v}`).join(' · ') : '—'}</td>
+                                        <td>{item?.recommended ? Object.entries(item.recommended).map(([k, v]) => `${k}=${v}`).join(' · ') : '—'}</td>
+                                        <td className={styles.mono}>{item?.retrieved_at || '—'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                <div className={styles.kvRow}>
+                                  <span>Live source authorized</span>
+                                  <span>{intent.workload_evidence.live_allowed ? 'Yes — consent + flag + allowlist' : 'No — fixture/store facts only'}</span>
+                                </div>
+                              </>
+                            )}
                             {Array.isArray(intent.priority_factors) && intent.priority_factors.length > 0 && (
                               <>
                                 <div className={styles.sectionTitle}>Priority Factors</div>
