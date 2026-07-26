@@ -16,6 +16,7 @@ def _demand(source: str) -> dict:
         "confidence": 0.9,
         "observed_at": "2026-07-24T00:00:00Z",
         "source_system": source,
+        "lineage_root": f"{source}/record-1",
         "provenance_chain": [f"{source}/record-1"],
         "tenant_id": "tenant-a",
         "sku": "SKU-1",
@@ -122,3 +123,27 @@ def test_replenishment_proposal_surfaces_denial_reasons():
     assert proposal["authorized"] is False
     assert "insufficient_independent_demand_sources" in proposal["reasons"]
     assert proposal["send_gate"] == "blocked"
+
+
+def test_replenishment_does_not_count_mirrored_adapters_as_independent_demand():
+    orders = _demand("orders")
+    analytics = _demand("ga4")
+    analytics["lineage_root"] = orders["lineage_root"]
+    analytics["provenance_chain"] = [
+        orders["lineage_root"],
+        "ga4/mirrored-record-1",
+    ]
+
+    proposal = propose_replenishment(
+        sku="SKU-1",
+        tenant_id="tenant-a",
+        currency="AUD",
+        demand_facts=[orders, analytics],
+        atp=_atp(),
+        economics=_economics(),
+        now=NOW,
+    )
+
+    assert proposal["authorized"] is False
+    assert proposal["demand_source_count"] == 1
+    assert "insufficient_independent_demand_sources" in proposal["reasons"]
