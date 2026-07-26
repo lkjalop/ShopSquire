@@ -56,7 +56,7 @@ def _record_governance_run(*, run_type: str, status: str, metadata: Dict[str, An
         pass
 
 
-def _sample_skus_for_forecast(limit: int = 40) -> List[str]:
+def _sample_skus_for_forecast(*, tenant_id: str, limit: int = 40) -> List[str]:
     out: List[str] = []
     try:
         with db_session() as db:
@@ -65,13 +65,17 @@ def _sample_skus_for_forecast(limit: int = 40) -> List[str]:
                     """
                     SELECT sku
                     FROM recommend_interactions
-                    WHERE sku IS NOT NULL AND sku <> ''
+                    WHERE tenant_id = :tenant
+                      AND sku IS NOT NULL AND sku <> ''
                     GROUP BY sku
                     ORDER BY COUNT(*) DESC
                     LIMIT :lim
                     """
                 ),
-                {"lim": max(5, min(int(limit or 40), 200))},
+                {
+                    "tenant": str(tenant_id),
+                    "lim": max(5, min(int(limit or 40), 200)),
+                },
             ).fetchall()
             out = [str(r[0]) for r in (rows or []) if str(r[0] or "").strip()]
     except Exception:
@@ -159,14 +163,19 @@ def train_recommend_cf_nightly(self) -> Dict[str, Any]:
 
 
 @celery_app.task(bind=True, name="src.app.tasks.model_ops_tasks.snapshot_forecast_governance")
-def snapshot_forecast_governance(self) -> Dict[str, Any]:
-    skus = _sample_skus_for_forecast(limit=40)
+def snapshot_forecast_governance(
+    self, tenant_id: str = "default"
+) -> Dict[str, Any]:
+    tenant = str(tenant_id or "").strip()
+    if not tenant:
+        return {"status": "invalid_tenant", "skus": 0}
+    skus = _sample_skus_for_forecast(tenant_id=tenant, limit=40)
     if not skus:
         out = {"status": "no_data", "skus": 0}
         _record_governance_run(run_type="forecast_governance_snapshot", status="no_data", metadata=out)
         return out
 
-    forecaster = DemandForecaster()
+    forecaster = DemandForecaster(tenant_id=tenant)
     mape_vals: List[float] = []
     quarantined = 0
     methods: Dict[str, int] = {}
@@ -191,6 +200,7 @@ def snapshot_forecast_governance(self) -> Dict[str, Any]:
         "avg_mape_proxy": avg_mape,
         "quarantined_points": quarantined,
         "methods": methods,
+        "tenant_id": tenant,
     }
     _record_governance_run(run_type="forecast_governance_snapshot", status=status, metadata=out)
     return out

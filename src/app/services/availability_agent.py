@@ -34,10 +34,19 @@ def _default_lead_time_fn(sku: str) -> int:
         return 7
 
 
-def _default_reorder_fn(sku: str, current_stock: int, reorder_point: int) -> Dict[str, Any]:
+def _default_reorder_fn(
+    sku: str,
+    current_stock: int,
+    reorder_point: int,
+    *,
+    tenant_id: str,
+) -> Dict[str, Any]:
     from src.app.services.reorder_supplier_flow import plan_reorder_with_supplier_draft
     return plan_reorder_with_supplier_draft(
-        sku=sku, current_stock=int(current_stock), reorder_point=int(reorder_point)
+        sku=sku,
+        current_stock=int(current_stock),
+        reorder_point=int(reorder_point),
+        tenant_id=tenant_id,
     )
 
 
@@ -50,6 +59,7 @@ def assess_availability(
     lead_time_fn: Optional[Callable[[str], int]] = None,
     reorder_fn: Optional[Callable[..., Dict[str, Any]]] = None,
     draft_reorder: bool = False,
+    tenant_id: str = "default",
 ) -> Dict[str, Any]:
     """Assess fulfilment of ``order_quantity`` units of the PRIMARY candidate (skus[0]) within
     ``horizon_days``. Fast by default (stock + lead-time only); set ``draft_reorder=True`` to also
@@ -103,7 +113,10 @@ def assess_availability(
         result["fulfilment"] = "reorder_required"
 
     if draft_reorder:
-        reorder_fn = reorder_fn or _default_reorder_fn
+        if reorder_fn is None:
+            reorder_fn = lambda **kwargs: _default_reorder_fn(
+                **kwargs, tenant_id=tenant_id
+            )
         try:
             draft = reorder_fn(sku=primary, current_stock=in_stock, reorder_point=n) or {}
             result["reorder_draft"] = {

@@ -255,8 +255,15 @@ def run_fulfillment_stage(
     _primary_over_budget = bool(_bmax and _primary_price and _primary_price > _bmax)
     qty = int(order_qty) if is_bulk else 1
     is_b2b_bulk = is_bulk and qty >= 5
+    _availability_kwargs: Dict[str, Any] = {"draft_reorder": is_b2b_bulk}
+    if tenant_id:
+        _availability_kwargs["tenant_id"] = str(tenant_id)
     payload["availability"] = assess_availability(
-        avail_skus, qty, constraints.get("availability_horizon_days"), draft_reorder=is_b2b_bulk)
+        avail_skus,
+        qty,
+        constraints.get("availability_horizon_days"),
+        **_availability_kwargs,
+    )
     line = availability_summary_line(payload["availability"])
     if _primary_over_budget:
         line = ""

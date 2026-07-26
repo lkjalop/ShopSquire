@@ -25,6 +25,7 @@ def plan_reorder_with_supplier_draft(
     forecast_fn: Optional[Callable[..., Any]] = None,
     draft_fn: Optional[Callable[..., Any]] = None,
     templates: Optional[Dict[str, Any]] = None,
+    tenant_id: str = "default",
 ) -> Dict[str, Any]:
     """Run the bounded demand->supplier flow for one SKU. Returns:
       * {low_stock: False, status: 'ok_no_reorder'} when stock is above the reorder point;
@@ -43,7 +44,7 @@ def plan_reorder_with_supplier_draft(
     # 1) Forecast demand over the cover window.
     if forecast_fn is None:
         from src.app.services.demand_forecast import DemandForecaster
-        forecast_fn = DemandForecaster().forecast_sku
+        forecast_fn = DemandForecaster(tenant_id=tenant_id).forecast_sku
     projected = 0.0
     try:
         fc = forecast_fn(sku, cover_days)

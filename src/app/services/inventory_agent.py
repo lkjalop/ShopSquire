@@ -90,8 +90,10 @@ class InventoryAgent:
     decision logging utilities so all recommendations are auditable.
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, *, tenant_id: str = "default"):
+        self.tenant_id = str(tenant_id or "").strip()
+        if not self.tenant_id:
+            raise ValueError("tenant_id is required")
 
     # STOCK_RULES: deterministic stock interaction rules (simplified)
     STOCK_RULES = {
@@ -472,7 +474,9 @@ class InventoryAgent:
             try:
                 from src.app.services.demand_forecast import DemandForecaster
 
-                fc = DemandForecaster().forecast_sku(sku, horizon_days=14)
+                fc = DemandForecaster(tenant_id=self.tenant_id).forecast_sku(
+                    sku, horizon_days=14
+                )
                 means = [float((d or {}).get("mean") or 0.0) for d in (fc.daily or [])]
                 if means:
                     avg = float(sum(means) / float(max(1, len(means))))
@@ -490,8 +494,20 @@ class InventoryAgent:
                         "quarantined_points": int(((fc.meta or {}).get("quarantined_points") or 0)),
                         "poison_guard": (fc.meta or {}).get("poison_guard"),
                     }
-            except Exception:
-                pass
+            except Exception as exc:
+                return {
+                    "method": "canonical_unavailable",
+                    "daily_demand": 0.0,
+                    "std_daily": 0.0,
+                    "variance": 0.0,
+                    "high_variance": False,
+                    "cv": 0.0,
+                    "mape": None,
+                    "quarantined_points": 0,
+                    "poison_guard": {"enabled": True, "trust_weighted": True},
+                    "evidence_status": "degraded",
+                    "error_type": type(exc).__name__,
+                }
 
         days = int(os.environ.get("INV_FORECAST_DAYS", "45") or 45)
         alpha = float(os.environ.get("INV_EWMA_ALPHA", "0.3") or 0.3)

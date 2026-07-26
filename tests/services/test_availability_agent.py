@@ -44,6 +44,31 @@ def test_draft_reorder_is_human_gated_and_uses_shortfall_context():
     assert captured == {"sku": "A", "cs": 4, "rp": 10}  # current stock + requested qty as reorder point
 
 
+def test_default_reorder_receives_tenant_identity(monkeypatch):
+    captured = {}
+
+    def fake_plan(**kwargs):
+        captured.update(kwargs)
+        return {"status": "awaiting_human_approval", "low_stock": True}
+
+    monkeypatch.setattr(
+        "src.app.services.reorder_supplier_flow.plan_reorder_with_supplier_draft",
+        fake_plan,
+    )
+    result = assess_availability(
+        ["A"],
+        10,
+        28,
+        stock_fn=lambda _skus: {"A": 4},
+        lead_time_fn=lambda _sku: 14,
+        draft_reorder=True,
+        tenant_id="tenant-a",
+    )
+
+    assert result["reorder_draft"]["status"] == "awaiting_human_approval"
+    assert captured["tenant_id"] == "tenant-a"
+
+
 def test_not_applicable_without_skus_or_quantity():
     assert assess_availability([], 10).get("applicable") is False
     assert assess_availability(["A"], 0).get("applicable") is False

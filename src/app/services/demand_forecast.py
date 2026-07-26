@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
+import logging
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -32,36 +35,74 @@ class DemandForecaster:
     - anomaly flags
     """
 
-    def __init__(self):
+    def __init__(self, *, tenant_id: str = "default"):
         self._db_ok = True
+        self._last_history_error: str | None = None
+        self.tenant_id = str(tenant_id or "").strip()
+        if not self.tenant_id:
+            raise ValueError("tenant_id is required")
 
     def _read_history(self, sku: str, lookback_days: int = 120) -> List[Dict[str, Any]]:
         rows = []
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=max(7, int(lookback_days))
+        )
         try:
             with db_session() as db:
                 rows = db.execute(
                     text(
                         """
-                        SELECT substr(created_at, 1, 10) AS d,
-                               SUM(COALESCE(quantity, 1)) AS qty
-                        FROM order_items
-                        WHERE sku = :sku
-                          AND datetime(created_at) >= datetime('now', :window)
-                        GROUP BY substr(created_at, 1, 10)
-                        ORDER BY d ASC
+                        SELECT occurred_at, quantity, confidence, source_system
+                        FROM marketing_event_fact
+                        WHERE tenant_id = :tenant
+                          AND sku = :sku
+                          AND event_type = 'purchase'
+                          AND status = 'active'
+                          AND occurred_at >= :cutoff
+                        ORDER BY occurred_at ASC
                         """
                     ),
-                    {"sku": sku, "window": f"-{max(7, int(lookback_days))} days"},
+                    {
+                        "tenant": self.tenant_id,
+                        "sku": str(sku),
+                        "cutoff": cutoff,
+                    },
                 ).fetchall()
         except Exception:
+            self._last_history_error = "canonical_purchase_history_unavailable"
+            logger.warning(
+                "forecast history unavailable tenant=%s sku=%s",
+                self.tenant_id,
+                str(sku),
+                exc_info=True,
+            )
             rows = []
-        out: List[Dict[str, Any]] = []
+        daily: Dict[str, Dict[str, float]] = {}
         for r in rows or []:
             try:
-                out.append({"date": str(r[0]), "qty": float(r[1] or 0.0), "trust": 1.0, "source": "orders"})
+                day = str(r[0] or "")[:10]
+                if not day:
+                    continue
+                quantity = max(0.0, float(r[1] or 0.0))
+                confidence = max(0.0, min(1.0, float(r[2] or 0.0)))
+                bucket = daily.setdefault(
+                    day, {"qty": 0.0, "weighted_confidence": 0.0}
+                )
+                bucket["qty"] += quantity
+                bucket["weighted_confidence"] += quantity * confidence
             except Exception:
                 continue
-        return out
+        return [
+            {
+                "date": day,
+                "qty": round(values["qty"], 4),
+                "trust": round(
+                    values["weighted_confidence"] / values["qty"], 4
+                ) if values["qty"] > 0 else 0.0,
+                "source": "canonical_purchase",
+            }
+            for day, values in sorted(daily.items())
+        ]
 
     def _quarantine_and_weight(self, series: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not series:
@@ -181,5 +222,10 @@ class DemandForecaster:
                 "quarantined_points": len(quarantined),
                 "mape_proxy": round(float(mape), 4) if mape is not None else None,
                 "poison_guard": {"enabled": True, "trust_weighted": True},
+                "evidence_status": (
+                    "degraded" if self._last_history_error else ("available" if history else "no_data")
+                ),
+                "evidence_error": self._last_history_error,
+                "tenant_id": self.tenant_id,
             },
         )
