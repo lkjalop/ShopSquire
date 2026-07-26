@@ -243,6 +243,15 @@ def _prewarm_router_models(app: FastAPI) -> dict[str, Any]:
     return result
 
 
+def _vlm_warmup_enabled() -> bool:
+    """Resolve startup VLM warming without evicting the demo text router."""
+    raw = os.getenv("VLM_WARMUP_ON_START")
+    if raw is not None:
+        return str(raw).strip().lower() in ("1", "true", "yes", "on")
+    profile = str(os.getenv("SHOPSQUIRE_RUNTIME_PROFILE", "") or "").strip().lower()
+    return profile != "demo_v2"
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -638,7 +647,7 @@ def create_app() -> FastAPI:
         # VLM cold-start warming: fire a tiny generate request so the first real user request
         # doesn't pay the full model-load latency (typically 4-8 s for qwen3-vl:8b on RTX 5070 Ti).
         try:
-            if str(os.getenv("VLM_WARMUP_ON_START", "1")).lower() not in ("0", "false", "no"):
+            if _vlm_warmup_enabled():
                 import asyncio as _asyncio
                 import logging as _wlog
 

@@ -48,6 +48,7 @@ $env:CV_SELECTIVE_OCR_TIMEOUT_S        = "3"      # bounded before the deeper OC
 # taxonomy embedder warm for the main journey; selective IMAGE V2 loads vision only on demand.
 # Record image acts last, or expect the following text turn to pay one router reload.
 $env:CV_WARMUP_ON_START                = "0"
+$env:VLM_WARMUP_ON_START               = "0"      # do not evict the text router after its blocking prewarm
 # Serve the bounded V2 core for its eligible recommendation lanes. The procurement switch below
 # enrolls only read-only product selection and sourcing advice; fulfillment_cases still owns case
 # creation, RFQ drafts, approvals, and all external sends. Unsupported lanes continue to delegate,
