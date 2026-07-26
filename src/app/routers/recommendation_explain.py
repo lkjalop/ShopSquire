@@ -19,6 +19,7 @@ from src.app.security.auth import (
     require_role,
 )
 from src.app.services.decision_log import log_trace_event
+from src.app.services.catalog_read_model import get_variant
 from src.app.services.memory import Memory
 from src.app.services.recommendations import RecommendationService
 
@@ -78,7 +79,13 @@ def build_sku_explanation(
         matched.append("use_case")
 
     reasons: list[str] = []
-    if positive:
+    evidence_status = str(row.get("_explanation_scope") or "rank_factors")
+    if evidence_status == "catalog_only":
+        reasons.append(
+            "This product is verified in the tenant catalog, but detailed ranking "
+            "factors were not retained for this explanation request."
+        )
+    elif positive:
         reasons.append(f"Selected because it matched: {', '.join(positive[:4])}.")
     if checks:
         reasons.append(f"Additional checks considered: {', '.join(checks[:3])}.")
@@ -98,6 +105,7 @@ def build_sku_explanation(
         "positive_factors": positive,
         "checks": checks,
         "reason_summary": " ".join(reasons),
+        "evidence_status": evidence_status,
         "query": str(query or ""),
     }
 
@@ -115,7 +123,7 @@ def explain_why_product(
     ),
     db=Depends(get_db),
 ) -> Dict[str, Any]:
-    del request, role, db
+    del role
     target_sku = str(sku or "").strip()
     if not target_sku:
         raise HTTPException(status_code=400, detail="sku required")
@@ -182,7 +190,27 @@ def explain_why_product(
                 "factors": {"positive": [], "negative": [], "checks": []},
             }
     if not row:
-        raise HTTPException(status_code=404, detail="sku not found in candidate set")
+        tenant_id = str(
+            request.headers.get("X-Tenant-Id")
+            or request.headers.get("x-tenant-id")
+            or "default"
+        ).strip()
+        variant = get_variant(db, target_sku, tenant_id=tenant_id)
+        if variant:
+            row = {
+                "sku": variant.sku,
+                "name": variant.title,
+                "score": None,
+                "confidence": None,
+                "factors": {
+                    "positive": [],
+                    "negative": [],
+                    "checks": ["catalog_record_verified"],
+                },
+                "_explanation_scope": "catalog_only",
+            }
+    if not row:
+        raise HTTPException(status_code=404, detail="sku not found in tenant catalog")
 
     explanation = build_sku_explanation(
         row=row, constraints=constraints, query=effective_query
