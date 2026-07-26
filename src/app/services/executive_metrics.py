@@ -70,6 +70,44 @@ def forecast_quality(
     ]
 
 
+def compare_forecast_candidates(
+    *, tenant_id: str, subject_id: str,
+    baseline: Sequence[Dict[str, Any]], challenger: Sequence[Dict[str, Any]],
+    unit_value_cents: int | None = None, as_of: datetime | None = None,
+) -> Dict[str, Any]:
+    """Compare two sealed forecast sets without authorizing model promotion."""
+    base = {item.metric: item for item in forecast_quality(
+        tenant_id=tenant_id, subject_id=subject_id, observations=baseline, as_of=as_of)}
+    trial = {item.metric: item for item in forecast_quality(
+        tenant_id=tenant_id, subject_id=subject_id, observations=challenger, as_of=as_of)}
+    base_wape = base["forecast_wape"].value
+    trial_wape = trial["forecast_wape"].value
+    measurable = base_wape is not None and trial_wape is not None
+    improvement = (float(base_wape) - float(trial_wape)) if measurable else None
+    actual_units = sum(
+        max(0.0, float(row.get("actual") or 0.0)) for row in challenger
+        if row.get("actual") is not None)
+    monetary_impact = (
+        int(round(abs(float(improvement)) * actual_units * max(0, int(unit_value_cents))))
+        if improvement is not None and unit_value_cents is not None else None)
+    return {
+        "tenant_id": tenant_id,
+        "subject_id": subject_id,
+        "status": "observed" if measurable else "insufficient_data",
+        "baseline": {name: metric.model_dump(mode="json") for name, metric in base.items()},
+        "challenger": {name: metric.model_dump(mode="json") for name, metric in trial.items()},
+        "wape_improvement": improvement,
+        "estimated_absolute_error_value_cents": monetary_impact,
+        "recommendation": (
+            "challenger_better" if improvement is not None and improvement > 0
+            else "baseline_better" if improvement is not None and improvement < 0
+            else "no_measurable_difference" if improvement == 0
+            else "insufficient_data"
+        ),
+        "authority": "shadow_evaluation_only",
+    }
+
+
 def persist_forecast_actual_pair(
     db,
     *,

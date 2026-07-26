@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 import pytest
 
 from src.app.services.executive_metrics import (
-    forecast_quality, gmroi_unavailable, inventory_productivity, ppv_evidence,
+    compare_forecast_candidates, forecast_quality, gmroi_unavailable,
+    inventory_productivity, ppv_evidence,
 )
 
 _FIXED = datetime(2026, 7, 24, tzinfo=timezone.utc)
@@ -23,6 +24,20 @@ def test_forecast_quality_exposes_wape_bias_and_coverage():
     assert metrics["forecast_bias"].value == 0.0
     assert metrics["forecast_coverage"].value == 1.0
     assert all(item.status == "observed" for item in metrics.values())
+
+
+def test_forecast_challenger_reports_quality_and_monetary_impact_without_promoting():
+    result = compare_forecast_candidates(
+        tenant_id="tenant-a", subject_id="SKU-1",
+        baseline=[{"forecast": 20, "actual": 10, "source_record_id": "b1"}],
+        challenger=[{"forecast": 12, "actual": 10, "source_record_id": "c1"}],
+        unit_value_cents=5000, as_of=_FIXED,
+    )
+
+    assert result["recommendation"] == "challenger_better"
+    assert result["wape_improvement"] == pytest.approx(0.8)
+    assert result["estimated_absolute_error_value_cents"] == 40000
+    assert result["authority"] == "shadow_evaluation_only"
 
 
 def test_inventory_productivity_is_explicitly_estimated_from_point_atp():
