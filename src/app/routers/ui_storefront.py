@@ -1,6 +1,7 @@
 
 import os
 import json
+import secrets
 import sqlite3
 from pathlib import Path
 
@@ -659,6 +660,7 @@ def product_detail(sku: str) -> HTMLResponse:
 
     price_display = ("$" + str(price)) if price is not None else ""
     api_key = os.getenv("MERCHANT_API_KEY", "")
+    csp_nonce = secrets.token_urlsafe(16)
     decision_modal_test_open = str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on")
     html = """
     <!doctype html>
@@ -704,7 +706,7 @@ def product_detail(sku: str) -> HTMLResponse:
       </div>
       <shopsquire-widget data-api-base='' data-api-key='__API_KEY__' data-uid='detail-user' data-signed-in='false'></shopsquire-widget>
       <script src='/ui/widget.js'></script>
-      <script>
+      <script nonce='__CSP_NONCE__'>
         const cartCount = document.querySelector('.cart-count');
         const addBtn = document.querySelector('.add-to-cart');
         function setCount(v){ if (cartCount) cartCount.textContent = String(v); }
@@ -755,6 +757,15 @@ def product_detail(sku: str) -> HTMLResponse:
         .replace("__PRICE__", price_display)
         .replace("__SPEC_ROWS__", spec_rows)
         .replace("__API_KEY__", api_key)
+        .replace("__CSP_NONCE__", csp_nonce)
         .replace("__DECISION_MODAL_DISPLAY__", "block" if decision_modal_test_open else "none")
     )
-    return HTMLResponse(content=html)
+    csp = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{csp_nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob: https:; "
+        "connect-src 'self' ws: wss:; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    )
+    return HTMLResponse(content=html, headers={"Content-Security-Policy": csp})
