@@ -104,8 +104,14 @@ def _buyer_procurement_trace(draft: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def _case_view(db, case_id: str, *, for_operator: bool) -> Dict[str, Any]:
-    cur = fwf.repository.current_version(db, case_id)
+def _case_view(
+    db,
+    case_id: str,
+    *,
+    for_operator: bool,
+    tenant_id: str = "default",
+) -> Dict[str, Any]:
+    cur = fwf.repository.current_version(db, case_id, tenant_id)
     if cur is None:
         raise HTTPException(status_code=404, detail="case not found")
     state_json = dict(cur.state_json)
@@ -234,7 +240,12 @@ def get_case(case_id: str, request: Request) -> Dict[str, Any]:
     principal = resolve_buyer_principal(request)
     with db_session() as db:
         assert_case_owner(db, case_id, principal)
-        return _case_view(db, case_id, for_operator=False)
+        return _case_view(
+            db,
+            case_id,
+            for_operator=False,
+            tenant_id=(principal.tenant_id if principal else "default"),
+        )
 
 
 @router.get("/cases/{case_id}/operator-view")
@@ -250,11 +261,15 @@ def get_case_by_trace(trace_id: str, request: Request) -> Dict[str, Any]:
     from src.app.security.buyer_principal import assert_case_owner, resolve_buyer_principal
     principal = resolve_buyer_principal(request)
     with db_session() as db:
-        cid = fwf.repository.case_id_by_trace(db, trace_id)
+        tenant_id = principal.tenant_id if principal else "default"
+        cid = fwf.repository.case_id_by_trace(db, trace_id, tenant_id)
         if not cid:
             raise HTTPException(status_code=404, detail="no case for trace")
         assert_case_owner(db, cid, principal)
-        return {"trace_id": trace_id, **_case_view(db, cid, for_operator=False)}
+        return {
+            "trace_id": trace_id,
+            **_case_view(db, cid, for_operator=False, tenant_id=tenant_id),
+        }
 
 
 @router.get("/cases/by-trace/{trace_id}/operator-view")
@@ -278,7 +293,8 @@ def _cases_by_trace_view(
     the drafted RFQs (one per supplier), not just the newest. Superseded cases are excluded (they belong to
     a prior amendment). Proof surface only; it never mutates or sends. Empty list (not 404) when none."""
     with db_session() as db:
-        cids = fwf.repository.case_ids_by_trace(db, trace_id)
+        tenant_id = principal.tenant_id if principal else "default"
+        cids = fwf.repository.case_ids_by_trace(db, trace_id, tenant_id)
         cases: List[Dict[str, Any]] = []
         order_group_id: Optional[str] = None
         for cid in cids:
@@ -286,7 +302,7 @@ def _cases_by_trace_view(
                 if not for_operator:
                     from src.app.security.buyer_principal import assert_case_owner
                     assert_case_owner(db, cid, principal)
-                cv = _case_view(db, cid, for_operator=for_operator)
+                cv = _case_view(db, cid, for_operator=for_operator, tenant_id=tenant_id)
             except HTTPException:
                 continue
             if str(cv.get("state") or "").upper() == "SUPERSEDED":
@@ -319,7 +335,14 @@ def get_journey(case_id: str, request: Request) -> Dict[str, Any]:
     principal = resolve_buyer_principal(request)
     with db_session() as db:
         assert_case_owner(db, case_id, principal)
-        return {"case_id": case_id, "journey": fwf.journey(db, case_id)}
+        return {
+            "case_id": case_id,
+            "journey": fwf.journey(
+                db,
+                case_id,
+                tenant_id=(principal.tenant_id if principal else "default"),
+            ),
+        }
 
 
 @router.get("/cases/by-order/{order_id}")
@@ -697,10 +720,12 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
             if _verdict["action"] == "escalate":
                 _emit_confirm_trace(db, body.order_id, _verdict)  # watch, but let the buyer proceed
             result = supersede_order(db, order_id=body.order_id, lines=resolved, uid=buyer_uid,
+                                     tenant_id=(principal.tenant_id if principal else "default"),
                                      trace_id=body.trace_id, requirements=body.requirements)
         else:
             result = materialize_cases_for_order(db, order_id=body.order_id, lines=resolved,
                                                  uid=buyer_uid, trace_id=body.trace_id,
+                                                 tenant_id=(principal.tenant_id if principal else "default"),
                                                  requirements=body.requirements)
         _notify_from_confirm(db, result)
     return result
@@ -816,14 +841,15 @@ def commit(case_id: str, body: CommitBody, request: Request) -> Dict[str, Any]:
     from src.app.security.buyer_principal import assert_case_owner, resolve_buyer_principal
     principal = resolve_buyer_principal(request, supplied_uid=body.uid)
     buyer_uid = principal.subject if principal else str(body.uid or "")
+    tenant_id = principal.tenant_id if principal else "default"
     with db_session() as db:
         assert_case_owner(db, case_id, principal)
         res = fwf.transition(db, case_id=case_id, event="buyer_committed", actor=Actor(ActorType.BUYER, buyer_uid),
-                             reason_code="buyer_commitment")
+                             reason_code="buyer_commitment", tenant_id=tenant_id)
         _raise_if_failed(res)
         if _auto_draft_on_commit_enabled():
             try:
-                cur = fwf.repository.current_version(db, case_id)
+                cur = fwf.repository.current_version(db, case_id, tenant_id)
                 sj = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
                 avail = sj.get("availability") if isinstance(sj.get("availability"), dict) else {}
                 item_ref = str(avail.get("item_ref") or "").strip()
@@ -836,6 +862,7 @@ def commit(case_id: str, body: CommitBody, request: Request) -> Dict[str, Any]:
                         with db_session() as draft_db:
                             draft_result, _draft = fdraft.draft_and_record(
                                 draft_db, case_id=case_id, actor=_agent(), item_ref=item_ref, quantity=qty,
+                                tenant_id=tenant_id,
                                 estimated_value_cents=0, trace_id=(cur.source_trace_id if cur else None))
                             _raise_if_failed(draft_result)
                     except Exception as exc:
@@ -1679,6 +1706,7 @@ def select_option(case_id: str, body: SelectBody, request: Request) -> Dict[str,
     from src.app.security.buyer_principal import assert_case_owner, resolve_buyer_principal
     principal = resolve_buyer_principal(request, supplied_uid=body.uid)
     buyer_uid = principal.subject if principal else str(body.uid or "")
+    tenant_id = principal.tenant_id if principal else "default"
     with db_session() as db:
         assert_case_owner(db, case_id, principal)
         res = fopt.select_option(
@@ -1686,9 +1714,10 @@ def select_option(case_id: str, body: SelectBody, request: Request) -> Dict[str,
             case_id=case_id,
             actor=Actor(ActorType.BUYER, buyer_uid),
             option_id=body.option_id,
+            tenant_id=tenant_id,
         )
         _raise_if_failed(res)
-        return _case_view(db, case_id, for_operator=False)
+        return _case_view(db, case_id, for_operator=False, tenant_id=tenant_id)
 
 
 # ── PO finalization: AGENT proposes, HUMAN approves+creates, then completes ─────
