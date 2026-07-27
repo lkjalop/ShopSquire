@@ -3,6 +3,9 @@ the actor is resolved from role/uid, illegal commands return 409, demo replies a
 buyer view is redacted."""
 from __future__ import annotations
 
+import time
+
+import jwt
 import pytest
 import uuid
 from fastapi.testclient import TestClient
@@ -18,6 +21,44 @@ def _open():
     r = client.post(_BASE, json={"uid": "u1", "trace_id": f"T-API-{uuid.uuid4()}"})
     assert r.status_code == 200, r.text
     return r.json()["case_id"]
+
+
+def _buyer_token(secret: str, subject: str) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "sub": subject,
+            "typ": "access",
+            "iss": "shopsquire",
+            "aud": "shopsquire-api",
+            "iat": now,
+            "exp": now + 300,
+        },
+        secret,
+        algorithm="HS256",
+    )
+
+
+def test_strict_buyer_boundary_hides_foreign_cases(monkeypatch):
+    cid = _open()
+    monkeypatch.setenv("BUYER_IDENTITY_MODE", "strict")
+    monkeypatch.setenv("JWT_SIGNING_KEY", "buyer-boundary-test")
+
+    assert client.get(f"{_BASE}/{cid}").status_code == 401
+    own = _buyer_token("buyer-boundary-test", "u1")
+    assert client.get(
+        f"{_BASE}/{cid}", headers={"Authorization": f"Bearer {own}"}
+    ).status_code == 200
+
+    foreign = _buyer_token("buyer-boundary-test", "u2")
+    assert client.get(
+        f"{_BASE}/{cid}", headers={"Authorization": f"Bearer {foreign}"}
+    ).status_code == 404
+    assert client.post(
+        f"{_BASE}/{cid}/commit",
+        headers={"Authorization": f"Bearer {own}"},
+        json={"uid": "u2"},
+    ).status_code == 403
 
 
 def test_open_assess_commit_flow_over_http():

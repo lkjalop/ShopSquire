@@ -229,8 +229,11 @@ def autonomous_audit(limit: int = Query(100, ge=1, le=1000),
 
 
 @router.get("/cases/{case_id}")
-def get_case(case_id: str) -> Dict[str, Any]:
+def get_case(case_id: str, request: Request) -> Dict[str, Any]:
+    from src.app.security.buyer_principal import assert_case_owner, resolve_buyer_principal
+    principal = resolve_buyer_principal(request)
     with db_session() as db:
+        assert_case_owner(db, case_id, principal)
         return _case_view(db, case_id, for_operator=False)
 
 
@@ -241,13 +244,16 @@ def get_case_operator(case_id: str, role: str = Depends(require_role(_OPERATOR))
 
 
 @router.get("/cases/by-trace/{trace_id}")
-def get_case_by_trace(trace_id: str) -> Dict[str, Any]:
+def get_case_by_trace(trace_id: str, request: Request) -> Dict[str, Any]:
     """Resolve the procurement case opened from a decision trace_id — the link that lets the buyer's
     DecisionTrace surface the fulfilment journey for the same turn. 404 when no case was opened."""
+    from src.app.security.buyer_principal import assert_case_owner, resolve_buyer_principal
+    principal = resolve_buyer_principal(request)
     with db_session() as db:
         cid = fwf.repository.case_id_by_trace(db, trace_id)
         if not cid:
             raise HTTPException(status_code=404, detail="no case for trace")
+        assert_case_owner(db, cid, principal)
         return {"trace_id": trace_id, **_case_view(db, cid, for_operator=False)}
 
 
@@ -261,7 +267,12 @@ def get_case_by_trace_operator(trace_id: str,
         return {"trace_id": trace_id, **_case_view(db, cid, for_operator=True)}
 
 
-def _cases_by_trace_view(trace_id: str, *, for_operator: bool) -> Dict[str, Any]:
+def _cases_by_trace_view(
+    trace_id: str,
+    *,
+    for_operator: bool,
+    principal: Any = None,
+) -> Dict[str, Any]:
     """READ-ONLY: every ACTIVE case opened from a decision trace — a multi-supplier bulk order opens one
     case per supplier group, all sharing the trace, so the Decision Trace → Procurement tab can show ALL
     the drafted RFQs (one per supplier), not just the newest. Superseded cases are excluded (they belong to
@@ -272,6 +283,9 @@ def _cases_by_trace_view(trace_id: str, *, for_operator: bool) -> Dict[str, Any]
         order_group_id: Optional[str] = None
         for cid in cids:
             try:
+                if not for_operator:
+                    from src.app.security.buyer_principal import assert_case_owner
+                    assert_case_owner(db, cid, principal)
                 cv = _case_view(db, cid, for_operator=for_operator)
             except HTTPException:
                 continue
@@ -284,8 +298,13 @@ def _cases_by_trace_view(trace_id: str, *, for_operator: bool) -> Dict[str, Any]
 
 
 @router.get("/cases/by-trace/{trace_id}/all")
-def get_cases_by_trace_all(trace_id: str) -> Dict[str, Any]:
-    return _cases_by_trace_view(trace_id, for_operator=False)
+def get_cases_by_trace_all(trace_id: str, request: Request) -> Dict[str, Any]:
+    from src.app.security.buyer_principal import resolve_buyer_principal
+    return _cases_by_trace_view(
+        trace_id,
+        for_operator=False,
+        principal=resolve_buyer_principal(request),
+    )
 
 
 @router.get("/cases/by-trace/{trace_id}/all/operator-view")
@@ -295,8 +314,11 @@ def get_cases_by_trace_all_operator(trace_id: str,
 
 
 @router.get("/cases/{case_id}/journey")
-def get_journey(case_id: str) -> Dict[str, Any]:
+def get_journey(case_id: str, request: Request) -> Dict[str, Any]:
+    from src.app.security.buyer_principal import assert_case_owner, resolve_buyer_principal
+    principal = resolve_buyer_principal(request)
     with db_session() as db:
+        assert_case_owner(db, case_id, principal)
         return {"case_id": case_id, "journey": fwf.journey(db, case_id)}
 
 
@@ -537,7 +559,7 @@ def cases_from_order(body: FromOrderBody, role: str = Depends(require_role(_OPER
 
 
 class ConfirmCartBody(BaseModel):
-    uid: str
+    uid: Optional[str] = None
     order_id: str                                 # commitment reference (cart/order id) — the idempotency key
     lines: Optional[list[SplitLineBody]] = None   # explicit resolved lines, OR
     query: Optional[str] = None                   # a raw mixed message to parse ("15 laptops + 10 monitors")
@@ -583,10 +605,13 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
     FULFILLMENT_DEFER_TO_CART the recommend stage only PREVIEWED the split, so this is where intent becomes
     a durable case. Fully-in-stock lines are fulfilled from stock and create no case."""
     from src.app.security.rate_limit import consume_fixed_window_limit
+    from src.app.security.buyer_principal import resolve_buyer_principal
     from src.app.services.fulfillment.cart_commitment import materialize_cases_for_order, supersede_order
+    principal = resolve_buyer_principal(request, supplied_uid=body.uid)
+    buyer_uid = principal.subject if principal else str(body.uid or "")
     # anti-abuse: bound confirm/amend churn per buyer (cost + security control). Fail-open if the limiter
     # backend is down (the limiter itself degrades gracefully); over-limit → 429.
-    if not consume_fixed_window_limit(key=f"confirm_cart:{body.uid}", limit=_CONFIRM_RATE_PER_MIN, window_sec=60):
+    if not consume_fixed_window_limit(key=f"confirm_cart:{buyer_uid}", limit=_CONFIRM_RATE_PER_MIN, window_sec=60):
         raise HTTPException(status_code=429, detail="confirm_cart_rate_limited")
     # Address validation at GATE 1: a supplier RFQ that carries an unshippable ship_to produces a
     # case that can never fulfil. Reject an unusable ship_to here (only when one is supplied).
@@ -671,11 +696,11 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
                 raise HTTPException(status_code=429, detail={"error": "amendment_cap_exceeded", **_verdict})
             if _verdict["action"] == "escalate":
                 _emit_confirm_trace(db, body.order_id, _verdict)  # watch, but let the buyer proceed
-            result = supersede_order(db, order_id=body.order_id, lines=resolved, uid=body.uid,
+            result = supersede_order(db, order_id=body.order_id, lines=resolved, uid=buyer_uid,
                                      trace_id=body.trace_id, requirements=body.requirements)
         else:
             result = materialize_cases_for_order(db, order_id=body.order_id, lines=resolved,
-                                                 uid=body.uid, trace_id=body.trace_id,
+                                                 uid=buyer_uid, trace_id=body.trace_id,
                                                  requirements=body.requirements)
         _notify_from_confirm(db, result)
     return result
@@ -780,16 +805,20 @@ def supplier_event(body: SupplierEventBody, role: str = Depends(require_role(_OP
 
 
 class CommitBody(BaseModel):
-    uid: str
+    uid: Optional[str] = None
     email: Optional[str] = None   # optional buyer email → bounded-autonomy status reply (flag-gated)
 
 
 @router.post("/cases/{case_id}/commit")
-def commit(case_id: str, body: CommitBody) -> Dict[str, Any]:
+def commit(case_id: str, body: CommitBody, request: Request) -> Dict[str, Any]:
     """GATE 1: the BUYER commits (places the order / requests sourcing). No operator role required —
     this is the buyer's own action; only now may a supplier be engaged."""
+    from src.app.security.buyer_principal import assert_case_owner, resolve_buyer_principal
+    principal = resolve_buyer_principal(request, supplied_uid=body.uid)
+    buyer_uid = principal.subject if principal else str(body.uid or "")
     with db_session() as db:
-        res = fwf.transition(db, case_id=case_id, event="buyer_committed", actor=Actor(ActorType.BUYER, body.uid),
+        assert_case_owner(db, case_id, principal)
+        res = fwf.transition(db, case_id=case_id, event="buyer_committed", actor=Actor(ActorType.BUYER, buyer_uid),
                              reason_code="buyer_commitment")
         _raise_if_failed(res)
         if _auto_draft_on_commit_enabled():
@@ -1640,15 +1669,24 @@ def experiment_revert(body: ExperimentBody = Body(default=ExperimentBody()),
 
 
 class SelectBody(BaseModel):
-    uid: str
+    uid: Optional[str] = None
     option_id: str
 
 
 @router.post("/cases/{case_id}/select-option")
-def select_option(case_id: str, body: SelectBody) -> Dict[str, Any]:
+def select_option(case_id: str, body: SelectBody, request: Request) -> Dict[str, Any]:
     """BUYER picks an offered option (no operator role — the buyer's own action)."""
+    from src.app.security.buyer_principal import assert_case_owner, resolve_buyer_principal
+    principal = resolve_buyer_principal(request, supplied_uid=body.uid)
+    buyer_uid = principal.subject if principal else str(body.uid or "")
     with db_session() as db:
-        res = fopt.select_option(db, case_id=case_id, actor=Actor(ActorType.BUYER, body.uid), option_id=body.option_id)
+        assert_case_owner(db, case_id, principal)
+        res = fopt.select_option(
+            db,
+            case_id=case_id,
+            actor=Actor(ActorType.BUYER, buyer_uid),
+            option_id=body.option_id,
+        )
         _raise_if_failed(res)
         return _case_view(db, case_id, for_operator=False)
 
