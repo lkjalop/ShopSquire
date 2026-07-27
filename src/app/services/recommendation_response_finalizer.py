@@ -87,6 +87,9 @@ def finalize_core_response(
                 {
                     "sku": item["sku"],
                     "name": item["name"],
+                    "currency": item.get("currency"),
+                    "price": item.get("price"),
+                    "price_cents": item.get("price_cents"),
                     "score_norm": item.get("score_norm"),
                     "reasons": item.get("reasons") or [],
                 }

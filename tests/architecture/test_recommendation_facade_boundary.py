@@ -32,7 +32,7 @@ def test_chat_cannot_import_legacy_recommend_or_suggest() -> None:
     assert violations == []
 
 
-def test_legacy_suggest_import_is_confined_to_delegate_boundary() -> None:
+def test_production_services_do_not_import_legacy_suggest() -> None:
     importers: list[str] = []
     for path in SERVICES.rglob("*.py"):
         for module, names in _imports(path):
@@ -41,4 +41,4 @@ def test_legacy_suggest_import_is_confined_to_delegate_boundary() -> None:
             ):
                 importers.append(path.relative_to(ROOT).as_posix())
 
-    assert importers == ["src/app/services/legacy_recommendation_delegate.py"]
+    assert importers == []

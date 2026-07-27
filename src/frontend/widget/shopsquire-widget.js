@@ -250,14 +250,22 @@ class ShopSquireWidget extends HTMLElement {
 
   async fetchRecommend(query) {
     const base = this.config.apiBase || window.location.origin;
-    const url = `${base.replace(/\/$/, '')}/api/v1/recommend/suggest?uid=${encodeURIComponent(this.config.uid)}&query=${encodeURIComponent(query)}`;
-    const headers = {};
+    const url = `${base.replace(/\/$/, '')}/api/v1/chat/query`;
+    const headers = { 'Content-Type': 'application/json' };
     if (this.config.apiKey) headers['x-api-key'] = this.config.apiKey;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        uid: this.config.uid,
+        query,
+      }),
+    });
     clearTimeout(timer);
-    if (!resp.ok) throw new Error(`Recommend failed ${resp.status}`);
+    if (!resp.ok) throw new Error(`Chat recommendation failed ${resp.status}`);
     const data = await resp.json();
     return data;
   }

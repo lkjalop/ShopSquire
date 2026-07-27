@@ -1,7 +1,7 @@
 """Phase 1 — single formatter: assistant_message is never empty at the choke point."""
 from __future__ import annotations
 
-from src.app.routers.recommend import _finalize_answer, _recovery_answer
+from src.app.services.recommend_response_finalizer import _finalize_answer, _recovery_answer
 
 
 def test_existing_answer_unchanged():
@@ -43,7 +43,7 @@ def test_recovery_answer_verdict_first_with_upgrade_path():
 
 
 def test_dereference_replaces_labels_with_product_names():
-    from src.app.routers.recommend import _dereference_product_labels
+    from src.app.services.recommend_response_finalizer import _dereference_product_labels
     p = {"assistant_message": "The [1] is a solid pick; [2] is cheaper.",
          "results": [{"name": "MSI Katana 15"}, {"name": "Dell G15"}]}
     out = _dereference_product_labels(p)
@@ -52,18 +52,18 @@ def test_dereference_replaces_labels_with_product_names():
 
 
 def test_dereference_leaves_unknown_labels_and_no_results():
-    from src.app.routers.recommend import _dereference_product_labels
+    from src.app.services.recommend_response_finalizer import _dereference_product_labels
     p = {"assistant_message": "See [5].", "results": [{"name": "X"}]}
     assert _dereference_product_labels(p)["assistant_message"] == "See [5]."  # out of range -> unchanged
     assert _dereference_product_labels({"assistant_message": "hi", "results": []})["assistant_message"] == "hi"
 
 
 def test_exclude_off_category_drops_router_for_laptop():
-    from src.app.routers.recommend import _exclude_off_category_in_payload
+    from src.app.services.recommend_response_finalizer import exclude_off_category_in_payload
     p = {"results": [{"name": "ASUS Vivobook S16"}, {"name": "ASUS RT-AX54HP Wi-Fi 6 Router"}, {"name": "Dell XPS 13"}],
          "products": [{"name": "ASUS Vivobook S16"}, {"name": "ASUS RT-AX54HP Wi-Fi 6 Router"}, {"name": "Dell XPS 13"}],
          "constraints_used": {"query": "asus laptop for university under 1500"}}
-    out = _exclude_off_category_in_payload(p)
+    out = exclude_off_category_in_payload(p)
     names = [r["name"].lower() for r in out["results"]]
     assert not any("router" in n for n in names), names
     assert any("vivobook" in n for n in names)
@@ -73,21 +73,21 @@ def test_exclude_off_category_drops_router_for_laptop():
 def test_exclude_drops_peripheral_regardless_of_query():
     # Query-INDEPENDENT contract (2026-06): for a laptop store a peripheral is dropped
     # whenever a real product is also present — even on a vague query ("uni work").
-    from src.app.routers.recommend import _exclude_off_category_in_payload
+    from src.app.services.recommend_response_finalizer import exclude_off_category_in_payload
     p = {"results": [{"name": "Dell XPS 13"}, {"name": "B Router"}], "constraints_used": {"query": "something vague"}}
-    out = _exclude_off_category_in_payload(p)["results"]
+    out = exclude_off_category_in_payload(p)["results"]
     assert [r["name"] for r in out] == ["Dell XPS 13"]
 
 
 def test_exclude_keeps_all_when_only_peripherals():
     # If EVERY result is a peripheral (user actually searched "headset"), keep them all.
-    from src.app.routers.recommend import _exclude_off_category_in_payload
+    from src.app.services.recommend_response_finalizer import exclude_off_category_in_payload
     p = {"results": [{"name": "HyperX Cloud Flight"}, {"name": "Logitech Keyboard"}], "constraints_used": {"query": "headset"}}
-    assert len(_exclude_off_category_in_payload(p)["results"]) == 2
+    assert len(exclude_off_category_in_payload(p)["results"]) == 2
 
 
 def test_dereference_drops_redundant_label_after_name():
-    from src.app.routers.recommend import _dereference_product_labels
+    from src.app.services.recommend_response_finalizer import _dereference_product_labels
     p = {"assistant_message": "The HP Victus 15-fa2364TX [1] is the top pick.",
          "results": [{"name": "HP Victus 15-fa2364TX 15.6 Gaming Laptop"}]}
     out = _dereference_product_labels(p)["assistant_message"]

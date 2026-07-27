@@ -41,6 +41,12 @@ _QTY_PRECEDING_OK = frozenset({
 _QTY_SPEC_FILLERS = re.compile(r"\b(?:inch(?:es)?|in|\"|gb|tb|mb|hz|ghz|kg|lb|nits?|core|gen)\b", re.I)
 # vertical-blind unit nouns — real product nouns are injected per-vertical by the caller.
 _GENERIC_UNIT_NOUNS = ("units?", "items?", "pieces?", "pcs", r"of\s+(?:them|these|those)")
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20,
+    "twenty-five": 25, "thirty": 30, "forty": 40, "fifty": 50,
+}
 
 
 @lru_cache(maxsize=32)
@@ -96,6 +102,17 @@ def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) 
         r = _ok(m, check_fillers=True)
         if r:
             return r
+    word_pattern = "|".join(
+        re.escape(word) for word in sorted(_NUMBER_WORDS, key=len, reverse=True)
+    )
+    m = re.search(
+        rf"\b({word_pattern})\s+((?:[a-z]+(?:[-\s]+)){{0,3}}?)(?:{nouns})\b",
+        q,
+    )
+    if m:
+        if not _preceded_by_name_token(q, m.start(1)):
+            if not _QTY_SPEC_FILLERS.search(m.group(2) or ""):
+                return _NUMBER_WORDS[m.group(1)], m.group(1)
     m = re.search(r"\b(?:need|want|get|buy|order|purchase|looking\s+for|help\s+with)\s+"
                   r"(?:about|around|roughly|approx\w*|maybe|some|say)?\s*(\d{1,4})\b", q)
     if m:

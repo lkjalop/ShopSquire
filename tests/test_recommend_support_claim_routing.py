@@ -3,7 +3,7 @@ import json
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
-from src.app.routers.recommend import _classify_turn_intent
+from src.app.services.query_classifier import classify_turn_intent
 from tests.utils import default_headers
 
 
@@ -12,7 +12,7 @@ def _client() -> TestClient:
 
 
 def test_classify_turn_intent_treats_cracked_query_as_support_claim():
-    assert _classify_turn_intent(
+    assert classify_turn_intent(
         query="i cracked my macbook! who do i talk to?",
         nlp={},
         followup_explain=False,

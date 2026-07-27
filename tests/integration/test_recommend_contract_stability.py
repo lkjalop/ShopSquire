@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.app.main import app
-from src.app.routers.recommend import _ensure_trace_response
+from src.app.services.recommendation_response_finalizer import finalize_core_response
 from tests.utils import default_headers
 
 client = TestClient(app, headers=default_headers())
@@ -104,7 +104,7 @@ def test_success_shape_full_ui_contract():
 
 
 def test_anchor_product_preserves_authoritative_currency():
-    body = _ensure_trace_response(
+    body = finalize_core_response(
         {
             "results": [{
                 "sku": "AUD-1",
@@ -114,7 +114,9 @@ def test_anchor_product_preserves_authoritative_currency():
             }],
         },
         "trace-currency",
-        {},
+        query="a laptop",
+        tenant_id="default",
+        uid="contract-currency",
     )
 
     product = body["right_panel"]["anchor_sections"][0]["top_products"][0]

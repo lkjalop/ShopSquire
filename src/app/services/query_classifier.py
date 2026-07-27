@@ -50,11 +50,26 @@ def is_followup_explain_query(query: Optional[str]) -> bool:
 # ── Off-domain / unsupported intent ──────────────────────────────────────────
 
 _OFF_DOMAIN_RE = re.compile(
-    r"\b(write.*code|write.*essay|write.*email|compose.*poem|"
+    r"\b(can i get your number|what(?:'s| is) your number|give me your number|"
+    r"date me|go out with me|sexy|hot|"
+    r"big\s*mac|burger|fries|mcdonalds|"
+    r"write.*code|write.*essay|write.*email|compose.*poem|"
     r"translate|what is the weather|stock.*price|stock.*market|"
-    r"recipe|cook|bake|medical.*advice|legal.*advice|"
+    r"weather|forecast|is\s+it\s+raining|going\s+to\s+rain|will\s+it\s+rain|"
+    r"recipe|cook|bake|pasta|pizza|lasagne|sandwich|"
+    r"who\s+won|the\s+score|match\s+last\s+night|football|cricket|"
+    r"nba|nfl|world\s+cup|tell\s+me\s+a\s+joke|knock\s+knock|sing\s+me|"
+    r"write\s+me\s+a\s+poem|"
+    r"capital\s+of|who\s+is\s+the\s+president|meaning\s+of\s+life|"
+    r"what\s+year\s+did|medical.*advice|legal.*advice|"
     r"diagnose|diagnosis|prescription|drug|medication|"
     r"political|election|vote|president|prime.minister)\b",
+    re.IGNORECASE,
+)
+
+_OFF_DOMAIN_CALCULATION_RE = re.compile(
+    r"^\s*(?:(?:what|whats|what's)\s+is|calculate)\s+\d+\s*"
+    r"(?:[-+*x/]|times|plus|minus|divided\s+by)\s*\d+",
     re.IGNORECASE,
 )
 
@@ -65,10 +80,26 @@ _UNSUPPORTED_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_GREETING_RE = re.compile(
+    r"^\s*(?:hi+|hey+|hello+|helo|yo|sup|hiya|howdy|greetings|"
+    r"good\s+(?:morning|afternoon|evening)|help|menu|start|get\s+started|"
+    r"what\s+can\s+you\s+do|what\s+do\s+you\s+do|who\s+are\s+you|"
+    r"what\s+are\s+you|what\s+is\s+this|how\s+(?:do|does)\s+(?:you|this|it)\s+work|"
+    r"what\s+can\s+i\s+(?:do|ask)|can\s+you\s+help(?:\s+me)?)"
+    r"(?:\s+there|\s+friend)?\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
+
 
 def is_off_domain_query(query: Optional[str]) -> bool:
     """Return True when the query is clearly off-domain (not a shopping/support task)."""
-    return bool(_OFF_DOMAIN_RE.search(str(query or "")))
+    text = str(query or "")
+    return bool(_OFF_DOMAIN_RE.search(text) or _OFF_DOMAIN_CALCULATION_RE.search(text))
+
+
+def is_greeting_query(query: Optional[str]) -> bool:
+    """Return True only for a standalone greeting/capabilities request."""
+    return bool(_GREETING_RE.match(str(query or "").strip()))
 
 
 def has_unsupported_intent(query: Optional[str]) -> bool:
@@ -126,7 +157,10 @@ def classify_turn_intent(
     if re.search(
         r"\b(warranty|return|refund|broken|damaged|cracked|shattered|repair|"
         r"replacement|support|not working|faulty|dead pixel|screen damage|"
-        r"bsod|blue screen|stop code)\b",
+        r"bsod|blue screen|stop code|where is my order|order status|"
+        r"track(?:ing)? (?:my |the )?(?:order|shipment|delivery)|"
+        r"has not arrived|hasn't arrived|not arrived|not received|"
+        r"late delivery|missing (?:order|shipment|delivery))\b",
         q,
     ):
         return "SUPPORT_CLAIM"

@@ -572,7 +572,7 @@ class TestDeterministicAssistantMessagePersona:
     """_deterministic_assistant_message should produce persona-aware, human-like text."""
 
     def _fn(self):
-        from src.app.routers.recommend import _deterministic_assistant_message
+        from src.app.services.recommend_budget_advisor import _deterministic_assistant_message
         return _deterministic_assistant_message
 
     def _make_results(self, n: int = 3) -> list:

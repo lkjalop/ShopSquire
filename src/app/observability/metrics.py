@@ -1589,6 +1589,11 @@ recommendation_dispatch_total = Counter(
     "Typed recommendation dispatch outcomes, including legacy rollback use",
     labelnames=["outcome", "lane", "reason"],
 )
+recommend_compatibility_requests_total = Counter(
+    "shopsquire_recommend_compatibility_requests_total",
+    "Deprecated /recommend/suggest compatibility traffic served by V2",
+    labelnames=["outcome"],
+)
 
 
 def record_event(name: str, fields: dict) -> None:
@@ -1619,12 +1624,13 @@ def record_core_fallback(reason: str) -> None:
 
 
 _DISPATCH_OUTCOMES = {
-    "v2_served", "v2_unavailable", "legacy_delegated", "blocked", "error",
+    "v2_served", "v2_unavailable", "legacy_delegated", "blocked", "timeout", "error",
 }
 _DISPATCH_REASONS = {
     "served", "mode_off", "search_mode_off", "shadow_only",
     "outside_pilot_cohort", "outside_canary_bucket", "lane_not_enrolled",
-    "core_error", "core_degraded", "guard_blocked", "quota_blocked", "unknown",
+    "core_error", "core_degraded", "guard_blocked", "quota_blocked", "recommend_timeout",
+    "compatibility_cutover", "unknown",
 }
 _DISPATCH_LANES = {
     "SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG",
@@ -1655,6 +1661,14 @@ def record_recommendation_dispatch(*, outcome: str, lane: str | None,
             lane=bounded_lane,
             reason=bounded_reason,
         ).inc()
+    except Exception:
+        pass
+
+
+def record_recommend_compatibility_request(outcome: str) -> None:
+    try:
+        bounded = outcome if outcome in {"served", "blocked", "unavailable", "error"} else "error"
+        recommend_compatibility_requests_total.labels(outcome=bounded).inc()
     except Exception:
         pass
 

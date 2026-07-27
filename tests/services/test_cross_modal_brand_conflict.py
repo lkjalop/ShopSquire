@@ -1,7 +1,7 @@
 """Cross-modal (vision ⟂ NLP) brand-consistency check: text brand vs image brand."""
 from __future__ import annotations
 
-from src.app.routers.recommend import _cross_modal_brand_conflict_question as conflict
+from src.app.services.recommend_vision_stage import _cross_modal_brand_conflict_question as conflict
 
 
 def test_text_asus_image_msi_raises_conflict():

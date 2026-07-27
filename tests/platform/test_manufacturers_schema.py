@@ -13,7 +13,7 @@ from src.app.platform.store_profile import (
     get_store_profile,
     product_line_index,
 )
-from src.app.routers.recommend import _BRAND_LABEL_PATTERNS_FALLBACK
+from src.app.services.recommend_image_hints import _BRAND_LABEL_PATTERNS_FALLBACK
 
 
 # ── Parity: derived patterns == the live inline dict (set-wise per manufacturer) ──

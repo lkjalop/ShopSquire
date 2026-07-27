@@ -137,6 +137,16 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
         a, b = _to_int(m.group(1), m.group(2)), _to_int(m.group(3), m.group(4))
         if a is not None and b is not None and a != b:
             return BudgetParse(min(a, b), max(a, b), "range")
+    m = re.search(
+        rf"\b(?:good|options?|products?|recommendations?)\b[^.?!]{{0,16}}"
+        rf"\bfor\s*{_CUR}?\s*{_NUM}\s*(?:-|to|and)\s*"
+        rf"{_CUR}?\s*{_NUM}{_UNIT_GUARD}",
+        q,
+    )
+    if m:
+        a, b = _to_int(m.group(1), m.group(2)), _to_int(m.group(3), m.group(4))
+        if a is not None and b is not None and a != b:
+            return BudgetParse(min(a, b), max(a, b), "range")
 
     # 2) revision DOWN — "cut it to 1000 max", "drop the budget to 800": a new CEILING (floor cleared).
     #    Requires a budget cue and >= 100 so "reduce to 10" stays a quantity amendment.

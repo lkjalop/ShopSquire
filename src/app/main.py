@@ -41,7 +41,7 @@ from src.app.routers.scoring import router as scoring_router
 from src.app.routers.approvals import router as approvals_router
 from src.app.routers.fulfillment_cases import router as fulfillment_cases_router
 from src.app.routers.kyv_admin import router as kyv_admin_router
-from src.app.routers.recommend import router as recommend_router
+from src.app.routers.recommend_compat import router as recommend_router
 from src.app.routers.recommend_aux import router as recommend_aux_router
 from src.app.routers.recommendation_checkout import router as recommendation_checkout_router
 from src.app.routers.recommendation_explain import router as recommendation_explain_router

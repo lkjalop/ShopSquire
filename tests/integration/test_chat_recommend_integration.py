@@ -4,11 +4,12 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
-def test_chat_to_recommend_integration():
+def test_suggest_compatibility_route_keeps_canonical_contract():
     app = create_app()
     client = TestClient(app)
 
-    # create a lightweight chat/recommend request that goes through recommend.suggest
+    # The deprecated transport must retain its canonical response contract while
+    # dispatching through V2.
     headers = {"x-api-key": "local-merchant-key"}
     # Use a deterministic uid that maps to guest tier
     uid = "test_guest_123"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.app.routers.recommend import _query_signals_greeting, _query_signals_off_domain
+from src.app.services.query_classifier import is_greeting_query, is_off_domain_query
 
 
 @pytest.mark.parametrize("q", [
@@ -13,7 +13,7 @@ from src.app.routers.recommend import _query_signals_greeting, _query_signals_of
     "what can you do?", "what do you do", "who are you", "how does this work", "can you help me",
 ])
 def test_greetings_are_caught(q):
-    assert _query_signals_greeting(q) is True
+    assert is_greeting_query(q) is True
 
 
 @pytest.mark.parametrize("q", [
@@ -22,7 +22,7 @@ def test_greetings_are_caught(q):
     "compare the dell and lenovo", "i need 20 laptops for my team",
 ])
 def test_product_queries_are_not_greetings(q):
-    assert _query_signals_greeting(q) is False
+    assert is_greeting_query(q) is False
 
 
 @pytest.mark.parametrize("q", [
@@ -31,7 +31,7 @@ def test_product_queries_are_not_greetings(q):
     "what is the capital of france", "who is the president", "what is 15 x 32", "what is 15 times 32", "calculate 8 plus 7",
 ])
 def test_off_domain_is_caught(q):
-    assert _query_signals_off_domain(q) is True
+    assert is_off_domain_query(q) is True
 
 
 @pytest.mark.parametrize("q", [
@@ -40,4 +40,4 @@ def test_off_domain_is_caught(q):
     "cheapest laptop you have", "best laptop for university",
 ])
 def test_product_queries_are_not_off_domain(q):
-    assert _query_signals_off_domain(q) is False
+    assert is_off_domain_query(q) is False

@@ -108,7 +108,7 @@ def test_context_preamble_deduplicates_fields():
 # ─────────────────────────────────────────────────────────────────────────────
 # Fix 4 — _build_brand_budget_answer: corporate branch + budget extraction
 # ─────────────────────────────────────────────────────────────────────────────
-from src.app.routers.recommend import _build_brand_budget_answer
+from src.app.services.recommend_budget_advisor import _build_brand_budget_answer
 
 
 def _make_results(prices_cents: list[int]) -> list[dict]:
@@ -172,7 +172,7 @@ def test_no_budget_mention_returns_empty():
 # ─────────────────────────────────────────────────────────────────────────────
 # BUG-7 — expanded asks_budget token detection
 # ─────────────────────────────────────────────────────────────────────────────
-from src.app.routers.recommend import _build_brand_budget_answer_v2
+from src.app.services.recommend_budget_advisor import _build_brand_budget_answer_v2
 
 
 @pytest.mark.parametrize("query", [
@@ -211,7 +211,7 @@ def test_would_dollar_v2_over_budget():
 # ─────────────────────────────────────────────────────────────────────────────
 # Fix 5 — _classify_budget_bracket gaming tiers
 # ─────────────────────────────────────────────────────────────────────────────
-from src.app.routers.recommend import _classify_budget_bracket
+from src.app.services.recommend_budget_parsing import classify_budget_bracket as _classify_budget_bracket
 
 
 def test_bracket_entry():

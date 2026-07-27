@@ -348,6 +348,28 @@ def _formatter_enabled() -> bool:
     return str(os.getenv("COMMERCE_FORMATTER", "0")).strip().lower() in ("1", "true", "yes")
 
 
+def exclude_off_category_in_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep product aliases synchronized after deterministic off-category filtering."""
+    try:
+        results = payload.get("results")
+        if not isinstance(results, list) or len(results) < 2:
+            return payload
+        constraints = payload.get("constraints_used")
+        query = (
+            str(constraints.get("query") or "")
+            if isinstance(constraints, dict)
+            else ""
+        ) or str(payload.get("query") or "")
+        filtered = _demote_off_category(results, query)
+        if len(filtered) != len(results):
+            payload["results"] = filtered
+            if isinstance(payload.get("products"), list):
+                payload["products"] = filtered
+    except Exception:
+        pass
+    return payload
+
+
 def finalize_response_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """SINGLE owner of buyer-facing answer shaping (P1 one-writer).
 
@@ -361,9 +383,7 @@ def finalize_response_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     security challenge -> never-empty formatter. Never raises."""
     try:
         payload = _ensure_result_prices(payload)                       # price_cents -> price
-        payload["results"] = _demote_off_category(payload.get("results") or [], None)
-        if isinstance(payload.get("products"), list):
-            payload["products"] = payload["results"]
+        payload = exclude_off_category_in_payload(payload)
         payload = _annotate_type_and_price_integrity(payload)          # price-poisoning guard
         payload = _dereference_product_labels(payload)                 # [N] -> product name
         payload = _maybe_apply_security_challenge(payload)             # educational image-security

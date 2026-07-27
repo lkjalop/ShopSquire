@@ -569,7 +569,13 @@ def _merge_session_overrides(
             continue
         try:
             cents = int(round(float(raw) * 100))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.debug(
+                "confirmed slot %s ignored: invalid monetary value %r (%s)",
+                source_key,
+                raw,
+                type(exc).__name__,
+            )
             continue
         if 0 < cents <= 100_000_000_000_000:
             accepted[target_key] = cents
@@ -620,6 +626,7 @@ def dispatch_recommendation_core_typed(
     intent_hint: Optional[str] = None,
     role: str = "",
     confirmed_slots: Optional[Dict[str, Any]] = None,
+    compatibility_cutover: bool = False,
     with_trace: Optional[Callable[[Dict[str, Any], str], Dict[str, Any]]] = None,
     record_failure: Optional[Callable[..., Any]] = None,
 ) -> FacadeOutcome:
@@ -658,6 +665,8 @@ def dispatch_recommendation_core_typed(
         )
 
     mode, pct = _resolve_mode()
+    if compatibility_cutover:
+        mode, pct = "primary", 100
     cart_mode = _cart_mode()
     if mode == "off" and cart_mode == "off":
         return outcome("delegate", reason="mode_off")
@@ -678,10 +687,33 @@ def dispatch_recommendation_core_typed(
         record_failure("recommend_facade_quota", exc, trace_id=trace_id)
         return outcome("error", reason="quota_check_failed")
 
+    # The compatibility transport preserves the recorded authoritative inventory
+    # short-circuit. This remains inside the V2 facade boundary: stock counts come
+    # from the dedicated DB-backed inventory service and never from the model.
+    if compatibility_cutover and not (image_labels or image_hash):
+        from src.app.services.query_classifier import is_off_domain_query
+        from src.app.services.recommend_intent_router import run_inventory_fastpath
+
+        inventory_payload = run_inventory_fastpath(
+            query=query,
+            uid=uid,
+            trace_id=trace_id,
+            route_t0=dispatch_started,
+            off_domain_fn=is_off_domain_query,
+            # Inventory-specific injection is intentionally handled by the
+            # authoritative inventory service so the legacy refusal shape survives.
+            unsupported_fn=lambda _query: False,
+            with_trace=with_trace,
+            record_failure=record_failure,
+        )
+        if inventory_payload is not None:
+            return outcome("served", payload=inventory_payload, lane="INVENTORY")
+
     # IMAGE V2 ingress: transform the legacy flat parameters into one bounded observation.
     # OCR remains guard-only. The trust posture determines which visual facts may influence
     # interpretation; taxonomy, eligibility, constraints and ranking remain core-owned.
     image_observations = []
+    signals: Dict[str, Any] = {}
     if image_labels or image_hash or image_product_identity or image_cv_signals:
         from src.app.services.recommendation_core.envelope import ImageObservation
         try:
@@ -708,6 +740,45 @@ def dispatch_recommendation_core_typed(
         image_observations.append(ImageObservation.bounded(
             labels=labels, product_identity=identity, image_hash=image_hash,
             analysis_state=analysis_state, trust_mode=trust_mode))
+
+    try:
+        damage_score = float(signals.get("damage_score") or 0)
+    except (TypeError, ValueError):
+        damage_score = 0.0
+    if (
+        compatibility_cutover
+        and (
+            str(image_intent or "").strip().lower() == "cv_triage"
+            or bool(signals.get("intent_cv_triage"))
+            or damage_score >= 0.5
+        )
+    ):
+        payload = with_trace(
+            {
+                "products": [],
+                "results": [],
+                "recommendations": [],
+                "turn_intent": "SUPPORT_CLAIM",
+                "status": "support_claim",
+                "assistant_message": (
+                    "This looks like a damaged device. I can help document the issue "
+                    "and route it for support review."
+                ),
+                "next_questions": [
+                    {"id": "damage_details", "label": "Describe the damage"}
+                ],
+                "right_panel": {
+                    "mode": "support",
+                    "damage_score": damage_score,
+                },
+                "security": {
+                    "policy_route": "visual_sanitized",
+                    "image_untrusted": True,
+                },
+            },
+            trace_id,
+        )
+        return outcome("served", payload=payload, lane="SUPPORT_CLAIM")
 
     # ── CART-MUTATION LANE — its OWN ladder, independent of the search mode ──────
     # RECOMMEND_CART_SERVE=on: inline serve (below). =shadow: RESOLVE-ONLY — handled at the
@@ -822,7 +893,7 @@ def dispatch_recommendation_core_typed(
             return outcome("served", payload=payload, lane="CLARIFY")
 
         # ── LANE GATE (finding #6): non-core lanes fall through to legacy ───────
-        if not _lane_is_enrolled(core.lane):
+        if not compatibility_cutover and not _lane_is_enrolled(core.lane):
             logger.debug("core lane %s not canary-eligible — falling through to legacy", core.lane)
             _fallback_metric(f"lane:{core.lane}")
             return outcome("delegate", reason="lane_not_enrolled", lane=core.lane)

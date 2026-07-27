@@ -1,7 +1,7 @@
 """Frontend <-> backend PARITY (Playwright).
 
-Proves the storefront widget renders EXACTLY what /api/v1/recommend/suggest returns
--- not just that "something renders". Intercepts the live /suggest response and
+Proves the storefront widget renders EXACTLY what /api/v1/chat/query returns
+-- not just that "something renders". Intercepts the live V2 chat response and
 compares it to the widget's rendered state.results (count + SKU set).
 
 Deterministic: results are catalog-driven, not LLM-driven, so this is a stable gate
@@ -47,11 +47,11 @@ def test_widget_results_match_backend(page, test_server):
 
     try:
         inp.fill(_QUERY)
-        with page.expect_response(lambda r: "/recommend/suggest" in r.url, timeout=15000) as resp_info:
+        with page.expect_response(lambda r: "/chat/query" in r.url, timeout=15000) as resp_info:
             inp.press("Enter")
         body = resp_info.value.json()
     except Exception:
-        pytest.skip("/suggest response not captured (widget wiring/env)")
+        pytest.skip("/chat/query response not captured (widget wiring/env)")
 
     wait_for_results(page)
     state = _read_widget_results(page)
@@ -90,11 +90,11 @@ def test_widget_no_results_is_graceful_not_blank(page, test_server):
         pytest.skip("widget query input not found")
     try:
         inp.fill("asus gaming laptop under 200")
-        with page.expect_response(lambda r: "/recommend/suggest" in r.url, timeout=15000) as resp_info:
+        with page.expect_response(lambda r: "/chat/query" in r.url, timeout=15000) as resp_info:
             inp.press("Enter")
         body = resp_info.value.json()
     except Exception:
-        pytest.skip("/suggest response not captured")
+        pytest.skip("/chat/query response not captured")
     # Backend must carry SOME answer text (message/assistant_message) even on no-match.
     answer = str(body.get("assistant_message") or body.get("message") or "")
     assert answer.strip(), "no-match response carried no message text (blank-answer regression)"
