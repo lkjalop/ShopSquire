@@ -938,14 +938,23 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # with POLICY_QUESTION is an internal contradiction: it describes the active order, not a
     # general store policy. Correct that contradiction without inspecting query words. General
     # policy turns remain untouched because the model marks them general_policy/uncertain.
-    if (str(session.get("active_workflow_lane")
+    active_procurement = (
+        str(session.get("active_workflow_lane")
             or session.get("prior_lane") or "").strip().upper() == "PROCUREMENT"
+    )
+    if (active_procurement
             and lane == "POLICY_QUESTION"
             and procurement_context != "general_policy"
             and (subject_action == "continue" or procurement_context == "current_order")):
         lane = "PROCUREMENT"
+    if (active_procurement
+            and lane == "FILTER"
+            and procurement_context == "current_order"
+            and subject_action != "switch"):
+        lane = "PROCUREMENT"
     _continues = subject_action == "continue" or (
-        subject_action != "switch" and lane in ("FILTER", "COMPARE", "EXPLAIN"))
+        subject_action != "switch" and lane in ("FILTER", "COMPARE", "EXPLAIN")) or (
+        active_procurement and lane == "PROCUREMENT" and subject_action != "switch")
     if _continues:
         pn = get_node(str(session.get("prior_node") or ""))
         if node is None:
@@ -1207,6 +1216,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     if quantity is not None and quantity in budget_values:
         logger.info("ignored quantity proposal colliding with budget: %s", quantity)
         quantity = None
+    if quantity is None and active_procurement and subject_action != "switch":
+        accepted_quantity = (
+            (session.get("accepted_constraints") or {}).get("quantity")
+        )
+        if (isinstance(accepted_quantity, int)
+                and not isinstance(accepted_quantity, bool)
+                and 1 <= accepted_quantity <= 100_000):
+            quantity = accepted_quantity
     total_budget_cents = None
     _tb = data.get("total_budget")
     if (isinstance(_tb, (int, float)) and not isinstance(_tb, bool) and _math.isfinite(_tb)
@@ -1225,6 +1242,12 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         # buyer explicitly says total/all-in. Treating it as $76 per unit is never useful.
         if quantity and parsed_scope_budget and parsed_scope_budget.mode == "range":
             budget_scope = "per_unit"
+        elif budget_scope == "unknown" and subject_action != "switch":
+            accepted_scope = str(
+                (session.get("accepted_constraints") or {}).get("budget_scope") or ""
+            ).strip().lower()
+            if accepted_scope in ("per_unit", "total"):
+                budget_scope = accepted_scope
     if budget_scope == "per_unit":
         # total_budget is contractually the whole-order amount. Some models echo the
         # per-item ceiling into this field; discard it and use the parsed envelope band.
@@ -1416,7 +1439,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             if node is not None:
                 routing_source = "model+use_case_host"
 
-    if node is not None and use_cases:
+    if (node is not None and use_cases
+            and not (lane == "EXPLAIN" and prior_shortlist)):
         workload_host = _grounded_use_case_host(db, envelope, use_cases)
         explicitly_named = set(_query_named_sold_handles(db, envelope))
         if workload_host is not None and workload_host.handle != node.handle:

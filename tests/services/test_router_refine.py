@@ -368,6 +368,113 @@ def test_procurement_lane_synonyms_are_clamped_to_existing_lane(db, model_lane):
     assert decision.source == "model"
 
 
+def test_active_procurement_quantity_amendment_inherits_subject_and_budget_scope(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="actually make that 20 people",
+        uid="u1",
+        tenant_id="default",
+        session={
+            "active_workflow_lane": "PROCUREMENT",
+            "prior_node": "el-6-6",
+            "accepted_constraints": {
+                "quantity": 15,
+                "budget_max_cents": 140000,
+                "budget_scope": "per_unit",
+            },
+        },
+    )
+    payload = {
+        "lane": "PROCUREMENT",
+        "handle": None,
+        "subject_action": "uncertain",
+        "procurement_context": "none",
+        "quantity": 20,
+        "budget_scope": None,
+        "requirements": {},
+    }
+
+    decision = route_turn(
+        db, envelope, llm_fn=lambda *_args: json.dumps(payload),
+    )
+
+    assert decision.lane == "PROCUREMENT"
+    assert decision.node_handle == "el-6-6"
+    assert decision.quantity == 20
+    assert decision.budget_scope == "per_unit"
+
+
+def test_current_order_quote_request_repairs_filter_to_procurement(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="prepare the supplier quote for the current quantity",
+        uid="u1",
+        tenant_id="default",
+        session={
+            "active_workflow_lane": "PROCUREMENT",
+            "prior_node": "el-6-6",
+            "accepted_constraints": {
+                "quantity": 20,
+                "budget_max_cents": 140000,
+                "budget_scope": "per_unit",
+            },
+        },
+    )
+    payload = {
+        "lane": "FILTER",
+        "handle": None,
+        "subject_action": "continue",
+        "procurement_context": "current_order",
+        "budget_scope": None,
+        "requirements": {},
+    }
+
+    decision = route_turn(
+        db, envelope, llm_fn=lambda *_args: json.dumps(payload),
+    )
+
+    assert decision.lane == "PROCUREMENT"
+    assert decision.node_handle == "el-6-6"
+    assert decision.quantity == 20
+    assert decision.budget_scope == "per_unit"
+
+
+def test_explain_with_prior_shortlist_does_not_reopen_product_type(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    add_sold_node(db, node_handle="el-7-9-12-7-2")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="why is the first one enough for a high school art student?",
+        uid="u1",
+        tenant_id="default",
+        session={
+            "prior_node": "el-7-9-12-7-2",
+            "shortlist_skus": ["WAC-INTUOS-S"],
+            "accepted_constraints": {"use_cases": ["drawing"]},
+        },
+    )
+    payload = {
+        "lane": "EXPLAIN",
+        "handle": None,
+        "subject_action": "continue",
+        "use_cases": ["high_school", "drawing"],
+        "requirements": {},
+    }
+
+    decision = route_turn(
+        db, envelope, llm_fn=lambda *_args: json.dumps(payload),
+    )
+
+    assert decision.lane == "EXPLAIN"
+    assert decision.node_handle == "el-7-9-12-7-2"
+    assert decision.product_type_options == ()
+
+
 def test_router_default_generation_budget_fits_bulk_decision(monkeypatch):
     from src.app.services.recommendation_core import turn_router
 

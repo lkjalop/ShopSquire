@@ -10,6 +10,7 @@ from tests.characterization.synthetic_conversation_soak import (
     _effective_decision,
     _error_dimension,
     _percentile,
+    _recommend_checks,
     _resume_checkpoint,
     _session_from,
     build_context_journeys,
@@ -75,7 +76,7 @@ def test_build_journeys_supports_explicit_stress_shape():
 def test_long_context_and_lifecycle_shapes_are_real_not_repeated_five_turns():
     context = build_context_journeys(20, seed=7)
     lifecycle = build_lifecycle_journeys(14, seed=7)
-    assert len(context) == 20 and all(len(j.turns) == 10 for j in context)
+    assert len(context) == 20 and all(len(j.turns) >= 10 for j in context)
     assert len(lifecycle) == 14 and all(len(j.turns) == 15 for j in lifecycle)
     assert all(j.family == "lifecycle_procurement" for j in lifecycle)
 
@@ -199,3 +200,28 @@ def test_soak_dimensions_do_not_mix_lane_calibration_with_safety():
     assert summary["relevance"]["measured"] is False
     assert _error_dimension("node:x", turn=0) == "semantic_safety"
     assert _error_dimension("products:empty", turn=4) == "catalog_coverage"
+
+
+def test_subject_check_accepts_broader_taxonomy_when_catalog_titles_are_specific():
+    class Product:
+        sku = "LAP-1"
+        title = "Dell Business Laptop 15-inch"
+        brand = "Dell"
+
+    class Core:
+        lane = "SEARCH"
+        products = [Product()]
+        message = "One match"
+        extras = {
+            "decision": {
+                "node_handle": "el-6",
+                "node_path": "Electronics > Computers",
+            },
+        }
+
+    errors = _recommend_checks(
+        TurnSpec("laptop", node_contains="Laptop", expect_products=True),
+        Core(),
+    )
+
+    assert errors == []

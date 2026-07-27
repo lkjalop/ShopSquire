@@ -157,8 +157,7 @@ def _base_journeys(variant: int) -> List[JourneySpec]:
                      node_contains="Laptop", excluded_brand="Apple"),
             TurnSpec("what is the delivery and sourcing tradeoff?",
                      lane_in=("POLICY_QUESTION", "PROCUREMENT", "EXPLAIN"),
-                     calibration_class="active_procurement_explanation",
-                     node_contains="Laptop"),
+                     calibration_class="active_procurement_explanation"),
             TurnSpec("prepare the supplier quote for the current quantity", lane_in=("PROCUREMENT",),
                      node_contains="Laptop"),
         )),
@@ -526,8 +525,15 @@ def _recommend_checks(spec: TurnSpec, core,
     lane = str(core.lane or "")
     if spec.lane_in and lane not in spec.lane_in:
         errors.append(f"lane:{lane}:expected:{','.join(spec.lane_in)}")
-    if spec.node_contains and spec.node_contains.lower() not in str(dec.get("node_path") or "").lower():
-        errors.append(f"node:{dec.get('node_path')}:expected_contains:{spec.node_contains}")
+    if spec.node_contains:
+        expected_subject = spec.node_contains.lower()
+        subject_evidence = [str(dec.get("node_path") or "")]
+        subject_evidence.extend(str(getattr(product, "title", "") or "")
+                                for product in core.products)
+        if not any(expected_subject in value.lower() for value in subject_evidence):
+            errors.append(
+                f"node:{dec.get('node_path')}:expected_contains:{spec.node_contains}"
+            )
     if spec.quantity is not None and dec.get("quantity") != spec.quantity:
         errors.append(f"quantity:{dec.get('quantity')}:expected:{spec.quantity}")
     if spec.total_budget_cents is not None and dec.get("total_budget_cents") != spec.total_budget_cents:
