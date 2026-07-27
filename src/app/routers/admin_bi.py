@@ -13,6 +13,7 @@ logger = logging.getLogger("shopsquire.admin_bi")
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text as sql_text
+from sqlalchemy.exc import SQLAlchemyError
 from prometheus_client import generate_latest
 from pydantic import BaseModel, Field
 
@@ -140,17 +141,24 @@ def executive_metric_forecast_comparison(
     )
 
     tenant_id = str(current_tenant_id() or "default")
-    with db_session() as db:
-        return compare_forecast_candidates_from_sealed(
-            db,
-            tenant_id=tenant_id,
-            subject_id=sku,
-            baseline_model_id=baseline_model_id,
-            baseline_model_version=baseline_model_version,
-            challenger_model_id=challenger_model_id,
-            challenger_model_version=challenger_model_version,
-            unit_value_cents=unit_value_cents,
-        )
+    try:
+        with db_session() as db:
+            return compare_forecast_candidates_from_sealed(
+                db,
+                tenant_id=tenant_id,
+                subject_id=sku,
+                baseline_model_id=baseline_model_id,
+                baseline_model_version=baseline_model_version,
+                challenger_model_id=challenger_model_id,
+                challenger_model_version=challenger_model_version,
+                unit_value_cents=unit_value_cents,
+            )
+    except SQLAlchemyError as exc:
+        logger.error("forecast comparison schema unavailable for %s: %s", tenant_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="forecast_evidence_schema_unavailable_apply_alembic_head",
+        ) from exc
 
 
 class NewsletterDraftRequest(BaseModel):
