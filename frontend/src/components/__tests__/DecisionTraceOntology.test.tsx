@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compactAuthorityPath,
   legacyComponentOntology,
+  procurementQuarantineView,
   resolveWhyAnchorSections,
 } from '../DecisionTrace';
 
@@ -52,5 +53,40 @@ describe('Decision Trace component ontology', () => {
       { authority: 'authorizes' },
       { authority: 'presents' },
     ])).toBe('proposes -> authorizes -> executes (3 stages) -> authorizes -> presents');
+  });
+
+  it('normalizes a quarantined supplier response without exposing raw content', () => {
+    expect(procurementQuarantineView(
+      {
+        state_json: {
+          quarantine: {
+            sender_domain: 'supplier.example',
+            reason: 'inbound_security_review',
+            security: {
+              severity: 'critical',
+              route: 'security_review',
+              reasons: ['active_content', 'credential_request'],
+            },
+          },
+        },
+      },
+      [{
+        state: 'SUPPLIER_RESPONSE_QUARANTINED',
+        event: 'supplier_response_quarantined',
+        valid_from: '2026-07-27T14:20:00Z',
+      }],
+    )).toEqual({
+      active: true,
+      senderDomain: 'supplier.example',
+      reason: 'inbound_security_review',
+      severity: 'critical',
+      route: 'security_review',
+      securityReasons: ['active_content', 'credential_request'],
+      timestamp: '2026-07-27T14:20:00Z',
+    });
+  });
+
+  it('does not manufacture quarantine state when none was recorded', () => {
+    expect(procurementQuarantineView({ state_json: {} }, [])).toMatchObject({ active: false });
   });
 });

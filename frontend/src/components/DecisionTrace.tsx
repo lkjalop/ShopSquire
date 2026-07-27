@@ -258,6 +258,47 @@ export function compactAuthorityPath(steps: any[]): string {
   )).join(' -> ');
 }
 
+export function procurementQuarantineView(procCase: any, journey: any[]): {
+  active: boolean;
+  senderDomain: string;
+  reason: string;
+  severity: string;
+  route: string;
+  securityReasons: string[];
+  timestamp: string;
+} {
+  const quarantine = procCase?.state_json?.quarantine;
+  if (!quarantine || typeof quarantine !== 'object') {
+    return {
+      active: false,
+      senderDomain: '',
+      reason: '',
+      severity: '',
+      route: '',
+      securityReasons: [],
+      timestamp: '',
+    };
+  }
+  const security = quarantine.security && typeof quarantine.security === 'object'
+    ? quarantine.security
+    : {};
+  const transition = [...(Array.isArray(journey) ? journey : [])].reverse().find((item: any) => (
+    String(item?.event || '').toLowerCase() === 'supplier_response_quarantined'
+    || String(item?.state || '').toUpperCase() === 'SUPPLIER_RESPONSE_QUARANTINED'
+  ));
+  return {
+    active: true,
+    senderDomain: String(quarantine.sender_domain || 'not recorded'),
+    reason: String(quarantine.reason || transition?.reason_code || 'security review required'),
+    severity: String(security.severity || 'unknown'),
+    route: String(security.route || 'security_review'),
+    securityReasons: Array.isArray(security.reasons)
+      ? security.reasons.map((value: any) => String(value)).filter(Boolean)
+      : [],
+    timestamp: String(transition?.valid_from || transition?.created_at || ''),
+  };
+}
+
 function componentSource(evt: TraceEvent): string {
   const label = inlineText(evt.payload?._component_label);
   const kind = inlineText(evt.payload?._component_kind);
@@ -3562,6 +3603,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const dealStatus = dealProjection ? dealEconomicsStatus(dealProjection) : null;
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     const gateView = procurementGateDisplay(draft?.send_gate || draft?.gate);
+                    const quarantineView = procurementQuarantineView(procCase, procJourney || []);
                     return (
                       <>
                         {/* RFQ-FIRST: the drafted supplier RFQ is the first-class object of this tab (GPT-5.5
@@ -3954,6 +3996,46 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
                         {/* Audit trail — the case's own bitemporal journey (state · actor · reason · time),
                             inline so the operator proves provenance without switching tabs/windows. */}
+                        {canSeeOperatorDraft && quarantineView.active && (
+                          <section
+                            data-testid="proc-supplier-quarantine"
+                            style={{
+                              marginTop: 10,
+                              border: '1px solid #f59e0b',
+                              borderRadius: 8,
+                              padding: '10px 12px',
+                              background: '#fffbeb',
+                              color: '#78350f',
+                            }}
+                          >
+                            <div style={{ fontWeight: 700 }}>Supplier response quarantined</div>
+                            <div style={{ marginTop: 4 }}>
+                              No quote, price, inventory, economics, payment, or procurement state was applied.
+                            </div>
+                            <div className={styles.kvRow}><span>Supplier domain</span><span>{quarantineView.senderDomain}</span></div>
+                            <div className={styles.kvRow}><span>Containment reason</span><span>{humanizeKey(quarantineView.reason)}</span></div>
+                            <div className={styles.kvRow}><span>Security decision</span><span>{humanizeKey(quarantineView.severity)} - {humanizeKey(quarantineView.route)}</span></div>
+                            {quarantineView.securityReasons.length > 0 && (
+                              <div className={styles.kvRow}>
+                                <span>Recorded evidence</span>
+                                <span>{quarantineView.securityReasons.map(humanizeKey).join(', ')}</span>
+                              </div>
+                            )}
+                            <div className={styles.kvRow}>
+                              <span>When</span>
+                              <span className={styles.mono}>
+                                {quarantineView.timestamp
+                                  ? quarantineView.timestamp.replace('T', ' ').slice(0, 19)
+                                  : 'not recorded'}
+                              </span>
+                            </div>
+                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #fde68a' }}>
+                              <strong>Operator actions:</strong> verify the supplier out of band, inspect the Email Security evidence,
+                              and keep this response quarantined until an authorized review workflow records a resolution.
+                            </div>
+                          </section>
+                        )}
+
                         {procCase && Array.isArray(procJourney) && procJourney.length > 0 && (
                           <details data-testid="proc-audit-trail" style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
                             <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
