@@ -1007,7 +1007,17 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     try:
         email, ingest_gate_meta = strict_attachment_ingest_gate(email)
     except Exception:
-        ingest_gate_meta = {"gate": "strict_attachment_ingest", "blocked": False, "error": "ingest_gate_failed"}
+        attachment_count = len(email.get("attachments") or [])
+        ingest_gate_meta = {
+            "gate": "strict_attachment_ingest",
+            "blocked": attachment_count > 0,
+            "blocked_count": attachment_count,
+            "accepted_count": 0,
+            "attachment_count": attachment_count,
+            "global_reasons": ["ingest_gate_unavailable"] if attachment_count else [],
+            "block_reasons": ["ingest_gate_unavailable"] if attachment_count else [],
+            "error": "ingest_gate_failed",
+        }
 
     # Accept raw base64 attachment bytes in the evaluate path and hydrate deterministic metadata/text.
     try:
@@ -1019,7 +1029,14 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     try:
         email, ocr_sanitization_meta = sanitize_attachment_ocr_for_llm(email)
     except Exception:
-        ocr_sanitization_meta = {"gate": "ocr_qr_sanitization", "blocked_qr_url_count": 0, "error": "ocr_sanitize_failed"}
+        attachment_count = len(email.get("attachments") or [])
+        ocr_sanitization_meta = {
+            "gate": "ocr_qr_sanitization",
+            "blocked": attachment_count > 0,
+            "blocked_qr_url_count": 0,
+            "prompt_instruction_hits": 0,
+            "error": "ocr_sanitize_failed",
+        }
 
     content_classification = _classify_email_content_mode(email)
 
@@ -1531,6 +1548,14 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 + ["ingest_gate_blocked_attachment"]
                 + [str(x) for x in ((ingest_gate_meta or {}).get("global_reasons") or [])]
             )
+        )
+    if bool((ocr_sanitization_meta or {}).get("blocked")):
+        v["severity"] = "error"
+        v["route"] = "security_review"
+        v["verdict_action"] = "security_review"
+        v["escalation"] = "security_middleware"
+        v["reasons"] = list(
+            dict.fromkeys((v.get("reasons") or []) + ["ocr_sanitization_unavailable"])
         )
     # Header forensics can escalate suspicious sender/header tampering patterns.
     try:

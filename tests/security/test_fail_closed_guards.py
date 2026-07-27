@@ -35,3 +35,51 @@ def test_abac_malformed_allowlist_denies(monkeypatch):
     monkeypatch.setenv("ABAC_TENANT_ALLOWLIST_JSON", '{"merchant": ["t1"]}')
     assert _abac_tenant_allow("merchant", "t1") is True
     assert _abac_tenant_allow("merchant", "t2") is False
+
+
+def test_email_attachment_ingest_gate_failure_blocks(monkeypatch):
+    import src.app.security.email_security as es
+
+    monkeypatch.setattr(
+        es,
+        "strict_attachment_ingest_gate",
+        lambda _email: (_ for _ in ()).throw(RuntimeError("scanner unavailable")),
+    )
+    out = es.evaluate_email_security(
+        {
+            "message_id": "fail-closed-ingest",
+            "from_addr": "quotes@supplier.example",
+            "subject": "Quote",
+            "body": "Attached quote.",
+            "attachments": [{"name": "quote.pdf", "content_type": "application/pdf"}],
+        },
+        tenant_id="tenant-fail-closed",
+    )
+    gate = (out.get("evidence_snapshot") or {}).get("attachment_ingest_gate") or {}
+    assert gate.get("blocked") is True
+    assert "ingest_gate_unavailable" in (out.get("reasons") or [])
+    assert out.get("route") == "security_review"
+
+
+def test_email_ocr_sanitizer_failure_blocks_attachment(monkeypatch):
+    import src.app.security.email_security as es
+
+    monkeypatch.setattr(
+        es,
+        "sanitize_attachment_ocr_for_llm",
+        lambda _email: (_ for _ in ()).throw(RuntimeError("sanitizer unavailable")),
+    )
+    out = es.evaluate_email_security(
+        {
+            "message_id": "fail-closed-ocr",
+            "from_addr": "quotes@supplier.example",
+            "subject": "Quote",
+            "body": "Attached quote.",
+            "attachments": [{"name": "quote.pdf", "content_type": "application/pdf"}],
+        },
+        tenant_id="tenant-fail-closed",
+    )
+    gate = (out.get("evidence_snapshot") or {}).get("ocr_qr_sanitization") or {}
+    assert gate.get("blocked") is True
+    assert "ocr_sanitization_unavailable" in (out.get("reasons") or [])
+    assert out.get("route") == "security_review"
