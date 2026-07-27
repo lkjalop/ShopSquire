@@ -375,11 +375,16 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # subject switch only releases prior constraints when the buyer explicitly resets or
     # switches context.  Fresh searches remain isolated by the lane guard below.
     explicit_context_reset = bool(_EXPLICIT_CONTEXT_RESET.search(envelope.query or ""))
+    active_lane = str((envelope.session or {}).get("active_workflow_lane")
+                      or (envelope.session or {}).get("prior_lane") or "").strip().upper()
     is_continuation = (
         decision.subject_action == "continue"
         or (decision.lane in ("FILTER", "COMPARE", "EXPLAIN")
             and decision.subject_action != "switch")
         or (decision.lane == "EXPLAIN" and not explicit_context_reset)
+        or (decision.lane == "PROCUREMENT"
+            and active_lane == "PROCUREMENT"
+            and decision.subject_action != "switch")
     )
     if is_continuation:
         acc = (envelope.session or {}).get("accepted_constraints") or {}
@@ -397,8 +402,6 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         # not enough: a fresh SEARCH that the model mislabels as "continue" must not resurrect
         # an old 20-unit order. Carry an omitted quantity only inside a known current-order /
         # procurement workflow; descriptive product follow-ups do not need quantity arithmetic.
-        active_lane = str((envelope.session or {}).get("active_workflow_lane")
-                          or (envelope.session or {}).get("prior_lane") or "").strip().upper()
         if (decision.quantity is None and decision.subject_action == "continue"
                 and (decision.procurement_context == "current_order"
                      or active_lane == "PROCUREMENT")

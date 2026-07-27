@@ -1058,6 +1058,11 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     from src.app.services import use_case_registry as use_cases_registry
     if not use_cases:
         use_cases = use_cases_registry.match_use_cases(envelope.query)
+    if not use_cases and active_procurement and subject_action != "switch":
+        for value in (session.get("accepted_constraints") or {}).get("use_cases") or []:
+            normalized = normalize_use_case(str(value))
+            if normalized and normalized not in use_cases:
+                use_cases.append(normalized)
     use_cases = use_cases_registry.apply_use_case_exclusions(use_cases)
     use_cases.extend(value for value in audience_contexts if value not in use_cases)
     # Named workloads are model-proposed but literal-clamped: every significant token must
@@ -1439,7 +1444,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             if node is not None:
                 routing_source = "model+use_case_host"
 
-    if (node is not None and use_cases
+    if (node is not None and use_cases and not subject_from_session
             and not (lane == "EXPLAIN" and prior_shortlist)):
         workload_host = _grounded_use_case_host(db, envelope, use_cases)
         explicitly_named = set(_query_named_sold_handles(db, envelope))

@@ -919,6 +919,49 @@ def test_filter_continuation_inherits_budget_and_requirements(db):
     assert all((p.fit or {}).get("overall") for p in resp.products)   # fit_check ran on inherited reqs
 
 
+def test_active_procurement_continuation_inherits_budget_and_use_case(db):
+    """A sparse current-order turn keeps already-authorized commercial context.
+
+    Procurement continuity is bounded by the active workflow marker; a fresh procurement
+    search without that marker cannot inherit an old budget or workload.
+    """
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-6",
+        "accepted_constraints": {
+            "budget_min_cents": None,
+            "budget_max_cents": 140000,
+            "budget_scope": "per_unit",
+            "quantity": 15,
+            "requirements": {},
+            "use_cases": ["office"],
+        },
+    }
+    payload = {
+        "lane": "PROCUREMENT",
+        "handle": None,
+        "requirements": {},
+        "use_cases": [],
+        "quantity": 20,
+        "budget_scope": None,
+        "subject_action": "uncertain",
+        "procurement_context": "current_order",
+        "confidence": 0.9,
+    }
+    resp = recommend_turn(
+        db,
+        _env("actually make that 20 people", session=session),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    constraints = resp.extras["constraints_used"]
+    assert constraints["budget_max_cents"] == 140000
+    assert constraints["budget_inherited"] is True
+    assert "office" in resp.extras["decision"]["use_cases"]
+    assert all(question.get("id") not in {"ask_budget", "ask_use_case"}
+               for question in resp.clarify)
+
+
 def test_stated_constraints_beat_session(db):
     """Adopt-if-absent: a budget/requirement stated THIS turn always wins over the session."""
     session = {"prior_node": "el-6-11-2",

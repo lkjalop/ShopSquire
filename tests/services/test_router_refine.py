@@ -383,6 +383,7 @@ def test_active_procurement_quantity_amendment_inherits_subject_and_budget_scope
                 "quantity": 15,
                 "budget_max_cents": 140000,
                 "budget_scope": "per_unit",
+                "use_cases": ["office"],
             },
         },
     )
@@ -404,6 +405,7 @@ def test_active_procurement_quantity_amendment_inherits_subject_and_budget_scope
     assert decision.node_handle == "el-6-6"
     assert decision.quantity == 20
     assert decision.budget_scope == "per_unit"
+    assert "office" in decision.use_cases
 
 
 def test_current_order_quote_request_repairs_filter_to_procurement(db):
