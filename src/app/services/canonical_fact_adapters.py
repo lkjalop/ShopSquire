@@ -271,6 +271,28 @@ def canonical_source_health(db, *, tenant_id: str) -> Dict[str, Any]:
                 "quarantine_reasons": {},
             }
     try:
+        rows = db.execute(text("""
+            SELECT source_system, COUNT(*), MAX(actual_observed_at)
+            FROM forecast_actual_pair
+            WHERE tenant_id=:tenant AND status='active'
+              AND sealed_by IS NOT NULL AND sealed_by <> ''
+            GROUP BY source_system
+        """), {"tenant": tenant_id}).fetchall()
+    except Exception:
+        # Forecast evidence is an optional onboarding family. A missing table means
+        # not configured; core canonical fact tables above still fail health loudly.
+        rows = []
+    for source, count, latest in rows:
+        key = ("sealed_forecast_actual", str(source or "unknown"))
+        sources[key] = {
+            "family": key[0],
+            "source_system": key[1],
+            "active_records": int(count or 0),
+            "latest_observed_at": str(latest or "") or None,
+            "quarantined_records": 0,
+            "quarantine_reasons": {},
+        }
+    try:
         quarantines = db.execute(text("""
             SELECT family, COALESCE(source_system,'unknown'), reason_code, COUNT(*),
                    MAX(quarantined_at)

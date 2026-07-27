@@ -122,6 +122,37 @@ def executive_metric_source_health(
         return canonical_source_health(db, tenant_id=tenant_id)
 
 
+@router.get("/executive-metrics/forecast-comparison")
+def executive_metric_forecast_comparison(
+    sku: str = Query(..., min_length=1, max_length=192),
+    baseline_model_id: str = Query(..., min_length=1, max_length=128),
+    baseline_model_version: str = Query(..., min_length=1, max_length=128),
+    challenger_model_id: str = Query(..., min_length=1, max_length=128),
+    challenger_model_version: str = Query(..., min_length=1, max_length=128),
+    unit_value_cents: int | None = Query(default=None, ge=0),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Compare named forecast candidates from sealed evidence; never promotes a model."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.executive_metrics import (
+        compare_forecast_candidates_from_sealed,
+    )
+
+    tenant_id = str(current_tenant_id() or "default")
+    with db_session() as db:
+        return compare_forecast_candidates_from_sealed(
+            db,
+            tenant_id=tenant_id,
+            subject_id=sku,
+            baseline_model_id=baseline_model_id,
+            baseline_model_version=baseline_model_version,
+            challenger_model_id=challenger_model_id,
+            challenger_model_version=challenger_model_version,
+            unit_value_cents=unit_value_cents,
+        )
+
+
 class NewsletterDraftRequest(BaseModel):
     skus: List[str] = Field(default_factory=list, max_length=10)
 

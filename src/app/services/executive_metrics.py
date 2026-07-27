@@ -124,6 +124,8 @@ def persist_forecast_actual_pair(
     source_system: str,
     source_records: Sequence[str],
     provenance_chain: Sequence[str],
+    model_id: str,
+    model_version: str,
     sealed_by: str,
     sealed_at: datetime | None = None,
     commit: bool = True,
@@ -139,6 +141,8 @@ def persist_forecast_actual_pair(
         "subject_id": subject_id,
         "unit": unit,
         "source_system": source_system,
+        "model_id": model_id,
+        "model_version": model_version,
         "sealed_by": sealed_by,
     }
     missing = sorted(key for key, value in required.items() if not str(value or "").strip())
@@ -153,12 +157,12 @@ def persist_forecast_actual_pair(
           id, tenant_id, pair_key, subject_type, subject_id, forecast_value,
           actual_value, unit, target_start, target_end, forecast_created_at,
           actual_observed_at, source_system, source_records_json, provenance_json,
-          sealed_at, sealed_by, status
+          model_id, model_version, sealed_at, sealed_by, status
         ) VALUES (
           :id, :tenant, :pair_key, 'sku', :subject_id, :forecast_value,
           :actual_value, :unit, :target_start, :target_end, :forecast_created_at,
           :actual_observed_at, :source_system, :source_records, :provenance,
-          :sealed_at, :sealed_by, 'active'
+          :model_id, :model_version, :sealed_at, :sealed_by, 'active'
         ) ON CONFLICT(tenant_id, pair_key) DO NOTHING
     """), {
         "id": str(uuid.uuid4()),
@@ -173,6 +177,8 @@ def persist_forecast_actual_pair(
         "forecast_created_at": forecast_created_at,
         "actual_observed_at": actual_observed_at,
         "source_system": str(source_system),
+        "model_id": str(model_id),
+        "model_version": str(model_version),
         "source_records": json.dumps(records),
         "provenance": json.dumps(provenance),
         "sealed_at": sealed_at or _now(),
@@ -181,6 +187,83 @@ def persist_forecast_actual_pair(
     if commit:
         db.commit()
     return max(0, int(result.rowcount or 0))
+
+
+def _sealed_candidate_observations(
+    db,
+    *,
+    tenant_id: str,
+    subject_id: str,
+    model_id: str,
+    model_version: str,
+) -> list[Dict[str, Any]]:
+    rows = db.execute(text("""
+        SELECT forecast_value, actual_value, pair_key
+        FROM forecast_actual_pair
+        WHERE tenant_id=:tenant AND subject_type='sku' AND subject_id=:subject
+          AND model_id=:model_id AND model_version=:model_version
+          AND status='active' AND sealed_by IS NOT NULL AND sealed_by <> ''
+        ORDER BY target_end
+    """), {
+        "tenant": tenant_id,
+        "subject": subject_id,
+        "model_id": model_id,
+        "model_version": model_version,
+    }).fetchall()
+    return [
+        {
+            "forecast": float(row[0]),
+            "actual": float(row[1]),
+            "source_record_id": str(row[2]),
+        }
+        for row in rows
+    ]
+
+
+def compare_forecast_candidates_from_sealed(
+    db,
+    *,
+    tenant_id: str,
+    subject_id: str,
+    baseline_model_id: str,
+    baseline_model_version: str,
+    challenger_model_id: str,
+    challenger_model_version: str,
+    unit_value_cents: int | None = None,
+    as_of: datetime | None = None,
+) -> Dict[str, Any]:
+    """Compare named candidates using only durable, independently sealed pairs."""
+    baseline = _sealed_candidate_observations(
+        db,
+        tenant_id=tenant_id,
+        subject_id=subject_id,
+        model_id=baseline_model_id,
+        model_version=baseline_model_version,
+    )
+    challenger = _sealed_candidate_observations(
+        db,
+        tenant_id=tenant_id,
+        subject_id=subject_id,
+        model_id=challenger_model_id,
+        model_version=challenger_model_version,
+    )
+    result = compare_forecast_candidates(
+        tenant_id=tenant_id,
+        subject_id=subject_id,
+        baseline=baseline,
+        challenger=challenger,
+        unit_value_cents=unit_value_cents,
+        as_of=as_of,
+    )
+    result["baseline_identity"] = {
+        "model_id": baseline_model_id,
+        "model_version": baseline_model_version,
+    }
+    result["challenger_identity"] = {
+        "model_id": challenger_model_id,
+        "model_version": challenger_model_version,
+    }
+    return result
 
 
 def forecast_quality_from_sealed(

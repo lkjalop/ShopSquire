@@ -193,3 +193,38 @@ def test_source_health_distinguishes_broken_schema_from_unconfigured():
         "inventory_atp", "marketing_event", "quarantine",
     }
     db.close()
+
+
+def test_source_health_reports_only_tenant_scoped_sealed_forecast_pairs():
+    db = sessionmaker(bind=create_engine("sqlite+pysqlite:///:memory:", future=True))()
+    _migration(db, "20260721_market_fact_contract.py", "fact_contract_forecast_health")
+    _migration(db, "20260722_market_fact_governance.py", "fact_governance_forecast_health")
+    _migration(db, "20260723_market_fact_quarantine_dedup.py", "fact_quarantine_forecast_health")
+    _migration(db, "20260725_forecast_actual_pairs.py", "forecast_pairs_health")
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(text("""
+        INSERT INTO forecast_actual_pair (
+          id, tenant_id, pair_key, subject_type, subject_id, forecast_value,
+          actual_value, unit, target_start, target_end, forecast_created_at,
+          actual_observed_at, source_system, source_records_json, provenance_json,
+          sealed_at, sealed_by, status
+        ) VALUES
+          ('p1','tenant-a','a1','sku','SKU-1',10,9,'units',:now,:now,:now,:now,
+           'forecast_service','[]','[]',:now,'reviewer','active'),
+          ('p2','tenant-b','b1','sku','SKU-1',10,9,'units',:now,:now,:now,:now,
+           'forecast_service','[]','[]',:now,'reviewer','active'),
+          ('p3','tenant-a','a2','sku','SKU-1',10,9,'units',:now,:now,:now,:now,
+           'forecast_service','[]','[]',:now,'','active')
+    """), {"now": now})
+    db.commit()
+
+    health = canonical_source_health(db, tenant_id="tenant-a")
+    source = next(
+        row for row in health["sources"]
+        if row["family"] == "sealed_forecast_actual"
+    )
+    assert source["active_records"] == 1
+    assert source["status"] == "healthy"
+    onboarding = {row["family"]: row for row in health["onboarding"]}
+    assert onboarding["sealed_forecast_actual"]["status"] == "connected"
+    db.close()
