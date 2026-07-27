@@ -94,3 +94,33 @@ def test_pipeline_excludes_replay_tenant(db):
 def test_pipeline_none_db_safe():
     assert mp.run_pipeline(None)["ingested"] == 0
     assert mp.state(None)["active_findings"] == 0
+
+
+def test_pipeline_propagates_requested_tenant_into_ingestion_and_analysis(db, monkeypatch):
+    from src.app.services import market_analysis, market_signal_adapters
+
+    seen = {}
+
+    def fake_backfill(_db, **kwargs):
+        seen["backfill_tenant"] = kwargs.get("tenant_id")
+        return {}
+
+    def fake_analysis(_db, **kwargs):
+        seen["analysis_tenant"] = kwargs.get("tenant_id")
+        return []
+
+    def fake_persist(_db, _findings, **kwargs):
+        seen["persist_tenant"] = kwargs.get("tenant_id")
+        return 0
+
+    monkeypatch.setattr(market_signal_adapters, "backfill_from_db", fake_backfill)
+    monkeypatch.setattr(market_analysis, "run_analysis", fake_analysis)
+    monkeypatch.setattr(market_analysis, "persist_findings", fake_persist)
+
+    mp.run_pipeline(db, tenant_id="tenant-market-a")
+
+    assert seen == {
+        "backfill_tenant": "tenant-market-a",
+        "analysis_tenant": "tenant-market-a",
+        "persist_tenant": "tenant-market-a",
+    }

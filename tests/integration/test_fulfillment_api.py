@@ -224,6 +224,10 @@ def test_closed_loop_trace_survives_confirmation_and_rfq_redraft(monkeypatch):
     })
     assert first.status_code == 200, first.text
     first_case = first.json()["cases"][0]["case_id"]
+    first_state = client.get(f"{_BASE}/{first_case}/operator-view").json()["state_json"]
+    assert first_state["availability"]["shortfall"] == 5
+    assert first_state["availability"]["lines"][0]["approved_source_override"] == 5
+    assert first_state["availability"]["lines"][0]["source_override_authority"] == "buyer_confirm_cart"
     committed = client.post(f"{_BASE}/{first_case}/commit", json={"uid": uid})
     assert committed.status_code == 200 and committed.json()["state"] == "QUOTE_DRAFTED", committed.text
     first_draft = client.get(f"{_BASE}/{first_case}/operator-view").json()["state_json"]["draft"]
@@ -264,6 +268,36 @@ def test_market_refresh_and_state_run_the_real_pipeline():
     assert "refreshed" in body and body["state"]["label"] == "LIVE"
     s = client.get("/api/v1/fulfillment/market/state")
     assert s.status_code == 200 and s.json()["label"] == "LIVE"
+
+
+def test_market_refresh_and_state_follow_request_tenant(monkeypatch):
+    from src.app.services import market_pipeline
+
+    seen = []
+
+    def fake_run(_db, *, tenant_id, **kwargs):
+        seen.append(("run", tenant_id))
+        return {"ingested": 0, "findings": 0, "persisted": 0}
+
+    def fake_state(_db, *, tenant_id, **kwargs):
+        seen.append(("state", tenant_id))
+        return {"signals": 0, "active_findings": 0, "findings": [], "label": "LIVE"}
+
+    monkeypatch.setattr(market_pipeline, "run_pipeline", fake_run)
+    monkeypatch.setattr(market_pipeline, "state", fake_state)
+    headers = {"X-Tenant-Id": "tenant-market-a"}
+    refreshed = client.post("/api/v1/fulfillment/market/refresh", headers=headers)
+    state = client.get("/api/v1/fulfillment/market/state", headers=headers)
+
+    assert refreshed.status_code == 200
+    assert refreshed.json()["tenant_id"] == "tenant-market-a"
+    assert state.status_code == 200
+    assert state.json()["tenant_id"] == "tenant-market-a"
+    assert seen == [
+        ("run", "tenant-market-a"),
+        ("state", "tenant-market-a"),
+        ("state", "tenant-market-a"),
+    ]
 
 
 def test_edit_draft_and_asof_routes_wired():

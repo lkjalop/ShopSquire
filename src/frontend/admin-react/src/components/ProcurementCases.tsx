@@ -12,7 +12,8 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  fcCaseAsOf, fcCaseOkf, fcCompareQuotes, fcEconomics, fcEditDraft, fcRfqFanout, fcSupplierCandidates,
+  fcCaseAsOf, fcCaseOkf, fcCompareQuotes, fcEconomics, fcEditDraft, fcQuarantineDisposition,
+  fcRfqFanout, fcSupplierCandidates,
   getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
   type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
   type RfqFanoutDraft, type SupplierCandidate,
@@ -69,6 +70,8 @@ export function ProcurementCases() {
   const draft = (view?.state_json?.draft || {}) as Record<string, any>;
   const parsed = (view?.state_json?.parsed_quote || view?.state_json?.validated_quote || {}) as Record<string, any>;
   const inbound = (view?.state_json?.inbound || {}) as Record<string, any>;
+  const quarantine = (view?.state_json?.quarantine || {}) as Record<string, any>;
+  const quarantineEvent = [...journey].reverse().find((event) => event.event === 'supplier_response_quarantined');
   const po = (view?.state_json?.purchase_order || {}) as Record<string, any>;
   const availability = (view?.state_json?.availability || {}) as Record<string, any>;
   const state = view?.state || '';
@@ -140,6 +143,76 @@ export function ProcurementCases() {
                 <strong>No approved supplier for this SKU.</strong> Seed or approve a supplier
                 (<code>scripts/seed_suppliers.py</code>, or add a trusted domain) before contacting the buyer —
                 the draft cannot be generated until coverage exists.
+              </div>
+            )}
+            {state === 'SUPPLIER_RESPONSE_QUARANTINED' && (
+              <div data-testid="op-quarantine-panel" role="alert"
+                   style={{ margin: '8px 0', padding: '10px 12px', borderRadius: 8,
+                            border: '1px solid #f59e0b', background: '#fffbeb', color: '#78350f' }}>
+                <strong>Supplier response quarantined</strong>
+                <div data-testid="op-quarantine-reason">
+                  Reason: {String(quarantine.reason || 'security review required').replace(/_/g, ' ')}
+                </div>
+                <div>Supplier: {quarantine.sender_domain || 'unknown'}</div>
+                <div>Received: {quarantineEvent?.valid_from || 'timestamp unavailable'}</div>
+                <div>
+                  Evidence: {quarantine.security
+                    ? `${quarantine.security.severity || 'unknown'} · ${quarantine.security.route || 'review'}`
+                    : 'sender trust evidence recorded'}
+                </div>
+                <div data-testid="op-quarantine-evidence-ref">
+                  Immutable evidence: {quarantine.raw_evidence_ref || 'reference unavailable'}
+                </div>
+                <div data-testid="op-quarantine-enrichment">
+                  Enrichment: {view.email_enrichment?.status || 'not scheduled'}
+                  {view.email_enrichment ? ` · ${view.email_enrichment.attempts || 0} attempt(s)` : ''}
+                </div>
+                {Array.isArray(quarantine.security?.reasons) && quarantine.security.reasons.length > 0 && (
+                  <ul data-testid="op-quarantine-evidence">
+                    {quarantine.security.reasons.map((reason: string, i: number) => (
+                      <li key={i}>{String(reason).replace(/_/g, ' ')}</li>
+                    ))}
+                  </ul>
+                )}
+                <div data-testid="op-quarantine-actions" style={{ marginTop: 6, fontWeight: 600 }}>
+                  Operator action: verify the supplier out-of-band, inspect the immutable evidence reference,
+                  then keep the response quarantined or open a fresh RFQ. No quote, economics, PO, or payment
+                  state was updated.
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button disabled={busy} onClick={() => run(() =>
+                    fcQuarantineDisposition(sel, 'keep_quarantined', 'Operator reviewed evidence'))}>
+                    Keep quarantined
+                  </button>
+                  <button disabled={busy} onClick={() => {
+                    if (window.confirm('Discard this response permanently? The evidence retention policy still applies.')) {
+                      run(() => fcQuarantineDisposition(sel, 'discard', 'Operator discarded unsafe response'));
+                    }
+                  }}>
+                    Discard response
+                  </button>
+                  <button disabled={busy} onClick={() => {
+                    if (window.confirm('Open a fresh RFQ? The quarantined response will not be reused.')) {
+                      run(() => fcQuarantineDisposition(sel, 'open_fresh_rfq', 'Fresh RFQ requested after quarantine'));
+                    }
+                  }}>
+                    Open fresh RFQ
+                  </button>
+                </div>
+                {(view.quarantine_dispositions || []).length > 0 && (
+                  <div data-testid="op-quarantine-history" style={{ marginTop: 8 }}>
+                    <strong>Disposition history</strong>
+                    <ul>
+                      {(view.quarantine_dispositions || []).map((item, i) => (
+                        <li key={i}>
+                          {item.action.replace(/_/g, ' ')} · {item.actor_id}
+                          {item.created_at ? ` · ${item.created_at}` : ''}
+                          {item.note ? ` — ${item.note}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 

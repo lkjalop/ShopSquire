@@ -28,7 +28,13 @@ def run_pipeline(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 2000, min_
     try:
         from src.app.services.market_analysis import persist_findings, run_analysis
         from src.app.services.market_signal_adapters import backfill_from_db
-        ingested = backfill_from_db(db, limit=limit, min_trust=min_trust, commit=False) or {}
+        ingested = backfill_from_db(
+            db,
+            limit=limit,
+            min_trust=min_trust,
+            tenant_id=tenant_id,
+            commit=False,
+        ) or {}
         findings = run_analysis(db, limit=limit, anomaly_fn=anomaly_fn, forecast_fn=forecast_fn,
                                 tenant_id=tenant_id)
         persisted = persist_findings(db, findings, tenant_id=tenant_id, expire_unobserved=expire_unobserved)

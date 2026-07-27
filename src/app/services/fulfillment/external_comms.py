@@ -181,7 +181,7 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
             return workflow.TransitionResult(False, case_id, cur.state, "send_failed", http_status=502)
         provider_ref = sent.provider_ref
         transport_detail = getattr(sent, "detail", "")
-    return workflow.transition(
+    transition_result = workflow.transition(
         db, case_id=case_id, event=event, actor=actor, reason_code=reason_code,
         evidence={"content_hash": draft.get("content_hash"), "provider_ref": provider_ref,
                   "recipient": recipient, "recipient_domain": draft.get("recipient_domain"),
@@ -190,6 +190,20 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
                                   "recipient": recipient, "content_hash": draft.get("content_hash"), "status": "sent",
                                   "transport": transport_detail}},
         tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+    if transition_result.ok and provider_ref:
+        try:
+            from src.app.services.email_thread_correlation import record_outbound_reference
+
+            record_outbound_reference(
+                db,
+                tenant_id=tenant_id,
+                provider="supplier_transport",
+                provider_message_id=provider_ref,
+                case_id=case_id,
+            )
+        except Exception as exc:
+            _log.warning("outbound email correlation record unavailable: %s", repr(exc)[:160])
+    return transition_result
 
 
 def send_approved(db, *, case_id: str, actor: Actor, approval_content_hash: Optional[str],
@@ -250,6 +264,8 @@ def receive_email_reply(
     email: Dict[str, Any],
     sender_domain: str,
     provider_ref: Optional[str] = None,
+    raw_evidence_ref: Optional[str] = None,
+    inbox_id: Optional[str] = None,
     tenant_id: str = "default",
     now_iso: Optional[str] = None,
     trace_id: Optional[str] = None,
@@ -291,11 +307,19 @@ def receive_email_reply(
             event="supplier_response_quarantined",
             actor=Actor(ActorType.SYSTEM, "email_security"),
             reason_code="inbound_security_review",
-            evidence={"sender_domain": sender_domain, "provider_ref": provider_ref, "security": summary},
+            evidence={
+                "sender_domain": sender_domain,
+                "provider_ref": provider_ref,
+                "raw_evidence_ref": raw_evidence_ref,
+                "inbox_id": inbox_id,
+                "security": summary,
+            },
             state_patch={
                 "quarantine": {
                     "sender_domain": sender_domain,
                     "reason": "inbound_security_review",
+                    "raw_evidence_ref": raw_evidence_ref,
+                    "inbox_id": inbox_id,
                     "security": summary,
                 }
             },

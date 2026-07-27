@@ -51,13 +51,38 @@ def market_signal_backfill(tenant_id: str | None = None) -> Dict[str, Any]:
         from src.app.models.db import db_session
         from src.app.services.market_signal_adapters import backfill_from_db
         with db_session() as db:
-            counts = (backfill_from_db(db, limit=limit, min_trust=min_trust,
-                                       max_age_seconds=max_age_seconds, now_iso=now_iso)
-                      if _enabled() else {})
+            tenants = _canonical_tenant_ids(tenant_id)
+            if not tenants:
+                tenants = ("default",)
+            legacy_reports = (
+                {
+                    tid: backfill_from_db(
+                        db,
+                        limit=limit,
+                        min_trust=min_trust,
+                        max_age_seconds=max_age_seconds,
+                        now_iso=now_iso,
+                        tenant_id=tid,
+                    )
+                    for tid in tenants
+                }
+                if _enabled() else {}
+            )
+            # Keep the historic single-tenant field shape for existing operators while exposing
+            # the authoritative fan-out explicitly.
+            counts = (
+                next(iter(legacy_reports.values()))
+                if len(legacy_reports) == 1
+                else {
+                    source: sum(int(report.get(source) or 0) for report in legacy_reports.values())
+                    for source in {
+                        name for report in legacy_reports.values() for name in report
+                    }
+                }
+            )
             canonical: Dict[str, Any] = {}
             if canonical_enabled:
                 from src.app.services.canonical_fact_adapters import backfill_canonical_facts
-                tenants = _canonical_tenant_ids(tenant_id)
                 if not tenants:
                     canonical = {"skipped": "no_tenants_configured", "tenants": {}}
                     logger.error(
@@ -78,7 +103,11 @@ def market_signal_backfill(tenant_id: str | None = None) -> Dict[str, Any]:
                         ),
                     }
         logger.info("market_signal_backfill counts=%s (min_trust=%s max_age=%s)", counts, min_trust, max_age_seconds)
-        return {"legacy_signals": counts, "canonical_facts": canonical}
+        return {
+            "legacy_signals": counts,
+            "legacy_signals_by_tenant": legacy_reports,
+            "canonical_facts": canonical,
+        }
     except Exception as exc:
         logger.warning("market_signal_backfill failed: %s", exc)
         return {"error": f"{type(exc).__name__}: {exc}"}

@@ -131,6 +131,39 @@ def _case_view(db, case_id: str, *, for_operator: bool) -> Dict[str, Any]:
     msg = buyer_status_message(cur.state, cur.state_json)
     if msg:
         out["buyer_status"] = msg
+    if for_operator:
+        quarantine = state_json.get("quarantine")
+        inbox_id = str((quarantine or {}).get("inbox_id") or "") if isinstance(quarantine, dict) else ""
+        if inbox_id:
+            try:
+                rows = db.execute(
+                    __import__("sqlalchemy").text(
+                        "SELECT action, actor_id, note, fresh_case_id, created_at "
+                        "FROM inbound_email_quarantine_disposition "
+                        "WHERE inbox_id=:inbox ORDER BY created_at ASC"
+                    ),
+                    {"inbox": inbox_id},
+                ).fetchall()
+                out["quarantine_dispositions"] = [
+                    {
+                        "action": row[0], "actor_id": row[1], "note": row[2],
+                        "fresh_case_id": row[3], "created_at": row[4],
+                    }
+                    for row in rows
+                ]
+                job = db.execute(
+                    __import__("sqlalchemy").text(
+                        "SELECT enrichment_status, enrichment_attempts, enrichment_error "
+                        "FROM inbound_email_inbox WHERE id=:inbox"
+                    ),
+                    {"inbox": inbox_id},
+                ).fetchone()
+                if job:
+                    out["email_enrichment"] = {
+                        "status": job[0], "attempts": job[1], "error": job[2],
+                    }
+            except Exception:
+                pass
     try:
         from src.app.services.fulfillment.draft_retry import status_for_case
         retry = status_for_case(db, case_id)
@@ -581,6 +614,11 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
         for l in resolved:
             sku = str(l.get("item_ref") or "")
             requested = int(l.get("requested_qty") or 0)
+            submitted_source_qty = (
+                max(0, min(requested, int(l["source_qty"])))
+                if l.get("source_qty") is not None
+                else None
+            )
             try:
                 from src.app.services.multi_location_availability import (
                     combined_availability, stock_by_location)
@@ -595,9 +633,24 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
                 combined = combined_availability(
                     sku, requested, by_location=by_location,
                     preferred_location=(preferred if locations.get(sku) else None))
+                observed_atp = int(combined["total_in_network"])
+                calculated_shortfall = int(combined["supplier_rfq_qty"])
+                combined["observed_atp"] = observed_atp
+                combined["calculated_shortfall"] = calculated_shortfall
+                combined["approved_source_override"] = submitted_source_qty
+                combined["source_override_authority"] = (
+                    "buyer_confirm_cart" if submitted_source_qty is not None else None
+                )
+                combined["source_override_reason"] = (
+                    "confirmed_preview_source_qty" if submitted_source_qty is not None else None
+                )
                 l["availability"] = combined
-                l["in_stock"] = int(combined["total_in_network"])
-                l["source_qty"] = int(combined["supplier_rfq_qty"])
+                l["in_stock"] = observed_atp
+                l["source_qty"] = (
+                    submitted_source_qty
+                    if submitted_source_qty is not None
+                    else calculated_shortfall
+                )
             except Exception:
                 if l.get("in_stock") in (None, 0):
                     l["in_stock"] = int(stock.get(sku, 0))
@@ -1083,6 +1136,229 @@ class DemoReplyBody(BaseModel):
     requested_qty: int = 6
 
 
+class QuarantineDispositionBody(BaseModel):
+    action: str
+    note: Optional[str] = None
+
+
+class EvidencePurposeBody(BaseModel):
+    purpose: str
+
+
+class LegalHoldBody(BaseModel):
+    enabled: bool
+    purpose: str
+
+
+@router.post("/email/inbox/{inbox_id}/evidence/read")
+def read_inbound_evidence(
+    inbox_id: str,
+    body: EvidencePurposeBody,
+    role: str = Depends(require_role([ROLE_OWNER])),
+    subj: OperatorSubject = Depends(operator_subject),
+) -> Dict[str, Any]:
+    """Explicit owner-only decrypt; the read is committed to the evidence audit ledger."""
+    if not body.purpose.strip():
+        raise HTTPException(status_code=400, detail="purpose_required")
+    from src.app.services.inbound_email_evidence import load_raw_evidence
+
+    actor_id = (getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
+    with db_session() as db:
+        row = db.execute(
+            __import__("sqlalchemy").text(
+                "SELECT tenant_id, raw_evidence_ref FROM inbound_email_inbox WHERE id=:id"
+            ),
+            {"id": inbox_id},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="inbound_email_not_found")
+        try:
+            evidence = load_raw_evidence(
+                db,
+                tenant_id=str(row[0]),
+                evidence_ref=str(row[1]),
+                actor_id=actor_id,
+                purpose=body.purpose.strip(),
+                inbox_id=inbox_id,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"inbox_id": inbox_id, "evidence": evidence}
+
+
+@router.post("/email/inbox/{inbox_id}/evidence/legal-hold")
+def legal_hold_inbound_evidence(
+    inbox_id: str,
+    body: LegalHoldBody,
+    role: str = Depends(require_role([ROLE_OWNER])),
+    subj: OperatorSubject = Depends(operator_subject),
+) -> Dict[str, Any]:
+    if not body.purpose.strip():
+        raise HTTPException(status_code=400, detail="purpose_required")
+    from src.app.services.inbound_email_evidence import set_legal_hold
+
+    actor_id = (getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
+    with db_session() as db:
+        row = db.execute(
+            __import__("sqlalchemy").text(
+                "SELECT tenant_id, raw_evidence_ref FROM inbound_email_inbox WHERE id=:id"
+            ),
+            {"id": inbox_id},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="inbound_email_not_found")
+        try:
+            set_legal_hold(
+                db,
+                tenant_id=str(row[0]),
+                evidence_ref=str(row[1]),
+                enabled=body.enabled,
+                actor_id=actor_id,
+                purpose=body.purpose.strip(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"inbox_id": inbox_id, "legal_hold": body.enabled}
+
+
+@router.get("/email/enrichment/jobs")
+def email_enrichment_jobs(
+    status: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    role: str = Depends(require_role([ROLE_OWNER])),
+) -> Dict[str, Any]:
+    with db_session() as db:
+        where = "WHERE enrichment_status=:status" if status else ""
+        rows = db.execute(
+            __import__("sqlalchemy").text(
+                "SELECT id, tenant_id, provider, provider_message_id, enrichment_status, "
+                "enrichment_attempts, enrichment_error, updated_at FROM inbound_email_inbox "
+                f"{where} ORDER BY updated_at DESC LIMIT :limit"
+            ),
+            {"status": status, "limit": limit},
+        ).fetchall()
+        return {
+            "jobs": [
+                {
+                    "inbox_id": row[0], "tenant_id": row[1], "provider": row[2],
+                    "provider_message_id": row[3], "status": row[4],
+                    "attempts": row[5], "error": row[6], "updated_at": row[7],
+                }
+                for row in rows
+            ]
+        }
+
+
+@router.post("/email/enrichment/jobs/{inbox_id}/replay")
+def replay_email_enrichment(
+    inbox_id: str,
+    body: EvidencePurposeBody,
+    role: str = Depends(require_role([ROLE_OWNER])),
+    subj: OperatorSubject = Depends(operator_subject),
+) -> Dict[str, Any]:
+    if not body.purpose.strip():
+        raise HTTPException(status_code=400, detail="purpose_required")
+    actor_id = (getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
+    with db_session() as db:
+        row = db.execute(
+            __import__("sqlalchemy").text(
+                "SELECT tenant_id, enrichment_status, raw_evidence_ref "
+                "FROM inbound_email_inbox WHERE id=:id"
+            ),
+            {"id": inbox_id},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="inbound_email_not_found")
+        if str(row[1]) not in {"dead_lettered", "enqueue_failed"}:
+            raise HTTPException(status_code=409, detail="enrichment_job_not_replayable")
+        from src.app.services.inbound_email_evidence import _audit
+        from src.app.tasks.email_enrichment_tasks import enrich_inbound_email
+
+        _audit(
+            db,
+            tenant_id=str(row[0]),
+            inbox_id=inbox_id,
+            evidence_id=str(row[2]).split(":")[1],
+            action="enrichment_replayed",
+            actor_id=actor_id,
+            purpose=body.purpose.strip(),
+        )
+        db.execute(
+            __import__("sqlalchemy").text(
+                "UPDATE inbound_email_inbox SET enrichment_status='queued', "
+                "enrichment_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=:id"
+            ),
+            {"id": inbox_id},
+        )
+        try:
+            enrich_inbound_email.apply_async(args=[inbox_id, str(row[0])], countdown=2)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"enrichment_queue_unavailable:{exc}") from exc
+        return {"inbox_id": inbox_id, "status": "queued"}
+
+
+@router.post("/cases/{case_id}/quarantine-disposition")
+def quarantine_disposition(
+    case_id: str,
+    body: QuarantineDispositionBody,
+    role: str = Depends(require_role(_OPERATOR)),
+    subj: OperatorSubject = Depends(operator_subject),
+) -> Dict[str, Any]:
+    """Resolve operator work without ever releasing the original quarantined message."""
+    from src.app.services.inbound_quarantine_dispositions import (
+        ALLOWED_ACTIONS,
+        record_disposition,
+    )
+
+    if body.action not in ALLOWED_ACTIONS:
+        raise HTTPException(status_code=400, detail="invalid_quarantine_disposition")
+    if body.action in {"discard", "open_fresh_rfq"} and not str(body.note or "").strip():
+        raise HTTPException(status_code=400, detail="disposition_note_required")
+    with db_session() as db:
+        cur = fwf.repository.current_version(db, case_id)
+        if cur is None:
+            raise HTTPException(status_code=404, detail="case not found")
+        if cur.state != "SUPPLIER_RESPONSE_QUARANTINED":
+            raise HTTPException(status_code=409, detail="case_not_quarantined")
+        quarantine = dict((cur.state_json or {}).get("quarantine") or {})
+        inbox_id = str(quarantine.get("inbox_id") or "")
+        if not inbox_id:
+            raise HTTPException(status_code=409, detail="quarantine_inbox_reference_missing")
+        fresh_case_id = None
+        if body.action == "open_fresh_rfq":
+            fresh_case_id = fwf.open_case(
+                db,
+                buyer_uid_hash=None,
+                source_trace_id=cur.source_trace_id,
+                requested_by=role,
+                tenant_id="default",
+                state_json={
+                    "reopened_from_quarantine": {
+                        "case_id": case_id,
+                        "inbox_id": inbox_id,
+                        "reason": quarantine.get("reason"),
+                    }
+                },
+            )
+        actor_id = (getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
+        try:
+            disposition = record_disposition(
+                db,
+                tenant_id="default",
+                inbox_id=inbox_id,
+                action=body.action,
+                actor_id=actor_id,
+                note=body.note,
+                fresh_case_id=fresh_case_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            **_case_view(db, case_id, for_operator=True),
+            "quarantine_disposition": disposition,
+        }
+
+
 @router.post("/cases/{case_id}/demo-reply")
 def demo_reply(case_id: str, body: DemoReplyBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """DEMO-only (FULFILLMENT_DEMO_ENABLED): inject a deterministic supplier reply, correlate, parse."""
@@ -1173,20 +1449,24 @@ def replay_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]
 # ── REAL market pipeline (operator) — live ingestion → analysis → findings, not synthetic replay ──
 @router.post("/market/refresh")
 def market_refresh(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
-    """Run the REAL pipeline now (default tenant): backfill orders/conversion/search/returns → analyze →
+    """Run the REAL pipeline for the authenticated request tenant: backfill source facts → analyze →
     persist. Operator-triggered so the demo shows live findings without waiting for the beat schedule."""
     from src.app.services import market_pipeline as mp
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = current_tenant_id()
     with db_session() as db:
-        out = mp.run_pipeline(db, tenant_id="default")
-        return {"refreshed": out, "state": mp.state(db)}
+        out = mp.run_pipeline(db, tenant_id=tenant_id)
+        return {"tenant_id": tenant_id, "refreshed": out, "state": mp.state(db, tenant_id=tenant_id)}
 
 
 @router.get("/market/state")
 def market_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
-    """The REAL (default-tenant) findings — the live counterpart to /replay/state."""
+    """The current request tenant's REAL findings — the live counterpart to /replay/state."""
     from src.app.services import market_pipeline as mp
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = current_tenant_id()
     with db_session() as db:
-        return mp.state(db)
+        return {"tenant_id": tenant_id, **mp.state(db, tenant_id=tenant_id)}
 
 
 @router.get("/market/digest")
@@ -1195,8 +1475,9 @@ def market_digest(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any
     Deterministic facts always; the (flag-gated, local-LLM) narrative only rewrites wording. Advisory
     only: read-only projection, nothing executes from it (deck M3 summarization within the LLM boundary)."""
     from src.app.services.market_digest import build_digest
+    from src.app.platform.tenant_context import current_tenant_id
     with db_session() as db:
-        return build_digest(db)
+        return build_digest(db, tenant_id=current_tenant_id())
 
 
 @router.get("/market/traffic-sources")

@@ -836,7 +836,12 @@ from src.app.security.email_dmarc import (  # noqa: E402
 )
 
 
-def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None) -> Dict[str, Any]:
+def evaluate_email_security(
+    email: Dict[str, Any],
+    tenant_id: str | None = None,
+    *,
+    bounded_ingress: bool = False,
+) -> Dict[str, Any]:
     """Evaluate an email for BEC/security signals, emit telemetry, and ticket with rate-limit.
 
     Minimal expected 'email' keys: message_id, from_addr, reply_to, subject, body, attachments (optional list).
@@ -894,7 +899,11 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     # Live DNS verification of SPF/DMARC/DKIM — non-authoritative, adds discrepancy indicators.
     dns_auth_result: dict[str, Any] = {}
     try:
-        dns_auth_result = run_dns_auth_checks_parallel(email)
+        dns_auth_result = (
+            {"skipped": True, "reason": "bounded_ingress_enrichment_job"}
+            if bounded_ingress
+            else run_dns_auth_checks_parallel(email)
+        )
         dns_indicators = list(dns_auth_result.get("discrepancy_indicators") or [])
         if dns_indicators:
             logger.info(
@@ -1020,14 +1029,22 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         }
 
     # Accept raw base64 attachment bytes in the evaluate path and hydrate deterministic metadata/text.
-    try:
-        email = hydrate_attachments_from_bytes(email, tenant_id=tenant_id)
-    except Exception:
-        email = dict(email)
+    if not bounded_ingress:
+        try:
+            email = hydrate_attachments_from_bytes(email, tenant_id=tenant_id)
+        except Exception:
+            email = dict(email)
 
     # OCR text sanitization + QR URL allowlist enforcement before any model-assisted processing.
     try:
-        email, ocr_sanitization_meta = sanitize_attachment_ocr_for_llm(email)
+        if bounded_ingress:
+            ocr_sanitization_meta = {
+                "gate": "ocr_qr_sanitization",
+                "skipped": True,
+                "reason": "bounded_ingress_enrichment_job",
+            }
+        else:
+            email, ocr_sanitization_meta = sanitize_attachment_ocr_for_llm(email)
     except Exception:
         attachment_count = len(email.get("attachments") or [])
         ocr_sanitization_meta = {
@@ -1240,7 +1257,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         pass
     artifact_intel = {}
     try:
-        artifact_intel = analyze_email_artifacts(email)
+        artifact_intel = {} if bounded_ingress else analyze_email_artifacts(email)
         if isinstance(artifact_intel, dict):
             ai_inds = list(artifact_intel.get("indicators") or [])
             if ai_inds:
@@ -1709,6 +1726,13 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["evidence_snapshot"]["kill_chain_stage"] = threat.get("kill_chain_stage")
         v["evidence_snapshot"]["threat_correlation"] = threat
     load_shed = _spoof_flood_load_shed_state(ff, tenant_id, v.get("indicators") or [])
+    if bounded_ingress:
+        load_shed = {
+            **dict(load_shed or {}),
+            "active": False,
+            "fast_path_only": True,
+            "reason": "bounded_ingress_enrichment_job",
+        }
     if isinstance(v.get("evidence_snapshot"), dict):
         v["evidence_snapshot"]["load_shed"] = load_shed
     if bool(load_shed.get("active")):
@@ -1822,7 +1846,16 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     phishing_page_stage = {}
     try:
         urls = [str(x.get("value") or "") for x in (v.get("iocs") or []) if str(x.get("type") or "") == "url" and x.get("value")]
-        phishing_page_stage = analyze_phishing_targets(urls, enrichment=enrichment, detonation=detonation, tenant_id=tenant_id)
+        phishing_page_stage = (
+            {"skipped": True, "reason": "bounded_ingress_enrichment_job"}
+            if bounded_ingress
+            else analyze_phishing_targets(
+                urls,
+                enrichment=enrichment,
+                detonation=detonation,
+                tenant_id=tenant_id,
+            )
+        )
         p_inds = list((phishing_page_stage or {}).get("indicators") or [])
         if p_inds:
             v["indicators"] = list(v.get("indicators") or []) + p_inds
@@ -1907,7 +1940,11 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         access_policy = None
 
     # P1 LLM assist: summary/secondary signal only (non-authoritative).
-    llm_assist = _llm_assist_summary(email, extracted, v, ff=ff)
+    llm_assist = (
+        {"skipped": True, "reason": "bounded_ingress_enrichment_job"}
+        if bounded_ingress
+        else _llm_assist_summary(email, extracted, v, ff=ff)
+    )
     llm_controls = _llm_control_policy(extracted, ff=ff)
     if llm_controls.get("policy_gate") == "deny":
         v["severity"] = "error"

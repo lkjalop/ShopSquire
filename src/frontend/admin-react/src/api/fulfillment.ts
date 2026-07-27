@@ -28,6 +28,11 @@ export interface FulfillmentCaseView {
   case_id: string; state: string; state_json: Record<string, any>; source_trace_id?: string | null;
   margin_advice?: MarginAdvice;
   margin_warning?: { mode: string; message: string };
+  email_enrichment?: { status: string; attempts: number; error?: string | null };
+  quarantine_dispositions?: Array<{
+    action: string; actor_id: string; note?: string | null;
+    fresh_case_id?: string | null; created_at?: string | null;
+  }>;
 }
 export interface JourneyEvent {
   state: string; event: string; actor_type: string; actor_id: string;
@@ -87,6 +92,11 @@ export interface FromOrderResult { order_group_id: string; case_count: number; c
 export const fcFromOrder = (query: string) =>
   http<FromOrderResult>(`/api/v1/fulfillment/cases/from-order`, { method: 'POST', body: JSON.stringify({ query }) });
 export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
+export const fcQuarantineDisposition = (
+  id: string,
+  action: 'keep_quarantined' | 'discard' | 'open_fresh_rfq',
+  note?: string,
+) => _fcPost(`${_fc(id)}/quarantine-disposition`, { action, note });
 
 // Operator notification feed — new cart confirmations, amendments/supersessions, supplier out-of-band events.
 export interface ProcurementNotification {
