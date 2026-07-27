@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
+
+import pytest
 
 from src.app.services.async_safe import run_async_safe
 
@@ -26,3 +29,14 @@ def test_propagates_the_coroutine_result_type():
     async def c():
         return {"ok": True, "labels": ["a", "b"]}
     assert run_async_safe(c()) == {"ok": True, "labels": ["a", "b"]}
+
+
+def test_timeout_returns_without_waiting_for_daemon_runner_shutdown():
+    async def stuck():
+        await asyncio.sleep(1.0)
+        return "too late"
+
+    started = time.perf_counter()
+    with pytest.raises(TimeoutError, match="caller deadline"):
+        run_async_safe(stuck(), timeout_seconds=0.03)
+    assert time.perf_counter() - started < 0.25

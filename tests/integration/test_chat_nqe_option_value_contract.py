@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
@@ -78,3 +80,26 @@ def test_chat_forwards_qr_cv_signals_from_image_security_payload(monkeypatch):
     assert '"qr_code_detected":true' in raw
     assert '"qr_external_url_detected":true' in raw
     assert '"qr_prompt_injection":true' in raw
+
+
+def test_chat_recommend_timeout_returns_typed_degradation(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    async def _never_returns(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setenv("CHAT_UPSTREAM_TIMEOUT_SEC", "0.05")
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process", _never_returns)
+    app = create_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/chat/query",
+        json={"uid": "u-chat-timeout-1", "query": "show laptops"},
+        headers={"x-api-key": "local-merchant-key"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["degraded"] is True
+    assert body["degraded_reason"] == "recommend_timeout"
+    assert body["blocked"] is False
+    assert str(body["trace_id"]).startswith("chat-degraded-")

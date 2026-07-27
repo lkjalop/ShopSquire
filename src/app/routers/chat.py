@@ -8,13 +8,13 @@ import uuid
 import base64
 import hashlib
 import os
+import anyio
 from threading import RLock
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response
 from sqlalchemy import text as sql_text
-from starlette.concurrency import run_in_threadpool
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.deps import get_redis
@@ -1512,7 +1512,12 @@ async def _call_recommend_in_process(
         return delegated
 
     try:
-        data = await run_in_threadpool(_invoke)
+        # The outer chat boundary applies a real deadline. AnyIO defaults to shielding worker threads
+        # from cancellation, which would make asyncio.wait_for continue waiting for a stuck sync facade.
+        # Abandon the await on cancellation so the HTTP request can degrade on time. Dependencies inside
+        # _invoke must remain side-effect-safe and carry their own I/O deadlines because Python cannot
+        # forcibly stop the abandoned thread.
+        data = await anyio.to_thread.run_sync(_invoke, abandon_on_cancel=True)
         return 200, data if isinstance(data, dict) else {}
     except HTTPException as exc:
         detail = exc.detail
@@ -2221,14 +2226,20 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             headers["x-api-key"] = fwd_key
         except Exception:
             headers["x-api-key"] = "local-merchant-key"
-        # Bound the storefront upstream wait (was 120s — a silent hang). Narration is async, so recommend
-        # returns fast; a hung upstream now fails in ~25s (→ 502, caught below) instead of blocking 2 min.
+        # Bound the storefront upstream wait. The V2 dispatch is now in-process, so configuring a timeout
+        # without applying it here does nothing and can strand an HTTP worker indefinitely. wait_for gives
+        # the buyer a real response deadline; downstream sync dependencies must still carry their own
+        # statement/model timeouts because cancelling this await cannot forcibly stop a running OS thread.
         try:
             _upstream_timeout = float(os.getenv("CHAT_UPSTREAM_TIMEOUT_SEC", "25") or 25)
         except (TypeError, ValueError):
             _upstream_timeout = 25.0
-        status_code, data = await _call_recommend_in_process(
-            request, params, redis=redis, db=db, role=role)
+        _upstream_timeout = max(0.05, min(_upstream_timeout, 120.0))
+        status_code, data = await asyncio.wait_for(
+            _call_recommend_in_process(
+                request, params, redis=redis, db=db, role=role),
+            timeout=_upstream_timeout,
+        )
         if status_code is not None:
             # CART-MUTATION short-circuit (V2 cart lane): see _cart_mutation_short_circuit.
             if status_code == 200:
@@ -2355,8 +2366,20 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 raise HTTPException(status_code=status_code, detail=data)
     except Exception as e:
         import traceback as _tb
+        _timed_out = isinstance(e, (asyncio.TimeoutError, TimeoutError))
+        _failure_reason = "recommend_timeout" if _timed_out else "recommend_error"
         _detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
         logger.warning("chat.recommend_call_failed detail=%s tb=%s", _detail, _tb.format_exc()[-500:])
+        if _timed_out:
+            try:
+                from src.app.observability.metrics import record_recommendation_dispatch
+                record_recommendation_dispatch(
+                    outcome="timeout",
+                    lane=str(params.get("turn_intent") or "UNKNOWN"),
+                    reason="recommend_timeout",
+                )
+            except Exception as _metric_exc:
+                logger.debug("chat timeout metric skipped: %s", repr(_metric_exc)[:120])
         # N7 (2026-07-07): a hiccup on the internal recommend hop used to surface to the BUYER as a
         # raw HTTP 502 — a broken chat experience. Degrade GRACEFULLY instead: a friendly retry
         # message + a traceable id, HTTP 200. The operator still sees the warning log above and the
@@ -2364,9 +2387,16 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         _degraded_trace = f"chat-degraded-{uuid.uuid4().hex[:12]}"
         try:
             log_trace_event(
-                trace_id=_degraded_trace, event_type="system_error", source_type="agent",
+                trace_id=_degraded_trace,
+                event_type=("system_timeout" if _timed_out else "system_error"),
+                source_type="agent",
                 source_id="Chat_Delegation", target_type="system", target_id=None,
-                payload={"stage": "recommend_hop", "error": _detail[:300], "route": "graceful_degrade"},
+                payload={
+                    "stage": "recommend_hop",
+                    "error": _detail[:300],
+                    "reason": _failure_reason,
+                    "route": "graceful_degrade",
+                },
             )
         except Exception:
             pass
@@ -2386,6 +2416,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             ],
             "blocked": False,
             "degraded": True,
+            "degraded_reason": _failure_reason,
             "needs_human_review": False,
             "security_route": "allow",
         }

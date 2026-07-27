@@ -10,19 +10,44 @@ has no loop — preserving asyncio.run() semantics (run-to-completion, return th
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
+import queue
+import threading
 from typing import Any
 
 
-def run_async_safe(coro) -> Any:
-    """Run ``coro`` to completion and return its result, whether or not a loop is already running."""
+def run_async_safe(coro, *, timeout_seconds: float = 300.0) -> Any:
+    """Run ``coro`` from sync code with a real caller-side deadline.
+
+    A ``ThreadPoolExecutor`` context manager is unsuitable here: after ``future.result`` times out,
+    ``__exit__`` calls ``shutdown(wait=True)`` and can re-hang on the very coroutine we intended to
+    abandon. A daemon thread lets the caller receive ``TimeoutError`` without waiting for executor
+    shutdown. Wrapped I/O still needs its own timeout; Python cannot safely kill a running thread.
+    """
     try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)  # no running loop in this thread — the simple path is safe
-    # we ARE inside a running loop → asyncio.run() would crash; run it in a loop-free thread instead.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        # H fix: bound the sync→async bridge with a generous backstop (300s) so a hung wrapped
-        # coroutine surfaces a TimeoutError instead of parking the calling thread forever. The
-        # wrapped coros (model/HTTP) are individually bounded, so this only fires on a genuine hang.
-        return pool.submit(asyncio.run, coro).result(timeout=300.0)
+        timeout = float(timeout_seconds)
+    except (TypeError, ValueError):
+        timeout = 300.0
+    timeout = max(0.01, min(timeout, 3600.0))
+    result: "queue.Queue[tuple[str, Any]]" = queue.Queue(maxsize=1)
+
+    def _runner() -> None:
+        try:
+            result.put(("value", asyncio.run(coro)))
+        except BaseException as exc:
+            result.put(("error", exc))
+
+    thread = threading.Thread(
+        target=_runner,
+        name="shopsquire-async-safe",
+        daemon=True,
+    )
+    thread.start()
+    try:
+        kind, value = result.get(timeout=timeout)
+    except queue.Empty as exc:
+        raise TimeoutError(
+            f"async operation exceeded {timeout:g}s caller deadline"
+        ) from exc
+    if kind == "error":
+        raise value
+    return value

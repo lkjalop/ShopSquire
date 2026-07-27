@@ -9,6 +9,12 @@ const API_KEY_ENV = (import.meta.env.VITE_API_KEY as string) || '';
 // HttpOnly cookie/session over any browser-stored key.
 let VOLATILE_API_KEY = (() => { try { return sessionStorage.getItem('shopsquire_admin_api_key') || ''; } catch { return ''; } })();
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+export const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+
+export interface HttpOptions extends RequestInit {
+  /** Caller-visible deadline. Set a larger explicit value only for a known bounded batch operation. */
+  timeoutMs?: number;
+}
 
 export function apiBase(): string {
   // Every domain path hardcodes its own `/api/v1` prefix, so the base must NOT also end in one —
@@ -41,7 +47,7 @@ export function clearClientApiKey() {
   try { sessionStorage.removeItem('shopsquire_admin_api_key'); } catch { /* storage unavailable */ }
 }
 
-function buildHeaders(opts?: RequestInit, withContentType = true): Record<string, string> {
+function buildHeaders(opts?: HttpOptions, withContentType = true): Record<string, string> {
   const headers: Record<string, string> = withContentType ? { 'Content-Type': 'application/json' } : {};
   if (opts?.headers) {
     if (opts.headers instanceof Headers) {
@@ -77,14 +83,37 @@ async function raiseForStatus(r: Response): Promise<void> {
   throw err;
 }
 
-export async function http<T>(path: string, opts?: RequestInit): Promise<T> {
-  const r = await fetch(`${apiBase()}${path}`, { ...opts, headers: buildHeaders(opts), credentials: 'include' });
+async function fetchWithDeadline(path: string, opts?: HttpOptions, withContentType = true): Promise<Response> {
+  const { timeoutMs: requestedTimeout, signal: callerSignal, ...requestOpts } = opts || {};
+  const timeoutMs = Math.max(1, Math.min(Number(requestedTimeout ?? DEFAULT_HTTP_TIMEOUT_MS), 300_000));
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) forwardAbort();
+  else callerSignal?.addEventListener('abort', forwardAbort, { once: true });
+  const timer = window.setTimeout(() => controller.abort(
+    new DOMException(`Request exceeded ${timeoutMs}ms deadline`, 'TimeoutError'),
+  ), timeoutMs);
+  try {
+    return await fetch(`${apiBase()}${path}`, {
+      ...requestOpts,
+      headers: buildHeaders(opts, withContentType),
+      credentials: 'include',
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', forwardAbort);
+  }
+}
+
+export async function http<T>(path: string, opts?: HttpOptions): Promise<T> {
+  const r = await fetchWithDeadline(path, opts);
   await raiseForStatus(r);
   return r.json();
 }
 
-export async function httpResponse(path: string, opts?: RequestInit): Promise<Response> {
-  const r = await fetch(`${apiBase()}${path}`, { ...opts, headers: buildHeaders(opts, false), credentials: 'include' });
+export async function httpResponse(path: string, opts?: HttpOptions): Promise<Response> {
+  const r = await fetchWithDeadline(path, opts, false);
   await raiseForStatus(r);
   return r;
 }
