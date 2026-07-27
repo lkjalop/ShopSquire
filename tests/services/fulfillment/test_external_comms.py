@@ -99,6 +99,70 @@ def test_untrusted_sender_is_quarantined(db):
     assert r.ok and wf.current_state(db, cid) == S.SUPPLIER_RESPONSE_QUARANTINED
 
 
+# ── receive security boundary ────────────────────────────────────────────────
+def test_compromised_trusted_supplier_email_is_quarantined_before_quote_receive(db):
+    cid = _to_sent(db)
+    verdict = {
+        "severity": "critical",
+        "route": "security_review",
+        "verdict_action": "security_review",
+        "reasons": ["attachment_active_content", "oob_verification_required"],
+        "tags": ["email_security", "bec", "ioc:url"],
+        "evidence_snapshot": {
+            "hard_security_triggered": True,
+            "ingest_gate": {"blocked": True},
+        },
+    }
+    r = ec.receive_email_reply(
+        db,
+        case_id=cid,
+        email={
+            "from_addr": "quotes@approved-supplier.example",
+            "subject": "Updated quote and payment details",
+            "body": "6 units at AUD 1115 each. Use the attached new bank details.",
+            "attachments": [{"name": "Wire_Transfer_Authorization_Form.pdf"}],
+        },
+        sender_domain="approved-supplier.example",
+        trusted_fn=lambda _: True,
+        security_evaluator=lambda *_args, **_kwargs: verdict,
+    )
+    assert r.ok and wf.current_state(db, cid) == S.SUPPLIER_RESPONSE_QUARANTINED
+    cur = wf.repository.current_version(db, cid, "default")
+    assert "inbound" not in cur.state_json
+    assert cur.state_json["quarantine"]["reason"] == "inbound_security_review"
+    assert cur.state_json["quarantine"]["security"]["severity"] == "critical"
+
+
+def test_clean_authenticated_supplier_email_can_reach_quote_receive(db):
+    cid = _to_sent(db)
+    verdict = {
+        "severity": "warning",
+        "route": "human_review",
+        "verdict_action": "quarantine",
+        "reasons": ["multi-signal threshold met", "ml_gate_review"],
+        "tags": ["email_security"],
+        "evidence_snapshot": {"hard_security_triggered": False},
+    }
+    r = ec.receive_email_reply(
+        db,
+        case_id=cid,
+        email={
+            "from_addr": "quotes@approved-supplier.example",
+            "reply_to": "quotes@approved-supplier.example",
+            "subject": "RFQ response",
+            "body": "Quantity 6 units. AUD 1115 per unit. Lead time 5 days.",
+            "attachments": [],
+            "spf_result": "pass",
+            "dkim_result": "pass",
+            "dmarc_result": "pass",
+        },
+        sender_domain="approved-supplier.example",
+        trusted_fn=lambda _: True,
+        security_evaluator=lambda *_args, **_kwargs: verdict,
+    )
+    assert r.ok and wf.current_state(db, cid) == S.QUOTE_RECEIVED
+
+
 # ── parse (strict schema + evidence spans) ───────────────────────────────────
 def test_parse_full_quote_extracts_fields_with_spans():
     reply = sb.generate_reply(case_ref="FC-1", scenario="full_quote", requested_qty=6, unit_amount_cents=111500)

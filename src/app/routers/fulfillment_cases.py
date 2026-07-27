@@ -1092,8 +1092,26 @@ def demo_reply(case_id: str, body: DemoReplyBody, role: str = Depends(require_ro
         raise HTTPException(status_code=400, detail=f"unknown scenario; choose from {sorted(fsb.SCENARIOS)}")
     with db_session() as db:
         reply = fsb.generate_reply(case_ref=case_id, scenario=body.scenario, requested_qty=body.requested_qty)
-        res = fec.receive_reply(db, case_id=case_id, raw_body=reply["body"], sender_domain=reply["sender_domain"],
-                                provider_ref=reply["provider_ref"])
+        res = fec.receive_email_reply(
+            db,
+            case_id=case_id,
+            email={
+                "message_id": f"<{reply['provider_ref']}@{reply['sender_domain']}>",
+                "from_addr": f"quotes@{reply['sender_domain']}",
+                "reply_to": f"quotes@{reply['sender_domain']}",
+                "subject": f"RFQ response for {case_id}",
+                "body": reply["body"],
+                "attachments": [],
+                "external_sender": True,
+                "spf_result": "pass",
+                "dkim_result": "pass",
+                "dmarc_result": "pass",
+                "dmarc_fail": False,
+                "vendor_domain": reply["sender_domain"],
+            },
+            sender_domain=reply["sender_domain"],
+            provider_ref=reply["provider_ref"],
+        )
         _raise_if_failed(res)
         if res.state == "QUOTE_RECEIVED":
             fec.record_parsed(db, case_id=case_id, actor=_agent())

@@ -226,6 +226,97 @@ def send_autonomous(db, *, case_id: str, actor: Actor, transport: Optional[Any] 
 
 
 # ── receive (correlate + verify, else quarantine) ─────────────────────────────
+def _inbound_security_requires_quarantine(verdict: Dict[str, Any]) -> bool:
+    """Interpret the email-security contract without treating generic ML review noise as malware."""
+    severity = str(verdict.get("severity") or "").strip().lower()
+    route = str(verdict.get("route") or "").strip().lower()
+    tags = {str(tag or "").strip().lower() for tag in (verdict.get("tags") or [])}
+    evidence = dict(verdict.get("evidence_snapshot") or {})
+    ingest = dict(evidence.get("ingest_gate") or evidence.get("attachment_ingest_gate") or {})
+    return bool(
+        severity in {"high", "critical", "error"}
+        or route in {"security_review", "block", "block_and_escalate"}
+        or bool(evidence.get("hard_security_triggered"))
+        or bool(evidence.get("oob_verification_required"))
+        or bool(ingest.get("blocked"))
+        or bool(tags.intersection({"bec", "supply_chain", "prompt_injection", "malware"}))
+    )
+
+
+def receive_email_reply(
+    db,
+    *,
+    case_id: str,
+    email: Dict[str, Any],
+    sender_domain: str,
+    provider_ref: Optional[str] = None,
+    tenant_id: str = "default",
+    now_iso: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    trusted_fn=None,
+    security_evaluator=None,
+) -> workflow.TransitionResult:
+    """Security-screen a complete supplier email before it can enter quote parsing."""
+    payload = dict(email or {})
+    payload.setdefault("from_addr", f"quotes@{sender_domain}")
+    payload.setdefault("reply_to", payload.get("from_addr"))
+    payload.setdefault("body", "")
+    payload.setdefault("attachments", [])
+    payload.setdefault("external_sender", True)
+    try:
+        if security_evaluator is None:
+            from src.app.security.email_security import evaluate_email_security
+            security_evaluator = evaluate_email_security
+        verdict = dict(security_evaluator(payload, tenant_id=tenant_id) or {})
+    except Exception as exc:
+        _log.error("supplier inbound security scan failed closed: %s", repr(exc)[:160])
+        verdict = {
+            "severity": "error",
+            "route": "security_review",
+            "reasons": ["security_scan_unavailable"],
+            "tags": ["email_security"],
+            "evidence_snapshot": {"hard_security_triggered": True},
+        }
+
+    if _inbound_security_requires_quarantine(verdict):
+        summary = {
+            "severity": str(verdict.get("severity") or "unknown"),
+            "route": str(verdict.get("route") or "unknown"),
+            "reasons": [str(x)[:120] for x in (verdict.get("reasons") or [])[:12]],
+            "tags": [str(x)[:80] for x in (verdict.get("tags") or [])[:12]],
+        }
+        return workflow.transition(
+            db,
+            case_id=case_id,
+            event="supplier_response_quarantined",
+            actor=Actor(ActorType.SYSTEM, "email_security"),
+            reason_code="inbound_security_review",
+            evidence={"sender_domain": sender_domain, "provider_ref": provider_ref, "security": summary},
+            state_patch={
+                "quarantine": {
+                    "sender_domain": sender_domain,
+                    "reason": "inbound_security_review",
+                    "security": summary,
+                }
+            },
+            tenant_id=tenant_id,
+            now_iso=now_iso,
+            trace_id=trace_id,
+        )
+
+    return receive_reply(
+        db,
+        case_id=case_id,
+        raw_body=str(payload.get("body") or ""),
+        sender_domain=sender_domain,
+        provider_ref=provider_ref,
+        tenant_id=tenant_id,
+        now_iso=now_iso,
+        trace_id=trace_id,
+        trusted_fn=trusted_fn,
+    )
+
+
 def receive_reply(db, *, case_id: str, raw_body: str, sender_domain: str, provider_ref: Optional[str] = None,
                   tenant_id: str = "default", now_iso: Optional[str] = None, trace_id: Optional[str] = None,
                   trusted_fn=None) -> workflow.TransitionResult:
