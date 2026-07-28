@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hmac
 import json
+import logging
 import os
 from typing import Any, Dict, Optional
 
@@ -17,6 +18,7 @@ from src.app.services.email_connector_identity import (
 )
 
 router = APIRouter(prefix="/api/v1/ingest/gmail", tags=["ingest-gmail"])
+logger = logging.getLogger("shopsquire.ingest_gmail")
 
 
 def _apply_supplier_domain_guard(email: dict) -> dict:
@@ -105,6 +107,11 @@ def _persist_or_evaluate(identity, email: Dict[str, Any]) -> Dict[str, Any]:
         if identity_mode() == "strict":
             record_email_security_connector_failure(identity.tenant_id, "gmail", "inbox_unavailable")
             raise HTTPException(status_code=503, detail="inbound_email_inbox_unavailable") from exc
+        logger.warning(
+            "gmail inbox persistence unavailable; evaluating without custody tenant=%s error=%s",
+            identity.tenant_id,
+            repr(exc)[:180],
+        )
         verdict = evaluate_email_security(email, tenant_id=identity.tenant_id)
         return {"status": "evaluated_not_persisted", "security_route": verdict.get("route")}
 

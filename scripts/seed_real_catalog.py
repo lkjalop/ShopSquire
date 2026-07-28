@@ -10,9 +10,11 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
-DB_PATH = "tmp/demo.sqlite"
+DB_PATH = str(os.getenv("CATALOG_SEED_DB_PATH") or "tmp/demo.sqlite").strip()
 CATALOG_CURRENCY = str(os.getenv("CATALOG_SEED_CURRENCY") or "AUD").strip().upper()
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # ---------------------------------------------------------------------------
 # LAPTOPS — budget/mid-range (non-gaming, Windows/Copilot+)
@@ -1328,30 +1330,128 @@ STORAGE = [
 ]
 
 
+GROUP_CATALOG = {
+    "Windows Laptops": ("Laptops", "laptop", "el-6-6"),
+    "Real Gaming Laptops": ("Laptops", "gaming_laptop", "el-6-11-2"),
+    "Apple Products": ("Laptops", "laptop", "el-6-6"),
+    "Monitors": ("Computer Monitors", "monitor", "el-17-1"),
+    "Bags/Cases": ("Laptop Bags", "laptop_bag", "lb-15"),
+    "Tablets": ("Tablet Computers", "tablet", "el-6-8"),
+    "Networking/Routers": ("Networking", "networking", "el-12-1"),
+    "Gaming Headsets": ("Gaming Headsets", "headset", "el-2-2-7-2-2"),
+}
+
+
+def _catalog_identity(product: dict, group_name: str) -> tuple[str, str, str]:
+    if group_name != "Storage/Printers":
+        return GROUP_CATALOG[group_name]
+    name = str(product["name"]).lower()
+    if "printer" in name or "pixma" in name or "workforce" in name:
+        return "Printers", "printer", "el-13-4"
+    if "ssd" in name:
+        return "Storage Devices", "solid_state_drive", "el-7-9-14-9"
+    return "Storage Devices", "hard_drive", "el-7-9-14-4"
+
+
+def _brand(name: str) -> str:
+    return str(name).strip().split(" ", 1)[0]
+
+
+def _image_url(sku: str) -> str:
+    """Advertise an image only when the backend can actually serve it.
+
+    The storefront owns its bundled placeholder. Returning a fabricated SKU
+    URL creates a browser-console 404 before the fallback can render.
+    """
+    relative = f"/static/images/{sku}.svg"
+    return relative if (REPO_ROOT / "static" / "images" / f"{sku}.svg").is_file() else ""
+
+
 def seed_group(cur, conn, products: list[dict], group_name: str) -> tuple[int, int]:
     now = datetime.now(timezone.utc).isoformat()
     inserted = skipped = 0
     for p in products:
-        cur.execute("SELECT sku FROM products WHERE sku = ?", (p["sku"],))
-        if cur.fetchone():
+        category, product_type, node_handle = _catalog_identity(p, group_name)
+        brand = _brand(p["name"])
+        image_url = _image_url(p["sku"])
+        cur.execute("SELECT id FROM products WHERE sku = ?", (p["sku"],))
+        existing = cur.fetchone()
+        if existing:
+            product_id = str(existing[0])
+            # Backfill only absent classification fields. The seed remains safe to
+            # rerun against an operator-edited demo database.
+            cur.execute(
+                """UPDATE products
+                   SET brand = COALESCE(NULLIF(brand, ''), ?),
+                       category = COALESCE(NULLIF(category, ''), ?),
+                       product_type = COALESCE(NULLIF(product_type, ''), ?),
+                       image_url = CASE
+                           WHEN image_url IS NULL OR image_url = ''
+                                OR image_url = ?
+                           THEN ?
+                           ELSE image_url
+                       END
+                   WHERE id = ?""",
+                (
+                    brand, category, product_type,
+                    f"/static/images/{p['sku']}.svg", image_url, product_id,
+                ),
+            )
             skipped += 1
-            continue
+        else:
+            product_id = str(uuid.uuid4())
+            cur.execute(
+                """INSERT INTO products
+                   (id, sku, name, brand, category, product_type, price_cents, currency,
+                    specs, active, updated_at, image_url)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    product_id,
+                    p["sku"],
+                    p["name"],
+                    brand,
+                    category,
+                    product_type,
+                    p["price_cents"],
+                    CATALOG_CURRENCY,
+                    json.dumps(p["specs"]),
+                    1,
+                    now,
+                    image_url,
+                ),
+            )
+            inserted += 1
+        # Browser/demo catalog rows must carry explicit legacy inventory while
+        # the canonical inventory_level projection is still being rolled out.
+        # Fill only a missing row; never overwrite an operator's stock value.
         cur.execute(
-            """INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at, image_url)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                str(uuid.uuid4()),
-                p["sku"],
-                p["name"],
-                p["price_cents"],
-                CATALOG_CURRENCY,
-                json.dumps(p["specs"]),
-                1,
-                now,
-                f"/static/images/{p['sku']}.svg",
-            ),
+            "SELECT 1 FROM inventory WHERE product_id = ? AND warehouse = 'default' LIMIT 1",
+            (product_id,),
         )
-        inserted += 1
+        if not cur.fetchone():
+            cur.execute(
+                """INSERT INTO inventory (id, product_id, stock, warehouse, updated_at)
+                   VALUES (?, ?, ?, 'default', ?)""",
+                (str(uuid.uuid4()), product_id, 24, now),
+            )
+        # V2 will not claim catalog grounding from names alone. Seed explicit,
+        # approved taxonomy evidence and the tenant's sold scope.
+        cur.execute(
+            """INSERT INTO product_classification
+               (id, tenant_id, sku, node_handle, taxonomy_release, source,
+                confidence, status, approved_by, updated_at)
+               VALUES (?, 'default', ?, ?, '2026-05', 'demo_seed',
+                       1.0, 'approved', 'demo_seed', ?)
+               ON CONFLICT(tenant_id, sku) DO NOTHING""",
+            (str(uuid.uuid4()), p["sku"], node_handle, now),
+        )
+        cur.execute(
+            """INSERT INTO sold_taxonomy
+               (id, tenant_id, node_handle, taxonomy_release, source, approved_by, updated_at)
+               VALUES (?, 'default', ?, '2026-05', 'demo_seed', 'demo_seed', ?)
+               ON CONFLICT(tenant_id, node_handle) DO NOTHING""",
+            (str(uuid.uuid4()), node_handle, now),
+        )
     conn.commit()
     print(f"  {group_name}: inserted={inserted} skipped={skipped}")
     return inserted, skipped

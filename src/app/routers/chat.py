@@ -11,9 +11,8 @@ import os
 import anyio
 from threading import RLock
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy import text as sql_text
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
@@ -445,6 +444,28 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
             _store_chat_message(db, uid=uid, role="assistant", content=msg, trace_id=tid)
     except Exception as _cm_exc:
         logger.debug("cart-mutation chat persist skipped: %s", repr(_cm_exc)[:100])
+    multi_intent = None
+    try:
+        enabled = str(os.getenv("MULTI_INTENT_PLANNER_ENABLED", "")).strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        if not enabled:
+            from src.app.feature_flags import get_flags as _get_flags
+
+            enabled = bool(_get_flags().get("MULTI_INTENT_PLANNER_ENABLED", False))
+        if enabled:
+            from src.app.services.multi_intent_live import plan_live
+
+            multi_intent = plan_live(str(q or ""), str(uid))
+    except Exception as exc:
+        # A cart action is still bounded by its own confirmation contract. Keep
+        # the planner failure visible instead of silently dropping the other
+        # obligations from a mixed buyer turn.
+        multi_intent = {
+            "warnings": [f"multi_intent planner error: {str(exc)[:120]}"],
+            "needs_confirmation": True,
+            "plan": [],
+        }
     return {
         "products": [],
         "view_mode": "cards",
@@ -452,6 +473,7 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
         "cart_mutation": data.get("cart_mutation"),
         "cart_updated": bool(data.get("cart_updated")),
         "cart": data.get("cart"),
+        "multi_intent": multi_intent,
         "turn_intent": "CART_MUTATE",
         "execution_mode": data.get("execution_mode") or "v2_served",
         "execution_lane": data.get("execution_lane") or "CART_MUTATE",
@@ -461,6 +483,7 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
         "trace_id": tid,
         "next_questions": [],
         "confirmed_slots": _extract_confirmed_slots(query=q, response=data),
+        "requested_quantity": data.get("requested_quantity"),
         "timing_breakdown": (
             data.get("timing_breakdown")
             if isinstance(data.get("timing_breakdown"), dict)
@@ -3209,9 +3232,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         elif image_handling_mode == "text_only_fallback":
             # Pixels themselves looked altered → ask the user to recover context.
             _warn_msg = (
-                f"⚠️ Your image looked altered or unreadable, so I couldn't safely identify the product "
-                f"from it (this has been logged for security review). I've used your text for now — to get "
-                f"you the right match, can you tell me the model or type you're after?"
+                "⚠️ Your image looked altered or unreadable, so I couldn't safely identify the product "
+                "from it (this has been logged for security review). I've used your text for now — to get "
+                "you the right match, can you tell me the model or type you're after?"
             )
             _clarify_q = {
                 "id": "clarify_product_identity",

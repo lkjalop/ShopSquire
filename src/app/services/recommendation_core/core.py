@@ -23,7 +23,7 @@ from src.app.services.recommendation_core.evidence import (
     gather_evidence,
 )
 from src.app.services.recommendation_core.fit import build_cards
-from src.app.services.recommendation_core.plan import Plan, derive_plan
+from src.app.services.recommendation_core.plan import derive_plan
 from src.app.services.recommendation_core.turn_router import (
     TurnDecision,
     active_router_model,
@@ -424,6 +424,22 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # quantity is MODEL-JUDGED now (decision.quantity, clamped in the router) — no count-in-fit hack;
     # the router also excludes `count` from requirements, so nothing pollutes fit/closest-match.
     requested_quantity = decision.quantity
+    quantity_inherited = False
+    if (
+        requested_quantity is None
+        and is_continuation
+        and isinstance((envelope.session or {}).get("accepted_constraints"), dict)
+    ):
+        prior_quantity = (envelope.session or {})["accepted_constraints"].get("quantity")
+        try:
+            if prior_quantity is not None and 1 <= int(prior_quantity) <= 100_000:
+                # Preserve the buyer-visible order context without promoting it
+                # into this turn's decision/proposal. Fresh searches never enter
+                # this branch; an explicit quantity still wins above.
+                requested_quantity = int(prior_quantity)
+                quantity_inherited = True
+        except (TypeError, ValueError):
+            pass
 
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 
@@ -439,6 +455,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     resp.extras["secondary_lanes"] = list(decision.secondary_lanes)
     if requested_quantity is not None:
         resp.extras["requested_quantity"] = requested_quantity
+        resp.extras["quantity_inherited"] = quantity_inherited
     resp.extras["plan"] = plan.as_dict()
     # the resolver's reasoning, surfaced for the 'Why Recommended' decision-trace tab
     resp.extras["intent"] = {"use_cases": intent["use_cases"],
@@ -1241,7 +1258,8 @@ def _bind_compare_targets(variants, targets) -> Optional[list]:
     ≥2 DISTINCT units bound — anything less keeps the whole slate (a comparison narrowed to
     the wrong or a single unit is worse than showing the category)."""
     import re
-    tok = lambda s: set(re.findall(r"[a-z0-9]+", (s or "").lower()))
+    def tok(value):
+        return set(re.findall(r"[a-z0-9]+", (value or "").lower()))
     title_toks = {v.sku: tok(v.title) for v in variants}
     df: Dict[str, int] = {}
     for toks in title_toks.values():

@@ -83,7 +83,8 @@ def test_marketing_facts_keep_consent_and_campaign_separate_from_inventory(db, m
         "source_record_id": "event-1", "provenance_chain": ["ga4/event-1"],
     }
     fact["signature"] = sign_fact(fact, "ga4-test-secret")
-    assert record_marketing_event(db, fact) is True
+    evaluation_time = datetime(2026, 7, 21, tzinfo=timezone.utc)
+    assert record_marketing_event(db, fact, now=evaluation_time) is True
     row = db.execute(text(
         "SELECT event_type, campaign_id, consent_state FROM marketing_event_fact"
     )).one()
@@ -101,7 +102,9 @@ def test_invalid_signature_is_quarantined(db, monkeypatch):
         "signature": "not-valid",
     }
     with pytest.raises(MarketFactRejected, match="invalid_source_signature"):
-        record_marketing_event(db, fact)
+        record_marketing_event(
+            db, fact, now=datetime(2026, 7, 21, tzinfo=timezone.utc),
+        )
     assert db.execute(text("SELECT reason_code FROM market_fact_quarantine")).scalar_one() == \
         "invalid_source_signature"
 

@@ -1104,7 +1104,7 @@ def test_explicit_bulk_fields_survive_when_model_omits_them(db):
     assert legacy["bulk_budget"]["floor_cents"] == shown_floor
 
 
-def test_descriptive_search_continuation_does_not_inherit_bulk_quantity(db):
+def test_descriptive_continuation_surfaces_bulk_context_without_promoting_decision(db):
     payload = {"lane": "SEARCH", "handle": "el-6-6", "requirements": {},
                "quantity": None, "subject_action": "continue", "confidence": 0.9}
     session = {"prior_node": "el-6-6", "accepted_constraints": {"quantity": 25}}
@@ -1113,7 +1113,9 @@ def test_descriptive_search_continuation_does_not_inherit_bulk_quantity(db):
         _env("which of these has the best battery life?", session=session),
         llm_fn=lambda p, t: json.dumps(payload),
     )
-    assert resp.extras.get("requested_quantity") is None
+    assert resp.extras["decision"]["quantity"] is None
+    assert resp.extras["requested_quantity"] == 25
+    assert resp.extras["quantity_inherited"] is True
 
 
 def test_current_procurement_continuation_inherits_prior_bulk_quantity(db):
@@ -1565,10 +1567,11 @@ def test_budget_only_revision_overrides_incorrect_model_switch(db):
         session={"prior_node": "el-6-6", "shortlist_skus": ["LAP-1"],
                  "accepted_constraints": {}},
     )
-    llm = lambda _p, _t: json.dumps({
-        "lane": "SEARCH", "handle": None, "requirements": {},
-        "subject_action": "switch", "confidence": 0.9,
-    })
+    def llm(_prompt, _timeout):
+        return json.dumps({
+            "lane": "SEARCH", "handle": None, "requirements": {},
+            "subject_action": "switch", "confidence": 0.9,
+        })
     resp = recommend_turn(db, env, llm_fn=llm)
     decision = resp.extras["decision"]
     assert decision["node_handle"] == "el-6-6"
