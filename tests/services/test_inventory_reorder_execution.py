@@ -49,6 +49,16 @@ def _db() -> Session:
             quantity INTEGER, unit_cost REAL, status TEXT
         )
     """))
+    db.execute(text("""
+        CREATE TABLE product_lifecycle_state (
+            id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sku TEXT NOT NULL,
+            state TEXT NOT NULL, version INTEGER NOT NULL,
+            selling_allowed INTEGER NOT NULL,
+            procurement_allowed INTEGER NOT NULL,
+            updated_at TEXT NOT NULL, updated_by TEXT NOT NULL,
+            UNIQUE (tenant_id, sku)
+        )
+    """))
     db.commit()
     return db
 
@@ -162,6 +172,33 @@ def test_execution_uses_immutable_server_derived_economics(monkeypatch):
         "proposal_id": proposal["proposal_id"],
         "deduped": True,
     }
+
+
+def test_reorder_proposal_fails_closed_when_lifecycle_blocks_procurement(monkeypatch):
+    db = _db()
+    _seed_offer(db)
+    db.execute(text("""
+        INSERT INTO product_lifecycle_state
+        (id, tenant_id, sku, state, version, selling_allowed,
+         procurement_allowed, updated_at, updated_by)
+        VALUES
+        ('state-1', 'tenant-a', 'SKU-1', 'sell_through', 1, 1, 0,
+         '2026-07-29T00:00:00Z', 'owner-1')
+    """))
+    db.commit()
+    monkeypatch.setattr(
+        "src.app.services.market_projection.operator_product_projection",
+        lambda *a, **k: _projection(),
+    )
+    with pytest.raises(boundary.ReorderBoundaryError) as blocked:
+        boundary.create_reorder_proposal(
+            db,
+            tenant_id="tenant-a",
+            sku="SKU-1",
+            actor_id="owner-1",
+        )
+    assert blocked.value.code == "product_lifecycle_procurement_blocked"
+    assert blocked.value.detail["state"] == "sell_through"
 
 
 def test_execution_rejects_tenant_mismatch_and_changed_offer(monkeypatch):

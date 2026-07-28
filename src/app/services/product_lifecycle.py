@@ -25,6 +25,97 @@ _PERMISSIONS = {
 }
 
 
+class LifecyclePermissionDenied(RuntimeError):
+    def __init__(self, permission: str, state: str) -> None:
+        self.permission = permission
+        self.state = state
+        super().__init__(f"lifecycle_{permission}_blocked:{state}")
+
+
+def lifecycle_permissions(db, *, tenant_id: str, sku: str) -> dict[str, Any]:
+    """Resolve the execution policy; absence means the declared active default."""
+    tenant = str(tenant_id or "").strip()
+    key = str(sku or "").strip()
+    if not tenant or not key:
+        raise ValueError("lifecycle_permission_scope_required")
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT state, version, selling_allowed, procurement_allowed,
+                       updated_at, updated_by
+                FROM product_lifecycle_state
+                WHERE tenant_id=:tenant AND sku=:sku
+                """
+            ),
+            {"tenant": tenant, "sku": key},
+        ).fetchone()
+    except Exception as exc:
+        raise RuntimeError("lifecycle_policy_unavailable") from exc
+    if not row:
+        state, version, selling, procurement, updated_at, updated_by = (
+            "active", 0, True, True, None, None,
+        )
+    else:
+        state, version, selling, procurement, updated_at, updated_by = row
+    return {
+        "tenant_id": tenant,
+        "sku": key,
+        "state": str(state),
+        "version": int(version),
+        "selling_allowed": bool(selling),
+        "procurement_allowed": bool(procurement),
+        "updated_at": str(updated_at or "") or None,
+        "updated_by": str(updated_by or "") or None,
+    }
+
+
+def require_lifecycle_permission(
+    db,
+    *,
+    tenant_id: str,
+    sku: str,
+    permission: str,
+) -> dict[str, Any]:
+    if permission not in {"selling", "procurement"}:
+        raise ValueError("unsupported_lifecycle_permission")
+    policy = lifecycle_permissions(db, tenant_id=tenant_id, sku=sku)
+    if not bool(policy[f"{permission}_allowed"]):
+        raise LifecyclePermissionDenied(permission, str(policy["state"]))
+    return policy
+
+
+def filter_sellable_skus(
+    db,
+    *,
+    tenant_id: str,
+    skus: list[str],
+) -> set[str]:
+    """Batch catalog gate. Products without a transition retain active defaults."""
+    keys = sorted({str(sku).strip() for sku in skus if str(sku).strip()})
+    if not keys:
+        return set()
+    placeholders = ", ".join(f":sku_{index}" for index in range(len(keys)))
+    params = {"tenant": str(tenant_id), **{
+        f"sku_{index}": sku for index, sku in enumerate(keys)
+    }}
+    try:
+        rows = db.execute(
+            text(
+                f"""
+                SELECT sku, selling_allowed
+                FROM product_lifecycle_state
+                WHERE tenant_id=:tenant AND sku IN ({placeholders})
+                """
+            ),
+            params,
+        ).fetchall()
+    except Exception as exc:
+        raise RuntimeError("lifecycle_policy_unavailable") from exc
+    explicit = {str(sku): bool(allowed) for sku, allowed in rows}
+    return {sku for sku in keys if explicit.get(sku, True)}
+
+
 def _current(db, *, tenant_id: str, sku: str) -> tuple[str, int]:
     row = db.execute(
         text(

@@ -130,6 +130,26 @@ def create_reorder_proposal(
     if not tenant or not key or not actor:
         raise ReorderBoundaryError("proposal_identity_missing", status_code=400)
 
+    from src.app.services.product_lifecycle import (
+        LifecyclePermissionDenied,
+        require_lifecycle_permission,
+    )
+
+    try:
+        require_lifecycle_permission(
+            db,
+            tenant_id=tenant,
+            sku=key,
+            permission="procurement",
+        )
+    except LifecyclePermissionDenied as exc:
+        raise ReorderBoundaryError(
+            "product_lifecycle_procurement_blocked",
+            detail={"state": exc.state},
+        ) from exc
+    except RuntimeError as exc:
+        raise ReorderBoundaryError("lifecycle_policy_unavailable") from exc
+
     from src.app.services.market_projection import operator_product_projection
 
     projection = operator_product_projection(db, sku=key, tenant_id=tenant)
@@ -370,6 +390,26 @@ def execute_approved_reorder(
             "deduped": True,
         }
     current = (now or _utcnow()).astimezone(timezone.utc)
+    from src.app.services.product_lifecycle import (
+        LifecyclePermissionDenied,
+        require_lifecycle_permission,
+    )
+
+    try:
+        require_lifecycle_permission(
+            db,
+            tenant_id=str(proposal["tenant_id"]),
+            sku=str(proposal["sku"]),
+            permission="procurement",
+        )
+    except LifecyclePermissionDenied as exc:
+        raise ReorderBoundaryError(
+            "product_lifecycle_procurement_blocked",
+            detail={"state": exc.state},
+        ) from exc
+    except RuntimeError as exc:
+        raise ReorderBoundaryError("lifecycle_policy_unavailable") from exc
+
     recovered = _recover_execution_claim(db, proposal=proposal, current=current)
     if recovered is not None:
         return recovered

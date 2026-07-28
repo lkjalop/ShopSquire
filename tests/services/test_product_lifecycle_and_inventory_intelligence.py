@@ -6,6 +6,7 @@ from pathlib import Path
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from src.app.models.db import set_engine
 from src.app.services.inventory_intelligence import (
@@ -13,6 +14,9 @@ from src.app.services.inventory_intelligence import (
     calculate_inventory_intelligence,
 )
 from src.app.services.product_lifecycle import (
+    LifecyclePermissionDenied,
+    filter_sellable_skus,
+    require_lifecycle_permission,
     propose_lifecycle_transition,
     resolve_lifecycle_transition,
 )
@@ -55,6 +59,24 @@ def test_lifecycle_is_human_gated_and_separates_sell_from_procure(tmp_path):
     )
     assert resolved["selling_allowed"] is True
     assert resolved["procurement_allowed"] is False
+
+    with Session(engine) as db:
+        assert filter_sellable_skus(
+            db,
+            tenant_id="tenant-a",
+            skus=["SKU-1", "SKU-2"],
+        ) == {"SKU-1", "SKU-2"}
+        try:
+            require_lifecycle_permission(
+                db,
+                tenant_id="tenant-a",
+                sku="SKU-1",
+                permission="procurement",
+            )
+        except LifecyclePermissionDenied as exc:
+            assert exc.state == "sell_through"
+        else:
+            raise AssertionError("sell-through product must not be procured")
 
 
 def test_inventory_metrics_and_stale_price_remain_shadow_only():
