@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "generator_version": "synthetic_supply_v1",
+  "scenarios": {
+    "electronics_memory_allocation": {
+      "description": "A component capacity constraint affects a supplier and one finished variant.",
+      "history_profile": {
+        "target_node_id": "variant:portable-compute-a",
+        "base_daily_demand": 1.8,
+        "demand_stddev": 1.4,
+        "zero_demand_probability": 0.28,
+        "annual_amplitude": 0.18,
+        "weekly_multipliers": [0.9, 1.0, 1.0, 1.05, 1.2, 1.25, 0.6],
+        "initial_inventory": 42,
+        "reorder_point": 14,
+        "reorder_quantity": 36,
+        "lead_time_mean_days": 9,
+        "lead_time_jitter_days": 3,
+        "shock_day": 220,
+        "shock_lead_time_add_days": 7,
+        "unit_cost_minor": 98000,
+        "shock_cost_pass_through_pct": 5.0
+      },
+      "nodes": [
+        {"id": "component:memory", "node_type": "component", "label": "Memory component"},
+        {"id": "supplier:electronics-a", "node_type": "supplier", "label": "Supplier A"},
+        {"id": "variant:portable-compute-a", "node_type": "finished_variant", "label": "Portable compute variant A"}
+      ],
+      "edges": [
+        {"id": "edge:memory:supplier-a", "from_node_id": "component:memory", "to_node_id": "supplier:electronics-a", "relationship_type": "supplied_through", "cost_share_low": 0.45, "cost_share_high": 0.7, "pass_through_low": 0.35, "pass_through_high": 0.8, "confidence": 0.8},
+        {"id": "edge:supplier-a:portable-a", "from_node_id": "supplier:electronics-a", "to_node_id": "variant:portable-compute-a", "relationship_type": "supplies", "cost_share_low": 0.18, "cost_share_high": 0.3, "pass_through_low": 0.5, "pass_through_high": 1.0, "confidence": 0.9}
+      ],
+      "signals": [
+        {"id": "signal:memory-capacity", "subject_node_id": "component:memory", "signal_type": "capacity_constraint", "pestel_domains": ["technological", "economic"], "direction": "up", "magnitude_low_pct": 12.0, "magnitude_high_pct": 22.0, "confidence": 0.78, "source_system": "synthetic_lab", "available_at": "2026-07-15T00:00:00Z"}
+      ]
+    },
+    "packaging_resin_freight": {
+      "description": "Packaging resin and freight pressure affect a recurring consumable.",
+      "history_profile": {
+        "target_node_id": "variant:packaged-consumable-a",
+        "base_daily_demand": 7.0,
+        "demand_stddev": 2.2,
+        "zero_demand_probability": 0.03,
+        "annual_amplitude": 0.08,
+        "weekly_multipliers": [1.0, 1.0, 1.05, 1.0, 1.15, 0.85, 0.7],
+        "initial_inventory": 160,
+        "reorder_point": 55,
+        "reorder_quantity": 140,
+        "lead_time_mean_days": 6,
+        "lead_time_jitter_days": 2,
+        "shock_day": 180,
+        "shock_lead_time_add_days": 2,
+        "unit_cost_minor": 820,
+        "shock_cost_pass_through_pct": 3.5
+      },
+      "nodes": [
+        {"id": "commodity:resin", "node_type": "raw_material", "label": "Packaging resin"},
+        {"id": "supplier:packaging-a", "node_type": "supplier", "label": "Packaging supplier A"},
+        {"id": "variant:packaged-consumable-a", "node_type": "finished_variant", "label": "Packaged consumable A"}
+      ],
+      "edges": [
+        {"id": "edge:resin:packaging-a", "from_node_id": "commodity:resin", "to_node_id": "supplier:packaging-a", "relationship_type": "input_to", "cost_share_low": 0.3, "cost_share_high": 0.55, "pass_through_low": 0.4, "pass_through_high": 0.9, "confidence": 0.75},
+        {"id": "edge:packaging-a:consumable-a", "from_node_id": "supplier:packaging-a", "to_node_id": "variant:packaged-consumable-a", "relationship_type": "supplies", "cost_share_low": 0.08, "cost_share_high": 0.18, "pass_through_low": 0.5, "pass_through_high": 1.0, "confidence": 0.85}
+      ],
+      "signals": [
+        {"id": "signal:resin-price", "subject_node_id": "commodity:resin", "signal_type": "commodity_input_price", "pestel_domains": ["economic", "environmental"], "direction": "up", "magnitude_low_pct": 8.0, "magnitude_high_pct": 15.0, "confidence": 0.72, "source_system": "synthetic_lab", "available_at": "2026-07-12T00:00:00Z"}
+      ]
+    },
+    "seasonal_fibre_capacity": {
+      "description": "Fibre input and supplier capacity pressure affect a seasonal soft-goods variant.",
+      "history_profile": {
+        "target_node_id": "variant:seasonal-softgoods-a",
+        "base_daily_demand": 2.5,
+        "demand_stddev": 2.0,
+        "zero_demand_probability": 0.18,
+        "annual_amplitude": 0.65,
+        "weekly_multipliers": [0.8, 0.85, 0.9, 1.0, 1.25, 1.4, 0.75],
+        "initial_inventory": 80,
+        "reorder_point": 25,
+        "reorder_quantity": 70,
+        "lead_time_mean_days": 18,
+        "lead_time_jitter_days": 6,
+        "shock_day": 250,
+        "shock_lead_time_add_days": 9,
+        "unit_cost_minor": 3200,
+        "shock_cost_pass_through_pct": 6.0
+      },
+      "nodes": [
+        {"id": "commodity:fibre", "node_type": "raw_material", "label": "Fibre input"},
+        {"id": "supplier:softgoods-a", "node_type": "supplier", "label": "Soft-goods supplier A"},
+        {"id": "variant:seasonal-softgoods-a", "node_type": "finished_variant", "label": "Seasonal soft-goods variant A"}
+      ],
+      "edges": [
+        {"id": "edge:fibre:softgoods-a", "from_node_id": "commodity:fibre", "to_node_id": "supplier:softgoods-a", "relationship_type": "input_to", "cost_share_low": 0.2, "cost_share_high": 0.4, "pass_through_low": 0.3, "pass_through_high": 0.8, "confidence": 0.7},
+        {"id": "edge:softgoods-a:seasonal-a", "from_node_id": "supplier:softgoods-a", "to_node_id": "variant:seasonal-softgoods-a", "relationship_type": "supplies", "cost_share_low": 0.3, "cost_share_high": 0.55, "pass_through_low": 0.5, "pass_through_high": 1.0, "confidence": 0.82}
+      ],
+      "signals": [
+        {"id": "signal:fibre-capacity", "subject_node_id": "commodity:fibre", "signal_type": "capacity_constraint", "pestel_domains": ["environmental", "economic"], "direction": "up", "magnitude_low_pct": 6.0, "magnitude_high_pct": 14.0, "confidence": 0.68, "source_system": "synthetic_lab", "available_at": "2026-07-10T00:00:00Z"}
+      ]
+    }
+  }
+}

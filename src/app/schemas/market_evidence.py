@@ -37,6 +37,26 @@ class MarketEvidence(BaseModel):
     lineage_root: str | None = None
     provenance_chain: List[str] = Field(default_factory=list)
     observed_at: str | None = None
+    effective_from: str | None = None
+    effective_to: str | None = None
+    published_at: str | None = None
+    available_at: str | None = None
+    geography: str | None = None
+    measurement_definition: str | None = None
+    measurement_scope: str | None = None
+    currency: str | None = None
+    uom: str | None = None
+    release_version: str | None = None
+    coverage: Dict[str, Any] = Field(default_factory=dict)
+    magnitude_low: float | None = None
+    magnitude_high: float | None = None
+    propagation_lag_min_days: int | None = Field(default=None, ge=0)
+    propagation_lag_max_days: int | None = Field(default=None, ge=0)
+    dependency_path_ids: List[str] = Field(default_factory=list)
+    supporting_evidence_ids: List[str] = Field(default_factory=list)
+    contradicting_evidence_ids: List[str] = Field(default_factory=list)
+    assumptions: List[str] = Field(default_factory=list)
+    alternative_explanations: List[str] = Field(default_factory=list)
     summary: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
 

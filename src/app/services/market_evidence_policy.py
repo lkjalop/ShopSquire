@@ -48,6 +48,30 @@ def resolve_contradictions(
         eligible.append((row, observed))
     if not eligible:
         return {"status": "insufficient_data", "winner": None, "contested": False}
+    scope_groups: dict[str, list[dict[str, Any]]] = {}
+    for row, _ in eligible:
+        scope_key = "|".join((
+            str(row.get("geography") or ""),
+            str(row.get("measurement_definition") or ""),
+            str(row.get("currency") or ""),
+            str(row.get("uom") or ""),
+        ))
+        scope_groups.setdefault(scope_key, []).append(row)
+    declared_scopes = {key for key in scope_groups if key != "|||"}
+    if len(declared_scopes) > 1:
+        return {
+            "status": "incomparable_scopes",
+            "winner": None,
+            "contested": True,
+            "scope_groups": {
+                key: [str(row.get("id") or row.get("source_record_id") or "unknown")
+                      for row in group]
+                for key, group in sorted(scope_groups.items())
+            },
+            "resolution_basis": "scope_mismatch_preserved",
+            "authority": "advisory_only",
+            "execution_allowed": False,
+        }
     eligible.sort(
         key=lambda item: (
             TRUST_ORDER[str(item[0]["source_policy"]["trust_tier"])],
