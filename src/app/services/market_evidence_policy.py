@@ -49,21 +49,47 @@ def resolve_contradictions(
     if not eligible:
         return {"status": "insufficient_data", "winner": None, "contested": False}
     scope_groups: dict[str, list[dict[str, Any]]] = {}
+    display_scope_groups: dict[str, list[dict[str, Any]]] = {}
     for row, _ in eligible:
-        scope_key = "|".join((
+        measurement = row.get("measurement") or {}
+        display_key = "|".join((
             str(row.get("geography") or ""),
             str(row.get("measurement_definition") or ""),
             str(row.get("currency") or ""),
             str(row.get("uom") or ""),
         ))
+        scope_key = "|".join((
+            str(row.get("geography") or ""),
+            str(row.get("effective_from") or ""),
+            str(row.get("effective_to") or ""),
+            str(row.get("published_at") or ""),
+            str(row.get("source_revision") or ""),
+            str(row.get("measurement_definition") or ""),
+            str(row.get("currency") or ""),
+            str(row.get("uom") or ""),
+            str(
+                row.get("supply_chain_stage")
+                or measurement.get("supply_chain_stage")
+                or "unspecified"
+            ),
+        ))
         scope_groups.setdefault(scope_key, []).append(row)
-    declared_scopes = {key for key in scope_groups if key != "|||"}
+        display_scope_groups.setdefault(display_key, []).append(row)
+    declared_scopes = {
+        key for key in scope_groups
+        if any(part for part in key.split("|") if part != "unspecified")
+    }
     if len(declared_scopes) > 1:
         return {
             "status": "incomparable_scopes",
             "winner": None,
             "contested": True,
             "scope_groups": {
+                key: [str(row.get("id") or row.get("source_record_id") or "unknown")
+                      for row in group]
+                for key, group in sorted(display_scope_groups.items())
+            },
+            "comparison_scope_groups": {
                 key: [str(row.get("id") or row.get("source_record_id") or "unknown")
                       for row in group]
                 for key, group in sorted(scope_groups.items())
