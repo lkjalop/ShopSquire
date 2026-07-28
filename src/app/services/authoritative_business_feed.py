@@ -44,6 +44,32 @@ def _parse_time(value: str) -> str:
     return parsed.astimezone(timezone.utc).isoformat()
 
 
+def business_observation_id(
+    *,
+    tenant_id: str,
+    source: str,
+    observation: BusinessObservation,
+) -> str:
+    """Return the immutable identity used by the append-only observation ledger."""
+    entity = str(observation.entity_type or "").strip().lower()
+    external_id = str(observation.external_id or "").strip()
+    if entity not in SUPPORTED_ENTITY_TYPES:
+        raise ValueError(f"unsupported_entity_type:{entity}")
+    if not external_id:
+        raise ValueError("external_id_required")
+    event_time = _parse_time(observation.event_time)
+    validated_payload = validate_payload(entity, dict(observation.payload or {}))
+    _, payload_hash = _canonical_payload(validated_payload)
+    return hashlib.sha256(
+        (
+            f"{str(tenant_id).strip()}|{str(source).strip().lower()}|{entity}|"
+            f"{external_id}|{event_time}|{observation.schema_version}|"
+            f"{observation.corrects_observation_id or ''}|"
+            f"{observation.reverses_observation_id or ''}|{payload_hash}"
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def load_observations_csv(path: str | Path) -> list[BusinessObservation]:
     rows: list[BusinessObservation] = []
     with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
@@ -116,13 +142,11 @@ def ingest_authoritative_observations(
                     raise ValueError("observation_cannot_correct_and_reverse")
                 validated_payload = validate_payload(entity, dict(item.payload or {}))
                 payload_json, payload_hash = _canonical_payload(validated_payload)
-                observation_id = hashlib.sha256(
-                    (
-                        f"{tenant}|{source_name}|{entity}|{external_id}|{event_time}|"
-                        f"{item.schema_version}|{item.corrects_observation_id or ''}|"
-                        f"{item.reverses_observation_id or ''}|{payload_hash}"
-                    ).encode("utf-8")
-                ).hexdigest()
+                observation_id = business_observation_id(
+                    tenant_id=tenant,
+                    source=source_name,
+                    observation=item,
+                )
                 exists = db.execute(
                     text("SELECT 1 FROM authoritative_business_observation WHERE id=:id"),
                     {"id": observation_id},

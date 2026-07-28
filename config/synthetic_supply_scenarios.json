@@ -97,6 +97,143 @@
       "signals": [
         {"id": "signal:fibre-capacity", "subject_node_id": "commodity:fibre", "signal_type": "capacity_constraint", "pestel_domains": ["environmental", "economic"], "direction": "up", "magnitude_low_pct": 6.0, "magnitude_high_pct": 14.0, "confidence": 0.68, "source_system": "synthetic_lab", "available_at": "2026-07-10T00:00:00Z"}
       ]
+    },
+    "intermittent_critical_spare": {
+      "description": "A low-frequency critical spare has lumpy demand and a concentrated supplier exposure.",
+      "history_profile": {
+        "target_node_id": "variant:critical-spare-a",
+        "base_daily_demand": 5.0,
+        "demand_stddev": 3.5,
+        "zero_demand_probability": 0.82,
+        "annual_amplitude": 0.05,
+        "weekly_multipliers": [1.0, 1.0, 1.0, 1.0, 1.0, 0.8, 0.6],
+        "initial_inventory": 18,
+        "reorder_point": 6,
+        "reorder_quantity": 12,
+        "lead_time_mean_days": 24,
+        "lead_time_jitter_days": 9,
+        "shock_day": 190,
+        "shock_lead_time_add_days": 14,
+        "unit_cost_minor": 18500,
+        "shock_cost_pass_through_pct": 8.0,
+        "current_price_minor": 32000,
+        "event_plan": {"transfer_day": 90, "return_day": 130, "markdown_day": 330, "disposal_day": 360, "correction_day": 55, "reversal_day": 56, "quantity_tolerance": 1}
+      },
+      "nodes": [
+        {"id": "capacity:precision-machining", "node_type": "capacity", "label": "Precision machining capacity"},
+        {"id": "supplier:critical-spare-a", "node_type": "supplier", "label": "Critical spare supplier A"},
+        {"id": "variant:critical-spare-a", "node_type": "finished_variant", "label": "Critical spare A"}
+      ],
+      "edges": [
+        {"id": "edge:machining:spare-supplier", "from_node_id": "capacity:precision-machining", "to_node_id": "supplier:critical-spare-a", "relationship_type": "constrains", "cost_share_low": 0.35, "cost_share_high": 0.6, "pass_through_low": 0.4, "pass_through_high": 0.9, "confidence": 0.72},
+        {"id": "edge:spare-supplier:spare-a", "from_node_id": "supplier:critical-spare-a", "to_node_id": "variant:critical-spare-a", "relationship_type": "supplies", "cost_share_low": 0.5, "cost_share_high": 0.8, "pass_through_low": 0.6, "pass_through_high": 1.0, "confidence": 0.86}
+      ],
+      "signals": [
+        {"id": "signal:machining-capacity", "subject_node_id": "capacity:precision-machining", "signal_type": "capacity_constraint", "pestel_domains": ["technological", "economic"], "direction": "up", "magnitude_low_pct": 10.0, "magnitude_high_pct": 24.0, "confidence": 0.7, "source_system": "synthetic_lab", "available_at": "2025-07-10T00:00:00Z"}
+      ]
+    },
+    "perishable_cold_chain": {
+      "description": "A shelf-life-constrained product experiences cold-chain inspection and waste.",
+      "history_profile": {
+        "target_node_id": "variant:perishable-a",
+        "base_daily_demand": 8.5,
+        "demand_stddev": 2.6,
+        "zero_demand_probability": 0.02,
+        "annual_amplitude": 0.22,
+        "weekly_multipliers": [0.9, 0.95, 1.0, 1.05, 1.2, 1.3, 0.75],
+        "initial_inventory": 75,
+        "reorder_point": 30,
+        "reorder_quantity": 65,
+        "lead_time_mean_days": 4,
+        "lead_time_jitter_days": 1,
+        "shock_day": 210,
+        "shock_lead_time_add_days": 3,
+        "unit_cost_minor": 450,
+        "shock_cost_pass_through_pct": 7.0,
+        "current_price_minor": 950,
+        "shelf_life_days": 12,
+        "event_plan": {"transfer_day": 80, "return_day": 120, "markdown_day": 300, "disposal_day": 315, "correction_day": 45, "reversal_day": 46, "inspection_quarantine_every": 4, "quantity_tolerance": 1}
+      },
+      "nodes": [
+        {"id": "capacity:cold-chain", "node_type": "logistics_capacity", "label": "Cold-chain capacity"},
+        {"id": "supplier:perishable-a", "node_type": "supplier", "label": "Perishable supplier A"},
+        {"id": "variant:perishable-a", "node_type": "finished_variant", "label": "Perishable product A"}
+      ],
+      "edges": [
+        {"id": "edge:cold-chain:perishable-supplier", "from_node_id": "capacity:cold-chain", "to_node_id": "supplier:perishable-a", "relationship_type": "constrains", "cost_share_low": 0.15, "cost_share_high": 0.3, "pass_through_low": 0.4, "pass_through_high": 0.9, "confidence": 0.8},
+        {"id": "edge:perishable-supplier:perishable-a", "from_node_id": "supplier:perishable-a", "to_node_id": "variant:perishable-a", "relationship_type": "supplies", "cost_share_low": 0.25, "cost_share_high": 0.45, "pass_through_low": 0.5, "pass_through_high": 1.0, "confidence": 0.9}
+      ],
+      "signals": [
+        {"id": "signal:cold-chain-disruption", "subject_node_id": "capacity:cold-chain", "signal_type": "logistics_disruption", "pestel_domains": ["environmental", "economic"], "direction": "up", "magnitude_low_pct": 9.0, "magnitude_high_pct": 18.0, "confidence": 0.76, "source_system": "synthetic_lab", "available_at": "2025-07-30T00:00:00Z"}
+      ]
+    },
+    "bulky_freight_exposure": {
+      "description": "A low-velocity bulky item is exposed to freight cost and damage risk.",
+      "history_profile": {
+        "target_node_id": "variant:bulky-homeware-a",
+        "base_daily_demand": 1.4,
+        "demand_stddev": 1.2,
+        "zero_demand_probability": 0.48,
+        "annual_amplitude": 0.12,
+        "weekly_multipliers": [0.8, 0.85, 0.9, 1.0, 1.2, 1.35, 0.7],
+        "initial_inventory": 28,
+        "reorder_point": 9,
+        "reorder_quantity": 20,
+        "lead_time_mean_days": 16,
+        "lead_time_jitter_days": 5,
+        "shock_day": 205,
+        "shock_lead_time_add_days": 6,
+        "unit_cost_minor": 22000,
+        "shock_cost_pass_through_pct": 11.0,
+        "current_price_minor": 39900,
+        "event_plan": {"transfer_day": 100, "return_day": 150, "markdown_day": 320, "disposal_day": 370, "correction_day": 60, "reversal_day": 61, "inspection_quarantine_every": 3, "quantity_tolerance": 1}
+      },
+      "nodes": [
+        {"id": "commodity:freight", "node_type": "logistics_input", "label": "Freight capacity and fuel"},
+        {"id": "supplier:bulky-a", "node_type": "supplier", "label": "Bulky-goods supplier A"},
+        {"id": "variant:bulky-homeware-a", "node_type": "finished_variant", "label": "Bulky homeware A"}
+      ],
+      "edges": [
+        {"id": "edge:freight:bulky-supplier", "from_node_id": "commodity:freight", "to_node_id": "supplier:bulky-a", "relationship_type": "input_to", "cost_share_low": 0.3, "cost_share_high": 0.5, "pass_through_low": 0.6, "pass_through_high": 1.0, "confidence": 0.82},
+        {"id": "edge:bulky-supplier:bulky-a", "from_node_id": "supplier:bulky-a", "to_node_id": "variant:bulky-homeware-a", "relationship_type": "supplies", "cost_share_low": 0.25, "cost_share_high": 0.5, "pass_through_low": 0.5, "pass_through_high": 1.0, "confidence": 0.88}
+      ],
+      "signals": [
+        {"id": "signal:freight-cost", "subject_node_id": "commodity:freight", "signal_type": "transport_fuel_price", "pestel_domains": ["economic", "environmental"], "direction": "up", "magnitude_low_pct": 12.0, "magnitude_high_pct": 25.0, "confidence": 0.8, "source_system": "synthetic_lab", "available_at": "2025-07-25T00:00:00Z"}
+      ]
+    },
+    "b2b_project_item": {
+      "description": "A project item has large irregular orders, MOQ and long variable lead time.",
+      "history_profile": {
+        "target_node_id": "variant:b2b-project-a",
+        "base_daily_demand": 18.0,
+        "demand_stddev": 8.0,
+        "zero_demand_probability": 0.9,
+        "annual_amplitude": 0.08,
+        "weekly_multipliers": [1.0, 1.0, 1.0, 1.0, 0.9, 0.2, 0.1],
+        "initial_inventory": 90,
+        "reorder_point": 35,
+        "reorder_quantity": 100,
+        "lead_time_mean_days": 35,
+        "lead_time_jitter_days": 12,
+        "shock_day": 230,
+        "shock_lead_time_add_days": 18,
+        "unit_cost_minor": 12500,
+        "shock_cost_pass_through_pct": 9.0,
+        "current_price_minor": 21000,
+        "event_plan": {"transfer_day": 110, "return_day": 170, "markdown_day": 340, "disposal_day": 380, "correction_day": 70, "reversal_day": 71, "quantity_tolerance": 2}
+      },
+      "nodes": [
+        {"id": "capacity:project-fabrication", "node_type": "capacity", "label": "Project fabrication capacity"},
+        {"id": "supplier:b2b-project-a", "node_type": "supplier", "label": "Project supplier A"},
+        {"id": "variant:b2b-project-a", "node_type": "finished_variant", "label": "B2B project item A"}
+      ],
+      "edges": [
+        {"id": "edge:fabrication:project-supplier", "from_node_id": "capacity:project-fabrication", "to_node_id": "supplier:b2b-project-a", "relationship_type": "constrains", "cost_share_low": 0.45, "cost_share_high": 0.7, "pass_through_low": 0.5, "pass_through_high": 0.95, "confidence": 0.78},
+        {"id": "edge:project-supplier:project-a", "from_node_id": "supplier:b2b-project-a", "to_node_id": "variant:b2b-project-a", "relationship_type": "supplies", "cost_share_low": 0.55, "cost_share_high": 0.8, "pass_through_low": 0.6, "pass_through_high": 1.0, "confidence": 0.9}
+      ],
+      "signals": [
+        {"id": "signal:project-capacity", "subject_node_id": "capacity:project-fabrication", "signal_type": "capacity_constraint", "pestel_domains": ["economic", "technological"], "direction": "up", "magnitude_low_pct": 10.0, "magnitude_high_pct": 20.0, "confidence": 0.74, "source_system": "synthetic_lab", "available_at": "2025-08-20T00:00:00Z"}
+      ]
     }
   }
 }

@@ -120,6 +120,16 @@ class InvoicePayload(Contract):
     total: Money
 
 
+class InvoiceLinePayload(Contract):
+    kind: Literal["invoice_line"] = "invoice_line"
+    invoice_external_id: str
+    purchase_order_external_id: str
+    receipt_external_ids: list[str] = Field(default_factory=list)
+    variant_id: str
+    quantity: Quantity
+    unit_cost: Money
+
+
 class PurchaseOrderPayload(Contract):
     kind: Literal["purchase_order"] = "purchase_order"
     supplier_external_id: str
@@ -178,6 +188,66 @@ class InventoryAdjustmentPayload(Contract):
     approved_by: str | None = None
 
 
+class MarkdownPayload(Contract):
+    kind: Literal["markdown"] = "markdown"
+    variant_id: str
+    location_id: str
+    original_price: Money
+    new_price: Money
+    reason_code: str
+    effective_at: str
+    approved_by: str
+
+    @model_validator(mode="after")
+    def coherent_price(self) -> "MarkdownPayload":
+        if self.original_price.currency != self.new_price.currency:
+            raise ValueError("markdown_currency_mismatch")
+        if self.new_price.amount_minor > self.original_price.amount_minor:
+            raise ValueError("markdown_must_not_increase_price")
+        return self
+
+
+class DisposalPayload(Contract):
+    kind: Literal["disposal"] = "disposal"
+    variant_id: str
+    location_id: str
+    quantity: Quantity
+    reason_code: str
+    writeoff: Money | None = None
+    approved_by: str
+
+
+class ProcurementReconciliationPayload(Contract):
+    kind: Literal["procurement_reconciliation"] = "procurement_reconciliation"
+    purchase_order_external_id: str
+    invoice_external_id: str
+    receipt_external_ids: list[str] = Field(min_length=1)
+    variant_id: str
+    ordered_quantity: Quantity
+    received_quantity: Quantity
+    invoiced_quantity: Quantity
+    quantity_tolerance: Decimal = Field(ge=0)
+    ordered_unit_cost: Money
+    invoiced_unit_cost: Money
+    status: Literal["matched", "within_tolerance", "exception"]
+    exception_reasons: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def comparable_dimensions(self) -> "ProcurementReconciliationPayload":
+        units = {
+            self.ordered_quantity.uom,
+            self.received_quantity.uom,
+            self.invoiced_quantity.uom,
+        }
+        if len(units) != 1:
+            raise ValueError("reconciliation_uom_mismatch")
+        if self.ordered_unit_cost.currency != self.invoiced_unit_cost.currency:
+            raise ValueError("reconciliation_currency_mismatch")
+        if self.status == "exception" and not self.exception_reasons:
+            raise ValueError("reconciliation_exception_reason_required")
+        return self
+
+
 CanonicalPayload = Annotated[
     Union[
         OrderPayload,
@@ -187,12 +257,16 @@ CanonicalPayload = Annotated[
         ReturnPayload,
         ReceiptPayload,
         InvoicePayload,
+        InvoiceLinePayload,
         PurchaseOrderPayload,
         InventoryValuationPayload,
         LandedCostPayload,
         TransferPayload,
         InspectionPayload,
         InventoryAdjustmentPayload,
+        MarkdownPayload,
+        DisposalPayload,
+        ProcurementReconciliationPayload,
     ],
     Field(discriminator="kind"),
 ]
@@ -207,12 +281,16 @@ PAYLOAD_MODELS = {
         ReturnPayload,
         ReceiptPayload,
         InvoicePayload,
+        InvoiceLinePayload,
         PurchaseOrderPayload,
         InventoryValuationPayload,
         LandedCostPayload,
         TransferPayload,
         InspectionPayload,
         InventoryAdjustmentPayload,
+        MarkdownPayload,
+        DisposalPayload,
+        ProcurementReconciliationPayload,
     )
 }
 
