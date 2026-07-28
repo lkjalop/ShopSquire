@@ -6,9 +6,11 @@ fetch data, infer SKU exposure, or grant decision authority.
 from __future__ import annotations
 
 import json
+import hashlib
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 REGISTRY_PATH = (
@@ -50,6 +52,22 @@ def _load(path: str) -> dict[str, dict[str, Any]]:
             raise ValueError("external_market_source_must_be_advisory")
         if bool(source["personal_data_allowed"]):
             raise ValueError("external_market_source_personal_data_disallowed")
+        fetch_profile = source.get("fetch_profile")
+        if fetch_profile is not None:
+            if not isinstance(fetch_profile, dict):
+                raise ValueError("external_market_source_fetch_profile_invalid")
+            fetch_url = urlparse(str(fetch_profile.get("url") or ""))
+            allowed_host = str(fetch_profile.get("allowed_host") or "").lower()
+            if (
+                fetch_url.scheme != "https"
+                or not fetch_url.hostname
+                or fetch_url.hostname.lower() != allowed_host
+            ):
+                raise ValueError("external_market_source_fetch_origin_invalid")
+            if str(fetch_profile.get("kind") or "") not in {
+                "cpsc_recalls_json",
+            }:
+                raise ValueError("external_market_source_fetch_kind_invalid")
         domains = set(source["pestel_domains"])
         if not domains or not domains <= {
             "political",
@@ -139,11 +157,27 @@ def govern_external_observation(
         "available_at": str(available_at),
         "retrieved_at": str(retrieved_at),
         "source_policy": {
+            "source_system": source["source_system"],
             "trust_tier": source["trust_tier"],
             "licence_id": source["licence_id"],
             "licence_url": source["licence_url"],
             "permitted_uses": list(source["permitted_uses"]),
+            "allowed_uses": list(source["permitted_uses"]),
             "measurement_scope": source["measurement_scope"],
+            "retrieved_at": str(retrieved_at),
+            "terms_hash": hashlib.sha256(
+                json.dumps(
+                    {
+                        "licence_id": source["licence_id"],
+                        "licence_url": source["licence_url"],
+                        "permitted_uses": source["permitted_uses"],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
+            "approved_by": "market_source_registry:v1",
+            "personal_data_allowed": False,
         },
         "provenance_chain": [
             f"source/{source['source_id']}",
@@ -151,6 +185,11 @@ def govern_external_observation(
             f"record/{source_record_id}",
         ],
         "authority": "advisory_only",
+        "observed_at": str(available_at),
+        "measurement_definition": str(measurement.get("kind") or ""),
+        "direction": str(measurement.get("direction") or "unknown"),
+        "currency": measurement.get("currency"),
+        "uom": measurement.get("uom"),
         "can_establish_sku_exposure": False,
         "execution_allowed": False,
     }
