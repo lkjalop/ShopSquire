@@ -143,6 +143,7 @@ async def notifications(
                     __import__("json").dumps(
                         {
                             "tenant_id": tenant_id,
+                            "subscription_id": identity.subscription_id,
                             "message_id": str(msg_id),
                             "resource": str(resource or ""),
                         }

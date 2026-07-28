@@ -87,8 +87,7 @@ def poll_dmarc_filesystem(self) -> Dict[str, Any]:
     default_retry_delay=60,
 )
 def poll_email_connector(self) -> Dict[str, Any]:
-    """Poll configured email inbox connectors (Gmail / M365) and run
-    evaluate_email_security on each unprocessed message.
+    """Poll configured email inbox connectors through durable governed ingress.
 
     Connectors are selected via EMAIL_CONNECTOR_PROVIDER env var:
       - "gmail"   → uses ingest_gmail.py
@@ -102,8 +101,25 @@ def poll_email_connector(self) -> Dict[str, Any]:
         return {"ok": True, "processed": 0, "provider": "none", "reason": "EMAIL_CONNECTOR_PROVIDER not set"}
 
     tenant_id = os.getenv("EMAIL_CONNECTOR_TENANT_ID") or None
+    subscription_id = str(os.getenv("EMAIL_CONNECTOR_SUBSCRIPTION_ID") or "").strip()
+    from src.app.services.connector_email_ingress import (
+        identity_for_worker_item,
+        persist_connector_email,
+    )
+    try:
+        identity = identity_for_worker_item(
+            provider,
+            {"subscription_id": subscription_id, "tenant_id": tenant_id},
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "processed": 0,
+            "provider": provider,
+            "error": f"connector_identity:{type(exc).__name__}",
+        }
     batch_size = max(1, min(int(os.getenv("EMAIL_CONNECTOR_BATCH_SIZE", "20") or 20), 100))
-    seen_key = f"email_connector:seen:{provider}:{tenant_id or 'default'}"
+    seen_key = f"email_connector:seen:{provider}:{identity.tenant_id}"
 
     seen: set[str] = set()
     r = None
@@ -129,8 +145,6 @@ def poll_email_connector(self) -> Dict[str, Any]:
         logger.warning("email_connector poll: fetch failed for provider=%s — %s", provider, exc)
         return {"ok": False, "processed": 0, "provider": provider, "error": str(exc)}
 
-    from src.app.security.email_security import evaluate_email_security
-
     processed = 0
     errors = 0
     new_seen: list[str] = []
@@ -140,7 +154,7 @@ def poll_email_connector(self) -> Dict[str, Any]:
         if msg_id and msg_id in seen:
             continue
         try:
-            result = evaluate_email_security(msg, tenant_id=tenant_id)
+            result = persist_connector_email(identity, msg)
             risk = str(result.get("risk_label") or "").lower()
             if risk in ("critical", "high"):
                 logger.warning(
@@ -168,5 +182,6 @@ def poll_email_connector(self) -> Dict[str, Any]:
         "processed": processed,
         "errors": errors,
         "provider": provider,
-        "tenant_id": tenant_id,
+        "tenant_id": identity.tenant_id,
+        "subscription_id": identity.subscription_id,
     }

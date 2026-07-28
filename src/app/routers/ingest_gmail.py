@@ -177,6 +177,7 @@ async def pubsub_push(
                         json.dumps(
                             {
                                 "tenant_id": tenant_id,
+                                "subscription_id": identity.subscription_id,
                                 "emailAddress": str(inner.get("emailAddress")),
                                 "historyId": str(inner.get("historyId")),
                             }
