@@ -256,6 +256,7 @@ def test_world_bank_prices_are_bounded_series_observations():
     assert latest["measurement"]["value"] == 72.0
     assert latest["measurement"]["direction"] == "decrease"
     assert latest["measurement"]["currency"] == "USD"
+    assert latest["published_at"].startswith("2026-07-02")
     assert latest["can_establish_sku_exposure"] is False
 
 

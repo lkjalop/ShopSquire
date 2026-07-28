@@ -184,6 +184,22 @@ def _world_bank_observations(
         sheet = workbook["Monthly Prices"]
     except Exception as exc:
         raise ValueError("public_market_workbook_invalid") from exc
+    update_cell = next(
+        sheet.iter_rows(min_row=4, max_row=4, values_only=True)
+    )[0]
+    update_match = re.search(
+        r"Updated on ([A-Za-z]+ \d{1,2}, \d{4})",
+        str(update_cell or ""),
+    )
+    published_at = retrieved_at
+    if update_match:
+        try:
+            published_at = datetime.strptime(
+                update_match.group(1),
+                "%B %d, %Y",
+            ).replace(tzinfo=timezone.utc).isoformat()
+        except ValueError:
+            published_at = retrieved_at
     header = list(next(sheet.iter_rows(min_row=5, max_row=5, values_only=True)))
     units = list(next(sheet.iter_rows(min_row=6, max_row=6, values_only=True)))
     requested = {
@@ -239,8 +255,8 @@ def _world_bank_observations(
                 geography="global_benchmark",
                 effective_from=effective,
                 effective_to=None,
-                published_at=retrieved_at,
-                available_at=retrieved_at,
+                published_at=published_at,
+                available_at=published_at,
                 retrieved_at=retrieved_at,
             ))
             prior = value
