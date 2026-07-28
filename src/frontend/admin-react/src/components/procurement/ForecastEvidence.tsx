@@ -63,9 +63,12 @@ export default function ForecastEvidence({
             {' · '}{data.history_points} daily points
             {' · '}{data.horizon.days}-day supplier lead-time horizon
           </div>
-          <div style={{ fontSize: 12, color: '#475569', marginBottom: 6 }}>
-            Shadow evaluation only · cannot increase autonomy · source {data.source.status}
-            {data.source.watermark ? ` · through ${data.source.watermark}` : ''}
+          <div data-testid="forecast-trust-labels"
+               style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 12, color: '#475569', marginBottom: 6 }}>
+            <span className="badge">Authority: {data.authority.replace(/_/g, ' ').toUpperCase()}</span>
+            <span className="badge">Autonomy: {data.can_increase_autonomy ? 'eligible' : 'cannot increase autonomy'}</span>
+            <span className="badge">Source: {data.source.status.replace(/_/g, ' ').toUpperCase()}</span>
+            <span className="badge">Freshness: {data.source.watermark ? `THROUGH ${data.source.watermark}` : 'NOT REPORTED'}</span>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>

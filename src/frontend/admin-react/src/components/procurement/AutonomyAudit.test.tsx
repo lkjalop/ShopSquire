@@ -29,6 +29,9 @@ describe('AutonomyAudit', () => {
     expect(screen.getByText(/low_confidence \(1\)/)).toBeInTheDocument();
     expect(screen.getByText('sent')).toBeInTheDocument();        // decision 'allow' rendered as 'sent'
     expect(screen.getByText('escalate')).toBeInTheDocument();
+    expect(screen.getByTestId('procurement-trust-labels')).toHaveTextContent('Authority: AUTONOMY ENABLED');
+    expect(screen.getByTestId('procurement-trust-labels')).toHaveTextContent('SANDBOX / NON-TRANSMITTING');
+    expect(screen.getByTestId('procurement-trust-labels')).toHaveTextContent('2026-06-28 10:00:00');
   });
 
   it('warns when SMTP is selected but not configured', async () => {
@@ -43,5 +46,6 @@ describe('AutonomyAudit', () => {
     (fcAutonomousAudit as any).mockResolvedValue({ ...base, killed: true });
     render(<AutonomyAudit />);
     await waitFor(() => expect(screen.getByText('KILL SWITCH')).toBeInTheDocument());
+    expect(screen.getByTestId('procurement-trust-labels')).toHaveTextContent('Authority: HUMAN-GATED');
   });
 });

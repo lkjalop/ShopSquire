@@ -1,7 +1,7 @@
 // ProcurementNotifications — the operator "needs attention" banner. Polls the notification feed (new cart
 // confirmations, amendments/supersessions, supplier out-of-band events) so the operator learns immediately
 // instead of only on a manual queue refresh. "Mark all seen" clears the badge.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fcNotifications, fcMarkNotificationsSeen, type ProcurementNotification } from '../../api';
 
 export default function ProcurementNotifications({ onActivity, pollMs = 6000 }:
@@ -9,13 +9,18 @@ export default function ProcurementNotifications({ onActivity, pollMs = 6000 }:
   const [items, setItems] = useState<ProcurementNotification[]>([]);
   const [unseen, setUnseen] = useState(0);
   const [busy, setBusy] = useState(false);
+  const previousUnseen = useRef<number | null>(null);
 
   const load = useCallback(() => {
     fcNotifications(true, 10)
       .then((d) => {
+        const nextUnseen = d.unseen || 0;
         setItems(d.notifications || []);
-        setUnseen(d.unseen || 0);
-        if ((d.unseen || 0) > 0) onActivity?.();   // new cases likely landed → let the queue refresh
+        setUnseen(nextUnseen);
+        // The queue loads independently on mount. Refresh it only when new unseen work arrives;
+        // an unchanged backlog must not refetch the full case list on every polling interval.
+        if (previousUnseen.current !== null && nextUnseen > previousUnseen.current) onActivity?.();
+        previousUnseen.current = nextUnseen;
       })
       .catch(() => { /* feed is best-effort; never block the control room */ });
   }, [onActivity]);
@@ -29,7 +34,12 @@ export default function ProcurementNotifications({ onActivity, pollMs = 6000 }:
 
   const markAll = async () => {
     setBusy(true);
-    try { await fcMarkNotificationsSeen(); setItems([]); setUnseen(0); }
+    try {
+      await fcMarkNotificationsSeen();
+      setItems([]);
+      setUnseen(0);
+      previousUnseen.current = 0;
+    }
     catch { /* ignore */ }
     finally { setBusy(false); }
   };

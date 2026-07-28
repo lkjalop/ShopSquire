@@ -111,6 +111,12 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
   // the displayed source is driven by the active MODE (not just the last payload's label), so the
   // switch is unmistakable even before the next fetch lands.
   const sourceLabel = live ? (st?.label || 'LIVE') : (st?.label || 'SYNTHETIC REPLAY');
+  const dataThrough = series?.dates?.length ? series.dates[series.dates.length - 1] : null;
+  const adaptationAuthority = !exp
+    ? 'NOT REPORTED'
+    : exp.live
+      ? 'LIVE ADAPTATION'
+      : 'SHADOW / NOT LIVE';
 
   // Clean empty state instead of empty cards + a burst of 401s when the panel is opened before auth lands.
   if (!authReady) {
@@ -161,6 +167,19 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
           {live ? 'Re-run live pipeline' : 'Refresh live data'}
         </button>
       </div>
+      <div data-testid="mi-trust-labels" style={{
+        display: 'flex', gap: 8, flexWrap: 'wrap', margin: '-4px 0 12px', fontSize: 12,
+      }}>
+        <span className="badge">
+          Evidence: {live ? 'OPERATIONAL PIPELINE' : 'SYNTHETIC'}
+        </span>
+        <span className="badge">
+          Adaptation authority: {adaptationAuthority}
+        </span>
+        <span className="badge">
+          Freshness: {dataThrough ? `data through ${dataThrough}` : 'NOT REPORTED'}
+        </span>
+      </div>
 
       {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
 
@@ -180,7 +199,7 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
               <span>High churn <strong>{executiveMetrics.estimates.high_churn_estimate_count ?? 0}</strong> <small>(estimate)</small></span>
             </div>
             <table style={{ width: '100%' }}>
-              <thead><tr><th>SKU</th><th>Metric</th><th>Value</th><th>Status</th><th>Evidence</th></tr></thead>
+              <thead><tr><th>SKU</th><th>Metric</th><th>Value</th><th>Evidence status</th><th>As of</th><th>Evidence quality</th></tr></thead>
               <tbody>
                 {executiveMetrics.metrics.slice(0, 30).map((metric, index) => (
                   <tr key={`${metric.subject_id}-${metric.metric}-${index}`}>
@@ -188,11 +207,14 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
                     <td>{metric.metric.replace(/_/g, ' ')}</td>
                     <td>{metric.value == null ? 'Unavailable' : `${Number(metric.value).toFixed(2)} ${metric.unit || ''}`}</td>
                     <td>{metric.status.replace(/_/g, ' ')}</td>
+                    <td>{new Date(metric.as_of).toLocaleString()}</td>
                     <td>
                       <details>
-                        <summary>{metric.source_count} source(s) · {(metric.confidence * 100).toFixed(0)}% confidence</summary>
+                        <summary>
+                          {metric.source_count} source(s) · {(metric.coverage * 100).toFixed(0)}% coverage
+                          {' · '}{(metric.confidence * 100).toFixed(0)}% confidence
+                        </summary>
                         <div>Definition: {metric.definition_version}</div>
-                        <div>As of: {new Date(metric.as_of).toLocaleString()}</div>
                         {metric.reason && <div>Reason: {metric.reason.replace(/_/g, ' ')}</div>}
                         {metric.provenance_chain.map((source) => <div key={source}><code>{source}</code></div>)}
                       </details>

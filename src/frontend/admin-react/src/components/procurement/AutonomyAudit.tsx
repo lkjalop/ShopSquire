@@ -23,6 +23,11 @@ export function AutonomyAudit() {
 
   const t = data.transport;
   const transportWarn = t && t.mode === 'smtp' && !t.configured;
+  const decisionTimes = data.rows
+    .map((row) => row.created_at)
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  const latestDecisionAt = decisionTimes[decisionTimes.length - 1];
 
   return (
     <details data-testid="autonomy-audit" style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8,
@@ -41,6 +46,13 @@ export function AutonomyAudit() {
         <span data-testid="autonomy-sent">Auto-sent: <strong>{data.summary.sent}</strong></span>
         <span data-testid="autonomy-escalated">Escalated: <strong>{data.summary.escalated}</strong></span>
         <button className="btn secondary" style={{ marginLeft: 'auto' }} onClick={load}>Refresh</button>
+      </div>
+      <div data-testid="procurement-trust-labels" style={{
+        display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8, fontSize: 12,
+      }}>
+        <span className="badge">Authority: {data.enabled && !data.killed ? 'AUTONOMY ENABLED' : 'HUMAN-GATED'}</span>
+        <span className="badge">Transport: {t?.transmits ? 'TRANSMITTING' : 'SANDBOX / NON-TRANSMITTING'}</span>
+        <span className="badge">Freshness: {latestDecisionAt || 'NO DECISION EVIDENCE'}</span>
       </div>
 
       {transportWarn && (

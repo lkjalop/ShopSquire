@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import ProcurementNotifications from './ProcurementNotifications';
 
@@ -22,7 +22,7 @@ describe('ProcurementNotifications', () => {
 
     await waitFor(() => expect(screen.getByTestId('proc-notif-badge')).toHaveTextContent('2 new procurement updates'));
     expect(screen.getAllByTestId('proc-notif-item')).toHaveLength(2);
-    expect(onActivity).toHaveBeenCalled();
+    expect(onActivity).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('proc-notif-seen'));
     await waitFor(() => expect(fcMarkNotificationsSeen).toHaveBeenCalled());
@@ -34,5 +34,34 @@ describe('ProcurementNotifications', () => {
     render(<ProcurementNotifications pollMs={0} />);
     await waitFor(() => expect(fcNotifications).toHaveBeenCalled());
     expect(screen.queryByTestId('proc-notifications')).not.toBeInTheDocument();
+  });
+
+  it('refreshes the case queue only when the unseen count increases', async () => {
+    vi.useFakeTimers();
+    try {
+      (fcNotifications as any)
+        .mockResolvedValueOnce({ unseen: 2, notifications: [{ id: 'n1', summary: 'existing' }] })
+        .mockResolvedValueOnce({ unseen: 2, notifications: [{ id: 'n1', summary: 'existing' }] })
+        .mockResolvedValueOnce({
+          unseen: 3,
+          notifications: [{ id: 'n1', summary: 'existing' }, { id: 'n2', summary: 'new work' }],
+        });
+      const onActivity = vi.fn();
+      render(<ProcurementNotifications onActivity={onActivity} pollMs={100} />);
+
+      await act(async () => { await Promise.resolve(); });
+      expect(fcNotifications).toHaveBeenCalledTimes(1);
+      expect(onActivity).not.toHaveBeenCalled();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(fcNotifications).toHaveBeenCalledTimes(2);
+      expect(onActivity).not.toHaveBeenCalled();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(fcNotifications).toHaveBeenCalledTimes(3);
+      expect(onActivity).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

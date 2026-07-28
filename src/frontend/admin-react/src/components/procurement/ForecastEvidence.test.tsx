@@ -54,6 +54,8 @@ describe('ForecastEvidence', () => {
     expect(screen.getByTestId('forecast-evidence')).toHaveTextContent('13-day supplier lead-time horizon');
     expect(screen.getByTestId('forecast-evidence')).toHaveTextContent('cannot increase autonomy');
     expect(screen.getByTestId('forecast-model-croston_sba')).toHaveTextContent('Croston/SBA');
+    expect(screen.getByTestId('forecast-trust-labels')).toHaveTextContent('Authority: SHADOW EVALUATION ONLY');
+    expect(screen.getByTestId('forecast-trust-labels')).toHaveTextContent('Freshness: THROUGH 2026-07-28');
   });
 
   it('seals the shadow evaluation without changing its authority', async () => {
