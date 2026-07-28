@@ -131,4 +131,3 @@ def apply_query_plan_filters(
 # import the retired router.
 _apply_query_plan_filters = apply_query_plan_filters
 _constraint_relaxation_note = constraint_relaxation_note
-

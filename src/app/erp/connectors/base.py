@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Protocol
+from typing import Any, Dict, List, Protocol
 
 from src.app.erp.connector_runtime import ConnectorOutcome
 

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
-
 PROVIDERS = {
     "netsuite": {"type": "deep", "module": "src.app.erp.connectors.netsuite_inventory", "factory": "create_connector"},
     "sap": {"type": "deep", "module": "src.app.erp.connectors.sap", "factory": "create_connector"},
@@ -23,4 +20,3 @@ def load_provider(provider: str):
     mod = __import__(entry["module"], fromlist=[entry["factory"]])
     fn = getattr(mod, entry["factory"])
     return fn()
-

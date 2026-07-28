@@ -1,0 +1,20 @@
+name: Ruff changed-file ratchet
+
+on:
+  pull_request:
+
+jobs:
+  changed-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install "ruff>=0.3,<0.4"
+      - name: Check changed Python files only
+        run: >-
+          python scripts/ci_ruff_changed.py
+          --base "${{ github.event.pull_request.base.sha }}"
