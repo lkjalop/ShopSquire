@@ -313,13 +313,30 @@ def materialize_canonical_replay(
             "status": "received",
         },
     ))
-    return_day, return_date = planned_day("return_day", days // 3)
+    planned_return_day, _ = planned_day("return_day", days // 3)
+    sale_days = [
+        int(row["day_index"])
+        for row in history["daily_history"]
+        if int(row["observed_sales_units"]) > 0
+    ]
+    eligible_sale_days = [
+        day_index for day_index in sale_days if day_index <= planned_return_day
+    ]
+    return_order_day = (
+        eligible_sale_days[-1]
+        if eligible_sale_days
+        else sale_days[0] if sale_days else None
+    )
+    if return_order_day is None:
+        raise ValueError("synthetic_return_requires_fulfilled_order")
+    return_day = max(planned_return_day, return_order_day)
+    return_date = str(history["daily_history"][return_day]["date"])
     observations.append(_observation(
         "return",
         f"{scenario_id}:return:{return_day}",
         _stamp(return_date, hour=14),
         {
-            "order_external_id": f"{scenario_id}:order:{return_day}",
+            "order_external_id": f"{scenario_id}:order:{return_order_day}",
             "variant_id": target,
             "quantity": {"value": 1, "uom": "EA"},
             "physical_disposition": "quarantine",

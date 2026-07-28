@@ -5,6 +5,7 @@ import math
 import statistics
 from typing import Any
 
+from src.app.services.authoritative_business_feed import business_observation_id
 from src.app.services.forecast_intelligence import compare_forecast_models
 
 
@@ -38,6 +39,55 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
         for index in range(len(observations) - 1)
         if observations[index].event_time > observations[index + 1].event_time
     ]
+    external_ids = {
+        (observation.entity_type, observation.external_id)
+        for observation in observations
+    }
+    observation_ids = {
+        business_observation_id(
+            tenant_id=replay["manifest"]["tenant_id"],
+            source=replay["manifest"]["source"],
+            observation=observation,
+        )
+        for observation in observations
+    }
+    reference_failures: list[str] = []
+    relation_fields = {
+        "order_line": (("order", "order_external_id"),),
+        "return": (("order", "order_external_id"),),
+        "receipt": (("purchase_order", "purchase_order_external_id"),),
+        "inspection": (("receipt", "receipt_external_id"),),
+        "invoice_line": (
+            ("invoice", "invoice_external_id"),
+            ("purchase_order", "purchase_order_external_id"),
+        ),
+        "procurement_reconciliation": (
+            ("invoice", "invoice_external_id"),
+            ("purchase_order", "purchase_order_external_id"),
+        ),
+    }
+    for observation in observations:
+        for related_type, field in relation_fields.get(observation.entity_type, ()):
+            related_id = str(observation.payload.get(field) or "")
+            if not related_id or (related_type, related_id) not in external_ids:
+                reference_failures.append(
+                    f"{observation.entity_type}:{observation.external_id}:{field}"
+                )
+        for receipt_id in observation.payload.get("receipt_external_ids") or []:
+            if ("receipt", str(receipt_id)) not in external_ids:
+                reference_failures.append(
+                    f"{observation.entity_type}:{observation.external_id}:"
+                    "receipt_external_ids"
+                )
+        for relation_name, relation_id in (
+            ("corrects", observation.corrects_observation_id),
+            ("reverses", observation.reverses_observation_id),
+        ):
+            if relation_id and relation_id not in observation_ids:
+                reference_failures.append(
+                    f"{observation.entity_type}:{observation.external_id}:"
+                    f"{relation_name}"
+                )
     latent = [int(row["latent_demand_units"]) for row in history]
     observed = [int(row["observed_sales_units"]) for row in history]
     zero_rate = sum(value == 0 for value in latent) / len(latent)
@@ -123,6 +173,10 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
         "event_ordering": _gate(
             not order_failures,
             value={"failures": order_failures[:20]},
+        ),
+        "referential_integrity": _gate(
+            not reference_failures,
+            value={"failures": reference_failures[:20]},
         ),
         "latent_sales_separation": _gate(all(
             int(row["observed_sales_units"]) <= int(row["latent_demand_units"])

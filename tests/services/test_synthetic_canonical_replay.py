@@ -92,6 +92,7 @@ def test_acceptance_report_exposes_structural_statistical_and_utility_gates():
     assert report["authority"] == "simulation_only"
     assert report["structural_fidelity"]["inventory_conservation"]["status"] == "passed"
     assert report["structural_fidelity"]["event_ordering"]["status"] == "passed"
+    assert report["structural_fidelity"]["referential_integrity"]["status"] == "passed"
     assert report["statistical_fidelity"]["zero_demand_rate"]["value"] > 0.5
     assert report["causal_interventions"]["status"] == "passed"
     assert report["forecast_discrimination"]["status"] in {
