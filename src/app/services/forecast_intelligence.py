@@ -93,7 +93,7 @@ def compare_forecast_models(
 ) -> dict[str, Any]:
     horizon_days = max(1, min(365, int(math.ceil(float(lead_time_days or 1.0)))))
     clean = [max(0.0, float(value)) for value in history]
-    evaluation = rolling_origin_evaluation(clean)
+    evaluation = rolling_origin_evaluation(clean, horizon_days=horizon_days)
     if clean:
         candidates = {
             "seasonal_naive": clean[-7] if len(clean) >= 7 else clean[-1],
@@ -121,12 +121,27 @@ def compare_forecast_models(
             "mase_status": metrics.get("mase_status", "undefined"),
             "bias": metrics.get("bias"),
             "origins": metrics.get("origins", 0),
+            "evaluation_horizon_days": horizon_days,
         }
     selected = evaluation.get("winner")
     if selected not in model_rows:
         selected = None
     demand_mean = statistics.fmean(clean) if clean else None
     demand_variance = statistics.pvariance(clean) if len(clean) >= 2 else None
+    lead_time_windows = [
+        sum(clean[index:index + horizon_days])
+        for index in range(0, len(clean) - horizon_days + 1)
+    ]
+    sorted_windows = sorted(lead_time_windows)
+
+    def percentile(probability: float) -> float | None:
+        if not sorted_windows:
+            return None
+        position = max(0, min(len(sorted_windows) - 1, math.ceil(
+            probability * len(sorted_windows),
+        ) - 1))
+        return round(float(sorted_windows[position]), 4)
+
     return {
         "status": evaluation.get("status", "undefined"),
         "selected_model": selected,
@@ -137,6 +152,11 @@ def compare_forecast_models(
         },
         "history_points": len(clean),
         "origins": evaluation.get("origins", 0),
+        "evaluation": {
+            "kind": evaluation.get("kind", "rolling_origin_lead_time_demand"),
+            "horizon_days": evaluation.get("horizon_days", horizon_days),
+            "status": evaluation.get("status", "undefined"),
+        },
         "demand_distribution": {
             "kind": "empirical_daily",
             "mean_daily": round(demand_mean, 6) if demand_mean is not None else None,
@@ -148,6 +168,21 @@ def compare_forecast_models(
                 if len(clean) >= 2
                 else "insufficient_history"
             ),
+            "lead_time_empirical": {
+                "status": "observed" if lead_time_windows else "insufficient_history",
+                "windows": len(lead_time_windows),
+                "mean_units": (
+                    round(statistics.fmean(lead_time_windows), 4)
+                    if lead_time_windows else None
+                ),
+                "variance_units2": (
+                    round(statistics.pvariance(lead_time_windows), 4)
+                    if len(lead_time_windows) >= 2 else None
+                ),
+                "p50_units": percentile(0.50),
+                "p90_units": percentile(0.90),
+                "p95_units": percentile(0.95),
+            },
         },
         "models": model_rows,
         "segmentation": segmentation or {

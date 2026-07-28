@@ -15,18 +15,26 @@ logger = logging.getLogger(__name__)
 
 
 def rolling_origin_evaluation(
-    values: List[float], *, seasonal_period: int = 7, min_train_points: int = 14
+    values: List[float], *, seasonal_period: int = 7, min_train_points: int = 14,
+    horizon_days: int = 1,
 ) -> Dict[str, Any]:
-    """Walk-forward comparison with explicit undefined/insufficient states."""
+    """Walk-forward comparison over the decision horizon.
+
+    A supplier-lead-time decision consumes aggregate demand across the lead
+    time, not a one-day forecast multiplied after evaluation.
+    """
     clean = [max(0.0, float(value)) for value in values if math.isfinite(float(value))]
     minimum = max(3, int(min_train_points))
-    if len(clean) <= minimum:
+    horizon = max(1, int(horizon_days))
+    if len(clean) < minimum + horizon:
         return {
             "status": "insufficient_history",
             "history_points": len(clean),
             "origins": 0,
             "models": {},
             "winner": None,
+            "kind": "rolling_origin_lead_time_demand",
+            "horizon_days": horizon,
         }
     errors: Dict[str, list[tuple[float, float, float]]] = {
         "zero": [],
@@ -36,24 +44,34 @@ def rolling_origin_evaluation(
         "croston_sba": [],
         "tsb": [],
     }
-    for index in range(minimum, len(clean)):
+    for index in range(minimum, len(clean) - horizon + 1):
         train = clean[:index]
-        actual = clean[index]
+        actual = sum(clean[index:index + horizon])
+        seasonal_cycle = (
+            train[-seasonal_period:]
+            if len(train) >= seasonal_period
+            else [train[-1]]
+        )
         predictions = {
             "zero": 0.0,
-            "naive": train[-1],
-            "seasonal_naive": (
-                train[-seasonal_period] if len(train) >= seasonal_period else train[-1]
+            "naive": train[-1] * horizon,
+            "seasonal_naive": sum(
+                seasonal_cycle[step % len(seasonal_cycle)]
+                for step in range(horizon)
             ),
-            "ewma": _ewma_one(train),
-            "croston_sba": _croston_sba_one(train),
-            "tsb": _tsb_one(train),
+            "ewma": _ewma_one(train) * horizon,
+            "croston_sba": _croston_sba_one(train) * horizon,
+            "tsb": _tsb_one(train) * horizon,
         }
         for name, prediction in predictions.items():
             errors[name].append((actual, max(0.0, prediction), actual - prediction))
+    windows = [
+        sum(clean[index:index + horizon])
+        for index in range(0, len(clean) - horizon + 1)
+    ]
     scale_errors = [
-        abs(clean[index] - clean[index - seasonal_period])
-        for index in range(seasonal_period, len(clean))
+        abs(windows[index] - windows[index - seasonal_period])
+        for index in range(seasonal_period, len(windows))
     ]
     mase_scale = sum(scale_errors) / len(scale_errors) if scale_errors else 0.0
     models: Dict[str, Any] = {}
@@ -79,9 +97,11 @@ def rolling_origin_evaluation(
     return {
         "status": "observed" if winner else "undefined",
         "history_points": len(clean),
-        "origins": len(clean) - minimum,
+        "origins": len(errors["zero"]),
         "models": models,
         "winner": winner,
+        "kind": "rolling_origin_lead_time_demand",
+        "horizon_days": horizon,
         "authority": "shadow_evaluation_only",
     }
 

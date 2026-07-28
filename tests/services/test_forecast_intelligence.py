@@ -49,13 +49,33 @@ def test_model_comparison_has_explicit_metrics_and_lead_time_horizon():
     }
     for model in result["models"].values():
         assert {"wape", "mase", "bias", "status"} <= set(model)
-    assert result["demand_distribution"] == {
+    assert {
+        key: result["demand_distribution"][key]
+        for key in ("kind", "mean_daily", "variance_daily", "status")
+    } == {
         "kind": "empirical_daily",
         "mean_daily": 1.0,
         "variance_daily": 2.571429,
         "status": "observed",
     }
+    assert result["demand_distribution"]["lead_time_empirical"]["windows"] > 0
     assert result["can_increase_autonomy"] is False
+
+
+def test_model_comparison_scores_full_lead_time_windows_and_empirical_uncertainty():
+    history = ([2.0] * 5 + [12.0] * 2) * 12
+    result = compare_forecast_models(history, lead_time_days=14)
+    assert result["evaluation"]["kind"] == "rolling_origin_lead_time_demand"
+    assert result["evaluation"]["horizon_days"] == 14
+    assert result["origins"] == len(history) - 14 - 14 + 1
+    assert all(
+        row["evaluation_horizon_days"] == 14
+        for row in result["models"].values()
+    )
+    lead_time = result["demand_distribution"]["lead_time_empirical"]
+    assert lead_time["status"] == "observed"
+    assert lead_time["windows"] > 0
+    assert lead_time["p50_units"] <= lead_time["p90_units"] <= lead_time["p95_units"]
 
 
 def test_abc_xyz_exposes_undefined_and_observed_states():
