@@ -25,6 +25,7 @@ import ProcurementNotifications from './procurement/ProcurementNotifications';
 import { procurementActionMessage } from '../lib/actionError';
 import CaseJourney from './procurement/CaseJourney';
 import CaseQueue from './procurement/CaseQueue';
+import ForecastEvidence from './procurement/ForecastEvidence';
 import QuotePacket from './procurement/QuotePacket';
 import RfqFanout from './procurement/RfqFanout';
 import SupplierCandidates from './procurement/SupplierCandidates';
@@ -81,6 +82,11 @@ export function ProcurementCases() {
   const recipientDisplay = draft.recipient_email || draft.recipient_domain || 'not resolved';
   const draftItemRef = String(draft.commercial_scope?.item_ref || availability.item_ref || '').trim();
   const draftQty = Number(draft.commercial_scope?.quantity || availability.shortfall || availability.requested_qty || 0);
+  const forecastLeadTime = Number(
+    candidates.find((candidate) => candidate.recommended)?.lead_time_days
+    || candidates[0]?.lead_time_days
+    || 14,
+  );
   // keep the editable draft fields in sync with the persisted draft (re-syncs after an edit re-hashes).
   useEffect(() => { setEditSubject(draft.subject || ''); setEditBody(draft.body || ''); }, [draft.content_hash]);
   const humanGate = state === 'AWAITING_APPROVAL' || state === 'PROCUREMENT_APPROVAL_REQUIRED';
@@ -219,6 +225,10 @@ export function ProcurementCases() {
             {/* Supplier shortlist (read-only review prefill) — most useful before/at drafting. */}
             {(state === 'COMMITTED' || state === 'NO_APPROVED_SUPPLIER' || state === 'QUOTE_DRAFTED') && (
               <SupplierCandidates candidates={candidates} />
+            )}
+
+            {draftItemRef && (
+              <ForecastEvidence sku={draftItemRef} leadTimeDays={forecastLeadTime} />
             )}
 
             {/* Competitive RFQ (multi-supplier): caged draft preview per top-N supplier + quote compare. */}

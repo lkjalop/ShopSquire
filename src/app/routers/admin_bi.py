@@ -161,6 +161,48 @@ def executive_metric_forecast_comparison(
         ) from exc
 
 
+@router.get("/inventory-intelligence/{sku}/forecast")
+def inventory_forecast_intelligence(
+    sku: str,
+    lead_time_days: float = Query(default=14.0, gt=0, le=365),
+    lookback_days: int = Query(default=180, ge=28, le=730),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Preview a shadow forecast comparison from reconciled purchase facts."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.forecast_intelligence import evaluate_inventory_forecast
+
+    return evaluate_inventory_forecast(
+        tenant_id=str(current_tenant_id() or "default"),
+        sku=sku,
+        lead_time_days=lead_time_days,
+        lookback_days=lookback_days,
+        materialize=False,
+    )
+
+
+@router.post("/inventory-intelligence/{sku}/forecast")
+def materialize_inventory_forecast_intelligence(
+    sku: str,
+    lead_time_days: float = Query(default=14.0, gt=0, le=365),
+    lookback_days: int = Query(default=180, ge=28, le=730),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Seal a reproducible shadow evaluation; it cannot increase autonomy."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.forecast_intelligence import evaluate_inventory_forecast
+
+    return evaluate_inventory_forecast(
+        tenant_id=str(current_tenant_id() or "default"),
+        sku=sku,
+        lead_time_days=lead_time_days,
+        lookback_days=lookback_days,
+        materialize=True,
+    )
+
+
 class NewsletterDraftRequest(BaseModel):
     skus: List[str] = Field(default_factory=list, max_length=10)
 

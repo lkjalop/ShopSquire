@@ -46,6 +46,48 @@ export interface DealEconomics {
   profit_after_max_discount_cents: number; clears_floor: boolean;
 }
 
+export interface ForecastModelEvidence {
+  status: string;
+  daily_units?: number | null;
+  horizon_units?: number | null;
+  wape?: number | null;
+  wape_status?: string;
+  mase?: number | null;
+  mase_status?: string;
+  bias?: number | null;
+  origins?: number;
+}
+
+export interface InventoryForecastIntelligence {
+  sku: string;
+  status: string;
+  selected_model?: string | null;
+  history_points: number;
+  origins: number;
+  horizon: { kind: string; days: number; input_days: number };
+  models: Record<string, ForecastModelEvidence>;
+  segmentation: {
+    abc_class?: string;
+    abc_status?: string;
+    xyz_class?: string;
+    xyz_status?: string;
+    coefficient_of_variation?: number | null;
+  };
+  source: {
+    kind: string;
+    status: string;
+    watermark?: string | null;
+    sources?: string[];
+    row_count?: number;
+    lookback_days?: number;
+  };
+  authority: 'shadow_evaluation_only' | string;
+  can_increase_autonomy: boolean;
+  materialized: boolean;
+  evaluation_id?: string;
+  computation_version: string;
+}
+
 const _fc = (id: string) => `/api/v1/fulfillment/cases/${encodeURIComponent(id)}`;
 const _fcPost = (path: string, body?: any) =>
   http<FulfillmentCaseView>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
@@ -164,3 +206,16 @@ export const fcCompleteCase = (id: string) => _fcPost(`${_fc(id)}/complete`);
 export const fcEconomics = (id: string) =>
   http<{ case_id: string; economics: DealEconomics | Record<string, never> }>(`${_fc(id)}/economics`)
     .then((d) => d.economics);
+
+export const fetchInventoryForecast = (sku: string, leadTimeDays = 14) =>
+  http<InventoryForecastIntelligence>(
+    `/api/v1/admin/bi/inventory-intelligence/${encodeURIComponent(sku)}/forecast`
+    + `?lead_time_days=${encodeURIComponent(String(leadTimeDays))}`,
+  );
+
+export const materializeInventoryForecast = (sku: string, leadTimeDays = 14) =>
+  http<InventoryForecastIntelligence>(
+    `/api/v1/admin/bi/inventory-intelligence/${encodeURIComponent(sku)}/forecast`
+    + `?lead_time_days=${encodeURIComponent(String(leadTimeDays))}`,
+    { method: 'POST' },
+  );
