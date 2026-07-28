@@ -189,6 +189,14 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
     audit_chain_verify_min = max(1, min(60, int(float(os.getenv("AUDIT_CHAIN_VERIFY_MINUTES", "5") or 5))))
 
     beat_schedule = {}
+    connector_recovery_min = max(
+        1, min(60, int(os.getenv("CONNECTOR_RECOVERY_MINUTES", "5") or 5))
+    )
+    beat_schedule["connector-stalled-job-recovery"] = {
+        "task": "src.app.tasks.connector_recovery_tasks.recover_stalled_connector_jobs",
+        "schedule": crontab(minute=f"*/{connector_recovery_min}"),
+        "args": (),
+    }
     if poll_enabled:
         beat_schedule["security-crowdstrike-poll"] = {
             "task": "src.app.tasks.security_poll_tasks.poll_crowdstrike",
@@ -286,6 +294,20 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
         beat_schedule["fulfillment-draft-retry"] = {
             "task": "src.app.tasks.fulfillment_tasks.retry_supplier_drafts",
             "schedule": crontab(minute="*"),
+            "args": (),
+        }
+
+    outbound_delivery_enabled = str(
+        os.getenv("OUTBOUND_DELIVERY_SWEEP_ENABLED", "1")
+    ).strip().lower() in ("1", "true", "yes", "on")
+    outbound_delivery_min = max(
+        1,
+        min(60, int(os.getenv("OUTBOUND_DELIVERY_SWEEP_MINUTES", "1") or 1)),
+    )
+    if outbound_delivery_enabled:
+        beat_schedule["outbound-delivery-sweep"] = {
+            "task": "src.app.tasks.fulfillment_tasks.sweep_outbound_delivery",
+            "schedule": crontab(minute=f"*/{outbound_delivery_min}"),
             "args": (),
         }
 
@@ -426,6 +448,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.shadow_action_tasks.generate_shadow_actions": {"queue": default_q},
             "src.app.tasks.experiment_ops_tasks.experiment_watchdog": {"queue": default_q},
             "src.app.tasks.fulfillment_tasks.retry_supplier_drafts": {"queue": default_q},
+            "src.app.tasks.connector_recovery_tasks.recover_stalled_connector_jobs": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -446,6 +469,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.retention_tasks",
             "src.app.tasks.vision_prewarm_tasks",
             "src.app.tasks.fulfillment_tasks",
+            "src.app.tasks.connector_recovery_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

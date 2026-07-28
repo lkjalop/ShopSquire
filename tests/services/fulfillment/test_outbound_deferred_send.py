@@ -8,7 +8,7 @@ a new one, never leaving the case stranded.
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -23,6 +23,8 @@ from src.app.services.fulfillment.domain import Actor, ActorType as AT, Fulfillm
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    s.execute(text(q._DDL))
+    s.commit()
     try:
         yield s
     finally:

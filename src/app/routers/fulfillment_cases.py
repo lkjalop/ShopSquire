@@ -293,7 +293,11 @@ def _cases_by_trace_view(
     the drafted RFQs (one per supplier), not just the newest. Superseded cases are excluded (they belong to
     a prior amendment). Proof surface only; it never mutates or sends. Empty list (not 404) when none."""
     with db_session() as db:
-        tenant_id = principal.tenant_id if principal else "default"
+        if principal:
+            tenant_id = principal.tenant_id
+        else:
+            from src.app.platform.tenant_context import current_tenant_id
+            tenant_id = current_tenant_id()
         cids = fwf.repository.case_ids_by_trace(db, trace_id, tenant_id)
         cases: List[Dict[str, Any]] = []
         order_group_id: Optional[str] = None
@@ -309,8 +313,48 @@ def _cases_by_trace_view(
                 continue  # a prior amendment's retired case — not part of the current order
             order_group_id = order_group_id or (cv.get("state_json") or {}).get("order_group_id")
             cases.append(cv)
-        return {"trace_id": trace_id, "order_group_id": order_group_id,
-                "case_count": len(cases), "cases": cases}
+        amendment_history = None
+        if for_operator and str(order_group_id or "").startswith("order-"):
+            from src.app.services.fulfillment.cart_commitment import (
+                draft_diff,
+                list_order_cases,
+            )
+            order_id = str(order_group_id)[len("order-"):]
+            history_cases = list_order_cases(
+                db,
+                order_id,
+                tenant_id=tenant_id,
+                include_body=True,
+            )
+            active = next(
+                (case for case in history_cases if not case["superseded"]),
+                None,
+            )
+            prior = next(
+                (case for case in history_cases if case["superseded"]),
+                None,
+            )
+            amendment_history = {
+                "order_id": order_id,
+                "case_count": len(history_cases),
+                "cases": history_cases,
+                "draft_diff": (
+                    draft_diff(prior["draft"], active["draft"])
+                    if active and prior else None
+                ),
+                "trace_ids": list(dict.fromkeys(
+                    str(case.get("source_trace_id") or "")
+                    for case in history_cases
+                    if case.get("source_trace_id")
+                )),
+            }
+        return {
+            "trace_id": trace_id,
+            "order_group_id": order_group_id,
+            "case_count": len(cases),
+            "cases": cases,
+            "amendment_history": amendment_history,
+        }
 
 
 @router.get("/cases/by-trace/{trace_id}/all")
@@ -351,8 +395,14 @@ def cases_by_order(order_id: str, role: str = Depends(require_role(_OPERATOR))) 
     newest-first — plus a draft-DIFF showing what changed between the most-recently-superseded draft and the
     current active draft. Lets the operator see 'what the buyer changed' across an amendment."""
     from src.app.services.fulfillment.cart_commitment import draft_diff, list_order_cases
+    from src.app.platform.tenant_context import current_tenant_id
     with db_session() as db:
-        cases = list_order_cases(db, order_id, include_body=True)
+        cases = list_order_cases(
+            db,
+            order_id,
+            tenant_id=current_tenant_id(),
+            include_body=True,
+        )
         active = next((c for c in cases if not c["superseded"]), None)
         prior = next((c for c in cases if c["superseded"]), None)
         diff = draft_diff(prior["draft"], active["draft"]) if (active and prior) else None
@@ -1902,32 +1952,115 @@ def _replay_deferred_send_transitions(db, sent_rows: list) -> Dict[str, int]:
     return {"advanced": advanced, "skipped": skipped}
 
 
-@router.post("/outbound/process")
-def outbound_process(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+@router.post("/outbound/process", status_code=202)
+def outbound_process(
+    limit: int = 50,
+    role: str = Depends(require_role(_OPERATOR)),
+) -> Dict[str, Any]:
     """Drive the durable outbound queue once — attempt every DUE pending send, backing off failures and
     dead-lettering exhausted ones. A deferred delivery then REPLAYS the approved transition so the case advances
     to QUOTE_SENT (no stranding). In production a worker calls this on a schedule; here an operator can too."""
-    from src.app.services.fulfillment import outbound_queue as oq
+    import uuid
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.fulfillment import outbound_delivery
+    from src.app.tasks.fulfillment_tasks import process_outbound_delivery
+
+    tenant_id = str(current_tenant_id() or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail={"error": "tenant_scope_missing"})
+    bounded_limit = max(1, min(int(limit), 100))
+    job_id = f"outjob-{uuid.uuid4().hex}"
     with db_session() as db:
-        out = oq.process_pending(db)
-        out["transitions"] = _replay_deferred_send_transitions(db, out.get("sent_rows") or [])
-        return out
+        outbound_delivery.create_job(
+            db,
+            job_id=job_id,
+            tenant_id=tenant_id,
+            requested_by=role,
+            limit=bounded_limit,
+        )
+    try:
+        process_outbound_delivery.apply_async(
+            kwargs={
+                "tenant_id": tenant_id,
+                "job_id": job_id,
+                "limit": bounded_limit,
+            },
+            task_id=job_id,
+            retry=True,
+            retry_policy={
+                "max_retries": 3,
+                "interval_start": 0,
+                "interval_step": 1,
+                "interval_max": 3,
+            },
+        )
+    except Exception as exc:
+        with db_session() as db:
+            outbound_delivery.finish_job(
+                db,
+                job_id=job_id,
+                tenant_id=tenant_id,
+                error=f"publish_failed:{type(exc).__name__}",
+            )
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "outbound_job_publish_failed"},
+        )
+    return {
+        "accepted": True,
+        "job_id": job_id,
+        "tenant_id": tenant_id,
+        "status": "queued",
+    }
+
+
+@router.get("/outbound/jobs/{job_id}")
+def outbound_job_status(
+    job_id: str,
+    role: str = Depends(require_role(_OPERATOR)),
+) -> Dict[str, Any]:
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.fulfillment import outbound_delivery
+
+    tenant_id = str(current_tenant_id() or "").strip()
+    with db_session() as db:
+        result = outbound_delivery.job_status(
+            db,
+            job_id=job_id,
+            tenant_id=tenant_id,
+        )
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "outbound_job_not_found"},
+        )
+    return result
 
 
 @router.get("/outbound/status")
 def outbound_status(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Queue health: counts by status + how many sent messages are still unacknowledged (no 855)."""
     from src.app.services.fulfillment import outbound_queue as oq
+    from src.app.platform.tenant_context import current_tenant_id
     with db_session() as db:
-        return oq.queue_status(db)
+        return oq.queue_status(
+            db,
+            tenant_id=str(current_tenant_id() or ""),
+        )
 
 
 @router.get("/outbound/dead-letters")
 def outbound_dead_letters(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """The sends that exhausted their retries — operator triage queue."""
     from src.app.services.fulfillment import outbound_queue as oq
+    from src.app.platform.tenant_context import current_tenant_id
     with db_session() as db:
-        return {"dead_letters": oq.dead_letters(db)}
+        return {
+            "dead_letters": oq.dead_letters(
+                db,
+                tenant_id=str(current_tenant_id() or ""),
+            )
+        }
 
 
 @router.post("/cases/{case_id}/record-ack")
@@ -1936,13 +2069,21 @@ def outbound_record_ack(case_id: str, body: AckBody,
     """Record the supplier's acknowledgement (EDI 855) for the case's sent message — closes the send→ack loop.
     Resolves the message by the case's outbound content_hash. SYSTEM (855 inbound) or operator."""
     from src.app.services.fulfillment import outbound_queue as oq
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = str(current_tenant_id() or "")
     with db_session() as db:
         cur = fwf.repository.current_version(db, case_id)
         sj = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
         content_hash = str((sj.get("outbound") or {}).get("content_hash") or "")
         if not content_hash:
             raise HTTPException(status_code=409, detail={"error": "no_outbound_to_ack"})
-        r = oq.record_ack(db, idempotency_key=content_hash, ack_ref=body.ack_ref, case_id=case_id)
+        r = oq.record_ack(
+            db,
+            idempotency_key=content_hash,
+            ack_ref=body.ack_ref,
+            case_id=case_id,
+            tenant_id=tenant_id,
+        )
         if not r.get("acked"):
             # 409 when the message exists but isn't ackable yet (not sent); 404 only when truly absent.
             code = 404 if r.get("reason") == "not_found" else 409

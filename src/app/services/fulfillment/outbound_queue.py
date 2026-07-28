@@ -94,7 +94,6 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
         return {"message_id": None, "status": "skipped", "deduped": False}
     ts = _now_iso(now_iso)
     try:
-        db.execute(text(_DDL))
         existing = db.execute(text("SELECT id, status FROM outbound_message WHERE tenant_id=:t AND idempotency_key=:k LIMIT 1"),
                               {"t": tenant_id, "k": idempotency_key}).fetchone()
         if existing:
@@ -143,7 +142,6 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
     ts = _now_iso(now_iso)
     out: Dict[str, Any] = {"processed": 0, "sent": 0, "retried": 0, "dead_lettered": 0, "sent_rows": []}
     try:
-        db.execute(text(_DDL))
         _reclaim_stale(db, tenant_id=tenant_id, ts=ts)
         sql = ("SELECT id, case_id, recipient, subject, body, idempotency_key, attempts, max_attempts, "
                "actor_type, actor_id, transition_event FROM outbound_message WHERE tenant_id=:t AND status='pending' "
@@ -157,6 +155,7 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
         db.commit()
     except Exception as exc:
         logger.debug("process_pending query failed: %s", exc)
+        out["error"] = f"{type(exc).__name__}: {exc}"
         return out
     for r in (rows or []):
         mid, case_id, recipient, subject, body, idem, attempts, max_attempts, a_type, a_id, t_event = r
@@ -212,7 +211,7 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             status, provider_ref, detail = "failed", "", str(exc)[:200]
         try:
             if status == "sent":
-                db.execute(text("UPDATE outbound_message SET status='sent', provider_ref=:p, updated_at=:ts "
+                db.execute(text("UPDATE outbound_message SET status='sent', provider_ref=:p, last_error=NULL, updated_at=:ts "
                                 "WHERE id=:i"), {"p": provider_ref, "ts": ts, "i": mid})
                 db.commit()
                 out["sent"] += 1
@@ -247,7 +246,6 @@ def get_by_key(db, *, idempotency_key: str, tenant_id: str = "default") -> Dict[
     if db is None or not idempotency_key:
         return {}
     try:
-        db.execute(text(_DDL))
         r = db.execute(text("SELECT status, provider_ref, attempts, ack_status, last_error FROM outbound_message "
                             "WHERE tenant_id=:t AND idempotency_key=:k LIMIT 1"),
                        {"t": tenant_id, "k": idempotency_key}).fetchone()
@@ -292,7 +290,6 @@ def record_ack(db, *, idempotency_key: str, ack_ref: str = "", case_id: str = ""
         return {"acked": False, "message_id": None, "reason": "no_key"}
     ts = _now_iso(now_iso)
     try:
-        db.execute(text(_DDL))
         row = db.execute(text("SELECT id, status, case_id FROM outbound_message WHERE tenant_id=:t "
                               "AND idempotency_key=:k LIMIT 1"), {"t": tenant_id, "k": idempotency_key}).fetchone()
         if not row:
@@ -316,7 +313,6 @@ def queue_status(db, *, tenant_id: str = "default") -> Dict[str, Any]:
     if db is None:
         return {}
     try:
-        db.execute(text(_DDL))
         rows = db.execute(text("SELECT status, COUNT(*) FROM outbound_message WHERE tenant_id=:t GROUP BY status"),
                           {"t": tenant_id}).fetchall()
         by_status = {str(r[0]): int(r[1]) for r in (rows or [])}
@@ -332,7 +328,6 @@ def dead_letters(db, *, tenant_id: str = "default", limit: int = 50) -> List[Dic
     if db is None:
         return []
     try:
-        db.execute(text(_DDL))
         rows = db.execute(text("SELECT id, case_id, recipient, subject, attempts, last_error, updated_at "
                                "FROM outbound_message WHERE tenant_id=:t AND status='dead_letter' "
                                "ORDER BY updated_at DESC LIMIT :lim"), {"t": tenant_id, "lim": int(limit)}).fetchall()

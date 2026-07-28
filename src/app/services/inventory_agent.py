@@ -81,6 +81,9 @@ class ReorderRecommendation:
     supplier_trust_band: str = "medium"
     anomaly_score: float = 0.0
     source_confirmations: Optional[Dict[str, Any]] = None
+    tenant_id: Optional[str] = None
+    currency: Optional[str] = None
+    proposal_id: Optional[str] = None
 
 
 class InventoryAgent:
@@ -1015,7 +1018,13 @@ class InventoryAgent:
                 break
         return suggestions
 
-    def execute_reorder(self, recommendation: ReorderRecommendation, approval: Optional[str] = None) -> Dict[str, Any]:
+    def execute_reorder(
+        self,
+        recommendation: ReorderRecommendation,
+        approval: Optional[str] = None,
+        *,
+        governed_approval: bool = False,
+    ) -> Dict[str, Any]:
         thr = _get_inventory_thresholds()
         approval_min = float(thr["reorder_cost_approval_usd"])
         trust_score = float(getattr(recommendation, "supplier_trust_score", 0.7) or 0.7)
@@ -1048,7 +1057,9 @@ class InventoryAgent:
             idempotency_key=f"reorder:{getattr(recommendation, 'sku', '')}:{_est_cost}",
             metadata={"urgency": getattr(recommendation, "urgency", ""), "anomaly_score": anomaly_score},
         )
-        if _authz.should_block():  # inert in shadow; enforces once flipped to active
+        # Creating a supplier PO is consequential. A shadow deny/escalation is
+        # never permission on this boundary.
+        if not _authz.allowed:
             return {
                 "status": "blocked_by_authorization_engine",
                 "reason": _authz.reason,
@@ -1153,8 +1164,11 @@ class InventoryAgent:
                         "ticket_id": ticket_id,
                         "playbook_tag": "data_not_ready",
                     }
-            except Exception:
-                pass
+            except Exception as exc:
+                return {
+                    "status": "data_readiness_unavailable",
+                    "reason": f"readiness_check_failed:{type(exc).__name__}",
+                }
 
         # If above threshold, require an approved ticket id
         needs_reason = getattr(recommendation, "requires_human_review_reason", None)
@@ -1172,36 +1186,42 @@ class InventoryAgent:
                 except Exception:
                     pass
                 return {"status": "approval_required", "reason": reason, "threshold": approval_min, "cost": recommendation.estimated_cost}
-            # approval provided: verify ticket is approved
-            try:
-                tagent = TicketingAgent()
-                t = tagent.get_ticket(approval)
-                if not t:
+            # The dedicated reorder boundary has already verified a durable
+            # approval record bound to the immutable proposal hash.
+            if governed_approval:
+                pass
+            # Legacy/direct callers must still present an approved ticket.
+            else:
+                # approval provided: verify ticket is approved
+                try:
+                    tagent = TicketingAgent()
+                    t = tagent.get_ticket(approval)
+                    if not t:
+                        try:
+                            from src.app.observability.metrics import record_inventory_reorder_approval
+                            record_inventory_reorder_approval("ticket_missing")
+                        except Exception:
+                            pass
+                        return {"status": "approval_required", "reason": "ticket_missing", "ticket": approval}
+                    if t.status != "approved":
+                        try:
+                            from src.app.observability.metrics import record_inventory_reorder_approval
+                            record_inventory_reorder_approval("ticket_not_approved")
+                        except Exception:
+                            pass
+                        return {"status": "approval_required", "reason": "ticket_not_approved", "ticket": approval, "ticket_status": t.status}
                     try:
                         from src.app.observability.metrics import record_inventory_reorder_approval
-                        record_inventory_reorder_approval("ticket_missing")
+                        record_inventory_reorder_approval("approved")
                     except Exception:
                         pass
-                    return {"status": "approval_required", "reason": "ticket_missing", "ticket": approval}
-                if t.status != "approved":
+                except Exception:
                     try:
                         from src.app.observability.metrics import record_inventory_reorder_approval
-                        record_inventory_reorder_approval("ticket_not_approved")
+                        record_inventory_reorder_approval("verification_failed")
                     except Exception:
                         pass
-                    return {"status": "approval_required", "reason": "ticket_not_approved", "ticket": approval, "ticket_status": t.status}
-                try:
-                    from src.app.observability.metrics import record_inventory_reorder_approval
-                    record_inventory_reorder_approval("approved")
-                except Exception:
-                    pass
-            except Exception:
-                try:
-                    from src.app.observability.metrics import record_inventory_reorder_approval
-                    record_inventory_reorder_approval("verification_failed")
-                except Exception:
-                    pass
-                return {"status": "approval_required", "reason": "ticket_verification_failed", "ticket": approval}
+                    return {"status": "approval_required", "reason": "ticket_verification_failed", "ticket": approval}
         else:
             try:
                 from src.app.observability.metrics import record_inventory_reorder_approval
@@ -1211,32 +1231,48 @@ class InventoryAgent:
         try:
             po_number = str(uuid.uuid4())
             expected_days = recommendation.lead_time_days
-            # Persist a simple PO record into purchase_orders table if present
+            # Persist the PO before reporting success. A missing/broken PO store
+            # is a hard failure, never a synthetic "po_created" response.
             try:
                 with db_session() as db:
                     db.execute(
                         text(
                             """
-                            INSERT INTO purchase_orders (id, supplier_id, sku, quantity, unit_cost, status, expected_delivery)
-                            VALUES (:id, :supplier_id, :sku, :qty, :unit_cost, :status, :expected)
+                            INSERT INTO purchase_orders (
+                                id, tenant_id, reorder_proposal_id, supplier_id, sku,
+                                quantity, unit_cost, landed_unit_cost_cents, currency,
+                                status, expected_delivery
+                            )
+                            VALUES (
+                                :id, :tenant_id, :proposal_id, :supplier_id, :sku,
+                                :qty, :unit_cost, :unit_cost_cents, :currency,
+                                :status, :expected
+                            )
                             """
                         ),
                         {
                             "id": po_number,
+                            "tenant_id": str(getattr(recommendation, "tenant_id", None) or self.tenant_id),
+                            "proposal_id": getattr(recommendation, "proposal_id", None),
                             "supplier_id": recommendation.supplier_id,
                             "sku": recommendation.sku,
                             "qty": recommendation.quantity,
                             "unit_cost": float(recommendation.estimated_cost / max(1, recommendation.quantity)),
+                            "unit_cost_cents": int(round(
+                                float(recommendation.estimated_cost)
+                                * 100.0 / max(1, recommendation.quantity)
+                            )),
+                            "currency": str(getattr(recommendation, "currency", None) or ""),
                             "status": "created",
                             "expected": f"in {expected_days} days",
                         },
                     )
-                    try:
-                        db.commit()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    db.commit()
+            except Exception as exc:
+                return {
+                    "status": "failed",
+                    "reason": f"po_persistence_failed:{type(exc).__name__}",
+                }
 
             # Log execution decision
             try:
@@ -1257,7 +1293,7 @@ class InventoryAgent:
                     trace_id=po_number,
                     actor_type="agent",
                     actor_id="inventory_agent",
-                    tenant_id="default",
+                    tenant_id=self.tenant_id,
                     resource_id=str(recommendation.sku),
                     action="auto_po_create",
                     policy_version="v1",
@@ -1289,7 +1325,7 @@ class InventoryAgent:
                         "bundle_hash": bundle.get("bundle_hash"),
                         "actor_type": "agent",
                         "actor_id": "inventory_agent",
-                        "tenant_id": "default",
+                        "tenant_id": self.tenant_id,
                         "resource_id": str(recommendation.sku),
                         "decision": "allow",
                         "policy_version": "v1",

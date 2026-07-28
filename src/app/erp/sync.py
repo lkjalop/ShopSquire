@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 import hashlib
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List
 
 from sqlalchemy import text
 
@@ -15,35 +18,57 @@ from src.app.services.catalog_profile import invalidate_catalog_profile_cache
 from src.app.repositories.embeddings import upsert_product_embedding
 
 
+logger = logging.getLogger(__name__)
+
+
 def _now_iso() -> str:
-    return __import__("datetime").datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
-def _ensure_supplier_risk_tables(db) -> None:
-    try:
+def _finish_sync_run(
+    *,
+    run_id: str,
+    status: str,
+    seen: int,
+    applied: int,
+    error: str | None,
+) -> None:
+    with db_session() as db:
         db.execute(
             text(
-                """
-                CREATE TABLE IF NOT EXISTS supplier_feed_quarantine (
-                    id TEXT PRIMARY KEY,
-                    tenant_id TEXT,
-                    source TEXT,
-                    sku TEXT,
-                    warehouse TEXT,
-                    stock INTEGER,
-                    risk_score REAL,
-                    reasons_json TEXT,
-                    raw_json TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
+                "UPDATE inventory_sync_runs "
+                "SET status=:status, finished_at=:fin, records_seen=:seen, "
+                "records_applied=:applied, error=:err, outcome_type=:outcome "
+                "WHERE id=:id"
+            ),
+            {
+                "id": run_id,
+                "status": status,
+                "fin": _now_iso(),
+                "seen": int(seen),
+                "applied": int(applied),
+                "err": error,
+                "outcome": (
+                    "observed"
+                    if status in {"completed", "dry_run"}
+                    else "empty"
+                    if status == "empty"
+                    else status
+                ),
+            },
         )
-    except Exception:
-        pass
+        db.commit()
 
 
-def _score_supplier_record(db, *, source: str, sku: str, incoming_stock: int, raw_payload: Dict[str, Any]) -> tuple[float, list[str]]:
+def _score_supplier_record(
+    db,
+    *,
+    tenant_id: str | None,
+    source: str,
+    sku: str,
+    incoming_stock: int,
+    raw_payload: Dict[str, Any],
+) -> tuple[float, list[str]]:
     reasons: list[str] = []
     score = 0.0
     prev_stock = None
@@ -53,16 +78,28 @@ def _score_supplier_record(db, *, source: str, sku: str, incoming_stock: int, ra
                 """
                 SELECT stock
                 FROM inventory_external_stock
-                WHERE source = :source AND sku = :sku
+                WHERE COALESCE(tenant_id, '') = :tenant
+                  AND source = :source AND sku = :sku
                 ORDER BY observed_at DESC
                 LIMIT 1
                 """
             ),
-            {"source": source, "sku": sku},
+            {
+                "tenant": str(tenant_id or ""),
+                "source": source,
+                "sku": sku,
+            },
         ).fetchone()
         if row:
             prev_stock = int(row[0] or 0)
-    except Exception:
+    except Exception as exc:
+        logger.debug(
+            "unable to load prior supplier stock tenant=%s source=%s sku=%s: %s",
+            tenant_id,
+            source,
+            sku,
+            exc,
+        )
         prev_stock = None
 
     if incoming_stock < 0:
@@ -90,8 +127,14 @@ def _score_supplier_record(db, *, source: str, sku: str, incoming_stock: int, ra
                     if pd >= float(os.getenv("SUPPLIER_PRICE_SPIKE_RATIO_THRESHOLD", "0.6") or 0.6):
                         score += min(1.0, 0.25 + pd * 0.4)
                         reasons.append("price_spike_delta")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "supplier price anomaly check unavailable tenant=%s source=%s sku=%s: %s",
+            tenant_id,
+            source,
+            sku,
+            exc,
+        )
     return min(1.0, score), reasons
 
 
@@ -111,31 +154,88 @@ def sync_inventory(
     """
     run_id = str(uuid.uuid4())
     started = _now_iso()
+    budget_seconds = max(1, int(os.getenv("INVENTORY_SYNC_JOB_BUDGET_SEC", "60") or 60))
+    budget_monotonic_deadline = time.monotonic() + budget_seconds
+    budget_deadline = (datetime.now(timezone.utc) + timedelta(seconds=budget_seconds)).isoformat()
     source = getattr(connector, "name", lambda: "unknown")()
 
-    recs = connector.fetch_inventory(tenant_id=tenant_id) or []
-    seen = len(recs)
+    recs: List[InventoryRecord] = []
+    seen = 0
     applied = 0
     quarantined = 0
     supplier_risk_samples: list[float] = []
     err = None
+    failure_status = "failed"
 
     with db_session() as db:
         db.execute(
             text(
                 """
-                INSERT INTO inventory_sync_runs (id, tenant_id, source, status, started_at, records_seen, records_applied)
-                VALUES (:id, :tenant_id, :source, :status, :started_at, :seen, 0)
+                INSERT INTO inventory_sync_runs
+                (id, tenant_id, source, status, started_at, heartbeat_at,
+                 budget_deadline_at, records_seen, records_applied)
+                VALUES
+                (:id, :tenant_id, :source, :status, :started_at, :started_at,
+                 :budget_deadline, :seen, 0)
                 """
             ),
-            {"id": run_id, "tenant_id": tenant_id, "source": source, "status": "started", "started_at": started, "seen": seen},
+            {
+                "id": run_id,
+                "tenant_id": tenant_id,
+                "source": source,
+                "status": "started",
+                "started_at": started,
+                "budget_deadline": budget_deadline,
+                "seen": 0,
+            },
         )
         db.commit()
 
     try:
+        health_fn = getattr(connector, "health", None)
+        health = health_fn() if callable(health_fn) else {"ok": True}
+        if not isinstance(health, dict) or not bool(health.get("ok")):
+            failure_status = "unavailable"
+            detail = health.get("error") if isinstance(health, dict) else None
+            raise RuntimeError(str(detail or "connector_unavailable"))
+        outcome_fn = getattr(connector, "fetch_inventory_outcome", None)
+        if callable(outcome_fn):
+            outcome = outcome_fn(tenant_id=tenant_id)
+            if outcome is not None:
+                if not outcome.ok:
+                    failure_status = str(outcome.outcome.value)
+                    raise RuntimeError(str(outcome.error or outcome.outcome.value))
+                recs = list(outcome.value or [])
+            else:
+                recs = connector.fetch_inventory(tenant_id=tenant_id) or []
+        else:
+            recs = connector.fetch_inventory(tenant_id=tenant_id) or []
+        seen = len(recs)
+        if time.monotonic() >= budget_monotonic_deadline:
+            raise TimeoutError("inventory_sync_job_budget_exhausted")
+    except Exception as exc:
+        err = f"{type(exc).__name__}: {exc}"
+        _finish_sync_run(
+            run_id=run_id,
+            status=failure_status,
+            seen=seen,
+            applied=0,
+            error=err,
+        )
+        return {
+            "id": run_id,
+            "source": source,
+            "status": failure_status,
+            "records_seen": seen,
+            "records_applied": 0,
+            "records_quarantined": 0,
+            "supplier_risk_avg": 0.0,
+            "error": err,
+        }
+
+    try:
         if not dry_run:
             with db_session() as db:
-                _ensure_supplier_risk_tables(db)
                 dialect = ""
                 try:
                     bind = getattr(db, "get_bind", lambda: None)()
@@ -143,38 +243,45 @@ def sync_inventory(
                 except Exception:
                     dialect = ""
                 for r in recs:
+                    if time.monotonic() >= budget_monotonic_deadline:
+                        raise TimeoutError("inventory_sync_job_budget_exhausted")
                     payload = {"sku": r.sku, "warehouse": r.warehouse, "stock": r.stock, "updated_at": r.updated_at, "source": r.source}
                     risk_score, risk_reasons = _score_supplier_record(
-                        db, source=source, sku=str(r.sku), incoming_stock=int(r.stock or 0), raw_payload=payload
+                        db,
+                        tenant_id=tenant_id,
+                        source=source,
+                        sku=str(r.sku),
+                        incoming_stock=int(r.stock or 0),
+                        raw_payload=payload,
                     )
                     supplier_risk_samples.append(float(risk_score))
                     quarantine_threshold = float(os.getenv("SUPPLIER_QUARANTINE_RISK_THRESHOLD", "0.7") or 0.7)
                     is_quarantined = bool(risk_score >= quarantine_threshold and len(risk_reasons) > 0)
                     if is_quarantined:
-                        try:
-                            db.execute(
-                                text(
-                                    """
-                                    INSERT INTO supplier_feed_quarantine (id, tenant_id, source, sku, warehouse, stock, risk_score, reasons_json, raw_json, created_at)
-                                    VALUES (:id, :tenant_id, :source, :sku, :warehouse, :stock, :risk_score, :reasons_json, :raw_json, :created_at)
-                                    """
-                                ),
-                                {
-                                    "id": str(uuid.uuid4()),
-                                    "tenant_id": tenant_id,
-                                    "source": source,
-                                    "sku": r.sku,
-                                    "warehouse": r.warehouse,
-                                    "stock": int(r.stock or 0),
-                                    "risk_score": float(risk_score),
-                                    "reasons_json": json.dumps(risk_reasons, ensure_ascii=False),
-                                    "raw_json": json.dumps(payload, ensure_ascii=False),
-                                    "created_at": _now_iso(),
-                                },
-                            )
-                            quarantined += 1
-                        except Exception:
-                            pass
+                        db.execute(
+                            text(
+                                """
+                                INSERT INTO supplier_feed_quarantine (id, tenant_id, source, sku, warehouse, stock, risk_score, reasons_json, raw_json, created_at)
+                                VALUES (:id, :tenant_id, :source, :sku, :warehouse, :stock, :risk_score, :reasons_json, :raw_json, :created_at)
+                                """
+                            ),
+                            {
+                                "id": str(uuid.uuid4()),
+                                "tenant_id": tenant_id,
+                                "source": source,
+                                "sku": r.sku,
+                                "warehouse": r.warehouse,
+                                "stock": int(r.stock or 0),
+                                "risk_score": float(risk_score),
+                                "reasons_json": json.dumps(risk_reasons, ensure_ascii=False),
+                                "raw_json": json.dumps(payload, ensure_ascii=False),
+                                "created_at": _now_iso(),
+                            },
+                        )
+                        quarantined += 1
+                        # Quarantine is a separate custody path. It must never
+                        # become an active stock observation or product update.
+                        continue
                     obs = r.updated_at or started
                     # Deterministic id gives basic idempotency when a connector provides stable `updated_at`.
                     # (For CSV, include an updated_at column in the file for best results.)
@@ -225,8 +332,17 @@ def sync_inventory(
                                 params,
                             )
                             applied += 1
-                    except Exception:
-                        # Duplicate or DB error; continue best-effort.
+                    except Exception as exc:
+                        # Snapshot persistence is best-effort, but it must be observable:
+                        # a duplicate is harmless while a schema/connection error is not.
+                        logger.warning(
+                            "inventory snapshot write skipped run=%s tenant=%s source=%s sku=%s: %s",
+                            run_id,
+                            tenant_id,
+                            r.source,
+                            r.sku,
+                            exc,
+                        )
                         continue
 
                     if upsert_products and not is_quarantined:
@@ -308,34 +424,33 @@ def sync_inventory(
                                 emb_text = build_embedding_text(r) or (r.sku or "")
                                 vec = emb_svc.embed_text_vector(emb_text)
                                 upsert_product_embedding(db, pid, vec)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.warning(
+                                    "inventory embedding refresh skipped run=%s tenant=%s sku=%s: %s",
+                                    run_id,
+                                    tenant_id,
+                                    r.sku,
+                                    exc,
+                                )
                 db.commit()
                 if upsert_products and applied > 0:
                     invalidate_catalog_profile_cache(tenant_id=tenant_id)
     except Exception as exc:
         err = str(exc)
 
-    finished = _now_iso()
-    with db_session() as db:
-        db.execute(
-            text(
-                "UPDATE inventory_sync_runs SET status=:status, finished_at=:fin, records_applied=:applied, error=:err WHERE id=:id"
-            ),
-            {
-                "id": run_id,
-                "status": "failed" if err else ("dry_run" if dry_run else "completed"),
-                "fin": finished,
-                "applied": applied,
-                "err": err,
-            },
-        )
-        db.commit()
+    final_status = "failed" if err else ("dry_run" if dry_run else "completed")
+    _finish_sync_run(
+        run_id=run_id,
+        status=final_status,
+        seen=seen,
+        applied=applied,
+        error=err,
+    )
 
     return {
         "id": run_id,
         "source": source,
-        "status": "failed" if err else ("dry_run" if dry_run else "completed"),
+        "status": final_status,
         "records_seen": seen,
         "records_applied": applied,
         "records_quarantined": quarantined,

@@ -958,6 +958,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  status TEXT NOT NULL DEFAULT 'started',\n"
                         "  started_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                         "  finished_at TEXT,\n"
+                        "  heartbeat_at TEXT,\n"
+                        "  budget_deadline_at TEXT,\n"
+                        "  outcome_type TEXT,\n"
                         "  records_seen INT DEFAULT 0,\n"
                         "  records_applied INT DEFAULT 0,\n"
                         "  error TEXT\n"
@@ -965,6 +968,20 @@ def _ensure_minimal_sqlite_tables(bind):
                     ))
                 except Exception:
                     pass
+                for _sync_col, _sync_type in (
+                    ("heartbeat_at", "TEXT"),
+                    ("budget_deadline_at", "TEXT"),
+                    ("outcome_type", "TEXT"),
+                ):
+                    try:
+                        conn.execute(
+                            sql_text(
+                                f"ALTER TABLE inventory_sync_runs "
+                                f"ADD COLUMN {_sync_col} {_sync_type}"
+                            )
+                        )
+                    except Exception:
+                        pass
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS inventory_external_stock (\n"

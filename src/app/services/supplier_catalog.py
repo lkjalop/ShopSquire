@@ -162,7 +162,7 @@ _DEMO_SUPPLIER_CHANNELS = {
 
 
 def _ensure_suppliers_columns(db) -> None:
-    """Idempotently add suppliers.preferred_channel (additive ALTER, sqlite + pg). Best-effort."""
+    """Dev/test compatibility for additive supplier columns owned by Alembic."""
     try:
         existing = {str(r[1]) for r in db.execute(text("PRAGMA table_info(suppliers)")).fetchall()}
     except Exception:
@@ -171,11 +171,19 @@ def _ensure_suppliers_columns(db) -> None:
                 "SELECT column_name FROM information_schema.columns WHERE table_name='suppliers'")).fetchall()}
         except Exception:
             return
-    if "preferred_channel" not in existing:
+    additions = (
+        ("preferred_channel", "TEXT"),
+        ("active", "INTEGER DEFAULT 1"),
+    )
+    for name, column_type in additions:
+        if name in existing:
+            continue
         try:
-            db.execute(text("ALTER TABLE suppliers ADD COLUMN preferred_channel TEXT"))
+            db.execute(
+                text(f"ALTER TABLE suppliers ADD COLUMN {name} {column_type}")
+            )
         except Exception as exc:
-            logger.debug("suppliers.preferred_channel add skipped: %s", exc)
+            logger.debug("suppliers.%s add skipped: %s", name, exc)
 
 
 def apply_demo_supplier_channels(db) -> int:
@@ -301,6 +309,39 @@ def _exists(db, sql: str, params: Dict[str, Any]) -> bool:
         return False
 
 
+def _insert_supplier_product(db, params: Dict[str, Any]) -> None:
+    """Insert across both legacy ``id`` schemas and the canonical composite-key schema."""
+    from sqlalchemy import inspect
+
+    columns = {
+        item["name"]
+        for item in inspect(db.get_bind()).get_columns("supplier_products")
+    }
+    values = dict(params)
+    if "id" in columns:
+        values["row_id"] = f"{values['s']}:{values['k']}"
+        db.execute(
+            text(
+                "INSERT INTO supplier_products "
+                "(id, supplier_id, sku, moq, min_order_value_cents, "
+                "lead_time_days, region, on_time_rate, price_breaks, "
+                "contract_status, active) "
+                "VALUES (:row_id,:s,:k,:moq,:mov,:lt,:rg,:ot,:pb,:cs,1)"
+            ),
+            values,
+        )
+        return
+    db.execute(
+        text(
+            "INSERT INTO supplier_products "
+            "(supplier_id, sku, moq, min_order_value_cents, lead_time_days, "
+            "region, on_time_rate, price_breaks, contract_status, active) "
+            "VALUES (:s,:k,:moq,:mov,:lt,:rg,:ot,:pb,:cs,1)"
+        ),
+        values,
+    )
+
+
 def seed_demo(db, *, skus: Optional[List[str]] = None, commit: bool = True) -> Dict[str, int]:
     """Idempotently seed the demo suppliers, their products (for ``skus``), and their trusted domains.
     Returns {suppliers, products, domains} counts inserted."""
@@ -332,10 +373,7 @@ def seed_demo(db, *, skus: Optional[List[str]] = None, commit: bool = True) -> D
         for sku in skus:
             if not _exists(db, "SELECT 1 FROM supplier_products WHERE supplier_id=:s AND sku=:k",
                            {"s": s["id"], "k": sku}):
-                db.execute(text(
-                    "INSERT INTO supplier_products (supplier_id, sku, moq, min_order_value_cents, "
-                    "lead_time_days, region, on_time_rate, price_breaks, contract_status, active) "
-                    "VALUES (:s,:k,:moq,:mov,:lt,:rg,:ot,:pb,:cs,1)"), {**_params, "k": sku})
+                _insert_supplier_product(db, {**_params, "k": sku})
                 n_prod += 1
             else:
                 # backfill commercial terms onto a pre-migration row (null terms) — COALESCE keeps any
@@ -392,10 +430,7 @@ def _seed_supplier_set(db, suppliers: List[Dict[str, Any]], supplier_skus: Dict[
         for sku in sorted(set(supplier_skus.get(str(s["id"]), []) or [])):
             if not _exists(db, "SELECT 1 FROM supplier_products WHERE supplier_id=:s AND sku=:k",
                            {"s": s["id"], "k": sku}):
-                db.execute(text(
-                    "INSERT INTO supplier_products (supplier_id, sku, moq, min_order_value_cents, "
-                    "lead_time_days, region, on_time_rate, price_breaks, contract_status, active) "
-                    "VALUES (:s,:k,:moq,:mov,:lt,:rg,:ot,:pb,:cs,1)"), {**_params, "k": sku})
+                _insert_supplier_product(db, {**_params, "k": sku})
                 n_prod += 1
             else:
                 db.execute(text(

@@ -161,6 +161,33 @@ def operator_subject(authorization: Optional[str] = Header(default=None, alias="
     return OperatorSubject(user_id=_bearer_subject(authorization) or "", email=_bearer_email(authorization) or "")
 
 
+def _authorize_operator_tenant(
+    *,
+    request: Optional[Request],
+    role: str,
+    effective_key: Optional[str],
+    authorization: Optional[str],
+) -> None:
+    """Bind the authenticated credential to a persisted tenant membership.
+
+    The request header selects a tenant context; it never grants that context.
+    Production/staging fail closed when membership storage or membership is absent.
+    """
+    if request is None:
+        return
+    from src.app.services.operator_tenant_membership import (
+        authorize_request_membership,
+    )
+
+    authorize_request_membership(
+        request=request,
+        role=role,
+        effective_key=effective_key,
+        authorization=authorization,
+        bearer_subject=_bearer_subject(authorization),
+    )
+
+
 def _assert_privileged_role_server_side(*, role: str, authorization: Optional[str], effective_key: Optional[str]) -> bool:
     """§10 hardening: never trust privileged role solely from JWT claims.
 
@@ -702,6 +729,12 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                 except Exception:
                     pass
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"ABAC deny: {reason}")
+        _authorize_operator_tenant(
+            request=request,
+            role=role,
+            effective_key=effective_key,
+            authorization=authorization,
+        )
         try:
             if _emit_iam:
                 _emit_iam(
@@ -937,6 +970,12 @@ def require_role(allowed_roles: Iterable[str]):
                 except Exception:
                     pass
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"ABAC deny: {reason}")
+        _authorize_operator_tenant(
+            request=request,
+            role=role,
+            effective_key=effective_key,
+            authorization=authorization,
+        )
         try:
             if _emit_iam:
                 _emit_iam(

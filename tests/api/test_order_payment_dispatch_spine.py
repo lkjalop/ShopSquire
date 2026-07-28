@@ -30,6 +30,8 @@ def client(monkeypatch):
             "guest_email TEXT, guest_email_hash TEXT, guest_email_encrypted TEXT, total_cents INTEGER, "
             "currency TEXT, status TEXT, trace_id TEXT, stripe_intent_id TEXT, tracking_number TEXT, "
             "carrier TEXT, updated_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"))
+        from src.app.services.fulfillment import outbound_queue
+        c.execute(text(outbound_queue._DDL))
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     monkeypatch.delenv("EASYPOST_WEBHOOK_SECRET", raising=False)
     monkeypatch.setattr(payments, "_is_non_dev_env", lambda *_a, **_k: False)

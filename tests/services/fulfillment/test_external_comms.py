@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.app.services.fulfillment import external_comms as ec
+from src.app.services.fulfillment import outbound_queue
 from src.app.services.fulfillment import sandbox_supplier as sb
 from src.app.services.fulfillment import workflow as wf
 from src.app.services.fulfillment.domain import Actor, ActorType as A, FulfillmentState as S
@@ -16,6 +17,8 @@ from src.app.services.fulfillment.domain import Actor, ActorType as A, Fulfillme
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    s.execute(text(outbound_queue._DDL))
+    s.commit()
     try:
         yield s
     finally:

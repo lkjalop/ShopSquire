@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
+from src.app.erp.connector_runtime import ConnectorOutcome
+
 
 @dataclass(frozen=True)
 class InventoryRecord:
@@ -25,5 +27,8 @@ class InventoryConnector(Protocol):
 
     def fetch_inventory(self, *, tenant_id: str | None = None) -> List[InventoryRecord]: ...
 
-    def health(self) -> Dict[str, Any]: ...
+    def fetch_inventory_outcome(
+        self, *, tenant_id: str | None = None
+    ) -> ConnectorOutcome[List[InventoryRecord]]: ...
 
+    def health(self) -> Dict[str, Any]: ...

@@ -69,8 +69,11 @@ def list_order_cases(
         from src.app.services.fulfillment.repository import ensure_tables
         ensure_tables(db)
         rows = db.execute(text(
-            "SELECT case_id, state, state_json, valid_from FROM fulfillment_case_version "
-            "WHERE tenant_id=:t AND valid_to IS NULL AND state_json LIKE :p ORDER BY valid_from DESC"),
+            "SELECT v.case_id, v.state, v.state_json, v.valid_from, c.source_trace_id "
+            "FROM fulfillment_case_version v "
+            "JOIN fulfillment_case c ON c.id=v.case_id AND c.tenant_id=v.tenant_id "
+            "WHERE v.tenant_id=:t AND v.valid_to IS NULL "
+            "AND v.state_json LIKE :p ORDER BY v.valid_from DESC"),
             {"t": str(tenant_id or "default"), "p": f'%"order_group_id"%{group_id}%'}).fetchall()
     except Exception as exc:
         logger.debug("list_order_cases failed for %s: %s", order_id, exc)
@@ -97,6 +100,7 @@ def list_order_cases(
                 "body": draft.get("body"),
             })
         out.append({"case_id": r[0], "state": r[1], "valid_from": r[3],
+                    "source_trace_id": r[4],
                     "superseded": r[1] == "SUPERSEDED", "draft": draft_summary})
     return out
 

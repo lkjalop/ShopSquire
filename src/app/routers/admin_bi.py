@@ -628,24 +628,68 @@ def submit_product_action_proposal(
             "action_type": action,
             "reasons": proposal.get("reasons") or [],
         })
-    approval_id = enqueue_approval(
-        f"commercial_{action}",
-        {
-            "tenant_id": tenant_id,
-            "sku": str(sku),
-            "proposal": proposal,
-            "execution": "not_implemented_by_approval",
-        },
-        reason="human_review_required",
-        created_by=role,
-    )
-    return {
+    if action == "replenishment":
+        from src.app.services.inventory_reorder_execution import (
+            ReorderBoundaryError,
+            bind_approval,
+            create_reorder_proposal,
+        )
+        try:
+            with db_session() as db:
+                durable = create_reorder_proposal(
+                    db,
+                    tenant_id=tenant_id,
+                    sku=sku,
+                    actor_id=role,
+                )
+            approval_id = enqueue_approval(
+                "commercial_replenishment",
+                {
+                    "tenant_id": tenant_id,
+                    "proposal_id": durable["proposal_id"],
+                    "proposal_hash": durable["proposal_hash"],
+                },
+                reason="human_review_required",
+                created_by=role,
+            )
+            with db_session() as db:
+                bind_approval(
+                    db,
+                    tenant_id=tenant_id,
+                    proposal_id=durable["proposal_id"],
+                    approval_id=approval_id,
+                )
+        except ReorderBoundaryError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={"reason": exc.code, **exc.detail},
+            )
+    else:
+        durable = {}
+        approval_id = enqueue_approval(
+            f"commercial_{action}",
+            {
+                "tenant_id": tenant_id,
+                "sku": str(sku),
+                "proposal": proposal,
+                "execution": "not_implemented_by_approval",
+            },
+            reason="human_review_required",
+            created_by=role,
+        )
+    response = {
         "queued": True,
         "approval_id": approval_id,
         "action_type": action,
         "human_gate": "required",
         "executed": False,
     }
+    if durable:
+        response.update({
+            "proposal_id": durable.get("proposal_id"),
+            "proposal_hash": durable.get("proposal_hash"),
+        })
+    return response
 
 
 @router.post("/newsletter-draft")

@@ -43,6 +43,8 @@ def db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     Session = sessionmaker(bind=engine)
     s = Session()
+    s.execute(text(q._DDL))
+    s.commit()
     yield s
     s.close()
 
@@ -84,6 +86,10 @@ def test_retry_is_not_due_until_backoff_elapses(db):
     # far in the future it IS due → delivers
     out2 = q.process_pending(db, transport=_OkTransport(), now_iso="2026-06-28T13:00:00")
     assert out2["sent"] == 1
+    row = db.execute(
+        text("SELECT status, last_error FROM outbound_message")
+    ).fetchone()
+    assert row[0] == "sent" and row[1] is None
 
 
 def test_max_attempts_dead_letters(db):
