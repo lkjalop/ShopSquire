@@ -1,5 +1,197 @@
 # Agnostic Market Intelligence and Procurement Roadmap — 2026-07-27
 
+## Production-shaped landing update — 2026-07-28
+
+The foundation batch is now split into reviewable commits. Local proof covers
+the migration chain, bounded service-suite collection/sharding, runtime
+governance, canonical observations, provider-independent communications,
+conversation observations, forecast evidence, procurement proposals, buyer
+journeys and the worker boundary.
+
+The production-shaped browser stack proved:
+
+- all 179 storefront component assertions and all 29 admin assertions;
+- production frontend builds for the storefront and admin;
+- all nine serial Playwright buyer journeys;
+- the live policy-trace, procurement supersession and malicious
+  trusted-supplier regressions;
+- before/after invariance for quote, economics, purchase-order and payment
+  state after a quarantined malicious reply;
+- a real Redis/Celery task delivery plus the bounded retry/recovery tests.
+
+This is local certification, not hosted or external-provider certification.
+The new GitHub workflow is authored and locally validated, but still needs its
+first hosted run. Gmail, Microsoft 365 and design-partner business feeds remain
+deliberately outside the current proof because no external credentials or
+authoritative source are available.
+
+The next no-credential delivery order is:
+
+1. Run and stabilize the new browser/worker workflow on GitHub.
+2. Move the remaining legacy recommendation characterizations to V2 contracts,
+   compatibility-route tests or frozen evidence. Eighteen test files still
+   import the legacy router or its legacy test helper directly.
+3. Project Party/account intelligence into tenant-scoped APIs, timelines and
+   operator views; keep merge/split as governed proposals until reviewed.
+4. Enforce lifecycle selling and procurement permissions at their execution
+   boundaries.
+5. Run forecast, supplier-score, replenishment, GMROI, shelf-velocity and
+   stale-stock evaluations in shadow mode against versioned synthetic and
+   replayable historical fixtures, preserving explicit undefined states.
+6. Add UI disclosure for source authority, freshness, completeness, currency,
+   UoM comparability, uncertainty, simulation/shadow status and human gates.
+7. Reduce the large storefront/admin JavaScript chunks and then split
+   `chat.py` and simplify `main.py` after the identity and communications
+   composition roots are stable.
+
+## Foundation execution update — 2026-07-28
+
+The next dependency-ordered foundation slice is implemented:
+
+- connector cursor/checkpoint and ERP outbound state is migration-owned;
+- cursor advancement uses compare-and-set and rejects stale writers;
+- OAuth tokens are cached by tenant, provider and subscription rather than by
+  provider alone;
+- connector retries honor bounded `Retry-After`, HTTP attempts share a total
+  job budget, outbound rows are claimed atomically and stalled connector jobs
+  are reconciled by Celery beat;
+- connector results distinguish observed, empty, unavailable, unauthorised,
+  malformed and partial outcomes;
+- a dedicated browser/worker CI workflow uses separate databases, Redis,
+  visible test reporting, per-test backstops and hard job/suite deadlines;
+- an append-only authoritative feed contract accepts orders, order lines,
+  location ATP, reservations, returns, receipts, invoices, purchase orders,
+  inventory valuation and landed cost without directly mutating operational
+  state;
+- tenant-scoped Party, ExternalIdentity, relationships, observations,
+  activities, snapshots and identity-resolution decision storage now exists;
+- supplier and buyer communications have a provider-independent observation
+  contract whose authority is always `observation_only`;
+- product lifecycle transitions are tenant-scoped, versioned, auditable and
+  human-approved, with selling and procurement permissions represented
+  separately;
+- replenishment inputs, GMROI, shelf velocity, weeks of supply and stale-stock
+  price proposals have a deterministic shadow-only calculation boundary;
+- two more legacy `recommend.py` test imports moved to V2 service contracts.
+
+These foundations do not mean the production integrations are complete. The
+remaining delivery order is:
+
+1. Bind connector credentials and subscriptions to authoritative persisted
+   tenant configuration. The current token cache is correctly scoped but still
+   process-local, and most provider shapes remain scaffolds.
+2. Run the new CI workflow on GitHub and fix any production-stack failures; its
+   YAML and local constituent suites are validated, but the hosted worker and
+   browser jobs have not yet executed.
+3. Configure one real design-partner CSV/SFTP feed, add source-specific schema
+   mapping and reconciliation, and project only approved observations into
+   operational order, ATP and finance read models.
+4. Wire authoritative source identities into Party resolution, build account
+   timeline/API/UI projections and implement governed merge/split resolution.
+5. Project the existing secure inbox/outbox into the generic communication
+   observation table, then add purpose, consent, frequency and draft-approval
+   policy for buyer communications.
+6. Integrate lifecycle permissions with catalog selling and reorder execution;
+   derive inventory history from reconciled observations and run the new
+   metrics in shadow evaluation before proposing automation.
+7. Continue legacy characterization migration. Eighteen test files still
+   import the legacy router directly, so deletion remains blocked despite the
+   production routing boundary already being V2-owned.
+
+## P0 correctness update — 2026-07-28
+
+The roadmap is now ordered around tenant-safe facts and bounded execution. The
+latest correctness slice completed:
+
+- attribution reward and trace-arm lookups are tenant-scoped, including
+  adversarial coverage for reused trace and decision identifiers;
+- chat consumes the tenant established by the authenticated operator context,
+  applies one end-to-end deadline and returns a retryable `in_progress`
+  response instead of allowing duplicate callers to wait for roughly 90
+  seconds;
+- inventory sync persists its run before provider I/O, records unavailable
+  sources durably and rejects malformed or non-JSON provider responses;
+- supplier anomaly baselines are tenant-scoped and quarantined observations no
+  longer enter active stock or product projections;
+- the Procurement projection follows an amended order across decision traces,
+  preserves the original procurement request identity and passes the live SPA
+  supersession regression;
+- direct Xero writes are disabled by default, credit notes are drafted rather
+  than authorised, and non-JSON provider errors remain observable.
+
+The next execution order is:
+
+1. **Migrations and connector reliability.** Apply and validate
+   `20260807_inventory_feed_quarantine`, move the remaining `erp_sync_state`
+   runtime DDL into a migration, and replace swallowed cursor/token errors with
+   typed connector outcomes. Add cursor compare-and-set, page checkpoints,
+   `Retry-After`, token caching by authoritative tenant subscription, total job
+   budgets and stalled-job reconciliation.
+2. **Production-shaped CI.** Give browser and worker suites isolated databases,
+   visible per-test reporting and hard suite/test deadlines. The live
+   cross-trace regression passes, but the full Vitest run can keep the process
+   alive long after all 179 assertions have passed.
+3. **One authoritative read-only feed.** Start with CSV/SFTP or one design
+   partner and reconcile orders, order lines, location ATP/reservations,
+   returns, receipts, invoices, purchase orders, valuation and landed cost.
+4. **Provider-independent communications.** Continue durable observations,
+   drafts, approval, correlation, quarantine disposition and synthetic
+   transport tests. Real Gmail/M365 activation remains deliberately snoozed.
+5. **Account intelligence, not a new CRM.** Add tenant-scoped Party,
+   ExternalIdentity, PartyRelationship, observations, activities, rebuildable
+   snapshots and governed merge/split decisions. Existing HubSpot,
+   Salesforce and Dynamics routes remain adapter scaffolds until native APIs
+   and contract tests exist.
+6. **Lifecycle and inventory intelligence.** After authoritative history is
+   reconciled, add `active -> sell_through -> procurement_blocked ->
+   discontinued`, followed by calibrated replenishment, GMROI, shelf velocity
+   and margin-floored stale-stock proposals in shadow mode.
+7. **Parallel cleanup.** Continue moving legacy `recommend.py` test imports to
+   V2 contracts, compatibility-route tests or frozen evidence. Split
+   `fulfillment_cases.py`, then `chat.py`; reduce `main.py` after identity and
+   communications composition is stable. These refactors do not outrank
+   correctness or authoritative data.
+
+Direct Xero execution must remain disabled until it uses proposal,
+authorization and a tenant-bound durable delivery ledger. CRM writes remain
+out of scope except for future governed proposals to ShopSquire-owned fields.
+
+## Implementation update — 2026-07-28
+
+Completed in the current P0 execution slice:
+
+- inventory reorder execution now accepts only an immutable proposal ID;
+- replenishment quantity, supplier, landed cost, currency and lead time are
+  derived from canonical facts and a validated tenant-scoped supplier offer;
+- human approval is bound to the proposal hash and proposal expiry;
+- execution rechecks supplier and replenishment facts before creating a PO,
+  treats authorization shadow denials/escalations as blocks, and fails closed
+  when data readiness cannot be evaluated;
+- an architecture test prohibits production callers from bypassing the
+  dedicated reorder execution boundary;
+- the supplier outbox and delivery-job ledger are migration-owned;
+- `/outbound/process` now returns an accepted Celery job instead of transmitting
+  synchronously;
+- outbound processing, status, dead letters and acknowledgements are
+  tenant-scoped, with bounded batches and a scheduled tenant sweep;
+- migrations `20260802_inventory_reorder`, `20260803_outbound_jobs` and
+  `20260804_inventory_claims` pass from an empty database and are applied to
+  the inspected local database; stale execution claims reconcile an already
+  persisted PO instead of creating a duplicate.
+
+Still open after this slice:
+
+- operator tenant identity is still ultimately based on the request tenant
+  context and role/ABAC configuration; authoritative per-user tenant membership
+  must become a first-class authenticated principal claim;
+- the real Gmail/M365 poll worker still needs to enter the durable inbound
+  inbox/evidence/correlation/`receive_email_reply()` boundary;
+- buyer/customer email needs its own governed inbox and policy;
+- provider-shaped and malicious-reply browser round trips remain required;
+- authoritative orders, location ATP, returns, receipts, invoices and landed
+  inventory valuation remain prerequisites for GMROI or autonomous inventory
+  optimization.
+
 ## Objective
 
 Build one vertical-agnostic commerce intelligence loop that:
