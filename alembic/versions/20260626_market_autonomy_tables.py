@@ -1,4 +1,4 @@
-"""Market-intelligence & adaptive-growth tables → Alembic (prod-parity for the runtime-ensured set).
+"""Market-intelligence & adaptive-growth tables -> Alembic (prod-parity for the runtime-ensured set).
 
 Eleven tables backing the adaptive-growth subsystem are created at runtime via ensure_table() /
 CREATE TABLE IF NOT EXISTS in their service modules (works on Postgres + SQLite alike). This migration
