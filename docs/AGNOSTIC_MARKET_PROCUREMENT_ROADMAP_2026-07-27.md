@@ -1,5 +1,75 @@
 # Agnostic Market Intelligence and Procurement Roadmap — 2026-07-27
 
+## Canonical replay and supply-risk execution update — 2026-07-29
+
+This no-credential slice is implemented and locally verified:
+
+- deterministic synthetic histories now materialize as tenant-scoped,
+  append-only canonical observations for orders, ATP, purchase orders,
+  receipts, inspections/quarantine, transfers, returns, invoices and
+  reconciliation, markdowns, disposal, adjustments, corrections and
+  reversals;
+- four configuration-driven archetypes were added: intermittent critical
+  spares, perishables/cold chain, bulky freight-heavy goods and irregular B2B
+  project items. Product behavior remains parameter-driven rather than
+  category-coded;
+- acceptance reports expose daily inventory conservation, event ordering,
+  canonical referential integrity, latent-demand separation, statistical
+  descriptors, causal shock response, lead-time forecast comparison,
+  empirical interval coverage and business utility;
+- replenishment, supplier scoring, GMROI, shelf velocity and stale-stock price
+  proposals run against the replay only with `shadow_only` authority;
+- a tenant-scoped supply-risk API and lazy-loaded admin workbench expose
+  dependency paths, PESTEL scope, provenance/licence, contradictions,
+  freshness/completeness, impact ranges, alternatives and bounded options;
+- lifecycle permissions are enforced in product selling and reorder proposal/
+  execution boundaries;
+- both frontends are code-split. The admin entry fell from about 505 KB to
+  49 KB; the storefront entry fell from about 569 KB to 426 KB, with React in
+  a separate shared chunk;
+- all 2,908 currently collected service tests pass across eight local,
+  production-shaped shards with 120-second per-test deadlines and a
+  non-daemon-thread leak gate. The run fixed a date-dependent warehouse test,
+  a recovered-product slate regression and unbounded executor shutdown;
+- the GitHub shard workflow now isolates databases and feature flags, starts a
+  real Redis service, retains last-running-test diagnostics and applies Ruff
+  to the stabilized boundary.
+
+Red/green interpretation:
+
+- red meant a violated invariant, stale time assumption, cross-shard resource
+  collision, leaked executor, or an incorrect product-slate contract;
+- green now means deterministic replay, governed non-execution authority,
+  isolated shard state and clean worker shutdown under the tested contracts;
+- green does **not** certify live market-source fetching, external-provider
+  causality, real ERP data, or autonomous procurement performance.
+
+Remaining work, in dependency order:
+
+1. Run the authored workflow on GitHub and preserve the eight hosted artifacts.
+   Local sharding is complete; hosted runner behavior is not yet certified.
+2. Project every canonical inventory event into a location-level accounting
+   replay so transfer, quarantine, return, disposal, correction and reversal
+   quantities participate in conservation, not only the generated daily
+   on-hand series.
+3. Add scenario target ranges and model-specific interval calibration, then
+   compare policy counterfactuals for fill rate, stockouts, waste, margin and
+   working capital instead of reporting one shadow proposal.
+4. Add governed fetch adapters for the public source registry, including
+   licence-aware caching, observation timestamps, revision handling,
+   contradiction grouping and source-health outcomes. Until then, the
+   workbench is a deterministic/configured intelligence demonstration.
+5. Add Party/account timelines and governed merge/split proposals, then connect
+   supplier observations and buyer requirements to immutable case snapshots.
+6. Continue extracting frozen helpers and characterizations from
+   `recommend.py`. Production routing remains V2-owned, but the legacy file is
+   still about 12,520 lines and 23 test files directly import its module/helper
+   boundary, so deletion is still blocked.
+7. Address the repository-wide Ruff baseline separately. The declared
+   toolchain runs, but the pre-existing broad service/ERP/test scan reports
+   618 findings; the CI gate intentionally covers the newly stabilized
+   boundaries rather than pretending the legacy baseline is clean.
+
 ## Causal supply-intelligence execution update — 2026-07-29
 
 The roadmap is now ordered around proving product exposure before interpreting
