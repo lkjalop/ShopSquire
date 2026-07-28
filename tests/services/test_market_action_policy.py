@@ -37,6 +37,35 @@ def test_replenishment_requires_every_independent_gate():
         atp=_atp(), economics=_economics(), now=NOW)
     assert verdict["allowed"] is True
     assert verdict["authority"] == "operator_advisory_only"
+    assert verdict["autonomous_execution_allowed"] is False
+
+
+def test_autonomous_authority_requires_all_outcome_and_policy_readiness():
+    base = dict(
+        demand_facts=[_demand("ga4"), _demand("orders")],
+        atp=_atp(), economics=_economics(), now=NOW,
+    )
+    partial = authorize_replenishment(
+        **base,
+        authority_readiness={
+            "forecast_outcome_calibrated": True,
+            "supplier_score_outcome_calibrated": True,
+            "market_source_licensed": True,
+        },
+    )
+    assert partial["allowed"] is True
+    assert partial["autonomous_execution_allowed"] is False
+    assert partial["autonomy_blockers"] == ["human_policy_approved"]
+    ready = authorize_replenishment(
+        **base,
+        authority_readiness={
+            "forecast_outcome_calibrated": True,
+            "supplier_score_outcome_calibrated": True,
+            "market_source_licensed": True,
+            "human_policy_approved": True,
+        },
+    )
+    assert ready["autonomous_execution_allowed"] is True
 
 
 def test_replenishment_fails_closed_on_one_source_missing_lead_and_fake_margin():

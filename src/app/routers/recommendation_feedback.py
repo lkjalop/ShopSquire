@@ -144,7 +144,9 @@ def log_recommend_interaction(
             }
             arm = (
                 str(safe_context.get("bandit_arm") or "").strip()
-                or arm_for_trace(db, trace_id)
+                or arm_for_trace(
+                    db, trace_id, tenant_id=current_tenant_id(),
+                )
             )
             bandit_context = (
                 safe_context.get("bandit_context")
@@ -247,7 +249,9 @@ def recommend_feedback(
                 sku=sku,
                 arm=(
                     str(safe_context.get("bandit_arm") or "").strip()
-                    or arm_for_trace(db, trace_id)
+                    or arm_for_trace(
+                        db, trace_id, tenant_id=current_tenant_id(),
+                    )
                 ),
                 reward=float({
                     "accepted": 1.0,

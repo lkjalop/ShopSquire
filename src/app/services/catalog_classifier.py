@@ -253,18 +253,23 @@ def _build_prompt(text: str, candidates: List[Tuple[TaxonomyNode, float]]) -> st
 
 
 def classify_text(text: str, *, existing_category: str = "",
-                  llm_fn: Optional[LLMFn] = None, timeout: float = 30.0) -> Optional[Classification]:
+                  llm_fn: Optional[LLMFn] = None, timeout: float = 30.0,
+                  semantic_candidates: bool = True) -> Optional[Classification]:
     """Classify one product text. Returns None only when there is NO signal at all (no tokens,
     zero candidates) — every other path yields a proposal (model or lexical fallback)."""
     xw = _crosswalk(existing_category)
-    cands = candidate_nodes(text)
+    cands = candidate_nodes(text, semantic=semantic_candidates)
     # An AMBIGUOUS merchant category ('monitor', 'tablet') couldn't crosswalk, but it must
     # still SEED candidates — 'Tablet Computers' was crowded out of the top-K by Wi-Fi token
     # noise on the first live run, and the clamp means the model can never pick a node that
     # isn't offered. Union the hint's own candidates in, best score wins on dedup.
     merged: Dict[str, Tuple[TaxonomyNode, float]] = {n.handle: (n, s) for n, s in cands}
     if existing_category:
-        for n, s in candidate_nodes(existing_category, top_k=5):
+        for n, s in candidate_nodes(
+            existing_category,
+            top_k=5,
+            semantic=semantic_candidates,
+        ):
             if n.handle not in merged or s > merged[n.handle][1]:
                 merged[n.handle] = (n, s)
     # CROSSWALK IS A PRIOR, NOT A SHORTCUT (holdout 2026-07-11: the early-return crosswalk
@@ -332,7 +337,8 @@ def classify_text(text: str, *, existing_category: str = "",
 
 def classify_catalog(db, *, tenant_id: str = "default", llm_fn: Optional[LLMFn] = None,
                      limit: Optional[int] = None, commit: bool = True,
-                     mode: Optional[str] = None) -> Dict[str, Any]:
+                     mode: Optional[str] = None,
+                     semantic_candidates: bool = True) -> Dict[str, Any]:
     """Classify every variant the read-model facade serves and write status='proposed' rows.
     Product text = title + brand + specs keys (whatever exists). Returns a report; the
     approval step (T4) is deliberately separate — nothing here changes what sells."""
@@ -365,7 +371,7 @@ def classify_catalog(db, *, tenant_id: str = "default", llm_fn: Optional[LLMFn] 
                        or "").replace("_", " ")
         text = " ".join(filter(None, [v.title, v.brand, v.product_type, cat_hint]))
         c = classify_text(text, existing_category=v.category or v.product_type or cat_hint,
-                          llm_fn=llm_fn)
+                          llm_fn=llm_fn, semantic_candidates=semantic_candidates)
         if c is None:
             report["unclassifiable"].append(v.sku)
             continue

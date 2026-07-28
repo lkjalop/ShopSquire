@@ -6,11 +6,13 @@ printers and storage.
 Run: python scripts/seed_real_catalog.py
 """
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 
 DB_PATH = "tmp/demo.sqlite"
+CATALOG_CURRENCY = str(os.getenv("CATALOG_SEED_CURRENCY") or "AUD").strip().upper()
 
 # ---------------------------------------------------------------------------
 # LAPTOPS — budget/mid-range (non-gaming, Windows/Copilot+)
@@ -1342,7 +1344,7 @@ def seed_group(cur, conn, products: list[dict], group_name: str) -> tuple[int, i
                 p["sku"],
                 p["name"],
                 p["price_cents"],
-                "USD",
+                CATALOG_CURRENCY,
                 json.dumps(p["specs"]),
                 1,
                 now,

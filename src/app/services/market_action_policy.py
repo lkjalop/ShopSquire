@@ -32,6 +32,7 @@ def authorize_replenishment(
     tenant_id: str | None = None, sku: str | None = None,
     taxonomy_node: str | None = None, currency: str | None = None,
     forecast_quality: Dict[str, Any] | None = None,
+    authority_readiness: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     expected_tenant = str(tenant_id or "").strip()
@@ -123,6 +124,14 @@ def authorize_replenishment(
             and float(quality_wape) <= 0.35
             and quality_coverage >= 0.5),
     }
+    readiness = authority_readiness or {}
+    autonomous_execution_allowed = bool(
+        not reasons
+        and readiness.get("forecast_outcome_calibrated")
+        and readiness.get("supplier_score_outcome_calibrated")
+        and readiness.get("market_source_licensed")
+        and readiness.get("human_policy_approved")
+    )
     return {
         "allowed": not reasons,
         "decision": "replenish_advisory" if not reasons else "insufficient_evidence",
@@ -134,5 +143,16 @@ def authorize_replenishment(
         "atp_authoritative": atp_authoritative,
         "economics_authoritative": margin_authoritative,
         "forecast_quality_shadow": forecast_quality_shadow,
+        "autonomous_execution_allowed": autonomous_execution_allowed,
+        "autonomy_blockers": (
+            [] if autonomous_execution_allowed else [
+                key for key in (
+                    "forecast_outcome_calibrated",
+                    "supplier_score_outcome_calibrated",
+                    "market_source_licensed",
+                    "human_policy_approved",
+                ) if not readiness.get(key)
+            ]
+        ),
         "authority": "operator_advisory_only",
     }

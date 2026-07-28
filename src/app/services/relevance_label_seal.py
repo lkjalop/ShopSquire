@@ -1,0 +1,60 @@
+"""Human-only sealing workflow for relevance labels."""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+from pathlib import Path
+
+
+ATTESTATION = "I independently reviewed every relevance slate and accept these labels."
+
+
+def canonical_corpus_hash(path: str | Path) -> str:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("relevance_corpus_must_be_object")
+    review_copy = dict(data)
+    for key in ("review_status", "human_reviewed_by", "human_reviewed_at", "human_signature"):
+        review_copy.pop(key, None)
+    encoded = json.dumps(review_copy, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def create_human_seal(
+    path: str | Path,
+    *,
+    reviewer: str,
+    reviewed_at: str,
+    attestation: str,
+    signing_secret: str,
+) -> dict[str, str]:
+    identity = str(reviewer or "").strip()
+    secret = str(signing_secret or "")
+    if not identity or identity.lower() in {"codex", "ai", "automation", "system"}:
+        raise ValueError("independent_human_reviewer_required")
+    if attestation != ATTESTATION:
+        raise ValueError("exact_human_attestation_required")
+    if len(secret) < 24:
+        raise ValueError("human_seal_secret_too_short")
+    corpus_hash = canonical_corpus_hash(path)
+    message = f"{corpus_hash}|{identity}|{reviewed_at}|{attestation}"
+    signature = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+    return {
+        "corpus_hash": corpus_hash,
+        "reviewer": identity,
+        "reviewed_at": reviewed_at,
+        "attestation": attestation,
+        "signature": signature,
+    }
+
+
+def verify_human_seal(path: str | Path, seal: dict[str, str], *, signing_secret: str) -> bool:
+    if canonical_corpus_hash(path) != seal.get("corpus_hash"):
+        return False
+    message = (
+        f"{seal.get('corpus_hash')}|{seal.get('reviewer')}|"
+        f"{seal.get('reviewed_at')}|{seal.get('attestation')}"
+    )
+    expected = hmac.new(str(signing_secret).encode(), message.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, str(seal.get("signature") or ""))

@@ -5,12 +5,120 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+import math
 
 from sqlalchemy import text
 
 from src.app.models.db import db_session
 
 logger = logging.getLogger(__name__)
+
+
+def rolling_origin_evaluation(
+    values: List[float], *, seasonal_period: int = 7, min_train_points: int = 14
+) -> Dict[str, Any]:
+    """Walk-forward comparison with explicit undefined/insufficient states."""
+    clean = [max(0.0, float(value)) for value in values if math.isfinite(float(value))]
+    minimum = max(3, int(min_train_points))
+    if len(clean) <= minimum:
+        return {
+            "status": "insufficient_history",
+            "history_points": len(clean),
+            "origins": 0,
+            "models": {},
+            "winner": None,
+        }
+    errors: Dict[str, list[tuple[float, float, float]]] = {
+        "zero": [],
+        "naive": [],
+        "seasonal_naive": [],
+        "ewma": [],
+        "croston_sba": [],
+        "tsb": [],
+    }
+    for index in range(minimum, len(clean)):
+        train = clean[:index]
+        actual = clean[index]
+        predictions = {
+            "zero": 0.0,
+            "naive": train[-1],
+            "seasonal_naive": (
+                train[-seasonal_period] if len(train) >= seasonal_period else train[-1]
+            ),
+            "ewma": _ewma_one(train),
+            "croston_sba": _croston_sba_one(train),
+            "tsb": _tsb_one(train),
+        }
+        for name, prediction in predictions.items():
+            errors[name].append((actual, max(0.0, prediction), actual - prediction))
+    scale_errors = [
+        abs(clean[index] - clean[index - seasonal_period])
+        for index in range(seasonal_period, len(clean))
+    ]
+    mase_scale = sum(scale_errors) / len(scale_errors) if scale_errors else 0.0
+    models: Dict[str, Any] = {}
+    for name, rows in errors.items():
+        absolute = sum(abs(actual - prediction) for actual, prediction, _ in rows)
+        actual_total = sum(actual for actual, _, _ in rows)
+        signed = sum(error for _, _, error in rows)
+        models[name] = {
+            "status": "observed",
+            "origins": len(rows),
+            "wape": round(absolute / actual_total, 6) if actual_total > 0 else None,
+            "wape_status": "available" if actual_total > 0 else "undefined_zero_actual",
+            "mase": round((absolute / len(rows)) / mase_scale, 6) if mase_scale > 0 else None,
+            "mase_status": "available" if mase_scale > 0 else "undefined_zero_scale",
+            "bias": round(signed / actual_total, 6) if actual_total > 0 else None,
+        }
+    candidates = [
+        (metrics["wape"], name)
+        for name, metrics in models.items()
+        if metrics["wape"] is not None
+    ]
+    winner = min(candidates)[1] if candidates else None
+    return {
+        "status": "observed" if winner else "undefined",
+        "history_points": len(clean),
+        "origins": len(clean) - minimum,
+        "models": models,
+        "winner": winner,
+        "authority": "shadow_evaluation_only",
+    }
+
+
+def _ewma_one(values: List[float], alpha: float = 0.28) -> float:
+    level = float(values[0]) if values else 0.0
+    for value in values[1:]:
+        level = alpha * float(value) + (1.0 - alpha) * level
+    return level
+
+
+def _croston_sba_one(values: List[float], alpha: float = 0.2) -> float:
+    nonzero = [(index, value) for index, value in enumerate(values) if value > 0]
+    if not nonzero:
+        return 0.0
+    demand = float(nonzero[0][1])
+    interval = float(nonzero[0][0] + 1)
+    previous_index = nonzero[0][0]
+    for index, value in nonzero[1:]:
+        demand += alpha * (float(value) - demand)
+        gap = float(index - previous_index)
+        interval += alpha * (gap - interval)
+        previous_index = index
+    return (1.0 - alpha / 2.0) * demand / max(interval, 1e-9)
+
+
+def _tsb_one(values: List[float], alpha: float = 0.2, beta: float = 0.2) -> float:
+    if not values:
+        return 0.0
+    probability = 1.0 if values[0] > 0 else 0.0
+    demand = float(values[0]) if values[0] > 0 else 0.0
+    for value in values[1:]:
+        occurred = 1.0 if value > 0 else 0.0
+        probability += beta * (occurred - probability)
+        if value > 0:
+            demand += alpha * (float(value) - demand)
+    return probability * demand
 
 
 @dataclass
@@ -205,6 +313,7 @@ class DemandForecaster:
             preds, method = self._forecast_ewma(clean, horizon_days)
 
         mape = self._mape(clean)
+        evaluation = rolling_origin_evaluation(clean)
         daily = []
         for i in range(horizon_days):
             d = today + timedelta(days=i)
@@ -221,6 +330,9 @@ class DemandForecaster:
                 "clean_points": len(clean),
                 "quarantined_points": len(quarantined),
                 "mape_proxy": round(float(mape), 4) if mape is not None else None,
+                "mape_proxy_status": "deprecated_in_sample_diagnostic",
+                "rolling_origin": evaluation,
+                "forecast_quality_status": evaluation.get("status"),
                 "poison_guard": {"enabled": True, "trust_weighted": True},
                 "evidence_status": (
                     "degraded" if self._last_history_error else ("available" if history else "no_data")

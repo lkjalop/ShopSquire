@@ -281,6 +281,7 @@ def _mark_rewarded(db, conversion_event_id: str) -> None:
 def run_reward_feed(
     db,
     *,
+    tenant_id: str,
     settle_cutoff_iso: str,
     per_uid_cap: int = 50,
     batch_limit: int = 500,
@@ -300,6 +301,9 @@ def run_reward_feed(
     """
     if db is None:
         return {"processed": 0, "rewarded": 0, "skipped_no_decision": 0, "skipped_cap": 0}
+    tenant = str(tenant_id or "").strip()
+    if not tenant:
+        raise ValueError("tenant_id is required")
     if bandit_reward_fn is None:
         from src.app.services.recommendation_bandit import record_bandit_reward as bandit_reward_fn
     if reward_fn is None:
@@ -309,12 +313,14 @@ def run_reward_feed(
         text(
             "SELECT ce.id, ce.decision_id, ce.uid_hash, ce.attributed_skus_json, rd.arm "
             "FROM conversion_event ce "
-            "LEFT JOIN recommendation_decision rd ON rd.decision_id = ce.decision_id "
-            "WHERE ce.rewarded_at IS NULL "
+            "LEFT JOIN recommendation_decision rd "
+            "  ON rd.tenant_id = ce.tenant_id AND rd.decision_id = ce.decision_id "
+            "WHERE ce.tenant_id = :tn "
+            "  AND ce.rewarded_at IS NULL "
             "  AND COALESCE(ce.converted_at, ce.created_at) <= :cut "
             "ORDER BY ce.created_at ASC LIMIT :lim"
         ),
-        {"cut": settle_cutoff_iso, "lim": int(batch_limit)},
+        {"tn": tenant, "cut": settle_cutoff_iso, "lim": int(batch_limit)},
     ).fetchall()
     summary = {"processed": 0, "rewarded": 0, "skipped_no_decision": 0, "skipped_cap": 0}
     uid_counts: Dict[str, int] = {}
@@ -339,7 +345,12 @@ def run_reward_feed(
     return summary
 
 
-def arm_for_trace(db, trace_id: Optional[str]) -> str:
+def arm_for_trace(
+    db,
+    trace_id: Optional[str],
+    *,
+    tenant_id: Optional[str] = None,
+) -> str:
     """The bandit arm recorded for a trace's decision (E0), or 'balanced' as a safe default.
 
     Lets the feedback/interaction path reward the arm that ACTUALLY ranked the results — the
@@ -349,12 +360,19 @@ def arm_for_trace(db, trace_id: Optional[str]) -> str:
         return "balanced"
     try:
         ensure_tables(db)
+        if not tenant_id:
+            from src.app.platform.tenant_context import current_tenant_id
+            tenant_id = current_tenant_id()
+        tenant = str(tenant_id or "").strip()
+        if not tenant:
+            return "balanced"
         row = db.execute(
             text(
-                "SELECT arm FROM recommendation_decision WHERE trace_id = :t "
+                "SELECT arm FROM recommendation_decision "
+                "WHERE tenant_id = :tn AND trace_id = :t "
                 "ORDER BY created_at DESC LIMIT 1"
             ),
-            {"t": str(trace_id)},
+            {"tn": tenant, "t": str(trace_id)},
         ).fetchone()
         if row and row[0]:
             return str(row[0])

@@ -126,11 +126,11 @@ def test_reward_feed_rewards_settled_conversion(db):
     calls = []
     def fake(db, *, uid_hash, sku, arm, reward, context):
         calls.append((uid_hash, sku, arm, reward))
-    s = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00", bandit_reward_fn=fake)
+    s = attribution.run_reward_feed(db, tenant_id="default", settle_cutoff_iso="2099-01-01T00:00:00", bandit_reward_fn=fake)
     assert s["rewarded"] == 1
     assert calls == [("u1", "S1", "price_value", 1.0)]
     # idempotent: a second pass rewards nothing (rewarded_at marker).
-    s2 = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00", bandit_reward_fn=fake)
+    s2 = attribution.run_reward_feed(db, tenant_id="default", settle_cutoff_iso="2099-01-01T00:00:00", bandit_reward_fn=fake)
     assert s2["rewarded"] == 0 and len(calls) == 1
 
 
@@ -139,7 +139,7 @@ def test_reward_feed_skips_unsettled(db):
     _settled_conversion(db, n=2, decision_id="RD2", uid_hash="u2", sku="S2", converted="2099-12-31T00:00:00")
     db.commit()
     calls = []
-    s = attribution.run_reward_feed(db, settle_cutoff_iso="2000-01-01T00:00:00",
+    s = attribution.run_reward_feed(db, tenant_id="default", settle_cutoff_iso="2000-01-01T00:00:00",
                                     bandit_reward_fn=lambda *a, **k: calls.append(1))
     assert s["rewarded"] == 0 and not calls  # converted_at is after the settle cutoff → not yet settled
 
@@ -150,7 +150,7 @@ def test_reward_feed_per_uid_cap(db):
         _settled_conversion(db, n=10 + i, decision_id=f"CD{i}", uid_hash="capuid", sku="SC")
     db.commit()
     calls = []
-    s = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00", per_uid_cap=2,
+    s = attribution.run_reward_feed(db, tenant_id="default", settle_cutoff_iso="2099-01-01T00:00:00", per_uid_cap=2,
                                     bandit_reward_fn=lambda db, **k: calls.append(1))
     assert s["rewarded"] == 2 and s["skipped_cap"] == 1  # one uid's influence is capped per batch
 
@@ -165,9 +165,68 @@ def test_reward_feed_marks_no_decision_and_skips(db):
         "INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, attributed_skus_json, "
         "value_cents, converted_at) VALUES ('orph','MISSING','O9','ux','[\"S\"]',1,'2020-01-01T00:00:00')"))
     db.commit()
-    s = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00",
+    s = attribution.run_reward_feed(db, tenant_id="default", settle_cutoff_iso="2099-01-01T00:00:00",
                                     bandit_reward_fn=lambda *a, **k: None)
     assert s["skipped_no_decision"] >= 1 and s["rewarded"] == 0
+
+
+def test_reward_feed_never_joins_same_decision_id_across_tenants(db):
+    attribution.record_decision(
+        db, trace_id="shared-trace", decision_id="shared-decision",
+        uid_hash="tenant-a-user", skus=["A"], arm="tenant-a-arm",
+        tenant_id="tenant-a",
+    )
+    attribution.record_decision(
+        db, trace_id="shared-trace", decision_id="shared-decision",
+        uid_hash="tenant-b-user", skus=["B"], arm="tenant-b-arm",
+        tenant_id="tenant-b",
+    )
+    attribution.attribute_order(
+        db, order_id="tenant-a-order", trace_id="shared-trace",
+        uid_hash="tenant-a-user", line_skus=["A"],
+        converted_at="2020-01-01T00:00:00", tenant_id="tenant-a",
+    )
+    attribution.attribute_order(
+        db, order_id="tenant-b-order", trace_id="shared-trace",
+        uid_hash="tenant-b-user", line_skus=["B"],
+        converted_at="2020-01-01T00:00:00", tenant_id="tenant-b",
+    )
+    db.commit()
+    calls = []
+    summary = attribution.run_reward_feed(
+        db,
+        tenant_id="tenant-a",
+        settle_cutoff_iso="2099-01-01T00:00:00",
+        bandit_reward_fn=lambda db, **kwargs: calls.append(kwargs),
+    )
+    assert summary["processed"] == 1
+    assert summary["rewarded"] == 1
+    assert [(c["uid_hash"], c["sku"], c["arm"]) for c in calls] == [
+        ("tenant-a-user", "A", "tenant-a-arm"),
+    ]
+    tenant_b_rewarded = db.execute(text(
+        "SELECT rewarded_at FROM conversion_event "
+        "WHERE tenant_id='tenant-b' AND order_id='tenant-b-order'"
+    )).scalar()
+    assert tenant_b_rewarded is None
+
+
+def test_arm_for_trace_is_tenant_scoped(db):
+    attribution.record_decision(
+        db, trace_id="same-trace", decision_id="A", uid_hash="a",
+        skus=["A"], arm="price_value", tenant_id="tenant-a",
+    )
+    attribution.record_decision(
+        db, trace_id="same-trace", decision_id="B", uid_hash="b",
+        skus=["B"], arm="explore_novelty", tenant_id="tenant-b",
+    )
+    db.commit()
+    assert attribution.arm_for_trace(
+        db, "same-trace", tenant_id="tenant-a",
+    ) == "price_value"
+    assert attribution.arm_for_trace(
+        db, "same-trace", tenant_id="tenant-b",
+    ) == "explore_novelty"
 
 
 def test_conversion_attributes_back_to_adaptation_exposure(db):

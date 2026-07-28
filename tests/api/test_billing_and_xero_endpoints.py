@@ -43,3 +43,14 @@ def test_xero_endpoint_returns_validation_or_config_error():
     # Route-level validation requires sku; this confirms endpoint is wired.
     assert r.status_code == 400
 
+
+def test_xero_direct_writes_are_disabled_by_default():
+    client = TestClient(create_app())
+    r = client.post(
+        "/api/v1/billing/accounting/xero/inventory-adjustment",
+        headers={"x-api-key": "local-owner-key"},
+        json={"sku": "SKU-1", "qty": 3, "reason": "stock_count"},
+    )
+    assert r.status_code == 503
+    assert "governed_delivery_job" in str(r.json().get("detail") or "")
+

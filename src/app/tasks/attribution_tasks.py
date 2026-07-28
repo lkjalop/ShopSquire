@@ -25,6 +25,20 @@ def _enabled() -> bool:
     return str(os.getenv("ATTRIBUTION_REWARD_FEED_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _tenant_ids() -> tuple[str, ...]:
+    configured = tuple(
+        dict.fromkeys(
+            value.strip()
+            for value in os.getenv("ATTRIBUTION_REWARD_TENANTS", "").split(",")
+            if value.strip()
+        )
+    )
+    if configured:
+        return configured[:100]
+    from src.app.platform.tenant_registry import registered_tenant_ids
+    return registered_tenant_ids()[:100]
+
+
 @celery_app.task(name="src.app.tasks.attribution_tasks.attribution_reward_feed")
 def attribution_reward_feed() -> Dict[str, Any]:
     if not _enabled():
@@ -36,13 +50,17 @@ def attribution_reward_feed() -> Dict[str, Any]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=settle_days)).isoformat()
         from src.app.models.db import db_session
         from src.app.services.attribution import run_reward_feed
-        with db_session() as db:
-            summary = run_reward_feed(
-                db,
-                settle_cutoff_iso=cutoff,
-                per_uid_cap=per_uid_cap,
-                batch_limit=batch_limit,
-            )
+        summaries: Dict[str, Any] = {}
+        for tenant_id in _tenant_ids():
+            with db_session() as db:
+                summaries[tenant_id] = run_reward_feed(
+                    db,
+                    tenant_id=tenant_id,
+                    settle_cutoff_iso=cutoff,
+                    per_uid_cap=per_uid_cap,
+                    batch_limit=batch_limit,
+                )
+        summary = {"tenants": summaries}
         logger.info("attribution_reward_feed summary=%s cutoff=%s", summary, cutoff)
         return summary
     except Exception as exc:  # never crash the scheduler — log + report

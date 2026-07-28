@@ -43,7 +43,13 @@ def cmd_classify(args) -> None:
                 print("model WARM — classifying with model picks")
             else:
                 print("model UNAVAILABLE — proceeding LEXICAL-ONLY (all rows will need review)")
-        report = classify_catalog(s, tenant_id=args.tenant, llm_fn=llm_fn, limit=args.limit)
+        report = classify_catalog(
+            s,
+            tenant_id=args.tenant,
+            llm_fn=llm_fn,
+            limit=args.limit,
+            semantic_candidates=not args.no_model,
+        )
         if report.get("demoting_approved"):
             print(f"WARNING: {report['demoting_approved']} previously-APPROVED rows demoted to "
                   f"'proposed' — the sold set keeps its grants until you run approve (which "

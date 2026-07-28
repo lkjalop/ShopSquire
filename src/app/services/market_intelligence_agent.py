@@ -72,6 +72,11 @@ def _finding_dict(f: Any, *, tenant_id: str) -> Dict[str, Any]:
         confidence=float(getattr(f, "confidence", 0.0) or 0.0),
         source_system=evidence.get("source_system"),
         source_record_id=evidence.get("source_record_id"),
+        trust_tier=evidence.get("trust_tier"),
+        licence_id=evidence.get("licence_id"),
+        licence_url=evidence.get("licence_url"),
+        licence_terms_hash=evidence.get("licence_terms_hash"),
+        permitted_use=evidence.get("permitted_use"),
         lineage_root=evidence.get("lineage_root"),
         provenance_chain=provenance,
         observed_at=evidence.get("observed_at"),
@@ -87,6 +92,9 @@ def _finding_dict(f: Any, *, tenant_id: str) -> Dict[str, Any]:
     result["severity"] = getattr(f, "severity", None)
     result["scope"] = evidence.get("scope")
     result["provenance_complete"] = typed.provenance_complete
+    result["licensed_provenance_complete"] = typed.licensed_provenance_complete
+    if result.get("authority") == "authoritative" and not typed.licensed_provenance_complete:
+        result["authority"] = "advisory"
     return result
 
 
