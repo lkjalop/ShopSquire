@@ -588,17 +588,35 @@ def _restore_db_engine():
     This fixture is zero-overhead for the common case where no test changes
     the engine (just a reference comparison at teardown).
     """
+    original_database_url = os.environ.get("DATABASE_URL")
+    original_database_url_ro = os.environ.get("DATABASE_URL_RO")
     try:
+        import src.app.models.db as db_module
         from src.app.models.db import get_engine, set_engine  # noqa: PLC0415
         original_engine = get_engine()
+        original_session_factory = db_module.SessionLocal
     except Exception:
         yield
         return
     yield
     try:
+        if original_database_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = original_database_url
+        if original_database_url_ro is None:
+            os.environ.pop("DATABASE_URL_RO", None)
+        else:
+            os.environ["DATABASE_URL_RO"] = original_database_url_ro
+        import src.app.models.db as db_module
         from src.app.models.db import get_engine, set_engine  # noqa: PLC0415
-        if get_engine() is not original_engine:
+        engine_changed = get_engine() is not original_engine
+        session_factory_changed = db_module.SessionLocal is not original_session_factory
+        if engine_changed:
             set_engine(original_engine)
+        if session_factory_changed:
+            db_module.SessionLocal = original_session_factory
+        if engine_changed or session_factory_changed:
             # Re-align all singleton app.state.engine so that request handlers
             # use the same engine as db_session() after restoration.
             with _SINGLETONS_LOCK:
