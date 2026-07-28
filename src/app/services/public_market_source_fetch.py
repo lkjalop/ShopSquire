@@ -6,8 +6,10 @@ text is never treated as SKU exposure or execution authority.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -92,6 +94,29 @@ def _normalize_cpsc_query(query: dict[str, Any]) -> dict[str, str]:
     return normalized
 
 
+def _normalize_world_bank_query(query: dict[str, Any]) -> dict[str, str]:
+    raw_series = query.get("series") or []
+    if isinstance(raw_series, str):
+        raw_series = [part.strip() for part in raw_series.split("|")]
+    if not isinstance(raw_series, list):
+        raise ValueError("public_market_series_invalid")
+    series = sorted({
+        str(value or "").strip()
+        for value in raw_series
+        if str(value or "").strip()
+    })
+    if not series or len(series) > 5 or any(len(value) > 120 for value in series):
+        raise ValueError("public_market_series_invalid")
+    signal_type = str(query.get("signal_type") or "commodity_input_price").strip()
+    if signal_type not in {
+        "commodity_input_price",
+        "transport_fuel_price",
+        "energy_input_price",
+    }:
+        raise ValueError("external_market_signal_not_permitted")
+    return {"series": "|".join(series), "signal_type": signal_type}
+
+
 def _cpsc_observations(
     rows: Any,
     *,
@@ -142,6 +167,82 @@ def _cpsc_observations(
             retrieved_at=retrieved_at,
         ))
     return observations
+
+
+def _world_bank_observations(
+    body: bytes,
+    *,
+    request: dict[str, str],
+    retrieved_at: str,
+) -> list[dict[str, Any]]:
+    from openpyxl import load_workbook
+
+    try:
+        workbook = load_workbook(io.BytesIO(body), read_only=True, data_only=True)
+        sheet = workbook["Monthly Prices"]
+    except Exception as exc:
+        raise ValueError("public_market_workbook_invalid") from exc
+    header = list(next(sheet.iter_rows(min_row=5, max_row=5, values_only=True)))
+    units = list(next(sheet.iter_rows(min_row=6, max_row=6, values_only=True)))
+    requested = {
+        value.casefold(): value
+        for value in request["series"].split("|")
+    }
+    columns = {
+        index: str(name).strip()
+        for index, name in enumerate(header)
+        if name is not None and str(name).strip().casefold() in requested
+    }
+    if len(columns) != len(requested):
+        raise ValueError("public_market_series_not_found")
+    values: dict[int, list[tuple[str, float]]] = {index: [] for index in columns}
+    for row in sheet.iter_rows(min_row=7, values_only=True):
+        period = str(row[0] or "").strip()
+        if not re.fullmatch(r"\d{4}M\d{2}", period):
+            continue
+        for index in columns:
+            value = row[index] if index < len(row) else None
+            if isinstance(value, (int, float)):
+                values[index].append((period, float(value)))
+    observations: list[dict[str, Any]] = []
+    for index, series_name in columns.items():
+        points = values[index][-24:]
+        unit = str(units[index] or "").strip() if index < len(units) else ""
+        prior: float | None = None
+        for period, value in points:
+            direction = (
+                "unknown"
+                if prior is None
+                else "increase" if value > prior
+                else "decrease" if value < prior
+                else "stable"
+            )
+            year, month = period.split("M", 1)
+            effective = f"{year}-{month}-01T00:00:00+00:00"
+            measurement = {
+                "kind": "commodity_benchmark_price",
+                "direction": direction,
+                "series": series_name,
+                "period": period,
+                "value": value,
+                "uom": unit or None,
+                "currency": "USD" if "$" in unit else None,
+            }
+            observations.append(govern_external_observation(
+                source_id="world_bank_pink_sheet",
+                source_record_id=f"{series_name}:{period}",
+                signal_type=request["signal_type"],
+                subject_id=f"world-bank-commodity:{series_name.casefold()}",
+                measurement=measurement,
+                geography="global_benchmark",
+                effective_from=effective,
+                effective_to=None,
+                published_at=retrieved_at,
+                available_at=retrieved_at,
+                retrieved_at=retrieved_at,
+            ))
+            prior = value
+    return observations[:_MAX_ROWS]
 
 
 def _latest_revision(
@@ -280,9 +381,15 @@ def fetch_public_market_source(
             "authority": "advisory_only",
             "execution_allowed": False,
         }
-    if profile["kind"] != "cpsc_recalls_json":
+    kind = str(profile["kind"])
+    if kind == "cpsc_recalls_json":
+        request = _normalize_cpsc_query(query)
+        provider_params = request
+    elif kind == "world_bank_pink_sheet_xlsx":
+        request = _normalize_world_bank_query(query)
+        provider_params = {}
+    else:
         raise ValueError("external_market_source_fetch_kind_invalid")
-    request = _normalize_cpsc_query(query)
     request_key = _request_key(request)
     stamp = _utc(now)
     latest = _latest_revision(
@@ -322,7 +429,7 @@ def fetch_public_market_source(
     try:
         response = (transport or _default_transport)(
             str(profile["url"]),
-            request,
+            provider_params,
             headers,
             float(profile.get("timeout_seconds") or 8),
         )
@@ -365,10 +472,17 @@ def fetch_public_market_source(
         }
     else:
         try:
-            normalized = _cpsc_observations(
-                json.loads(response.body.decode("utf-8")),
-                retrieved_at=stamp.isoformat(),
-            )
+            if kind == "cpsc_recalls_json":
+                normalized = _cpsc_observations(
+                    json.loads(response.body.decode("utf-8")),
+                    retrieved_at=stamp.isoformat(),
+                )
+            else:
+                normalized = _world_bank_observations(
+                    response.body,
+                    request=request,
+                    retrieved_at=stamp.isoformat(),
+                )
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
             return {
                 "source_id": source_id,

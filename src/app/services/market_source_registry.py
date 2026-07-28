@@ -66,6 +66,7 @@ def _load(path: str) -> dict[str, dict[str, Any]]:
                 raise ValueError("external_market_source_fetch_origin_invalid")
             if str(fetch_profile.get("kind") or "") not in {
                 "cpsc_recalls_json",
+                "world_bank_pink_sheet_xlsx",
             }:
                 raise ValueError("external_market_source_fetch_kind_invalid")
         domains = set(source["pestel_domains"])

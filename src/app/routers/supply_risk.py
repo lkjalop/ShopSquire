@@ -26,6 +26,8 @@ class PublicSourceFetchRequest(BaseModel):
     recall_date_end: str | None = Field(default=None, max_length=32)
     product_name: str | None = Field(default=None, max_length=120)
     title: str | None = Field(default=None, max_length=120)
+    series: list[str] | None = Field(default=None, max_length=5)
+    signal_type: str | None = Field(default=None, max_length=80)
 
 
 @router.get("/scenarios")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -64,13 +65,38 @@ def _recall_body() -> bytes:
     }]).encode()
 
 
-def test_registry_exposes_only_approved_cpsc_live_origin():
+def _pink_sheet_body() -> bytes:
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Monthly Prices"
+    sheet.append(["World Bank Commodity Price Data"])
+    sheet.append(["monthly prices"])
+    sheet.append(["nominal"])
+    sheet.append(["Updated on July 02, 2026"])
+    sheet.append([None, "Crude oil, average", "Aluminum"])
+    sheet.append([None, "($/bbl)", "($/mt)"])
+    sheet.append(["2026M04", 70.0, 2300.0])
+    sheet.append(["2026M05", 75.0, 2280.0])
+    sheet.append(["2026M06", 72.0, 2350.0])
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def test_registry_exposes_only_approved_live_origins():
     sources = load_market_source_registry()
     supported = [
         source for source in sources.values() if source.get("fetch_profile")
     ]
-    assert [source["source_id"] for source in supported] == ["cpsc_recalls"]
-    assert supported[0]["fetch_profile"]["allowed_host"] == "www.saferproducts.gov"
+    assert sorted(source["source_id"] for source in supported) == [
+        "cpsc_recalls",
+        "world_bank_pink_sheet",
+    ]
+    assert {
+        source["fetch_profile"]["allowed_host"] for source in supported
+    } == {"www.saferproducts.gov", "thedocs.worldbank.org"}
 
 
 def test_fetch_persists_revision_and_reuses_tenant_scoped_cache():
@@ -205,3 +231,55 @@ def test_rate_limit_is_typed_and_never_sleeps_inside_request():
     assert result["outcome"] == "rate_limited"
     assert result["retry_after"] == "120"
     assert result["execution_allowed"] is False
+
+
+def test_world_bank_prices_are_bounded_series_observations():
+    db = _db()
+    result = fetch_public_market_source(
+        db,
+        tenant_id="tenant-a",
+        source_id="world_bank_pink_sheet",
+        query={
+            "series": ["Crude oil, average"],
+            "signal_type": "transport_fuel_price",
+        },
+        enabled=True,
+        transport=lambda *_args: PublicHttpResponse(
+            200,
+            {"etag": '"pink-sheet-v1"'},
+            _pink_sheet_body(),
+        ),
+    )
+    assert result["outcome"] == "observed"
+    assert len(result["observations"]) == 3
+    latest = result["observations"][-1]
+    assert latest["measurement"]["value"] == 72.0
+    assert latest["measurement"]["direction"] == "decrease"
+    assert latest["measurement"]["currency"] == "USD"
+    assert latest["can_establish_sku_exposure"] is False
+
+
+def test_world_bank_rejects_unknown_or_unbounded_series():
+    db = _db()
+
+    def response(*_args):
+        return PublicHttpResponse(200, {}, _pink_sheet_body())
+
+    with pytest.raises(ValueError, match="public_market_series_invalid"):
+        fetch_public_market_source(
+            db,
+            tenant_id="tenant-a",
+            source_id="world_bank_pink_sheet",
+            query={},
+            enabled=True,
+            transport=response,
+        )
+    malformed = fetch_public_market_source(
+        db,
+        tenant_id="tenant-a",
+        source_id="world_bank_pink_sheet",
+        query={"series": ["Not a real benchmark"]},
+        enabled=True,
+        transport=response,
+    )
+    assert malformed["outcome"] == "malformed"
