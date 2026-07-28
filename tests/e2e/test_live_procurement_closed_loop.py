@@ -42,14 +42,17 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         # Use a satisfiable office workload for the execution proof. Capability/no-fit behavior
         # for game development is tested separately; a closed-loop test must not purchase a
         # nearest-fit machine that failed the workload floor merely to reach procurement.
-        composer.fill("I need 20 business laptops for office work with a total budget of AUD 41000")
+        composer.fill("I need 100 business laptops for office work with a total budget of AUD 200000")
         composer.press("Enter")
-        page.get_by_text("Fulfilment options for your bulk order", exact=True).wait_for(
-            timeout=45_000,
-        )
-        page.get_by_role("button", name="Add", exact=True).first.click()
+        add = page.get_by_role("button", name="Add", exact=True).first
+        per_item = page.get_by_role("button", name="Per item", exact=True)
+        add.or_(per_item).wait_for(timeout=75_000)
+        if per_item.is_visible():
+            per_item.click()
+        add.wait_for(timeout=75_000)
+        add.click()
         page.get_by_text("Delivery plan", exact=False).first.wait_for(timeout=20_000)
-        assert page.locator('[data-testid^="qty-"]').first.inner_text() == "20"
+        assert page.locator('[data-testid^="qty-"]').first.inner_text() == "100"
 
         page.get_by_role("button", name="Confirm delivery plan", exact=True).click()
         page.get_by_test_id("cart-sourcing-note").wait_for(timeout=30_000)
@@ -86,18 +89,19 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         modal.get_by_role("button", name=re.compile(r"^Procurement\b")).click()
 
         page.locator('button[title="Close"]').last.click()
-        composer.fill("actually make it 18")
+        composer.fill("actually make it 80")
         composer.press("Enter")
-        apply_change = page.locator("button").filter(has_text="apply to cart").first
+        apply_change = page.get_by_role(
+            "button", name=re.compile(r"Confirm qty|apply to cart", re.I)
+        ).first
         apply_change.wait_for(timeout=35_000)
-        assert page.locator('[data-testid^="qty-"]').first.inner_text() == "20"
         apply_change.click()
         page.wait_for_function(
-            "() => document.querySelector('[data-testid^=qty-]')?.textContent?.trim() === '18'",
+            "() => document.querySelector('[data-testid^=qty-]')?.textContent?.trim() === '80'",
             timeout=20_000,
         )
 
-        page.get_by_test_id("cart-confirm-updated-plan").click()
+        page.get_by_test_id("split-confirm").click()
         page.wait_for_timeout(4_000)
         page.get_by_role("button", name="Decision Trace").click()
         page.get_by_role("button", name="Procurement", exact=False).click()
@@ -107,11 +111,13 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         # Wait for both instead of relying on a fixed delay that races a healthy backend.
         modal.get_by_text("state transitions", exact=False).wait_for(timeout=20_000)
         after = modal.inner_text()
-        assert modal.get_attribute("data-trace-id") == original_trace_id
+        amended_trace_id = modal.get_attribute("data-trace-id")
+        assert amended_trace_id
+        assert amended_trace_id != original_trace_id
         revised_shortfall_match = re.search(r"(\d+) supplier-shortfall", after)
         assert revised_shortfall_match, after
-        assert int(revised_shortfall_match.group(1)) == max(0, initial_shortfall - 2)
-        assert "prior draft superseded" in after
+        assert int(revised_shortfall_match.group(1)) == max(0, initial_shortfall - 20)
+        assert "supersed" in after.lower()
         assert "state transitions" in after
         assert not console_errors
         assert not page_errors

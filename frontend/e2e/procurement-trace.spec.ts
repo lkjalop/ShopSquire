@@ -47,13 +47,13 @@ test('procurement decision trace — drafted supplier RFQ + audit, re-routes per
 
   await test.step('1 · a bulk LAPTOP order → the AI drafts an RFQ to the business supplier (human-gated)', async () => {
     const trace = `inv-rec-laptop-${run}`;
-    await seedDraftedCase(page, { uid: `inv-rec-laptop-${run}`, trace, sku: 'LAP-433AB371', qty: 25 });
+    await seedDraftedCase(page, { uid: `inv-rec-laptop-${run}`, trace, sku: 'LAP-0003', qty: 100 });
     await page.goto(`/?trace=${trace}&tracetab=procurement`);
 
     await expect(page.getByTestId('proc-drafted-rfq')).toBeVisible({ timeout: 30_000 });
     // routed to the BUSINESS supplier, not a guess; only the shortfall is sourced
     await expect(page.getByTestId('proc-rfq-recipient')).toContainText('SUP-BIZ');
-    await expect(page.getByTestId('proc-rfq-subject')).toContainText('LAP-433AB371');
+    await expect(page.getByTestId('proc-rfq-subject')).toContainText('LAP-0003');
     await expect(page.getByTestId('proc-rfq-body')).toContainText(/quote/i);
     await expect(page.getByTestId('proc-deal-economics')).toBeVisible();
     await expect(page.getByTestId('proc-deal-economics')).toContainText(/Operator-only/i);
@@ -68,13 +68,13 @@ test('procurement decision trace — drafted supplier RFQ + audit, re-routes per
 
   await test.step('2 · change the product to an SSD → the RFQ RE-ROUTES to a different supplier', async () => {
     const trace = `inv-rec-ssd-${run}`;
-    await seedDraftedCase(page, { uid: `inv-rec-ssd-${run}`, trace, sku: 'HDD-30C9A5E1', qty: 30 });
+    await seedDraftedCase(page, { uid: `inv-rec-ssd-${run}`, trace, sku: 'STO-0001', qty: 100 });
     await page.goto(`/?trace=${trace}&tracetab=procurement`);
 
     await expect(page.getByTestId('proc-drafted-rfq')).toBeVisible({ timeout: 30_000 });
     // a different product → a different approved supplier + a different RFQ (proves it's product-derived)
     await expect(page.getByTestId('proc-rfq-recipient')).toContainText('SUP-OFFICE');
-    await expect(page.getByTestId('proc-rfq-subject')).toContainText('HDD-30C9A5E1');
+    await expect(page.getByTestId('proc-rfq-subject')).toContainText('STO-0001');
     await expect(page.getByTestId('proc-rfq-recipient')).not.toContainText('SUP-BIZ');
     await page.waitForTimeout(3500);
   });

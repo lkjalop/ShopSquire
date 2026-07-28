@@ -1,6 +1,7 @@
 """Opt-in live proof: a malicious trusted-domain reply cannot mutate commercial state."""
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -46,10 +47,10 @@ def test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert():
     )
     if drafted["state"] == "NO_APPROVED_SUPPLIER":
         pytest.skip("trusted supplier fixture is not seeded")
-    post(f"/api/v1/fulfillment/cases/{case_id}/request-approval")
+    approval = post(f"/api/v1/fulfillment/cases/{case_id}/request-approval")
     sent = post(
         f"/api/v1/fulfillment/cases/{case_id}/dispatch",
-        {"content_hash": drafted["state_json"]["draft"]["content_hash"]},
+        {"content_hash": approval["state_json"]["draft"]["content_hash"]},
     )
     before = {
         key: sent["state_json"].get(key)
@@ -62,7 +63,7 @@ def test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert():
         json={
             "tenant_id": "default",
             "email": {
-                "message_id": "<malicious-browser-regression@example>",
+                "message_id": f"<malicious-browser-regression-{case_id}@example>",
                 "from_addr": "quotes@approved-supplier.example",
                 "reply_to": "quotes@approved-supplier.example",
                 "subject": f"Re: Availability and quote request - {case_id}",
@@ -99,8 +100,8 @@ def test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert():
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
         page.add_init_script(
-            "(key) => sessionStorage.setItem('shopsquire_admin_api_key', key)",
-            api_key,
+            "sessionStorage.setItem('shopsquire_admin_api_key', "
+            f"{json.dumps(api_key)});"
         )
         page.goto(f"{admin}/?tab=procurement", wait_until="domcontentloaded", timeout=30_000)
         page.get_by_test_id("op-queue-search").fill(case_id)

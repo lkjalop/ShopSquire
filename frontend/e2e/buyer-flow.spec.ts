@@ -47,10 +47,14 @@ test.describe('shopper storefront', () => {
     expect(body).not.toMatch(/\+in_stock|ram_gb_min|embedding_similarity|cross_encoder/);
   });
 
-  const T4_UID = 'e2e-t4-buyer';
-  const T4_SKU = 'LAP-433AB371';  // a resolvable, in-stock business laptop the amendment binds "__last__" to
+  const T4_UID = `e2e-t4-buyer-${Date.now()}`;
+  const T4_SKU = 'LAP-0003';  // canonical, in-stock business laptop the amendment binds "__last__" to
 
   test('T4 — multi-intent Confirm-qty sets the laptop line to 15 (sourcing-backed, no 409)', async ({ page }) => {
+    // This regression targets the canonical query response + confirmation UI.
+    // Streaming parity is covered by voice-v2-pilot; abort SSE here so an
+    // idempotent fallback cannot make this cart-mutation assertion model-timing dependent.
+    await page.route('**/api/v1/chat/stream', (route) => route.abort());
     // 1) DURABLE prior selection: seed the cart over the API (the storefront's "in stock" pick can 409 on
     // add, and the Redis-shortlist fallback is a cross-turn race — a real cart line makes the amendment
     // deterministic, which is what a production test needs).
@@ -69,7 +73,16 @@ test.describe('shopper storefront', () => {
     // expensive" objection: with browser context that phrasing classifies as SUPPORT_CLAIM, which chat.py
     // deliberately skips the planner for — a support turn, not a cart-changing one. The amendment itself is
     // what T4 exercises.)
+    const queryResponse = page.waitForResponse(
+      (response) => response.url().includes('/api/v1/chat/query'),
+      { timeout: 90_000 },
+    );
     await openChatAndSend(page, 'actually make it 15, and get me headsets and hard drives for 1200 for those');
+    const queryData = await (await queryResponse).json();
+    expect(
+      Array.isArray(queryData?.multi_intent?.plan) ? queryData.multi_intent.plan.length : 0,
+      'canonical chat response must carry the governed mixed-intent plan',
+    ).toBeGreaterThan(0);
 
     // 3) the confirmation card renders with the amendment + scoped picks
     const card = page.getByTestId('multi-intent-card');
@@ -80,8 +93,9 @@ test.describe('shopper storefront', () => {
     await expect(amendRow).toBeVisible({ timeout: 30_000 });
     await expect(amendRow).toContainText('15');
 
-    // 4) confirm the qty → the sourcing-backed set succeeds (message names the sourced shortfall)
+    // 4) confirm the qty → the guarded cart mutation succeeds and the
+    // authoritative cart panel reflects the exact requested quantity.
     await card.getByRole('button', { name: 'Confirm qty' }).click();
-    await expect(page.getByText(/will be sourced|Set .* to 15/i)).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-testid^="qty-"]').first()).toHaveText('15', { timeout: 30_000 });
   });
 });

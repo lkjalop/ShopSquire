@@ -89,13 +89,18 @@ describe('CartPanel sourcing amendments', () => {
     fireEvent.click(await screen.findByTestId('split-confirm'));
     await waitFor(() => expect(screen.getByTestId('cart-proceed')).toBeInTheDocument());
 
-    view.rerender(<CartPanel {...props} cart={cart(15)} />);
+    view.rerender(<CartPanel
+      {...props}
+      sourcingOrderId="pr-2"
+      traceId="trace-2"
+      cart={cart(15)}
+    />);
     expect(await screen.findByTestId('cart-sourcing-stale')).toHaveTextContent(/prior RFQ will be superseded/i);
     expect(screen.queryByTestId('cart-proceed')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('cart-confirm-updated-plan'));
     await waitFor(() => expect(screen.getByTestId('cart-sourcing-note')).toHaveTextContent(/previous supplier request was retired/i));
-    expect(api.confirmCartSourcing).toHaveBeenLastCalledWith('u1', 'pr-1', [{ item_ref: 'LAP-1', quantity: 15 }], 'trace-1', true, undefined);
+    expect(api.confirmCartSourcing).toHaveBeenLastCalledWith('u1', 'pr-1', [{ item_ref: 'LAP-1', quantity: 15 }], 'trace-2', true, undefined);
     expect(api.commitFulfillmentCase).toHaveBeenCalledTimes(1);
   });
 });

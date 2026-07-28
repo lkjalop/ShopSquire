@@ -32,8 +32,8 @@ test('demo procurement journey: clear, bulk split, RFQ evidence, amendment and r
     await expect(page.getByText(/Cart is empty/i)).toBeVisible();
   });
 
-  await test.step('request and add 25 work laptops', async () => {
-    await send(page, 'what laptops for work? budget 1500 to 1900, I need about 25');
+  await test.step('request and add 100 work laptops', async () => {
+    await send(page, 'what laptops for work? budget 1500 to 1900, I need about 100');
     const add = page.getByRole('button', { name: 'Add', exact: true }).first();
     const perItem = page.getByRole('button', { name: 'Per item', exact: true });
     await expect(add.or(perItem)).toBeVisible({ timeout: 75_000 });
@@ -42,7 +42,7 @@ test('demo procurement journey: clear, bulk split, RFQ evidence, amendment and r
     }
     await expect(add).toBeVisible({ timeout: 75_000 });
     await add.click();
-    await expect(page.locator('[data-testid^="qty-"]').first()).toHaveText('25');
+    await expect(page.locator('[data-testid^="qty-"]').first()).toHaveText('100');
   });
 
   let originalDraft = '';
@@ -59,23 +59,21 @@ test('demo procurement journey: clear, bulk split, RFQ evidence, amendment and r
     await modal.getByTitle('Close').click();
   });
 
-  await test.step('amend the selected laptop to 15 and redraft', async () => {
-    await send(page, 'actually make the laptop 15 instead');
+  await test.step('amend the selected laptop to 60 and redraft', async () => {
+    await send(page, 'actually make the laptop 60 instead');
     const card = page.getByTestId('multi-intent-card');
-    const quantity = page.locator('[data-testid^="qty-"]').first();
-    await quantity.scrollIntoViewIfNeeded();
     const inlineConfirm = page.getByRole('button', { name: /Confirm.*apply to cart/i });
     await expect(card.or(inlineConfirm)).toBeVisible({ timeout: 75_000 });
-    await expect(quantity).toHaveText('25');
     if (await card.isVisible().catch(() => false)) {
       const amendment = card.locator('[data-testid^="multi-intent-amend-"]').first();
-      await expect(amendment).toContainText('15');
+      await expect(amendment).toContainText('60');
       await card.getByRole('button', { name: /Confirm qty|Apply all/i }).click();
     } else {
       await inlineConfirm.click();
     }
 
-    await expect(quantity).toHaveText('15');
+    const quantity = page.locator('[data-testid^="qty-"]').first();
+    await expect(quantity).toHaveText('60');
     const reconfirm = page.getByTestId('split-confirm');
     await expect(reconfirm).toBeVisible({ timeout: 30_000 });
     await reconfirm.scrollIntoViewIfNeeded();

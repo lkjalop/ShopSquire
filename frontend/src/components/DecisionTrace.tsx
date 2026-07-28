@@ -642,15 +642,18 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       const cases: any[] = Array.isArray(allView?.cases) ? allView.cases : [];
       setProcCases(cases);
       const orderGroupId = String(allView?.order_group_id || '');
+      const embeddedHistory = allView?.amendment_history?.case_count
+        ? allView.amendment_history
+        : null;
       if (canSeeOperatorDraft && orderGroupId.startsWith('order-')) {
         const orderId = orderGroupId.slice('order-'.length);
         const history: any = await fetch(
           apiUrl(`/api/v1/fulfillment/cases/by-order/${encodeURIComponent(orderId)}`),
           { credentials: 'include', headers },
         ).then(safeJson).catch(() => null);
-        setProcHistory(history?.case_count ? history : null);
+        setProcHistory(history?.case_count ? history : embeddedHistory);
       } else {
-        setProcHistory(null);
+        setProcHistory(embeddedHistory);
       }
       const primary = cases[0] || null;
       setProcCase(primary && (primary.case_id || primary.state) ? primary : null);

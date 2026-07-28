@@ -109,8 +109,8 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
 
   await trace.getByRole('button', { name: 'Why Recommended', exact: true }).click();
   await expect(trace.getByText('All Ranked Products')).toBeVisible();
-  const whySku = (await trace.locator('text=/LAP-[A-Z0-9]+/').first().innerText()).trim();
-  expect(whySku).toMatch(/^LAP-[A-Z0-9]+$/);
+  const whySku = (await trace.locator('text=/R?GAM-[A-Z0-9]+/').first().innerText()).trim();
+  expect(whySku).toMatch(/^R?GAM-[A-Z0-9]+$/);
 
   await trace.getByRole('button', { name: 'Intent', exact: true }).click();
   await expect(trace.getByText(/Shopper Intent Profile|Lane/i).first()).toBeVisible();

@@ -142,6 +142,10 @@ export default function CartPanel({
   const [sourcingNote, setSourcingNote] = useState<string | null>(null);
   const [sourcedSplitKey, setSourcedSplitKey] = useState<string | null>(null);
   const [checkingSourcing, setCheckingSourcing] = useState(false);
+  // The backend may mint a fresh PR preview on a later conversational turn.
+  // Once this mounted cart has confirmed a procurement request, amendments
+  // must retain that original order identity while carrying the new trace.
+  const confirmedSourcingOrderId = useRef<string | null>(null);
   // Pre-payment split-fulfilment confirmation. The card reports whether the cart splits (a supplier-backed
   // second shipment exists) and whether the buyer has confirmed the plan; checkout is gated on that confirm.
   const [splitHasSplit, setSplitHasSplit] = useState(false);
@@ -152,6 +156,9 @@ export default function CartPanel({
     [cart],
   );
   const sourcingNeedsReview = Boolean(sourcedSplitKey && sourcedSplitKey !== splitKey);
+  useEffect(() => {
+    if (items.length === 0) confirmedSourcingOrderId.current = null;
+  }, [items.length]);
   const nameForSku = (sku: string): string => {
     const it = (cart?.items || []).find((x) => x.sku === sku);
     return it ? productDisplayName(it) : sku;
@@ -174,7 +181,10 @@ export default function CartPanel({
     // A cart survives "clear my cart", so cart_id alone cannot identify one procurement journey.
     // Prefer the immutable recommendation trace when the core did not issue an explicit procurement
     // request id; subsequent amendments keep that trace pinned and therefore retain continuity.
-    const cid = sourcingOrderId || traceId || cart?.cart_id;
+    const cid = confirmedSourcingOrderId.current
+      || sourcingOrderId
+      || traceId
+      || cart?.cart_id;
     if (!cid) return null;
     // Pass the current decision trace so the sourcing case records source_trace_id — the Decision Trace
     // → Procurement tab resolves the drafted RFQ by-trace (was null → 404 → empty tab).
@@ -182,6 +192,9 @@ export default function CartPanel({
     let res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, false, sourcingRequirements);
     if (res.amend_required) {
       res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, true, sourcingRequirements);
+    }
+    if (res.status !== 'operator_required') {
+      confirmedSourcingOrderId.current = cid;
     }
     return res.status === 'operator_required' ? null : res;
   };

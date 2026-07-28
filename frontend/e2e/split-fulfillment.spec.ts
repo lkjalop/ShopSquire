@@ -29,8 +29,8 @@ function devApiKey(): string {
 }
 
 const UID = 'e2e-split-buyer';
-const SKU = 'LAP-BF3CF82E';   // a resolvable business laptop; stock (~22) < the seeded qty → guaranteed split
-const QTY = 30;
+const SKU = 'LAP-0003';       // canonical seeded business laptop
+const QTY = 100;              // deliberately exceeds aggregate seeded location stock
 
 async function seedSplittingCart(page: Page) {
   const key = devApiKey();
@@ -55,7 +55,9 @@ test('pre-payment split-fulfilment — ships now + supplier-ETA follow-up, buyer
     const card = page.getByTestId('split-fulfillment-card');
     await expect(card).toBeVisible({ timeout: 30_000 });
     // plain-English rationale that names the supplier-lead-time ETA
-    await expect(page.getByTestId('split-rationale')).toContainText(/follow in ~\d+ days \(supplier lead time\)/i);
+    await expect(page.getByTestId('split-rationale')).toContainText(
+      /(?:follow in|supplier RFQ in) ~\d+ days \(supplier lead time\)/i,
+    );
     // the backordered line carries the SUPPLIER's real ETA (a real figure, not a guess)
     await expect(page.getByTestId(`split-eta-${SKU}`)).toContainText(/~\d+ days/);
     // the store's delivery economics are shown (free over threshold, or per-shipment fees)

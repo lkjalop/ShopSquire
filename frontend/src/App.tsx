@@ -1898,6 +1898,12 @@ export default function App() {
         // guarded); needs_clarification → the ask IS the answer. Product machinery is skipped.
         if (data && (data as any).cart_mutation) {
           const cm = (data as any).cart_mutation;
+          const nextMultiIntent =
+            data.multi_intent
+            && Array.isArray((data.multi_intent as any).plan)
+            && (data.multi_intent as any).plan.length > 0
+              ? (data.multi_intent as MultiIntentPlan)
+              : null;
           const cartConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
             ? data.confirmed_slots
             : null;
@@ -1907,12 +1913,13 @@ export default function App() {
             role: 'assistant',
             content: String(data.assistant_message || 'Cart update processed.'),
             timestamp: new Date(),
-            ...(cm.needs_confirmation && cm.plan_id
+            ...(cm.needs_confirmation && cm.plan_id && !nextMultiIntent
               ? { cartConfirm: { planId: String(cm.plan_id), ops: Array.isArray(cm.ops) ? cm.ops : [], expiresAt: cm.expires_at } }
               : {}),
             ...(data.cart_updated && destructive ? { undoServer: true } : {}),
           }]);
           setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || null));
+          setMultiIntent(nextMultiIntent);
           if (cartConfirmedSlots && Object.keys(cartConfirmedSlots).length > 0) {
             setConfirmedSlots(prev => ({ ...prev, ...cartConfirmedSlots }));
           }
@@ -1923,6 +1930,7 @@ export default function App() {
             await refreshCart();
             switchRightPanelMode('cart');
           }
+          if (nextMultiIntent) switchRightPanelMode('cart');
           return;
         }
 
@@ -1957,9 +1965,17 @@ export default function App() {
             ? (data.sourcing_intent as SourcingIntent) : null);
         // P0 multi-intent: present only on a genuine mixed turn (amend + scoped new lines). Surface it so
         // the buyer confirms the qty change and adds the scoped picks — never silently applied.
-        setMultiIntent(
-          data.multi_intent && Array.isArray((data.multi_intent as any).plan) && (data.multi_intent as any).plan.length > 0
-            ? (data.multi_intent as MultiIntentPlan) : null);
+        const nextMultiIntent =
+          data.multi_intent
+          && Array.isArray((data.multi_intent as any).plan)
+          && (data.multi_intent as any).plan.length > 0
+            ? (data.multi_intent as MultiIntentPlan)
+            : null;
+        setMultiIntent(nextMultiIntent);
+        // A mixed-intent response can intentionally contain no recommendation
+        // products: its actionable output is the governed confirmation plan.
+        // Open the cart/procurement panel explicitly so that plan is visible.
+        if (nextMultiIntent) switchRightPanelMode('cart');
         setBulkAlternatives(Array.isArray(data.fulfillment_options) ? (data.fulfillment_options as BulkAlternativeOption[]) : []);
         const respAssistant = data.assistant_message || '';
         // Async-narration handoff: recommend returned the deterministic answer now + a job id for the
@@ -3113,7 +3129,7 @@ export default function App() {
                         onClear={clearCartAll}
                         onAdd={addToCart}
                         onSetQty={setCartQty}
-                        traceId={sourcingTraceId || traceId}
+                        traceId={traceId || sourcingTraceId}
                         onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
                         onSourcingTraceId={(tid) => setSourcingTraceId(normalizeTraceId(tid))}
                         priorSkus={priorCartSkus}

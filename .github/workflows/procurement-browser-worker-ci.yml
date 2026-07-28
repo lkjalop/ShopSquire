@@ -1,0 +1,197 @@
+name: Procurement browser and worker isolation
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: procurement-browser-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      APP_ENV: testing
+      DISABLE_PLAYWRIGHT_TESTS: "0"
+      PYTEST_PER_TEST_TIMEOUT_SEC: "120"
+      PLAYWRIGHT_HTML_OPEN: never
+      DATABASE_URL: sqlite+pysqlite:///${{ github.workspace }}/tmp/browser.sqlite
+      DATABASE_URL_RO: sqlite+pysqlite:///${{ github.workspace }}/tmp/browser.sqlite
+      CATALOG_SEED_DB_PATH: ${{ github.workspace }}/tmp/browser.sqlite
+      REDIS_URL: redis://127.0.0.1:6379/0
+      SHOPSQUIRE_RUNTIME_PROFILE: demo_v2
+      RECOMMEND_CORE_MODE: primary
+      RECOMMEND_CART_SERVE: "1"
+      RECOMMEND_PROCUREMENT_ADVICE_MODE: "on"
+      RECOMMEND_POLICY_ANSWER_MODE: "on"
+      RECOMMEND_SUPPORT_HANDOFF_MODE: "on"
+      RECOMMEND_INVENTORY_READ_MODE: "on"
+      RECOMMEND_LEGACY_DELEGATE_ENABLED: "0"
+      MULTI_INTENT_PLANNER_ENABLED: "1"
+      FULFILLMENT_DEMO_ENABLED: "1"
+      USE_MOCK_LLM: "1"
+      USE_OLLAMA_INTENT: "0"
+      MODEL_WARMUP_ON_STARTUP: "0"
+      # Exercise the production quota boundary without making a nine-test
+      # conversation battery consume the entire guest allowance.
+      TOKEN_BUDGET_ENABLED: "1"
+      TOKEN_BUDGET_GUEST_DAILY_TOKENS: "100000"
+      TOKEN_BUDGET_GUEST_DAILY_USD: "10"
+      TENANT_QUOTAS_ENABLED: "1"
+      TENANT_QUOTA_RECOMMEND_CALLS_DAILY: "10000"
+      EMAIL_CONNECTOR_IDENTITY_MODE: shared_secret
+      GMAIL_INGEST_SECRET: ci-browser-ingress-only
+      EMAIL_EVIDENCE_ACTIVE_KEY_ID: ci-v1
+      EMAIL_EVIDENCE_KEYS: ci-v1:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+      RATE_LIMIT_PER_IP_PER_MIN: "10000"
+      RATE_LIMIT_PER_MINUTE_IP: "10000"
+      RATE_LIMIT_PER_MINUTE_KEY: "10000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend and browser dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-playwright
+          npm ci --prefix frontend
+          npm ci --prefix src/frontend/admin-react
+          npx --prefix frontend playwright install --with-deps chromium
+      - name: Create isolated database and validate migrations
+        run: |
+          mkdir -p tmp test-results
+          timeout 120s alembic upgrade head
+          alembic current
+          python scripts/seed_real_catalog.py
+          python scripts/seed_gaming_laptops.py
+          python -m scripts.seed_suppliers
+      - name: React component battery
+        run: |
+          timeout 420s npm --prefix frontend test -- --run --reporter=verbose --testTimeout=15000
+          timeout 180s npm --prefix src/frontend/admin-react test -- --run --reporter=verbose --testTimeout=15000
+      - name: Start isolated backend and storefront
+        run: |
+          python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > test-results/backend.log 2>&1 &
+          npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 > test-results/storefront.log 2>&1 &
+          npm --prefix src/frontend/admin-react run dev -- --host 127.0.0.1 --port 3001 > test-results/admin.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null &&
+               curl --fail --silent http://127.0.0.1:5173 >/dev/null &&
+               curl --fail --silent http://127.0.0.1:3001 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Storefront Playwright battery
+        working-directory: frontend
+        # One backend/database serves this suite. Serial execution prevents
+        # cross-spec market signals and cart writes from contaminating peers.
+        run: timeout 600s npx playwright test --reporter=line --workers=1
+      - name: Security, policy-trace, and closed-loop regressions
+        env:
+          RUN_LIVE_BROWSER_TESTS: "1"
+          LIVE_SHOPPER_URL: http://127.0.0.1:5173
+          LIVE_ADMIN_URL: http://127.0.0.1:3001
+          LIVE_GMAIL_INGEST_SECRET: ci-browser-ingress-only
+        run: |
+          timeout 240s pytest -vv -s tests/e2e/test_procurement_malicious_reply_playwright.py
+          timeout 240s pytest -vv -s tests/e2e/test_live_policy_trace.py
+          timeout 240s pytest -vv -s tests/e2e/test_live_procurement_closed_loop.py
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: procurement-browser-evidence
+          path: |
+            frontend/test-results/**
+            frontend/playwright-report/**
+            test-results/**
+            tmp/*.sqlite*
+          retention-days: 14
+
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      APP_ENV: testing
+      PYTEST_PER_TEST_TIMEOUT_SEC: "90"
+      DATABASE_URL: sqlite+pysqlite:///${{ github.workspace }}/tmp/worker.sqlite
+      DATABASE_URL_RO: sqlite+pysqlite:///${{ github.workspace }}/tmp/worker.sqlite
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      CELERY_HMAC_KEY: ci-only-worker-signing-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Create dedicated worker database
+        run: |
+          mkdir -p tmp test-results
+          timeout 120s alembic upgrade head
+      - name: Start worker and prove broker delivery
+        run: |
+          celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
+          echo $! > test-results/celery.pid
+          for attempt in $(seq 1 30); do
+            if timeout 5s celery -A src.app.workers.celery_app:celery_app inspect ping | grep -q pong; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Worker, delivery, connector, and recovery suites
+        run: |
+          timeout 420s pytest -vv \
+            tests/services/fulfillment/test_outbound_delivery_jobs.py \
+            tests/services/test_connector_runtime.py \
+            tests/api/test_admin_inventory_netsuite_jobs.py \
+            tests/api/test_admin_inventory_generic_deep_provider_jobs.py
+      - name: Upload worker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: procurement-worker-evidence
+          path: |
+            test-results/**
+            tmp/*.sqlite*
+          retention-days: 14
