@@ -2258,6 +2258,15 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include admin_bi router: %s", e)
+    # Tenant-scoped Party/account intelligence and human-governed identity proposals.
+    try:
+        from src.app.routers.admin_accounts import router as admin_accounts_router
+
+        app.include_router(admin_accounts_router)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_accounts router: %s", e)
     # Escalation room (admin ↔ shopper chat stream per incident)
     try:
         app.include_router(escalation_room_router)

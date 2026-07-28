@@ -7,6 +7,7 @@ export * from './api/client';        // setClientApiKey, clearClientApiKey, http
 export * from './api/decisions';     // Decision* types + decision query/trace/lifecycle
 export * from './api/fulfillment';   // fulfilment cases + PO + economics
 export * from './api/marketIntel';   // replay (market-intelligence)
+export * from './api/accounts';      // Party/account timeline + governed identity proposals
 export * from './api/supplyRisk';    // governed causal supply-risk replay
 
 export type ApprovalItem = {

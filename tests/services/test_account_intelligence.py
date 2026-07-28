@@ -19,19 +19,23 @@ from src.app.services.account_intelligence import (
 
 
 def _migrate(engine) -> None:
-    path = Path(__file__).resolve().parents[2] / "alembic" / "versions" / "20260810_account_intelligence.py"
-    spec = importlib.util.spec_from_file_location("account_intelligence_migration", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
     with engine.begin() as connection:
         operations = Operations(MigrationContext.configure(connection))
-        original = module.op
-        module.op = operations
-        try:
-            module.upgrade()
-        finally:
-            module.op = original
+        for filename in (
+            "20260810_account_intelligence.py",
+            "20260819_party_timeline.py",
+        ):
+            path = Path(__file__).resolve().parents[2] / "alembic" / "versions" / filename
+            spec = importlib.util.spec_from_file_location(filename.removesuffix(".py"), path)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            spec.loader.exec_module(module)
+            original = module.op
+            module.op = operations
+            try:
+                module.upgrade()
+            finally:
+                module.op = original
 
 
 def test_exact_identity_is_tenant_scoped_and_snapshot_is_rebuildable(tmp_path):

@@ -28,6 +28,7 @@ const EmailXdr = React.lazy(() => import('./components/EmailXdr').then((m) => ({
 const SupplyChainSim = React.lazy(() => import('./components/SupplyChainSim').then((m) => ({ default: m.SupplyChainSim })));
 const AgentIntelligence = React.lazy(() => import('./components/AgentIntelligence').then((m) => ({ default: m.AgentIntelligence })));
 const MaestroRegistry = React.lazy(() => import('./components/MaestroRegistry').then((m) => ({ default: m.MaestroRegistry })));
+const AccountIntelligence = React.lazy(() => import('./components/AccountIntelligence').then((m) => ({ default: m.AccountIntelligence })));
 
 type Role = 'merchant' | 'owner' | 'developer';
 
@@ -51,6 +52,7 @@ export default function App() {
     escalations: ['escalation', 'escalate', 'incident'],
     rules: ['rule', 'rules', 'policy'],
     approvals: ['approval', 'approvals', 'approve'],
+    accounts: ['account', 'accounts', 'party', 'customer', 'identity', 'timeline'],
     orders: ['order', 'orders'],
     analytics: ['analytics', 'ragas', 'eval'],
     compliance: ['compliance', 'gdpr', 'pci'],
@@ -130,7 +132,7 @@ export default function App() {
 
         <div className="nav-section">Merchant</div>
         <div className="nav">
-          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'procurement', 'market-intel', 'investor', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
+          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'accounts', 'procurement', 'market-intel', 'investor', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
             const locked = (key === 'compliance' && !canOwner) || (key === 'rules' && !(canOwner || canDeveloper)) || (key === 'grc' && !(canOwner || canDeveloper));
             return (
               <button
@@ -232,6 +234,7 @@ export default function App() {
             {active === 'rules' && 'Rules Admin'}
             {active === 'playbooks' && 'Playbook Editor'}
             {active === 'approvals' && 'Human Approvals'}
+            {active === 'accounts' && 'Account Intelligence'}
             {active === 'procurement' && 'Procurement Control Room'}
             {active === 'market-intel' && 'Market Intelligence (Synthetic Replay)'}
             {active === 'investor' && 'Investor Metrics'}
@@ -256,6 +259,7 @@ export default function App() {
             {active === 'rules' && 'Create, validate, and preview prioritized rules (tenant-scoped).'}
             {active === 'playbooks' && 'Validate, dry-run, publish, rollback, and audit playbook changes.'}
             {active === 'approvals' && 'Review and approve high-stakes proposals.'}
+            {active === 'accounts' && 'Tenant-scoped Party facts, expiring conversation observations, activity timeline, and governed identity review.'}
             {active === 'procurement' && 'Auditable buyer→supplier procurement: draft, approve+send (GATE 2), supplier reply, validate, options — every step bitemporally traced.'}
             {active === 'market-intel' && 'Advance a synthetic 7-day market replay through the REAL ingestion→analysis→finding path (isolated demo tenant).'}
             {active === 'investor' && 'One screen: exec KPIs, bounded-autonomy proof, procurement cycle time, capability-gap ledger, governance pulse.'}
@@ -296,6 +300,7 @@ export default function App() {
         {active === 'playbooks' && <Playbooks />}
         {active === 'rules' && <RulesAdmin role={role} />}
         {active === 'approvals' && <Approvals role={role} />}
+        {active === 'accounts' && <AccountIntelligence role={role} />}
         {active === 'procurement' && <ProcurementCases />}
         {active === 'market-intel' && (
           <>
