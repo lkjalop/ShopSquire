@@ -27,6 +27,7 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
     history = list((replay.get("history") or {}).get("daily_history") or [])
     purchase_orders = list((replay.get("history") or {}).get("purchase_orders") or [])
     observations = list(replay.get("observations") or [])
+    inventory_projection = dict(replay.get("inventory_projection") or {})
     profile = dict(replay.get("profile") or {})
     if not history:
         raise ValueError("synthetic_replay_history_required")
@@ -176,6 +177,18 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
             not reference_failures,
             value={"failures": reference_failures[:20]},
         ),
+        "canonical_internal_movement_conservation": _gate(
+            (
+                (inventory_projection.get("conservation") or {}).get("status")
+                == "passed"
+            ),
+            value=inventory_projection.get("conservation"),
+            detail=(
+                "Transfers and custody reclassifications must net to zero; "
+                "sales, receipts, returns, disposal and adjustments remain "
+                "explicit external physical deltas."
+            ),
+        ),
         "latent_sales_separation": _gate(all(
             int(row["observed_sales_units"]) <= int(row["latent_demand_units"])
             and int(row["lost_sales_units"]) == (
@@ -189,6 +202,14 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
         forecast_status == "undefined"
         or interval["status"] != "observed"
         or policy_counterfactual["status"] != "observed"
+        or (
+            (inventory_projection.get("balance_integrity") or {}).get("status")
+            != "passed"
+        )
+        or (
+            (inventory_projection.get("atp_reconciliation") or {}).get("status")
+            != "matched"
+        )
     )
     return {
         "scenario_id": replay["manifest"]["scenario_id"],
@@ -222,6 +243,12 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
             "evaluation": forecast.get("evaluation"),
         },
         "prediction_interval_coverage": interval,
+        "canonical_inventory_projection": {
+            "authority": "shadow_only",
+            "conservation": inventory_projection.get("conservation"),
+            "balance_integrity": inventory_projection.get("balance_integrity"),
+            "atp_reconciliation": inventory_projection.get("atp_reconciliation"),
+        },
         "business_utility": {
             "status": "observed" if total_latent else "undefined_zero_demand",
             "fill_rate": round(total_observed / total_latent, 4)

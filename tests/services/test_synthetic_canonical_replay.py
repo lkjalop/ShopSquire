@@ -93,6 +93,16 @@ def test_acceptance_report_exposes_structural_statistical_and_utility_gates():
     assert report["structural_fidelity"]["inventory_conservation"]["status"] == "passed"
     assert report["structural_fidelity"]["event_ordering"]["status"] == "passed"
     assert report["structural_fidelity"]["referential_integrity"]["status"] == "passed"
+    assert (
+        report["structural_fidelity"][
+            "canonical_internal_movement_conservation"
+        ]["status"]
+        == "passed"
+    )
+    projection = report["canonical_inventory_projection"]
+    assert projection["authority"] == "shadow_only"
+    assert projection["conservation"]["status"] == "passed"
+    assert projection["atp_reconciliation"]["status"] in {"matched", "mismatch"}
     assert report["statistical_fidelity"]["zero_demand_rate"]["value"] > 0.5
     assert report["causal_interventions"]["status"] == "passed"
     assert report["forecast_discrimination"]["status"] in {

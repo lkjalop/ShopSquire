@@ -22,7 +22,6 @@ def _undefined(status: str, detail: str) -> dict[str, Any]:
         "delta": None,
     }
 
-
 def _simulate_policy(
     *,
     demand: list[int],
@@ -197,4 +196,3 @@ def compare_inventory_policies(
             ],
         },
     }
-
