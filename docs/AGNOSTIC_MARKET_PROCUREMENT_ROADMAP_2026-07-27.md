@@ -1,5 +1,72 @@
 # Agnostic Market Intelligence and Procurement Roadmap — 2026-07-27
 
+## Causal supply-intelligence execution update — 2026-07-29
+
+The roadmap is now ordered around proving product exposure before interpreting
+external market signals. A commodity price, capacity constraint, recall,
+tariff, weather event or macroeconomic release is not SKU evidence by itself.
+The system must traverse a time-valid, tenant-scoped dependency path and retain
+the assumptions, alternatives, uncertainty and source policy.
+
+Completed in this slice:
+
+- added a governed registry of official external source families with
+  publisher, trust tier, licence, permitted use, measurement scope, refresh
+  expectation and PESTEL dimensions;
+- added durable supply nodes, dependency edges, signal observations, causal
+  hypotheses, procurement-option proposals and synthetic replay manifests;
+- added bounded impact reasoning that refuses to claim exposure without a
+  dependency path and never grants execution authority;
+- added supplier-confirmation evidence as a way to strengthen a hypothesis
+  without turning supplier text into authority;
+- added three configuration-driven supply scenarios without product-category
+  branches, plus deterministic 400-day commerce histories with latent demand,
+  observed sales, lost sales, inventory conservation, POs, receipts, lead-time
+  shocks and cost pass-through;
+- changed forecast comparison to evaluate aggregate supplier-lead-time demand
+  at every rolling origin and report empirical lead-time uncertainty;
+- fixed a supplier-catalog transaction rollback caused by engine-level schema
+  inspection on SQLite StaticPool;
+- removed fabricated admin KPI comparisons, distinguished unavailable evidence
+  from measured zero, reduced procurement polling churn, and made authority,
+  provenance, freshness, simulation and shadow states visible in both UIs.
+
+TDD evidence:
+
+- red: the causal market module and commerce-history function did not exist,
+  PESTEL scope was undeclared, and forecasting exposed no lead-time evaluation;
+- green: 79 focused backend procurement/forecast/inventory/market tests, 33
+  admin tests and 183 storefront tests pass; both production builds pass;
+- migration: an empty SQLite database upgraded to head, downgraded one
+  revision and re-upgraded to `20260817_supply_intelligence`;
+- known red: admin and storefront production chunks remain approximately
+  505 KB and 569 KB, above the 500 KB warning threshold.
+
+Reordered next work that needs no external credentials:
+
+1. Materialize the synthetic histories through the canonical observation and
+   correction/reversal contracts; add transfer, inspection, quarantine,
+   returns, markdown, disposal and invoice-reconciliation events.
+2. Add scenario acceptance reports for structural invariants, statistical
+   fidelity, causal interventions, model discrimination, interval coverage and
+   decision utility. Keep every result `simulation_only`.
+3. Add tenant-scoped APIs and an operator supply-risk workbench showing the
+   dependency path, PESTEL scope, source licence, contradictions, freshness,
+   uncertainty, alternatives and bounded procurement options.
+4. Replay replenishment, supplier scoring, GMROI, shelf velocity and
+   stale-stock pricing in shadow mode; compare counterfactual fill rate,
+   stockouts, waste, working capital and margin.
+5. Enforce lifecycle permissions at selling and reorder execution boundaries,
+   then add Party/account timelines and governed merge/split proposals.
+6. Code-split both frontends, run the hosted sharded/browser workflow, and
+   continue the remaining legacy `recommend.py` characterization imports in
+   parallel.
+
+Live external fetching remains a later connector slice. The current claim is
+source discovery, policy governance and deterministic replay—not certification
+against live providers or proof that a public signal caused a specific SKU
+impact.
+
 ## Production-shaped landing update — 2026-07-28
 
 The foundation batch is now split into reviewable commits. Local proof covers
