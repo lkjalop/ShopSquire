@@ -30,6 +30,12 @@ import AdminDashboard from './components/AdminDashboard';
 import { productShortLabel } from './lib/productDisplay';
 import { csrfHeaders } from './lib/csrf';
 import { detectPII } from './lib/pii';
+import StorefrontTrustBanner, {
+  trustEvidenceFromPayload,
+  type CatalogueLoadState,
+  type TrustEvidence,
+} from './components/StorefrontTrustBanner';
+import ProductWhyEvidence, { type ProductWhyExplanation } from './components/ProductWhyEvidence';
 import {
   detectCVIssueType,
   detectPanelMode,
@@ -201,15 +207,6 @@ type OperatorMetricSnapshot = {
   recordedAt?: string | null;
 };
 
-type ProductWhyExplanation = {
-  sku?: string;
-  reason_summary?: string;
-  matched_constraints?: string[];
-  rank_factors?: any[];
-  disqualifiers?: string[];
-  alternatives_not_selected?: any[];
-};
-
 type DeviceLane = 'windows' | 'macbook' | 'tablet_chromebook';
 
 function normalizeTraceId(value: any): string | null {
@@ -321,17 +318,29 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, 
 
 function useProducts() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [catalogueState, setCatalogueState] = useState<CatalogueLoadState>('loading');
+  const [catalogueEvidence, setCatalogueEvidence] = useState<TrustEvidence>(() => trustEvidenceFromPayload(null));
   useEffect(() => {
     const ctl = new AbortController();
     fetch('/ui/products.json', { signal: ctl.signal })
-      .then((r) => r.json())
-      .then((d) => setProducts(Array.isArray(d) ? d : Array.isArray(d?.products) ? d.products : []))
-      .catch(() => setProducts([]))
-      .finally(() => setLoading(false));
+      .then((r) => {
+        if (!r.ok) throw new Error(`catalogue_failed (${r.status})`);
+        return r.json();
+      })
+      .then((d) => {
+        const nextProducts = Array.isArray(d) ? d : Array.isArray(d?.products) ? d.products : [];
+        setProducts(nextProducts);
+        setCatalogueEvidence(trustEvidenceFromPayload(Array.isArray(d) ? null : d));
+        setCatalogueState(nextProducts.length > 0 ? 'ready' : 'empty');
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError') return;
+        setProducts([]);
+        setCatalogueState('unavailable');
+      });
     return () => ctl.abort();
   }, []);
-  return { products, loading };
+  return { products, catalogueState, catalogueEvidence };
 }
 
 // PII Detection - Luhn algorithm for credit card validation
@@ -346,10 +355,32 @@ const GridIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 const ListIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>;
 
 export default function App() {
-  const { products, loading } = useProducts();
+  const { products, catalogueState, catalogueEvidence } = useProducts();
+  const [trustEvidence, setTrustEvidence] = useState<TrustEvidence>(() => trustEvidenceFromPayload(null));
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [headerSearchValue, setHeaderSearchValue] = useState('');
+  const localEnvironment = Boolean(
+    (import.meta as any).env?.DEV
+    || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)),
+  );
+  useEffect(() => {
+    setTrustEvidence((current) => ({
+      synthetic: catalogueEvidence.synthetic ?? current.synthetic,
+      shadow: catalogueEvidence.shadow ?? current.shadow,
+      humanApprovalRequired: catalogueEvidence.humanApprovalRequired ?? current.humanApprovalRequired,
+      provenance: catalogueEvidence.provenance ?? current.provenance,
+    }));
+  }, [catalogueEvidence]);
+  const mergeTrustEvidence = (payload: any) => {
+    const observed = trustEvidenceFromPayload(payload);
+    setTrustEvidence((current) => ({
+      synthetic: observed.synthetic ?? current.synthetic,
+      shadow: observed.shadow ?? current.shadow,
+      humanApprovalRequired: observed.humanApprovalRequired ?? current.humanApprovalRequired,
+      provenance: observed.provenance ?? current.provenance,
+    }));
+  };
 
   const handleHeaderSearch = () => {
     const q = headerSearchValue.trim();
@@ -1644,6 +1675,7 @@ export default function App() {
         if (!r.ok || !data) {
           throw new Error((data && data.detail) ? data.detail : `orchestrate_failed (${r.status})`);
         }
+        mergeTrustEvidence(data);
         const proposal = data.proposal || {};
         const results = (proposal.results || []) as any[];
         const prods = results.map((item) => {
@@ -1890,6 +1922,7 @@ export default function App() {
             throw new Error(detailStr);
           }
         }
+        mergeTrustEvidence(data);
         // ── V2 CART LANE (C2): the backend resolved this turn as a CART MUTATION ──
         // Covers both transports (chat_stream forwards chat_query's result verbatim). Three
         // shapes: applied → refresh the cart panel (the stale-panel bug) + server-undo chip on
@@ -2288,6 +2321,7 @@ export default function App() {
             <input
               type="text"
               placeholder="Search products..."
+              aria-label="Search the product catalogue"
               className={styles.searchInput}
               value={headerSearchValue}
               onChange={(e) => setHeaderSearchValue(e.target.value)}
@@ -2324,9 +2358,14 @@ export default function App() {
 
       {/* Homepage Product Grid */}
       <main className={styles.main} {...backgroundInertProps}>
+        <StorefrontTrustBanner
+          localEnvironment={localEnvironment}
+          catalogueState={catalogueState}
+          evidence={trustEvidence}
+        />
         <StorefrontEmphasisBanner />
         <div className={styles.categoryBar}>
-          <span className={styles.categoryTitle}>Laptops</span>
+          <h1 className={styles.categoryTitle}>Laptops</h1>
           <div className={styles.filters}>
             <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me the best value laptops sorted by price')}>Price</button>
             <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me laptops with 16GB RAM or more')}>RAM</button>
@@ -2334,7 +2373,22 @@ export default function App() {
             <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me laptops with a dedicated GPU or RTX graphics card')}>GPU</button>
           </div>
         </div>
-        <ProductGrid products={displayProducts.length > 0 ? filteredDisplayProducts : products} onAdd={addToCart} viewMode="grid" />
+        {catalogueState === 'loading' && (
+          <div className={styles.catalogueNotice} role="status">Loading catalogue…</div>
+        )}
+        {catalogueState === 'unavailable' && (
+          <div className={styles.catalogueNotice} role="alert">
+            The catalogue is unavailable. Product facts could not be loaded, so no catalogue recommendations are shown.
+          </div>
+        )}
+        {catalogueState === 'empty' && (
+          <div className={styles.catalogueNotice} role="status">
+            The catalogue loaded successfully but contains no products.
+          </div>
+        )}
+        {catalogueState === 'ready' && (
+          <ProductGrid products={displayProducts.length > 0 ? filteredDisplayProducts : products} onAdd={addToCart} viewMode="grid" />
+        )}
         {!chatOpen && fulfilmentCase && <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />}
         <ExternalResearchPanel items={externalResearch} />
       </main>
@@ -2355,7 +2409,7 @@ export default function App() {
             <div className={styles.chatPanel}>
               <div className={styles.chatHeader}>
                 <div className={styles.chatHeaderLeft}>
-                  <span className={styles.chatTitle}>ShopSquire Assistant</span>
+                  <h2 className={styles.chatTitle}>ShopSquire Assistant</h2>
                   <span
                     className={`${styles.backendPill} ${backendStatus.ok ? styles.backendUp : styles.backendDown}`}
                     title={
@@ -2634,6 +2688,7 @@ export default function App() {
                   <textarea
                     ref={textareaRef}
                     className={styles.chatInput}
+                    aria-label="Message ShopSquire Assistant"
                     placeholder={imageRoutingInFlight ? "Analyzing image..." : (stt.isRecording ? "Listening..." : "Type your message...")}
                     value={inputValue}
                     onChange={(e) => { setInputValue(e.target.value); handleTextareaInput(); }}
@@ -2644,11 +2699,17 @@ export default function App() {
                     className={`${styles.inputIconBtn} ${stt.isRecording ? styles.recording : ''}`}
                     onClick={handleMicClick}
                     title={stt.isRecording ? 'Click to stop recording' : 'Voice input'}
+                    aria-label={stt.isRecording ? 'Stop voice input' : 'Start voice input'}
                   >
                     <MicIcon />
                     {stt.whisperPending && <span className={styles.whisperDot} />}
                   </button>
-                  <button className={styles.sendBtn} onClick={() => handleSend()} disabled={isThinking || imageRoutingInFlight}><SendIcon /></button>
+                  <button
+                    className={styles.sendBtn}
+                    onClick={() => handleSend()}
+                    disabled={isThinking || imageRoutingInFlight}
+                    aria-label="Send message"
+                  ><SendIcon /></button>
                 </div>
                 {/* NQE questions render inline in the assistant message (with option chips) — the old
                     sticky bottom bar duplicated them ("looks messy"), so it was removed. */}
@@ -3162,17 +3223,17 @@ export default function App() {
                     <div className={styles.whyDrawer}>
                       <div className={styles.whyDrawerHeader}>
                         <span>Why this product: {whyDrawerSku}</span>
-                        <button className={styles.iconBtn} onClick={() => { setWhyDrawerSku(null); setWhyDrawerData(null); setWhyDrawerError(null); }}>×</button>
+                        <button
+                          className={styles.iconBtn}
+                          aria-label="Close product explanation"
+                          onClick={() => { setWhyDrawerSku(null); setWhyDrawerData(null); setWhyDrawerError(null); }}
+                        >×</button>
                       </div>
                       {whyDrawerLoading && <div className={styles.muted}>Loading explanation...</div>}
                       {whyDrawerError && <div className={styles.muted}>{whyDrawerError}</div>}
                       {!whyDrawerLoading && whyDrawerData && (
                         <div className={styles.whyBody}>
-                          <div><strong>Matched constraints:</strong> {(whyDrawerData.matched_constraints || []).join(', ') || '--'}</div>
-                          <div><strong>Rank factors:</strong> {Array.isArray(whyDrawerData.rank_factors) ? whyDrawerData.rank_factors.length : 0}</div>
-                          <div><strong>Disqualifiers:</strong> {(whyDrawerData.disqualifiers || []).join(', ') || '--'}</div>
-                          <div><strong>Alternatives not selected:</strong> {Array.isArray(whyDrawerData.alternatives_not_selected) ? whyDrawerData.alternatives_not_selected.length : 0}</div>
-                          <div><strong>Summary:</strong> {whyDrawerData.reason_summary || '--'}</div>
+                          <ProductWhyEvidence explanation={whyDrawerData} />
                         </div>
                       )}
                     </div>
