@@ -40,6 +40,7 @@ from src.app.routers.recruiting import router as recruiting_router
 from src.app.routers.scoring import router as scoring_router
 from src.app.routers.approvals import router as approvals_router
 from src.app.routers.fulfillment_cases import router as fulfillment_cases_router
+from src.app.routers.supply_risk import router as supply_risk_router
 from src.app.routers.kyv_admin import router as kyv_admin_router
 from src.app.routers.recommend_compat import router as recommend_router
 from src.app.routers.recommend_aux import router as recommend_aux_router
@@ -1963,6 +1964,7 @@ def create_app() -> FastAPI:
             pass
     app.include_router(approvals_router)
     app.include_router(fulfillment_cases_router)
+    app.include_router(supply_risk_router)
     app.include_router(kyv_admin_router)  # KYV vendor onboarding/lifecycle (autonomous-send trust source)
     # Tickets router for approval workflow
     try:
