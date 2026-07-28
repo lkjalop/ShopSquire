@@ -785,12 +785,15 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
                      and (c.fit or {}).get("overall") == "meets"]
         if recovered:
             existing = {c.sku for c in recovered}
-            authorized_existing = [
+            original_cards = [
                 c for c in resp.products
-                if c.sku not in existing and (c.fit or {}).get("overall") == "meets"
+                if c.sku not in existing
             ]
-            resp.products = (recovered + authorized_existing)[:limit]
-            meets_in_budget = len(recovered)
+            resp.products = (recovered + original_cards)[:limit]
+            meets_in_budget = sum(
+                1 for c in resp.products
+                if (c.fit or {}).get("overall") == "meets"
+            )
             fs["meets"] = sum(1 for c in resp.products
                               if (c.fit or {}).get("overall") == "meets")
             fs["fails"] = sum(1 for c in resp.products

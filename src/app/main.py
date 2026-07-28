@@ -691,7 +691,13 @@ def create_app() -> FastAPI:
             await stop_stream_consumer()
         except Exception:
             pass
-
+        try:
+            from src.app.services.dependency_resilience import (
+                shutdown_resilience_executor,
+            )
+            shutdown_resilience_executor(wait=False)
+        except Exception:
+            pass
     app = FastAPI(title="ShopSquire API", default_response_class=ORJSONResponse, lifespan=lifespan)
     # Bind a fresh engine using current settings to the app state so
     # tests that mutate DATABASE_URL get an engine scoped to the app.

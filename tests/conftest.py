@@ -7,6 +7,7 @@ import tempfile
 import uuid
 import threading
 import time
+import traceback
 from pathlib import Path
 
 import pytest
@@ -135,7 +136,9 @@ def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     try:
         import json as _json
 
-        _fpath = Path("config/feature_flags.json")
+        _fpath = Path(
+            os.environ.get("FEATURE_FLAGS_PATH", "config/feature_flags.json")
+        )
         _fpath.parent.mkdir(parents=True, exist_ok=True)
 
         # Canonical flags baseline — written whenever the file is missing,
@@ -501,6 +504,27 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
     except OSError:
         pass
 
+    # Release the lazily-created bounded dependency pool before enforcing the
+    # thread-leak gate. Production performs the same cleanup in app lifespan.
+    try:
+        from src.app.services.dependency_resilience import (
+            shutdown_resilience_executor,
+        )
+        shutdown_resilience_executor(wait=False)
+    except Exception:
+        pass
+    try:
+        legacy_recommend = sys.modules.get("src.app.routers.recommend")
+        shutdown_recommend = getattr(
+            legacy_recommend,
+            "shutdown_recommend_executors",
+            None,
+        )
+        if shutdown_recommend is not None:
+            shutdown_recommend(wait=True)
+    except Exception:
+        pass
+
     leaked_threads = [
         thread
         for thread in threading.enumerate()
@@ -513,6 +537,12 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
         out = sys.__stderr__ or sys.stderr
         names = ", ".join(f"{thread.name}({thread.ident})" for thread in leaked_threads)
         out.write(f"\n[RESOURCE-LEAK] non-daemon threads still alive: {names}\n")
+        frames = sys._current_frames()
+        for thread in leaked_threads:
+            frame = frames.get(thread.ident)
+            if frame is not None:
+                out.write(f"[RESOURCE-LEAK-STACK] {thread.name}\n")
+                traceback.print_stack(frame, file=out)
         out.flush()
         if os.environ.get("PYTEST_FAIL_ON_THREAD_LEAK", "").strip().lower() in {
             "1",
@@ -530,7 +560,9 @@ def _restore_feature_flags_file():
     Several tests write minimal payloads (e.g. only DECISION_LOG_WRITES_ENABLED),
     which can erase required keys for later tests if not restored.
     """
-    flags_path = Path("config/feature_flags.json")
+    flags_path = Path(
+        os.environ.get("FEATURE_FLAGS_PATH", "config/feature_flags.json")
+    )
     existed = flags_path.exists()
     original = flags_path.read_bytes() if existed else None
     yield

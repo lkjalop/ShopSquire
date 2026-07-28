@@ -102,7 +102,9 @@ def test_run_pipeline_reports_rolled_up_key():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     db = sessionmaker(bind=eng, future=True)()
     ms.ensure_table(db)
-    _ins(db, "demand", "orders", 0.9, "2026-06-26 10:00:00")
+    from datetime import datetime, timezone
+    current_day = datetime.now(timezone.utc).date().isoformat()
+    _ins(db, "demand", "orders", 0.9, f"{current_day} 10:00:00")
     db.commit()
     from src.app.services import market_pipeline as mp
     res = mp.run_pipeline(db, anomaly_fn=lambda *a, **k: None)

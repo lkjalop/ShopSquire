@@ -56,7 +56,7 @@ def test_future_timeout_is_caught_and_does_not_block():
     re-call, and the guarded downstream access tolerates a None candidate."""
     ex = _futures.ThreadPoolExecutor(max_workers=1)
     try:
-        fut = ex.submit(lambda: (time.sleep(2.0), {"identified": True})[1])
+        fut = ex.submit(lambda: (time.sleep(0.2), {"identified": True})[1])
         _id_candidate = None
         _vision_status = "ok"
         try:
@@ -77,17 +77,17 @@ def test_future_timeout_is_caught_and_does_not_block():
             _id_result = _id_candidate
         assert _id_result is None
     finally:
-        ex.shutdown(wait=False)
+        ex.shutdown(wait=True, cancel_futures=True)
 
 
 # ── profile propagation: the worker sees the request's vertical ──
 def test_copy_context_run_in_executor_preserves_profile():
-    from src.app.routers.recommend import _VISION_EXECUTOR  # the real executor used by suggest()
+    from src.app.routers.recommend import _recommend_executor
 
     tok = set_active_profile_id("pharmacy")
     try:
         ctx = contextvars.copy_context()
-        fut = _VISION_EXECUTOR.submit(ctx.run, active_profile_id)
+        fut = _recommend_executor("vision").submit(ctx.run, active_profile_id)
         assert fut.result(timeout=5) == "pharmacy"
     finally:
         reset_active_profile_id(tok)

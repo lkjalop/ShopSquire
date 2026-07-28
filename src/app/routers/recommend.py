@@ -76,33 +76,67 @@ import httpx
 from types import SimpleNamespace
 import logging
 import concurrent.futures as _futures
+from threading import Lock as _Lock
 
 # Module-level thread pool for running security analysis in parallel with
 # product fetch.  Bounded to avoid thread explosion under load.
-_SECURITY_EXECUTOR = _futures.ThreadPoolExecutor(
-    max_workers=int(os.getenv("SECURITY_WORKER_THREADS", "4")),
-    thread_name_prefix="sec_worker",
-)
+_SECURITY_EXECUTOR = None
 
 # Module-level thread pool for running the (slow, 20-40s cold) VLM product-identity call in
 # parallel with NLP + constraint building, instead of blocking the pipeline at the identity stage.
 # Flag-gated (PARALLEL_VISION_IDENTITY). Tasks are submitted via contextvars.copy_context().run so
 # the active StoreProfile propagates into the worker thread (no electronics bleed for other verticals).
-_VISION_EXECUTOR = _futures.ThreadPoolExecutor(
-    max_workers=int(os.getenv("VISION_WORKER_THREADS", "2")),
-    thread_name_prefix="vision_worker",
-)
+_VISION_EXECUTOR = None
 
 # Module-level pool for async LLM narration (RECOMMEND_NARRATION_MODE=async): the deterministic
 # answer returns instantly; the slow LLM prose is computed here and fetched via /narration/{job_id}.
-_NARRATION_EXECUTOR = _futures.ThreadPoolExecutor(
-    # 4 (was 2, audit 2026-07-08 #14): force-on async narration submits a job per non-fast-path
-    # turn with up to ~90s worst-case occupancy (45s descriptor timeout x retry) — two slow jobs
-    # starved the queue past the frontend's poll budget, so guard-passed prose was computed and
-    # never shown.
-    max_workers=int(os.getenv("NARRATION_WORKER_THREADS", "4")),
-    thread_name_prefix="narration_worker",
-)
+_NARRATION_EXECUTOR = None
+_RECOMMEND_EXECUTOR_LOCK = _Lock()
+
+
+def _recommend_executor(kind: str):
+    """Return a live bounded pool, recreating it after application shutdown."""
+    global _SECURITY_EXECUTOR, _VISION_EXECUTOR, _NARRATION_EXECUTOR
+    with _RECOMMEND_EXECUTOR_LOCK:
+        if kind == "security":
+            if _SECURITY_EXECUTOR is None:
+                _SECURITY_EXECUTOR = _futures.ThreadPoolExecutor(
+                    max_workers=int(os.getenv("SECURITY_WORKER_THREADS", "4")),
+                    thread_name_prefix="sec_worker",
+                )
+            return _SECURITY_EXECUTOR
+        if kind == "vision":
+            if _VISION_EXECUTOR is None:
+                _VISION_EXECUTOR = _futures.ThreadPoolExecutor(
+                    max_workers=int(os.getenv("VISION_WORKER_THREADS", "2")),
+                    thread_name_prefix="vision_worker",
+                )
+            return _VISION_EXECUTOR
+        if kind == "narration":
+            if _NARRATION_EXECUTOR is None:
+                _NARRATION_EXECUTOR = _futures.ThreadPoolExecutor(
+                    max_workers=int(os.getenv("NARRATION_WORKER_THREADS", "4")),
+                    thread_name_prefix="narration_worker",
+                )
+            return _NARRATION_EXECUTOR
+    raise ValueError(f"unknown_recommend_executor:{kind}")
+
+
+def shutdown_recommend_executors(*, wait: bool = False) -> None:
+    """Release request-worker pools without preventing a later app restart."""
+    global _SECURITY_EXECUTOR, _VISION_EXECUTOR, _NARRATION_EXECUTOR
+    with _RECOMMEND_EXECUTOR_LOCK:
+        executors = (
+            _SECURITY_EXECUTOR,
+            _VISION_EXECUTOR,
+            _NARRATION_EXECUTOR,
+        )
+        _SECURITY_EXECUTOR = None
+        _VISION_EXECUTOR = None
+        _NARRATION_EXECUTOR = None
+    for executor in executors:
+        if executor is not None:
+            executor.shutdown(wait=wait, cancel_futures=True)
 
 def __ct() -> str:  # R10.2 cart-identity tenant (lazy: avoids import cycles at module load)
     from src.app.platform.tenant_context import current_tenant_id
@@ -288,7 +322,7 @@ def _bounded_knowledge_answer(
         budget = max(0.0, _kn_budget(model))
     except Exception:
         budget = 8.0
-    future = _NARRATION_EXECUTOR.submit(
+    future = _recommend_executor("narration").submit(
         _build_knowledge_answer,
         query,
         plan,
@@ -5051,7 +5085,10 @@ def suggest(
         _security_future: "_futures.Future[dict]" = _futures.Future()
         _security_future.set_result({"severity": "info", "details": {"signals": {}, "reason": "observer_skipped"}})
     else:
-        _security_future = _SECURITY_EXECUTOR.submit(analyze_payload, _sec_payload_for_bg)
+        _security_future = _recommend_executor("security").submit(
+            analyze_payload,
+            _sec_payload_for_bg,
+        )
     # Provide an optimistic default so the gate can proceed synchronously.
     # The real result is collected at _security_join() below.
     analysis: Dict[str, Any] = {"severity": "info", "details": {"signals": {}, "reason": "pending"}}
@@ -5239,7 +5276,7 @@ def suggest(
                 import contextvars as _contextvars
                 from src.app.services.product_identity_agent import identify_product_from_image as _pv_identify
                 _pv_ctx = _contextvars.copy_context()
-                _id_image_future = _VISION_EXECUTOR.submit(
+                _id_image_future = _recommend_executor("vision").submit(
                     _pv_ctx.run, _pv_identify, _pv_blob, user_query=query or "", trace_id=trace_id
                 )
     except Exception:
@@ -9776,7 +9813,7 @@ def suggest(
         # OUTPUT-security analysis submitted EARLY on the shared executor: its ~200ms fixed observer cost
         # now overlaps the decision-log/annotation work between here and the join. The verdict is still
         # consumed at the SAME gate point below — ordering and blocking semantics are unchanged.
-        _output_sec_future = _SECURITY_EXECUTOR.submit(analyze_payload, {
+        _output_sec_future = _recommend_executor("security").submit(analyze_payload, {
             "result_skus": [c.get("sku") for c in ranked[:8] if c.get("sku")],
         })
         cb_record(redis, "recommend", True, degradation_cfg)
@@ -11180,7 +11217,7 @@ def suggest(
             summ_model=_summ_model, trace_id=trace_id,
             combined_preamble=_combined_preamble, narration_inputs=narration_inputs,
             summarize_fn=_summarize_results,
-            executor=_NARRATION_EXECUTOR, redis=redis,
+            executor=_recommend_executor("narration"), redis=redis,
             guard_evidence=_guard_evidence,
             final_products=_narr_final_products,
         )
