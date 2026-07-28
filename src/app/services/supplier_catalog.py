@@ -313,9 +313,14 @@ def _insert_supplier_product(db, params: Dict[str, Any]) -> None:
     """Insert across both legacy ``id`` schemas and the canonical composite-key schema."""
     from sqlalchemy import inspect
 
+    # Inspect through the Session's enlisted Connection, not its Engine.  An
+    # Engine-level inspector checks out (and returns) a connection of its own.
+    # With SQLite StaticPool that is the *same* DBAPI connection currently used
+    # by the Session, so returning it issues a rollback and silently discards
+    # supplier/domain rows staged earlier in this transaction.
     columns = {
         item["name"]
-        for item in inspect(db.get_bind()).get_columns("supplier_products")
+        for item in inspect(db.connection()).get_columns("supplier_products")
     }
     values = dict(params)
     if "id" in columns:
