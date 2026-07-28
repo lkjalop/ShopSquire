@@ -3031,6 +3031,7 @@ from src.app.services.bulk_intent import (  # noqa: E402
     MAX_SOURCEABLE_QTY as _MAX_SOURCEABLE_QTY,
     absurd_quantity_span as _core_absurd_quantity_span,
     extract_quantity_span as _core_extract_quantity_span,
+    requires_full_procurement_path as _core_requires_full_procurement_path,
 )
 
 _ELECTRONICS_EXTRA_NOUNS = (
@@ -3065,11 +3066,11 @@ def _extract_quantity_from_query(query: str | None) -> int | None:
 
 
 def _requires_full_path_for_bulk(plan: Any, query: str | None) -> bool:
-    """The catalog fast path has no whole-order economics or availability planning."""
-    return bool(
-        getattr(plan, "quantity", None)
-        or _extract_quantity_span(query)
-        or getattr(plan, "availability_horizon_days", None)
+    """Compatibility shim; core owns the procurement-path decision."""
+    return _core_requires_full_procurement_path(
+        plan,
+        query,
+        unit_nouns=_profile_unit_nouns(),
     )
 
 

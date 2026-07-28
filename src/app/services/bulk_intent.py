@@ -150,3 +150,17 @@ def absurd_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = (),
     if 1 <= n <= max_qty:
         return None  # a sane count — extract_quantity_span owns it
     return n, m.group(1)
+
+
+def requires_full_procurement_path(
+    plan: object,
+    query: Optional[str],
+    *,
+    unit_nouns: Iterable[str] = (),
+) -> bool:
+    """Whether catalog-only retrieval lacks economics or availability context."""
+    return bool(
+        getattr(plan, "quantity", None)
+        or extract_quantity_span(query, unit_nouns=unit_nouns)
+        or getattr(plan, "availability_horizon_days", None)
+    )

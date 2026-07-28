@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 os.environ.setdefault("STORE_PROFILE_ID", "electronics")
 
 from src.app.services.recommend_candidate_classify import (  # noqa: E402
@@ -93,15 +91,17 @@ def test_generic_query_emits_no_use_case_match():
 def test_fast_path_ranks_discrete_above_integrated_for_gaming():
     # End-to-end on the real core scorer: the RTX-3050 144Hz gaming laptop must
     # score strictly higher than the Intel-Arc 60Hz laptop for a gaming query.
-    from src.app.routers.recommend import _fast_path_product_score
+    from src.app.services.catalog_scoring import score_candidate
 
     hints = {"brand_hints": ["msi"], "use_case_hints": []}
-    arc_score = _fast_path_product_score(
+    arc_score = score_candidate(
         row=LP018_ARC, query="gaming laptop", safe_hints=hints,
         budget_min=1300, budget_max=1800,
+        use_case_fit=use_case_fit(LP018_ARC, "gaming laptop"),
     )
-    rtx_score = _fast_path_product_score(
+    rtx_score = score_candidate(
         row=LAP0020_RTX3050, query="gaming laptop", safe_hints=hints,
         budget_min=1300, budget_max=1800,
+        use_case_fit=use_case_fit(LAP0020_RTX3050, "gaming laptop"),
     )
     assert rtx_score > arc_score, f"RTX-3050 {rtx_score} must beat Arc {arc_score}"

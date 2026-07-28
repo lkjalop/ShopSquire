@@ -1,5 +1,8 @@
 from src.app.services.budget_grammar import classify_budget_scope
-from src.app.services.bulk_intent import extract_quantity_span
+from src.app.services.bulk_intent import (
+    extract_quantity_span,
+    requires_full_procurement_path,
+)
 
 
 def test_catalog_command_quantity_and_total_budget_are_both_recognized():
@@ -33,9 +36,12 @@ def test_contextual_quantity_amendment_does_not_need_repeated_product_noun():
 
 def test_catalog_fast_path_defers_to_full_economics_for_catalog_command_quantity():
     from types import SimpleNamespace
-    from src.app.routers.recommend import _requires_full_path_for_bulk
 
     plan = SimpleNamespace(quantity=None, availability_horizon_days=None)
     query = "Suggest 10 suitable laptops under a $25,000 total budget"
 
-    assert _requires_full_path_for_bulk(plan, query) is True
+    assert requires_full_procurement_path(
+        plan,
+        query,
+        unit_nouns=("laptop",),
+    ) is True
