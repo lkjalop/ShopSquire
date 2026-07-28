@@ -46,6 +46,7 @@ class OrderLinePayload(Contract):
     kind: Literal["order_line"] = "order_line"
     order_external_id: str
     variant_id: str
+    location_id: str | None = None
     quantity: Quantity
     unit_price: Money
 
@@ -97,6 +98,7 @@ class ReturnPayload(Contract):
     kind: Literal["return"] = "return"
     order_external_id: str
     variant_id: str
+    location_id: str | None = None
     quantity: Quantity
     physical_disposition: Literal["restock", "quarantine", "repair", "scrap", "return_to_vendor"]
     financial_disposition: Literal["none", "credit_pending", "credited", "refunded"]
@@ -173,6 +175,7 @@ class InspectionPayload(Contract):
     kind: Literal["inspection"] = "inspection"
     receipt_external_id: str
     variant_id: str
+    location_id: str | None = None
     quantity: Quantity
     outcome: Literal["accepted", "quarantined", "rejected"]
     reason_code: str | None = None
@@ -212,6 +215,7 @@ class DisposalPayload(Contract):
     variant_id: str
     location_id: str
     quantity: Quantity
+    custody_from: Literal["available", "quarantined", "inspection", "repair"] = "available"
     reason_code: str
     writeoff: Money | None = None
     approved_by: str

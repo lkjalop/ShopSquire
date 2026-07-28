@@ -144,6 +144,7 @@ def materialize_canonical_replay(
                     {
                         "order_external_id": order_id,
                         "variant_id": target,
+                        "location_id": location_a,
                         "quantity": {"value": sold, "uom": "EA"},
                         "unit_price": {
                             "amount_minor": current_price,
@@ -234,6 +235,24 @@ def materialize_canonical_replay(
                 },
             ),
         ])
+        if quarantined:
+            # Synthetic demand assumes the receipt becomes sellable on receipt
+            # day. Preserve the quarantine custody event, then explicitly
+            # release it after inspection instead of silently treating
+            # quarantined stock as available.
+            observations.append(_observation(
+                "inspection",
+                f"{receipt_id}:inspection-release",
+                _stamp(receipt_date, hour=11),
+                {
+                    "receipt_external_id": receipt_id,
+                    "variant_id": target,
+                    "location_id": location_a,
+                    "quantity": {"value": quantity, "uom": "EA"},
+                    "outcome": "accepted",
+                    "reason_code": "synthetic_review_released",
+                },
+            ))
         invoice_id = f"{po_id}:invoice"
         invoiced_quantity = quantity
         observations.extend([
@@ -338,6 +357,7 @@ def materialize_canonical_replay(
         {
             "order_external_id": f"{scenario_id}:order:{return_order_day}",
             "variant_id": target,
+            "location_id": location_a,
             "quantity": {"value": 1, "uom": "EA"},
             "physical_disposition": "quarantine",
             "financial_disposition": "refunded",
@@ -441,6 +461,15 @@ def materialize_canonical_replay(
     observations.sort(
         key=lambda row: (row.event_time, row.entity_type, row.external_id)
     )
+    from src.app.services.inventory_event_projection import (
+        project_inventory_events,
+    )
+    inventory_projection = project_inventory_events(
+        observations,
+        tenant_id=tenant,
+        source=SOURCE,
+        default_location_id=location_a,
+    )
     manifest = {
         **history["manifest"],
         "source": SOURCE,
@@ -449,6 +478,7 @@ def materialize_canonical_replay(
         "event_count": len(observations),
         "authority": "simulation_only",
         "projection_allowed": False,
+        "inventory_projection_authority": "shadow_only",
     }
     return {
         "manifest": manifest,
@@ -457,4 +487,5 @@ def materialize_canonical_replay(
         "observations": observations,
         "profile": profile,
         "receipt_index": po_by_receipt_day,
+        "inventory_projection": inventory_projection,
     }
