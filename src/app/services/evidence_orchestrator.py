@@ -21,9 +21,10 @@ under EVIDENCE_LEG_BUDGET_SEC (default 2.5s) in a thread and times out to found=
 from __future__ import annotations
 
 import os
+import queue
 import re
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
 _REORDER_RE = re.compile(r"\b(?:again|reorder|re-?order|last\s+time|previous\s+order|bought|purchased)\b", re.I)
@@ -252,22 +253,50 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
         except Exception as exc:   # a broken leg is EVIDENCE of a problem, not silence
             return {"source": name, "found": False, "summary": "", "data": {}, "error": str(exc)[:160]}
 
-    # NOT a `with` block: the context manager JOINS all threads on exit, so one hung leg would still
-    # block the turn even after its result() timed out. shutdown(wait=False) abandons stragglers —
-    # legs are bounded read-only fetches, safe to orphan; the timeout is recorded, never silent.
-    pool = ThreadPoolExecutor(max_workers=min(5, len(selected)))
-    try:
-        futures = {name: pool.submit(_run, name) for name in selected}
-        deadline = time.perf_counter() + budget
-        for name, fut in futures.items():
-            remaining = max(0.05, deadline - time.perf_counter())
-            try:
-                out["legs"][name] = fut.result(timeout=remaining)
-            except Exception:
-                out["legs"][name] = {"source": name, "found": False, "summary": "", "data": {},
-                                     "error": f"leg_timeout>{budget}s"}
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+    tasks: queue.Queue[Optional[str]] = queue.Queue()
+    completed = {name: threading.Event() for name in selected}
+    results: Dict[str, Dict[str, Any]] = {}
+
+    def _worker() -> None:
+        while True:
+            name = tasks.get()
+            if name is None:
+                return
+            results[name] = _run(name)
+            completed[name].set()
+
+    # Python threads cannot be killed safely. Executor workers are non-daemon,
+    # so abandoning a timed-out future can keep a process alive. Daemon workers
+    # preserve concurrent collection while ensuring a hung read cannot stall
+    # interpreter shutdown. Individual legs must also keep transport deadlines.
+    workers = [
+        threading.Thread(
+            target=_worker,
+            name=f"evidence-leg-{index}",
+            daemon=True,
+        )
+        for index in range(min(5, len(selected)))
+    ]
+    for worker in workers:
+        worker.start()
+    for name in selected:
+        tasks.put(name)
+    for _worker_thread in workers:
+        tasks.put(None)
+
+    deadline = time.perf_counter() + budget
+    for name in selected:
+        remaining = max(0.0, deadline - time.perf_counter())
+        if completed[name].wait(timeout=remaining):
+            out["legs"][name] = results[name]
+        else:
+            out["legs"][name] = {
+                "source": name,
+                "found": False,
+                "summary": "",
+                "data": {},
+                "error": f"leg_timeout>{budget}s",
+            }
     for name in selected:
         leg = out["legs"].get(name) or {}
         if leg.get("found") and leg.get("summary"):

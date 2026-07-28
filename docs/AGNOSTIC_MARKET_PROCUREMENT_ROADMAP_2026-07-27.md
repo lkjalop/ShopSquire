@@ -1,5 +1,82 @@
 # Agnostic Market Intelligence and Procurement Roadmap — 2026-07-27
 
+## Governed intelligence execution update — 2026-07-29
+
+The previously ordered no-credential work is now implemented locally:
+
+- canonical inventory events project to tenant, variant, location, UoM and
+  custody balances. Receipts, quarantine/inspection, releases, transfers,
+  returns, disposal, adjustments, corrections and reversals participate in
+  conservation. Source ATP and component checkpoints remain immutable;
+- forecast models now publish split-conformal interval evidence with explicit
+  calibration/evaluation counts, nominal and empirical coverage, residual
+  radius, mean width and undefined states. Shadow policy counterfactuals
+  compare bounded fill-rate, stockout, waste, margin and working-capital
+  utility without claiming causal or execution authority;
+- governed, credential-free live adapters now fetch CPSC recall observations
+  and World Bank Pink Sheet commodity benchmarks. Fetches are tenant-cached,
+  revision-preserving, origin-pinned, licence-aware and grouped for
+  contradiction review. CPSC and World Bank protocol paths were exercised
+  against their live public endpoints; other registry entries remain
+  discovery-only;
+- Party/account search, exact-identity timelines and governed merge/split
+  proposals are available through tenant-scoped APIs and the admin UI.
+  Approval records a disposition only: it deliberately does not execute a
+  destructive merge or split;
+- the legacy recommendation constraint filters moved behind a V2-owned
+  service. Exact direct imports of `src.app.routers.recommend` are down to 15
+  test files, and `recommend.py` is approximately 12,435 lines. Production
+  routing remains V2-owned, but deletion is still blocked by those
+  characterizations;
+- a pull-request Ruff ratchet checks changed Python files. The reproducible
+  remaining baseline is 603 findings across services/ERP/service tests and
+  1,677 repository-wide. A green changed-file gate does not mean the legacy
+  repository is Ruff-clean.
+
+Current proof and honest limits:
+
+- 2,925 service tests pass across eight isolated local shards with strict
+  non-daemon-thread leak detection. The run found and fixed an
+  evidence-orchestrator timeout path whose abandoned executor worker could
+  delay process shutdown;
+- 61 focused backend tests, all 36 admin tests and the production admin build
+  pass;
+- the empty-database migration chain reaches `20260819_party_timeline`;
+- the synthetic generator still reports, rather than hides, ATP mismatches or
+  transient negative custody balances where its daily series omits injected
+  events. The projection is currently a shadow/in-memory acceptance surface,
+  not yet an operational read model and not a cross-UoM converter;
+- public signals are advisory. They cannot prove SKU exposure without a valid
+  supplier, BOM, component, location or contractual dependency path;
+- Party merge/split execution and fuzzy identity binding are intentionally
+  absent;
+- hosted GitHub execution is blocked on this workstation because `gh` has no
+  authenticated GitHub session. The workflow cannot be truthfully marked
+  hosted-green until an operator runs `gh auth login`, after which the branch
+  can be pushed and the workflow artifacts inspected.
+
+Remaining work, in dependency order:
+
+1. Authenticate GitHub, push this branch, open a draft PR and run the authored
+   Redis/service/browser/Ruff workflows on GitHub-hosted runners. Preserve the
+   shard and failure-diagnostic artifacts.
+2. Reconcile injected synthetic events into the daily ATP series, persist the
+   location/custody projection as a rebuildable read model and add governed
+   UoM conversion at projection boundaries.
+3. Extend model-specific calibration to conditional coverage and compare
+   policies across scenario cohorts and repeated seeds, not a single replay.
+4. Add one public-source family at a time only when its licence, revision,
+   availability clock, caching and source-health semantics pass the same
+   contract. USGS and USDA are the next useful candidates; their registry
+   entries are not live-fetch certified today.
+5. Add a separate, reviewed execution workflow for approved Party merge/split
+   plans with reversible identity redirects and immutable audit evidence.
+6. Move the remaining 15 legacy recommendation imports to V2 contracts,
+   compatibility-route tests or frozen characterization evidence, observe the
+   rollback window, then remove `recommend.py`.
+7. Burn down Ruff by owned subsystem under the changed-file ratchet. Do not
+   perform an indiscriminate repository-wide auto-fix.
+
 ## Canonical replay and supply-risk execution update — 2026-07-29
 
 This no-credential slice is implemented and locally verified:
