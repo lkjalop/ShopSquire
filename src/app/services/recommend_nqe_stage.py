@@ -44,6 +44,60 @@ DOMAIN_REFINEMENT_QUESTION_IDS = {
 }
 
 
+def normalize_product_type_label(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    aliases = {
+        "notebook": "laptop",
+        "ultrabook": "laptop",
+        "macbook": "laptop",
+        "chromebook": "laptop",
+        "pc": "desktop",
+        "mobile": "phone",
+        "smartphone": "phone",
+    }
+    normalized = aliases.get(raw, raw)
+    return "" if normalized in {"unknown", "other", "fruit", "document"} else normalized
+
+
+def resolve_nqe_product_category(
+    *,
+    query: str | None,
+    constraints: Dict[str, Any] | None,
+    identity_constraints: Dict[str, Any] | None,
+    identity_result: Dict[str, Any] | None,
+) -> str:
+    constraint_map = constraints if isinstance(constraints, dict) else {}
+    identity_map = identity_constraints if isinstance(identity_constraints, dict) else {}
+    result_map = identity_result if isinstance(identity_result, dict) else {}
+    for candidate in (
+        constraint_map.get("product_type"),
+        identity_map.get("identity_product_type"),
+        result_map.get("product_type"),
+    ):
+        product_type = normalize_product_type_label(candidate)
+        if product_type:
+            return product_type
+    try:
+        from src.app.services.query_classifier import coarse_product_category
+
+        explicit = normalize_product_type_label(coarse_product_category(query))
+        if explicit:
+            return explicit
+    except Exception:
+        pass
+    try:
+        from src.app.services.category_router import detect_category
+
+        detected = detect_category(query=query, constraints=constraints)
+        if detected and detected != "general":
+            return str(detected)
+    except Exception:
+        pass
+    return "laptop" if "laptop" in str(query or "").lower() else "general"
+
+
 @dataclass
 class RecommendStageState:
     query: str | None
@@ -161,11 +215,11 @@ def refine_missing_fields_with_query_understanding(
         "brand_preference": "brands",
     }
     out: list[str] = []
-    for field in legacy:
-        qfield = represented.get(field)
+    for missing_field in legacy:
+        qfield = represented.get(missing_field)
         if qfield and qfield not in missing:
             continue
-        out.append(field)
+        out.append(missing_field)
     return out
 
 

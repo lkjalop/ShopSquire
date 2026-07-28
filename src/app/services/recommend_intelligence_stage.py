@@ -322,11 +322,36 @@ def _sales_response_nudge(state: IntelligenceStageState, results: List[Dict[str,
             overstock = int(state.flags.get("SALES_RESPONSE_OVERSTOCK_UNITS") or 20)
         except (TypeError, ValueError):
             overstock = 20
+        result_skus = [
+            str(r.get("sku"))
+            for r in results
+            if isinstance(r, dict) and r.get("sku")
+        ]
         with db_session() as db:
             findings = load_recent_findings(db, limit=50)
+            # Inventory position must come from the canonical multi-location
+            # inventory ledger when it has rows. Product-card stock is only a
+            # compatibility snapshot and can lag receipts, reservations and ATP.
+            from src.app.platform.tenant_context import current_tenant_id
+            from src.app.services.commerce_catalog import batch_available
+
+            authoritative_stock = batch_available(
+                db,
+                result_skus,
+                tenant_id=str(current_tenant_id() or "default"),
+            )
         demand_trend, conf = classify_demand_trend(findings)
-        inv_by_sku = {str(r.get("sku")): _inventory_position(r, overstock_units=overstock)
-                      for r in results if isinstance(r, dict) and r.get("sku")}
+        inv_by_sku = {}
+        for row in results:
+            if not isinstance(row, dict) or not row.get("sku"):
+                continue
+            sku = str(row.get("sku"))
+            policy_row = dict(row)
+            if sku in authoritative_stock:
+                policy_row["stock"] = authoritative_stock[sku]
+            inv_by_sku[sku] = _inventory_position(
+                policy_row, overstock_units=overstock,
+            )
         actionable = {s: b for s, b in promotion_biases(demand_trend, inv_by_sku).items()
                       if b in ("boost", "suppress")}
         if not actionable:

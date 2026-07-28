@@ -615,6 +615,72 @@ def _run_guard(*, query: str, uid: str, image_labels: Optional[str],
         return {"verdict": "review", "severity": "medium", "reasons": ["guard_error"]}
 
 
+def _run_v2_intelligence_stage(
+    *, payload: Dict[str, Any], core: Any, envelope: Any, redis: Any
+) -> Dict[str, Any]:
+    """Apply the shared governed intelligence stage to a V2-served slate.
+
+    This stage used to be reachable only from the legacy ``suggest()`` body, which
+    made market findings, bounded ranking adaptations, and attribution disappear
+    at the compatibility router after the V2 cutover. Keep the stage independent
+    of either router and run it before trace finalization/session writeback.
+    """
+    results = list(payload.get("results") or payload.get("products") or [])
+    if not results:
+        return payload
+    try:
+        import hashlib
+
+        from src.app.config import get_settings, load_feature_flags
+        from src.app.services.memory import Memory
+        from src.app.services.recommend_intelligence_stage import (
+            IntelligenceStageState,
+            run_intelligence_stage,
+        )
+
+        flags = load_feature_flags(get_settings().feature_flags_path)
+        uid_hash = hashlib.sha256(str(envelope.uid or "").encode("utf-8")).hexdigest()
+        constraints = dict(payload.get("constraints_used") or {})
+        proposal = dict(payload.get("proposal") or {})
+        results = run_intelligence_stage(
+            IntelligenceStageState(
+                results=results,
+                payload=payload,
+                flags=flags,
+                simulate=False,
+                uid=envelope.uid,
+                uid_hash=uid_hash,
+                query=envelope.query,
+                constraints=constraints,
+                kv=dict(envelope.session or {}),
+                proposal=proposal,
+                trace_id=envelope.trace_id,
+                decision_id=getattr(core, "decision_id", None),
+            ),
+            mem=Memory(redis),
+        )
+        payload["results"] = results
+        payload["products"] = results
+
+        # Postflight persists the shown shortlist. Keep CoreResponse ordering in
+        # lockstep with the governed nudge so memory never records a pre-nudge slate.
+        by_sku = {
+            str(card.sku): card
+            for card in list(getattr(core, "products", []) or [])
+            if getattr(card, "sku", None)
+        }
+        reordered = [
+            by_sku[str(row.get("sku"))]
+            for row in results
+            if isinstance(row, dict) and str(row.get("sku")) in by_sku
+        ]
+        if len(reordered) == len(by_sku):
+            core.products = reordered
+    except Exception as exc:
+        logger.warning("V2 intelligence stage failed (non-fatal): %s", repr(exc)[:160])
+    return payload
+
+
 def dispatch_recommendation_core_typed(
     db, redis, *, query: str, uid: str, tenant_id: Optional[str],
     budget_min: Optional[float], budget_max: Optional[float], trace_id: str,
@@ -912,7 +978,11 @@ def dispatch_recommendation_core_typed(
         # persistence) must SUCCEED before any session mutation. If it raises, the outer except
         # returns None → legacy serves, and session state was NOT yet written by V2 — no
         # split-brain where V2 mutated session but legacy answered.
-        payload = with_trace(to_legacy(core), trace_id)
+        payload = to_legacy(core)
+        payload = _run_v2_intelligence_stage(
+            payload=payload, core=core, envelope=envelope, redis=redis,
+        )
+        payload = with_trace(payload, trace_id)
         try:
             from src.app.services.recommendation_postflight import run_postflight
             run_postflight(redis, envelope, core, latency_ms=_latency_ms)

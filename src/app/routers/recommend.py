@@ -1602,63 +1602,9 @@ def _auto_create_incident_for_review(
         )
 
 
-def _normalize_product_type_label(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return ""
-    aliases = {
-        "notebook": "laptop",
-        "ultrabook": "laptop",
-        "macbook": "laptop",
-        "chromebook": "laptop",
-        "pc": "desktop",
-        "mobile": "phone",
-        "smartphone": "phone",
-    }
-    normalized = aliases.get(raw, raw)
-    # Guard categories known to route into generic templates.
-    if normalized in {"unknown", "other", "fruit", "document"}:
-        return ""
-    return normalized
-
-
-def _resolve_nqe_product_category(
-    *,
-    query: str | None,
-    constraints: Dict[str, Any] | None,
-    identity_constraints: Dict[str, Any] | None,
-    identity_result: Dict[str, Any] | None,
-) -> str:
-    c = constraints if isinstance(constraints, dict) else {}
-    ic = identity_constraints if isinstance(identity_constraints, dict) else {}
-    ir = identity_result if isinstance(identity_result, dict) else {}
-    for candidate in (
-        c.get("product_type"),
-        ic.get("identity_product_type"),
-        ir.get("product_type"),
-    ):
-        pt = _normalize_product_type_label(candidate)
-        if pt:
-            return pt
-    # Prefer an explicit product noun over broad entity aliases.  For example,
-    # "laptops, no Apple" is a laptop query; an entity taxonomy may otherwise
-    # interpret Apple as fresh produce and contaminate NQE/RAG evidence.
-    try:
-        from src.app.services.query_classifier import coarse_product_category
-        explicit_category = _normalize_product_type_label(coarse_product_category(query))
-        if explicit_category:
-            return explicit_category
-    except Exception:
-        pass
-    # Use the category router for automatic detection from query text
-    try:
-        from src.app.services.category_router import detect_category, detect_entities
-        detected = detect_category(query=query, constraints=constraints)
-        if detected and detected != "general":
-            return detected
-    except Exception:
-        pass
-    return "laptop" if "laptop" in str(query or "").lower() else "general"
+from src.app.services.recommend_nqe_stage import (
+    resolve_nqe_product_category as _resolve_nqe_product_category,
+)
 
 
 _SUPPORTED_PRODUCT_TERMS = {

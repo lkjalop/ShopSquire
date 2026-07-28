@@ -7,6 +7,7 @@ math itself is covered by the unit tests.
 """
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -16,8 +17,6 @@ from sqlalchemy import text
 from src.app.main import app
 from src.app.models.db import db_session
 from src.app.services import experiments as ex
-from src.app.services.recommendations import RecommendationService
-from tests.test_recommend import _write_flags
 from tests.utils import default_headers
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
@@ -27,29 +26,21 @@ client = TestClient(app, headers=default_headers())
 @pytest.fixture()
 def nudge_stack(monkeypatch):
     monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
-    orig = RecommendationService.retrieve_candidates
-    RecommendationService.retrieve_candidates = lambda self, q, limit=10: [{
-        "id": "RNW-1",
-        "sku": "RNW-1",
-        "name": "RN Laptop",
-        "price": 1199.0,
-        "price_cents": 119900,
-        "currency": "USD",
-        "specs": {},
-        "stock": 5,
-        "active": True,
-        "score": 0.5,
-    }]
+    # This suite characterizes ranking authorization, not account metering.
+    # Developer .env files may deliberately enable durable token budgets, so
+    # own the boundary here rather than inheriting prior local Redis usage.
+    monkeypatch.setenv("TOKEN_BUDGET_ENABLED", "false")
     orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
-    _write_flags({
-        "USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 100,
-        "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
-        "KILL_SWITCH": False, "DEGRADATION": {"enabled": True},
-        "HIPPOGRAPH_FEEDBACK_ENABLED": True,        # needed so recall_ids exist
-        "RANKING_NUDGE_EXPERIMENT_ENABLED": True,
-        "RANKING_NUDGE_EXPERIMENT_ID": "ranking_nudge_v1",
-        "RANKING_NUDGE_CANARY_FRACTION": 1.0,       # 100% canary so the forced assign_variant applies
-    })
+    with open(_FLAGS_PATH, "w", encoding="utf-8") as flags_file:
+        json.dump({
+            "USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False, "DEGRADATION": {"enabled": True},
+            "HIPPOGRAPH_FEEDBACK_ENABLED": True,
+            "RANKING_NUDGE_EXPERIMENT_ENABLED": True,
+            "RANKING_NUDGE_EXPERIMENT_ID": "ranking_nudge_v1",
+            "RANKING_NUDGE_CANARY_FRACTION": 1.0,
+        }, flags_file)
     with db_session() as db:
         db.execute(text("INSERT OR REPLACE INTO products (id,sku,name,price_cents,currency,specs,active) "
                         "VALUES ('RNW-1','RNW-1','RN Laptop',119900,'USD','{}',1)"))
@@ -57,11 +48,17 @@ def nudge_stack(monkeypatch):
                         "VALUES ('inv-rnw1','RNW-1',5,'default')"))
         ex.create_experiment(db, name="ranking_nudge_v1", target_metric="conversion", status="live")
         db.commit()
-    # recall surfaces RNW-1 (a real result) → it's eligible to be boosted
-    monkeypatch.setattr("src.app.services.hippograph_feedback.build_hippograph_insights",
-                        lambda *a, **k: [{"id": "RNW-1", "kind": "product", "label": "RN", "score": 9.0, "reward_weight": 5.0}])
+    # Recall the first V2-served SKU; the compatibility route no longer uses
+    # RecommendationService, so characterize the implementation that serves it.
+    monkeypatch.setattr(
+        "src.app.services.hippograph_feedback.build_hippograph_insights",
+        lambda *a, **k: [{
+            "id": str((k.get("seed_skus") or [""])[0]),
+            "kind": "product", "label": "V2 candidate",
+            "score": 9.0, "reward_weight": 5.0,
+        }],
+    )
     yield monkeypatch
-    RecommendationService.retrieve_candidates = orig
     if orig_flags is not None:
         with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
             f.write(orig_flags)
@@ -85,7 +82,7 @@ def test_treatment_user_is_nudged(nudge_stack):
     body = _suggest("rnw-treat")
     exp = body.get("ranking_experiment")
     assert exp and exp["variant"] == "treatment" and exp["live"] is True
-    assert exp["nudged"] >= 1  # the recalled product was boosted
+    assert exp["nudged"] >= 1, body  # the recalled product was boosted
 
 
 def test_control_user_is_untouched(nudge_stack):
