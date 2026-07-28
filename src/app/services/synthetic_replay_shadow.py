@@ -8,8 +8,15 @@ from src.app.services.inventory_intelligence import (
     InventoryHistory,
     calculate_inventory_intelligence,
 )
+from src.app.services.forecast_intelligence import (
+    compare_forecast_models,
+    prediction_interval_coverage_report,
+)
 from src.app.services.procurement_decision_context import calculate_replenishment
 from src.app.services.supplier_intelligence import supplier_shadow_score
+from src.app.services.synthetic_policy_counterfactual import (
+    compare_inventory_policies,
+)
 
 
 def evaluate_shadow_decisions(replay: dict[str, Any]) -> dict[str, Any]:
@@ -64,6 +71,25 @@ def evaluate_shadow_decisions(replay: dict[str, Any]) -> dict[str, Any]:
     })
     replenishment["execution_allowed"] = False
     replenishment["authority"] = "shadow_only"
+    lead_time_mean = (
+        statistics.fmean(lead_times)
+        if lead_times
+        else float(profile["lead_time_mean_days"])
+    )
+    forecast = compare_forecast_models(
+        demand,
+        lead_time_days=lead_time_mean,
+    )
+    interval_coverage = prediction_interval_coverage_report(forecast)
+    policy_counterfactual = compare_inventory_policies(
+        replay,
+        candidate_reorder_point=float(replenishment["reorder_point_units"]),
+        candidate_reorder_quantity=max(
+            int(profile["reorder_quantity"]),
+            int(replenishment["suggested_order_units"]),
+        ),
+        candidate_label="replenishment_formula_policy",
+    )
 
     supplier_id = next(
         (
@@ -138,6 +164,9 @@ def evaluate_shadow_decisions(replay: dict[str, Any]) -> dict[str, Any]:
         "authority": "shadow_only",
         "execution_allowed": False,
         "replenishment": replenishment,
+        "forecast_evaluation": forecast,
+        "prediction_interval_coverage": interval_coverage,
+        "policy_counterfactual": policy_counterfactual,
         "supplier_score": supplier,
         "inventory": inventory,
     }

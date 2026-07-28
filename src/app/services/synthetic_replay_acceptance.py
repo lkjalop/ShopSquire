@@ -6,7 +6,13 @@ import statistics
 from typing import Any
 
 from src.app.services.authoritative_business_feed import business_observation_id
-from src.app.services.forecast_intelligence import compare_forecast_models
+from src.app.services.forecast_intelligence import (
+    compare_forecast_models,
+    prediction_interval_coverage_report,
+)
+from src.app.services.synthetic_policy_counterfactual import (
+    compare_inventory_policies,
+)
 
 
 def _gate(passed: bool, *, value: Any = None, detail: str | None = None) -> dict[str, Any]:
@@ -131,31 +137,23 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
         "observed" if forecast.get("selected_model")
         else "undefined"
     )
-    horizon = max(1, int(round(float(profile["lead_time_mean_days"]))))
-    windows = [
-        sum(latent[index:index + horizon])
-        for index in range(len(latent) - horizon + 1)
-    ]
-    split = max(1, int(len(windows) * 0.7))
-    train, evaluation = sorted(windows[:split]), windows[split:]
-    if train and evaluation:
-        p90 = train[max(0, math.ceil(0.9 * len(train)) - 1)]
-        coverage = sum(value <= p90 for value in evaluation) / len(evaluation)
-        interval = {
-            "status": "observed",
-            "nominal": 0.9,
-            "empirical": round(coverage, 4),
-            "observations": len(evaluation),
-            "bound_units": p90,
-        }
+    selected_model = forecast.get("selected_model")
+    interval = prediction_interval_coverage_report(forecast)
+    selected_interval = interval["selected"]
+    selected_forecast = (forecast.get("models") or {}).get(selected_model) or {}
+    if selected_interval.get("status") == "observed":
+        candidate_reorder_point = (
+            float(selected_forecast.get("horizon_units") or 0.0)
+            + float(selected_interval.get("calibration_error_units") or 0.0)
+        )
     else:
-        interval = {
-            "status": "undefined",
-            "nominal": 0.9,
-            "empirical": None,
-            "observations": len(evaluation),
-            "bound_units": None,
-        }
+        candidate_reorder_point = None
+    policy_counterfactual = compare_inventory_policies(
+        replay,
+        candidate_reorder_point=candidate_reorder_point,
+        candidate_reorder_quantity=int(profile["reorder_quantity"]),
+        candidate_label="selected_model_p90_reorder_point",
+    )
     total_latent = sum(latent)
     total_observed = sum(observed)
     average_on_hand = statistics.fmean(
@@ -187,7 +185,11 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
             for row in history
         )),
     }
-    warning = forecast_status == "undefined" or interval["status"] == "undefined"
+    warning = (
+        forecast_status == "undefined"
+        or interval["status"] != "observed"
+        or policy_counterfactual["status"] != "observed"
+    )
     return {
         "scenario_id": replay["manifest"]["scenario_id"],
         "authority": "simulation_only",
@@ -221,6 +223,7 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
         },
         "prediction_interval_coverage": interval,
         "business_utility": {
+            "status": "observed" if total_latent else "undefined_zero_demand",
             "fill_rate": round(total_observed / total_latent, 4)
             if total_latent else None,
             "stockout_units": total_latent - total_observed,
@@ -228,6 +231,7 @@ def build_acceptance_report(replay: dict[str, Any]) -> dict[str, Any]:
             "average_on_hand_units": round(average_on_hand, 4),
             "purchase_spend_minor": purchase_spend,
         },
+        "policy_counterfactual": policy_counterfactual,
         "overall_status": (
             "failed"
             if any(row["status"] == "failed" for row in structural.values())

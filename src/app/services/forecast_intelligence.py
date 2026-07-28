@@ -23,6 +23,35 @@ from src.app.services.demand_forecast import (
 COMPUTATION_VERSION = "forecast_intelligence_v1"
 
 
+def prediction_interval_coverage_report(
+    forecast: dict[str, Any],
+) -> dict[str, Any]:
+    """Project model-specific interval evidence without filling missing facts."""
+    selected_model = forecast.get("selected_model")
+    by_model = {
+        name: dict(row.get("prediction_interval") or {
+            "status": "undefined_insufficient_calibration",
+            "nominal_coverage": 0.9,
+            "empirical_coverage": None,
+        })
+        for name, row in (forecast.get("models") or {}).items()
+    }
+    selected = dict(
+        by_model.get(selected_model)
+        or {
+            "status": "undefined_no_selected_model",
+            "nominal_coverage": 0.9,
+            "empirical_coverage": None,
+        }
+    )
+    return {
+        "status": selected["status"],
+        "selected_model": selected_model,
+        "selected": selected,
+        "by_model": by_model,
+    }
+
+
 def _daily_series(rows: list[Any], *, lookback_days: int, as_of: date) -> tuple[list[float], list[str]]:
     start = as_of - timedelta(days=max(1, int(lookback_days)) - 1)
     by_day: dict[str, float] = {}
@@ -122,6 +151,11 @@ def compare_forecast_models(
             "bias": metrics.get("bias"),
             "origins": metrics.get("origins", 0),
             "evaluation_horizon_days": horizon_days,
+            "prediction_interval": metrics.get("prediction_interval", {
+                "status": "undefined_insufficient_calibration",
+                "nominal_coverage": 0.9,
+                "empirical_coverage": None,
+            }),
         }
     selected = evaluation.get("winner")
     if selected not in model_rows:
@@ -157,6 +191,14 @@ def compare_forecast_models(
             "horizon_days": evaluation.get("horizon_days", horizon_days),
             "status": evaluation.get("status", "undefined"),
         },
+        "selected_prediction_interval": evaluation.get(
+            "selected_prediction_interval",
+            {
+                "status": "undefined_no_selected_model",
+                "nominal_coverage": 0.9,
+                "empirical_coverage": None,
+            },
+        ),
         "demand_distribution": {
             "kind": "empirical_daily",
             "mean_daily": round(demand_mean, 6) if demand_mean is not None else None,

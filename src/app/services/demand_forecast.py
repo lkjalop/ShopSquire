@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import logging
+import statistics
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -12,6 +13,81 @@ from sqlalchemy import text
 from src.app.models.db import db_session
 
 logger = logging.getLogger(__name__)
+
+
+def _undefined_prediction_interval(
+    status: str,
+    *,
+    nominal: float = 0.9,
+    origins: int = 0,
+) -> Dict[str, Any]:
+    return {
+        "status": status,
+        "method": "split_conformal_absolute_residual",
+        "nominal_coverage": nominal,
+        "empirical_coverage": None,
+        "calibration_origins": 0,
+        "evaluation_origins": 0,
+        "calibration_error_units": None,
+        "mean_interval_width_units": None,
+        "origins": origins,
+    }
+
+
+def _calibrate_prediction_interval(
+    rows: list[tuple[float, float, float]],
+    *,
+    nominal: float = 0.9,
+) -> Dict[str, Any]:
+    """Calibrate a model-specific split-conformal interval.
+
+    The first origins calibrate an absolute-residual radius and the remaining
+    origins measure coverage. This is an evaluation artifact only: it does not
+    grant execution authority or assert coverage on live data.
+    """
+    minimum_calibration = 5
+    minimum_evaluation = 3
+    if len(rows) < minimum_calibration + minimum_evaluation:
+        return _undefined_prediction_interval(
+            "undefined_insufficient_calibration",
+            nominal=nominal,
+            origins=len(rows),
+        )
+    calibration_count = max(minimum_calibration, int(len(rows) * 0.6))
+    calibration_count = min(
+        calibration_count,
+        len(rows) - minimum_evaluation,
+    )
+    calibration = rows[:calibration_count]
+    evaluation = rows[calibration_count:]
+    residuals = sorted(
+        abs(actual - prediction)
+        for actual, prediction, _error in calibration
+    )
+    # Finite-sample conformal quantile: ceil((n + 1) * nominal), capped at n.
+    rank = min(
+        len(residuals),
+        max(1, math.ceil((len(residuals) + 1) * nominal)),
+    )
+    radius = float(residuals[rank - 1])
+    covered = 0
+    widths: list[float] = []
+    for actual, prediction, _error in evaluation:
+        lower = max(0.0, prediction - radius)
+        upper = prediction + radius
+        covered += int(lower <= actual <= upper)
+        widths.append(upper - lower)
+    return {
+        "status": "observed",
+        "method": "split_conformal_absolute_residual",
+        "nominal_coverage": nominal,
+        "empirical_coverage": round(covered / len(evaluation), 6),
+        "calibration_origins": len(calibration),
+        "evaluation_origins": len(evaluation),
+        "calibration_error_units": round(radius, 6),
+        "mean_interval_width_units": round(statistics.fmean(widths), 6),
+        "origins": len(rows),
+    }
 
 
 def rolling_origin_evaluation(
@@ -35,6 +111,9 @@ def rolling_origin_evaluation(
             "winner": None,
             "kind": "rolling_origin_lead_time_demand",
             "horizon_days": horizon,
+            "selected_prediction_interval": _undefined_prediction_interval(
+                "undefined_no_selected_model"
+            ),
         }
     errors: Dict[str, list[tuple[float, float, float]]] = {
         "zero": [],
@@ -87,6 +166,7 @@ def rolling_origin_evaluation(
             "mase": round((absolute / len(rows)) / mase_scale, 6) if mase_scale > 0 else None,
             "mase_status": "available" if mase_scale > 0 else "undefined_zero_scale",
             "bias": round(signed / actual_total, 6) if actual_total > 0 else None,
+            "prediction_interval": _calibrate_prediction_interval(rows),
         }
     candidates = [
         (metrics["wape"], name)
@@ -94,6 +174,11 @@ def rolling_origin_evaluation(
         if metrics["wape"] is not None
     ]
     winner = min(candidates)[1] if candidates else None
+    selected_interval = (
+        dict(models[winner]["prediction_interval"])
+        if winner
+        else _undefined_prediction_interval("undefined_no_selected_model")
+    )
     return {
         "status": "observed" if winner else "undefined",
         "history_points": len(clean),
@@ -102,6 +187,7 @@ def rolling_origin_evaluation(
         "winner": winner,
         "kind": "rolling_origin_lead_time_demand",
         "horizon_days": horizon,
+        "selected_prediction_interval": selected_interval,
         "authority": "shadow_evaluation_only",
     }
 

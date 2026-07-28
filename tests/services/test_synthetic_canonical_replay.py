@@ -99,9 +99,22 @@ def test_acceptance_report_exposes_structural_statistical_and_utility_gates():
         "passed", "observed", "undefined",
     }
     assert report["prediction_interval_coverage"]["status"] in {
-        "observed", "undefined",
+        "observed", "undefined_insufficient_calibration",
     }
+    coverage = report["prediction_interval_coverage"]
+    assert coverage["selected_model"] == report["forecast_discrimination"]["selected_model"]
+    assert set(coverage["by_model"]) >= {
+        "seasonal_naive", "ewma", "croston_sba", "tsb",
+    }
+    assert coverage["selected"] == coverage["by_model"][coverage["selected_model"]]
     assert report["business_utility"]["fill_rate"] is not None
+    counterfactual = report["policy_counterfactual"]
+    assert counterfactual["status"] == "observed"
+    assert counterfactual["authority"] == "simulation_only"
+    assert counterfactual["causal_claim_allowed"] is False
+    assert 0.0 <= counterfactual["baseline"]["bounded_utility"] <= 1.0
+    assert 0.0 <= counterfactual["candidate"]["bounded_utility"] <= 1.0
+    assert -1.0 <= counterfactual["delta"]["bounded_utility"] <= 1.0
     assert report["overall_status"] in {"passed", "passed_with_warnings"}
 
 
@@ -120,3 +133,11 @@ def test_shadow_decisions_never_gain_execution_authority():
     assert result["inventory"]["stale_price_proposal"] is None or (
         result["inventory"]["stale_price_proposal"]["execution_allowed"] is False
     )
+    assert result["policy_counterfactual"]["authority"] == "simulation_only"
+    assert result["policy_counterfactual"]["execution_allowed"] is False
+    assert result["policy_counterfactual"]["candidate"]["policy"]["reorder_point_units"] == (
+        result["replenishment"]["reorder_point_units"]
+    )
+    coverage = result["prediction_interval_coverage"]
+    assert coverage["selected_model"] == result["forecast_evaluation"]["selected_model"]
+    assert coverage["selected"] == coverage["by_model"][coverage["selected_model"]]
