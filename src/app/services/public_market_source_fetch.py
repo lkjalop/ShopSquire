@@ -64,7 +64,9 @@ def _default_transport(
 
     with httpx.Client(
         timeout=httpx.Timeout(timeout),
-        follow_redirects=True,
+        # Registry validation covers the configured origin. Redirects are not
+        # followed because they could escape that allowlisted host.
+        follow_redirects=False,
         headers={"User-Agent": "ShopSquire-market-intelligence/1.0", **headers},
     ) as client:
         response = client.get(url, params=params)
