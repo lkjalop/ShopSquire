@@ -1,0 +1,62 @@
+name: Service tests sharded
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: service-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  services:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      APP_ENV: testing
+      PYTEST_SERVICE_SHARD_TOTAL: "8"
+      PYTEST_SERVICE_SHARD_INDEX: ${{ matrix.shard }}
+      PYTEST_PER_TEST_TIMEOUT_SEC: "120"
+      PYTEST_PROGRESS_LOG: "1"
+      PYTEST_FAIL_ON_THREAD_LEAK: "1"
+      PYTEST_LAST_RUNNING_FILE: test-results/last-running-${{ matrix.shard }}.txt
+      DATABASE_URL: sqlite+pysqlite:///${{ github.workspace }}/tmp/services-${{ matrix.shard }}.sqlite
+      DATABASE_URL_RO: sqlite+pysqlite:///${{ github.workspace }}/tmp/services-${{ matrix.shard }}.sqlite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install declared backend toolchain
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-timeout "ruff>=0.3,<0.4"
+      - name: Prepare isolated shard
+        run: mkdir -p tmp test-results
+      - name: Run service shard with hard boundaries
+        run: |
+          timeout --signal=TERM --kill-after=30s 1200s \
+            pytest -vv --run-slow --timeout=120 --timeout-method=thread \
+              --junitxml=test-results/services-${{ matrix.shard }}.xml \
+              tests/services
+      - name: Static checks for changed service boundary
+        if: matrix.shard == 0
+        run: |
+          ruff check src/app/services src/app/erp tests/services
+      - name: Upload diagnostics and duration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-shard-${{ matrix.shard }}
+          path: |
+            test-results/**
+            tmp/*.sqlite*
+          retention-days: 14

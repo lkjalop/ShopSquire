@@ -2,9 +2,11 @@ import os
 import sys
 import asyncio
 import faulthandler
+import hashlib
 import tempfile
 import uuid
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,17 @@ import pytest
 # integration tests are ~10-20s each), so it never trips legitimate work; set
 # to 0 to disable.
 _PER_TEST_TIMEOUT_SEC = float(os.environ.get("PYTEST_PER_TEST_TIMEOUT_SEC", "180") or 0)
+_REPORT_TEST_PROGRESS = os.environ.get("PYTEST_PROGRESS_LOG", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+_LAST_RUNNING_PATH = Path(
+    os.environ.get("PYTEST_LAST_RUNNING_FILE", ".pytest-last-running")
+)
+_TEST_STARTED_AT: dict[str, float] = {}
+_SESSION_BASELINE_THREAD_IDS: set[int] = set()
 
 
 def _hang_backstop_fire(test_id: str) -> None:
@@ -46,6 +59,28 @@ def pytest_runtest_call(item):
     finally:
         if timer is not None:
             timer.cancel()
+
+
+def pytest_runtest_logstart(nodeid, location):  # noqa: ARG001
+    """Expose the exact test running when a shard stalls."""
+    _TEST_STARTED_AT[nodeid] = time.monotonic()
+    try:
+        _LAST_RUNNING_PATH.write_text(nodeid + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    if _REPORT_TEST_PROGRESS:
+        out = sys.__stderr__ or sys.stderr
+        out.write(f"\n[RUNNING] {nodeid}\n")
+        out.flush()
+
+
+def pytest_runtest_logfinish(nodeid, location):  # noqa: ARG001
+    started = _TEST_STARTED_AT.pop(nodeid, None)
+    if started is None or not _REPORT_TEST_PROGRESS:
+        return
+    out = sys.__stderr__ or sys.stderr
+    out.write(f"[FINISHED {time.monotonic() - started:.2f}s] {nodeid}\n")
+    out.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +291,12 @@ asyncio.run = _safe_asyncio_run
 
 
 def pytest_sessionstart(session):
+    global _SESSION_BASELINE_THREAD_IDS
+    _SESSION_BASELINE_THREAD_IDS = {
+        thread.ident
+        for thread in threading.enumerate()
+        if thread.ident is not None
+    }
     # Isolate test DB for this session so stateful API tests don't collide.
     db_file = os.path.join(tempfile.gettempdir(), f"shopsquire_test_{uuid.uuid4().hex}.sqlite")
     session_db_url = f"sqlite+pysqlite:///{db_file}"
@@ -342,6 +383,59 @@ def pytest_sessionstart(session):
             _ensure_minimal_sqlite_tables(_session_eng)
         except Exception:
             pass
+        # Connector reliability tables are migration-owned in production.
+        # The session-scoped ephemeral SQLite database intentionally does not
+        # run the historical Alembic chain, so mirror the current migration
+        # contract here rather than letting connector services create schema.
+        try:
+            from sqlalchemy import text as _sql_text  # noqa: PLC0415
+            with _session_eng.begin() as _connection:
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS erp_sync_state (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        provider TEXT NOT NULL,
+                        subscription_id TEXT NOT NULL DEFAULT 'default',
+                        entity_type TEXT NOT NULL,
+                        cursor_value TEXT,
+                        cursor_version INTEGER NOT NULL DEFAULT 0,
+                        checkpoint_json TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    )
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_erp_sync_state_scope
+                    ON erp_sync_state
+                    (tenant_id, provider, subscription_id, entity_type)
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS erp_outbound_queue (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        provider TEXT NOT NULL,
+                        entity_type TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        max_attempts INTEGER NOT NULL DEFAULT 3,
+                        last_error TEXT,
+                        next_attempt_at TIMESTAMP,
+                        claimed_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    )
+                """))
+                for _column_ddl in (
+                    "ALTER TABLE inventory_sync_runs ADD COLUMN heartbeat_at TIMESTAMP",
+                    "ALTER TABLE inventory_sync_runs ADD COLUMN budget_deadline_at TIMESTAMP",
+                    "ALTER TABLE inventory_sync_runs ADD COLUMN outcome_type TEXT",
+                ):
+                    try:
+                        _connection.execute(_sql_text(_column_ddl))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         try:
             from src.app.models.orm import Base  # noqa: PLC0415
             Base.metadata.create_all(_session_eng)
@@ -401,6 +495,32 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
     # 2 — release all singleton app references so GC can reclaim memory
     with _SINGLETONS_LOCK:
         _SINGLETONS.clear()
+
+    try:
+        _LAST_RUNNING_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    leaked_threads = [
+        thread
+        for thread in threading.enumerate()
+        if thread.ident is not None
+        and thread.ident not in _SESSION_BASELINE_THREAD_IDS
+        and thread.is_alive()
+        and not thread.daemon
+    ]
+    if leaked_threads:
+        out = sys.__stderr__ or sys.stderr
+        names = ", ".join(f"{thread.name}({thread.ident})" for thread in leaked_threads)
+        out.write(f"\n[RESOURCE-LEAK] non-daemon threads still alive: {names}\n")
+        out.flush()
+        if os.environ.get("PYTEST_FAIL_ON_THREAD_LEAK", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 @pytest.fixture(autouse=True)
@@ -603,9 +723,31 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
-    if config.getoption("--run-slow", default=False):
-        return  # run everything
-    skip_slow = pytest.mark.skip(reason="slow test — pass --run-slow to enable")
+    if not config.getoption("--run-slow", default=False):
+        skip_slow = pytest.mark.skip(reason="slow test — pass --run-slow to enable")
+        for item in items:
+            if item.get_closest_marker("slow"):
+                item.add_marker(skip_slow)
+
+    shard_total = int(os.environ.get("PYTEST_SERVICE_SHARD_TOTAL", "1") or 1)
+    shard_index = int(os.environ.get("PYTEST_SERVICE_SHARD_INDEX", "0") or 0)
+    if shard_total <= 1:
+        return
+    if shard_index < 0 or shard_index >= shard_total:
+        raise pytest.UsageError(
+            f"PYTEST_SERVICE_SHARD_INDEX={shard_index} must be in [0, {shard_total})"
+        )
+
+    selected = []
+    deselected = []
     for item in items:
-        if item.get_closest_marker("slow"):
-            item.add_marker(skip_slow)
+        normalized_path = str(item.path).replace("\\", "/")
+        if "/tests/services/" not in f"/{normalized_path}":
+            selected.append(item)
+            continue
+        digest = hashlib.sha256(item.nodeid.encode("utf-8")).digest()
+        bucket = int.from_bytes(digest[:8], "big") % shard_total
+        (selected if bucket == shard_index else deselected).append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = selected
