@@ -68,6 +68,33 @@ def test_concurrent_duplicate_waits_for_the_same_producer():
     assert calls["n"] == 1
 
 
+def test_duplicate_returns_retryable_in_progress_after_bounded_wait():
+    r = _FakeRedis()
+    r.store["chat:idem:slow:lock"] = "existing-owner"
+    calls = {"n": 0}
+
+    async def producer():
+        calls["n"] += 1
+        return {"answer": "must-not-run"}
+
+    async def go():
+        started = asyncio.get_running_loop().time()
+        result = await _idem_single_flight(
+            r,
+            "chat:idem:slow",
+            producer,
+            wait_timeout_seconds=0.05,
+        )
+        return result, asyncio.get_running_loop().time() - started
+
+    result, elapsed = asyncio.run(go())
+    assert result["status"] == "in_progress"
+    assert result["retryable"] is True
+    assert elapsed < 0.5
+    assert calls["n"] == 0
+    assert r.store["chat:idem:slow:lock"] == "existing-owner"
+
+
 def test_stale_producer_cannot_release_successors_lease():
     """R10.3 (review-8 #8): a SLOW producer whose lease expired must not delete the SUCCESSOR's
     lock on exit — release is compare-and-delete on the ownership token, so only the current

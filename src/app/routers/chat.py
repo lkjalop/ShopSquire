@@ -43,6 +43,40 @@ _CHAT_REPLAY_LOCAL: Dict[str, float] = {}
 _CHAT_REPLAY_LOCK = RLock()
 
 
+def _request_tenant_id(request: Request | None) -> str:
+    """Return the tenant already authorized by the authentication dependency."""
+    identity = (
+        getattr(getattr(request, "state", None), "operator_identity", None)
+        if request is not None else None
+    )
+    tenant_id = str(getattr(identity, "tenant_id", "") or "").strip()
+    if tenant_id:
+        return tenant_id
+    from src.app.platform.tenant_context import current_tenant_id
+    return str(current_tenant_id() or "default")
+
+
+def _chat_in_progress(*, idempotency_key: str = "") -> Dict[str, Any]:
+    return {
+        "status": "in_progress",
+        "retryable": True,
+        "retry_after_ms": 750,
+        "idempotency_key": str(idempotency_key or "")[:128] or None,
+        "assistant_message": (
+            "I’m still working on that request. Retrying with the same "
+            "request key will return the completed result without running it twice."
+        ),
+    }
+
+
+def _chat_request_timeout_seconds() -> float:
+    try:
+        configured = float(os.getenv("CHAT_REQUEST_TIMEOUT_SEC", "30") or 30)
+    except (TypeError, ValueError):
+        configured = 30.0
+    return max(0.1, min(configured, 120.0))
+
+
 def _resolve_uid(payload: Dict[str, Any] | None, request: Request | None = None) -> str:
     raw = str((payload or {}).get("uid") or "").strip()
     if raw and raw.lower() != "demo-user":
@@ -193,10 +227,19 @@ def _ensure_chat_messages_table(db) -> None:
     db.commit()
 
 
-def _store_chat_message(db, *, uid: str, role: str, content: str, trace_id: str | None, session_id: str | None = None) -> None:
+def _store_chat_message(
+    db,
+    *,
+    uid: str,
+    role: str,
+    content: str,
+    trace_id: str | None,
+    session_id: str | None = None,
+) -> str | None:
     if not str(content or "").strip():
-        return
+        return None
     _ensure_chat_messages_table(db)
+    message_id = str(uuid.uuid4())
     db.execute(
         sql_text(
             """
@@ -205,7 +248,7 @@ def _store_chat_message(db, *, uid: str, role: str, content: str, trace_id: str 
             """
         ),
         {
-            "id": str(uuid.uuid4()),
+            "id": message_id,
             "uid": str(uid or "anonymous")[:128],
             "session_id": str(session_id or "")[:128] or None,
             "role": str(role or "assistant")[:32],
@@ -214,6 +257,7 @@ def _store_chat_message(db, *, uid: str, role: str, content: str, trace_id: str 
         },
     )
     db.commit()
+    return message_id
 
 
 def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
@@ -1358,7 +1402,13 @@ def _persist_chat_structured_state(
     mem.set_product_memory_bank(uid, bank)
 
 
-async def _idem_single_flight(redis, key: str, producer):
+async def _idem_single_flight(
+    redis,
+    key: str,
+    producer,
+    *,
+    wait_timeout_seconds: float = 2.0,
+):
     """SINGLE-FLIGHT over an Idempotency-Key (review-7 P0): the first request produces the result
     and caches it; a concurrent DUPLICATE — the stream-timeout → /chat/query fallback carrying the
     SAME key — WAITS for and returns that cached result instead of resolving the model a second
@@ -1384,8 +1434,13 @@ async def _idem_single_flight(redis, key: str, producer):
     except Exception:
         claimed = True   # redis unavailable → don't block; just run (degrade to today's behavior)
     if not claimed:
-        for _ in range(180):         # ~90s: match the producer lease before takeover
-            await asyncio.sleep(0.5)
+        wait_deadline = time.monotonic() + max(
+            0.0, min(float(wait_timeout_seconds or 0.0), 10.0),
+        )
+        while time.monotonic() < wait_deadline:
+            await asyncio.sleep(
+                min(0.05, max(0.0, wait_deadline - time.monotonic())),
+            )
             try:
                 cached = redis.get(result_key)
             except Exception:
@@ -1396,7 +1451,7 @@ async def _idem_single_flight(redis, key: str, producer):
                 except Exception:
                     break
         try:
-            redis.set(lock_key, token, ex=90)   # producer appears dead → take over WITH our token
+            return _chat_in_progress(idempotency_key=key.rsplit(":", 1)[-1])
         except Exception:
             pass
     try:
@@ -1437,8 +1492,7 @@ async def _call_recommend_in_process(
     def _invoke() -> Dict[str, Any]:
         from src.app.observability.metrics import record_recommendation_dispatch
 
-        tenant_id = (request.headers.get("X-Tenant-Id")
-                     or request.headers.get("x-tenant-id") or "default")
+        tenant_id = _request_tenant_id(request)
         observed_lane = str(params.get("turn_intent") or "").upper() or None
         facade = dispatch_recommendation_core_typed(
             db, redis,
@@ -1537,11 +1591,34 @@ async def chat_query(
     rather than double-resolving. No key (or no redis) → straight through."""
     idem = (request.headers.get("Idempotency-Key") or request.headers.get("idempotency-key")
             or (payload or {}).get("idempotency_key"))
-    if not idem or redis is None:
-        return await _chat_query_impl(request, payload, redis, db, role)
-    return await _idem_single_flight(
-        redis, f"chat:idem:{str(idem)[:128]}",
-        lambda: _chat_query_impl(request, payload, redis, db, role))
+
+    async def _run() -> Dict[str, Any]:
+        if not idem or redis is None:
+            return await _chat_query_impl(request, payload, redis, db, role)
+        try:
+            configured_wait = float(
+                os.getenv("CHAT_SINGLE_FLIGHT_WAIT_SEC", "2") or 2,
+            )
+        except (TypeError, ValueError):
+            configured_wait = 2.0
+        wait_budget = min(
+            max(0.05, _chat_request_timeout_seconds() - 0.1),
+            max(0.05, configured_wait),
+        )
+        return await _idem_single_flight(
+            redis,
+            f"chat:idem:{str(idem)[:128]}",
+            lambda: _chat_query_impl(request, payload, redis, db, role),
+            wait_timeout_seconds=wait_budget,
+        )
+
+    try:
+        return await asyncio.wait_for(
+            _run(),
+            timeout=_chat_request_timeout_seconds(),
+        )
+    except asyncio.TimeoutError:
+        return _chat_in_progress(idempotency_key=str(idem or ""))
 
 
 def _effective_chat_query(payload: Dict[str, Any]) -> tuple[str, bool, Any]:
@@ -1904,8 +1981,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     from src.app.services.recommendation_ingress import authorize_recommendation_ingress
     _recommend_ingress = authorize_recommendation_ingress(
         request=request, redis=redis, query=q, uid=uid,
-        tenant_id=(request.headers.get("X-Tenant-Id")
-                   or request.headers.get("x-tenant-id") if request else None),
+        tenant_id=_request_tenant_id(request),
         benign_shopping_query=False,
     )
 
@@ -2087,7 +2163,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     if bool((payload or {}).get("external_research_consent")):
         params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
-    tenant_id = (request.headers.get("X-Tenant-Id") or request.headers.get("x-tenant-id") or "default")
+    tenant_id = _request_tenant_id(request)
     pending_clarification: Dict[str, Any] = {}
     try:
         pending_clarification = Memory(redis).get_pending_clarification(uid, tenant_id=tenant_id)
@@ -3197,7 +3273,36 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 tenant_id=tenant_id,
                 ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
             )
-        _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
+        user_message_id = _store_chat_message(
+            db,
+            uid=uid,
+            role="user",
+            content=q,
+            trace_id=decision_trace_id,
+            session_id=session_id,
+        )
+        if user_message_id:
+            from src.app.deps import hash_uid
+            from src.app.services.conversation_fact_observations import (
+                record_conversation_fact_observations,
+            )
+
+            try:
+                record_conversation_fact_observations(
+                    tenant_id=tenant_id,
+                    subject_ref=hash_uid(uid),
+                    session_id=session_id,
+                    source_message_id=user_message_id,
+                    trace_id=decision_trace_id,
+                    message=q,
+                )
+            except Exception as observation_exc:
+                logger.warning(
+                    "conversation fact observation unavailable tenant=%s trace=%s: %s",
+                    tenant_id,
+                    decision_trace_id,
+                    observation_exc,
+                )
         _store_chat_message(
             db,
             uid=uid,
