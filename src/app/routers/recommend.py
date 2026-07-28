@@ -411,6 +411,10 @@ from src.app.services.recommend_utils import (  # noqa: E402
     _result_price_dollars,
     _extract_candidate_numeric_specs,
 )
+from src.app.services.recommend_constraint_filters import (  # noqa: E402
+    apply_query_plan_filters as _apply_query_plan_filters,
+    constraint_relaxation_note as _constraint_relaxation_note,
+)
 
 # Vision decision stage extracted → services/recommend_vision_stage.py (core/adapter split, P2).
 # Pure vision/brand decision primitives; re-exported so suggest() call-sites stay unchanged.
@@ -3543,95 +3547,6 @@ def _build_knowledge_answer(
         except Exception:
             pass
     return None
-
-
-_CONSTRAINT_FRIENDLY = {
-    "refresh": "refresh-rate", "ram": "RAM", "needs_dgpu": "dedicated-GPU",
-    "weight": "weight/portability", "accessory": "product-type",
-}
-
-
-def _constraint_relaxation_note(violated: list[str]) -> str:
-    """Honest, buyer-friendly 'no exact match' sentence naming the unmet constraints + the relaxation
-    offer. Agnostic phrasing (the constraint labels are generic spec dimensions)."""
-    labels = [_CONSTRAINT_FRIENDLY.get(v, v) for v in violated if v in _CONSTRAINT_FRIENDLY]
-    if labels:
-        unmet = ", ".join(labels)
-        return (f"No exact match for your {unmet} requirement — these are the closest options. "
-                f"I can relax the {unmet}, adjust the budget, or widen the search if you'd like.")
-    return ("No exact match for every requirement — these are the closest options. I can relax a "
-            "constraint, adjust the budget, or widen the search if you'd like.")
-
-
-def _apply_query_plan_filters(results: list, plan: Any) -> tuple[list, dict]:
-    """WS3.1/WS3.2 — drop accessories and hard-constraint violators.
-
-    Conservative by design: only drops on CONFIDENT violations (spec known and breaks the floor;
-    name clearly an accessory). If filtering would empty the list it returns the closest set, but
-    HONESTLY: dropped["exact_match"]=False + dropped["violated_constraints"] so the response says
-    "no exact match, here's the closest, want to relax X?" — never silently presents violators as a
-    clean match.
-    """
-    if not results or plan is None:
-        return results, {}
-    try:
-        hc = getattr(plan, "hard_constraints", {}) or {}
-        category = getattr(plan, "category", None)
-        intent = str(getattr(plan, "intent", "") or "")
-        dropped: dict = {}
-        _ACCESSORY_RE = re.compile(
-            r"\b(stand|cable|adapter|charger|dock|hub|sleeve|case|bag|mouse ?pad|"
-            r"cooling pad|screen protector|cleaning kit|warranty|insurance|webcam cover|"
-            r"keyboard|mouse|headset|backpack)\b",
-            re.I,
-        )
-        _DEVICE_CATS = {"laptop", "desktop", "phone", "tablet"}
-        is_device_query = (category in _DEVICE_CATS) or (
-            intent in ("product_search", "recommendation_multi") and category not in ("keyboard", "mouse", "headset", "storage", "gpu", "cpu")
-        )
-        rmin = hc.get("refresh_hz_min")
-        rammin = hc.get("ram_gb_min")
-        wmax = hc.get("weight_kg_max")
-        need_dgpu = bool(hc.get("must_have_dedicated_gpu"))
-        out: list = []
-        for r in results:
-            if not isinstance(r, dict):
-                out.append(r)
-                continue
-            name = str(r.get("name") or "")
-            if is_device_query and _ACCESSORY_RE.search(name):
-                dropped["accessory"] = dropped.get("accessory", 0) + 1
-                continue
-            specs = _extract_candidate_numeric_specs(r)
-            # dGPU required but candidate is a clearly-integrated, non-gaming machine
-            if need_dgpu and (specs.get("has_dedicated_gpu") is False) and (not specs.get("gaming_style")):
-                dropped["needs_dgpu"] = dropped.get("needs_dgpu", 0) + 1
-                continue
-            if rmin and specs.get("refresh_hz") is not None and float(specs["refresh_hz"]) < float(rmin):
-                dropped["refresh"] = dropped.get("refresh", 0) + 1
-                continue
-            if rammin and specs.get("ram_gb") is not None and float(specs["ram_gb"]) < float(rammin):
-                dropped["ram"] = dropped.get("ram", 0) + 1
-                continue
-            # Weight cap (portability) — only when the candidate's weight is known (defensive: no
-            # weight data → no drop, never invents a violation).
-            if wmax and specs.get("weight_kg") is not None and float(specs["weight_kg"]) > float(wmax):
-                dropped["weight"] = dropped.get("weight", 0) + 1
-                continue
-            out.append(r)
-        if not out:
-            # Filtering would empty the screen → return the closest set, but HONESTLY: flag that no
-            # exact match exists and name the constraints that eliminated everything, so the response
-            # offers relaxation instead of silently presenting violators as a clean match.
-            violated = [k for k in ("refresh", "ram", "needs_dgpu", "weight", "accessory") if dropped.get(k)]
-            dropped["reverted"] = True
-            dropped["exact_match"] = False
-            dropped["violated_constraints"] = violated
-            return results, dropped
-        dropped["exact_match"] = True
-        return out, dropped
-    except Exception:
-        return results, {}
 
 
 def _summarize_results(

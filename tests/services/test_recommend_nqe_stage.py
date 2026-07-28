@@ -84,13 +84,13 @@ def test_query_understanding_refinement_does_not_add_new_missing_fields():
     assert refine_missing_fields_with_query_understanding([], qu) == []
 
 
-def test_router_reexports_same_objects():
-    from src.app.routers import recommend as r
-
-    assert r.prioritize_domain_refinement_questions is prioritize_domain_refinement_questions
-    assert r.RecommendStageState is RecommendStageState
-    assert r.RecommendNQEHooks is RecommendNQEHooks
-    assert r.run_recommend_nqe_stage is run_recommend_nqe_stage
+def test_v2_nqe_contracts_are_owned_by_the_stage_module():
+    assert prioritize_domain_refinement_questions.__module__.endswith(
+        "recommend_nqe_stage"
+    )
+    assert RecommendStageState.__module__.endswith("recommend_nqe_stage")
+    assert RecommendNQEHooks.__module__.endswith("recommend_nqe_stage")
+    assert run_recommend_nqe_stage.__module__.endswith("recommend_nqe_stage")
 
 
 def test_persona_fallback_never_reasks_a_known_use_case():

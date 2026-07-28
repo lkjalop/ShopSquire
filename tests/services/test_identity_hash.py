@@ -37,8 +37,8 @@ def test_tenant_scope_prevents_collision(monkeypatch):
 
 
 def test_recommend_and_pricing_use_same_pseudonym():
-    # Both routes now call hash_uid -> same value for the same user (was [:12] vs [:16]).
-    import src.app.routers.recommend as rec
+    # The active feedback and pricing owners share the tenant-scoped identity hash.
+    import src.app.routers.recommendation_feedback as rec
     import src.app.routers.pricing as pr
     assert hasattr(rec, "hash_uid") and hasattr(pr, "hash_uid")
     assert rec.hash_uid("u-xyz") == pr.hash_uid("u-xyz")

@@ -7,7 +7,9 @@ couldn't filter because the extractor didn't read weight. Core stays agnostic (i
 """
 from __future__ import annotations
 
-from src.app.routers.recommend import _apply_query_plan_filters
+from src.app.services.recommend_constraint_filters import (
+    _apply_query_plan_filters,
+)
 from src.app.services.recommend_utils import _extract_candidate_numeric_specs
 
 

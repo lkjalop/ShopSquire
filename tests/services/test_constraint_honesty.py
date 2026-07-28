@@ -4,7 +4,10 @@ set but flags exact_match=False, names the violated constraints, and offers rela
 """
 from __future__ import annotations
 
-from src.app.routers.recommend import _apply_query_plan_filters, _constraint_relaxation_note
+from src.app.services.recommend_constraint_filters import (
+    _apply_query_plan_filters,
+    _constraint_relaxation_note,
+)
 
 
 class _Plan:

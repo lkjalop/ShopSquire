@@ -92,11 +92,12 @@ def test_extract_candidate_numeric_specs_empty():
     assert out["has_dedicated_gpu"] is False
 
 
-def test_router_reexports_same_objects():
-    # Foundation invariant: the router shim re-exports the identical functions (no copies).
-    from src.app.routers import recommend as r
+def test_v2_service_consumers_share_the_leaf_utilities():
+    # Service ownership, not a retired-router re-export, is the lasting boundary.
+    from src.app.services import recommend_budget_advisor as advisor
+    from src.app.services import recommend_ranking as ranking
 
-    assert r._candidate_matches_brand is _candidate_matches_brand
-    assert r._brand_display_name is _brand_display_name
-    assert r._result_price_dollars is _result_price_dollars
-    assert r._extract_candidate_numeric_specs is _extract_candidate_numeric_specs
+    assert advisor._candidate_matches_brand is _candidate_matches_brand
+    assert advisor._brand_display_name is _brand_display_name
+    assert advisor._result_price_dollars is _result_price_dollars
+    assert ranking._extract_candidate_numeric_specs is _extract_candidate_numeric_specs
