@@ -25,6 +25,7 @@ import ProcurementNotifications from './procurement/ProcurementNotifications';
 import { procurementActionMessage } from '../lib/actionError';
 import CaseJourney from './procurement/CaseJourney';
 import CaseQueue from './procurement/CaseQueue';
+import DecisionIntelligence from './procurement/DecisionIntelligence';
 import ForecastEvidence from './procurement/ForecastEvidence';
 import QuotePacket from './procurement/QuotePacket';
 import RfqFanout from './procurement/RfqFanout';
@@ -230,6 +231,7 @@ export function ProcurementCases() {
             {draftItemRef && (
               <ForecastEvidence sku={draftItemRef} leadTimeDays={forecastLeadTime} />
             )}
+            <DecisionIntelligence caseId={sel} />
 
             {/* Competitive RFQ (multi-supplier): caged draft preview per top-N supplier + quote compare. */}
             {(state === 'COMMITTED' || state === 'QUOTE_DRAFTED') && fanout.length > 0 && (

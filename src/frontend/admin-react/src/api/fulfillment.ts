@@ -88,6 +88,39 @@ export interface InventoryForecastIntelligence {
   computation_version: string;
 }
 
+export interface ProcurementDecisionIntelligence {
+  status: 'available' | 'not_materialized' | string;
+  context: null | {
+    snapshot_id: string;
+    case_version_id: string;
+    facts_hash: string;
+    source_authority: 'authoritative' | 'simulation' | string;
+    facts: Record<string, any>;
+    provenance: Record<string, any>;
+    created_by: string;
+    created_at: string;
+    immutable: boolean;
+  };
+  proposal: null | {
+    proposal_id: string;
+    status: string;
+    blocked_reasons: string[];
+    authority: 'proposal_only' | string;
+    result: Record<string, any>;
+    created_at: string;
+  };
+  comparison: null | {
+    comparison_id: string;
+    status: string;
+    authority: 'comparison_only' | string;
+    ranked: Array<Record<string, any>>;
+    recommended?: Record<string, any> | null;
+    excluded: Array<{ quote_id: string; reason: string }>;
+    can_authorize_purchase: boolean;
+    created_at: string;
+  };
+}
+
 const _fc = (id: string) => `/api/v1/fulfillment/cases/${encodeURIComponent(id)}`;
 const _fcPost = (path: string, body?: any) =>
   http<FulfillmentCaseView>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
@@ -183,6 +216,31 @@ export interface RankedQuote extends QuoteInput {
 export const fcCompareQuotes = (id: string, quotes: QuoteInput[], weights?: Record<string, number>) =>
   http<{ case_id: string; ranked: RankedQuote[]; recommended: RankedQuote | null; considered: number; excluded: number }>(
     `${_fc(id)}/compare-quotes`, { method: 'POST', body: JSON.stringify({ quotes, weights }) });
+export const fcDecisionIntelligence = (id: string) =>
+  http<ProcurementDecisionIntelligence>(`${_fc(id)}/decision-intelligence`);
+export const fcCreateDecisionContext = (id: string, facts: Record<string, any>) =>
+  http<any>(`${_fc(id)}/decision-context`, {
+    method: 'POST',
+    body: JSON.stringify({ facts }),
+  });
+export const fcCreateReplenishmentProposal = (id: string, contextSnapshotId: string) =>
+  http<any>(`${_fc(id)}/replenishment-proposal`, {
+    method: 'POST',
+    body: JSON.stringify({ context_snapshot_id: contextSnapshotId }),
+  });
+export const fcCreateLandedCostComparison = (
+  id: string,
+  body: {
+    context_snapshot_id: string;
+    target_currency: string;
+    target_uom: string;
+    quotes: Array<Record<string, any>>;
+    at_time?: string;
+  },
+) => http<any>(`${_fc(id)}/landed-cost-comparison`, {
+  method: 'POST',
+  body: JSON.stringify(body),
+});
 // RFI: HUMAN asks the resolved supplier a scoped clarification before approving the RFQ (claim-safe).
 export const fcRequestInfo = (id: string, question: string) => _fcPost(`${_fc(id)}/request-info`, { question });
 // record the supplier's RFI reply → back to the approval gate.

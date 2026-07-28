@@ -209,6 +209,18 @@ def test_compare_quotes_endpoint_ranks_and_recommends():
     assert client.post(f"{_BASE}/nope/compare-quotes", json={"quotes": quotes}).status_code == 404
 
 
+def test_decision_intelligence_route_reports_unmaterialized_evidence_explicitly():
+    cid = _open()
+    response = client.get(f"{_BASE}/{cid}/decision-intelligence")
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "status": "not_materialized",
+        "context": None,
+        "proposal": None,
+        "comparison": None,
+    }
+
+
 def test_by_trace_links_case_to_decision_trace():
     # a case opened with a trace_id is resolvable by that trace (the DecisionTrace ↔ journey link)
     r = client.post(_BASE, json={"uid": "u1", "trace_id": "T-LINK-42"})

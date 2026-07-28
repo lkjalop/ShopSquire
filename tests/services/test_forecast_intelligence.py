@@ -49,6 +49,12 @@ def test_model_comparison_has_explicit_metrics_and_lead_time_horizon():
     }
     for model in result["models"].values():
         assert {"wape", "mase", "bias", "status"} <= set(model)
+    assert result["demand_distribution"] == {
+        "kind": "empirical_daily",
+        "mean_daily": 1.0,
+        "variance_daily": 2.571429,
+        "status": "observed",
+    }
     assert result["can_increase_autonomy"] is False
 
 

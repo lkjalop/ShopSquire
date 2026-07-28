@@ -125,6 +125,8 @@ def compare_forecast_models(
     selected = evaluation.get("winner")
     if selected not in model_rows:
         selected = None
+    demand_mean = statistics.fmean(clean) if clean else None
+    demand_variance = statistics.pvariance(clean) if len(clean) >= 2 else None
     return {
         "status": evaluation.get("status", "undefined"),
         "selected_model": selected,
@@ -135,6 +137,18 @@ def compare_forecast_models(
         },
         "history_points": len(clean),
         "origins": evaluation.get("origins", 0),
+        "demand_distribution": {
+            "kind": "empirical_daily",
+            "mean_daily": round(demand_mean, 6) if demand_mean is not None else None,
+            "variance_daily": (
+                round(demand_variance, 6) if demand_variance is not None else None
+            ),
+            "status": (
+                "observed"
+                if len(clean) >= 2
+                else "insufficient_history"
+            ),
+        },
         "models": model_rows,
         "segmentation": segmentation or {
             "abc_class": "undefined",

@@ -17,13 +17,6 @@ from pydantic import BaseModel
 
 from src.app.models.db import db_session
 from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, OperatorSubject, operator_subject, require_role
-
-
-def _operator_actor(role: str, subj: "OperatorSubject") -> Actor:
-    """A HUMAN_OPERATOR actor stamped with the per-user identity when a JWT carried one, else a 'key:<role>'
-    sentinel so the audit shows 'shared key, no user'. role stays the AUTHORITY axis; user_id the AUDIT axis."""
-    uid = (getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
-    return Actor(ActorType.HUMAN_OPERATOR, role, user_id=uid)
 from src.app.services.fulfillment import draft as fdraft
 from src.app.services.fulfillment import economics as feco
 from src.app.services.fulfillment import external_comms as fec
@@ -33,6 +26,13 @@ from src.app.services.fulfillment import purchase_order as fpo
 from src.app.services.fulfillment import sandbox_supplier as fsb
 from src.app.services.fulfillment import workflow as fwf
 from src.app.services.fulfillment.domain import Actor, ActorType
+
+
+def _operator_actor(role: str, subj: "OperatorSubject") -> Actor:
+    """Resolve human authority while retaining the authenticated audit identity."""
+    uid = (getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
+    return Actor(ActorType.HUMAN_OPERATOR, role, user_id=uid)
+
 
 router = APIRouter(prefix="/api/v1/fulfillment", tags=["fulfillment"])
 
@@ -58,7 +58,6 @@ def _auto_draft_on_commit_enabled() -> bool:
     if raw is not None:
         return _truthy(raw)
     try:
-        from src.app.config import get_settings, load_feature_flags
         flags = _ff_get_flags() or {}
         return _truthy(flags.get("FULFILLMENT_AUTO_DRAFT_ON_COMMIT"))
     except Exception:
@@ -468,6 +467,111 @@ def compare_quotes_endpoint(case_id: str, body: CompareQuotesBody,
     return {"case_id": case_id, **result}
 
 
+class DecisionContextBody(BaseModel):
+    facts: Dict[str, Any]
+
+
+class ReplenishmentProposalBody(BaseModel):
+    context_snapshot_id: str
+
+
+class LandedCostComparisonBody(BaseModel):
+    context_snapshot_id: str
+    target_currency: str
+    target_uom: str
+    quotes: list[Dict[str, Any]]
+    at_time: Optional[str] = None
+
+
+def _decision_actor(role: str, subj: OperatorSubject) -> str:
+    return str(getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
+
+
+@router.post("/cases/{case_id}/decision-context")
+def create_decision_context(
+    case_id: str,
+    body: DecisionContextBody,
+    role: str = Depends(require_role(_OPERATOR)),
+    subj: OperatorSubject = Depends(operator_subject),
+) -> Dict[str, Any]:
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.procurement_decision_context import create_case_context_snapshot
+
+    try:
+        return create_case_context_snapshot(
+            tenant_id=str(current_tenant_id() or "default"),
+            case_id=case_id,
+            facts=body.facts,
+            created_by=_decision_actor(role, subj),
+        )
+    except ValueError as exc:
+        status = 404 if str(exc) == "procurement_case_not_found" else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
+@router.post("/cases/{case_id}/replenishment-proposal")
+def create_case_replenishment_proposal(
+    case_id: str,
+    body: ReplenishmentProposalBody,
+    role: str = Depends(require_role(_OPERATOR)),
+    subj: OperatorSubject = Depends(operator_subject),
+) -> Dict[str, Any]:
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.procurement_decision_context import create_replenishment_proposal
+
+    try:
+        return create_replenishment_proposal(
+            tenant_id=str(current_tenant_id() or "default"),
+            case_id=case_id,
+            context_snapshot_id=body.context_snapshot_id,
+            created_by=_decision_actor(role, subj),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/cases/{case_id}/landed-cost-comparison")
+def create_landed_cost_comparison(
+    case_id: str,
+    body: LandedCostComparisonBody,
+    role: str = Depends(require_role(_OPERATOR)),
+    subj: OperatorSubject = Depends(operator_subject),
+) -> Dict[str, Any]:
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.procurement_decision_context import compare_landed_cost_quotes
+
+    try:
+        return compare_landed_cost_quotes(
+            tenant_id=str(current_tenant_id() or "default"),
+            case_id=case_id,
+            context_snapshot_id=body.context_snapshot_id,
+            target_currency=body.target_currency,
+            target_uom=body.target_uom,
+            quotes=body.quotes,
+            created_by=_decision_actor(role, subj),
+            at_time=body.at_time,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/cases/{case_id}/decision-intelligence")
+def get_case_decision_intelligence(
+    case_id: str,
+    role: str = Depends(require_role(_OPERATOR)),
+) -> Dict[str, Any]:
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.procurement_decision_context import (
+        latest_case_decision_intelligence,
+    )
+
+    return latest_case_decision_intelligence(
+        tenant_id=str(current_tenant_id() or "default"),
+        case_id=case_id,
+    )
+
+
 @router.get("/cases/{case_id}/okf")
 def case_okf(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Export the case as an OKF (Open Knowledge Format) document — a portable, vendor-neutral
@@ -706,15 +810,17 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
         # an unreadable stock level defaults to 0 → the line sources, never silently drops).
         try:
             from src.app.services.inventory_query_service import batch_stock_levels
-            stock = batch_stock_levels([str(l.get("item_ref")) for l in resolved if l.get("item_ref")])
+            stock = batch_stock_levels(
+                [str(line.get("item_ref")) for line in resolved if line.get("item_ref")]
+            )
         except Exception:
             stock = {}
-        for l in resolved:
-            sku = str(l.get("item_ref") or "")
-            requested = int(l.get("requested_qty") or 0)
+        for line in resolved:
+            sku = str(line.get("item_ref") or "")
+            requested = int(line.get("requested_qty") or 0)
             submitted_source_qty = (
-                max(0, min(requested, int(l["source_qty"])))
-                if l.get("source_qty") is not None
+                max(0, min(requested, int(line["source_qty"])))
+                if line.get("source_qty") is not None
                 else None
             )
             try:
@@ -742,16 +848,16 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
                 combined["source_override_reason"] = (
                     "confirmed_preview_source_qty" if submitted_source_qty is not None else None
                 )
-                l["availability"] = combined
-                l["in_stock"] = observed_atp
-                l["source_qty"] = (
+                line["availability"] = combined
+                line["in_stock"] = observed_atp
+                line["source_qty"] = (
                     submitted_source_qty
                     if submitted_source_qty is not None
                     else calculated_shortfall
                 )
             except Exception:
-                if l.get("in_stock") in (None, 0):
-                    l["in_stock"] = int(stock.get(sku, 0))
+                if line.get("in_stock") in (None, 0):
+                    line["in_stock"] = int(stock.get(sku, 0))
         # supersede=True → buyer is amending a confirmed order: retire the active pre-send cases + re-source.
         if body.supersede:
             # NETWORK-AWARE churn brake: amendment-churn spins up supplier RFQ redrafts (a DDoS vector). Combine
@@ -925,7 +1031,7 @@ def commit(case_id: str, body: CommitBody, request: Request) -> Dict[str, Any]:
                                         source_id="Procurement_Agent", target_type="case", target_id=case_id,
                                         payload={"case_id": case_id, "item_ref": item_ref,
                                                  "quantity": qty, "status": "pending_retry"})
-            except Exception as exc:
+            except Exception:
                 import logging
                 logging.getLogger(__name__).exception("auto-draft preparation failed for case %s", case_id)
         # bounded autonomy: auto-send the claim-safe "thanks, sourcing" status to the buyer (flag-gated;
