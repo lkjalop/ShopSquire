@@ -404,6 +404,10 @@ export default function App() {
   // doesn't advance past it. confirm-cart links the case to THIS trace, so the Decision-Trace procurement
   // badge resolves against the decision that actually opened the journey (not whatever turn is latest).
   const [sourcingTraceId, setSourcingTraceId] = useState<string | null>(null);
+  // Keep the first confirmed procurement request identity above CartPanel.
+  // Conversational turns temporarily unmount that panel; amendments must still
+  // supersede the original order group instead of creating a parallel RFQ.
+  const [confirmedSourcingOrderId, setConfirmedSourcingOrderId] = useState<string | null>(null);
   // P0 multi-intent plan (amend chosen qty + scoped new lines) surfaced for buyer confirmation.
   const [multiIntent, setMultiIntent] = useState<MultiIntentPlan | null>(null);
   const [bulkAlternatives, setBulkAlternatives] = useState<BulkAlternativeOption[]>([]);
@@ -972,6 +976,7 @@ export default function App() {
       // A cleared cart has no procurement story — release the sticky sourcing-trace pin so the Decision
       // Trace no longer resolves the (now-abandoned) bulk order's Procurement tab.
       setSourcingTraceId(null);
+      setConfirmedSourcingOrderId(null);
     } catch {
       // ignore
     }
@@ -3197,6 +3202,8 @@ export default function App() {
                         onClearPrior={clearPriorCartItems}
                         sourcingRequirements={sourcingIntent?.requirements}
                         sourcingOrderId={sourcingIntent?.pr_id}
+                        confirmedSourcingOrderId={confirmedSourcingOrderId}
+                        onConfirmedSourcingOrderId={setConfirmedSourcingOrderId}
                       />
                     </>) : recommendationShelf && ['grid', 'list'].includes(rightPanelMode) ? (
                       <RecommendationShelf

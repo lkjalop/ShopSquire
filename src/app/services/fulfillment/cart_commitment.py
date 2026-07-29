@@ -44,7 +44,8 @@ def count_amendments(db, order_id: str, tenant_id: str = "default") -> int:
         ensure_tables(db)
         row = db.execute(text(
             "SELECT COUNT(DISTINCT case_id) FROM fulfillment_case_version "
-            "WHERE tenant_id=:t AND state='SUPERSEDED' AND state_json LIKE :p"),
+            "WHERE tenant_id=:t AND state='SUPERSEDED' "
+            "AND CAST(state_json AS TEXT) LIKE :p"),
             {"t": str(tenant_id or "default"), "p": f'%"order_group_id"%{group_id}%'}).fetchone()
         return int((row or [0])[0] or 0)
     except Exception as exc:
@@ -73,7 +74,7 @@ def list_order_cases(
             "FROM fulfillment_case_version v "
             "JOIN fulfillment_case c ON c.id=v.case_id AND c.tenant_id=v.tenant_id "
             "WHERE v.tenant_id=:t AND v.valid_to IS NULL "
-            "AND v.state_json LIKE :p ORDER BY v.valid_from DESC"),
+            "AND CAST(v.state_json AS TEXT) LIKE :p ORDER BY v.valid_from DESC"),
             {"t": str(tenant_id or "default"), "p": f'%"order_group_id"%{group_id}%'}).fetchall()
     except Exception as exc:
         logger.debug("list_order_cases failed for %s: %s", order_id, exc)
@@ -139,7 +140,8 @@ def _already_materialized(db, order_group_id: str, tenant_id: str = "default") -
         params.update({f"st{i}": v for i, v in enumerate(terminal)})
         rows = db.execute(text(
             "SELECT DISTINCT case_id FROM fulfillment_case_version "
-            f"WHERE tenant_id=:t AND valid_to IS NULL AND state_json LIKE :p AND state NOT IN ({placeholders})"),
+            f"WHERE tenant_id=:t AND valid_to IS NULL "
+            f"AND CAST(state_json AS TEXT) LIKE :p AND state NOT IN ({placeholders})"),
             params).fetchall()
         return [str(r[0]) for r in (rows or []) if r and r[0]]
     except Exception as exc:
@@ -286,9 +288,9 @@ def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]
     resolved = resolve_line_skus(db, lines, tenant_id=tenant_id)
     # Source explicit buyer-sourcing lines, plus ordinary stock shortfalls.
     sourcing = [
-        l for l in resolved
-        if (int(l.get("source_qty") or l.get("shortfall") or 0) > 0)
-        or int(l.get("requested_qty") or 0) > int(l.get("in_stock") or 0)
+        line for line in resolved
+        if (int(line.get("source_qty") or line.get("shortfall") or 0) > 0)
+        or int(line.get("requested_qty") or 0) > int(line.get("in_stock") or 0)
     ]
 
     existing = _already_materialized(db, group_id, tenant_id=tenant_id)
@@ -301,7 +303,10 @@ def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]
             from src.app.services.fulfillment.repository import backfill_source_trace_id
             backfill_source_trace_id(db, existing, trace_id, tenant_id=tenant_id)
         # this order already materialized — distinguish a double-submit from a real amendment.
-        incoming_sig = _line_signature((l.get("item_ref"), l.get("requested_qty")) for l in sourcing)
+        incoming_sig = _line_signature(
+            (line.get("item_ref"), line.get("requested_qty"))
+            for line in sourcing
+        )
         existing_sig = _materialized_signature(db, existing, tenant_id=tenant_id)
         if incoming_sig == existing_sig:
             return {"order_group_id": group_id, "case_count": len(existing),

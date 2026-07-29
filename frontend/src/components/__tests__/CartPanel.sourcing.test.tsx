@@ -70,7 +70,7 @@ describe('CartPanel sourcing amendments', () => {
     ));
   });
 
-  it('blocks checkout and retires the prior RFQ when amended demand is fully in stock', async () => {
+  it('retains the confirmed RFQ identity when a later preview mints a new PR', async () => {
     (api.getSplitOffer as any)
       .mockResolvedValueOnce(splitOffer(20))
       .mockResolvedValueOnce(splitOffer(15));
@@ -79,18 +79,22 @@ describe('CartPanel sourcing amendments', () => {
       .mockResolvedValueOnce({ case_count: 1, cases: [{ case_id: 'case-1' }], amend_required: true })
       .mockResolvedValueOnce({ status: 'superseded', superseded: ['case-1'], created: { case_count: 0, cases: [] } });
     (api.commitFulfillmentCase as any).mockResolvedValue({ state: 'QUOTE_DRAFTED' });
+    const onConfirmedSourcingOrderId = vi.fn();
 
     const props = {
       uid: 'u1', onRefresh: vi.fn(), onRemove: vi.fn(), onClear: vi.fn(), onAdd: vi.fn(),
       traceId: 'trace-1', sourcingOrderId: 'pr-1',
+      onConfirmedSourcingOrderId,
     };
     const view = render(<CartPanel {...props} cart={cart(20)} />);
 
     fireEvent.click(await screen.findByTestId('split-confirm'));
     await waitFor(() => expect(screen.getByTestId('cart-proceed')).toBeInTheDocument());
+    expect(onConfirmedSourcingOrderId).toHaveBeenCalledWith('pr-1');
 
     view.rerender(<CartPanel
       {...props}
+      confirmedSourcingOrderId="pr-1"
       sourcingOrderId="pr-2"
       traceId="trace-2"
       cart={cart(15)}

@@ -41,6 +41,8 @@ export default function CartPanel({
   onClearPrior,
   sourcingRequirements,
   sourcingOrderId,
+  confirmedSourcingOrderId,
+  onConfirmedSourcingOrderId,
 }: {
   uid: string;
   cart: CartState | null;
@@ -56,6 +58,8 @@ export default function CartPanel({
   onClearPrior?: () => Promise<void>;      // remove ONLY those, keeping what was added this session
   sourcingRequirements?: Record<string, any>; // deadline/use-case/ship-to from the recommendation turn
   sourcingOrderId?: string | null;             // stable PR identity; cart_id is only a legacy fallback
+  confirmedSourcingOrderId?: string | null;    // survives panel unmounts during conversational amendments
+  onConfirmedSourcingOrderId?: (orderId: string | null) => void;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const [upsells, setUpsells] = useState<Product[]>([]);
@@ -142,10 +146,6 @@ export default function CartPanel({
   const [sourcingNote, setSourcingNote] = useState<string | null>(null);
   const [sourcedSplitKey, setSourcedSplitKey] = useState<string | null>(null);
   const [checkingSourcing, setCheckingSourcing] = useState(false);
-  // The backend may mint a fresh PR preview on a later conversational turn.
-  // Once this mounted cart has confirmed a procurement request, amendments
-  // must retain that original order identity while carrying the new trace.
-  const confirmedSourcingOrderId = useRef<string | null>(null);
   // Pre-payment split-fulfilment confirmation. The card reports whether the cart splits (a supplier-backed
   // second shipment exists) and whether the buyer has confirmed the plan; checkout is gated on that confirm.
   const [splitHasSplit, setSplitHasSplit] = useState(false);
@@ -157,8 +157,8 @@ export default function CartPanel({
   );
   const sourcingNeedsReview = Boolean(sourcedSplitKey && sourcedSplitKey !== splitKey);
   useEffect(() => {
-    if (items.length === 0) confirmedSourcingOrderId.current = null;
-  }, [items.length]);
+    if (items.length === 0) onConfirmedSourcingOrderId?.(null);
+  }, [items.length, onConfirmedSourcingOrderId]);
   const nameForSku = (sku: string): string => {
     const it = (cart?.items || []).find((x) => x.sku === sku);
     return it ? productDisplayName(it) : sku;
@@ -181,7 +181,7 @@ export default function CartPanel({
     // A cart survives "clear my cart", so cart_id alone cannot identify one procurement journey.
     // Prefer the immutable recommendation trace when the core did not issue an explicit procurement
     // request id; subsequent amendments keep that trace pinned and therefore retain continuity.
-    const cid = confirmedSourcingOrderId.current
+    const cid = confirmedSourcingOrderId
       || sourcingOrderId
       || traceId
       || cart?.cart_id;
@@ -194,7 +194,7 @@ export default function CartPanel({
       res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, true, sourcingRequirements);
     }
     if (res.status !== 'operator_required') {
-      confirmedSourcingOrderId.current = cid;
+      onConfirmedSourcingOrderId?.(cid);
     }
     return res.status === 'operator_required' ? null : res;
   };
