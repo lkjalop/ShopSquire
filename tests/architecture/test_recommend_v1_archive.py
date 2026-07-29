@@ -10,7 +10,10 @@ MANIFEST = ROOT / "tests/golden/recommend_v1_archive_manifest.json"
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Git may materialize text archives with CRLF on Windows. Seal canonical
+    # LF bytes so the evidence hash remains portable across hosted runners.
+    canonical = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def test_legacy_recommend_router_is_non_importable_and_hash_sealed() -> None:
