@@ -232,6 +232,7 @@ jobs:
       - name: Worker, delivery, connector, and recovery suites
         run: |
           timeout 420s poetry run pytest -vv \
+            --junitxml=test-results/worker-tests.xml \
             tests/services/fulfillment/test_outbound_delivery_jobs.py \
             tests/services/test_connector_runtime.py \
             tests/api/test_admin_inventory_netsuite_jobs.py \
@@ -254,6 +255,6 @@ jobs:
         with:
           name: procurement-worker-evidence
           path: |
-            test-results/**
+            test-results/
             tmp/*.sqlite*
           retention-days: 14
