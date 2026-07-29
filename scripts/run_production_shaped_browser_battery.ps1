@@ -6,6 +6,10 @@ param(
 $ErrorActionPreference = "Stop"
 $pgName = "shopsquire-live-pg"
 $redisName = "shopsquire-live-redis"
+$workerNode = (
+    "shopsquire-live-" + [guid]::NewGuid().ToString("N") +
+    "@" + $env:COMPUTERNAME
+)
 if (-not $ArtifactRoot) {
     $ArtifactRoot = Join-Path $env:TEMP (
         "shopsquire-live-" + [guid]::NewGuid().ToString("N")
@@ -124,7 +128,8 @@ try {
         -RedirectStandardError (Join-Path $ArtifactRoot "backend.err.log")
     $processes += Start-Process -FilePath python -ArgumentList @(
         "-m", "celery", "-A", "src.app.workers.celery_app:celery_app",
-        "worker", "--loglevel=INFO", "--pool=solo"
+        "worker", "--loglevel=INFO", "--pool=solo",
+        "--hostname=$workerNode"
     ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $ArtifactRoot "worker.out.log") `
         -RedirectStandardError (Join-Path $ArtifactRoot "worker.err.log")
@@ -172,7 +177,7 @@ try {
     }
 
     python -m celery -A src.app.workers.celery_app:celery_app `
-        inspect ping --timeout 10 *>&1 |
+        inspect ping --destination $workerNode --timeout 10 *>&1 |
         Tee-Object -FilePath (Join-Path $ArtifactRoot "worker-ping.log") |
         Out-Null
     Assert-NativeSuccess "live_worker_ping"
