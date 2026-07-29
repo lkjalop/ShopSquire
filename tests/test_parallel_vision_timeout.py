@@ -82,13 +82,12 @@ def test_future_timeout_is_caught_and_does_not_block():
 
 # ── profile propagation: the worker sees the request's vertical ──
 def test_copy_context_run_in_executor_preserves_profile():
-    from src.app.routers.recommend import _recommend_executor
-
     tok = set_active_profile_id("pharmacy")
     try:
         ctx = contextvars.copy_context()
-        fut = _recommend_executor("vision").submit(ctx.run, active_profile_id)
-        assert fut.result(timeout=5) == "pharmacy"
+        with _futures.ThreadPoolExecutor(max_workers=1) as executor:
+            fut = executor.submit(ctx.run, active_profile_id)
+            assert fut.result(timeout=5) == "pharmacy"
     finally:
         reset_active_profile_id(tok)
 
@@ -105,6 +104,11 @@ def test_text_query_contract_stable_with_parallel_flag_on(tmp_path, monkeypatch)
     fp.write_text(json.dumps(base), encoding="utf-8")
     monkeypatch.setenv("FEATURE_FLAGS_PATH", str(fp))
 
-    body = client.get("/api/v1/recommend/suggest",
-                      params={"uid": "u-pvt", "query": "gaming laptop under 1800"}).json()
+    # Keep the contract test independent from durable quota usage accumulated by
+    # other compatibility tests sharing the local Redis instance.
+    uid = f"u-pvt-{tmp_path.name}"
+    body = client.get(
+        "/api/v1/recommend/suggest",
+        params={"uid": uid, "query": "gaming laptop under 1800"},
+    ).json()
     assert "results" in body and "decision_trace_id" in body

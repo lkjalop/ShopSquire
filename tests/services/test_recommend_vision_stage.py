@@ -31,10 +31,3 @@ def test_resolve_supported_brand_hint_precedence():
     assert _resolve_supported_brand_hint(None, None, "I want a macbook") == "apple"  # query token
     assert _resolve_supported_brand_hint(None, None, "a lenovo please") == "lenovo"
     assert _resolve_supported_brand_hint(None, None, "just a laptop") == ""          # none
-
-
-def test_router_reexports_same_objects():
-    from src.app.routers import recommend as r
-
-    assert r._cross_modal_brand_conflict_question is _cross_modal_brand_conflict_question
-    assert r._resolve_supported_brand_hint is _resolve_supported_brand_hint

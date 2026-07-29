@@ -121,20 +121,6 @@ def test_use_case_budget_floors_shape():
     assert isinstance(_USE_CASE_BUDGET_FLOORS, dict)
 
 
-def test_router_reexports_same_objects():
-    from src.app.routers import recommend as r
-
-    assert r._build_brand_budget_answer is _build_brand_budget_answer
-    assert r._build_brand_budget_answer_v2 is _build_brand_budget_answer_v2
-    assert r._deterministic_assistant_message is _deterministic_assistant_message
-    assert r._assess_budget_fitness is _assess_budget_fitness
-    assert r._build_minimum_recommended_tiers is _build_minimum_recommended_tiers
-    assert r._build_budget_reasoning_note is _build_budget_reasoning_note
-    assert r._budget_reasoning_requested is _budget_reasoning_requested
-    assert r._persona_summary_label is _persona_summary_label
-    assert r._USE_CASE_BUDGET_FLOORS is _USE_CASE_BUDGET_FLOORS
-
-
 # ── capability yes/no verdicts ("can it run X", "good for Y") — answer-first from the top result's specs ──
 _GPU = [{"name": "Asus TUF Gaming F15 RTX 4060", "specs": {"gpu_discrete": True, "gpu": "RTX 4060", "ram_gb": 16}}]
 _IGPU16 = [{"name": "Lenovo ThinkPad T14", "specs": {"gpu_discrete": False, "ram_gb": 16}}]
@@ -171,8 +157,10 @@ def test_capability_returns_empty_for_non_capability_or_budget_turns():
 
 def _r(name, price, vram=None, ram=None, gpu=True):
     specs = {"gpu_discrete": gpu}
-    if vram: specs["gpu_vram_gb"] = vram
-    if ram: specs["ram_gb"] = ram
+    if vram:
+        specs["gpu_vram_gb"] = vram
+    if ram:
+        specs["ram_gb"] = ram
     return {"name": name, "price_cents": price * 100, "specs": specs}
 
 

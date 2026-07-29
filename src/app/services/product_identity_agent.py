@@ -29,6 +29,54 @@ from src.app.services.decision_log import log_trace_event
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
+def resolve_cached_product_identity(
+    *,
+    kv: Dict[str, Any],
+    image_hash: str | None,
+    user_query: str | None,
+    trace_id: str | None,
+    identify_fn: Any = None,
+    constraints_fn: Any = None,
+) -> Dict[str, Any]:
+    """Resolve a cached upload into bounded identity evidence and constraints."""
+    if not image_hash or not isinstance(kv, dict):
+        return {
+            "status": "unavailable",
+            "source": None,
+            "identity": {},
+            "constraints": {},
+        }
+    try:
+        cache = kv.get("image_blob_cache")
+        cache = cache if isinstance(cache, dict) else {}
+        encoded = cache.get(str(image_hash))
+        if not isinstance(encoded, str) or not encoded:
+            raise ValueError("cached_image_not_found")
+        image_bytes = base64.b64decode(encoded.encode("utf-8"), validate=False)
+    except Exception:
+        return {
+            "status": "unavailable",
+            "source": None,
+            "identity": {},
+            "constraints": {},
+        }
+    identify = identify_fn or identify_product_from_image
+    identity = identify(
+        image_bytes,
+        user_query=user_query,
+        trace_id=trace_id,
+        timeout_s=12.0,
+    )
+    convert = constraints_fn or specs_to_constraints
+    constraints = convert(identity) if identity.get("identified") else {}
+    return {
+        "status": "identified" if identity.get("identified") else "unidentified",
+        "source": "vision_image",
+        "identity": identity,
+        "constraints": constraints,
+    }
+
+
 def _extract_json(text: str) -> Dict[str, Any] | None:
     if not text:
         return None

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Canonical query classification service (Sprint R1 extraction).
 
 All query intent classification belongs here. The recommend router should
@@ -13,6 +11,7 @@ Covers:
 - Stock query detection (delegates to inventory_query_service)
 - Budget question detection
 """
+from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional
@@ -45,6 +44,59 @@ def is_followup_explain_query(query: Optional[str]) -> bool:
     if not q:
         return False
     return bool(_FOLLOWUP_EXPLAIN_RE.search(q))
+
+
+def is_standalone_search(query: Optional[str]) -> bool:
+    """Return whether a turn contains its own product/budget search subject."""
+    value = str(query or "").strip().lower()
+    if not value:
+        return False
+    from src.app.services.recommend_budget_parsing import (
+        extract_explicit_budget_override,
+    )
+
+    if extract_explicit_budget_override(value):
+        return True
+    category_words = (
+        "laptop",
+        "notebook",
+        "ultrabook",
+        "macbook",
+        "chromebook",
+        "desktop",
+        "tower",
+        "workstation",
+        "tablet",
+        "ipad",
+        "phone",
+        "smartphone",
+        "monitor",
+        "pc",
+        "computer",
+        "headset",
+        "keyboard",
+        "mouse",
+    )
+    if any(re.search(rf"\b{re.escape(word)}\b", value) for word in category_words):
+        return True
+    try:
+        from src.app.services.query_decomposer import decompose
+
+        plan = decompose(value)
+        if getattr(plan, "answer_without_products", False):
+            return False
+        if (
+            getattr(plan, "category", None)
+            or str(getattr(plan, "intent", "")) == "recommendation_multi"
+        ):
+            return True
+        return any(
+            getattr(question, "use_cases", None)
+            or getattr(question, "hard_constraints", None)
+            for question in getattr(plan, "sub_questions", []) or []
+        )
+    except Exception:
+        return False
 
 
 # ── Off-domain / unsupported intent ──────────────────────────────────────────

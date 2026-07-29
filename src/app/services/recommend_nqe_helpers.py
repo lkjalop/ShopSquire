@@ -60,6 +60,31 @@ _TECHY_QUERY_TOKENS = (
 )
 
 
+def adapt_questions_for_sentiment(
+    questions: list[dict] | None,
+    *,
+    sentiment: str | None,
+) -> list[dict]:
+    """Reduce question load and acknowledge frustration without changing facts."""
+    out = [dict(question) for question in (questions or []) if isinstance(question, dict)]
+    if not out:
+        return out
+    normalized = str(sentiment or "neutral").strip().lower()
+    if normalized not in {"negative", "frustrated", "angry", "upset"}:
+        return out
+    softened: list[dict] = []
+    for question in out[:2]:
+        adapted = dict(question)
+        text = str(adapted.get("text") or "").strip()
+        if text:
+            adapted["text"] = (
+                "I know this can be frustrating. To get this right quickly: "
+                f"{text}"
+            )
+        softened.append(adapted)
+    return softened[:1]
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CORE — Question slot mapping and normalization
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -247,15 +272,6 @@ def question_fatigue_filter(
     seen_slots: set[str] = set()
     for q in out:
         qid = str(q.get("id") or "").strip().lower()
-        qtext = str(q.get("text") or "").lower()
-        if flow == "creator" and "what kind of games" in qtext:
-            q["text"] = "Which development or creative tools will you run, and how complex are the projects?"
-            q["goal"] = "resolve_software_workload"
-            q["options"] = [
-                {"id": "tools_entry", "label": "Learning / small projects"},
-                {"id": "tools_realtime_3d", "label": "Real-time 3D / engine editor"},
-                {"id": "tools_heavy", "label": "Large scenes / heavy rendering and builds"},
-            ]
         slot = question_slot_from_id(qid)
         q["question_slot"] = slot
         asked_recently = False

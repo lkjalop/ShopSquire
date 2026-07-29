@@ -106,12 +106,12 @@ def test_recommend_feedback_endpoint_accepts_correction(monkeypatch, tmp_path):
 
 
 def test_sentiment_nqe_adapter_reduces_questions():
-    from src.app.routers.recommend import _adapt_nqe_questions_for_sentiment
+    from src.app.services.recommend_nqe_helpers import adapt_questions_for_sentiment
 
     qs = [
         {"id": "ask_budget", "text": "What's your budget?", "goal": "narrow_results"},
         {"id": "ask_use_case", "text": "What do you use it for?", "goal": "narrow_results"},
     ]
-    out = _adapt_nqe_questions_for_sentiment(qs, sentiment="frustrated")
+    out = adapt_questions_for_sentiment(qs, sentiment="frustrated")
     assert len(out) == 1
     assert "frustrating" in str(out[0].get("text") or "").lower()

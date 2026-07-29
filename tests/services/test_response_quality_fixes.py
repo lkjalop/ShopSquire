@@ -10,13 +10,19 @@ Covers:
 from __future__ import annotations
 import pytest
 
+from src.app.services.recommend_budget_advisor import (
+    _build_brand_budget_answer,
+    _build_brand_budget_answer_v2,
+)
+from src.app.services.recommend_budget_parsing import (
+    classify_budget_bracket as _classify_budget_bracket,
+)
+from src.app.services.recommend_context_preamble import build_context_preamble
+from src.app.services.llm_provider import complexity_explain, score_query_complexity
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fix 1 — budget question floor in llm_provider.score_query_complexity
 # ─────────────────────────────────────────────────────────────────────────────
-from src.app.services.llm_provider import score_query_complexity, complexity_explain
-
-
 def test_budget_question_floor_short_query():
     """Short budget yes/no query must score ≥ 5 even without other signals."""
     result = score_query_complexity("Is $1800 enough for gaming?")
@@ -59,15 +65,12 @@ def test_non_budget_simple_query_stays_small():
 # ─────────────────────────────────────────────────────────────────────────────
 # Fix 2 — _build_context_preamble
 # ─────────────────────────────────────────────────────────────────────────────
-from src.app.routers.recommend import _build_context_preamble
-
-
 def test_context_preamble_empty_when_no_data():
-    assert _build_context_preamble({}, {}, {}) == ""
+    assert build_context_preamble({}, {}, {}) == ""
 
 
 def test_context_preamble_includes_budget():
-    preamble = _build_context_preamble(
+    preamble = build_context_preamble(
         kv={"nqe_answered_fields": {"budget_max": 1800}},
         structured_state={},
         constraints={},
@@ -77,7 +80,7 @@ def test_context_preamble_includes_budget():
 
 
 def test_context_preamble_includes_use_case():
-    preamble = _build_context_preamble(
+    preamble = build_context_preamble(
         kv={},
         structured_state={"nqe_answered_fields": {"use_case": "gaming"}},
         constraints={},
@@ -86,7 +89,7 @@ def test_context_preamble_includes_use_case():
 
 
 def test_context_preamble_merges_constraints():
-    preamble = _build_context_preamble(
+    preamble = build_context_preamble(
         kv={},
         structured_state={},
         constraints={"budget_max": 1500, "use_case": "corporate"},
@@ -96,7 +99,7 @@ def test_context_preamble_merges_constraints():
 
 def test_context_preamble_deduplicates_fields():
     """When kv and constraints both have budget_max, it should appear once."""
-    preamble = _build_context_preamble(
+    preamble = build_context_preamble(
         kv={"nqe_answered_fields": {"budget_max": 2000}},
         structured_state={},
         constraints={"budget_max": 2000},
@@ -108,9 +111,6 @@ def test_context_preamble_deduplicates_fields():
 # ─────────────────────────────────────────────────────────────────────────────
 # Fix 4 — _build_brand_budget_answer: corporate branch + budget extraction
 # ─────────────────────────────────────────────────────────────────────────────
-from src.app.services.recommend_budget_advisor import _build_brand_budget_answer
-
-
 def _make_results(prices_cents: list[int]) -> list[dict]:
     return [
         {"price_cents": p, "name": f"Product {i}", "brand": "lenovo"}
@@ -172,9 +172,6 @@ def test_no_budget_mention_returns_empty():
 # ─────────────────────────────────────────────────────────────────────────────
 # BUG-7 — expanded asks_budget token detection
 # ─────────────────────────────────────────────────────────────────────────────
-from src.app.services.recommend_budget_advisor import _build_brand_budget_answer_v2
-
-
 @pytest.mark.parametrize("query", [
     "Will $1500 cover a gaming laptop?",
     "Would $800 be enough for a MacBook?",
@@ -211,9 +208,6 @@ def test_would_dollar_v2_over_budget():
 # ─────────────────────────────────────────────────────────────────────────────
 # Fix 5 — _classify_budget_bracket gaming tiers
 # ─────────────────────────────────────────────────────────────────────────────
-from src.app.services.recommend_budget_parsing import classify_budget_bracket as _classify_budget_bracket
-
-
 def test_bracket_entry():
     # ≤ 500 → entry
     assert _classify_budget_bracket(400) == "entry"

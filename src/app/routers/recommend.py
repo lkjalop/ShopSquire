@@ -55,10 +55,8 @@ from src.app.rag.retrieve import Retriever
 from src.app.services.trace_strategy_tags import build_strategy_trace_correlation
 from src.app.services.i18n import localize_recommend_payload
 from src.app.services.billing import record_meter_event
-from src.app.services.fraud_scorer import FraudScorer
 from src.app.services.use_case_advisor import get_use_case_min_price_floor
 from src.app.services.recommendations import classify_budget_tier, classify_warranty_candidate
-from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints_from_request
 from src.app.services.copywriting import maybe_apply_copywriting
 from src.app.security.image_threat_signals import normalize_ocr_and_detect as _normalize_ocr_and_detect_shared
 from src.app.security.model_theft import (
@@ -282,7 +280,7 @@ def _image_security_event(
     }
 
 
-def _bounded_knowledge_answer(
+def _bounded_knowledge_answer_legacy(
     payload: Dict[str, Any],
     *,
     query: str,
@@ -337,6 +335,31 @@ def _bounded_knowledge_answer(
         return None
     finally:
         timing[f"{timing_prefix}_ms"] = int((time.perf_counter() - started) * 1000)
+def _bounded_knowledge_answer(
+    payload: Dict[str, Any],
+    *,
+    query: str,
+    plan: Any,
+    results: list[dict],
+    model: str,
+    trace_id: str | None,
+    timing_prefix: str,
+) -> str | None:
+    from src.app.services.recommend_bounded_narration import (
+        bounded_knowledge_answer,
+    )
+
+    return bounded_knowledge_answer(
+        payload,
+        query=query,
+        plan=plan,
+        results=results,
+        model=model,
+        trace_id=trace_id,
+        timing_prefix=timing_prefix,
+        build_answer=_build_knowledge_answer,
+        executor=_recommend_executor("narration"),
+    )
 
 
 def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None) -> None:
@@ -561,7 +584,10 @@ def _maybe_attach_evidence(payload: Dict[str, Any], trace_id: str | None) -> Dic
     return payload
 
 
-def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
+def _with_trace_legacy(
+    payload: Dict[str, Any],
+    trace_id: str | None,
+) -> Dict[str, Any]:
     try:
         payload = security_sanitize(payload or {})
     except Exception:
@@ -753,6 +779,44 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
     return payload
 
 
+def _with_trace(
+    payload: Dict[str, Any],
+    trace_id: str | None,
+) -> Dict[str, Any]:
+    from src.app.services.recommend_response_transaction import (
+        ResponseTransactionDependencies,
+        finalize_response_transaction,
+    )
+
+    knowledge_context = _KNOWLEDGE_QUERY_CTX.get()
+    plan = (
+        knowledge_context.get("plan")
+        if isinstance(knowledge_context, dict)
+        else None
+    )
+    return finalize_response_transaction(
+        payload,
+        trace_id,
+        dependencies=ResponseTransactionDependencies(
+            security_sanitize=security_sanitize,
+            sanitize_specs=_sanitize_specs_in_response,
+            inject_knowledge=_maybe_inject_knowledge_answer,
+            attach_evidence=_maybe_attach_evidence,
+            localize=localize_recommend_payload,
+            exclude_off_category=_exclude_off_category_in_payload,
+            annotate_integrity=_annotate_type_and_price_integrity,
+            formatter_enabled=_formatter_enabled,
+            finalize_answer=_finalize_answer,
+            dereference_labels=_dereference_product_labels,
+            apply_security_challenge=_maybe_apply_security_challenge,
+            log_trace_event=log_trace_event,
+            log_decision=log_decision,
+        ),
+        negation_terms=list(getattr(plan, "exclusions", []) or []),
+        current_query=str(_CURRENT_QUERY_CTX.get() or ""),
+    )
+
+
 def _decision_log_writes_enabled(flags: Dict[str, Any] | None) -> bool:
     """Mirror decisions-router precedence: env override, then feature flags."""
     try:
@@ -897,133 +961,10 @@ def _incident_auto_create_enabled() -> bool:
     )
 
 
-def _coarse_product_category(name: str, specs: Dict[str, Any] | None = None) -> str:
-    from src.app.services.category_router import detect_category
-    from src.app.services.product_taxonomy import infer_product_family
-
-    specs = specs if isinstance(specs, dict) else {}
-    text_blob = " ".join(
-        [
-            str(name or ""),
-            str(specs.get("category") or ""),
-            " ".join(str(x) for x in (specs.get("tags") or []) if x is not None),
-        ]
-    ).strip()
-    cat = detect_category(query=text_blob, image_labels=[str(specs.get("category") or "")], constraints=specs)
-    if cat and cat != "general":
-        return cat
-    family = infer_product_family(name=name, specs=specs)
-    family_map = {
-        "LAP": "laptop",
-        "MON": "monitor",
-        "PERIPH": "accessory",
-        "HEAD": "accessory",
-        "ACC": "accessory",
-        "COOL": "accessory",
-        "BAG": "accessory",
-    }
-    return family_map.get(family, "general")
-
-
-def _top_up_image_results(
-    *,
-    db,
-    results: List[Dict[str, Any]],
-    minimum_count: int,
-    image_category: str,
-    constraints: Dict[str, Any],
-    catalog_profile: Dict[str, Any],
-) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    from src.app.services.product_taxonomy import infer_product_family
-
-    if minimum_count <= 0 or len(results) >= minimum_count:
-        return results, {"applied": False, "added": 0, "reason": "already_sufficient"}
-    if not image_category or image_category == "general":
-        return results, {"applied": False, "added": 0, "reason": "unknown_image_category"}
-
-    existing_skus = {str((row or {}).get("sku") or "").strip() for row in (results or [])}
-    budget_min = constraints.get("budget_min")
-    budget_max = constraints.get("budget_max")
-    try:
-        rows = db.execute(
-            text(
-                """
-                SELECT sku, name, price_cents, image_url, specs
-                FROM products
-                WHERE COALESCE(active, 1) = 1
-                ORDER BY COALESCE(price_cents, 0) ASC, name ASC
-                """
-            )
-        ).fetchall()
-    except Exception:
-        return results, {"applied": False, "added": 0, "reason": "catalog_query_failed"}
-
-    added = 0
-    fallback_rows: List[Dict[str, Any]] = []
-    for row in rows or []:
-        mapping = row._mapping if hasattr(row, "_mapping") else {}
-        sku_val = mapping.get("sku") if mapping else None
-        if not sku_val and isinstance(row, (tuple, list)) and len(row) > 0:
-            sku_val = row[0]
-        sku = str(sku_val or "").strip()
-        if not sku or sku in existing_skus:
-            continue
-        name = mapping.get("name") if mapping else (row[1] if isinstance(row, (tuple, list)) and len(row) > 1 else "")
-        price_cents = mapping.get("price_cents") if mapping else (row[2] if isinstance(row, (tuple, list)) and len(row) > 2 else None)
-        image_url = mapping.get("image_url") if mapping else (row[3] if isinstance(row, (tuple, list)) and len(row) > 3 else None)
-        raw_specs = mapping.get("specs") if mapping else (row[4] if isinstance(row, (tuple, list)) and len(row) > 4 else None)
-        if isinstance(raw_specs, str) and raw_specs.strip():
-            try:
-                specs = json.loads(raw_specs)
-            except Exception:
-                specs = {}
-        else:
-            specs = raw_specs if isinstance(raw_specs, dict) else {}
-        category = _coarse_product_category(str(name or ""), specs)
-        family = infer_product_family(sku=sku, name=str(name or ""), specs=specs)
-        if str(image_category or "").strip().lower() == "laptop" and family != "LAP":
-            continue
-        if category != image_category:
-            continue
-        if isinstance(price_cents, (int, float)):
-            if isinstance(budget_min, (int, float)) and price_cents < int(budget_min) * 100:
-                continue
-            if isinstance(budget_max, (int, float)) and price_cents > int(budget_max) * 100:
-                continue
-        fallback_rows.append(
-            {
-                "sku": sku,
-                "name": str(name or sku),
-                "price_cents": int(price_cents or 0),
-                "image_url": image_url,
-                "specs": specs,
-                "confidence": 0.51,
-                "factors": {"positive": ["catalog category match", "catalog fallback fill"], "negative": []},
-                "score": 0.01,
-                "score_norm": 50.0,
-                "rank_delta": None,
-                "why_not": [],
-                "contrastive_why": "",
-                "delta_vs_anchor": {},
-                "baseline_rank": None,
-                "rerank_delta": None,
-                "fallback_fill": True,
-            }
-        )
-        existing_skus.add(sku)
-        added += 1
-        if len(results) + len(fallback_rows) >= minimum_count:
-            break
-
-    merged = list(results or []) + fallback_rows
-    return merged, {
-        "applied": bool(fallback_rows),
-        "added": added,
-        "reason": "catalog_fill" if fallback_rows else "no_matching_fill_candidates",
-        "minimum_count": minimum_count,
-        "image_category": image_category,
-        "catalog_primary": catalog_profile.get("primary_category"),
-    }
+from src.app.services.recommend_catalog_fill import (  # noqa: E402
+    coarse_product_category as _coarse_product_category,
+    top_up_image_results as _top_up_image_results,
+)
 
 
 # Extracted to the agnostic core (services/catalog_scoring.py): shared scorer + candidate
@@ -1947,25 +1888,9 @@ def _apply_nqe_confidence_gating(
     return out[:3]
 
 
-def _adapt_nqe_questions_for_sentiment(
-    questions: list[dict] | None,
-    *,
-    sentiment: str | None,
-) -> list[dict]:
-    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
-    if not out:
-        return out
-    s = str(sentiment or "neutral").strip().lower()
-    if s not in {"negative", "frustrated", "angry", "upset"}:
-        return out
-    softened: list[dict] = []
-    for q in out[:2]:
-        qq = dict(q)
-        txt = str(qq.get("text") or "").strip()
-        if txt:
-            qq["text"] = f"I know this can be frustrating. To get this right quickly: {txt}"
-        softened.append(qq)
-    return softened[:1]
+from src.app.services.recommend_nqe_helpers import (  # noqa: E402
+    adapt_questions_for_sentiment as _adapt_nqe_questions_for_sentiment,
+)
 
 
 def _filter_nqe_questions_by_missing_fields(
@@ -2682,6 +2607,14 @@ def _infer_account_warranty_status(uid: str | None) -> dict[str, Any]:
         return {"status": "unknown", "message": "Coverage lookup unavailable right now; proceed with receipt verification."}
 
 
+# Strangler: support-context helpers are V2-owned; keep private aliases while
+# compatibility callers are retired.
+from src.app.services.recommend_support_context import (  # noqa: E402
+    infer_account_warranty_status as _infer_account_warranty_status,
+    parse_explicit_spec_blocks as _parse_explicit_spec_blocks,
+)
+
+
 # Strangler: NQE question helpers extracted to services/recommend_nqe_helpers.py.
 from src.app.services.recommend_nqe_helpers import (  # noqa: E402
     question_slot_from_id as _question_slot_from_id,
@@ -3387,6 +3320,11 @@ def _build_context_preamble(
             result += "\nProducts shown last turn:\n" + "\n".join(spec_lines)
 
     return result
+
+
+from src.app.services.recommend_context_preamble import (  # noqa: E402
+    build_context_preamble as _build_context_preamble,
+)
 
 
 def _trace_to_context_summary(
@@ -4124,6 +4062,12 @@ def _query_is_standalone_search(query: str | None) -> bool:
     return False
 
 
+from src.app.services.query_classifier import (  # noqa: E402
+    is_followup_explain_query as _is_followup_explain_query,
+    is_standalone_search as _query_is_standalone_search,
+)
+
+
 
 # Strangler: use-case ranking extracted to services/recommend_ranking.py.
 from src.app.services.recommend_ranking import (  # noqa: E402
@@ -4228,7 +4172,7 @@ def _humanize_positive_factor_tokens(items: list[Any]) -> list[str]:
     return out[:4]
 
 
-def _emit_inventory_brand_notice(
+def _emit_inventory_brand_notice_legacy(
     *,
     results: list[dict],
     constraints: dict,
@@ -4291,8 +4235,24 @@ def _emit_inventory_brand_notice(
         return None, []
     except Exception:
         return None, []
+def _emit_inventory_brand_notice(
+    *,
+    results: list[dict],
+    constraints: dict,
+    decision_id: str | None,
+    trace_id: str | None,
+) -> tuple[str | None, list[str]]:
+    from src.app.services.recommend_inventory_notice import (
+        emit_inventory_brand_notice,
+    )
 
-
+    return emit_inventory_brand_notice(
+        results=results,
+        constraints=constraints,
+        decision_id=decision_id,
+        trace_id=trace_id,
+        trace_fn=log_trace_event,
+    )
 
 
 def _reconcile_result_prices(results: Any) -> Any:
@@ -5564,7 +5524,13 @@ def suggest(
     _ckpt("policy_gate_and_session")  # kv load + vision prelaunch + policy gate + GDPR/PCI + gate traces
     fraud_summary: Dict[str, Any] = {}
     try:
-        tls_fp = extract_tls_fingerprints_from_request(request) if request is not None else {}
+        from src.app.security import tls_fingerprint_middleware as _tls_runtime
+
+        tls_fp = (
+            _tls_runtime.extract_tls_fingerprints_from_request(request)
+            if request is not None
+            else {}
+        )
         source_ip_eff = str((tls_fp or {}).get("source_ip") or source_ip or "").strip()
         fraud_session: Dict[str, Any] = {}
         if source_ip_eff:
@@ -5612,7 +5578,9 @@ def suggest(
                 fraud_session["previous_ip_country"] = _prev_country.strip().upper()[:2]
         except (ImportError, RuntimeError, TypeError, ValueError) as exc:
             _trace_system_error(trace_id=trace_id, stage="fraud_session.geoip", exc=exc, extra={"source_ip": source_ip_eff})
-        fraud = FraudScorer()
+        from src.app.services import fraud_scorer as _fraud_runtime
+
+        fraud = _fraud_runtime.FraudScorer()
         fraud_score, fraud_level, fraud_signals = fraud.score_with_enrichment(
             base_signals={},
             expected_serial=None,

@@ -32,7 +32,7 @@ def _row(*, sku: str, name: str, price_cents: int, specs: dict):
 
 
 def test_image_lane_fill_for_laptop_excludes_accessories():
-    from src.app.routers.recommend import _top_up_image_results
+    from src.app.services.recommend_catalog_fill import top_up_image_results
 
     rows = [
         _row(sku="BAG-001", name="Laptop Sleeve 15 inch", price_cents=2900, specs={"category": "laptop"}),
@@ -49,7 +49,7 @@ def test_image_lane_fill_for_laptop_excludes_accessories():
         }
     ]
 
-    merged, meta = _top_up_image_results(
+    merged, meta = top_up_image_results(
         db=_FakeDB(rows),
         results=seed_results,
         minimum_count=3,

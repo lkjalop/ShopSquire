@@ -1,9 +1,9 @@
-import pytest
+from src.app.services.recommend_inventory_notice import (
+    emit_inventory_brand_notice,
+)
 
-import src.app.routers.recommend as recommend
 
-
-def test_inventory_brand_notice_emits_events(monkeypatch):
+def test_inventory_brand_notice_emits_events():
     # Capture emitted trace events
     emitted = []
 
@@ -18,19 +18,18 @@ def test_inventory_brand_notice_emits_events(monkeypatch):
             "payload": payload,
         })
 
-    monkeypatch.setattr(recommend, "log_trace_event", fake_log_trace_event)
-
     # Results do not include the requested brand 'apple'
     results = [
         {"name": "Dell XPS 13", "sku": "DELL-XPS-13"},
         {"name": "Lenovo ThinkPad T14", "sku": "LENOVO-T14"},
     ]
     constraints = {"brands": ["apple"]}
-    note, unmatched = recommend._emit_inventory_brand_notice(
+    note, unmatched = emit_inventory_brand_notice(
         results=results,
         constraints=constraints,
         decision_id="TEST-ID",
         trace_id="TEST-ID",
+        trace_fn=fake_log_trace_event,
     )
 
     assert note is not None, "Expected inventory note when suppliers are missing"
@@ -47,15 +46,14 @@ def test_inventory_brand_notice_emits_events(monkeypatch):
     assert sup_ev["payload"].get("missing_suppliers_for") == ["apple"]
 
 
-def test_excluded_brand_never_emits_missing_supplier_notice(monkeypatch):
+def test_excluded_brand_never_emits_missing_supplier_notice():
     emitted = []
-    monkeypatch.setattr(recommend, "log_trace_event", lambda **event: emitted.append(event))
-
-    note, unmatched = recommend._emit_inventory_brand_notice(
+    note, unmatched = emit_inventory_brand_notice(
         results=[{"name": "Dell XPS 13", "sku": "DELL-XPS-13"}],
         constraints={"brands": ["Apple"], "brand_excludes": ["Apple"]},
         decision_id="TEST-ID",
         trace_id="TEST-ID",
+        trace_fn=lambda **event: emitted.append(event),
     )
 
     assert note is None
