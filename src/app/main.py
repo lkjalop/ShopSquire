@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -83,7 +84,6 @@ from src.app.observability.logging import init_logging, bind_request_id, new_req
 from src.app.observability.metrics import router as metrics_router
 from src.app.observability.init import instrument_app
 from src.app.routers.sla import router as sla_router
-from src.app.observability.metrics import router as metrics_router
 from src.app.security.observer import emit_security_event
 from src.app.security.webhook_security import WebhookSecurityMiddleware
 from src.app.security.idempotency import IdempotencyMiddleware
@@ -98,7 +98,6 @@ from src.app.security.rate_limit import (
     acquire_concurrency_slot,
     release_concurrency_slot,
 )
-from src.app.config import get_settings
 from src.app.security.internal_mtls import InternalMTLSMiddleware
 from src.app.security.tls_fingerprint_middleware import TLSFingerprintMiddleware
 from src.app.security.request_shape import GlobalRequestShapeMiddleware
@@ -703,7 +702,6 @@ def create_app() -> FastAPI:
     # tests that mutate DATABASE_URL get an engine scoped to the app.
     try:
         from src.app.config import get_settings
-        from sqlalchemy import create_engine
         from src.app.models import db as dbmod
 
         # Prefer live env var to avoid cached settings bleeding across tests.
@@ -744,9 +742,8 @@ def create_app() -> FastAPI:
             # If the env requests SQLite but the current engine is non-SQLite,
             # honor the env override (common in tests).
             else:
-                default_sqlite = "sqlite:///test.sqlite"
                 if target_is_sqlite and not existing_is_sqlite:
-                    eng = create_engine(url, pool_pre_ping=True, future=True)
+                    eng = dbmod.create_runtime_engine(url)
                     try:
                         setattr(eng, "_shopsquire_managed", True)
                     except Exception:
@@ -761,7 +758,7 @@ def create_app() -> FastAPI:
                     # test.sqlite). This preserves per-URL DB isolation so tests that
                     # monkeypatch DATABASE_URL don't share the session engine and
                     # contaminate unrelated test data.
-                    eng = create_engine(url, pool_pre_ping=True, future=True)
+                    eng = dbmod.create_runtime_engine(url)
                     try:
                         setattr(eng, "_shopsquire_managed", True)
                     except Exception:
@@ -771,7 +768,7 @@ def create_app() -> FastAPI:
                     except Exception:
                         pass
                 elif managed and url and existing_url and existing_url != url:
-                    eng = create_engine(url, pool_pre_ping=True, future=True)
+                    eng = dbmod.create_runtime_engine(url)
                     try:
                         setattr(eng, "_shopsquire_managed", True)
                     except Exception:
@@ -788,7 +785,7 @@ def create_app() -> FastAPI:
                     except Exception:
                         pass
         else:
-            eng = create_engine(url, pool_pre_ping=True, future=True)
+            eng = dbmod.create_runtime_engine(url)
             try:
                 setattr(eng, "_shopsquire_managed", True)
             except Exception:
@@ -885,7 +882,7 @@ def create_app() -> FastAPI:
     # PCI boundary header enforcement for payment endpoints
     try:
         # Skip PCI boundary middleware in test/dev when explicitly disabled
-        if not os.getenv("DISABLE_SECURITY_MIDDLEWARE", "0").lower() in ("1", "true", "yes"):
+        if os.getenv("DISABLE_SECURITY_MIDDLEWARE", "0").lower() not in ("1", "true", "yes"):
             app.add_middleware(PciBoundaryMiddleware)
     except Exception:
         pass
@@ -1088,7 +1085,6 @@ def create_app() -> FastAPI:
                         return ORJSONResponse({"detail": "server busy"}, status_code=503)
                     # Mark a short busy window to increase determinism for concurrent requests
                     try:
-                        import time as _t
                         delay = float(os.getenv("BACKPRESSURE_TEST_DELAY_SEC", "0.03") or 0)
                         app.state.busy_until = now + delay
                     except Exception:
@@ -1262,7 +1258,7 @@ def create_app() -> FastAPI:
                     pass
                 # record full traceback for triage
                 try:
-                    import traceback, sys
+                    import traceback
                     tb = traceback.format_exc()
                     with open("runs/request_exceptions.log", "a", encoding="utf-8") as ef:
                         ef.write(f"{datetime.utcnow().isoformat()} path={request.url.path} error={tb}\n")
@@ -1315,7 +1311,8 @@ def create_app() -> FastAPI:
             pass
         # Log full traceback to stderr to help triage intermittent 500s
         try:
-            import sys, traceback
+            import sys
+            import traceback
             tb = traceback.format_exc()
             sys.stderr.write(f"[unhandled_exception] path={request.url.path} error={exc}\n{tb}\n")
             sys.stderr.flush()
@@ -2433,7 +2430,7 @@ def create_app() -> FastAPI:
                 try:
                     alerts = agent.monitor_stock_levels()
                     if alerts:
-                        recs = agent.generate_reorder_recommendations(alerts)
+                        agent.generate_reorder_recommendations(alerts)
                         try:
                             decisions_events_counter.inc()
                         except Exception:

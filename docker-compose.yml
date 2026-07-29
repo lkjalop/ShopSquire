@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   api:
     build: .
@@ -11,8 +10,8 @@ services:
       # APP_ENV controls security guards: "local" = dev permissive, "staging" or "production" = enforced.
       # Set to "production" to enforce JWT_SIGNING_KEY, Redis TLS/ACL, and other prod guards.
       APP_ENV: "${APP_ENV:-staging}"
-      RUN_MIGRATIONS: "1"
-      AUTO_MIGRATE: "1"
+      RUN_MIGRATIONS: "0"
+      AUTO_MIGRATE: "0"
       DB_MIGRATION_GUARD: "1"
       INTERNAL_MTLS_REQUIRED: "1"
       CHAT_REPLAY_REQUIRE_NONCE: "1"
@@ -64,6 +63,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-graceful-shutdown", "30"]
     healthcheck:
       test:
@@ -87,6 +88,30 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=512M
+
+  migrate:
+    build: .
+    container_name: shopsquire_migrate
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      APP_ENV: "${APP_ENV:-staging}"
+      AUTO_MIGRATE: "0"
+      DB_MIGRATION_GUARD: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    user: "shopsquire"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128M
 
   db:
     image: pgvector/pgvector:pg16

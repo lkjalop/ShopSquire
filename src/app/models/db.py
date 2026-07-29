@@ -7,7 +7,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text as sql_text
 from sqlalchemy.sql.elements import TextClause
 from fastapi import Request
-from typing import Any
 import contextvars
 
 from src.app.config import get_settings
@@ -62,7 +61,7 @@ def _create_engine_with_fallback(url: str):
         # Enable WAL journal mode and a generous busy_timeout so concurrent
         # background agents don't deadlock on the same SQLite file.
         try:
-            from sqlalchemy import event as _sa_event, text as _text
+            from sqlalchemy import event as _sa_event
             @_sa_event.listens_for(eng, "connect")
             def _sqlite_wal(dbapi_conn, _rec):
                 dbapi_conn.execute("PRAGMA journal_mode=WAL")
@@ -116,6 +115,11 @@ def _create_engine_with_fallback(url: str):
     except Exception:
         pass
     return eng
+
+
+def create_runtime_engine(url: str):
+    """Create an engine with ShopSquire's canonical bounded runtime policy."""
+    return _create_engine_with_fallback(url)
 
 
 engine = _create_engine_with_fallback(db_url)

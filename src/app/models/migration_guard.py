@@ -12,7 +12,7 @@ def _alembic_head_and_current(db_url: str) -> Tuple[Optional[str], Optional[str]
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     from alembic.runtime.migration import MigrationContext
-    from sqlalchemy import create_engine
+    from src.app.models.db import create_runtime_engine
 
     # Expect to run from repo/app working directory where `alembic.ini` is present.
     cfg = Config("alembic.ini")
@@ -20,7 +20,7 @@ def _alembic_head_and_current(db_url: str) -> Tuple[Optional[str], Optional[str]
     script = ScriptDirectory.from_config(cfg)
     head = script.get_current_head()
 
-    engine = create_engine(db_url, future=True)
+    engine = create_runtime_engine(db_url)
     with engine.connect() as conn:
         mc = MigrationContext.configure(conn)
         current = mc.get_current_revision()
