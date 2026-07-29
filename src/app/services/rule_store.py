@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from typing import Dict, Any, List, Optional
 from sqlalchemy import text as sql_text
@@ -36,7 +35,7 @@ class RuleStore:
         try:
             with db_session() as db:
                 rows = db.execute(
-                    sql_text("SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE active = 1 AND (tenant_id IS NULL OR tenant_id = :tid) AND (:domain IS NULL OR domain = :domain) ORDER BY priority ASC"),
+                    sql_text("SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE active IS TRUE AND (tenant_id IS NULL OR tenant_id = :tid) AND (:domain IS NULL OR domain = :domain) ORDER BY priority ASC"),
                     {"tid": tenant_id, "domain": domain},
                 ).fetchall()
         except Exception:
@@ -84,7 +83,7 @@ class RuleStore:
                         "pattern": rule.get("pattern"),
                         "expression": rule.get("expression"),
                         "priority": int(rule.get("priority") or 100),
-                        "active": 1 if rule.get("active", True) else 0,
+                        "active": bool(rule.get("active", True)),
                         "created_by": rule.get("created_by"),
                         "version": rule.get("version"),
                         "effective_from": rule.get("effective_from"),

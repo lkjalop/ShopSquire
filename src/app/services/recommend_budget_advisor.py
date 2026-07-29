@@ -14,7 +14,7 @@ IS on the no-flavour-in-core lint at zero tolerance; keep every new word in the 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from typing import Any
 
 from src.app.services.recommend_utils import (
     _brand_display_name,
@@ -411,7 +411,7 @@ def _above_budget_step_ups(budget_cap: float, min_vram_above: int | None) -> lis
         with db_session() as db:
             rows = db.execute(
                 _sqltext("SELECT name, price_cents, specs FROM products "
-                         "WHERE active = 1 AND price_cents > :b ORDER BY price_cents ASC LIMIT 40"),
+                         "WHERE active IS TRUE AND price_cents > :b ORDER BY price_cents ASC LIMIT 40"),
                 {"b": int(float(budget_cap) * 100)},
             ).fetchall()
         out, seen_tiers = [], set()

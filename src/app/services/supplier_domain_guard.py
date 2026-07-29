@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Supplier domain allowlist guard.
 
 Protects inventory write paths against BEC (Business Email Compromise) attacks
@@ -15,9 +13,9 @@ Security model:
   transport layer. This guard validates the *business* identity.
 """
 
-import hashlib
+from __future__ import annotations
+
 import logging
-import os
 import re
 import uuid
 from typing import Any, Dict, Optional
@@ -87,7 +85,7 @@ def is_trusted_supplier_domain(domain: str) -> bool:
             row = db.execute(
                 _text(
                     "SELECT COUNT(*) FROM trusted_supplier_domains "
-                    "WHERE active = 1 AND ("
+                    "WHERE active IS TRUE AND ("
                     "  domain = :d "
                     "  OR :d LIKE '%.' || domain"  # subdomain match
                     ")"
@@ -258,7 +256,7 @@ def list_trusted_domains() -> list:
             rows = db.execute(
                 _text(
                     "SELECT id, domain, supplier_id, added_by, added_at, notes "
-                    "FROM trusted_supplier_domains WHERE active = 1 ORDER BY added_at DESC"
+                    "FROM trusted_supplier_domains WHERE active IS TRUE ORDER BY added_at DESC"
                 )
             ).fetchall()
         return [
