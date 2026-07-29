@@ -41,7 +41,7 @@ def seed_profile_catalog(db, profile_id: str, *, default_stock: int = 24) -> int
             price_cents = int(row.get("price_cents") or (int(row.get("price") or 0) * 100))
             db.execute(
                 text("INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at) "
-                     "VALUES (:id, :sku, :name, :price_cents, :currency, :specs, 1, :updated_at)"),
+                     "VALUES (:id, :sku, :name, :price_cents, :currency, :specs, true, :updated_at)"),
                 {"id": pid, "sku": sku, "name": str(row.get("name") or sku),
                  "price_cents": price_cents, "currency": str(row.get("currency") or "USD"),
                  "specs": json.dumps(row.get("specs") or {}), "updated_at": datetime.utcnow()},
