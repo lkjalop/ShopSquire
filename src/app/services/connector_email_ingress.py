@@ -62,5 +62,26 @@ def persist_connector_email(
             subscription_id=identity.subscription_id,
             fulfillment_case_id=payload.get("fulfillment_case_id"),
         )
+        try:
+            authoritative = resolve_subscription(
+                identity.provider, identity.subscription_id,
+            )
+        except Exception:
+            authoritative = None
+        if (
+            authoritative is not None
+            and authoritative.tenant_id == identity.tenant_id
+            and result.get("inbox_id")
+        ):
+            from src.app.services.supplier_observation_projection import (
+                project_governed_supplier_inbox,
+            )
+
+            result["supply_projection"] = project_governed_supplier_inbox(
+                db,
+                inbox_id=result["inbox_id"],
+                connector_identity=authoritative,
+                transport_identity_verified=True,
+            )
         db.commit()
         return result

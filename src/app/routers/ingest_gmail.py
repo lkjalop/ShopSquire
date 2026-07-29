@@ -101,6 +101,17 @@ def _persist_or_evaluate(identity, email: Dict[str, Any]) -> Dict[str, Any]:
                 subscription_id=identity.subscription_id,
                 fulfillment_case_id=email.get("fulfillment_case_id"),
             )
+            if identity_mode() == "strict" and result.get("inbox_id"):
+                from src.app.services.supplier_observation_projection import (
+                    project_governed_supplier_inbox,
+                )
+
+                result["supply_projection"] = project_governed_supplier_inbox(
+                    db,
+                    inbox_id=result["inbox_id"],
+                    connector_identity=identity,
+                    transport_identity_verified=True,
+                )
             db.commit()
             return result
     except Exception as exc:
