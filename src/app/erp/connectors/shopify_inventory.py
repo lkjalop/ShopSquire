@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.app.erp.connectors.base import InventoryConnector, InventoryRecord
 from src.app.security.url_guard import ensure_safe_outbound_url
+
+
+logger = logging.getLogger(__name__)
 
 
 class ShopifyInventoryConnector:
@@ -18,7 +22,7 @@ class ShopifyInventoryConnector:
 
     Notes:
       - Uses REST products endpoint and variant `inventory_quantity` for MVP simplicity.
-      - For large catalogs, you’ll want a GraphQL + bulk operation connector later.
+      - For large catalogs, use a GraphQL + bulk operation connector.
     """
 
     def __init__(
@@ -37,7 +41,7 @@ class ShopifyInventoryConnector:
     def name(self) -> str:
         return "shopify"
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         if not self.shop:
             return {"ok": False, "error": "SHOPIFY_SHOP not set"}
         if not self.access_token:
@@ -50,7 +54,7 @@ class ShopifyInventoryConnector:
         ensure_safe_outbound_url(base)
         return base
 
-    def fetch_inventory(self, *, tenant_id: str | None = None) -> List[InventoryRecord]:
+    def fetch_inventory(self, *, tenant_id: str | None = None) -> list[InventoryRecord]:
         if not self.health().get("ok"):
             return []
         try:
@@ -65,8 +69,8 @@ class ShopifyInventoryConnector:
         url = f"{self._base_url()}/products.json"
         params = {"limit": 250, "fields": "id,updated_at,variants"}
 
-        out: List[InventoryRecord] = []
-        next_url: Optional[str] = None
+        out: list[InventoryRecord] = []
+        next_url: str | None = None
 
         for _page in range(1, 50):  # hard cap for safety
             try:
@@ -106,7 +110,12 @@ class ShopifyInventoryConnector:
                                 source=self.name(),
                             )
                         )
-                except Exception:
+                except Exception as exc:
+                    logger.warning(
+                        "Shopify product record skipped warehouse=%s: %s",
+                        self.warehouse,
+                        exc,
+                    )
                     continue
 
             # Pagination: Shopify REST uses Link header
@@ -130,4 +139,3 @@ class ShopifyInventoryConnector:
 
 def create_connector() -> InventoryConnector:
     return ShopifyInventoryConnector()
-

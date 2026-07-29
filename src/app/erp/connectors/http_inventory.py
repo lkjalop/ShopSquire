@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
-from typing import Any, Dict, List
+from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
 from src.app.erp.connectors.base import InventoryConnector, InventoryRecord
 from src.app.security.url_guard import ensure_safe_outbound_url
+
+
+logger = logging.getLogger(__name__)
 
 
 class HTTPInventoryConnector(InventoryConnector):
@@ -19,7 +24,7 @@ class HTTPInventoryConnector(InventoryConnector):
     def name(self) -> str:
         return f"http_inventory:{self.provider_id}"
 
-    def _cfg(self) -> Dict[str, str]:
+    def _cfg(self) -> dict[str, str]:
         p = self.env_prefix
         return {
             "base_url": str(os.getenv(f"{p}_BASE_URL", "")).strip(),
@@ -32,7 +37,7 @@ class HTTPInventoryConnector(InventoryConnector):
             "scope": str(os.getenv(f"{p}_SCOPE", "")).strip(),
         }
 
-    def _headers(self, cfg: Dict[str, str]) -> Dict[str, str]:
+    def _headers(self, cfg: dict[str, str]) -> dict[str, str]:
         h = {"accept": "application/json"}
         if cfg.get("api_key"):
             h["x-api-key"] = cfg["api_key"]
@@ -55,18 +60,23 @@ class HTTPInventoryConnector(InventoryConnector):
                     tok = str((r.json() or {}).get("access_token") or "")
                     if tok:
                         h["authorization"] = f"Bearer {tok}"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "ERP OAuth token acquisition failed provider=%s token_host=%s: %s",
+                    self.provider_id,
+                    urlsplit(cfg["token_url"]).hostname or "invalid",
+                    exc,
+                )
         return h
 
-    def _endpoint(self, cfg: Dict[str, str]) -> str:
+    def _endpoint(self, cfg: dict[str, str]) -> str:
         base = (cfg.get("base_url") or "").rstrip("/")
         path = "/" + (cfg.get("inventory_path") or "/inventory").lstrip("/")
         out = f"{base}{path}"
         ensure_safe_outbound_url(out)
         return out
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         cfg = self._cfg()
         if not cfg.get("base_url"):
             return {"ok": False, "error": "missing_base_url", "provider": self.provider_id}
@@ -82,7 +92,7 @@ class HTTPInventoryConnector(InventoryConnector):
         except Exception as exc:
             return {"ok": False, "error": str(exc), "provider": self.provider_id}
 
-    def fetch_inventory(self, *, tenant_id: str | None = None) -> List[InventoryRecord]:
+    def fetch_inventory(self, *, tenant_id: str | None = None) -> list[InventoryRecord]:
         cfg = self._cfg()
         if not cfg.get("base_url"):
             return []
@@ -92,7 +102,7 @@ class HTTPInventoryConnector(InventoryConnector):
         rows = body.get("items") if isinstance(body, dict) else body
         if not isinstance(rows, list):
             return []
-        out: List[InventoryRecord] = []
+        out: list[InventoryRecord] = []
         for row in rows[:20000]:
             if not isinstance(row, dict):
                 continue
@@ -109,4 +119,3 @@ class HTTPInventoryConnector(InventoryConnector):
                 )
             )
         return out
-
