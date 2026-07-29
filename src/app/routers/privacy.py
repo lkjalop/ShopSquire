@@ -277,11 +277,11 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
             res = db.execute(text("DELETE FROM order_sessions WHERE uid = :uid"), {"uid": uid})
             deleted["order_sessions"] = getattr(res, "rowcount", 0) or 0
 
-            try:
-                res = db.execute(text("DELETE FROM chat_messages WHERE uid = :uid"), {"uid": uid})
-                deleted["chat_messages"] = getattr(res, "rowcount", 0) or 0
-            except Exception:
-                deleted["chat_messages"] = 0
+            res = db.execute(
+                text("DELETE FROM chat_messages WHERE tenant_id = :tenant_id AND uid = :uid"),
+                {"tenant_id": _ct(), "uid": uid},
+            )
+            deleted["chat_messages"] = getattr(res, "rowcount", 0) or 0
 
             res = db.execute(
                 "UPDATE orders SET customer_id = 'DELETED' WHERE customer_id = :uid",
@@ -342,17 +342,16 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
             export["order_sessions"] = [dict(r) for r in rows]
             order_ids = [r.get("order_id") for r in export["order_sessions"] if r.get("order_id")]
 
-            try:
-                rows = db.execute(
-                    text(
-                        "SELECT id, uid, session_id, role, content, trace_id, created_at "
-                        "FROM chat_messages WHERE uid = :uid ORDER BY created_at DESC LIMIT 1000"
-                    ),
-                    {"uid": uid},
-                ).mappings().all()
-                export["chat_messages"] = [dict(r) for r in rows]
-            except Exception:
-                export["chat_messages"] = []
+            rows = db.execute(
+                text(
+                    "SELECT id, tenant_id, uid, session_id, session_epoch, role, "
+                    "content, trace_id, created_at FROM chat_messages "
+                    "WHERE tenant_id = :tenant_id AND uid = :uid "
+                    "ORDER BY created_at DESC LIMIT 1000"
+                ),
+                {"tenant_id": _ct(), "uid": uid},
+            ).mappings().all()
+            export["chat_messages"] = [dict(r) for r in rows]
 
             if order_ids:
                 rows = db.execute(

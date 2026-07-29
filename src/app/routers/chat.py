@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy import text as sql_text
+from sqlalchemy.orm import Session
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.deps import get_redis
@@ -189,43 +190,6 @@ def _chat_replay_mark_once(redis, *, replay_key: str, ttl_seconds: int) -> bool:
         return True
 
 
-def _ensure_chat_messages_table(db) -> None:
-    dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
-    if "sqlite" in dialect:
-        db.execute(
-            sql_text(
-                """
-                CREATE TABLE IF NOT EXISTS chat_messages (
-                  id TEXT PRIMARY KEY,
-                  uid TEXT NOT NULL,
-                  session_id TEXT,
-                  role TEXT NOT NULL,
-                  content TEXT NOT NULL,
-                  trace_id TEXT,
-                  created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-        )
-    else:
-        db.execute(
-            sql_text(
-                """
-                CREATE TABLE IF NOT EXISTS chat_messages (
-                  id TEXT PRIMARY KEY,
-                  uid TEXT NOT NULL,
-                  session_id TEXT NULL,
-                  role TEXT NOT NULL,
-                  content TEXT NOT NULL,
-                  trace_id TEXT NULL,
-                  created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-                """
-            )
-        )
-    db.commit()
-
-
 def _store_chat_message(
     db,
     *,
@@ -234,28 +198,46 @@ def _store_chat_message(
     content: str,
     trace_id: str | None,
     session_id: str | None = None,
+    tenant_id: str | None = None,
+    session_epoch: str | None = None,
 ) -> str | None:
     if not str(content or "").strip():
         return None
-    _ensure_chat_messages_table(db)
+    from src.app.platform.tenant_context import current_tenant_id
+
     message_id = str(uuid.uuid4())
-    db.execute(
-        sql_text(
-            """
-            INSERT INTO chat_messages (id, uid, session_id, role, content, trace_id)
-            VALUES (:id, :uid, :session_id, :role, :content, :trace_id)
-            """
-        ),
-        {
-            "id": message_id,
-            "uid": str(uid or "anonymous")[:128],
-            "session_id": str(session_id or "")[:128] or None,
-            "role": str(role or "assistant")[:32],
-            "content": str(content or "")[:8000],
-            "trace_id": str(trace_id or "")[:128] or None,
-        },
-    )
-    db.commit()
+    bounded_uid = str(uid or "anonymous")[:128]
+    bounded_session_id = str(session_id or "")[:128] or None
+    params = {
+        "id": message_id,
+        "tenant_id": str(tenant_id or current_tenant_id() or "default")[:128],
+        "uid": bounded_uid,
+        "session_id": bounded_session_id,
+        "session_epoch": str(session_epoch or bounded_session_id or "legacy")[:128],
+        "role": str(role or "assistant")[:32],
+        "content": str(content or "")[:8000],
+        "trace_id": str(trace_id or "")[:128] or None,
+    }
+
+    # Chat history is optional evidence. Persist it in an isolated transaction so
+    # a failed optional/retrieval query on the request session cannot turn this
+    # insert into PostgreSQL 25P02 or discard unrelated decision evidence.
+    bind = db.get_bind() if hasattr(db, "get_bind") else getattr(db, "bind", None)
+    if bind is None:
+        raise RuntimeError("chat_message_store_requires_database_bind")
+    with Session(bind=bind, future=True) as message_db:
+        message_db.execute(
+            sql_text(
+                """
+                INSERT INTO chat_messages
+                    (id, tenant_id, uid, session_id, session_epoch, role, content, trace_id)
+                VALUES
+                    (:id, :tenant_id, :uid, :session_id, :session_epoch, :role, :content, :trace_id)
+                """
+            ),
+            params,
+        )
+        message_db.commit()
     return message_id
 
 
@@ -428,7 +410,15 @@ def _is_budget_question(item: Dict[str, Any]) -> bool:
 
 
 def _cart_mutation_short_circuit(
-    data: Any, *, q: str, uid: str, db, redis=None,
+    data: Any,
+    *,
+    q: str,
+    uid: str,
+    db,
+    redis=None,
+    tenant_id: str | None = None,
+    session_id: str | None = None,
+    session_epoch: str | None = None,
 ) -> Optional[Dict[str, Any]]:
     """CART-MUTATION short-circuit (V2 cart lane, extracted for testability): when the suggest
     hop returns a cart_mutation payload (RECOMMEND_CART_SERVE=on), build the MINIMAL chat
@@ -441,9 +431,27 @@ def _cart_mutation_short_circuit(
     tid = data.get("decision_trace_id") or data.get("decision_id") or data.get("trace_id")
     msg = str(data.get("assistant_message") or data.get("message") or "").strip()
     try:
-        _store_chat_message(db, uid=uid, role="user", content=q, trace_id=tid)
+        _store_chat_message(
+            db,
+            tenant_id=tenant_id,
+            uid=uid,
+            session_id=session_id,
+            session_epoch=session_epoch,
+            role="user",
+            content=q,
+            trace_id=tid,
+        )
         if msg:
-            _store_chat_message(db, uid=uid, role="assistant", content=msg, trace_id=tid)
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="assistant",
+                content=msg,
+                trace_id=tid,
+            )
     except Exception as _cm_exc:
         logger.debug("cart-mutation chat persist skipped: %s", repr(_cm_exc)[:100])
     multi_intent = None
@@ -509,6 +517,8 @@ def _cart_mutation_short_circuit(
             trace_id=str(tid or "") or None,
             assistant_message=msg,
             confirmed_slots=response_slots,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
         )
     except Exception:
         logger.warning("cart-mutation structured-state persistence failed", exc_info=True)
@@ -1369,8 +1379,14 @@ def _persist_chat_structured_state(
     assistant_message: str | None = None,
     recent_messages: List[Dict[str, Any]] | None = None,
     confirmed_slots: Dict[str, Any] | None = None,
+    tenant_id: str | None = None,
+    session_epoch: str | None = None,
 ) -> None:
-    mem = Memory(redis)
+    mem = Memory(
+        redis,
+        tenant_id=tenant_id,
+        session_epoch=session_epoch or "legacy",
+    )
     prior = mem.get_structured_state(uid) or {}
     budget = _extract_budget_bounds(query)
     brands = _extract_brand_mentions(query)
@@ -1771,6 +1787,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
 
     uid = _resolve_uid(payload, request)
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
+    tenant_id = _request_tenant_id(request)
+    session_epoch = session_id or "legacy"
     source_ip = request.client.host if request and request.client else ""
     # TEXT prompt-injection tally (ledger-only, no behavior change): classic override phrasings are
     # already harmless here (they fall through to a normal product turn — the LLM never sees them as
@@ -1811,7 +1829,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # cart is empty (e.g. an add-to-cart 409'd on stock).
     _prior_turn_shortlist: List[str] = []
     try:
-        _prior_ss = Memory(redis).get_structured_state(uid) or {}
+        _prior_ss = Memory(
+            redis,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        ).get_structured_state(uid) or {}
         _confirmed_in = _prior_ss.get("confirmed_slots") if isinstance(_prior_ss.get("confirmed_slots"), dict) else {}
         _confirmed_request = (
             payload.get("confirmed_slots")
@@ -1990,8 +2012,26 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             "complexity": score_query_complexity(q, context={"has_image": True}),
         }
         try:
-            _store_chat_message(db, uid=uid, role="user", content=q, trace_id=None)
-            _store_chat_message(db, uid=uid, role="assistant", content=str(out.get("assistant_message") or ""), trace_id=None)
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="user",
+                content=q,
+                trace_id=None,
+            )
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="assistant",
+                content=str(out.get("assistant_message") or ""),
+                trace_id=None,
+            )
             _persist_chat_structured_state(
                 redis=redis,
                 uid=uid,
@@ -2001,6 +2041,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 assistant_message=str(out.get("assistant_message") or ""),
                 recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
                 confirmed_slots=_extract_confirmed_slots(query=q, response=None),
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
             )
         except Exception:
             pass
@@ -2016,7 +2058,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     try:
         uid_for_cache = _resolve_uid(payload, request)
         if uid_for_cache and isinstance(image_hash_in, str) and image_hash_in.strip() and image_blob_bytes:
-            mem = Memory(redis)
+            mem = Memory(
+                redis,
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
+            )
             _stash_image_blob_for_recommend(mem, uid_for_cache, image_hash_in.strip()[:128], image_blob_bytes)
     except Exception:
         pass
@@ -2036,7 +2082,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         _uid_msg = uid
         _recent_msgs_raw = (payload or {}).get("recent_messages") or []
         if isinstance(_recent_msgs_raw, list) and _recent_msgs_raw:
-            _mem_state = Memory(redis)
+            _mem_state = Memory(
+                redis,
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
+            )
             _ss = _mem_state.get_structured_state(_uid_msg) or {}
             _ss["recent_messages"] = _normalize_recent_messages(_recent_msgs_raw, limit=12)
             _mem_state.set_structured_state(_uid_msg, _ss)
@@ -2140,8 +2190,26 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             },
         }
         try:
-            _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
-            _store_chat_message(db, uid=uid, role="assistant", content=str(out.get("assistant_message") or ""), trace_id=decision_trace_id, session_id=session_id)
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="user",
+                content=q,
+                trace_id=decision_trace_id,
+            )
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="assistant",
+                content=str(out.get("assistant_message") or ""),
+                trace_id=decision_trace_id,
+            )
         except Exception:
             pass
         return out
@@ -2206,10 +2274,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     if bool((payload or {}).get("external_research_consent")):
         params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
-    tenant_id = _request_tenant_id(request)
     pending_clarification: Dict[str, Any] = {}
     try:
-        pending_clarification = Memory(redis).get_pending_clarification(uid, tenant_id=tenant_id)
+        pending_clarification = Memory(
+            redis,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        ).get_pending_clarification(uid)
     except Exception:
         pending_clarification = {}
     q = _merge_material_nqe_answer(
@@ -2368,6 +2439,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     uid=_resolve_uid(payload, request),
                     db=db,
                     redis=redis,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    session_epoch=session_epoch,
                 )
                 if _cart_out is not None:
                     return _cart_out
@@ -2417,10 +2491,22 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     }
                     try:
                         uid = _resolve_uid(payload, request)
-                        _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id)
                         _store_chat_message(
                             db,
+                            tenant_id=tenant_id,
                             uid=uid,
+                            session_id=session_id,
+                            session_epoch=session_epoch,
+                            role="user",
+                            content=q,
+                            trace_id=decision_trace_id,
+                        )
+                        _store_chat_message(
+                            db,
+                            tenant_id=tenant_id,
+                            uid=uid,
+                            session_id=session_id,
+                            session_epoch=session_epoch,
                             role="assistant",
                             content=str(out.get("assistant_message") or ""),
                             trace_id=decision_trace_id,
@@ -2453,10 +2539,22 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 }
                 try:
                     uid = _resolve_uid(payload, request)
-                    _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id)
                     _store_chat_message(
                         db,
+                        tenant_id=tenant_id,
                         uid=uid,
+                        session_id=session_id,
+                        session_epoch=session_epoch,
+                        role="user",
+                        content=q,
+                        trace_id=decision_trace_id,
+                    )
+                    _store_chat_message(
+                        db,
+                        tenant_id=tenant_id,
+                        uid=uid,
+                        session_id=session_id,
+                        session_epoch=session_epoch,
                         role="assistant",
                         content=str(out.get("assistant_message") or ""),
                         trace_id=decision_trace_id,
@@ -2467,6 +2565,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         query=q,
                         products=[],
                         trace_id=decision_trace_id,
+                        tenant_id=tenant_id,
+                        session_epoch=session_epoch,
                     )
                 except Exception:
                     pass
@@ -3330,6 +3430,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                  "original_query": submitted_query[:1000], "trace_id": decision_trace_id,
                  "allowed_option_ids": (option_ids or ["total", "per_unit"])[:8]},
                 tenant_id=tenant_id,
+                session_epoch=session_epoch,
                 ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
             )
     except Exception:
@@ -3342,6 +3443,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             content=q,
             trace_id=decision_trace_id,
             session_id=session_id,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
         )
         if user_message_id:
             from src.app.deps import hash_uid
@@ -3372,6 +3475,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             content=str(out.get("assistant_message") or ""),
             trace_id=decision_trace_id,
             session_id=session_id,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
         )
     except Exception:
         logger.warning("chat message persistence failed", exc_info=True)
@@ -3389,9 +3494,15 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             assistant_message=str(out.get("assistant_message") or ""),
             recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
             confirmed_slots=response_confirmed_slots,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
         )
         if pending_clarification_consumed:
-            Memory(redis).clear_pending_clarification(uid, tenant_id=tenant_id)
+            Memory(
+                redis,
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
+            ).clear_pending_clarification(uid)
     except Exception:
         logger.warning("chat structured-state persistence failed", exc_info=True)
     return out
@@ -3403,20 +3514,31 @@ def chat_history(
     uid: str,
     limit: int = Query(50, ge=1, le=500),
     before: Optional[str] = None,
+    session_epoch: Optional[str] = Query(None, max_length=128),
     db=Depends(get_db),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
-    _ensure_chat_messages_table(db)
-    params: Dict[str, Any] = {"uid": uid, "lim": int(limit)}
-    where = "WHERE uid = :uid"
+    tenant_id = _request_tenant_id(request)
+    epoch = str(session_epoch or "legacy")[:128]
+    params: Dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "uid": uid,
+        "session_epoch": epoch,
+        "lim": int(limit),
+    }
+    where = (
+        "WHERE tenant_id = :tenant_id AND uid = :uid "
+        "AND session_epoch = :session_epoch"
+    )
     if before:
         where += " AND created_at < :before"
         params["before"] = str(before)
     rows = db.execute(
         sql_text(
             f"""
-            SELECT id, uid, session_id, role, content, trace_id, created_at
+            SELECT id, tenant_id, uid, session_id, session_epoch,
+                   role, content, trace_id, created_at
             FROM chat_messages
             {where}
             ORDER BY created_at DESC
@@ -3427,7 +3549,13 @@ def chat_history(
     ).mappings().all()
     items = [dict(r) for r in rows]
     items.reverse()
-    return {"uid": uid, "count": len(items), "items": items}
+    return {
+        "tenant_id": tenant_id,
+        "uid": uid,
+        "session_epoch": epoch,
+        "count": len(items),
+        "items": items,
+    }
 
 
 @router.post("/ollama_test")

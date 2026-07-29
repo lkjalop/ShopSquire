@@ -269,8 +269,10 @@ def _ensure_minimal_sqlite_tables(bind):
                 conn.execute(sql_text(
                     "CREATE TABLE IF NOT EXISTS chat_messages (\n"
                     "  id TEXT PRIMARY KEY,\n"
+                    "  tenant_id TEXT NOT NULL DEFAULT 'default',\n"
                     "  uid TEXT NOT NULL,\n"
                     "  session_id TEXT,\n"
+                    "  session_epoch TEXT NOT NULL DEFAULT 'legacy',\n"
                     "  role TEXT NOT NULL,\n"
                     "  content TEXT NOT NULL,\n"
                     "  trace_id TEXT,\n"
