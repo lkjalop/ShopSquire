@@ -58,13 +58,13 @@ jobs:
       - name: Run service shard with hard boundaries
         run: |
           timeout --signal=TERM --kill-after=30s 1200s \
-            pytest -vv --run-slow --timeout=120 --timeout-method=thread \
+            poetry run pytest -vv --run-slow --timeout=120 --timeout-method=thread \
               --junitxml=test-results/services-${{ matrix.shard }}.xml \
               tests/services
       - name: Static checks for stabilized service boundaries
         if: matrix.shard == 0
         run: |
-          ruff check \
+          poetry run ruff check \
             src/app/services/authoritative_business_feed.py \
             src/app/services/business_semantics.py \
             src/app/services/forecast_intelligence.py \
