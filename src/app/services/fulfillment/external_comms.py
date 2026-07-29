@@ -20,13 +20,12 @@ from __future__ import annotations
 import logging
 import os
 import re
-import uuid
 from typing import Any, Dict, List, Optional
 
 from src.app.services.fulfillment import workflow
+from src.app.services.fulfillment.domain import Actor, ActorType
 
 _log = logging.getLogger("shopsquire.fulfillment.external_comms")
-from src.app.services.fulfillment.domain import Actor, ActorType
 
 
 def _outbound_queue_enabled() -> bool:
@@ -131,6 +130,35 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
     body = str(draft.get("body") or "")
     content_hash = str(draft.get("content_hash") or "")
     transport_detail = ""
+    party_ref = None
+    try:
+        from src.app.services.communication_party_binding import (
+            bind_authoritative_party,
+        )
+        binding = bind_authoritative_party(
+            db,
+            tenant_id=tenant_id,
+            party_type="supplier",
+            source="supplier_registry",
+            object_type="approved_supplier",
+            external_id=str(draft.get("recipient_ref") or ""),
+            authority="approved_supplier_registry",
+            provenance_ref=f"case:{case_id}|draft:{content_hash}",
+            display_name=str(draft.get("recipient_ref") or recipient),
+        )
+        party_ref = str(binding["party_id"])
+    except Exception as exc:
+        _log.warning("supplier Party binding unavailable for %s: %s", case_id, exc)
+        if str(os.getenv("APP_ENV") or "").strip().lower() in {
+            "prod", "production", "staging",
+        }:
+            return workflow.TransitionResult(
+                False,
+                case_id,
+                cur.state,
+                "authoritative_party_binding_required",
+                http_status=503,
+            )
 
     # OUTBOUND INTEGRITY GATE — the single chokepoint for BOTH human and autonomous send. Destination
     # allowlisting + GATE-2 already stop the WRONG place; this stops the WRONG CONTENT — the platform
@@ -170,7 +198,20 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
         r = _oq.send_now(db, case_id=case_id, recipient=recipient, subject=subject, body=body,
                          idempotency_key=content_hash, transport=tx, tenant_id=tenant_id,
                          actor_type=getattr(actor.type, "value", str(actor.type)), actor_id=actor.id,
-                         transition_event=event, now_iso=now_iso)
+                         transition_event=event, now_iso=now_iso,
+                         party_ref=party_ref,
+                         grounding_materials=[
+                             {
+                                 "grounding_type": "fact",
+                                 "source_ref": evidence.get("evidence_id"),
+                                 "source_version": evidence.get("source_version") or "1",
+                                 "content": evidence.get("summary"),
+                             }
+                             for evidence in (draft.get("evidence") or [])
+                             if isinstance(evidence, dict)
+                             and evidence.get("evidence_id")
+                             and evidence.get("summary")
+                         ])
         if r.get("status") != "sent":
             return workflow.TransitionResult(False, case_id, cur.state, "send_failed", http_status=502)
         provider_ref = r.get("provider_ref", "")

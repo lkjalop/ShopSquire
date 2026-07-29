@@ -1,4 +1,4 @@
-"""Supplier communication — draft-first, gate-enforced outbound (Track 4). CORE / vertical-blind.
+"""Supplier draft compatibility surface; production delivery uses fulfillment external_comms.
 
 Bounded autonomy in one module: the AI may DRAFT a supplier message freely (no consequence), but a
 SEND happens only when ALL of these hold:
@@ -7,9 +7,11 @@ SEND happens only when ALL of these hold:
      action_authority_matrix SUP-04 — so an autonomous send is impossible without a deliberate rule),
   3. the recipient domain is on the trusted-supplier allowlist (defense in depth), and
   4. a real mailer is injected (the default NullMailer sends nothing).
-Otherwise the draft is returned with a status explaining why it was held. Never raises, and never
-sends on a non-ALLOW verdict. Message WORDING per vertical is FLAVOUR and lives in the profile slot
-`supplier_message_templates`; this module carries only a neutral, vertical-blind fallback.
+``draft_supplier_message`` remains the neutral facade used by proposal-only
+flows. ``dispatch_supplier_message`` is frozen compatibility evidence for tests
+and external callers; an architecture test prohibits application code from
+importing it. Governed production delivery uses the fulfillment workflow and
+durable outbox.
 """
 from __future__ import annotations
 
@@ -131,7 +133,9 @@ def dispatch_supplier_message(
     boundary_check_fn: Optional[Callable[..., Any]] = None,
     trace_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Decide-then-(maybe)-send. ALWAYS returns the draft. Never raises; never sends unless
+    """Frozen compatibility dispatch; application code must not call this.
+
+    Decide-then-(maybe)-send. ALWAYS returns the draft. Never raises; never sends unless
     allow_send AND the MAESTRO boundary passes AND the gate ALLOWs supplier_contact AND the recipient
     domain is trusted AND a real mailer is bound. Returns {draft, sent, status, [verdict], [maestro],
     [send_result], reason}."""

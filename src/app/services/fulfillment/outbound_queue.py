@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
@@ -82,9 +82,90 @@ def _backoff_seconds(attempts: int) -> int:
     return min(cap, base * (2 ** max(0, int(attempts) - 1)))
 
 
+def _project_lifecycle(
+    db, *, tenant_id: str, message_id: str, case_id: str, recipient: str,
+    subject: str, body: str, state: str, idempotency_key: str,
+    actor_type: str, actor_id: str = "", reason: str = "",
+    grounding_materials: Optional[List[Dict[str, Any]]] = None,
+    party_ref: Optional[str] = None,
+) -> None:
+    try:
+        from src.app.services.communication_lifecycle import (
+            append_transition,
+            register_approved_grounding,
+        )
+        from src.app.services.communication_observations import record_message_observation
+        grounding_refs: List[str] = []
+        material_claims: List[Dict[str, str]] = []
+        for material in grounding_materials or []:
+            if not isinstance(material, dict):
+                continue
+            source_ref = str(
+                material.get("source_ref") or material.get("evidence_id") or ""
+            ).strip()
+            content = str(
+                material.get("content") or material.get("summary") or ""
+            ).strip()
+            if not source_ref or not content:
+                continue
+            grounding_ref = register_approved_grounding(
+                db,
+                tenant_id=tenant_id,
+                grounding_type=str(material.get("grounding_type") or "fact"),
+                source_ref=source_ref,
+                source_version=str(material.get("source_version") or "1"),
+                content=content,
+                approved_by=actor_id or actor_type or "governed_send_boundary",
+            )
+            grounding_refs.append(grounding_ref)
+            material_claims.append(
+                {"text": content, "grounding_ref": grounding_ref}
+            )
+        observation = record_message_observation(
+            db=db, tenant_id=tenant_id, party_type="supplier", direction="outbound",
+            channel="outbound_queue", provider_message_id=message_id,
+            purpose="supplier_delivery", consent_status="not_required",
+            security_status="accepted",
+            sanitized_payload={
+                "recipient": recipient, "subject": subject, "body": body,
+                "material_claims": material_claims,
+            },
+            case_ref=case_id,
+            party_ref=party_ref,
+        )
+        observation_id = str(observation["id"])
+        current = db.execute(text(
+            "SELECT state FROM communication_lifecycle_event "
+            "WHERE tenant_id=:t AND observation_id=:o ORDER BY sequence_no DESC LIMIT 1"
+        ), {"t": tenant_id, "o": observation_id}).scalar()
+        if state == "queued" and current == "proposed":
+            append_transition(
+                db, tenant_id=tenant_id, observation_id=observation_id,
+                state="approved", idempotency_key=f"{idempotency_key}:approved",
+                actor_type=actor_type or "approved_boundary", actor_id=actor_id,
+                reason="existing governed send approval",
+                grounding_refs=grounding_refs,
+            )
+        append_transition(
+            db, tenant_id=tenant_id, observation_id=observation_id,
+            state=state, idempotency_key=f"{idempotency_key}:{state}",
+            actor_type=actor_type or "worker", actor_id=actor_id, reason=reason,
+            grounding_refs=grounding_refs,
+        )
+    except Exception as exc:
+        logger.warning(
+            "communication lifecycle projection failed message_id=%s state=%s: %s",
+            message_id, state, exc,
+        )
+        if str(os.getenv("APP_ENV") or "").strip().lower() in {"prod", "production", "staging"}:
+            raise
+
+
 def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempotency_key: str,
             max_attempts: int = 5, tenant_id: str = "default", actor_type: str = "", actor_id: str = "",
-            transition_event: str = "", now_iso: Optional[str] = None) -> Dict[str, Any]:
+            transition_event: str = "", now_iso: Optional[str] = None,
+            grounding_materials: Optional[List[Dict[str, Any]]] = None,
+            party_ref: Optional[str] = None) -> Dict[str, Any]:
     """Durably enqueue an outbound supplier message. IDEMPOTENT on (tenant, idempotency_key) — a retried
     enqueue of the same content_hash returns the existing row (deduped), never a second send. pending +
     due now. ``actor_type``/``actor_id``/``transition_event`` persist the already-approved workflow intent so a
@@ -107,6 +188,13 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
             {"i": mid, "t": tenant_id, "c": case_id, "r": recipient, "s": subject, "b": body,
              "k": idempotency_key, "m": int(max_attempts), "n": ts, "at": actor_type, "ai": actor_id,
              "te": transition_event, "ts": ts})
+        _project_lifecycle(
+            db, tenant_id=tenant_id, message_id=mid, case_id=case_id,
+            recipient=recipient, subject=subject, body=body, state="queued",
+            idempotency_key=idempotency_key, actor_type=actor_type, actor_id=actor_id,
+            grounding_materials=grounding_materials,
+            party_ref=party_ref,
+        )
         db.commit()
         return {"message_id": mid, "status": "pending", "deduped": False}
     except Exception as exc:
@@ -191,6 +279,13 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
                                 "WHERE id=:i"), {"e": ("integrity:" + ",".join(_integrity.get("findings") or []))[:200],
                                                  "ts": ts, "i": mid})
                 db.commit()
+                _project_lifecycle(
+                    db, tenant_id=tenant_id, message_id=mid, case_id=case_id,
+                    recipient=recipient, subject=subject, body=body, state="quarantined",
+                    idempotency_key=f"{idem}:integrity", actor_type="security",
+                    reason="outbound_integrity_block",
+                )
+                db.commit()
                 from src.app.services.decision_log import log_trace_event as _lte
                 _lte(trace_id=f"case:{case_id}", event_type="outbound_integrity_block", source_type="agent",
                      source_id="Outbound_Integrity_Guard", target_type="supplier_message", target_id=mid,
@@ -213,6 +308,12 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             if status == "sent":
                 db.execute(text("UPDATE outbound_message SET status='sent', provider_ref=:p, last_error=NULL, updated_at=:ts "
                                 "WHERE id=:i"), {"p": provider_ref, "ts": ts, "i": mid})
+                _project_lifecycle(
+                    db, tenant_id=tenant_id, message_id=mid, case_id=case_id,
+                    recipient=recipient, subject=subject, body=body, state="delivered",
+                    idempotency_key=str(idem or mid), actor_type="worker",
+                    reason=f"provider_ref:{provider_ref}",
+                )
                 db.commit()
                 out["sent"] += 1
                 out["sent_rows"].append({"case_id": case_id, "content_hash": idem, "provider_ref": provider_ref,
@@ -221,6 +322,11 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             elif new_attempts >= int(max_attempts or 5):
                 db.execute(text("UPDATE outbound_message SET status='dead_letter', last_error=:e, updated_at=:ts "
                                 "WHERE id=:i"), {"e": detail, "ts": ts, "i": mid})
+                _project_lifecycle(
+                    db, tenant_id=tenant_id, message_id=mid, case_id=case_id,
+                    recipient=recipient, subject=subject, body=body, state="failed",
+                    idempotency_key=f"{idem}:dead-letter", actor_type="worker", reason=detail,
+                )
                 db.commit()
                 out["dead_lettered"] += 1
             else:
@@ -260,7 +366,9 @@ def get_by_key(db, *, idempotency_key: str, tenant_id: str = "default") -> Dict[
 def send_now(db, *, case_id: str, recipient: str, subject: str, body: str, idempotency_key: str,
              transport: Optional[Any] = None, max_attempts: int = 5, tenant_id: str = "default",
              actor_type: str = "", actor_id: str = "", transition_event: str = "",
-             now_iso: Optional[str] = None) -> Dict[str, Any]:
+             now_iso: Optional[str] = None,
+             grounding_materials: Optional[List[Dict[str, Any]]] = None,
+             party_ref: Optional[str] = None) -> Dict[str, Any]:
     """Synchronous RELIABLE send for the GATE-2 path: durably enqueue (idempotent on content_hash) then attempt
     THIS message once. Returns {status, provider_ref, detail}: 'sent' (caller transitions now), or 'pending'
     (transient failure — durably retryable by the background processor, the human can re-dispatch), or
@@ -269,7 +377,8 @@ def send_now(db, *, case_id: str, recipient: str, subject: str, body: str, idemp
     of the same content_hash never double-sends (deduped)."""
     enqueue(db, case_id=case_id, recipient=recipient, subject=subject, body=body, idempotency_key=idempotency_key,
             max_attempts=max_attempts, tenant_id=tenant_id, actor_type=actor_type, actor_id=actor_id,
-            transition_event=transition_event, now_iso=now_iso)
+            transition_event=transition_event, now_iso=now_iso,
+            grounding_materials=grounding_materials, party_ref=party_ref)
     existing = get_by_key(db, idempotency_key=idempotency_key, tenant_id=tenant_id)
     if existing.get("status") == "sent":  # idempotent re-dispatch of an already-delivered message
         return {"status": "sent", "provider_ref": existing.get("provider_ref", ""), "detail": "deduped"}

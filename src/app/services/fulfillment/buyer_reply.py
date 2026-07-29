@@ -85,7 +85,8 @@ def buyer_auto_reply_enabled() -> bool:
 
 def send_buyer_status(db, case_id: str, *, to_email: Optional[str], transport: Any = None,
                       tenant_id: str = "default", now_iso: Optional[str] = None,
-                      trace_id: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
+                      trace_id: Optional[str] = None, force: bool = False,
+                      party_ref: Optional[str] = None) -> Dict[str, Any]:
     """Bounded-autonomy buyer notification: generate the claim-safe status for the case's current state and
     send it over the transport seam (SANDBOX by default; SMTP at deploy). Gated by buyer_auto_reply_enabled
     unless ``force`` (an explicit operator trigger). Idempotent per (case, state) so a buyer isn't spammed
@@ -94,6 +95,25 @@ def send_buyer_status(db, case_id: str, *, to_email: Optional[str], transport: A
         return {"sent": False, "reason": "disabled"}
     if not to_email:
         return {"sent": False, "reason": "no_recipient"}
+    if party_ref:
+        try:
+            from sqlalchemy import text
+            bound = db.execute(
+                text(
+                    "SELECT 1 FROM party_external_identity "
+                    "WHERE tenant_id=:tenant AND party_id=:party "
+                    "AND authority!='legacy_unverified' LIMIT 1"
+                ),
+                {"tenant": tenant_id, "party": party_ref},
+            ).fetchone()
+        except Exception:
+            bound = None
+        if not bound:
+            return {"sent": False, "reason": "buyer_party_binding_unverified"}
+    elif str(os.getenv("APP_ENV") or "").strip().lower() in {
+        "prod", "production", "staging",
+    }:
+        return {"sent": False, "reason": "buyer_party_binding_required"}
     try:
         from src.app.services.fulfillment import workflow
         cur = workflow.repository.current_version(db, case_id, tenant_id)
@@ -102,11 +122,67 @@ def send_buyer_status(db, case_id: str, *, to_email: Optional[str], transport: A
         msg = buyer_status_message(cur.state, cur.state_json)
         if not msg:
             return {"sent": False, "reason": "no_message", "state": cur.state}
+        observation_id = None
+        grounding_ref = None
+        message_key = f"buyer-status:{case_id}:{cur.state}"
+        try:
+            from src.app.services.communication_lifecycle import (
+                append_transition,
+                register_approved_grounding,
+            )
+            from src.app.services.communication_observations import record_message_observation
+            grounding_ref = register_approved_grounding(
+                db, tenant_id=tenant_id, grounding_type="template",
+                source_ref=f"buyer_status:{cur.state}", source_version="v1",
+                content=msg, approved_by="system:versioned_template_registry",
+            )
+            observation = record_message_observation(
+                db=db, tenant_id=tenant_id, party_type="buyer", direction="outbound",
+                channel="buyer_status", provider_message_id=message_key,
+                purpose="procurement_status", consent_status="granted",
+                security_status="accepted",
+                sanitized_payload={
+                    "recipient": str(to_email), "subject": "Update on your bulk order",
+                    "body": msg,
+                    "material_claims": [{"text": msg, "grounding_ref": grounding_ref}],
+                },
+                case_ref=case_id,
+                party_ref=party_ref,
+            )
+            observation_id = str(observation["id"])
+            append_transition(
+                db, tenant_id=tenant_id, observation_id=observation_id,
+                state="approved", idempotency_key=f"{message_key}:approved",
+                actor_type="system", actor_id="versioned_template_registry",
+                grounding_refs=[grounding_ref],
+            )
+            append_transition(
+                db, tenant_id=tenant_id, observation_id=observation_id,
+                state="queued", idempotency_key=f"{message_key}:queued",
+                actor_type="operator" if force else "bounded_agent",
+                actor_id="buyer_status_notifier", grounding_refs=[grounding_ref],
+            )
+        except Exception as exc:
+            logger.warning("buyer communication grounding failed for %s: %s", case_id, exc)
+            if str(os.getenv("APP_ENV") or "").strip().lower() in {"prod", "production", "staging"}:
+                return {"sent": False, "reason": "communication_grounding_required", "state": cur.state}
         from src.app.services.fulfillment.transport import get_transport
         tx = transport or get_transport()
         sent = tx.send(to=str(to_email), subject="Update on your bulk order", body=msg,
-                       idempotency_key=f"buyer-status:{case_id}:{cur.state}")
+                       idempotency_key=message_key)
         ok = getattr(sent, "status", "failed") == "sent"
+        if observation_id:
+            try:
+                append_transition(
+                    db, tenant_id=tenant_id, observation_id=observation_id,
+                    state="delivered" if ok else "failed",
+                    idempotency_key=f"{message_key}:{'delivered' if ok else 'failed'}",
+                    actor_type="transport", actor_id="buyer_status_transport",
+                    grounding_refs=[grounding_ref] if grounding_ref else [],
+                    reason=str(getattr(sent, "detail", "") or ""),
+                )
+            except Exception as exc:
+                logger.warning("buyer delivery projection failed for %s: %s", case_id, exc)
         try:  # auditable bounded-autonomy notification (off the silent-except ratchet via record_decision)
             from src.app.services.adaptive_action_gate import record_decision
             record_decision(db, action_type="buyer_status_notify",

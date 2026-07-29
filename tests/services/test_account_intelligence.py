@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 from src.app.models.db import set_engine
 from src.app.services.account_intelligence import (
@@ -16,6 +17,7 @@ from src.app.services.account_intelligence import (
     record_account_activity,
     resolve_exact_external_identity,
 )
+from src.app.services.communication_party_binding import bind_authoritative_party
 
 
 def _migrate(engine) -> None:
@@ -24,6 +26,7 @@ def _migrate(engine) -> None:
         for filename in (
             "20260810_account_intelligence.py",
             "20260819_party_timeline.py",
+            "20260827_party_identity_authority.py",
         ):
             path = Path(__file__).resolve().parents[2] / "alembic" / "versions" / filename
             spec = importlib.util.spec_from_file_location(filename.removesuffix(".py"), path)
@@ -127,3 +130,69 @@ def test_exact_identity_is_tenant_scoped_and_snapshot_is_rebuildable(tmp_path):
     )
     assert merge["human_review_required"] is True
     assert merge["execution_allowed"] is False
+
+
+def test_authoritative_communication_identity_is_tenant_scoped_and_idempotent(tmp_path):
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'authority.sqlite'}", future=True)
+    _migrate(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+
+    with session_factory() as db:
+        first = bind_authoritative_party(
+            db,
+            tenant_id="tenant-a",
+            party_type="supplier",
+            source="supplier_registry",
+            object_type="supplier",
+            external_id="supplier@example.test",
+            authority="approved_supplier_registry",
+            provenance_ref="case:case-1",
+        )
+        replay = bind_authoritative_party(
+            db,
+            tenant_id="tenant-a",
+            party_type="supplier",
+            source="supplier_registry",
+            object_type="supplier",
+            external_id="supplier@example.test",
+            authority="approved_supplier_registry",
+            provenance_ref="case:case-2",
+        )
+        other_tenant = bind_authoritative_party(
+            db,
+            tenant_id="tenant-b",
+            party_type="supplier",
+            source="supplier_registry",
+            object_type="supplier",
+            external_id="supplier@example.test",
+            authority="approved_supplier_registry",
+            provenance_ref="case:case-3",
+        )
+        db.commit()
+
+        assert replay["party_id"] == first["party_id"]
+        assert other_tenant["party_id"] != first["party_id"]
+        authority = db.execute(
+            text(
+                """
+                SELECT authority, provenance_ref, verified_at
+                FROM party_external_identity
+                WHERE tenant_id='tenant-a' AND external_id='supplier@example.test'
+                """
+            )
+        ).one()
+        assert authority[0] == "approved_supplier_registry"
+        assert authority[1] == "case:case-1"
+        assert authority[2] is not None
+
+        with pytest.raises(ValueError, match="party_identity_authority_conflict"):
+            bind_authoritative_party(
+                db,
+                tenant_id="tenant-a",
+                party_type="supplier",
+                source="supplier_registry",
+                object_type="supplier",
+                external_id="supplier@example.test",
+                authority="verified_connector_sender",
+                provenance_ref="subscription:sub-1",
+            )

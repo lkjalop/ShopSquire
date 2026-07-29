@@ -121,6 +121,105 @@ def resolve_exact_external_identity(
     return {"party_id": party_id, "created": True, "match_type": "exact_external_id"}
 
 
+def resolve_authoritative_external_identity_in_session(
+    db,
+    *,
+    tenant_id: str,
+    source: str,
+    object_type: str,
+    external_id: str,
+    party_type: str,
+    authority: str,
+    provenance_ref: str,
+    display_name: str | None = None,
+) -> dict[str, Any]:
+    """Resolve/create one exact Party identity without trusting request-selected fields."""
+    tenant = str(tenant_id or "").strip()
+    source_name = str(source or "").strip().lower()
+    object_name = str(object_type or "").strip().lower()
+    external = str(external_id or "").strip()
+    kind = str(party_type or "").strip().lower()
+    auth = str(authority or "").strip().lower()
+    provenance = str(provenance_ref or "").strip()
+    if not all((tenant, source_name, object_name, external, auth, provenance)):
+        raise ValueError("authoritative_external_identity_scope_required")
+    if kind not in PARTY_TYPES:
+        raise ValueError("unsupported_party_type")
+    columns = {
+        column["name"]
+        for column in inspect(db.connection()).get_columns("party_external_identity")
+    }
+    required = {"authority", "provenance_ref", "verified_at"}
+    if not required.issubset(columns):
+        raise RuntimeError("party_identity_authority_schema_required")
+    row = db.execute(
+        text(
+            """
+            SELECT party_id, authority, provenance_ref
+            FROM party_external_identity
+            WHERE tenant_id=:tenant AND source=:source
+              AND object_type=:object_type AND external_id=:external_id
+            LIMIT 1
+            """
+        ),
+        {
+            "tenant": tenant,
+            "source": source_name,
+            "object_type": object_name,
+            "external_id": external,
+        },
+    ).fetchone()
+    if row:
+        existing_authority = str(row[1] or "")
+        if existing_authority != auth:
+            raise ValueError("party_identity_authority_conflict")
+        return {
+            "party_id": str(row[0]),
+            "created": False,
+            "match_type": "authoritative_external_id",
+            "authority": existing_authority,
+        }
+    party_id = f"party-{uuid.uuid4().hex}"
+    db.execute(
+        text(
+            """
+            INSERT INTO party
+            (id, tenant_id, party_type, display_name, status, created_at, updated_at)
+            VALUES (:id, :tenant, :kind, :name, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """
+        ),
+        {"id": party_id, "tenant": tenant, "kind": kind, "name": display_name},
+    )
+    db.execute(
+        text(
+            """
+            INSERT INTO party_external_identity
+            (id, tenant_id, party_id, source, object_type, external_id,
+             authority, provenance_ref, verified_at, created_at)
+            VALUES
+            (:id, :tenant, :party_id, :source, :object_type, :external_id,
+             :authority, :provenance, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """
+        ),
+        {
+            "id": f"identity-{uuid.uuid4().hex}",
+            "tenant": tenant,
+            "party_id": party_id,
+            "source": source_name,
+            "object_type": object_name,
+            "external_id": external,
+            "authority": auth,
+            "provenance": provenance,
+        },
+    )
+    return {
+        "party_id": party_id,
+        "created": True,
+        "match_type": "authoritative_external_id",
+        "authority": auth,
+    }
+
+
 def record_account_activity(
     *,
     tenant_id: str,
@@ -426,6 +525,54 @@ def get_account_timeline(
                 }
             )
         table_names = set(inspect(db.get_bind()).get_table_names())
+        if {
+            "communication_observation", "communication_lifecycle_event"
+        }.issubset(table_names):
+            communication_rows = db.execute(
+                text(
+                    """
+                    SELECT e.id,e.state,e.actor_type,e.actor_id,e.reason,
+                           e.grounding_refs_json,e.commercial_effect,e.occurred_at,
+                           o.id,o.party_type,o.direction,o.channel,o.case_ref,
+                           o.trace_ref,o.purpose,o.authority,o.security_status,
+                           o.evidence_ref
+                    FROM communication_lifecycle_event e
+                    JOIN communication_observation o
+                      ON o.id=e.observation_id AND o.tenant_id=e.tenant_id
+                    WHERE e.tenant_id=:tenant AND o.party_ref=:party
+                    ORDER BY e.occurred_at DESC,e.sequence_no DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"tenant": tenant, "party": party, "limit": capped_limit},
+            ).fetchall()
+            for row in communication_rows:
+                timeline.append(
+                    {
+                        "id": str(row[0]),
+                        "event_type": str(row[1]),
+                        "event_class": "communication_lifecycle",
+                        "occurred_at": str(row[7]),
+                        "authority": str(row[15]),
+                        "actor_type": str(row[2]),
+                        "actor_id": str(row[3] or ""),
+                        "reason": str(row[4] or ""),
+                        "grounding_refs": json.loads(row[5] or "[]"),
+                        "commercial_effect": str(row[6]),
+                        "observation_id": str(row[8]),
+                        "party_type": str(row[9]),
+                        "direction": str(row[10]),
+                        "channel": str(row[11]),
+                        "case_ref": row[12],
+                        "trace_ref": row[13],
+                        "purpose": str(row[14]),
+                        "security_status": str(row[16]),
+                        "provenance": {
+                            "table": "communication_lifecycle_event",
+                            "evidence_ref": row[17],
+                        },
+                    }
+                )
         if "account_observation" in table_names:
             observation_rows = db.execute(
                 text(

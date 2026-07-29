@@ -381,13 +381,25 @@ def get_journey(case_id: str, request: Request) -> Dict[str, Any]:
     principal = resolve_buyer_principal(request)
     with db_session() as db:
         assert_case_owner(db, case_id, principal)
+        tenant_id = principal.tenant_id if principal else "default"
+        try:
+            from src.app.services.communication_lifecycle import timeline as communication_timeline
+            communications = communication_timeline(
+                db, tenant_id=tenant_id, case_ref=case_id
+            )
+            communication_status = "available"
+        except Exception as exc:
+            communications = []
+            communication_status = f"unavailable:{type(exc).__name__}"
         return {
             "case_id": case_id,
             "journey": fwf.journey(
                 db,
                 case_id,
-                tenant_id=(principal.tenant_id if principal else "default"),
+                tenant_id=tenant_id,
             ),
+            "communications": communications,
+            "communication_status": communication_status,
         }
 
 
@@ -1041,8 +1053,40 @@ def commit(case_id: str, body: CommitBody, request: Request) -> Dict[str, Any]:
         # no human approval needed because it makes no commitment). Best-effort.
         if body.email:
             from src.app.services.fulfillment.buyer_reply import send_buyer_status
+            party_ref = None
+            if principal is not None and principal.verified:
+                try:
+                    from src.app.services.communication_party_binding import (
+                        bind_authoritative_party,
+                    )
+                    binding = bind_authoritative_party(
+                        db,
+                        tenant_id=tenant_id,
+                        party_type="buyer_account",
+                        source="buyer_principal",
+                        object_type=principal.credential_kind,
+                        external_id=principal.subject,
+                        authority="authenticated_buyer_principal",
+                        provenance_ref=f"case:{case_id}|buyer_commitment",
+                        display_name=principal.subject,
+                    )
+                    party_ref = str(binding["party_id"])
+                except Exception:
+                    if str(os.getenv("APP_ENV") or "").strip().lower() in {
+                        "prod", "production", "staging",
+                    }:
+                        raise HTTPException(
+                            status_code=503,
+                            detail="authoritative_party_binding_required",
+                        )
             try:
-                send_buyer_status(db, case_id, to_email=body.email)
+                send_buyer_status(
+                    db,
+                    case_id,
+                    to_email=body.email,
+                    tenant_id=tenant_id,
+                    party_ref=party_ref,
+                )
             except Exception:
                 pass
         return _case_view(db, case_id, for_operator=False)
@@ -1050,6 +1094,7 @@ def commit(case_id: str, body: CommitBody, request: Request) -> Dict[str, Any]:
 
 class NotifyBuyerBody(BaseModel):
     to_email: str
+    party_ref: Optional[str] = None
 
 
 @router.post("/cases/{case_id}/notify-buyer")
@@ -1059,7 +1104,13 @@ def notify_buyer(case_id: str, body: NotifyBuyerBody,
     even if the auto-reply flag is off — an explicit human action."""
     from src.app.services.fulfillment.buyer_reply import send_buyer_status
     with db_session() as db:
-        result = send_buyer_status(db, case_id, to_email=body.to_email, force=True)
+        result = send_buyer_status(
+            db,
+            case_id,
+            to_email=body.to_email,
+            force=True,
+            party_ref=body.party_ref,
+        )
         return {**_case_view(db, case_id, for_operator=True), "buyer_notification": result}
 
 
@@ -1800,21 +1851,38 @@ def market_history(entity_ref: Optional[str] = Query(None), limit: int = Query(1
 
 
 @router.get("/governance/pulse")
-def governance_pulse(tenant_id: str = Query("default"),
-                     role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+def governance_pulse(
+    role: str = Depends(require_role(_OPERATOR)),
+) -> Dict[str, Any]:
     """Owner/governance VISIBILITY (deck Step 11): one read-only snapshot rolling the existing audit trails
     into four cards — signal & decision state, experiment health, policy & compliance, operational pressure.
     The owner observes WITHOUT becoming a runtime dependency (this writes nothing). ``tenant_id`` lets the
     pulse follow the view (e.g. the isolated 'replay-demo' tenant during the synthetic replay)."""
     from src.app.services.governance_pulse import governance_pulse as pulse
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = str(current_tenant_id() or "").strip()
     with db_session() as db:
-        return pulse(db, tenant_id=str(tenant_id or "default"))
+        return pulse(db, tenant_id=tenant_id)
 
 
 # ── ranking-experiment console (operator) — promote/observe/evaluate/revert the live-adaptation loop ──
 class ExperimentBody(BaseModel):
     experiment_id: Optional[str] = None
+    baseline: Optional[Dict[str, Any]] = None
+    eligibility: Optional[Dict[str, Any]] = None
     min_samples: Optional[int] = None
+    min_window_seconds: Optional[int] = None
+    rollback_threshold_pct: Optional[float] = None
+    guardrails: Optional[Dict[str, Any]] = None
+    terminal_policy: Optional[Dict[str, Any]] = None
+
+
+def _experiment_tenant() -> str:
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = str(current_tenant_id() or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="tenant_scope_missing")
+    return tenant_id
 
 
 def _exp_id(body: Optional["ExperimentBody"]) -> str:
@@ -1827,7 +1895,10 @@ def experiment_state(experiment_id: Optional[str] = Query(None),
                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     from src.app.services import experiment_console as ec
     with db_session() as db:
-        return ec.state(db, experiment_id=experiment_id or ec.DEFAULT_EXPERIMENT_ID)
+        return ec.state(
+            db, tenant_id=_experiment_tenant(),
+            experiment_id=experiment_id or ec.DEFAULT_EXPERIMENT_ID,
+        )
 
 
 @router.post("/market/experiment/promote")
@@ -1836,7 +1907,15 @@ def experiment_promote(body: ExperimentBody = Body(default=ExperimentBody()),
     """Arm the ranking experiment (status→live). The nudge still needs RANKING_NUDGE_EXPERIMENT_ENABLED."""
     from src.app.services import experiment_console as ec
     with db_session() as db:
-        return ec.promote(db, experiment_id=_exp_id(body))
+        return ec.promote(
+            db, tenant_id=_experiment_tenant(), experiment_id=_exp_id(body),
+            baseline=body.baseline, eligibility=body.eligibility,
+            min_samples=int(body.min_samples or 30),
+            min_window_seconds=int(body.min_window_seconds or 86400),
+            rollback_threshold_pct=float(body.rollback_threshold_pct or 2.0),
+            guardrails=body.guardrails,
+            terminal_policy=body.terminal_policy,
+        )
 
 
 @router.post("/market/experiment/evaluate")
@@ -1846,8 +1925,9 @@ def experiment_evaluate(body: ExperimentBody = Body(default=ExperimentBody()),
     from src.app.services import experiment_console as ec
     with db_session() as db:
         # never evaluate on fewer than 2 samples/arm — a 1-sample 'significance' would scale/auto-revert on noise.
-        requested = int(body.min_samples) if body and body.min_samples else 30
-        return ec.evaluate_now(db, experiment_id=_exp_id(body), min_samples=max(2, requested))
+        return ec.evaluate_now(
+            db, tenant_id=_experiment_tenant(), experiment_id=_exp_id(body)
+        )
 
 
 @router.post("/market/experiment/revert")
@@ -1856,7 +1936,9 @@ def experiment_revert(body: ExperimentBody = Body(default=ExperimentBody()),
     """The manual revert lever — stop the adaptation globally."""
     from src.app.services import experiment_console as ec
     with db_session() as db:
-        return ec.revert(db, experiment_id=_exp_id(body))
+        return ec.revert(
+            db, tenant_id=_experiment_tenant(), experiment_id=_exp_id(body)
+        )
 
 
 class SelectBody(BaseModel):

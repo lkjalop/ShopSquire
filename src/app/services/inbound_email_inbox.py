@@ -189,6 +189,57 @@ def ingest_email(
             "now": now,
         },
     )
+    communication = None
+    try:
+        party_ref = None
+        sender = str(email.get("from_addr") or "").strip()
+        sender_external_id = (
+            sender.rsplit("<", 1)[-1].split(">", 1)[0].strip().lower()
+            if sender
+            else ""
+        )
+        if status != "quarantined" and subscription_id and sender_external_id:
+            from src.app.services.communication_party_binding import (
+                bind_authoritative_party,
+            )
+            binding = bind_authoritative_party(
+                db,
+                tenant_id=tenant,
+                party_type="supplier",
+                source=provider_key,
+                object_type="supplier_sender",
+                external_id=sender_external_id,
+                authority="verified_connector_sender",
+                provenance_ref=(
+                    f"subscription:{subscription_id}|evidence:{raw_evidence_ref}"
+                ),
+                display_name=sender_external_id,
+            )
+            party_ref = str(binding["party_id"])
+        from src.app.services.communication_observations import record_message_observation
+        communication = record_message_observation(
+            db=db,
+            tenant_id=tenant,
+            party_type="supplier",
+            direction="inbound",
+            channel=provider_key,
+            provider_message_id=message_id,
+            purpose="supplier_reply",
+            consent_status="not_required",
+            security_status="quarantined" if status == "quarantined" else "accepted",
+            sanitized_payload=_sanitized_payload(email),
+            thread_ref=str(email.get("thread_id") or email.get("conversation_id") or "") or None,
+            case_ref=correlated_case_id,
+            party_ref=party_ref,
+            evidence_ref=raw_evidence_ref,
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "communication projection unavailable inbox_id=%s: %s", inbox_id, exc
+        )
+        if str(os.getenv("APP_ENV") or "").strip().lower() in {"prod", "production", "staging"}:
+            raise RuntimeError("communication_projection_required") from exc
 
     env = str(os.getenv("APP_ENV") or "dev").strip().lower()
     async_default = env in {"prod", "production", "staging"}
@@ -252,5 +303,6 @@ def ingest_email(
         "fulfillment_case_id": correlated_case_id,
         "case_state": getattr(case_result, "state", None),
         "raw_evidence_ref": raw_evidence_ref,
+        "communication_observation_id": communication["id"] if communication else None,
         "duplicate": False,
     }

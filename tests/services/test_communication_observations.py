@@ -12,19 +12,19 @@ from src.app.services.communication_observations import record_message_observati
 
 
 def _migrate(engine) -> None:
-    path = Path(__file__).resolve().parents[2] / "alembic" / "versions" / "20260812_communication_observations.py"
-    spec = importlib.util.spec_from_file_location("communication_observation_migration", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
     with engine.begin() as connection:
         operations = Operations(MigrationContext.configure(connection))
-        original = module.op
-        module.op = operations
-        try:
+        for filename in (
+            "20260812_communication_observations.py",
+            "20260826_communication_lifecycle.py",
+        ):
+            path = Path(__file__).resolve().parents[2] / "alembic" / "versions" / filename
+            spec = importlib.util.spec_from_file_location(filename.removesuffix(".py"), path)
+            module = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            spec.loader.exec_module(module)
+            module.op = operations
             module.upgrade()
-        finally:
-            module.op = original
 
 
 def test_supplier_and_buyer_messages_are_observations_not_authority(tmp_path):

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,9 +11,12 @@ from sqlalchemy import text
 
 from src.app.models.db import db_session
 
+logger = logging.getLogger(__name__)
+
 
 def record_message_observation(
     *,
+    db=None,
     tenant_id: str,
     party_type: str,
     direction: str,
@@ -23,6 +28,8 @@ def record_message_observation(
     sanitized_payload: dict[str, Any],
     thread_ref: str | None = None,
     case_ref: str | None = None,
+    party_ref: str | None = None,
+    trace_ref: str | None = None,
     evidence_ref: str | None = None,
 ) -> dict[str, Any]:
     tenant = str(tenant_id or "").strip()
@@ -44,8 +51,9 @@ def record_message_observation(
     observation_id = hashlib.sha256(
         f"{tenant}|{transport}|{message_id}".encode("utf-8")
     ).hexdigest()
-    with db_session() as db:
-        existing = db.execute(
+    owns_session = db is None
+    with (db_session() if owns_session else nullcontext(db)) as session:
+        existing = session.execute(
             text(
                 """
                 SELECT id, authority
@@ -62,17 +70,17 @@ def record_message_observation(
                 "duplicate": True,
                 "authority": str(existing[1]),
             }
-        db.execute(
+        session.execute(
             text(
                 """
                 INSERT INTO communication_observation
                 (id, tenant_id, party_type, direction, channel,
-                 provider_message_id, thread_ref, case_ref, purpose,
+                 provider_message_id, thread_ref, case_ref, party_ref, trace_ref, purpose,
                  consent_status, authority, security_status,
                  sanitized_payload_json, evidence_ref, observed_at)
                 VALUES
                 (:id, :tenant, :party, :direction, :channel,
-                 :message, :thread, :case_ref, :purpose,
+                 :message, :thread, :case_ref, :party_ref, :trace_ref, :purpose,
                  :consent, 'observation_only', :security,
                  :payload, :evidence, :observed)
                 """
@@ -86,6 +94,8 @@ def record_message_observation(
                 "message": message_id,
                 "thread": thread_ref,
                 "case_ref": case_ref,
+                "party_ref": party_ref,
+                "trace_ref": trace_ref,
                 "purpose": str(purpose),
                 "consent": consent_status,
                 "security": str(security_status or "unverified"),
@@ -94,5 +104,21 @@ def record_message_observation(
                 "observed": datetime.now(timezone.utc).isoformat(),
             },
         )
-        db.commit()
+        try:
+            from src.app.services.communication_lifecycle import append_transition
+            initial_state = (
+                "quarantined" if str(security_status).lower() == "quarantined"
+                else ("responded" if flow == "inbound" else "proposed")
+            )
+            append_transition(
+                session, tenant_id=tenant, observation_id=observation_id,
+                state=initial_state, idempotency_key="observation-created",
+                actor_type="connector" if flow == "inbound" else "agent",
+                reason=f"{transport}:{security_status}",
+            )
+        except Exception as exc:
+            # Lifecycle schema may not exist during an older migration's isolated test.
+            logger.debug("communication lifecycle projection unavailable: %s", exc)
+        if owns_session:
+            session.commit()
     return {"id": observation_id, "duplicate": False, "authority": "observation_only"}
