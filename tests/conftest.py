@@ -513,18 +513,6 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
         shutdown_resilience_executor(wait=False)
     except Exception:
         pass
-    try:
-        legacy_recommend = sys.modules.get("src.app.routers.recommend")
-        shutdown_recommend = getattr(
-            legacy_recommend,
-            "shutdown_recommend_executors",
-            None,
-        )
-        if shutdown_recommend is not None:
-            shutdown_recommend(wait=True)
-    except Exception:
-        pass
-
     leaked_threads = [
         thread
         for thread in threading.enumerate()

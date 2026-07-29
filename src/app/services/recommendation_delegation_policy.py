@@ -5,8 +5,13 @@ import os
 from typing import Any, Dict, Optional
 
 
-def legacy_delegate_enabled() -> bool:
-    return os.getenv("RECOMMEND_LEGACY_DELEGATE_ENABLED", "1").strip().lower() in {
+def compatibility_cutover_enabled() -> bool:
+    """Whether chat may retry through the V2-only compatibility transport."""
+    configured = os.getenv("RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED")
+    if configured is None:
+        # Transitional configuration alias; it no longer enables legacy code.
+        configured = os.getenv("RECOMMEND_LEGACY_DELEGATE_ENABLED", "1")
+    return configured.strip().lower() in {
         "1", "true", "yes", "on",
     }
 

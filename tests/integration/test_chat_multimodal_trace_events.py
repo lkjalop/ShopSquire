@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
-def _legacy_image_response(**_kwargs):
+def _compatibility_image_response(**_kwargs):
     return {
                 "results": [
                     {
@@ -26,14 +26,13 @@ def _legacy_image_response(**_kwargs):
 
 def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch):
     from src.app.routers import chat as chat_router
-    from src.app.services import legacy_recommendation_delegate
+    from src.app.services import recommendation_compatibility
 
-    # Chat now dispatches in-process through the typed facade and an isolated legacy delegate;
-    # mocking the removed HTTP loopback would no longer exercise the production boundary.
+    # Chat dispatches through the typed facade and V2-only compatibility cutover.
     monkeypatch.setattr(
-        legacy_recommendation_delegate,
-        "delegate_legacy_recommendation",
-        _legacy_image_response,
+        recommendation_compatibility,
+        "serve_v2_compatibility",
+        _compatibility_image_response,
     )
     monkeypatch.setattr(
         chat_router,

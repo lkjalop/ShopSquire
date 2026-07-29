@@ -8,9 +8,7 @@ guard). If any assertion here changes, the move changed behaviour: stop and fix.
 """
 from __future__ import annotations
 
-import pytest
-
-R = pytest.importorskip("src.app.routers.recommend")
+from src.app.services import recommend_response_finalizer as R
 
 
 # ── pure helpers (move directly) ──────────────────────────────────────────────

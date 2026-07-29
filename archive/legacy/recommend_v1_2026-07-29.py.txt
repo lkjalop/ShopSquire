@@ -1,3 +1,4 @@
+# Archived, non-importable V1 router retained for rollback evidence only.
 from __future__ import annotations
 
 import time

@@ -1505,9 +1505,9 @@ async def _call_recommend_in_process(
     db: Any,
     role: str,
 ) -> tuple[int, Dict[str, Any]]:
-    """Dispatch through the typed facade, delegating unsupported lanes to legacy."""
+    """Dispatch through the typed facade and its V2 compatibility cutover."""
     from src.app.services.recommendation_delegation_policy import (
-        legacy_delegate_enabled,
+        compatibility_cutover_enabled,
         v2_only_unavailable_response,
     )
     from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
@@ -1554,7 +1554,7 @@ async def _call_recommend_in_process(
                 "reason": facade.reason,
                 "trace_id": str(params.get("trace_id") or "") or None,
             })
-        if not legacy_delegate_enabled():
+        if not compatibility_cutover_enabled():
             record_recommendation_dispatch(
                 outcome="v2_unavailable", lane=facade.lane or observed_lane,
                 reason=facade.reason or facade.status,
@@ -1565,11 +1565,11 @@ async def _call_recommend_in_process(
                 lane=facade.lane,
                 trace_id=str(params.get("trace_id") or ""),
             )
-        from src.app.services.legacy_recommendation_delegate import (
-            delegate_legacy_recommendation,
+        from src.app.services.recommendation_compatibility import (
+            serve_v2_compatibility,
         )
         try:
-            delegated = delegate_legacy_recommendation(
+            delegated = serve_v2_compatibility(
                 request=request, params=params, redis=redis, db=db, role=role,
             )
         except Exception:
@@ -1579,11 +1579,11 @@ async def _call_recommend_in_process(
             )
             raise
         record_recommendation_dispatch(
-            outcome="legacy_delegated", lane=facade.lane or observed_lane,
+            outcome="v2_compatibility", lane=facade.lane or observed_lane,
             reason=facade.reason or facade.status,
         )
         delegated = dict(delegated or {})
-        delegated.setdefault("execution_mode", "legacy_delegated")
+        delegated.setdefault("execution_mode", "v2_compatibility")
         delegated.setdefault("delegation_reason", facade.reason or facade.status)
         delegated.setdefault("execution_lane", facade.lane)
         return delegated

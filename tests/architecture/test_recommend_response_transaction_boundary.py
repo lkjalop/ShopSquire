@@ -4,15 +4,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_legacy_wrapper_delegates_to_v2_response_transaction():
-    source = (ROOT / "src/app/routers/recommend.py").read_text(encoding="utf-8")
-    active = source.split("def _with_trace(", 1)[1].split(
-        "def _decision_log_writes_enabled",
-        1,
-    )[0]
+def test_response_transaction_is_v2_owned_after_legacy_archive():
+    assert not (ROOT / "src/app/routers/recommend.py").exists()
+    source = (
+        ROOT / "src/app/services/recommend_response_transaction.py"
+    ).read_text(encoding="utf-8")
 
-    assert "finalize_response_transaction(" in active
-    assert "ResponseTransactionDependencies(" in active
+    assert "def finalize_response_transaction(" in source
+    assert "class ResponseTransactionDependencies" in source
 
 
 def test_v2_cart_contract_does_not_import_legacy_router():

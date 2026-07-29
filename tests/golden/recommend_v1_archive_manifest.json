@@ -1,0 +1,42 @@
+{
+  "manifest_version": 1,
+  "archived_at": "2026-07-29",
+  "authority": "frozen_characterization_evidence",
+  "production_authority": false,
+  "legacy_router": {
+    "archived_path": "archive/legacy/recommend_v1_2026-07-29.py.txt",
+    "sha256": "3ce64c84cda77f60c5623f06421bd9bdf2f54036344ce2ed902d454845893858",
+    "git_blob_before_archive": "c9b3bc8d13e7e02be6eef37b1340b124db25fa7a",
+    "last_active_commit": "75ed65b8fc84fbd94ba32191236d423bac3f3674"
+  },
+  "legacy_characterization": {
+    "archived_path": "tests/golden/recommend_v1_characterization.py.txt",
+    "sha256": "a2ed6157f6ffb8cc2c28d706cc8f8f4b9b99ab3cb6d3ffca6adde0bd49c365bd",
+    "git_blob_before_archive": "c318b782515051792c8fe87daef06bd89c4d9489",
+    "last_active_commit": "091ad5ceac93ed6628b697a64daae641907df0d6",
+    "collected_tests": 62,
+    "last_observed": {
+      "passed": 25,
+      "failed": 36,
+      "xfailed": 1
+    },
+    "status": "non_executable_historical_evidence"
+  },
+  "active_replacements": {
+    "v2_contracts": [
+      "tests/services/test_recommendation_core_brain.py",
+      "tests/services/test_recommendation_facade.py",
+      "tests/services/test_recommend_response_transaction.py"
+    ],
+    "compatibility_route_contracts": [
+      "tests/api/test_recommend_v2_compatibility.py",
+      "tests/architecture/test_recommend_compatibility_boundary.py",
+      "tests/test_chat_recommend_delegation.py"
+    ],
+    "response_characterization": [
+      "tests/services/test_finalizer_characterization.py",
+      "tests/test_recommend_with_trace_cart.py"
+    ]
+  },
+  "claim_boundary": "The archive preserves source and stale characterizations; only active V2 and compatibility tests make current behavior claims."
+}

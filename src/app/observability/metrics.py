@@ -1,4 +1,3 @@
-from typing import Optional
 import os
 import ipaddress
 from fastapi import APIRouter, Request
@@ -1616,7 +1615,7 @@ def record_event(name: str, fields: dict) -> None:
 
 
 def record_core_fallback(reason: str) -> None:
-    """Count a core-eligible turn that fell through to legacy (lane gate / grounding / failure)."""
+    """Count a core-eligible turn that could not be served by the primary lane."""
     try:
         recommend_core_fallback_total.labels(reason=str(reason or "unknown")).inc()
     except Exception:
@@ -1624,7 +1623,7 @@ def record_core_fallback(reason: str) -> None:
 
 
 _DISPATCH_OUTCOMES = {
-    "v2_served", "v2_unavailable", "legacy_delegated", "blocked", "timeout", "error",
+    "v2_served", "v2_compatibility", "v2_unavailable", "blocked", "timeout", "error",
 }
 _DISPATCH_REASONS = {
     "served", "mode_off", "search_mode_off", "shadow_only",

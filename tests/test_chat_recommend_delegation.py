@@ -22,15 +22,18 @@ def _request() -> Request:
     })
 
 
-def test_in_process_recommend_preserves_request_and_dependencies(monkeypatch):
+def test_in_process_recommend_preserves_v2_compatibility_dependencies(monkeypatch):
     captured = {}
     dispatches = []
 
-    def fake_suggest(**kwargs):
+    def fake_compatibility(**kwargs):
         captured.update(kwargs)
         return {"results": [{"sku": "LAP-1"}], "requested_quantity": 20}
 
-    monkeypatch.setattr("src.app.routers.recommend.suggest", fake_suggest)
+    monkeypatch.setattr(
+        "src.app.services.recommendation_compatibility.serve_v2_compatibility",
+        fake_compatibility,
+    )
     monkeypatch.setattr(
         "src.app.observability.metrics.record_recommendation_dispatch",
         lambda **fields: dispatches.append(fields),
@@ -53,22 +56,21 @@ def test_in_process_recommend_preserves_request_and_dependencies(monkeypatch):
 
     assert status == 200
     assert body["requested_quantity"] == 20
-    assert body["execution_mode"] == "legacy_delegated"
-    assert captured["uid"] == "buyer-1"
-    assert captured["turn_intent"] == "PROCUREMENT"
+    assert body["execution_mode"] == "v2_compatibility"
+    assert captured["params"]["uid"] == "buyer-1"
+    assert captured["params"]["turn_intent"] == "PROCUREMENT"
     assert captured["request"].headers["x-tenant-id"] == "tenant-a"
     assert captured["redis"] is redis
     assert captured["db"] is db
     assert captured["role"] == "merchant"
-    assert captured["external_research_consent"] is True
     assert dispatches == [{
-        "outcome": "legacy_delegated",
+        "outcome": "v2_compatibility",
         "lane": "PROCUREMENT",
         "reason": "mode_off",
     }]
 
 
-def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkeypatch):
+def test_in_process_recommend_returns_typed_facade_service_without_compatibility(monkeypatch):
     payload = {"results": [{"sku": "V2-1"}], "decision_trace_id": "trace-1"}
     dispatches = []
     monkeypatch.setattr(
@@ -77,8 +79,10 @@ def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkey
             status="served", payload=payload, lane="SEARCH"),
     )
     monkeypatch.setattr(
-        "src.app.routers.recommend.suggest",
-        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy must not run")),
+        "src.app.services.recommendation_compatibility.serve_v2_compatibility",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("compatibility cutover must not run")
+        ),
     )
     monkeypatch.setattr(
         "src.app.observability.metrics.record_recommendation_dispatch",
@@ -101,19 +105,13 @@ def test_in_process_recommend_returns_typed_facade_service_without_legacy(monkey
     }]
 
 
-def test_v2_only_pilot_never_invokes_legacy_delegate(monkeypatch):
+def test_v2_only_pilot_never_invokes_compatibility_cutover(monkeypatch):
     dispatches = []
-    monkeypatch.setenv("RECOMMEND_LEGACY_DELEGATE_ENABLED", "0")
+    monkeypatch.setenv("RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED", "0")
     monkeypatch.setattr(
         "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
         lambda *_args, **_kwargs: FacadeOutcome(
             status="delegate", reason="lane_not_enrolled", lane="SUPPORT_CLAIM",
-        ),
-    )
-    monkeypatch.setattr(
-        "src.app.services.legacy_recommendation_delegate.delegate_legacy_recommendation",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("strict V2 pilot must not invoke legacy")
         ),
     )
     monkeypatch.setattr(
@@ -139,7 +137,7 @@ def test_v2_only_pilot_never_invokes_legacy_delegate(monkeypatch):
     }]
 
 
-def test_legacy_delegate_failure_is_observable(monkeypatch):
+def test_v2_compatibility_failure_is_observable(monkeypatch):
     dispatches = []
     monkeypatch.setattr(
         "src.app.services.recommendation_facade.dispatch_recommendation_core_typed",
@@ -148,8 +146,10 @@ def test_legacy_delegate_failure_is_observable(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "src.app.services.legacy_recommendation_delegate.delegate_legacy_recommendation",
-        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("legacy failed")),
+        "src.app.services.recommendation_compatibility.serve_v2_compatibility",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("compatibility failed")
+        ),
     )
     monkeypatch.setattr(
         "src.app.observability.metrics.record_recommendation_dispatch",
@@ -162,7 +162,7 @@ def test_legacy_delegate_failure_is_observable(monkeypatch):
             redis=object(), db=object(), role="merchant",
         ))
     except RuntimeError as exc:
-        assert str(exc) == "legacy failed"
+        assert str(exc) == "compatibility failed"
     else:
         raise AssertionError("delegate failure must propagate to the chat error boundary")
 

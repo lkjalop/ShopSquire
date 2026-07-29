@@ -1,3 +1,4 @@
+# Frozen, non-executable V1 characterization evidence. See the adjacent manifest.
 import json
 import os
 import base64

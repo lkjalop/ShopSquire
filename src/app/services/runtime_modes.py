@@ -31,9 +31,12 @@ def runtime_mode_snapshot() -> dict[str, Any]:
         "policy_answers": _mode("RECOMMEND_POLICY_ANSWER_MODE"),
         "support_handoff": _mode("RECOMMEND_SUPPORT_HANDOFF_MODE"),
         "inventory_read": _mode("RECOMMEND_INVENTORY_READ_MODE"),
-        "legacy_delegate": (
+        "compatibility_cutover": (
             "on"
-            if _mode("RECOMMEND_LEGACY_DELEGATE_ENABLED", "1") in _TRUE
+            if _mode(
+                "RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED",
+                _mode("RECOMMEND_LEGACY_DELEGATE_ENABLED", "1"),
+            ) in _TRUE
             else "off"
         ),
         "supplier_transport": _mode("FULFILLMENT_SUPPLIER_TRANSPORT", "unset"),
@@ -49,7 +52,7 @@ def runtime_mode_snapshot() -> dict[str, Any]:
             "policy_answers": {"on"},
             "support_handoff": {"on"},
             "inventory_read": {"on"},
-            "legacy_delegate": {"off"},
+            "compatibility_cutover": {"on"},
         }
         for key, allowed in required.items():
             actual = active[key]
@@ -59,22 +62,20 @@ def runtime_mode_snapshot() -> dict[str, Any]:
                     "expected": "|".join(sorted(allowed)),
                     "actual": actual,
                 })
-    legacy_enabled = active["legacy_delegate"] == "on"
-    rollback = (
-        {
-            "behavior": "legacy_suggest",
-            "available": True,
-            "equivalence_observed": False,
-            "reason": "legacy_delegate_enabled",
-        }
-        if legacy_enabled
-        else {
-            "behavior": "bounded_unavailable",
-            "available": True,
-            "equivalence_observed": False,
-            "reason": "legacy_delegate_disabled_without_observed_replacement",
-        }
-    )
+    rollback = {
+        "behavior": (
+            "v2_compatibility"
+            if active["compatibility_cutover"] == "on"
+            else "bounded_unavailable"
+        ),
+        "available": True,
+        "equivalence_observed": False,
+        "reason": (
+            "v2_compatibility_cutover_enabled"
+            if active["compatibility_cutover"] == "on"
+            else "compatibility_cutover_disabled"
+        ),
+    }
     return {
         "profile": profile,
         "ready": not mismatches,
