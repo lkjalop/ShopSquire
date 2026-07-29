@@ -327,13 +327,33 @@ def graph_quality(db, *, tenant_id: str) -> dict[str, Any]:
     ]
     connected = sum(1 for row in actionable if str(row["id"]) in incident)
     supplier_counts: dict[str, int] = defaultdict(int)
+    supplier_spend: dict[str, float] = defaultdict(float)
     for row in edges:
         if row["relationship_type"] == "supplied_by":
-            supplier_counts[str(row["to_node_id"])] += 1
+            supplier_id = str(row["to_node_id"])
+            supplier_counts[supplier_id] += 1
+            try:
+                properties = json.loads(row["properties_json"] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                properties = {}
+            try:
+                spend = float(properties.get("attributable_spend_minor") or 0)
+            except (TypeError, ValueError):
+                spend = 0.0
+            supplier_spend[supplier_id] += max(0.0, spend)
     total_supplier_links = sum(supplier_counts.values())
     concentration = (
         sum((count / total_supplier_links) ** 2 for count in supplier_counts.values())
         if total_supplier_links else None
+    )
+    total_supplier_spend = sum(supplier_spend.values())
+    spend_concentration = (
+        sum(
+            (spend / total_supplier_spend) ** 2
+            for spend in supplier_spend.values()
+            if spend > 0
+        )
+        if total_supplier_spend else None
     )
     unresolved = sum(1 for row in nodes if row["identity_status"] != "resolved")
     return {
@@ -346,6 +366,15 @@ def graph_quality(db, *, tenant_id: str) -> dict[str, Any]:
         ),
         "supplier_concentration_hhi": (
             round(concentration, 4) if concentration is not None else None
+        ),
+        "supplier_spend_concentration_hhi": (
+            round(spend_concentration, 4)
+            if spend_concentration is not None else None
+        ),
+        "attributable_supplier_spend_minor": round(total_supplier_spend),
+        "supplier_spend_concentration_status": (
+            "observed" if spend_concentration is not None
+            else "undefined_no_attributable_spend"
         ),
         "status": (
             "incomplete" if unresolved or connected < len(actionable) else "complete"

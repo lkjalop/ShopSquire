@@ -271,6 +271,8 @@ def _policy_aggregation(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "gross_margin_minor": "gross_margin_minor",
         "working_capital_minor": "working_capital_minor",
         "service_impact": "service_impact",
+        "waste_units": "waste_units",
+        "waste_value_minor": "waste_value_minor",
     }
     metrics: dict[str, Any] = {}
     for output_name, source_name in mappings.items():
@@ -291,12 +293,6 @@ def _policy_aggregation(runs: list[dict[str, Any]]) -> dict[str, Any]:
                 for index in range(len(baseline))
             ),
         }
-    metrics["waste_units"] = {
-        "status": "undefined_no_ageing_model",
-        "baseline_mean": None,
-        "candidate_mean": None,
-        "delta_mean": None,
-    }
     return {
         "status": (
             "partially_observed"
@@ -313,7 +309,7 @@ def _policy_aggregation(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "causal_claim_allowed": False,
         "limitations": [
             "policies replay identical synthetic demand and lead-time sequences",
-            "waste is undefined until inventory ageing and expiry are simulated",
+            "expiry waste uses deterministic FEFO lots and declared shelf life",
             "margin and working capital use declared price and base unit cost",
             "means can hide tail outcomes; inspect per-run records",
         ],

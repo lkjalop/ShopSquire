@@ -197,6 +197,7 @@ def test_quality_reports_incomplete_identity_and_supplier_concentration(db):
         provenance={"contract": "a"},
         valid_from="2026-01-01T00:00:00Z",
         confidence=1.0,
+        properties={"attributable_spend_minor": 125000},
     )
     put_node_revision(
         db,
@@ -213,6 +214,9 @@ def test_quality_reports_incomplete_identity_and_supplier_concentration(db):
     quality = graph_quality(db, tenant_id="tenant-a")
     assert quality["dependency_completeness"] == 1.0
     assert quality["supplier_concentration_hhi"] == 1.0
+    assert quality["supplier_spend_concentration_hhi"] == 1.0
+    assert quality["attributable_supplier_spend_minor"] == 125000
+    assert quality["supplier_spend_concentration_status"] == "observed"
     assert quality["unresolved_identity_count"] == 1
     assert quality["status"] == "incomplete"
 

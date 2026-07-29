@@ -108,8 +108,8 @@ def test_policy_aggregation_reports_requested_business_outcomes_honestly():
         "working_capital_minor",
         "service_impact",
     } <= set(policy["metrics"])
-    assert policy["metrics"]["waste_units"]["status"] == "undefined_no_ageing_model"
-    assert policy["metrics"]["waste_units"]["candidate_mean"] is None
+    assert policy["metrics"]["waste_units"]["status"] == "observed"
+    assert policy["metrics"]["waste_units"]["candidate_mean"] is not None
     assert policy["metrics"]["fill_rate"]["status"] == "observed"
     assert policy["limitations"]
     assert policy["causal_claim_allowed"] is False

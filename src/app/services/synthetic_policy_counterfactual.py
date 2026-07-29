@@ -33,19 +33,70 @@ def _simulate_policy(
     sale_price_minor: int,
     shock_day: int,
     shock_unit_cost_minor: int,
+    shelf_life_days: int | None,
 ) -> dict[str, Any]:
-    on_hand = max(0, int(initial_inventory))
+    initial = max(0, int(initial_inventory))
+    on_hand = initial
     arrivals: dict[int, int] = {}
+    # Lots are intentionally internal to this simulation. Canonical facts are
+    # never rewritten; the same receipt sequence is replayed under each policy.
+    lots: list[dict[str, int | None]] = [{
+        "quantity": initial,
+        "expires_day": (
+            max(1, int(shelf_life_days))
+            if shelf_life_days is not None
+            else None
+        ),
+        "unit_cost_minor": int(unit_cost_minor),
+    }]
     closing: list[int] = []
     lost_units = 0
+    waste_units = 0
+    waste_value_minor = 0
     stockout_days = 0
     purchase_orders = 0
     purchased_units = 0
     purchase_spend = 0
     for day, requested in enumerate(demand):
-        on_hand += arrivals.pop(day, 0)
-        sold = min(on_hand, max(0, int(requested)))
+        arrived = arrivals.pop(day, 0)
+        if arrived:
+            receipt_cost = (
+                shock_unit_cost_minor if day >= shock_day else unit_cost_minor
+            )
+            lots.append({
+                "quantity": arrived,
+                "expires_day": (
+                    day + max(1, int(shelf_life_days))
+                    if shelf_life_days is not None
+                    else None
+                ),
+                "unit_cost_minor": receipt_cost,
+            })
+            on_hand += arrived
+        for lot in lots:
+            expires_day = lot["expires_day"]
+            quantity = int(lot["quantity"] or 0)
+            if quantity and expires_day is not None and int(expires_day) <= day:
+                waste_units += quantity
+                waste_value_minor += quantity * int(lot["unit_cost_minor"] or 0)
+                on_hand -= quantity
+                lot["quantity"] = 0
+        requested_units = max(0, int(requested))
+        sold = min(on_hand, requested_units)
         lost = max(0, int(requested) - sold)
+        remaining_sale = sold
+        # FEFO is deterministic and prevents newer stock being consumed while
+        # an earlier-expiring lot remains.
+        lots.sort(key=lambda lot: (
+            lot["expires_day"] is None,
+            int(lot["expires_day"] or 0),
+        ))
+        for lot in lots:
+            if remaining_sale <= 0:
+                break
+            consumed = min(int(lot["quantity"] or 0), remaining_sale)
+            lot["quantity"] = int(lot["quantity"] or 0) - consumed
+            remaining_sale -= consumed
         on_hand -= sold
         lost_units += lost
         stockout_days += int(lost > 0)
@@ -86,6 +137,13 @@ def _simulate_policy(
         "purchase_orders": purchase_orders,
         "purchased_units": purchased_units,
         "purchase_spend_minor": purchase_spend,
+        "waste_units": waste_units,
+        "waste_value_minor": waste_value_minor,
+        "ageing_status": (
+            "observed_fefo_expiry"
+            if shelf_life_days is not None
+            else "observed_non_expiring"
+        ),
     }
 
 
@@ -149,6 +207,11 @@ def compare_inventory_policies(
         "sale_price_minor": sale_price,
         "shock_day": int(profile.get("shock_day") or len(history)),
         "shock_unit_cost_minor": shock_cost,
+        "shelf_life_days": (
+            max(1, int(profile["shelf_life_days"]))
+            if profile.get("shelf_life_days") is not None
+            else None
+        ),
     }
     baseline = _simulate_policy(
         **common,
@@ -199,6 +262,8 @@ def compare_inventory_policies(
                 "working_capital_minor",
                 "service_impact",
                 "bounded_utility",
+                "waste_units",
+                "waste_value_minor",
             )
         },
         "utility_definition": {
@@ -210,7 +275,8 @@ def compare_inventory_policies(
                 "not a causal estimate",
                 "margin uses the declared current price and base unit cost",
                 "working capital uses average units at base unit cost",
-                "does not price lost goodwill, expiry, storage, financing, or capacity",
+                "expiry waste uses deterministic FEFO lots and declared shelf life",
+                "does not price lost goodwill, storage, financing, or capacity",
                 "cannot increase autonomy",
             ],
         },
