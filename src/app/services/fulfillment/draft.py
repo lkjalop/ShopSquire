@@ -869,6 +869,10 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
                                   state_patch=({"fulfillment_alternatives": _alts} if _alts else None),
                                   tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
         return res, None
+    # Any unavailable optional evidence read may have left PostgreSQL's
+    # transaction aborted. Draft construction is read-only; reset before
+    # channel/terms enrichment so those operator-facing facts remain visible.
+    db.rollback()
     # Advisory pre-send gate (deterministic; PRIOR to the human GATE 2) attached to the persisted draft so
     # the operator sees allow / needs_info / block before approving. Does not change the transition.
     draft_dict = draft.to_dict()

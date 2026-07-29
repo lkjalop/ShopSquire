@@ -181,6 +181,9 @@ def _case_view(
     # never blocks the transition (warn-by-default) — the human still commits (GATE 2). Best-effort.
     if for_operator and cur.state in _SEND_DECISION_STATES:
         try:
+            # Everything above is a read-only projection. A tolerated optional
+            # query failure must not suppress margin analysis on PostgreSQL.
+            db.rollback()
             from src.app.services.fulfillment.margin_advisor import assess as _margin_assess
             adv = _margin_assess(db, case_id)
             if adv.get("available"):
@@ -1215,6 +1218,11 @@ def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR)))
         except Exception:
             pass
         auto = _attempt_autonomous_send(db, case_id)
+        # Approval and workflow writes commit internally; optional spend,
+        # budget, trace, or autonomy projections are read-only/best-effort.
+        # Reset before the authoritative response projection so a caught
+        # PostgreSQL error cannot become a misleading 404.
+        db.rollback()
         return {**_case_view(db, case_id, for_operator=True), "approval_id": approval_id,
                 "approval_required_tier": tier, "budget_status": budget,
                 "autonomous_send": {"action": auto.action, "reason": auto.reason,
