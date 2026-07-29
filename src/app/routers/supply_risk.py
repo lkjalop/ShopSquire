@@ -53,6 +53,10 @@ class PublicSourceFetchRequest(BaseModel):
     title: str | None = Field(default=None, max_length=120)
     series: list[str] | None = Field(default=None, max_length=5)
     signal_type: str | None = Field(default=None, max_length=80)
+    commodities: list[str] | None = Field(default=None, max_length=5)
+    statistics: list[str] | None = Field(default=None, max_length=5)
+    countries: list[str] | None = Field(default=None, max_length=10)
+    latest_year_only: bool = True
 
 
 class SupplyNodeRevisionRequest(BaseModel):

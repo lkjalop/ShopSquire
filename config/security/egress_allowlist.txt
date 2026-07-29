@@ -32,4 +32,7 @@ urlhaus.abuse.ch
 urlhaus-api.abuse.ch
 mb-api.abuse.ch
 
+# Governed public market data (source registry and adapter pin exact resources)
+www.sciencebase.gov
+
 # Webhook delivery targets should be added per-tenant

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -85,6 +86,44 @@ def _pink_sheet_body() -> bytes:
     return output.getvalue()
 
 
+def _usgs_metadata_body(*, file_host: str = "www.sciencebase.gov") -> bytes:
+    return json.dumps({
+        "id": "69837e43b66b01367d7ec7c7",
+        "provenance": {
+            "dateCreated": "2026-02-04T17:13:39Z",
+            "lastUpdated": "2026-05-27T15:15:49Z",
+        },
+        "files": [{
+            "name": "MCS2026_Commodities_Data.csv",
+            "contentType": "text/csv",
+            "size": 900,
+            "url": (
+                f"https://{file_host}/catalog/file/get/"
+                "69837e43b66b01367d7ec7c7?f=fixture"
+            ),
+            "checksum": {
+                "type": "md5",
+                "value": "36185ff3742087e1dd90c52fe634fe12",
+            },
+        }],
+    }).encode()
+
+
+def _usgs_csv_body() -> bytes:
+    return (
+        "MCS chapter,Section,Commodity,Country,Statistics,Statistics_detail,"
+        "Unit,Year,Value,Notes,Is critical mineral 2025,Other notes\r\n"
+        "Copper,World,Copper,World,Production,Mine production,metric tons,"
+        '2024,"10,000",prior,Yes,\r\n'
+        "Copper,World,Copper,World,Production,Mine production,metric tons,"
+        '2025,"e10,500",estimate,Yes,\r\n'
+        "Copper,World,Copper,Chile,Production,Mine production,metric tons,"
+        '2025,W,withheld – official,Yes,\r\n'
+        "Lithium,World,Lithium,World,Production,Mine production,metric tons,"
+        '2025,240000,other commodity,Yes,\r\n'
+    ).encode("cp1252")
+
+
 def test_registry_exposes_only_approved_live_origins():
     sources = load_market_source_registry()
     supported = [
@@ -92,11 +131,16 @@ def test_registry_exposes_only_approved_live_origins():
     ]
     assert sorted(source["source_id"] for source in supported) == [
         "cpsc_recalls",
+        "usgs_minerals",
         "world_bank_pink_sheet",
     ]
     assert {
         source["fetch_profile"]["allowed_host"] for source in supported
-    } == {"www.saferproducts.gov", "thedocs.worldbank.org"}
+    } == {
+        "www.saferproducts.gov",
+        "www.sciencebase.gov",
+        "thedocs.worldbank.org",
+    }
 
 
 def test_fetch_persists_revision_and_reuses_tenant_scoped_cache():
@@ -284,3 +328,122 @@ def test_world_bank_rejects_unknown_or_unbounded_series():
         transport=response,
     )
     assert malformed["outcome"] == "malformed"
+
+
+def test_usgs_mcs_uses_pinned_metadata_and_normalizes_bounded_annual_rows():
+    db = _db()
+    calls = []
+
+    def transport(url, params, headers, timeout):
+        calls.append((url, params, headers, timeout))
+        if "catalog/item/" in url:
+            return PublicHttpResponse(200, {}, _usgs_metadata_body())
+        return PublicHttpResponse(
+            200,
+            {"etag": '"mcs2026-fixture"'},
+            _usgs_csv_body(),
+        )
+
+    result = fetch_public_market_source(
+        db,
+        tenant_id="tenant-usgs",
+        source_id="usgs_minerals",
+        query={"commodities": ["Copper"], "latest_year_only": True},
+        enabled=True,
+        transport=transport,
+    )
+
+    assert result["outcome"] == "observed"
+    assert len(calls) == 2
+    assert calls[0][0].endswith(
+        "/catalog/item/69837e43b66b01367d7ec7c7"
+    )
+    assert calls[0][1] == {"format": "json"}
+    assert calls[1][0].startswith(
+        "https://www.sciencebase.gov/catalog/file/get/"
+        "69837e43b66b01367d7ec7c7?"
+    )
+    assert len(result["observations"]) == 2
+    world, chile = result["observations"]
+    assert world["measurement"]["reported_value"] == "e10,500"
+    assert world["measurement"]["numeric_value"] == 10500.0
+    assert world["measurement"]["value_status"] == "estimated_numeric"
+    assert chile["measurement"]["reported_value"] == "W"
+    assert chile["measurement"]["numeric_value"] is None
+    assert chile["measurement"]["value_status"] == "reported_non_numeric"
+    assert world["published_at"] == "2026-05-27T15:15:49Z"
+    assert world["measurement"]["release_doi"] == "10.5066/P1WKQ63T"
+    assert world["authority"] == "advisory_only"
+    assert world["can_establish_sku_exposure"] is False
+    assert validate_source_policy(world["source_policy"])["eligible"] is True
+
+    cached = fetch_public_market_source(
+        db,
+        tenant_id="tenant-usgs",
+        source_id="usgs_minerals",
+        query={"commodities": ["Copper"], "latest_year_only": True},
+        enabled=True,
+        transport=transport,
+    )
+    assert cached["outcome"] == "cache_hit"
+    assert len(calls) == 2
+
+
+def test_usgs_mcs_requires_bounded_commodities_and_rejects_origin_escape():
+    db = _db()
+    with pytest.raises(ValueError, match="public_market_commodities_invalid"):
+        fetch_public_market_source(
+            db,
+            tenant_id="tenant-usgs",
+            source_id="usgs_minerals",
+            query={},
+            enabled=True,
+        )
+
+    calls = []
+
+    def transport(url, *_args):
+        calls.append(url)
+        return PublicHttpResponse(
+            200,
+            {},
+            _usgs_metadata_body(file_host="example.invalid"),
+        )
+
+    escaped = fetch_public_market_source(
+        db,
+        tenant_id="tenant-usgs",
+        source_id="usgs_minerals",
+        query={"commodities": ["Copper"]},
+        enabled=True,
+        transport=transport,
+    )
+    assert escaped["outcome"] == "malformed"
+    assert escaped["error_code"] == "provider_metadata_invalid"
+    assert len(calls) == 1
+
+
+@pytest.mark.live_provider
+@pytest.mark.skipif(
+    os.getenv("RUN_LIVE_PUBLIC_SOURCE_TESTS") != "1",
+    reason="set RUN_LIVE_PUBLIC_SOURCE_TESTS=1 for official USGS protocol probe",
+)
+def test_live_usgs_mcs_official_sciencebase_protocol():
+    result = fetch_public_market_source(
+        _db(),
+        tenant_id="live-protocol-usgs",
+        source_id="usgs_minerals",
+        query={
+            "commodities": ["Copper"],
+            "countries": ["World total"],
+            "latest_year_only": True,
+        },
+        enabled=True,
+    )
+    assert result["outcome"] == "observed"
+    assert result["observations"]
+    assert all(
+        row["source_system"] == "usgs_mineral_commodities"
+        and row["authority"] == "advisory_only"
+        for row in result["observations"]
+    )

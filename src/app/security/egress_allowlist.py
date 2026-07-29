@@ -70,6 +70,8 @@ _BUILTIN_ALLOWED_DOMAINS: FrozenSet[str] = frozenset(
         "urlhaus.abuse.ch",
         "urlhaus-api.abuse.ch",
         "mb-api.abuse.ch",
+        # Governed public market data (path/item pinning is enforced by adapter)
+        "www.sciencebase.gov",
         # Demo QR/document provider used by linked-artifact analysis fixtures
         "scanned.page",
         "www.scanned.page",

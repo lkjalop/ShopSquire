@@ -11,9 +11,11 @@ import json
 import os
 import re
 import uuid
+import csv
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from sqlalchemy import text
 
@@ -69,7 +71,7 @@ def _default_transport(
         follow_redirects=False,
         headers={"User-Agent": "ShopSquire-market-intelligence/1.0", **headers},
     ) as client:
-        response = client.get(url, params=params)
+        response = client.get(url, params=params) if params else client.get(url)
     return PublicHttpResponse(
         status_code=int(response.status_code),
         headers={str(key).lower(): str(value) for key, value in response.headers.items()},
@@ -117,6 +119,238 @@ def _normalize_world_bank_query(query: dict[str, Any]) -> dict[str, str]:
     }:
         raise ValueError("external_market_signal_not_permitted")
     return {"series": "|".join(series), "signal_type": signal_type}
+
+
+def _bounded_values(
+    query: dict[str, Any],
+    key: str,
+    *,
+    maximum: int,
+    required: bool = False,
+) -> list[str]:
+    raw_values = query.get(key) or []
+    if isinstance(raw_values, str):
+        raw_values = [part.strip() for part in raw_values.split("|")]
+    if not isinstance(raw_values, list):
+        raise ValueError(f"public_market_{key}_invalid")
+    values = sorted({
+        str(value or "").strip()
+        for value in raw_values
+        if str(value or "").strip()
+    })
+    if (
+        (required and not values)
+        or len(values) > maximum
+        or any(len(value) > 120 for value in values)
+    ):
+        raise ValueError(f"public_market_{key}_invalid")
+    return values
+
+
+def _normalize_usgs_query(query: dict[str, Any]) -> dict[str, str]:
+    commodities = _bounded_values(query, "commodities", maximum=5, required=True)
+    statistics = _bounded_values(query, "statistics", maximum=5)
+    countries = _bounded_values(query, "countries", maximum=10)
+    latest = query.get("latest_year_only", True)
+    if not isinstance(latest, bool):
+        raise ValueError("public_market_latest_year_only_invalid")
+    return {
+        "commodities": "|".join(commodities),
+        "statistics": "|".join(statistics),
+        "countries": "|".join(countries),
+        "latest_year_only": "true" if latest else "false",
+    }
+
+
+def _usgs_data_response(
+    profile: dict[str, Any],
+    *,
+    transport: Transport,
+    conditional_headers: dict[str, str],
+) -> tuple[PublicHttpResponse, dict[str, Any]]:
+    """Resolve one exact file from one pinned ScienceBase item.
+
+    The item endpoint is intentionally fetched without conditional data-file
+    headers. The discovered file must remain on the pinned item path and host.
+    """
+    timeout = float(profile.get("timeout_seconds") or 8)
+    metadata_response = transport(
+        str(profile["url"]),
+        {"format": "json"},
+        {},
+        timeout,
+    )
+    if metadata_response.status_code < 200 or metadata_response.status_code >= 300:
+        return metadata_response, {}
+    if len(metadata_response.body) > int(
+        profile.get("max_metadata_bytes") or 500_000
+    ):
+        raise ValueError("public_market_usgs_metadata_too_large")
+    try:
+        metadata = json.loads(metadata_response.body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("public_market_usgs_metadata_invalid") from exc
+    item_id = str(profile["item_id"])
+    file_name = str(profile["csv_name"])
+    if not isinstance(metadata, dict) or str(metadata.get("id") or "") != item_id:
+        raise ValueError("public_market_usgs_item_identity_invalid")
+    files = metadata.get("files")
+    matches = [
+        item for item in files
+        if (
+            isinstance(item, dict)
+            and str(item.get("name") or "") == file_name
+            and str(item.get("contentType") or "").casefold() == "text/csv"
+        )
+    ] if isinstance(files, list) else []
+    if len(matches) != 1:
+        raise ValueError("public_market_usgs_file_identity_invalid")
+    selected = matches[0]
+    try:
+        declared_size = int(selected.get("size"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("public_market_usgs_file_size_invalid") from exc
+    if declared_size < 1 or declared_size > int(
+        profile.get("max_response_bytes") or 4_000_000
+    ):
+        raise ValueError("public_market_usgs_file_size_invalid")
+    file_url = str(selected.get("url") or "")
+    parsed = urlparse(file_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != str(profile["allowed_host"]).casefold()
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port is not None
+        or parsed.path != f"/catalog/file/get/{item_id}"
+    ):
+        raise ValueError("public_market_usgs_file_origin_invalid")
+    response = transport(file_url, {}, conditional_headers, timeout)
+    provenance = metadata.get("provenance")
+    return response, {
+        "item_id": item_id,
+        "release_doi": str(profile["release_doi"]),
+        "published_at": (
+            str(provenance.get("lastUpdated") or provenance.get("dateCreated") or "")
+            if isinstance(provenance, dict)
+            else ""
+        ),
+        "file_name": file_name,
+        "declared_size": declared_size,
+        "provider_checksum": selected.get("checksum"),
+    }
+
+
+def _usgs_number(raw: str) -> tuple[float | None, str]:
+    cleaned = raw.strip()
+    estimated = cleaned.casefold().startswith("e")
+    candidate = cleaned[1:].strip() if estimated else cleaned
+    candidate = candidate.replace(",", "")
+    if not re.fullmatch(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", candidate):
+        return None, "reported_non_numeric"
+    return float(candidate), "estimated_numeric" if estimated else "observed_numeric"
+
+
+def _usgs_observations(
+    body: bytes,
+    *,
+    request: dict[str, str],
+    retrieved_at: str,
+    release: dict[str, Any],
+) -> list[dict[str, Any]]:
+    try:
+        decoded = body.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            decoded = body.decode("cp1252")
+        except UnicodeDecodeError as exc:
+            raise ValueError("public_market_usgs_csv_invalid") from exc
+    reader = csv.DictReader(io.StringIO(decoded))
+    required = {
+        "Commodity",
+        "Country",
+        "Statistics",
+        "Statistics_detail",
+        "Unit",
+        "Year",
+        "Value",
+        "Notes",
+        "Is critical mineral 2025",
+    }
+    if not reader.fieldnames or not required <= set(reader.fieldnames):
+        raise ValueError("public_market_usgs_csv_shape_invalid")
+    commodities = {
+        value.casefold() for value in request["commodities"].split("|") if value
+    }
+    statistics = {
+        value.casefold() for value in request["statistics"].split("|") if value
+    }
+    countries = {
+        value.casefold() for value in request["countries"].split("|") if value
+    }
+    matches: list[dict[str, str]] = []
+    for raw_row in reader:
+        row = {str(key): str(value or "").strip() for key, value in raw_row.items()}
+        if row["Commodity"].casefold() not in commodities:
+            continue
+        if statistics and row["Statistics"].casefold() not in statistics:
+            continue
+        if countries and row["Country"].casefold() not in countries:
+            continue
+        if not re.fullmatch(r"\d{4}", row["Year"]):
+            continue
+        matches.append(row)
+        if len(matches) > 25_000:
+            raise ValueError("public_market_usgs_filter_too_broad")
+    if request["latest_year_only"] == "true" and matches:
+        latest_year = max(int(row["Year"]) for row in matches)
+        matches = [row for row in matches if int(row["Year"]) == latest_year]
+    published_at = str(release.get("published_at") or retrieved_at)
+    observations: list[dict[str, Any]] = []
+    for row in matches[:_MAX_ROWS]:
+        numeric_value, value_status = _usgs_number(row["Value"])
+        identity = "|".join((
+            row["Commodity"],
+            row["Country"],
+            row["Statistics"],
+            row["Statistics_detail"],
+            row["Year"],
+        ))
+        record_hash = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+        measurement = {
+            "kind": "mineral_commodity_statistic",
+            "direction": "unknown",
+            "commodity": row["Commodity"],
+            "country": row["Country"],
+            "statistic": row["Statistics"],
+            "statistic_detail": row["Statistics_detail"],
+            "year": int(row["Year"]),
+            "reported_value": row["Value"],
+            "numeric_value": numeric_value,
+            "value_status": value_status,
+            "uom": row["Unit"] or None,
+            "critical_mineral_2025": (
+                row["Is critical mineral 2025"].casefold() in {"yes", "true", "1"}
+            ),
+            "notes": row["Notes"][:1000],
+            "release_doi": release.get("release_doi"),
+            "sciencebase_item_id": release.get("item_id"),
+            "provider_checksum": release.get("provider_checksum"),
+        }
+        observations.append(govern_external_observation(
+            source_id="usgs_minerals",
+            source_record_id=f"mcs2026:{record_hash}",
+            signal_type="mineral_supply_statistic",
+            subject_id=f"usgs-mineral:{row['Commodity'].casefold()}",
+            measurement=measurement,
+            geography=row["Country"] or "unspecified",
+            effective_from=f"{row['Year']}-01-01T00:00:00+00:00",
+            effective_to=None,
+            published_at=published_at,
+            available_at=published_at,
+            retrieved_at=retrieved_at,
+        ))
+    return observations
 
 
 def _cpsc_observations(
@@ -403,6 +637,9 @@ def fetch_public_market_source(
     if kind == "cpsc_recalls_json":
         request = _normalize_cpsc_query(query)
         provider_params = request
+    elif kind == "usgs_mcs_sciencebase_csv":
+        request = _normalize_usgs_query(query)
+        provider_params = {}
     elif kind == "world_bank_pink_sheet_xlsx":
         request = _normalize_world_bank_query(query)
         provider_params = {}
@@ -444,13 +681,30 @@ def fetch_public_market_source(
         "permitted_uses": source["permitted_uses"],
         "measurement_scope": source["measurement_scope"],
     }
+    release: dict[str, Any] = {}
     try:
-        response = (transport or _default_transport)(
-            str(profile["url"]),
-            provider_params,
-            headers,
-            float(profile.get("timeout_seconds") or 8),
-        )
+        selected_transport = transport or _default_transport
+        if kind == "usgs_mcs_sciencebase_csv":
+            response, release = _usgs_data_response(
+                profile,
+                transport=selected_transport,
+                conditional_headers=headers,
+            )
+        else:
+            response = selected_transport(
+                str(profile["url"]),
+                provider_params,
+                headers,
+                float(profile.get("timeout_seconds") or 8),
+            )
+    except ValueError:
+        return {
+            "source_id": source_id,
+            "outcome": "malformed",
+            "error_code": "provider_metadata_invalid",
+            "authority": "advisory_only",
+            "execution_allowed": False,
+        }
     except Exception:
         return {
             "source_id": source_id,
@@ -494,6 +748,13 @@ def fetch_public_market_source(
                 normalized = _cpsc_observations(
                     json.loads(response.body.decode("utf-8")),
                     retrieved_at=stamp.isoformat(),
+                )
+            elif kind == "usgs_mcs_sciencebase_csv":
+                normalized = _usgs_observations(
+                    response.body,
+                    request=request,
+                    retrieved_at=stamp.isoformat(),
+                    release=release,
                 )
             else:
                 normalized = _world_bank_observations(
