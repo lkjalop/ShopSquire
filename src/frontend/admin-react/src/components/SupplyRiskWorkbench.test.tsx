@@ -1,11 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SupplyRiskWorkbench } from './SupplyRiskWorkbench';
-import { supplyRiskScenarios, supplyRiskWorkbench } from '../api';
+import { evaluateCausalCohorts, supplyRiskScenarios, supplyRiskWorkbench } from '../api';
 
 vi.mock('../api', () => ({
   supplyRiskScenarios: vi.fn(),
   supplyRiskWorkbench: vi.fn(),
+  evaluateCausalCohorts: vi.fn(),
 }));
 
 describe('SupplyRiskWorkbench', () => {
@@ -80,6 +81,47 @@ describe('SupplyRiskWorkbench', () => {
       acceptance: {},
       shadow_evaluation: {},
     });
+    vi.mocked(evaluateCausalCohorts).mockResolvedValue({
+      manifest: {
+        version: 'cohort-v1',
+        scenarios: ['electronics_memory_allocation'],
+        seeds: [7, 13, 29],
+        days: 220,
+        parameter_hash: 'abcdef1234567890',
+        run_count: 3,
+      },
+      conditional_interval_coverage: {},
+      policy_counterfactuals: {
+        status: 'observed',
+        runs: 3,
+        observed_runs: 3,
+        metrics: {
+          fill_rate: {
+            status: 'observed',
+            baseline_mean: 0.8,
+            candidate_mean: 0.9,
+            delta_mean: 0.1,
+          },
+          waste_units: {
+            status: 'undefined_no_ageing_model',
+            baseline_mean: null,
+            candidate_mean: null,
+            delta_mean: null,
+          },
+        },
+        limitations: ['means can hide tail outcomes'],
+      },
+      adversarial_evaluation: {
+        enabled: true,
+        misleading_correlation_records: 3,
+        contradictory_supplier_records: 3,
+        can_increase_autonomy: false,
+      },
+      authority: 'simulation_only',
+      execution_allowed: false,
+      causal_claim_allowed: false,
+      can_increase_autonomy: false,
+    });
   });
 
   it('shows evidence, uncertainty and prohibited execution', async () => {
@@ -91,5 +133,23 @@ describe('SupplyRiskWorkbench', () => {
     expect(screen.getByText(/component:a → variant:a/)).toBeInTheDocument();
     expect(screen.getByText(/Official source adapter: missing/)).toBeInTheDocument();
     expect(screen.getByText(/human approval required/)).toBeInTheDocument();
+  });
+
+  it('runs a bounded multi-seed proof without granting causal or autonomous authority', async () => {
+    render(<SupplyRiskWorkbench />);
+    await screen.findByTestId('supply-risk-trust-labels');
+
+    fireEvent.click(screen.getByRole('button', { name: /Evaluate seeds/ }));
+
+    const evaluation = await screen.findByTestId('causal-cohort-evaluation');
+    expect(evaluateCausalCohorts).toHaveBeenCalledWith(
+      ['electronics_memory_allocation'],
+      [7, 13, 29],
+      220,
+    );
+    expect(evaluation).toHaveTextContent('Runs: 3');
+    expect(evaluation).toHaveTextContent('Causal claim: prohibited');
+    expect(evaluation).toHaveTextContent('Autonomy increase: prohibited');
+    expect(evaluation).toHaveTextContent('Misleading correlations: 3');
   });
 });

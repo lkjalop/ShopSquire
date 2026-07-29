@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   createIdentityProposal,
+  executeIdentityProposal,
   fetchAccounts,
   fetchAccountTimeline,
   fetchIdentityProposals,
+  previewIdentityExecution,
   resolveIdentityProposal,
   type AccountSummary,
   type AccountTimeline,
+  type IdentityExecutionImpact,
   type IdentityProposal,
 } from '../api';
 
@@ -24,6 +27,8 @@ export function AccountIntelligence({ role }: { role: 'merchant' | 'owner' | 'de
   const [counterpartyId, setCounterpartyId] = useState('');
   const [reason, setReason] = useState('');
   const [resolutionNote, setResolutionNote] = useState('');
+  const [executionNote, setExecutionNote] = useState('');
+  const [executionImpact, setExecutionImpact] = useState<Record<string, IdentityExecutionImpact>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -103,12 +108,58 @@ export function AccountIntelligence({ role }: { role: 'merchant' | 'owner' | 'de
     }
   };
 
+  const previewExecution = async (proposal: IdentityProposal) => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const impact = await previewIdentityExecution(proposal.id);
+      setExecutionImpact((current) => ({ ...current, [proposal.id]: impact }));
+    } catch (err: any) {
+      setError(err?.message || 'Could not calculate identity execution impact.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const execute = async (proposal: IdentityProposal) => {
+    const impact = executionImpact[proposal.id];
+    if (!impact?.executable || executionNote.trim().length < 3) {
+      setError('Preview an executable change and provide an execution note.');
+      return;
+    }
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const result = await executeIdentityProposal(
+        proposal.id,
+        impact.graph_version,
+        `identity-execution:${proposal.id}:${impact.graph_version}`,
+        executionNote.trim(),
+      );
+      setNotice(result.message);
+      setExecutionNote('');
+      setExecutionImpact((current) => {
+        const next = { ...current };
+        delete next[proposal.id];
+        return next;
+      });
+      await Promise.all([
+        loadProposals(),
+        loadAccounts(query),
+        selected ? loadTimeline(selected) : Promise.resolve(),
+      ]);
+    } catch (err: any) {
+      setError(err?.message || 'Could not execute identity redirect.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const account = timeline?.party;
   return (
     <div data-testid="account-intelligence">
       <div className="callout" data-testid="account-authority-policy" style={{ marginBottom: 12 }}>
         <strong>Authority boundary:</strong> Party records stay authoritative. Conversation facts remain
-        expiring observations. Merge/split decisions are proposals only—even owner approval cannot execute them.
+        expiring observations. Approval and execution are separate. Execution creates an append-only,
+        reversible canonical redirect and never moves historical records.
       </div>
       {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
       {notice && <p role="status" style={{ color: '#166534' }}>{notice}</p>}
@@ -230,7 +281,7 @@ export function AccountIntelligence({ role }: { role: 'merchant' | 'owner' | 'de
                 <div><code>{proposal.left_party_id}</code> ↔ <code>{proposal.right_party_id}</code></div>
                 <div className="page-sub">
                   Proposed {proposal.proposed_at} by {proposal.proposed_by || 'unknown'}
-                  {' · '}execution allowed: never
+                  {' · '}execution: {proposal.status === 'approved' ? 'separate owner workflow' : 'not allowed'}
                 </div>
                 <details><summary>Evidence</summary><pre className="panel">{JSON.stringify(proposal.evidence, null, 2)}</pre></details>
                 {role === 'owner' && proposal.status === 'proposed' && (
@@ -241,6 +292,50 @@ export function AccountIntelligence({ role }: { role: 'merchant' | 'owner' | 'de
                     <button disabled={busy} onClick={() => void resolve(proposal, 'rejected')}>
                       Reject proposal
                     </button>
+                  </div>
+                )}
+                {role === 'owner' && proposal.status === 'approved' && (
+                  <div style={{ marginTop: 8 }}>
+                    <button disabled={busy} onClick={() => void previewExecution(proposal)}>
+                      Preview redirect impact
+                    </button>
+                    {executionImpact[proposal.id] && (
+                      <div data-testid="identity-execution-impact" className="callout" style={{ marginTop: 8 }}>
+                        <div>
+                          Version {executionImpact[proposal.id].graph_version} ·
+                          {' '}historical records moved: never · append-only redirect: yes
+                        </div>
+                        <div>
+                          Impact counts:{' '}
+                          {Object.entries(executionImpact[proposal.id].impact_counts)
+                            .map(([name, count]) => `${label(name)} ${count}`)
+                            .join(' · ')}
+                        </div>
+                        {executionImpact[proposal.id].conflicts.length > 0 && (
+                          <div>
+                            Conflicts: {executionImpact[proposal.id].conflicts.map(label).join('; ')}
+                          </div>
+                        )}
+                        <input
+                          aria-label="Identity execution note"
+                          value={executionNote}
+                          onChange={(event) => setExecutionNote(event.target.value)}
+                          placeholder="Why should this approved redirect execute now?"
+                          style={{ width: '100%', marginTop: 6 }}
+                        />
+                        <button
+                          disabled={
+                            busy
+                            || !executionImpact[proposal.id].executable
+                            || executionNote.trim().length < 3
+                          }
+                          onClick={() => void execute(proposal)}
+                          style={{ marginTop: 6 }}
+                        >
+                          Execute append-only redirect
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

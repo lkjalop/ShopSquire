@@ -62,6 +62,26 @@ export interface IdentityProposal {
   human_review_required: true;
 }
 
+export interface IdentityExecutionImpact {
+  proposal_id: string;
+  decision_type: string;
+  status: string;
+  source_party_id: string;
+  target_party_id: string;
+  canonical_source_party_id: string;
+  canonical_target_party_id: string;
+  graph_version: number;
+  impact_counts: Record<string, number>;
+  conflicts: string[];
+  executable: boolean;
+  execution_policy: {
+    moves_historical_records: false;
+    append_only_redirect: true;
+    separate_owner_execution_required: true;
+    proposal_creator_may_execute: false;
+  };
+}
+
 export const fetchAccounts = (query = '', limit = 100) => {
   const params = new URLSearchParams({ limit: String(limit) });
   if (query.trim()) params.set('query', query.trim());
@@ -101,4 +121,33 @@ export const resolveIdentityProposal = (
 ) => http<IdentityProposal & { message: string; authority: string }>(
   `/api/v1/admin/accounts/identity/proposals/${encodeURIComponent(proposalId)}/resolve`,
   { method: 'POST', body: JSON.stringify({ resolution, note }) },
+);
+
+export const previewIdentityExecution = (proposalId: string) =>
+  http<IdentityExecutionImpact>(
+    `/api/v1/admin/accounts/identity/proposals/${encodeURIComponent(proposalId)}/impact`,
+  );
+
+export const executeIdentityProposal = (
+  proposalId: string,
+  expectedVersion: number,
+  idempotencyKey: string,
+  note: string,
+) => http<{
+  event_id: string;
+  event_type: string;
+  graph_version: number;
+  historical_records_moved: false;
+  message: string;
+  authority: string;
+}>(
+  `/api/v1/admin/accounts/identity/proposals/${encodeURIComponent(proposalId)}/execute`,
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      expected_version: expectedVersion,
+      idempotency_key: idempotencyKey,
+      note,
+    }),
+  },
 );

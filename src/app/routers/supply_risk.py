@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field
 
 from src.app.models.db import get_db
 from src.app.platform.tenant_context import current_tenant_id
-from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, require_role
+from src.app.security.auth import (
+    ROLE_MERCHANT,
+    ROLE_OWNER,
+    OperatorSubject,
+    operator_subject,
+    require_role,
+)
 from src.app.services.market_source_registry import load_market_source_registry
 from src.app.services.public_market_source_fetch import fetch_public_market_source
 from src.app.services.supply_graph_repository import (
@@ -19,6 +25,13 @@ from src.app.services.supply_graph_repository import (
     public_source_health,
     put_edge_revision,
     put_node_revision,
+)
+from src.app.services.synthetic_causal_evaluation import evaluate_scenario_cohorts
+from src.app.services.supply_hypothesis_workflow import (
+    create_grounded_hypothesis,
+    get_grounded_hypothesis,
+    record_supplier_hypothesis_observation,
+    reevaluate_grounded_hypothesis,
 )
 from src.app.services.supply_risk_workbench import (
     build_supply_risk_workbench,
@@ -78,6 +91,47 @@ class SubjectMappingRequest(BaseModel):
     valid_from: str | None = None
 
 
+class CausalEvaluationRequest(BaseModel):
+    scenario_ids: list[str] = Field(min_length=1, max_length=12)
+    seeds: list[int] = Field(min_length=1, max_length=8)
+    days: int = Field(default=400, ge=60, le=1095)
+    cohort_dimensions: dict[str, dict[str, str]] = Field(default_factory=dict)
+    include_adversarial: bool = True
+
+
+class GroundedHypothesisRequest(BaseModel):
+    target_node_id: str = Field(min_length=1, max_length=64)
+    decision_time: str
+    case_id: str | None = Field(default=None, max_length=160)
+    known_exposure: dict[str, Any] = Field(default_factory=dict)
+
+
+class SupplierHypothesisObservationRequest(BaseModel):
+    observation_type: str = Field(min_length=1, max_length=32)
+    supplier_ref: str = Field(min_length=1, max_length=250)
+    source_message_id: str = Field(min_length=1, max_length=500)
+    observation: dict[str, Any]
+    provenance: dict[str, Any]
+    observed_at: str
+
+
+class HypothesisReevaluationRequest(BaseModel):
+    decision_time: str
+
+
+def _actor(role: str, subject: OperatorSubject) -> str:
+    return (subject.user_id or "").strip() or f"key:{role}"
+
+
+def _workflow_error(exc: ValueError) -> HTTPException:
+    detail = str(exc)
+    status = 404 if detail in {
+        "supply_target_not_in_tenant_graph",
+        "supply_hypothesis_not_in_tenant",
+    } else 400
+    return HTTPException(status_code=status, detail=detail)
+
+
 @router.get("/scenarios")
 def scenarios(
     role: str = Depends(require_role(_OPERATOR)),
@@ -110,6 +164,95 @@ def workbench(
                 detail="supply_risk_scenario_not_found",
             ) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/evaluation/cohorts")
+def evaluate_causal_cohorts(
+    payload: CausalEvaluationRequest,
+    role: str = Depends(require_role(_OPERATOR)),
+) -> dict[str, Any]:
+    _ = role
+    try:
+        return evaluate_scenario_cohorts(**payload.model_dump())
+    except ValueError as exc:
+        detail = str(exc)
+        status = 404 if detail == "synthetic_supply_scenario_not_found" else 400
+        raise HTTPException(status_code=status, detail=detail) from exc
+
+
+@router.post("/hypotheses")
+def create_supply_hypothesis(
+    payload: GroundedHypothesisRequest,
+    role: str = Depends(require_role(_OPERATOR)),
+    subject: OperatorSubject = Depends(operator_subject),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return create_grounded_hypothesis(
+            db,
+            tenant_id=current_tenant_id(),
+            created_by=_actor(role, subject),
+            **payload.model_dump(),
+        )
+    except ValueError as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.get("/hypotheses/{hypothesis_id}")
+def grounded_supply_hypothesis(
+    hypothesis_id: str,
+    role: str = Depends(require_role(_OPERATOR)),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    _ = role
+    try:
+        return get_grounded_hypothesis(
+            db,
+            tenant_id=current_tenant_id(),
+            hypothesis_id=hypothesis_id,
+        )
+    except ValueError as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.post("/hypotheses/{hypothesis_id}/supplier-observations")
+def supplier_hypothesis_observation(
+    hypothesis_id: str,
+    payload: SupplierHypothesisObservationRequest,
+    role: str = Depends(require_role(_OPERATOR)),
+    subject: OperatorSubject = Depends(operator_subject),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return record_supplier_hypothesis_observation(
+            db,
+            tenant_id=current_tenant_id(),
+            hypothesis_id=hypothesis_id,
+            recorded_by=_actor(role, subject),
+            **payload.model_dump(),
+        )
+    except ValueError as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.post("/hypotheses/{hypothesis_id}/reevaluate")
+def reevaluate_supply_hypothesis(
+    hypothesis_id: str,
+    payload: HypothesisReevaluationRequest,
+    role: str = Depends(require_role(_OPERATOR)),
+    subject: OperatorSubject = Depends(operator_subject),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return reevaluate_grounded_hypothesis(
+            db,
+            tenant_id=current_tenant_id(),
+            hypothesis_id=hypothesis_id,
+            decision_time=payload.decision_time,
+            created_by=_actor(role, subject),
+        )
+    except ValueError as exc:
+        raise _workflow_error(exc) from exc
 
 
 @router.get("/sources")

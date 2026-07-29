@@ -3,17 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountIntelligence } from './AccountIntelligence';
 import {
   createIdentityProposal,
+  executeIdentityProposal,
   fetchAccounts,
   fetchAccountTimeline,
   fetchIdentityProposals,
+  previewIdentityExecution,
   resolveIdentityProposal,
 } from '../api';
 
 vi.mock('../api', () => ({
   createIdentityProposal: vi.fn(),
+  executeIdentityProposal: vi.fn(),
   fetchAccounts: vi.fn(),
   fetchAccountTimeline: vi.fn(),
   fetchIdentityProposals: vi.fn(),
+  previewIdentityExecution: vi.fn(),
   resolveIdentityProposal: vi.fn(),
 }));
 
@@ -81,6 +85,33 @@ describe('AccountIntelligence', () => {
       message: 'Disposition recorded; execution remains a separate manual workflow.',
       authority: 'human_disposition_only',
     });
+    vi.mocked(previewIdentityExecution).mockResolvedValue({
+      proposal_id: proposal.id,
+      decision_type: proposal.decision_type,
+      status: 'approved',
+      source_party_id: proposal.left_party_id,
+      target_party_id: proposal.right_party_id,
+      canonical_source_party_id: proposal.left_party_id,
+      canonical_target_party_id: proposal.right_party_id,
+      graph_version: 0,
+      impact_counts: { account_activities: 2, external_identities: 1 },
+      conflicts: [],
+      executable: true,
+      execution_policy: {
+        moves_historical_records: false,
+        append_only_redirect: true,
+        separate_owner_execution_required: true,
+        proposal_creator_may_execute: false,
+      },
+    });
+    vi.mocked(executeIdentityProposal).mockResolvedValue({
+      event_id: 'redirect-event-1',
+      event_type: 'merge_redirect',
+      graph_version: 1,
+      historical_records_moved: false,
+      message: 'Canonical resolution changed; historical Party records were not moved.',
+      authority: 'owner_executed_append_only_redirect',
+    });
   });
 
   it('separates authoritative Party facts from expiring conversation observations', async () => {
@@ -97,7 +128,7 @@ describe('AccountIntelligence', () => {
     );
   });
 
-  it('records and resolves proposals without presenting direct execution', async () => {
+  it('records and resolves proposals while keeping execution separate', async () => {
     render(<AccountIntelligence role="owner" />);
     fireEvent.click(await screen.findByText('Acme Buyer'));
     fireEvent.change(await screen.findByLabelText('Counterparty Party ID'), {
@@ -117,6 +148,32 @@ describe('AccountIntelligence', () => {
     await waitFor(() => expect(resolveIdentityProposal).toHaveBeenCalledWith(
       'proposal-1', 'approved', 'reviewed by account owner',
     ));
-    expect(screen.getByTestId('identity-proposal')).toHaveTextContent('execution allowed: never');
+    expect(screen.getByTestId('identity-proposal')).toHaveTextContent('execution: not allowed');
+  });
+
+  it('previews blast radius before executing an approved append-only redirect', async () => {
+    vi.mocked(fetchIdentityProposals).mockResolvedValue({
+      tenant_id: 'default',
+      proposals: [{ ...proposal, status: 'approved' }],
+    });
+    render(<AccountIntelligence role="owner" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview redirect impact' }));
+    const impact = await screen.findByTestId('identity-execution-impact');
+    expect(impact).toHaveTextContent('historical records moved: never');
+    expect(impact).toHaveTextContent('account activities 2');
+
+    fireEvent.change(screen.getByLabelText('Identity execution note'), {
+      target: { value: 'owner reviewed impact and redirect direction' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Execute append-only redirect' }));
+
+    await waitFor(() => expect(executeIdentityProposal).toHaveBeenCalledWith(
+      proposal.id,
+      0,
+      `identity-execution:${proposal.id}:0`,
+      'owner reviewed impact and redirect direction',
+    ));
+    expect(await screen.findByText(/historical Party records were not moved/i)).toBeInTheDocument();
   });
 });

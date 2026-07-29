@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
+  evaluateCausalCohorts,
   supplyRiskScenarios,
   supplyRiskWorkbench,
+  type CausalCohortEvaluation,
   type SupplyRiskScenario,
   type SupplyRiskWorkbench as Workbench,
 } from '../api';
@@ -12,6 +14,8 @@ export function SupplyRiskWorkbench({ authReady = true }: { authReady?: boolean 
   const [data, setData] = useState<Workbench | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [evaluation, setEvaluation] = useState<CausalCohortEvaluation | null>(null);
+  const [evaluationBusy, setEvaluationBusy] = useState(false);
 
   useEffect(() => {
     if (!authReady) return;
@@ -32,6 +36,16 @@ export function SupplyRiskWorkbench({ authReady = true }: { authReady?: boolean 
       .catch((err: any) => setError(err?.message || 'Supply-risk evidence unavailable'))
       .finally(() => setBusy(false));
   }, [authReady, selected]);
+
+  const runCohortEvaluation = () => {
+    if (!selected) return;
+    setEvaluationBusy(true);
+    setError(null);
+    evaluateCausalCohorts([selected], [7, 13, 29], 220)
+      .then(setEvaluation)
+      .catch((err: any) => setError(err?.message || 'Cohort evaluation unavailable'))
+      .finally(() => setEvaluationBusy(false));
+  };
 
   return (
     <section className="card" data-testid="supply-risk-workbench" style={{ marginTop: 16 }}>
@@ -72,6 +86,73 @@ export function SupplyRiskWorkbench({ authReady = true }: { authReady?: boolean 
             <span className="badge">Confidence: {data.confidence == null ? 'UNDEFINED' : `${(data.confidence * 100).toFixed(0)}%`}</span>
             <span className="badge">PESTEL: {data.pestel_domains.join(', ') || 'UNDECLARED'}</span>
           </div>
+
+          <section className="card" style={{ margin: '12px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <h4 style={{ margin: 0 }}>Multi-seed evaluation proof</h4>
+                <small>
+                  Three sealed synthetic replays compare interval coverage and policy utility.
+                  Results cannot increase autonomy.
+                </small>
+              </div>
+              <button
+                type="button"
+                style={{ marginLeft: 'auto' }}
+                disabled={evaluationBusy}
+                onClick={runCohortEvaluation}
+              >
+                {evaluationBusy ? 'Evaluating…' : 'Evaluate seeds 7, 13 and 29'}
+              </button>
+            </div>
+            {evaluation && (
+              <div data-testid="causal-cohort-evaluation" style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <span className="badge">Runs: {evaluation.manifest.run_count}</span>
+                  <span className="badge">Authority: {evaluation.authority.replace(/_/g, ' ')}</span>
+                  <span className="badge">
+                    Causal claim: {evaluation.causal_claim_allowed ? 'allowed' : 'prohibited'}
+                  </span>
+                  <span className="badge">
+                    Autonomy increase: {evaluation.can_increase_autonomy ? 'allowed' : 'prohibited'}
+                  </span>
+                </div>
+                <div className="grid-2" style={{ marginTop: 8 }}>
+                  <div>
+                    <strong>Adversarial evidence</strong>
+                    <div>
+                      Misleading correlations: {
+                        evaluation.adversarial_evaluation.misleading_correlation_records
+                      }
+                    </div>
+                    <div>
+                      Contradictory suppliers: {
+                        evaluation.adversarial_evaluation.contradictory_supplier_records
+                      }
+                    </div>
+                  </div>
+                  <div>
+                    <strong>Policy outcomes</strong>
+                    {Object.entries(evaluation.policy_counterfactuals.metrics)
+                      .slice(0, 4)
+                      .map(([name, metric]) => (
+                        <div key={name}>
+                          {name.replace(/_/g, ' ')}: {
+                            metric.status === 'observed' && metric.delta_mean != null
+                              ? `Δ ${metric.delta_mean.toFixed(3)}`
+                              : metric.status.replace(/_/g, ' ')
+                          }
+                        </div>
+                      ))}
+                  </div>
+                </div>
+                <small>
+                  Parameter hash: {evaluation.manifest.parameter_hash.slice(0, 12)} ·
+                  {' '}means can hide tail outcomes; inspect the replay evidence before decisions.
+                </small>
+              </div>
+            )}
+          </section>
 
           <div className="grid-2">
             <div>

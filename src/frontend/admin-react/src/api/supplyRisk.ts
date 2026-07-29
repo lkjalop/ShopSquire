@@ -73,6 +73,46 @@ export type SupplyRiskWorkbench = {
   shadow_evaluation: Record<string, any>;
 };
 
+export type CausalCohortEvaluation = {
+  manifest: {
+    version: string;
+    scenarios: string[];
+    seeds: number[];
+    days: number;
+    parameter_hash: string;
+    run_count: number;
+  };
+  conditional_interval_coverage: Record<string, Record<string, {
+    status: string;
+    runs: number;
+    evaluation_origins: number;
+    nominal_coverage: number;
+    empirical_coverage: number | null;
+  }>>;
+  policy_counterfactuals: {
+    status: string;
+    runs: number;
+    observed_runs: number;
+    metrics: Record<string, {
+      status: string;
+      baseline_mean: number | null;
+      candidate_mean: number | null;
+      delta_mean: number | null;
+    }>;
+    limitations: string[];
+  };
+  adversarial_evaluation: {
+    enabled: boolean;
+    misleading_correlation_records: number;
+    contradictory_supplier_records: number;
+    can_increase_autonomy: false;
+  };
+  authority: 'simulation_only';
+  execution_allowed: false;
+  causal_claim_allowed: false;
+  can_increase_autonomy: false;
+};
+
 export const supplyRiskScenarios = () =>
   http<{ tenant_id: string; scenarios: SupplyRiskScenario[]; authority: string }>(
     '/api/v1/supply-risk/scenarios',
@@ -82,4 +122,23 @@ export const supplyRiskWorkbench = (scenarioId: string, seed = 42, days = 400) =
   http<SupplyRiskWorkbench>(
     `/api/v1/supply-risk/workbench/${encodeURIComponent(scenarioId)}?seed=${seed}&days=${days}`,
     { timeoutMs: 60_000 },
+  );
+
+export const evaluateCausalCohorts = (
+  scenarioIds: string[],
+  seeds: number[],
+  days = 220,
+) =>
+  http<CausalCohortEvaluation>(
+    '/api/v1/supply-risk/evaluation/cohorts',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        scenario_ids: scenarioIds,
+        seeds,
+        days,
+        include_adversarial: true,
+      }),
+      timeoutMs: 120_000,
+    },
   );
