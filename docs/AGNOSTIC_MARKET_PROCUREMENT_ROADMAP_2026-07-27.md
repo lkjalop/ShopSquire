@@ -29,7 +29,7 @@ status sections below:
   fraud, inventory, NQE and context seams have moved behind V2-owned services.
   Exactly one direct legacy import remains:
   `tests/test_recommend.py`, the large frozen characterization suite.
-  Production routing remains V2-owned. `recommend.py` is still about 11,900
+  Production routing remains V2-owned. `recommend.py` is still about 12,400
   physical lines because rollback bodies remain during parity observation;
 - a V2 trace defect exposed during extraction is fixed: blocked or unavailable
   compatibility turns now persist the decision identifier that they return;
