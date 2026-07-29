@@ -60,6 +60,13 @@ jobs:
       USE_MOCK_LLM: "1"
       USE_OLLAMA_INTENT: "0"
       MODEL_WARMUP_ON_STARTUP: "0"
+      DISABLE_TRACING: "1"
+      DECISION_LOG_PREWARM_ON_START: "0"
+      AUTO_SEED_CATALOG_ON_START: "0"
+      CV_PROVIDER: basic
+      CV_VISION_ENABLED: "0"
+      CV_OCR_PROVIDER: disabled
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
       # Exercise the production quota boundary without making a nine-test
       # conversation battery consume the entire guest allowance.
       TOKEN_BUDGET_ENABLED: "1"
