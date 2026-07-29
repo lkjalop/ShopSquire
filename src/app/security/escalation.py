@@ -166,8 +166,8 @@ def _create_incident(event_id: str, severity: str, details: Dict, status: str, e
         if escalated:
             try:
                 conn.execute(
-                    sql_text("UPDATE security_events SET escalated = 1 WHERE id = :id"),
-                    {"id": event_id},
+                    sql_text("UPDATE security_events SET escalated = :escalated WHERE id = :id"),
+                    {"id": event_id, "escalated": True},
                 )
             except Exception:
                 pass

@@ -1,5 +1,4 @@
 import os
-import json
 from src.app.security.observer import emit_security_event
 from src.app.models.db import set_engine
 from sqlalchemy import create_engine, text
@@ -18,7 +17,7 @@ def test_timeseries_write(tmp_path, monkeypatch):
     # Ensure minimal tables exist
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE IF NOT EXISTS security_events (id TEXT PRIMARY KEY, event_time TEXT, path TEXT, severity TEXT, verdict_score INT, details TEXT, escalated INTEGER DEFAULT 0, blocked INTEGER DEFAULT 0)"))
-        conn.execute(text("CREATE TABLE IF NOT EXISTS security_observer_timeseries (time TEXT DEFAULT CURRENT_TIMESTAMP, event_id TEXT, severity TEXT, risk_adj REAL, insider_score REAL, tenant_id TEXT)"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS security_observer_timeseries (id TEXT PRIMARY KEY, time TEXT DEFAULT CURRENT_TIMESTAMP, event_id TEXT, severity TEXT, risk_adj REAL, insider_score REAL, tenant_id TEXT)"))
     # Call emit_security_event with provided analysis to force severity 'warn'
     payload = {"analysis": {"severity": "warn", "risk_adj": 35.0, "insider_score": 35.0, "payload": {}}}
     emit_security_event(path="/test/insider", payload=payload)

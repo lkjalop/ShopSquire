@@ -30,7 +30,11 @@ def test_set_security_event_correction_verdict(monkeypatch, tmp_path):
                   verdict_score INT,
                   details TEXT,
                   escalated INTEGER DEFAULT 0,
-                  blocked INTEGER DEFAULT 0
+                  blocked INTEGER DEFAULT 0,
+                  ground_truth TEXT,
+                  analyst_verdict TEXT,
+                  correction_ts TEXT,
+                  correction_notes TEXT
                 )
                 """
             )

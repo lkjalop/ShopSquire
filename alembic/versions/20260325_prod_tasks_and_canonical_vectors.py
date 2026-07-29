@@ -69,14 +69,23 @@ def upgrade() -> None:
     _create_vector_table("faq_embeddings", vector_enabled=vector_enabled, postgres=postgres)
     _create_vector_table("session_embeddings", vector_enabled=vector_enabled, postgres=postgres)
 
-    op.execute(
-        """
-        INSERT INTO faq_embeddings (id, embedding, payload)
-        SELECT id, embedding, payload
-        FROM faq_vectors
-        ON CONFLICT (id) DO NOTHING
-        """
-    )
+    if postgres:
+        op.execute(
+            """
+            INSERT INTO faq_embeddings (id, embedding, payload)
+            SELECT id, embedding, payload
+            FROM faq_vectors
+            ON CONFLICT (id) DO NOTHING
+            """
+        )
+    else:
+        op.execute(
+            """
+            INSERT OR IGNORE INTO faq_embeddings (id, embedding, payload)
+            SELECT id, embedding, payload
+            FROM faq_vectors
+            """
+        )
 
     op.execute(
         """

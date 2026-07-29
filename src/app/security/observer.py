@@ -1056,9 +1056,12 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
                         try:
                             db_ts.execute(
                                 _text(
-                                    "INSERT INTO security_observer_timeseries (event_id, severity, risk_adj, insider_score, tenant_id) VALUES (:eid, :sev, :r_adj, :ins, :tid)"
+                                    "INSERT INTO security_observer_timeseries "
+                                    "(id, event_id, severity, risk_adj, insider_score, tenant_id) "
+                                    "VALUES (:id, :eid, :sev, :r_adj, :ins, :tid)"
                                 ),
                                 {
+                                    "id": str(uuid.uuid4()),
                                     "eid": event_id,
                                     "sev": severity_l,
                                     "r_adj": float(risk_adj_l or 0.0),

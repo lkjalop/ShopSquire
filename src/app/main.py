@@ -448,7 +448,7 @@ def create_app() -> FastAPI:
             if str(os.getenv("AUTO_SEED_CATALOG_ON_START", "1")).lower() in ("1", "true", "yes"):
                 with db_session() as db:
                     active_products = db.execute(
-                        _sql_text("SELECT COUNT(*) FROM products WHERE COALESCE(active, 1) = 1")
+                        _sql_text("SELECT COUNT(*) FROM products WHERE active IS TRUE")
                     ).scalar() or 0
                     if int(active_products) <= 0:
                         # Cold/empty catalog bootstrap.

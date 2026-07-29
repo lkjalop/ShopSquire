@@ -147,6 +147,7 @@ class InventoryValuationPayload(Contract):
     value: Money
     costing_method: Literal["standard", "fifo", "avco", "specific"]
     layer_ref: str
+    valuation_basis: Literal["landed", "product_cost_only"] = "product_cost_only"
 
 
 class LandedCostPayload(Contract):

@@ -1,143 +1,169 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from src.app.models.db import db_session
 
+_log = logging.getLogger("shopsquire.policy_evaluator")
+
 
 class PolicyEvaluator:
-    """Very small policy evaluator that persists control evaluations.
-
-    This is intentionally conservative: it supports a few simple rule
-    patterns encoded as text in `pg_rules.rule` and will not execute
-    arbitrary code. Rules are evaluated against a flattened view of the
-    decision context.
-    """
+    """Conservative evaluator for declarative PolicyGraph controls."""
 
     def _flatten(self, obj: Any, prefix: str = "") -> Dict[str, Any]:
         out: Dict[str, Any] = {}
         if isinstance(obj, dict):
-            for k, v in obj.items():
-                key = f"{prefix}.{k}" if prefix else k
-                out.update(self._flatten(v, key))
+            for key, value in obj.items():
+                path = f"{prefix}.{key}" if prefix else key
+                out.update(self._flatten(value, path))
         elif isinstance(obj, list):
             out[prefix] = obj
-            for i, v in enumerate(obj):
-                out.update(self._flatten(v, f"{prefix}[{i}]"))
+            for index, value in enumerate(obj):
+                out.update(self._flatten(value, f"{prefix}[{index}]"))
         else:
             out[prefix] = obj
         return out
 
     def _eval_simple_rule(self, rule: str, ctx: Dict[str, Any]) -> bool:
-        # Supported patterns: key==value, key!=value, key<value, key>value, key<=, key>=
-        # Also supports 'key:val' as equality and 'key>0' numeric checks.
         rule = (rule or "").strip()
         if not rule:
             return False
-        ops = ["==", "!=", ">=", "<=", ">", "<", ":", "="]
-        for op in ops:
-            if op in rule:
-                parts = rule.split(op)
-                if len(parts) != 2:
-                    return False
-                raw_k, raw_v = parts[0].strip(), parts[1].strip()
-                # Normalize key to flattened ctx
-                k = raw_k.replace("$", "").strip()
-                v = raw_v.strip().strip('"\'')
-                val = ctx.get(k)
-                # Try numeric compare
+        for operator in ("==", "!=", ">=", "<=", ">", "<", ":", "="):
+            if operator not in rule:
+                continue
+            parts = rule.split(operator)
+            if len(parts) != 2:
+                return False
+            raw_key, raw_value = parts[0].strip(), parts[1].strip()
+            key = raw_key.replace("$", "").strip()
+            expected = raw_value.strip().strip('"\'')
+            actual = ctx.get(key)
+            try:
+                if operator == ">":
+                    return float(actual) > float(expected)
+                if operator == "<":
+                    return float(actual) < float(expected)
+                if operator == ">=":
+                    return float(actual) >= float(expected)
+                if operator == "<=":
+                    return float(actual) <= float(expected)
+            except (TypeError, ValueError):
+                return False
+            if operator in (":", "=", "=="):
                 try:
-                    if op in (">", "<", ">=", "<="):
-                        num_v = float(v)
-                        num_val = float(val) if val is not None else float("nan")
-                        if op == ">":
-                            return num_val > num_v
-                        if op == "<":
-                            return num_val < num_v
-                        if op == ">=":
-                            return num_val >= num_v
-                        if op == "<=":
-                            return num_val <= num_v
-                except Exception:
-                    # Fall back to string compares
-                    pass
-                if op in (":", "=", "=="):
-                    # If value looks numeric and val is numeric, compare numerically
-                    try:
-                        return float(val) == float(ctx.get(k))
-                    except Exception:
-                        return str(ctx.get(k)) == v
-                if op == "!=":
-                    return str(ctx.get(k)) != v
-        # If no operator matched, do a contains check
+                    return float(actual) == float(expected)
+                except (TypeError, ValueError):
+                    return str(actual) == expected
+            if operator == "!=":
+                return str(actual) != expected
         return rule in json.dumps(ctx)
 
-    def evaluate_and_persist(self, decision_id: str, agent_name: str, input_data: Dict[str, Any], retrieved_context: Dict[str, Any], proposed_action: Dict[str, Any]) -> List[Dict[str, Any]]:
-        # NOTE: legacy signature did not include tenant_id; accept via kwargs for compatibility
-        tenant_id = None
+    @staticmethod
+    def _optional_rows(db, statement: str, params: Dict[str, Any] | None = None):
+        """Isolate optional reads so a PostgreSQL error cannot abort the caller."""
         try:
-            import inspect
-            sig = inspect.signature(self.evaluate_and_persist)
-        except Exception:
-            sig = None
-        # allow optional tenant_id in kwargs by checking locals (callers pass by name)
-        # if present in locals or in outer scope, ignore—this is a best-effort shim
-        try:
-            tenant_id = locals().get('tenant_id', None)
-        except Exception:
-            tenant_id = None
+            with db.begin_nested():
+                return db.execute(text(statement), params or {}).fetchall()
+        except Exception as exc:
+            _log.warning("optional policy read failed: %s", str(exc)[:300])
+            return []
+
+    def evaluate_and_persist(
+        self,
+        decision_id: str,
+        agent_name: str,
+        input_data: Dict[str, Any],
+        retrieved_context: Dict[str, Any],
+        proposed_action: Dict[str, Any],
+        tenant_id: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        del agent_name  # retained in the public signature for compatibility
         results: List[Dict[str, Any]] = []
+        flat_ctx = {
+            **self._flatten(input_data, "input"),
+            **self._flatten(retrieved_context, "ctx"),
+            **self._flatten(proposed_action, "action"),
+        }
         try:
-            flat_ctx = {**self._flatten(input_data, "input"), **self._flatten(retrieved_context, "ctx"), **self._flatten(proposed_action, "action")}
             with db_session() as db:
-                # Fetch enabled policies and controls; scope by tenant_id when available
                 try:
-                    if tenant_id:
-                        controls = db.execute(text("SELECT id, policy_id, control_key FROM pg_controls WHERE enabled = 1 AND (tenant_id IS NULL OR tenant_id = :tid)"), {"tid": tenant_id}).fetchall()
-                    else:
-                        controls = db.execute(text("SELECT id, policy_id, control_key FROM pg_controls WHERE enabled = 1")) .fetchall()
-                except Exception:
+                    has_controls = inspect(db.get_bind()).has_table(
+                        "policy_graph_controls"
+                    )
+                except Exception as exc:
+                    _log.warning("unable to inspect policy schema: %s", str(exc)[:300])
+                    has_controls = False
+
+                if not has_controls:
                     controls = []
-                for ctrl in controls:
-                    ctrl_id = ctrl[0]
-                    # Load rules for control
-                    try:
-                        rows = db.execute(text("SELECT id, rule FROM pg_rules WHERE control_id = :cid ORDER BY priority DESC"), {"cid": ctrl_id}).fetchall()
-                    except Exception:
-                        rows = []
+                elif tenant_id:
+                    controls = self._optional_rows(
+                        db,
+                        "SELECT id, policy_id, control_key FROM policy_graph_controls "
+                        "WHERE enabled IS TRUE "
+                        "AND (tenant_id IS NULL OR tenant_id = :tenant_id)",
+                        {"tenant_id": tenant_id},
+                    )
+                else:
+                    controls = self._optional_rows(
+                        db,
+                        "SELECT id, policy_id, control_key FROM policy_graph_controls "
+                        "WHERE enabled IS TRUE",
+                    )
+
+                for control in controls:
+                    control_id = control[0]
+                    rows = self._optional_rows(
+                        db,
+                        "SELECT id, rule FROM policy_graph_rules "
+                        "WHERE control_id = :control_id ORDER BY priority DESC",
+                        {"control_id": control_id},
+                    )
                     control_result = "pass"
-                    for r in rows:
-                        rule_id = r[0]
-                        rule_txt = r[1] or ""
-                        try:
-                            ok = self._eval_simple_rule(rule_txt, flat_ctx)
-                        except Exception:
-                            ok = False
-                        # If any rule fails (evaluates True as a matching violation), mark fail
-                        if ok:
-                            control_result = "fail"
-                            results.append({"control_id": ctrl_id, "rule_id": rule_id, "result": "fail"})
-                        else:
-                            results.append({"control_id": ctrl_id, "rule_id": rule_id, "result": "pass"})
-                    # Persist aggregate control result
-                    try:
-                        eval_id = str(uuid.uuid4())
-                        db.execute(
-                            text("INSERT INTO pg_evaluations (id, decision_id, control_id, result, evaluated_at) VALUES (:id, :did, :cid, :res, :ts)"),
-                            {"id": eval_id, "did": decision_id, "cid": ctrl_id, "res": control_result, "ts": datetime.utcnow().isoformat()},
+                    for row in rows:
+                        rule_id = row[0]
+                        matched_violation = self._eval_simple_rule(
+                            row[1] or "", flat_ctx
                         )
-                    except Exception:
-                        # best-effort
-                        pass
-                try:
-                    db.commit()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                        result = "fail" if matched_violation else "pass"
+                        if matched_violation:
+                            control_result = "fail"
+                        results.append(
+                            {
+                                "control_id": control_id,
+                                "rule_id": rule_id,
+                                "result": result,
+                            }
+                        )
+                    try:
+                        with db.begin_nested():
+                            db.execute(
+                                text(
+                                    "INSERT INTO policy_graph_evaluations "
+                                    "(id, decision_id, control_id, result, evaluated_at) "
+                                    "VALUES (:id, :decision_id, :control_id, :result, :evaluated_at)"
+                                ),
+                                {
+                                    "id": str(uuid.uuid4()),
+                                    "decision_id": decision_id,
+                                    "control_id": control_id,
+                                    "result": control_result,
+                                    "evaluated_at": datetime.utcnow().isoformat(),
+                                },
+                            )
+                    except Exception as exc:
+                        _log.warning(
+                            "policy evaluation persistence failed for control=%s: %s",
+                            control_id,
+                            str(exc)[:300],
+                        )
+                db.commit()
+        except Exception as exc:
+            _log.warning("policy evaluation failed: %s", str(exc)[:300])
         return results
