@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.app.services import experiments as ex
+from tests.experiment_helpers import apply_experiment_migrations, create_sealed_experiment
 from src.app.services import market_signal as ms
 from src.app.services.experiment_eval import evaluate_experiment, returns_guardrail
 from src.app.services.experiment_ops import canary_assignment, composite_guardrail, escalation_rate_guardrail
@@ -27,6 +28,7 @@ from src.app.services.ranking_nudge import apply_experiment_nudge
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_experiment_migrations(s)
     try:
         yield s
     finally:
@@ -88,7 +90,7 @@ def test_gate3_assignment_delta_outcome_guardrail_rollback(db):
     from src.app.services import attribution
     attribution.ensure_tables(db)
     db.execute(text("CREATE TABLE orders (id TEXT, status TEXT)"))
-    eid = ex.create_experiment(db, name="ranking_canary", target_metric="rpv", status="live")
+    eid = create_sealed_experiment(db, name="ranking_canary")
 
     # 1) assignment: control vs treatment exist within the canary, deterministically
     variants = {canary_assignment(experiment_id=eid, subject=f"u{i}", canary_fraction=1.0) for i in range(40)}
@@ -106,7 +108,10 @@ def test_gate3_assignment_delta_outcome_guardrail_rollback(db):
             subj = f"{eid}-{arm}-{i}"
             oid = f"O-{subj}"
             # assign BEFORE the conversion so the post-assignment attribution window credits it
-            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm, assigned_at="2026-06-24")
+            ex.record_assignment(
+                db, tenant_id="default", experiment_id=eid,
+                subject_hash=subj, variant=arm, assigned_at="2026-06-24",
+            )
             db.execute(text("INSERT INTO orders (id, status) VALUES (:o,:s)"),
                        {"o": oid, "s": "refunded" if (i % refund_every == 0) else "paid"})
             db.execute(text("INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, "
@@ -116,7 +121,8 @@ def test_gate3_assignment_delta_outcome_guardrail_rollback(db):
 
     # 4) guardrail breach + 5) AUTOMATIC rollback: revenue is up, but returns guardrail reverts it
     guardrail = composite_guardrail(returns_guardrail, escalation_rate_guardrail)
-    out = evaluate_experiment(db, eid, min_samples=2, guardrail_fn=guardrail)
+    db.execute(text("UPDATE experiment_run SET started_at='2026-06-24' WHERE id=:e"), {"e": eid})
+    out = evaluate_experiment(db, eid, tenant_id="default", guardrail_fn=guardrail)
     assert out["uplift_pct"] > 0                                   # treatment "won" on revenue ...
     assert out["decision"] == "revert" and out["reason"] == "guardrail_breach"  # ... but guardrail breached
-    assert ex.is_experiment_live(db, eid) is False                # the nudge stops globally — autonomous rollback
+    assert ex.is_experiment_live(db, eid, tenant_id="default") is False

@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from src.app.services import experiment_ops as ops
 from src.app.services import template_phrasing as tp
 from src.app.services import experiments as ex
+from tests.experiment_helpers import apply_experiment_migrations, create_sealed_experiment
 from src.app.services.ranking_nudge import apply_experiment_nudge
 
 
@@ -16,7 +17,7 @@ from src.app.services.ranking_nudge import apply_experiment_nudge
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
-    ex.ensure_tables(s)
+    apply_experiment_migrations(s)
     try:
         yield s
     finally:
@@ -94,7 +95,9 @@ def test_phrasing_claim_guard_reverts_if_numbers_change(monkeypatch):
 
 def test_apply_phrasing_respects_kill_switch(db, monkeypatch):
     monkeypatch.setenv("ADAPTATION_KILL_SWITCH", "1")
-    ex.create_experiment(db, name="template_phrasing_v1", target_metric="csat", status="live")
+    create_sealed_experiment(
+        db, name="template_phrasing_v1", target_metric="csat"
+    )
     out, info = tp.apply_phrasing_experiment(db, "I found 3 options.", subject="u1",
                                              flags={"TEMPLATE_PHRASING_CANARY_FRACTION": 1.0})
     assert out == "I found 3 options." and info["killed"] is True  # killed → control text

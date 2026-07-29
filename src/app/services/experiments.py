@@ -18,45 +18,21 @@ Vertical-blind: experiments/metrics/variants are opaque labels. Never raises int
 from __future__ import annotations
 
 import hashlib
+import json
 import statistics
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 DECISION_KEEP = "keep"
 DECISION_SCALE = "scale"
 DECISION_REVISE = "revise"
 DECISION_REVERT = "revert"
 
-_DDL = (
-    """
-    CREATE TABLE IF NOT EXISTS experiment_run (
-        id TEXT PRIMARY KEY, name TEXT, target_metric TEXT, status TEXT DEFAULT 'draft',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP, started_at TEXT, ended_at TEXT
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS experiment_assignment (
-        id TEXT PRIMARY KEY, experiment_id TEXT, subject_hash TEXT, variant TEXT,
-        assigned_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS experiment_result (
-        id TEXT PRIMARY KEY, experiment_id TEXT, variant TEXT, decision TEXT,
-        uplift_pct REAL, evidence_json TEXT, decided_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-    """,
-)
-_INDEXES = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS ix_expasn_subject ON experiment_assignment(experiment_id, subject_hash)",
-    "CREATE INDEX IF NOT EXISTS ix_expresult_exp ON experiment_result(experiment_id)",
-)
 # started_at = ACTIVATION time (status→live); ended_at = terminal time. Added after the table first
 # shipped → applied to pre-existing experiment_run tables on upgrade.
-_RUN_UPGRADE_COLS = (("started_at", "TEXT"), ("ended_at", "TEXT"))
 _TERMINAL_STATUSES = ("reverted", "paused", "ended", "completed")
 
 
@@ -65,26 +41,33 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _ensure_run_columns(db) -> None:
-    from sqlalchemy import inspect as _sa_inspect
-    try:
-        have = {c["name"] for c in _sa_inspect(db.connection()).get_columns("experiment_run")}
-    except Exception:
-        return
-    for name, decl in _RUN_UPGRADE_COLS:
-        if name not in have:
-            db.execute(text(f"ALTER TABLE experiment_run ADD COLUMN {name} {decl}"))
-
-
 def ensure_tables(db) -> None:
-    from src.app.services.schema_policy import runtime_ddl_allowed
-    if not runtime_ddl_allowed():
-        return
-    for stmt in _DDL:
-        db.execute(text(stmt))
-    _ensure_run_columns(db)
-    for stmt in _INDEXES:
-        db.execute(text(stmt))
+    """Validate migration-owned schema without mutating it at runtime."""
+    required = {
+        "experiment_run": {
+            "id", "tenant_id", "name", "target_metric", "policy_json",
+            "policy_version", "status", "started_at", "ended_at",
+        },
+        "experiment_assignment": {
+            "id", "tenant_id", "experiment_id", "subject_hash", "variant", "assigned_at",
+        },
+        "experiment_result": {
+            "id", "tenant_id", "experiment_id", "variant", "decision",
+            "uplift_pct", "evidence_json", "decided_at",
+        },
+    }
+    schema = inspect(db.connection())
+    missing: list[str] = []
+    for table, columns in required.items():
+        if not schema.has_table(table):
+            missing.append(table)
+            continue
+        present = {column["name"] for column in schema.get_columns(table)}
+        missing.extend(f"{table}.{column}" for column in sorted(columns - present))
+    if missing:
+        raise RuntimeError(
+            "experiment_schema_migration_required:" + ",".join(missing)
+        )
 
 
 # ── assignment ────────────────────────────────────────────────────────────────
@@ -183,101 +166,224 @@ def evaluate_experiment(*, control: Sequence[float], treatment: Sequence[float],
 
 
 # ── minimal data layer ────────────────────────────────────────────────────────
-def create_experiment(db, *, name: str, target_metric: str, status: str = "draft") -> Optional[str]:
+def _tenant(value: Optional[str]) -> Optional[str]:
+    tenant_id = str(value or "").strip()
+    return tenant_id or None
+
+
+def _sealed_policy(
+    *,
+    baseline: Optional[Dict[str, Any]],
+    eligibility: Optional[Dict[str, Any]],
+    min_samples: Optional[int],
+    min_window_seconds: Optional[int],
+    rollback_threshold_pct: Optional[float],
+    guardrails: Optional[Dict[str, Any]],
+    terminal_policy: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    try:
+        if not isinstance(baseline, dict) or not baseline:
+            return None
+        if not isinstance(eligibility, dict) or not eligibility:
+            return None
+        if int(min_samples or 0) < 2 or int(min_window_seconds or 0) <= 0:
+            return None
+        if float(rollback_threshold_pct or 0) <= 0:
+            return None
+        allowed = list((terminal_policy or {}).get("allowed") or [])
+        if not allowed or not set(allowed).issubset(
+            {DECISION_KEEP, DECISION_SCALE, DECISION_REVISE, DECISION_REVERT}
+        ):
+            return None
+        return {
+            "baseline": baseline,
+            "eligibility": eligibility,
+            "min_samples": int(min_samples),
+            "min_window_seconds": int(min_window_seconds),
+            "rollback_threshold_pct": float(rollback_threshold_pct),
+            "guardrails": guardrails or {},
+            "terminal_policy": terminal_policy,
+        }
+    except (TypeError, ValueError):
+        return None
+
+
+def create_experiment(
+    db,
+    *,
+    tenant_id: str,
+    name: str,
+    target_metric: str,
+    baseline: Optional[Dict[str, Any]] = None,
+    eligibility: Optional[Dict[str, Any]] = None,
+    min_samples: Optional[int] = None,
+    min_window_seconds: Optional[int] = None,
+    rollback_threshold_pct: Optional[float] = None,
+    guardrails: Optional[Dict[str, Any]] = None,
+    terminal_policy: Optional[Dict[str, Any]] = None,
+    status: str = "draft",
+) -> Optional[str]:
     if db is None:
+        return None
+    tid = _tenant(tenant_id)
+    policy = _sealed_policy(
+        baseline=baseline, eligibility=eligibility, min_samples=min_samples,
+        min_window_seconds=min_window_seconds, rollback_threshold_pct=rollback_threshold_pct,
+        guardrails=guardrails, terminal_policy=terminal_policy,
+    )
+    if tid is None or policy is None:
         return None
     try:
         ensure_tables(db)
         eid = str(uuid.uuid4())
         # an experiment created already-live records its activation time now (started_at).
         started = _now_iso() if str(status).strip().lower() == "live" else None
-        db.execute(text("INSERT INTO experiment_run (id, name, target_metric, status, started_at) "
-                        "VALUES (:i,:n,:m,:s,:st)"),
-                   {"i": eid, "n": name, "m": target_metric, "s": status, "st": started})
+        db.execute(text(
+            "INSERT INTO experiment_run "
+            "(id, tenant_id, name, target_metric, policy_json, policy_version, status, started_at) "
+            "VALUES (:i,:t,:n,:m,:p,'experiment-policy.v1',:s,:st)"
+        ), {"i": eid, "t": tid, "n": name, "m": target_metric,
+            "p": json.dumps(policy, sort_keys=True, separators=(",", ":")),
+            "s": status, "st": started})
         return eid
     except Exception:
         return None
 
 
-def record_assignment(db, *, experiment_id: str, subject_hash: str, variant: str,
+def _resolve_experiment_id(db, *, tenant_id: str, experiment_id: str) -> Optional[str]:
+    row = db.execute(
+        text("SELECT id FROM experiment_run "
+             "WHERE tenant_id=:t AND (id=:i OR name=:i) LIMIT 1"),
+        {"t": tenant_id, "i": str(experiment_id)},
+    ).fetchone()
+    return str(row[0]) if row else None
+
+
+def load_policy(db, *, tenant_id: str, experiment_id: str) -> Optional[Dict[str, Any]]:
+    tid = _tenant(tenant_id)
+    if db is None or tid is None:
+        return None
+    try:
+        ensure_tables(db)
+        row = db.execute(
+            text("SELECT policy_json FROM experiment_run "
+                 "WHERE tenant_id=:t AND (id=:i OR name=:i) LIMIT 1"),
+            {"t": tid, "i": str(experiment_id)},
+        ).fetchone()
+        return json.loads(row[0]) if row and row[0] else None
+    except Exception:
+        return None
+
+
+def update_policy(db, *, tenant_id: str, experiment_id: str, policy: Dict[str, Any]) -> bool:
+    """Experiment policy is intentionally immutable; supersede with a new experiment."""
+    return False
+
+
+def record_assignment(db, *, tenant_id: str, experiment_id: str, subject_hash: str, variant: str,
                       assigned_at: Optional[str] = None) -> bool:
     """Idempotent per (experiment, subject) — the UNIQUE index closes the assignment race. ``assigned_at``
     overrides the default CURRENT_TIMESTAMP (used by tests to place assignment BEFORE a conversion so
     the post-assignment attribution window is exercised deterministically)."""
-    if db is None:
+    tid = _tenant(tenant_id)
+    if db is None or tid is None:
         return False
     try:
         ensure_tables(db)
+        eid = _resolve_experiment_id(db, tenant_id=tid, experiment_id=experiment_id)
+        if eid is None:
+            return False
         existing = db.execute(
-            text("SELECT 1 FROM experiment_assignment WHERE experiment_id=:e AND subject_hash=:s LIMIT 1"),
-            {"e": experiment_id, "s": subject_hash},
+            text("SELECT 1 FROM experiment_assignment "
+                 "WHERE tenant_id=:t AND experiment_id=:e AND subject_hash=:s LIMIT 1"),
+            {"t": tid, "e": eid, "s": subject_hash},
         ).fetchone()
         if existing:
             return False
         if assigned_at is None:
-            db.execute(text("INSERT INTO experiment_assignment (id, experiment_id, subject_hash, variant) "
-                            "VALUES (:i,:e,:s,:v)"),
-                       {"i": str(uuid.uuid4()), "e": experiment_id, "s": subject_hash, "v": variant})
+            db.execute(text("INSERT INTO experiment_assignment "
+                            "(id, tenant_id, experiment_id, subject_hash, variant) "
+                            "VALUES (:i,:t,:e,:s,:v)"),
+                       {"i": str(uuid.uuid4()), "t": tid, "e": eid, "s": subject_hash, "v": variant})
         else:
-            db.execute(text("INSERT INTO experiment_assignment (id, experiment_id, subject_hash, variant, "
-                            "assigned_at) VALUES (:i,:e,:s,:v,:a)"),
-                       {"i": str(uuid.uuid4()), "e": experiment_id, "s": subject_hash, "v": variant,
+            db.execute(text("INSERT INTO experiment_assignment "
+                            "(id, tenant_id, experiment_id, subject_hash, variant, assigned_at) "
+                            "VALUES (:i,:t,:e,:s,:v,:a)"),
+                       {"i": str(uuid.uuid4()), "t": tid, "e": eid, "s": subject_hash, "v": variant,
                         "a": str(assigned_at)})
         return True
     except Exception:
         return False
 
 
-def is_experiment_live(db, experiment_id: str) -> bool:
+def is_experiment_live(db, experiment_id: str, *, tenant_id: str) -> bool:
     """True only when the experiment's status is 'live'. The nudge gate reads this every request, so a
     batch/human flipping status to 'reverted' (anti-Goodhart) stops the adaptation globally."""
-    if db is None or not experiment_id:
+    tid = _tenant(tenant_id)
+    if db is None or not experiment_id or tid is None:
         return False
     try:
         ensure_tables(db)
         row = db.execute(
-            text("SELECT status FROM experiment_run WHERE id = :i OR name = :i LIMIT 1"),
-            {"i": str(experiment_id)},
+            text("SELECT status FROM experiment_run "
+                 "WHERE tenant_id=:t AND (id = :i OR name = :i) LIMIT 1"),
+            {"t": tid, "i": str(experiment_id)},
         ).fetchone()
         return bool(row) and str(row[0] or "").strip().lower() == "live"
     except Exception:
         return False
 
 
-def set_status(db, *, experiment_id: str, status: str) -> bool:
+def set_status(db, *, tenant_id: str, experiment_id: str, status: str) -> bool:
     """Flip an experiment's status (e.g. draft→live, live→reverted). The reversibility lever. Stamps
     started_at on the FIRST activation (status→live) and ended_at on a terminal status, so experiment
     age + the attribution window are measured from real activation, not creation."""
-    if db is None or not experiment_id:
+    tid = _tenant(tenant_id)
+    if db is None or not experiment_id or tid is None:
         return False
     try:
         ensure_tables(db)
         s = str(status).strip().lower()
         now = _now_iso()
         if s == "live":
-            db.execute(text("UPDATE experiment_run SET status=:s, started_at=COALESCE(started_at, :now) "
-                            "WHERE id=:i OR name=:i"), {"s": status, "now": now, "i": str(experiment_id)})
+            result = db.execute(
+                text("UPDATE experiment_run SET status=:s, started_at=COALESCE(started_at, :now) "
+                     "WHERE tenant_id=:t AND (id=:i OR name=:i)"),
+                {"s": status, "now": now, "t": tid, "i": str(experiment_id)},
+            )
         elif s in _TERMINAL_STATUSES:
-            db.execute(text("UPDATE experiment_run SET status=:s, ended_at=:now WHERE id=:i OR name=:i"),
-                       {"s": status, "now": now, "i": str(experiment_id)})
+            result = db.execute(
+                text("UPDATE experiment_run SET status=:s, ended_at=:now "
+                     "WHERE tenant_id=:t AND (id=:i OR name=:i)"),
+                {"s": status, "now": now, "t": tid, "i": str(experiment_id)},
+            )
         else:
-            db.execute(text("UPDATE experiment_run SET status=:s WHERE id=:i OR name=:i"),
-                       {"s": status, "i": str(experiment_id)})
-        return True
+            result = db.execute(
+                text("UPDATE experiment_run SET status=:s "
+                     "WHERE tenant_id=:t AND (id=:i OR name=:i)"),
+                {"s": status, "t": tid, "i": str(experiment_id)},
+            )
+        return bool(result.rowcount)
     except Exception:
         return False
 
 
-def record_result(db, *, experiment_id: str, variant: str, outcome: Dict[str, Any]) -> Optional[str]:
-    if db is None:
+def record_result(
+    db, *, tenant_id: str, experiment_id: str, variant: str, outcome: Dict[str, Any]
+) -> Optional[str]:
+    tid = _tenant(tenant_id)
+    if db is None or tid is None:
         return None
     try:
-        import json
         ensure_tables(db)
+        eid = _resolve_experiment_id(db, tenant_id=tid, experiment_id=experiment_id)
+        if eid is None:
+            return None
         rid = str(uuid.uuid4())
-        db.execute(text("INSERT INTO experiment_result (id, experiment_id, variant, decision, uplift_pct, evidence_json) "
-                        "VALUES (:i,:e,:v,:d,:u,:j)"),
-                   {"i": rid, "e": experiment_id, "v": variant,
+        db.execute(text("INSERT INTO experiment_result "
+                        "(id, tenant_id, experiment_id, variant, decision, uplift_pct, evidence_json) "
+                        "VALUES (:i,:t,:e,:v,:d,:u,:j)"),
+                   {"i": rid, "t": tid, "e": eid, "v": variant,
                     "d": str(outcome.get("decision") or ""), "u": float(outcome.get("uplift_pct") or 0.0),
                     "j": json.dumps(outcome, default=str)})
         return rid

@@ -11,12 +11,18 @@ from src.app.services import contact_governance as cg
 from src.app.services import governance_pulse as gp
 from src.app.services import market_analysis as ma
 from src.app.services import market_outcome as mo
+from tests.experiment_helpers import apply_experiment_migrations, create_sealed_experiment
+
+
+def _pulse(db, tenant_id: str = "default"):
+    return gp.governance_pulse(db, tenant_id=tenant_id)
 
 
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_experiment_migrations(s)
     try:
         yield s
     finally:
@@ -24,7 +30,7 @@ def db():
 
 
 def test_empty_pulse_is_all_zeros_not_an_error(db):
-    p = gp.governance_pulse(db)
+    p = _pulse(db)
     assert p["signal_decision_state"]["active_findings"] == 0
     assert p["policy_compliance"]["policy_block_rate"] == 0.0
     assert p["experiment_health"]["rollback_count"] == 0
@@ -36,7 +42,7 @@ def test_policy_block_rate_and_reasons(db, monkeypatch):
     gate.authorize(db, action_type="adjust_ranking", confidence=0.9)          # allow
     gate.authorize(db, action_type="adjust_ranking", confidence=0.9)          # allow
     gate.authorize(db, action_type="not_a_real_action", confidence=0.9)       # deny (unauthorized)
-    p = gp.governance_pulse(db)
+    p = _pulse(db)
     pc = p["policy_compliance"]
     assert pc["actions_evaluated"] == 3 and pc["actions_blocked"] == 1
     assert pc["policy_block_rate"] == round(1 / 3, 4)
@@ -47,7 +53,7 @@ def test_ai_confidence_distribution_buckets(db):
     gate.authorize(db, action_type="adjust_ranking", confidence=0.2)   # low
     gate.authorize(db, action_type="adjust_ranking", confidence=0.6)   # medium
     gate.authorize(db, action_type="adjust_ranking", confidence=0.95)  # high
-    dist = gp.governance_pulse(db)["signal_decision_state"]["ai_confidence_distribution"]
+    dist = _pulse(db)["signal_decision_state"]["ai_confidence_distribution"]
     assert dist["low"] == 1 and dist["medium"] == 1 and dist["high"] == 1
 
 
@@ -59,7 +65,7 @@ def test_findings_severity_and_type_counts(db):
         ma.MarketFinding("objection_cluster", "price", "warn", 0.7, "price", {}, "7d"),
     ]
     ma.persist_findings(db, findings)
-    p = gp.governance_pulse(db)
+    p = _pulse(db)
     sd = p["signal_decision_state"]
     assert sd["active_findings"] == 3
     assert sd["findings_by_severity"]["critical"] == 1 and sd["findings_by_severity"]["warn"] == 2
@@ -72,7 +78,7 @@ def test_rollback_count_from_outcomes(db):
                       n_control=40, n_treatment=40, reverted=False, commit=True)
     mo.record_outcome(db, decision_ref="exp1", decision="revert", uplift_pct=-1.0, significant=True,
                       n_control=40, n_treatment=40, reverted=True, commit=True)
-    eh = gp.governance_pulse(db)["experiment_health"]
+    eh = _pulse(db)["experiment_health"]
     assert eh["outcomes_recorded"] == 2 and eh["rollback_count"] == 1
     assert eh["decision_breakdown"].get("keep") == 1 and eh["decision_breakdown"].get("revert") == 1
 
@@ -81,7 +87,7 @@ def test_contact_suppression_by_region(db):
     # consent defaults to REQUIRED (opt-in) → an un-consented contact is suppressed, audited with its region.
     cg.evaluate_contact(db, uid_hash="u1", channel="email", campaign_id="c1", region="EU")
     cg.evaluate_contact(db, uid_hash="u2", channel="email", campaign_id="c1", region="EU")
-    pc = gp.governance_pulse(db)["policy_compliance"]
+    pc = _pulse(db)["policy_compliance"]
     assert pc["contacts_evaluated"] == 2 and pc["contacts_suppressed"] >= 1
     assert pc["suppression_by_region"].get("EU", 0) >= 1
     assert pc["exception_count"] == pc["actions_blocked"] + pc["contacts_suppressed"]
@@ -90,7 +96,7 @@ def test_contact_suppression_by_region(db):
 def test_adaptation_mode_reflects_flags(db, monkeypatch):
     monkeypatch.setenv("ADAPTATION_KILL_SWITCH", "1")
     monkeypatch.setenv("HIPPOGRAPH_FEEDBACK_ENABLED", "shadow")
-    mode = gp.governance_pulse(db)["signal_decision_state"]["adaptation_mode"]
+    mode = _pulse(db)["signal_decision_state"]["adaptation_mode"]
     assert mode["kill_switch"] is True and mode["hippograph_mode"] == "shadow"
 
 
@@ -109,25 +115,24 @@ def test_pulse_is_tenant_scoped(db):
 def test_manual_revert_of_live_experiment_counts_as_rollback(db):
     """Review fix #4: reverting a LIVE experiment is an operator rollback — it must register in rollback_count."""
     from src.app.services import experiment_console as ec
-    ec.promote(db)                      # status → live
-    ec.revert(db)                       # manual operator kill of a live experiment
-    eh = gp.governance_pulse(db)["experiment_health"]
+    create_sealed_experiment(db, name=ec.DEFAULT_EXPERIMENT_ID)
+    ec.revert(db, tenant_id="default")
+    eh = _pulse(db)["experiment_health"]
     assert eh["rollback_count"] == 1 and eh["decision_breakdown"].get("revert") == 1
 
 
 def test_revert_of_non_live_experiment_records_no_rollback(db):
     """The was_live guard: reverting something that was never live must NOT inflate the rollback count."""
     from src.app.services import experiment_console as ec
-    ec.revert(db)                       # nothing was live
-    assert gp.governance_pulse(db)["experiment_health"]["rollback_count"] == 0
+    ec.revert(db, tenant_id="default")
+    assert _pulse(db)["experiment_health"]["rollback_count"] == 0
 
 
-def test_experiment_card_is_global_no_split_brain_in_replay_view(db):
-    """Review-fix #1: the experiment is GLOBAL; its outcomes are read from the experiment tenant regardless of
-    the pulse's display tenant. A replay-demo pulse must NOT show 'reverted but 0 rollbacks' (split-brain)."""
+def test_experiment_card_is_tenant_isolated(db):
     from src.app.services import experiment_console as ec
-    ec.promote(db)
-    ec.revert(db)                       # records a revert outcome under the default (experiment) tenant
-    eh = gp.governance_pulse(db, tenant_id="replay-demo")["experiment_health"]
-    assert eh["scope"] == "global"
-    assert eh["status"] == "reverted" and eh["rollback_count"] == 1  # consistent, not split
+    create_sealed_experiment(db, name=ec.DEFAULT_EXPERIMENT_ID)
+    ec.revert(db, tenant_id="default")
+    replay = _pulse(db, "replay-demo")["experiment_health"]
+    default = _pulse(db, "default")["experiment_health"]
+    assert replay["status"] == "absent" and replay["rollback_count"] == 0
+    assert default["status"] == "reverted" and default["rollback_count"] == 1

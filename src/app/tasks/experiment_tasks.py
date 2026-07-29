@@ -24,7 +24,6 @@ def evaluate_experiments() -> Dict[str, Any]:
     if not _enabled():
         return {"skipped": "disabled"}
     try:
-        min_samples = max(2, int(float(os.getenv("EXPERIMENT_EVAL_MIN_SAMPLES", "30") or 30)))
         from src.app.models.db import db_session
         from src.app.services.experiment_eval import evaluate_live_experiments, returns_guardrail
         from src.app.services.experiment_ops import (
@@ -36,7 +35,18 @@ def evaluate_experiments() -> Dict[str, Any]:
         # just refunds). Either breaching reverts the treatment.
         guardrail = composite_guardrail(returns_guardrail, escalation_rate_guardrail)
         with db_session() as db:
-            outcomes = evaluate_live_experiments(db, min_samples=min_samples, guardrail_fn=guardrail)
+            from sqlalchemy import text
+            tenants = [
+                str(row[0]) for row in db.execute(
+                    text("SELECT DISTINCT tenant_id FROM experiment_run "
+                         "WHERE status='live' AND tenant_id IS NOT NULL")
+                ).fetchall() if str(row[0] or "").strip()
+            ]
+            outcomes = []
+            for tenant_id in tenants:
+                outcomes.extend(evaluate_live_experiments(
+                    db, tenant_id=tenant_id, guardrail_fn=guardrail
+                ))
             record_heartbeat(db)  # stamp the safety loop's liveness (worker-health watchdog reads it)
             db.commit()
         reverted = [o.get("experiment_id") for o in outcomes if o.get("reverted")]

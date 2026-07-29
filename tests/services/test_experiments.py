@@ -21,6 +21,7 @@ from src.app.services.experiments import (
     decide,
     evaluate_experiment,
 )
+from tests.experiment_helpers import apply_experiment_migrations
 
 
 def test_single_sample_per_arm_is_never_significant():
@@ -96,6 +97,7 @@ def test_evaluate_experiment_one_shot():
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_experiment_migrations(s)
     try:
         yield s
     finally:
@@ -103,18 +105,33 @@ def db():
 
 
 def test_create_record_assignment_idempotent(db):
-    eid = ex.create_experiment(db, name="ranking-nudge", target_metric="conversion")
+    eid = ex.create_experiment(
+        db, tenant_id="tenant-a", name="ranking-nudge", target_metric="conversion",
+        baseline={"variant": "control", "metric_value": 0.10},
+        eligibility={"country": ["AU"]}, min_samples=30, min_window_seconds=86400,
+        rollback_threshold_pct=2.0, guardrails={"returns": {"max_degradation_pct": 2.0}},
+        terminal_policy={"allowed": ["keep", "scale", "revise", "revert"]},
+    )
     assert eid
-    assert ex.record_assignment(db, experiment_id=eid, subject_hash="u1", variant="treatment") is True
-    assert ex.record_assignment(db, experiment_id=eid, subject_hash="u1", variant="treatment") is False  # idempotent
+    assert ex.record_assignment(
+        db, tenant_id="tenant-a", experiment_id=eid, subject_hash="u1", variant="treatment"
+    ) is True
+    assert ex.record_assignment(
+        db, tenant_id="tenant-a", experiment_id=eid, subject_hash="u1", variant="treatment"
+    ) is False  # idempotent
     db.commit()
     n = db.execute(text("SELECT COUNT(*) FROM experiment_assignment WHERE experiment_id=:e"), {"e": eid}).fetchone()[0]
     assert n == 1
 
 
 def test_record_result(db):
-    eid = ex.create_experiment(db, name="x", target_metric="rpv")
-    rid = ex.record_result(db, experiment_id=eid, variant="treatment",
+    eid = ex.create_experiment(
+        db, tenant_id="tenant-a", name="x", target_metric="rpv",
+        baseline={"variant": "control"}, eligibility={"all": True},
+        min_samples=2, min_window_seconds=60, rollback_threshold_pct=2.0,
+        guardrails={}, terminal_policy={"allowed": ["keep", "scale", "revise", "revert"]},
+    )
+    rid = ex.record_result(db, tenant_id="tenant-a", experiment_id=eid, variant="treatment",
                            outcome={"decision": "scale", "uplift_pct": 12.0})
     assert rid
     row = db.execute(text("SELECT decision, uplift_pct FROM experiment_result WHERE id=:i"), {"i": rid}).fetchone()
@@ -122,5 +139,38 @@ def test_record_result(db):
 
 
 def test_data_layer_none_safe():
-    assert ex.create_experiment(None, name="x", target_metric="m") is None
-    assert ex.record_assignment(None, experiment_id="e", subject_hash="s", variant="v") is False
+    assert ex.create_experiment(None, tenant_id="tenant-a", name="x", target_metric="m") is None
+    assert ex.record_assignment(
+        None, tenant_id="tenant-a", experiment_id="e", subject_hash="s", variant="v"
+    ) is False
+
+
+def test_experiment_policy_is_sealed_and_tenant_scoped(db):
+    policy = {
+        "baseline": {"variant": "control", "metric_value": 0.10},
+        "eligibility": {"country": ["AU"]},
+        "min_samples": 40,
+        "min_window_seconds": 604800,
+        "rollback_threshold_pct": 1.5,
+        "guardrails": {"margin": {"max_degradation_pct": 1.5}},
+        "terminal_policy": {"allowed": ["keep", "scale", "revise", "revert"]},
+    }
+    a = ex.create_experiment(
+        db, tenant_id="tenant-a", name="same-name", target_metric="conversion", **policy
+    )
+    b = ex.create_experiment(
+        db, tenant_id="tenant-b", name="same-name", target_metric="conversion", **policy
+    )
+    assert a and b and a != b
+    assert ex.load_policy(db, tenant_id="tenant-a", experiment_id=a) == policy
+    assert ex.load_policy(db, tenant_id="tenant-b", experiment_id=a) is None
+    assert ex.update_policy(
+        db, tenant_id="tenant-a", experiment_id=a, policy={"min_samples": 1}
+    ) is False
+
+
+def test_missing_tenant_or_unsealed_policy_is_rejected(db):
+    assert ex.create_experiment(db, tenant_id="", name="x", target_metric="conversion") is None
+    assert ex.create_experiment(
+        db, tenant_id="tenant-a", name="x", target_metric="conversion"
+    ) is None

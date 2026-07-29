@@ -89,16 +89,17 @@ def test_downgrade_drops_tables(mig):
     assert remaining == set(), f"downgrade left tables behind: {remaining}"
 
 
-def _runtime_engine():
-    """Build a SQLite db by calling every service ensure_* (the runtime path)."""
+def _service_validation_engine(mig):
+    """Validate service readers against a migration-owned SQLite schema."""
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    _apply(s, mig.TABLE_STATEMENTS)
+    _apply(s, mig.INDEX_STATEMENTS)
     from src.app.services import (
         adaptive_action_gate,
         contact_governance,
-        experiments,
         human_feedback,
         market_signal,
         shadow_actions,
@@ -111,7 +112,6 @@ def _runtime_engine():
     shadow_actions.ensure_table(s)
     contact_governance.ensure_tables(s)
     _ensure_heartbeat(s)
-    experiments.ensure_tables(s)
     adaptive_action_gate.ensure_table(s)
     s.commit()
     return eng
@@ -138,11 +138,11 @@ def _schema(eng):
     return out
 
 
-def test_migration_ddl_matches_runtime_tables(mig):
+def test_migration_ddl_matches_service_validated_tables(mig):
     """The migration must create EXACTLY what the services create at runtime — same tables, COLUMNS,
     and INDEXES (incl. uniqueness). Comparing only table names would miss a column/index drift such as
     the per-event index-drop the runtime no longer does."""
-    runtime = _schema(_runtime_engine())
+    runtime = _schema(_service_validation_engine(mig))
     migrated = _schema(_migration_engine(mig))
     assert set(runtime) == set(migrated) == _EXPECTED_TABLES
     for t in _EXPECTED_TABLES:

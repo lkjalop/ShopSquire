@@ -20,11 +20,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from src.app.services.experiments import assign_variant, ensure_tables, is_experiment_live, set_status
 
@@ -78,9 +77,12 @@ def _parse(ts: Any) -> Optional[datetime]:
 
 
 # ── broader guardrails ────────────────────────────────────────────────────────
-def _safe_guard(fn: GuardrailFn, db, eid: str) -> Dict[str, float]:
+def _safe_guard(fn: GuardrailFn, db, eid: str, *, tenant_id: str) -> Dict[str, float]:
     try:
-        return fn(db, eid) or {}
+        try:
+            return fn(db, eid, tenant_id=tenant_id) or {}
+        except TypeError:
+            return fn(db, eid) or {}
     except Exception:
         return {}
 
@@ -88,10 +90,10 @@ def _safe_guard(fn: GuardrailFn, db, eid: str) -> Dict[str, float]:
 def composite_guardrail(*fns: GuardrailFn) -> GuardrailFn:
     """Merge several guardrails into one delta dict. decide() already breaches on ANY negative delta,
     so composing returns + escalation + margin makes anti-Goodhart multi-dimensional."""
-    def _g(db, eid: str) -> Dict[str, float]:
+    def _g(db, eid: str, *, tenant_id: str = "") -> Dict[str, float]:
         merged: Dict[str, float] = {}
         for fn in fns:
-            merged.update(_safe_guard(fn, db, eid))
+            merged.update(_safe_guard(fn, db, eid, tenant_id=tenant_id))
         return merged
     return _g
 
@@ -102,16 +104,16 @@ def feedback_rate_guardrail(feedback_type: str) -> GuardrailFn:
     link can't be computed (then decide runs on the other guardrails)."""
     key = f"{feedback_type}_rate"
 
-    def _g(db, eid: str) -> Dict[str, float]:
+    def _g(db, eid: str, *, tenant_id: str = "") -> Dict[str, float]:
         try:
             rows = db.execute(
                 text("SELECT a.variant, COUNT(DISTINCT a.subject_hash) AS assigned, "
                      "COUNT(DISTINCT h.subject_hash) AS flagged "
                      "FROM experiment_assignment a "
                      "LEFT JOIN human_feedback h ON h.subject_hash = a.subject_hash "
-                     "AND h.feedback_type = :ft "
-                     "WHERE a.experiment_id = :e GROUP BY a.variant"),
-                {"ft": str(feedback_type), "e": str(eid)},
+                     "AND h.feedback_type = :ft AND h.tenant_id=a.tenant_id "
+                     "WHERE a.experiment_id = :e AND a.tenant_id=:t GROUP BY a.variant"),
+                {"ft": str(feedback_type), "e": str(eid), "t": str(tenant_id)},
             ).fetchall()
         except Exception:
             return {}
@@ -135,16 +137,13 @@ escalation_rate_guardrail = feedback_rate_guardrail("escalation")
 
 
 # ── worker health (heartbeat) ─────────────────────────────────────────────────
-_HEARTBEAT_DDL = """
-CREATE TABLE IF NOT EXISTS experiment_ops_heartbeat (
-    name TEXT PRIMARY KEY,
-    beat_at TEXT
-)
-"""
-
-
 def _ensure_heartbeat(db) -> None:
-    db.execute(text(_HEARTBEAT_DDL))
+    schema = inspect(db.connection())
+    if not schema.has_table("experiment_ops_heartbeat"):
+        raise RuntimeError("experiment_ops_schema_migration_required")
+    columns = {column["name"] for column in schema.get_columns("experiment_ops_heartbeat")}
+    if not {"name", "beat_at"}.issubset(columns):
+        raise RuntimeError("experiment_ops_schema_migration_required")
 
 
 def record_heartbeat(db, *, name: str = "experiment_eval", now_iso: Optional[str] = None) -> bool:
@@ -184,12 +183,17 @@ def eval_is_stale(db, *, max_age_seconds: float, name: str = "experiment_eval",
     return age is None or age > float(max_age_seconds)
 
 
-def _live_experiment_ids(db) -> List[str]:
+def _live_experiment_ids(db, *, tenant_id: str) -> List[str]:
     ensure_tables(db)
-    return [r[0] for r in db.execute(text("SELECT id FROM experiment_run WHERE status='live'")).fetchall()]
+    return [r[0] for r in db.execute(
+        text("SELECT id FROM experiment_run WHERE tenant_id=:t AND status='live'"),
+        {"t": str(tenant_id)},
+    ).fetchall()]
 
 
-def pause_live_if_eval_stale(db, *, max_age_seconds: float, now_iso: Optional[str] = None) -> Dict[str, Any]:
+def pause_live_if_eval_stale(
+    db, *, tenant_id: str, max_age_seconds: float, now_iso: Optional[str] = None
+) -> Dict[str, Any]:
     """FAIL-SAFE: if the eval loop is stale (the watchdog that auto-reverts losers isn't running),
     pause every live experiment so no nudge keeps running unsupervised. Returns {stale, paused}."""
     if db is None:
@@ -198,8 +202,8 @@ def pause_live_if_eval_stale(db, *, max_age_seconds: float, now_iso: Optional[st
         return {"stale": False, "paused": []}
     paused: List[str] = []
     try:
-        for eid in _live_experiment_ids(db):
-            if set_status(db, experiment_id=eid, status="paused"):
+        for eid in _live_experiment_ids(db, tenant_id=tenant_id):
+            if set_status(db, tenant_id=tenant_id, experiment_id=eid, status="paused"):
                 paused.append(eid)
         db.commit()
     except Exception:
@@ -208,14 +212,19 @@ def pause_live_if_eval_stale(db, *, max_age_seconds: float, now_iso: Optional[st
 
 
 # ── stale-experiment detection ────────────────────────────────────────────────
-def detect_stale_experiments(db, *, max_age_seconds: float, now_iso: Optional[str] = None) -> List[Dict[str, Any]]:
+def detect_stale_experiments(
+    db, *, tenant_id: str, max_age_seconds: float, now_iso: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """Live experiments whose created_at is older than max_age_seconds — zombie candidates."""
     if db is None:
         return []
     try:
         ensure_tables(db)
-        rows = db.execute(text("SELECT id, name, started_at, created_at FROM experiment_run "
-                               "WHERE status='live'")).fetchall()
+        rows = db.execute(
+            text("SELECT id, name, started_at, created_at FROM experiment_run "
+                 "WHERE tenant_id=:t AND status='live'"),
+            {"t": str(tenant_id)},
+        ).fetchall()
     except Exception:
         return []
     now = _now(now_iso)
@@ -230,12 +239,18 @@ def detect_stale_experiments(db, *, max_age_seconds: float, now_iso: Optional[st
     return out
 
 
-def auto_revert_stale(db, *, max_age_seconds: float, now_iso: Optional[str] = None) -> List[str]:
+def auto_revert_stale(
+    db, *, tenant_id: str, max_age_seconds: float, now_iso: Optional[str] = None
+) -> List[str]:
     """Revert every stale live experiment (zombie cleanup). Returns the reverted ids."""
-    stale = detect_stale_experiments(db, max_age_seconds=max_age_seconds, now_iso=now_iso)
+    stale = detect_stale_experiments(
+        db, tenant_id=tenant_id, max_age_seconds=max_age_seconds, now_iso=now_iso
+    )
     reverted: List[str] = []
     for s in stale:
-        if set_status(db, experiment_id=s["experiment_id"], status="reverted"):
+        if set_status(
+            db, tenant_id=tenant_id, experiment_id=s["experiment_id"], status="reverted"
+        ):
             reverted.append(s["experiment_id"])
     if reverted and db is not None:
         try:
@@ -246,24 +261,26 @@ def auto_revert_stale(db, *, max_age_seconds: float, now_iso: Optional[str] = No
 
 
 # ── forced rollback drill (DR test for the kill switch) ───────────────────────
-def forced_rollback_drill(db, *, experiment_id: Optional[str] = None,
+def forced_rollback_drill(db, *, tenant_id: str, experiment_id: Optional[str] = None,
                           now_iso: Optional[str] = None) -> Dict[str, Any]:
     """Deliberately force-revert one experiment (or ALL live ones) and VERIFY each stopped — a fire
     drill proving the rollback path actually disables the adaptation. Returns a drill report."""
     if db is None:
         return {"targeted": [], "reverted": [], "verified_not_live": True, "failures": []}
     try:
-        targets = [experiment_id] if experiment_id else _live_experiment_ids(db)
+        targets = [experiment_id] if experiment_id else _live_experiment_ids(
+            db, tenant_id=tenant_id
+        )
     except Exception:
         return {"targeted": [], "reverted": [], "verified_not_live": False, "failures": ["enumerate_failed"]}
     reverted, failures = [], []
     for eid in targets:
-        set_status(db, experiment_id=eid, status="reverted")
+        set_status(db, tenant_id=tenant_id, experiment_id=eid, status="reverted")
         try:
             db.commit()
         except Exception:
             pass
-        if is_experiment_live(db, eid):
+        if is_experiment_live(db, eid, tenant_id=tenant_id):
             failures.append(eid)          # the kill switch DID NOT take — critical
         else:
             reverted.append(eid)

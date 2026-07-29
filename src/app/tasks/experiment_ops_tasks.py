@@ -30,10 +30,26 @@ def experiment_watchdog() -> Dict[str, Any]:
         from src.app.models.db import db_session
         from src.app.services.experiment_ops import auto_revert_stale, pause_live_if_eval_stale
         with db_session() as db:
-            health = pause_live_if_eval_stale(db, max_age_seconds=max_stale)
-            zombies = auto_revert_stale(db, max_age_seconds=max_live)
-        logger.info("experiment_watchdog stale_paused=%s zombies_reverted=%s", health.get("paused"), zombies)
-        return {"eval_stale": health.get("stale"), "paused": health.get("paused"), "reverted_stale": zombies}
+            from sqlalchemy import text
+            tenants = [
+                str(row[0]) for row in db.execute(
+                    text("SELECT DISTINCT tenant_id FROM experiment_run "
+                         "WHERE status='live' AND tenant_id IS NOT NULL")
+                ).fetchall() if str(row[0] or "").strip()
+            ]
+            paused, zombies = [], []
+            stale = False
+            for tenant_id in tenants:
+                health = pause_live_if_eval_stale(
+                    db, tenant_id=tenant_id, max_age_seconds=max_stale
+                )
+                stale = stale or bool(health.get("stale"))
+                paused.extend(health.get("paused") or [])
+                zombies.extend(auto_revert_stale(
+                    db, tenant_id=tenant_id, max_age_seconds=max_live
+                ))
+        logger.info("experiment_watchdog stale_paused=%s zombies_reverted=%s", paused, zombies)
+        return {"eval_stale": stale, "paused": paused, "reverted_stale": zombies}
     except Exception as exc:
         logger.warning("experiment_watchdog failed: %s", exc)
         return {"error": f"{type(exc).__name__}: {exc}"}

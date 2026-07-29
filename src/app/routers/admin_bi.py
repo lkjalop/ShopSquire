@@ -2063,8 +2063,11 @@ def investor_metrics(
     # 3) Market-intelligence governance pulse (signals → findings → shadow decisions → experiments)
     try:
         from src.app.services.governance_pulse import governance_pulse
+        from src.app.platform.tenant_context import current_tenant_id
         with db_session() as db:
-            out["sections"]["governance"] = governance_pulse(db)
+            out["sections"]["governance"] = governance_pulse(
+                db, tenant_id=str(current_tenant_id() or "").strip()
+            )
     except Exception as exc:
         logger.debug("investor-metrics governance block failed: %s", exc)
         out["sections"]["governance"] = {"error": "unavailable"}

@@ -68,10 +68,12 @@ def test_evaluate_now_records_an_outcome(db, monkeypatch):
     import src.app.services.experiment_console as ec
     monkeypatch.setattr(
         "src.app.services.experiment_eval.evaluate_experiment",
-        lambda _db, eid, min_samples=30: {"decision": "keep", "uplift_pct": 5.5, "significant": True,
+        lambda _db, eid, tenant_id: {"decision": "keep", "uplift_pct": 5.5, "significant": True,
                                           "n_control": 50, "n_treatment": 50},
     )
-    out = ec.evaluate_now(db, experiment_id="ranking_nudge_v1", min_samples=10)
+    out = ec.evaluate_now(
+        db, tenant_id="default", experiment_id="ranking_nudge_v1"
+    )
     assert out.get("decision") == "keep"
     rows = mo.load_recent_outcomes(db, decision_ref="ranking_nudge_v1")
     assert len(rows) == 1 and rows[0]["decision"] == "keep" and rows[0]["uplift_pct"] == 5.5

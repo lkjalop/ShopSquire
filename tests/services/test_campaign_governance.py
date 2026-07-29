@@ -15,13 +15,14 @@ from src.app.services import campaign_governance as cgov
 from src.app.services import contact_governance as cg
 from src.app.services import experiment_ops as ops
 from src.app.services import experiments as ex
+from tests.experiment_helpers import apply_experiment_migrations, create_sealed_experiment
 
 
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
-    ex.ensure_tables(s)
+    apply_experiment_migrations(s)
     from src.app.services import attribution
     attribution.ensure_tables(s)
     try:
@@ -41,17 +42,21 @@ def _prove_rollback(db, now_iso):
     from sqlalchemy import text
 
     from src.app.services.experiment_eval import evaluate_experiment
-    eid = ex.create_experiment(db, name="loser", target_metric="rpv", status="live")
+    eid = create_sealed_experiment(db, name="loser")
     for arm, val in (("control", 130.0), ("treatment", 100.0)):  # treatment significantly worse
         for i in range(8):
             subj = f"{eid}-{arm}-{i}"
-            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm, assigned_at="2026-06-24")
+            ex.record_assignment(
+                db, tenant_id="default", experiment_id=eid,
+                subject_hash=subj, variant=arm, assigned_at="2026-06-24",
+            )
             db.execute(text("INSERT INTO conversion_event (id,decision_id,order_id,uid_hash,"
                             "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d',:o,:u,'[]',:v,'2026-06-25')"),
                        {"id": f"{subj}-c", "o": f"order-{subj}",
                         "u": subj, "v": int(val * 100)})
     db.commit()
-    out = evaluate_experiment(db, eid, min_samples=2)
+    db.execute(text("UPDATE experiment_run SET started_at='2026-06-24' WHERE id=:e"), {"e": eid})
+    out = evaluate_experiment(db, eid, tenant_id="default")
     assert out["decision"] == "revert"  # the evaluator recorded a data-driven revert
     ops.record_heartbeat(db, now_iso=now_iso)
     return eid
@@ -75,8 +80,8 @@ def test_not_ready_before_anything_demonstrated(db):
 
 def test_manual_drill_alone_does_not_prove_rollback(db):
     # a forced drill flips status but writes NO experiment_result → not a data-driven rollback
-    eid = ex.create_experiment(db, name="drill", target_metric="rpv", status="live")
-    ops.forced_rollback_drill(db, experiment_id=eid)
+    eid = create_sealed_experiment(db, name="drill")
+    ops.forced_rollback_drill(db, tenant_id="default", experiment_id=eid)
     ops.record_heartbeat(db, now_iso="2026-06-25 12:00:00")
     _prove_contact_freq(db)
     r = cgov.adaptation_readiness(db, now_iso="2026-06-25 12:05:00")
