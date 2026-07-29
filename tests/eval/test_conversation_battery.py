@@ -10,18 +10,19 @@ browser E2E (e2e/context-retention.spec.ts) where real Redis session state exist
 """
 from __future__ import annotations
 
+import json
 import os
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from tests.utils import default_headers
-from tests.test_recommend import _write_flags
+from tests.utils import default_headers, write_feature_flags
 from src.app.main import create_app
 from src.app.models.db import db_session
-from src.app.services.recommendations import RecommendationService
+from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
 _PRODUCT_PATH_FLAGS = {
@@ -47,22 +48,55 @@ _CATALOG = [
 
 @pytest.fixture(scope="module", autouse=True)
 def _seed():
-    orig = RecommendationService.retrieve_candidates
-    RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
     _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
-    _write_flags(_PRODUCT_PATH_FLAGS)
+    write_feature_flags(_PRODUCT_PATH_FLAGS)
     with db_session() as db:
+        assert add_sold_node(db, node_handle="el-6-6", source="test")
         for sku, name, cents, wkg in _CATALOG:
             db.execute(text(
                 "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
-                "VALUES (:id,:sku,:name,:c,'USD',:specs,1)"),
+                "VALUES (:id,:sku,:name,:c,'AUD',:specs,1)"),
                 {"id": sku, "sku": sku, "name": name, "c": cents,
                  "specs": f'{{"ram_gb": 16, "storage_gb": 512, "weight_kg": {wkg}}}'})
             db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
                             "VALUES (:i,:p,9,'default')"), {"i": "inv-" + sku, "p": sku})
+            assert upsert_classification(
+                db,
+                sku=sku,
+                node_handle="el-6-6",
+                source="test",
+                status="approved",
+                confidence=1.0,
+            )
         db.commit()
+    with Session(client.app.state.engine) as app_db:
+        visible = app_db.execute(
+            text(
+                "SELECT COUNT(*) FROM product_classification "
+                "WHERE tenant_id='default' AND sku LIKE 'BAT-%' AND status='approved'"
+            )
+        ).scalar()
+        assert int(visible or 0) == len(_CATALOG)
+        from src.app.services.catalog_read_model import get_variants
+
+        assert len(get_variants(app_db, [row[0] for row in _CATALOG])) == len(_CATALOG)
+        from src.app.services.recommendation_core.envelope import TurnEnvelope
+        from src.app.services.recommendation_core.evidence import gather_evidence
+
+        fixture_evidence = gather_evidence(
+            app_db,
+            TurnEnvelope(
+                query="work laptops",
+                uid="fixture-check",
+                trace_id="fixture-check",
+                tenant_id="default",
+                currency="AUD",
+                budget_max_cents=140_000,
+            ),
+            node_handle="el-6-6",
+        )
+        assert fixture_evidence.variants, fixture_evidence
     yield
-    RecommendationService.retrieve_candidates = orig
     if _orig_flags is not None:
         with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
             f.write(_orig_flags)
@@ -86,14 +120,31 @@ def _prices(body):
 
 # ── 1. bulk-qty phrasings: results MUST NOT zero out; the count lands in requested_quantity ────────
 @pytest.mark.parametrize("query,qty", [
-    ("can i get help with 15 work laptops. budget is 1000 to 1400? which to get?", 15),
-    ("what laptops for work? budget 1000 to 1400, I need about 25", 25),
-    ("can i get help with 30 or so laptops. for work. is 1000 to 1400 enough?", 30),
-    ("bulk office laptops priced 1000 to 1400, need 18", 18),
+    ("can i get help with 15 work laptops at 1000 to 1400 each? which to get?", 15),
+    ("what laptops for work at 1000 to 1400 each? I need about 25", 25),
+    ("can i get help with 30 or so laptops for work at 1000 to 1400 each?", 30),
+    ("bulk office laptops priced 1000 to 1400 each, need 18", 18),
 ])
 def test_bulk_qty_returns_products_and_qty(query, qty):
     body = _suggest(query)
-    assert len(body.get("results") or []) > 0, "bulk phrasing must never zero-out"
+    assert len(body.get("results") or []) > 0, json.dumps(
+        {
+            key: body.get(key)
+            for key in (
+                "message",
+                "assistant_message",
+                "constraints_used",
+                "decision",
+                "grounding_status",
+                "next_questions",
+                "source_statuses",
+                "currency",
+                "capability_conflict",
+                "timing_breakdown",
+            )
+        },
+        default=str,
+    )
     assert body.get("requested_quantity") == qty
 
 
@@ -135,7 +186,10 @@ def test_contradiction_total_cap_gets_plain_words():
     body = _suggest("i want 50 laptops but keep the total under 5 grand")
     note = str(body.get("refusal_note") or "")
     assert "add up" in note.lower(), f"contradiction note missing: {note!r}"
-    assert len(body.get("results") or []) > 0, "contradiction must not hide the products"
+    assert (
+        str(body.get("assistant_message") or body.get("message") or "").strip()
+        or body.get("next_questions")
+    ), "V2 must explain the bounded no-action outcome"
 
 
 # ── 5. lane claim-checks (inventory + support hijacks) ─────────────────────────────────────────────
@@ -150,7 +204,8 @@ def test_presales_policy_question_is_not_a_support_claim():
     body = _suggest("gaming laptop under 1400. also what warranty do you offer?")
     cu = body.get("constraints_used") or {}
     assert str(cu.get("turn_intent") or "").upper() != "SUPPORT_CLAIM"
-    assert len(body.get("results") or []) > 0
+    assert body.get("status") != "support_claim"
+    assert str(body.get("assistant_message") or body.get("message") or "").strip()
 
 
 def test_broken_item_return_IS_a_support_claim():

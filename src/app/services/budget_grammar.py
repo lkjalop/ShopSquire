@@ -56,6 +56,7 @@ def classify_budget_scope(text: str) -> str:
         return "per_unit"
     if re.search(
         r"\b(?:total(?:\s+order)?\s+budget|budget\s+(?:for|across)\s+(?:all|the\s+whole)|"
+        r"(?:keep|cap|hold)\s+(?:the\s+)?total(?:\s+(?:under|below|at|to))?|"
         r"all\s+in|altogether|combined|grand\s+total|in\s+total|for\s+all)\b",
         q,
     ):

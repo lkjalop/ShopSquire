@@ -4,10 +4,13 @@ import asyncio
 import os
 import json
 import base64
-from typing import Dict, Optional, Tuple, List
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 import time
 import threading
+import urllib.error
+import urllib.request
+
 from src.app.security.url_guard import ensure_safe_outbound_url
 
 # ── Vision prompt templates (mode-selectable) ──
@@ -189,9 +192,6 @@ class ManagedCVProvider:
 
         Expects Ollama running locally on 127.0.0.1:11434.
         """
-        import urllib.request
-        import urllib.error
-
         queue_timeout = max(
             0.0,
             min(float(os.getenv("CV_VISION_QUEUE_TIMEOUT_SEC", "0.25") or 0.25), 5.0),

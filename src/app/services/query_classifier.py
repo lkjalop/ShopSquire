@@ -101,6 +101,21 @@ def is_standalone_search(query: Optional[str]) -> bool:
 
 # ── Off-domain / unsupported intent ──────────────────────────────────────────
 
+_FRESH_SEARCH_REQUEST_RE = re.compile(
+    r"\b(i|we)\s+(?:need|want|am looking for|are looking for|"
+    r"am thinking (?:to|of) (?:buying|getting)|are thinking (?:to|of) "
+    r"(?:buying|getting))\b|"
+    r"\b(?:recommend|find|show)\s+(?:me|us)\b",
+    re.IGNORECASE,
+)
+
+
+def is_fresh_search_request(query: Optional[str]) -> bool:
+    """Return whether a rationale-bearing turn supplies its own search subject."""
+    value = str(query or "").strip()
+    return bool(_FRESH_SEARCH_REQUEST_RE.search(value) and is_standalone_search(value))
+
+
 _OFF_DOMAIN_RE = re.compile(
     r"\b(can i get your number|what(?:'s| is) your number|give me your number|"
     r"date me|go out with me|sexy|hot|"
@@ -283,7 +298,7 @@ def classify_query(
     turn_intent = classify_turn_intent(
         query=query,
         nlp=nlp,
-        followup_explain=followup_explain,
+        followup_explain=followup_explain and not is_fresh_search_request(query),
         explicit_constraint_update=explicit_constraint,
     )
     category = coarse_product_category(query)

@@ -241,9 +241,16 @@ def _nudge(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> List
         variant = canary_assignment(experiment_id=exp_id, subject=subject, canary_fraction=canary)
         recall_ids = [i.get("id") for i in (state.payload.get("hippograph_insights") or [])
                       if isinstance(i, dict) and i.get("kind") == "product"]
+        from src.app.platform.tenant_context import current_tenant_id
+        tenant_id = str(current_tenant_id() or "").strip()
+        if not tenant_id:
+            return results
         with db_session() as db:
-            live = is_experiment_live(db, exp_id)
-            record_assignment(db, experiment_id=exp_id, subject_hash=subject, variant=variant)
+            live = is_experiment_live(db, exp_id, tenant_id=tenant_id)
+            record_assignment(
+                db, tenant_id=tenant_id, experiment_id=exp_id,
+                subject_hash=subject, variant=variant,
+            )
             db.commit()
         # UNIFIED GATE: an actual ranking adjustment (treatment + live + something to boost) must be
         # AUTHORIZED — confidence threshold + action authorization + a DURABLE audit record. A DENY

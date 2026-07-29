@@ -905,7 +905,13 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # model misroutes such as "why Lenovo and not MSI?" -> POLICY_QUESTION without turning the
     # edge classifier into the general-purpose brain for fresh searches.
     _intent_hint = str(envelope.intent_hint or "").strip().upper()
-    if _intent_hint in ("EXPLAIN", "COMPARE") and (envelope.session or {}).get("shortlist_skus"):
+    _has_prior_shortlist = bool((envelope.session or {}).get("shortlist_skus"))
+    if _intent_hint in ("EXPLAIN", "COMPARE") and _has_prior_shortlist:
+        lane = _intent_hint
+    elif lane == "EXPLAIN" and not _has_prior_shortlist and _intent_hint in ("SEARCH", "FILTER"):
+        # A model cannot invent a continuation subject. A self-contained search
+        # may contain a rationale obligation ("why are the picks suitable?"),
+        # but without a prior shortlist there is nothing to route as EXPLAIN.
         lane = _intent_hint
     # clamp 2: handle must be REGISTRY-REAL. Deliberately looser than the classifier's
     # candidates-only clamp: queries name INTENTS, not product titles — 'do you sell

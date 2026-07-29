@@ -95,6 +95,8 @@ def test_revert_nudge_undoes_sales_response_delta():
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    from tests.experiment_helpers import apply_experiment_migrations
+    apply_experiment_migrations(s)
     try:
         yield s
     finally:
@@ -102,18 +104,24 @@ def db():
 
 
 def test_is_experiment_live_reflects_status(db):
-    eid = ex.create_experiment(db, name="ranking_nudge_v1", target_metric="conversion", status="draft")
+    tenant = "tenant-a"
+    eid = ex.create_experiment(
+        db, tenant_id=tenant, name="ranking_nudge_v1", target_metric="conversion", status="draft",
+        baseline={"variant": "control"}, eligibility={"all": True},
+        min_samples=30, min_window_seconds=86400, rollback_threshold_pct=2.0,
+        guardrails={}, terminal_policy={"allowed": ["keep", "scale", "revise", "revert"]},
+    )
     db.commit()
-    assert ex.is_experiment_live(db, "ranking_nudge_v1") is False  # draft
-    ex.set_status(db, experiment_id="ranking_nudge_v1", status="live")
+    assert ex.is_experiment_live(db, "ranking_nudge_v1", tenant_id=tenant) is False
+    ex.set_status(db, tenant_id=tenant, experiment_id="ranking_nudge_v1", status="live")
     db.commit()
-    assert ex.is_experiment_live(db, "ranking_nudge_v1") is True
+    assert ex.is_experiment_live(db, "ranking_nudge_v1", tenant_id=tenant) is True
     # the reversibility lever — flip to reverted → no longer live
-    ex.set_status(db, experiment_id=eid, status="reverted")
+    ex.set_status(db, tenant_id=tenant, experiment_id=eid, status="reverted")
     db.commit()
-    assert ex.is_experiment_live(db, eid) is False
+    assert ex.is_experiment_live(db, eid, tenant_id=tenant) is False
 
 
 def test_is_experiment_live_unknown_is_false(db):
-    assert ex.is_experiment_live(db, "nope") is False
-    assert ex.is_experiment_live(None, "x") is False
+    assert ex.is_experiment_live(db, "nope", tenant_id="tenant-a") is False
+    assert ex.is_experiment_live(None, "x", tenant_id="tenant-a") is False

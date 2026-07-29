@@ -33,8 +33,7 @@ from sqlalchemy import text
 from src.app.main import app
 from src.app.models.db import db_session
 from src.app.services.recommendations import RecommendationService
-from tests.utils import default_headers
-from tests.test_recommend import _write_flags
+from tests.utils import default_headers, write_feature_flags
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
 # Deterministic product-path flags so the gate is order-independent (other test
@@ -67,7 +66,7 @@ def _seed():
     # technique as tests/acceptance/test_reference_query_matrix.py).
     RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
     _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
-    _write_flags(_PRODUCT_PATH_FLAGS)
+    write_feature_flags(_PRODUCT_PATH_FLAGS)
     _orig_narration = os.environ.get("RECOMMEND_NARRATION_MODE")
     os.environ["RECOMMEND_NARRATION_MODE"] = "skip"  # fast + deterministic
     with db_session() as db:

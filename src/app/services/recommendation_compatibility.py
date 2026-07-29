@@ -2,9 +2,100 @@
 from __future__ import annotations
 
 import uuid
+import re
 from typing import Any, Dict
 
 from fastapi import HTTPException
+
+
+def _compatibility_use_case_tags(query: str, payload: Dict[str, Any]) -> list[str]:
+    """Project governed V2 use cases into the frozen /suggest tag vocabulary.
+
+    These tags are presentation compatibility only. They do not add requirements,
+    authorize filtering, or override the V2 turn decision.
+    """
+    constraints = payload.get("constraints_used")
+    constraints = constraints if isinstance(constraints, dict) else {}
+    intent = payload.get("intent")
+    intent = intent if isinstance(intent, dict) else {}
+    canonical = [
+        str(value).strip().lower()
+        for value in (
+            list(constraints.get("use_cases") or [])
+            + list(intent.get("use_cases") or [])
+            + list(intent.get("context_use_cases") or [])
+            + list(intent.get("workload_use_cases") or [])
+        )
+        if str(value).strip()
+    ]
+    try:
+        from src.app.services.recommend_budget_parsing import load_capability_kb
+
+        kb = load_capability_kb()
+        aliases = kb.get("use_case_aliases") or {}
+        known = kb.get("use_cases") or {}
+        normalized_query = " ".join(str(query or "").lower().split())
+        for phrase, value in {**{key: key for key in known}, **aliases}.items():
+            token = " ".join(str(phrase).lower().split())
+            if token and re.search(rf"(?<!\w){re.escape(token)}(?!\w)", normalized_query):
+                canonical.append(str(value).strip().lower())
+    except Exception:
+        pass
+    legacy_names = {
+        "university": "student",
+        "corporate": "business",
+        "creative": "content_creation",
+    }
+    tags: list[str] = []
+    for value in canonical:
+        tag = legacy_names.get(value, value)
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def _apply_frozen_compatibility_fields(
+    *,
+    payload: Dict[str, Any],
+    query: str,
+    classification: Dict[str, Any],
+    compatibility_constraints: Dict[str, Any],
+) -> None:
+    """Populate fields explicitly retained by the frozen /suggest edge contract."""
+    constraints = payload.get("constraints_used")
+    constraints = constraints if isinstance(constraints, dict) else {}
+    payload["constraints_used"] = constraints
+    tags = _compatibility_use_case_tags(query, payload)
+    if tags:
+        constraints.setdefault("use_case_tags", tags)
+        constraints.setdefault("use_case", tags[0])
+    classified_intent = classification.get("turn_intent")
+    if classified_intent in {"SUPPORT_CLAIM", "OFF_DOMAIN"}:
+        constraints["turn_intent"] = classified_intent
+    else:
+        constraints.setdefault(
+            "turn_intent",
+            payload.get("turn_intent") or classified_intent,
+        )
+    slots = constraints.get("slots")
+    slots = dict(slots) if isinstance(slots, dict) else {}
+    if compatibility_constraints.get("budget_min") is not None:
+        slots.setdefault("price_min", compatibility_constraints["budget_min"])
+    if compatibility_constraints.get("budget_max") is not None:
+        slots.setdefault("price_max", compatibility_constraints["budget_max"])
+    constraints["slots"] = slots
+
+    from src.app.services.recommend_budget_parsing import build_price_buckets
+
+    payload["price_buckets"] = build_price_buckets(
+        results=list(payload.get("results") or payload.get("products") or []),
+        constraints=constraints,
+    )
+    timing = payload.get("timing_breakdown")
+    timing = dict(timing) if isinstance(timing, dict) else {}
+    timing.setdefault("compound_needed", False)
+    timing.setdefault("compound_mode", "skip")
+    payload["timing_breakdown"] = timing
 
 
 def _persist_compatibility_outcome(
@@ -113,16 +204,30 @@ def serve_v2_compatibility(
             compatibility_constraints["budget_min"] = parsed_budget.budget_min
         if parsed_budget is not None and parsed_budget.budget_max is not None:
             compatibility_constraints["budget_max"] = parsed_budget.budget_max
-    from src.app.services.bulk_intent import extract_quantity_span
+    if (
+        classification.get("turn_intent") == "SUPPORT_CLAIM"
+        and classification.get("category")
+        and compatibility_constraints
+    ):
+        # A product search that also asks a pre-sale policy question remains a
+        # shopping turn. Post-purchase claims do not carry a fresh product budget.
+        classification = dict(classification)
+        classification["turn_intent"] = "FILTER"
+    from src.app.services.bulk_intent import absurd_quantity_span, extract_quantity_span
 
+    unit_nouns = (
+        "laptop", "laptops", "computer", "computers", "desktop", "desktops",
+        "monitor", "monitors", "tablet", "tablets", "phone", "phones",
+        "keyboard", "keyboards", "mouse", "mice", "headset", "headsets",
+        "router", "routers", "charger", "chargers", "dock", "docks",
+    )
     quantity_span = extract_quantity_span(
         str(params.get("query") or ""),
-        unit_nouns=(
-            "laptop", "laptops", "computer", "computers", "desktop", "desktops",
-            "monitor", "monitors", "tablet", "tablets", "phone", "phones",
-            "keyboard", "keyboards", "mouse", "mice", "headset", "headsets",
-            "router", "routers", "charger", "chargers", "dock", "docks",
-        ),
+        unit_nouns=unit_nouns,
+    )
+    absurd_quantity = absurd_quantity_span(
+        str(params.get("query") or ""),
+        unit_nouns=unit_nouns,
     )
     if quantity_span:
         compatibility_constraints["order_quantity"] = quantity_span[0]
@@ -211,6 +316,31 @@ def serve_v2_compatibility(
             constraints_used.setdefault(
                 "order_quantity", compatibility_constraints["order_quantity"]
             )
+        _apply_frozen_compatibility_fields(
+            payload=payload,
+            query=str(params.get("query") or ""),
+            classification=classification,
+            compatibility_constraints=compatibility_constraints,
+        )
+        if absurd_quantity is not None:
+            from src.app.services.bulk_intent import MAX_SOURCEABLE_QTY
+
+            payload["refusal_note"] = (
+                f"The requested quantity is outside the bounded sourcing limit; "
+                f"the maximum supported request is {MAX_SOURCEABLE_QTY:,} units."
+            )
+        elif (
+            compatibility_constraints.get("order_quantity")
+            and compatibility_constraints.get("budget_max") is not None
+            and not (payload.get("products") or payload.get("results"))
+        ):
+            from src.app.services.budget_grammar import classify_budget_scope
+
+            if classify_budget_scope(str(params.get("query") or "")) == "total":
+                payload["refusal_note"] = (
+                    f"The available unit prices add up to more than the stated total "
+                    f"budget for {compatibility_constraints['order_quantity']} units."
+                )
         if nqe_selection:
             payload["nqe_selection_applied"] = nqe_selection
         payload["b2b_assessment"] = b2b_assessment.to_dict()
@@ -275,13 +405,13 @@ def serve_v2_compatibility(
                 [{"id": "order_reference", "label": "Provide order reference"}],
             )
         elif not payload.get("products") and not payload.get("results"):
-            payload["message"] = str(
+            bounded_message = str(
                 payload.get("message")
                 or payload.get("assistant_message")
                 or "No matching products were found."
             )
-            payload.pop("assistant_message", None)
-            payload.pop("next_questions", None)
+            payload["message"] = bounded_message
+            payload["assistant_message"] = bounded_message
             payload.pop("right_panel", None)
         from src.app.security.model_theft import protect_recommendation_output
 

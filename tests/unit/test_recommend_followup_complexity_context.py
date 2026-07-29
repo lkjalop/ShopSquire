@@ -1,6 +1,8 @@
 from src.app.services import recommend_intent_router
 from src.app.services.query_classifier import (
+    classify_query,
     classify_turn_intent,
+    is_fresh_search_request,
     is_followup_explain_query,
     is_standalone_search,
 )
@@ -40,6 +42,15 @@ def test_inferred_product_search_with_rationale_is_not_followup_explain():
     )
     assert is_followup_explain_query(query) is True
     assert is_standalone_search(query) is True
+    assert is_fresh_search_request(query) is True
+    assert classify_query(query)["turn_intent"] == "SEARCH"
+
+
+def test_prior_product_rationale_remains_explain():
+    query = "Why is this laptop suitable?"
+    assert is_followup_explain_query(query) is True
+    assert is_fresh_search_request(query) is False
+    assert classify_query(query)["turn_intent"] == "EXPLAIN"
 
 
 def test_recommend_passes_has_image_to_complexity_context(monkeypatch):

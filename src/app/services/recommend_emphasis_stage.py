@@ -67,9 +67,16 @@ def apply_storefront_emphasis(payload: Dict[str, Any], *, flags: Optional[Dict[s
         except (TypeError, ValueError):
             canary = 0.1
         variant = canary_assignment(experiment_id=exp_id, subject=subject, canary_fraction=canary)
+        from src.app.platform.tenant_context import current_tenant_id
+        tenant_id = str(current_tenant_id() or "").strip()
+        if not tenant_id:
+            return
         with db_session() as db:
-            live = is_experiment_live(db, exp_id)
-            record_assignment(db, experiment_id=exp_id, subject_hash=subject, variant=variant)
+            live = is_experiment_live(db, exp_id, tenant_id=tenant_id)
+            record_assignment(
+                db, tenant_id=tenant_id, experiment_id=exp_id,
+                subject_hash=subject, variant=variant,
+            )
             db.commit()
         emphasis: Dict[str, Any] = {"experiment_id": exp_id, "variant": variant, "live": bool(live),
                                     "applied": False}

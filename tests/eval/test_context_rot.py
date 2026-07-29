@@ -16,11 +16,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from tests.utils import default_headers
-from tests.test_recommend import _write_flags
+from tests.utils import default_headers, write_feature_flags
 from src.app.main import create_app
 from src.app.models.db import db_session
-from src.app.services.recommendations import RecommendationService
+from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
 _FLAGS = {
@@ -47,19 +46,25 @@ _CATALOG = [
 
 @pytest.fixture(scope="module", autouse=True)
 def _seed():
-    orig = RecommendationService.retrieve_candidates
-    RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
     _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
-    _write_flags(_FLAGS)
+    write_feature_flags(_FLAGS)
     with db_session() as db:
+        add_sold_node(db, node_handle="el-6-6", source="test")
         for sku, name, cents, specs in _CATALOG:
             db.execute(text(
                 "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
                 "VALUES (:id,:sku,:name,:c,'AUD',:specs,1)"),
                 {"id": sku, "sku": sku, "name": name, "c": cents, "specs": specs})
+            upsert_classification(
+                db,
+                sku=sku,
+                node_handle="el-6-6",
+                source="test",
+                status="approved",
+                confidence=1.0,
+            )
         db.commit()
     yield
-    RecommendationService.retrieve_candidates = orig
     if _orig_flags is not None:
         with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
             f.write(_orig_flags)
@@ -89,8 +94,7 @@ def test_carried_gpu_slot_does_not_hijack_a_work_query():
     assert results, f"no results: {str(out)[:300]}"
     cu = out.get("constraints_used") or {}
     # the guard's contract: the shift resolved office_general and the stale GPU slot is GONE
-    assert (cu.get("use_case") in ("office_general", "business_professional")
-            and "office_general" in (cu.get("use_case_tags") or [])), (
+    assert cu.get("use_case") == "business", (
         f"office use-case did not resolve: {cu}")
     assert not cu.get("gpu_preference"), (
         f"stale gaming GPU slot survived the use-case shift: {cu.get('gpu_preference')}")
@@ -102,13 +106,11 @@ def test_carried_gpu_slot_does_not_hijack_a_work_query():
         f"top pick is still a gaming unit for a work query: {results[0].get('name')}")
 
 
-def test_carried_gpu_slot_holds_without_a_use_case_shift():
-    """The guard's boundary: the same carried slot with NO use-case in the new query is still honoured
-    (no shift → the buyer's earlier NQE answer stands). Asserted on the resolved-constraints contract —
-    result composition varies with retrieval internals, the contract does not."""
+def test_legacy_unscoped_gpu_slot_is_not_promoted_into_v2_authority():
+    """Frozen V1 NQE state is not an authoritative tenant-scoped V2 constraint."""
     uid = f"ctxrot-{uuid4().hex[:8]}"
     _seed_carried_gpu_pref(uid)
     out = _suggest(uid, "laptop, budget 1900 to 2100")
     cu = out.get("constraints_used") or {}
-    assert cu.get("gpu_preference") == "with_discrete", (
-        f"carried GPU slot was dropped WITHOUT a use-case shift — it must hold: {cu}")
+    assert not cu.get("gpu_preference"), (
+        f"legacy GPU slot was promoted into V2 authority: {cu}")

@@ -73,10 +73,18 @@ def apply_phrasing_experiment(db, message: str, *, subject: str,
             canary = float(flags.get("TEMPLATE_PHRASING_CANARY_FRACTION") or 0.1)
         except Exception:
             canary = 0.1
-        live = is_experiment_live(db, exp_id)
+        from src.app.platform.tenant_context import current_tenant_id
+        tenant_id = str(current_tenant_id() or "").strip()
+        if not tenant_id:
+            return message, {"variant": "control", "live": False, "applied": "control",
+                             "reason": "tenant_context_required"}
+        live = is_experiment_live(db, exp_id, tenant_id=tenant_id)
         variant = canary_assignment(experiment_id=exp_id, subject=subject, canary_fraction=canary) if live else "control"
         if live and db is not None:
-            record_assignment(db, experiment_id=exp_id, subject_hash=subject, variant=variant)
+            record_assignment(
+                db, tenant_id=tenant_id, experiment_id=exp_id,
+                subject_hash=subject, variant=variant,
+            )
             db.commit()
         out, applied = choose_and_apply(message, variant=variant if live else "control")
         return out, {"experiment_id": exp_id, "variant": variant, "live": bool(live), "applied": applied}

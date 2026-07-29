@@ -17,6 +17,7 @@ from sqlalchemy import text
 from src.app.main import app
 from src.app.models.db import db_session
 from src.app.services import experiments as ex
+from tests.experiment_helpers import create_sealed_experiment
 from tests.utils import default_headers
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
@@ -26,6 +27,10 @@ client = TestClient(app, headers=default_headers())
 @pytest.fixture()
 def nudge_stack(monkeypatch):
     monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.turn_router._default_llm_fn",
+        lambda _prompt, _timeout: "",
+    )
     # This suite characterizes ranking authorization, not account metering.
     # Developer .env files may deliberately enable durable token budgets, so
     # own the boundary here rather than inheriting prior local Redis usage.
@@ -46,7 +51,9 @@ def nudge_stack(monkeypatch):
                         "VALUES ('RNW-1','RNW-1','RN Laptop',119900,'USD','{}',1)"))
         db.execute(text("INSERT OR REPLACE INTO inventory (id,product_id,stock,warehouse) "
                         "VALUES ('inv-rnw1','RNW-1',5,'default')"))
-        ex.create_experiment(db, name="ranking_nudge_v1", target_metric="conversion", status="live")
+        create_sealed_experiment(
+            db, name="ranking_nudge_v1", target_metric="conversion"
+        )
         db.commit()
     # Recall the first V2-served SKU; the compatibility route no longer uses
     # RecommendationService, so characterize the implementation that serves it.

@@ -9,6 +9,7 @@ def test_explicit_whole_order_budget_is_total():
     assert classify_budget_scope("25 laptops; total budget is $41,000") == "total"
     assert classify_budget_scope("20 laptops with a total order budget of $14,000") == "total"
     assert classify_budget_scope("$41k all in for the fleet") == "total"
+    assert classify_budget_scope("50 laptops but keep the total under 5 grand") == "total"
 
 
 def test_per_unit_language_wins_over_total_words():

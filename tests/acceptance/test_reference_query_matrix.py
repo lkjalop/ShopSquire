@@ -19,11 +19,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from tests.utils import default_headers
-from tests.test_recommend import _write_flags
+from tests.utils import default_headers, write_feature_flags
 from src.app.main import create_app
 from src.app.models.db import db_session
-from src.app.services.recommendations import RecommendationService
+from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
 # Deterministic product-path flags so the matrix is robust to whatever flag state other test modules
@@ -40,6 +39,7 @@ _PRODUCT_PATH_FLAGS = {
 }
 
 client = TestClient(create_app(), headers=default_headers())
+_RUN_ID = uuid4().hex[:8]
 
 _CATALOG = [
     ("MTX-APL", "Apple MacBook Air", 129900, 1.24),
@@ -52,23 +52,29 @@ _CATALOG = [
 
 @pytest.fixture(scope="module", autouse=True)
 def _seed():
-    orig = RecommendationService.retrieve_candidates
-    RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
     # Pin product-path flags (save + restore) so the matrix is order-independent.
     _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
-    _write_flags(_PRODUCT_PATH_FLAGS)
+    write_feature_flags(_PRODUCT_PATH_FLAGS)
     with db_session() as db:
+        add_sold_node(db, node_handle="el-6-6", source="test")
         for sku, name, cents, wkg in _CATALOG:
             db.execute(text(
                 "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
-                "VALUES (:id,:sku,:name,:c,'USD',:specs,1)"),
+                "VALUES (:id,:sku,:name,:c,'AUD',:specs,1)"),
                 {"id": sku, "sku": sku, "name": name, "c": cents,
                  "specs": f'{{"ram_gb": 16, "storage_gb": 1024, "weight_kg": {wkg}}}'})
             db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
                             "VALUES (:i,:p,8,'default')"), {"i": "inv-" + sku, "p": sku})
+            upsert_classification(
+                db,
+                sku=sku,
+                node_handle="el-6-6",
+                source="test",
+                status="approved",
+                confidence=1.0,
+            )
         db.commit()
     yield
-    RecommendationService.retrieve_candidates = orig
     if _orig_flags is not None:
         with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
             f.write(_orig_flags)
@@ -80,7 +86,10 @@ def _seed():
 
 
 def _suggest(uid, query, **params):
-    r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query, **params})
+    r = client.get(
+        "/api/v1/recommend/suggest",
+        params={"uid": f"{_RUN_ID}-{uid}", "query": query, **params},
+    )
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -192,7 +201,10 @@ def test_exact_compound_query_keeps_procurement_and_consistent_budget(monkeypatc
     escalation = body.get("escalation_assessment") or {}
     assert escalation.get("band") == "review"
     assert body.get("needs_human_review") is True
-    assert body.get("incident_id")
+    # Commercial review is not a security incident. V2 keeps a traceable human
+    # gate without fabricating incident authority.
+    assert body.get("trace_id")
+    assert body.get("incident_id") is None
 
 
 def test_exact_compound_query_warm_latency_under_five_seconds(monkeypatch):
