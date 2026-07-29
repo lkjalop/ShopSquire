@@ -3615,6 +3615,21 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             "Raw recorded payload" disclosure. */}
                         {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
 
+                        {canSeeOperatorDraft && !dealProjection && (
+                          <div data-testid="proc-deal-economics" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                              <strong>Deal economics unavailable</strong>
+                              <span style={{ color: '#92400e', fontWeight: 700 }}>Evidence incomplete</span>
+                            </div>
+                            <div style={{ color: '#4b5563', marginTop: 3 }}>
+                              Operator-only · supplier cost or comparable landed-cost evidence has not been validated
+                            </div>
+                            <div data-testid="proc-discount-authorization" style={{ marginTop: 7, padding: '6px 8px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontWeight: 600 }}>
+                              Discount authority locked until landed cost is validated
+                            </div>
+                          </div>
+                        )}
+
                         {canSeeOperatorDraft && dealProjection && dealStatus && (
                           <div data-testid="proc-deal-economics" style={{ border: '1px solid #86efac', background: '#f0fdf4', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
