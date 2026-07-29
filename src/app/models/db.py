@@ -615,6 +615,7 @@ def _ensure_minimal_sqlite_tables(bind):
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS security_observer_timeseries (\n"
+                        "  id TEXT PRIMARY KEY,\n"
                         "  time TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                         "  event_id TEXT,\n"
                         "  severity TEXT,\n"
