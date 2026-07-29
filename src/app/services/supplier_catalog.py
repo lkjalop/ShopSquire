@@ -163,6 +163,11 @@ _DEMO_SUPPLIER_CHANNELS = {
 
 def _ensure_suppliers_columns(db) -> None:
     """Dev/test compatibility for additive supplier columns owned by Alembic."""
+    dialect = str(getattr(
+        getattr(getattr(db, "bind", None), "dialect", None), "name", "",
+    ))
+    if dialect != "sqlite":
+        return
     try:
         existing = {str(r[1]) for r in db.execute(text("PRAGMA table_info(suppliers)")).fetchall()}
     except Exception:
@@ -203,6 +208,13 @@ def apply_demo_supplier_channels(db) -> int:
 
 
 def ensure_tables(db) -> None:
+    dialect = str(getattr(
+        getattr(getattr(db, "bind", None), "dialect", None), "name", "",
+    ))
+    if dialect != "sqlite":
+        # Deployed schemas are migration-owned. Runtime DDL after a failed
+        # statement poisons PostgreSQL's entire transaction.
+        return
     db.execute(text(_SUPPLIERS_DDL))
     db.execute(text(_SUPPLIER_PRODUCTS_DDL))
     db.execute(text(_SUPPLIER_OFFER_DDL))
@@ -216,6 +228,11 @@ def ensure_tables(db) -> None:
 def _ensure_supplier_products_columns(db) -> None:
     """Idempotently add the per-SKU commercial-terms columns (ALTER ADD COLUMN is additive in SQLite +
     Postgres; we add only the ones missing). Best-effort — a failed add never breaks the read path."""
+    dialect = str(getattr(
+        getattr(getattr(db, "bind", None), "dialect", None), "name", "",
+    ))
+    if dialect != "sqlite":
+        return
     try:
         existing = {str(r[1]) for r in db.execute(text("PRAGMA table_info(supplier_products)")).fetchall()}
     except Exception:
@@ -451,13 +468,13 @@ def _product_rows(db) -> List[Dict[str, Any]]:
     import json as _json
     try:
         rows = db.execute(text(
-            "SELECT sku, name, specs FROM products WHERE COALESCE(active,1)=1 "
+            "SELECT sku, name, specs FROM products WHERE active IS NOT FALSE "
             "AND sku IS NOT NULL AND sku <> ''"
         )).fetchall()
     except Exception:
         try:
             rows = db.execute(text(
-                "SELECT sku FROM products WHERE COALESCE(active,1)=1 "
+                "SELECT sku FROM products WHERE active IS NOT FALSE "
                 "AND sku IS NOT NULL AND sku <> ''"
             )).fetchall()
             return [{"sku": str(r[0]), "name": str(r[0]), "specs": {}} for r in rows if r and r[0]]
@@ -537,7 +554,8 @@ def all_catalog_skus(db) -> List[str]:
         return []
     try:
         rows = db.execute(text(
-            "SELECT sku FROM products WHERE COALESCE(active,1)=1 AND sku IS NOT NULL AND sku <> ''"
+            "SELECT sku FROM products WHERE active IS NOT FALSE "
+            "AND sku IS NOT NULL AND sku <> ''"
         )).fetchall()
         return sorted({str(r[0]) for r in rows if r and r[0]})
     except Exception:

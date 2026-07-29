@@ -181,6 +181,19 @@ _INDEXES = (
 
 
 def ensure_tables(db) -> None:
+    dialect = str(
+        getattr(
+            getattr(getattr(db, "bind", None), "dialect", None),
+            "name",
+            "",
+        )
+        or ""
+    ).lower()
+    # Production schemas are migration-owned. Runtime DDL remains available
+    # only for lightweight SQLite development and test databases.
+    if dialect and dialect != "sqlite":
+        return
+
     db.execute(text(_CLASSIFICATION_DDL))
     db.execute(text(_SOLD_DDL))
     for idx in _INDEXES:

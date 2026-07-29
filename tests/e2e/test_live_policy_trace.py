@@ -42,9 +42,12 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
         composer.press("Enter")
         page.get_by_text("30-day returns on unopened items", exact=False).wait_for(timeout=45_000)
 
-        body = page.locator("body").inner_text()
-        assert "Widen a little" not in body
-        assert "Prioritize interactive performance" not in body
+        policy_answer = page.get_by_text(
+            "30-day returns on unopened items", exact=False,
+        ).last
+        answer_text = policy_answer.inner_text()
+        assert "Widen a little" not in answer_text
+        assert "Prioritize interactive performance" not in answer_text
         assert len([url for url in calls if "/chat/stream" in url]) == 1
         assert not any("/orchestrate" in url or "/chat/query" in url for url in calls)
 

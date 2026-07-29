@@ -25,7 +25,7 @@ import logging
 import math
 import os
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from sqlalchemy import text
 
@@ -67,6 +67,18 @@ def _hash16(value: str | None) -> str | None:
 def _ensure_tables() -> None:
     try:
         with db_session() as db:
+            dialect = str(
+                getattr(
+                    getattr(getattr(db, "bind", None), "dialect", None),
+                    "name",
+                    "",
+                )
+                or ""
+            ).lower()
+            # Production schemas are migration-owned.
+            if dialect and dialect != "sqlite":
+                return
+
             db.execute(
                 text(
                     """

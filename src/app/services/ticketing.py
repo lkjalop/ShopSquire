@@ -4,12 +4,12 @@ import json
 import logging
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from sqlalchemy import text
 
-from src.app.config import get_settings, load_feature_flags
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.models.db import db_session
 from src.app.observability.metrics import record_ticket
@@ -137,7 +137,9 @@ class TicketingAgent:
         except Exception:
             pass
 
-        tid = f"TKT-{int(time.time() * 1000)}"
+        # Milliseconds collide under concurrent security fan-out. UUID identity
+        # keeps ticket creation append-only without retries or silent loss.
+        tid = f"TKT-{uuid.uuid4()}"
         status = "pending_approval" if approval_required else "open"
         ticket = Ticket(id=tid, external_id=None, title=title, description=description, severity=severity, status=status)
         strict_persistence = self._strict_persistence_required()

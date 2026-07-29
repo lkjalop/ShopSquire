@@ -91,6 +91,16 @@ try {
     python scripts/seed_demo_data.py *>&1 |
         Tee-Object -FilePath (Join-Path $ArtifactRoot "seed.log") | Out-Null
     Assert-NativeSuccess "live_seed"
+    python -m scripts.seed_portable_catalog *>&1 |
+        Tee-Object -FilePath (
+            Join-Path $ArtifactRoot "portable-catalog-seed.log"
+        ) | Out-Null
+    Assert-NativeSuccess "portable_catalog_seed"
+    python -m scripts.seed_suppliers *>&1 |
+        Tee-Object -FilePath (
+            Join-Path $ArtifactRoot "supplier-seed.log"
+        ) | Out-Null
+    Assert-NativeSuccess "supplier_seed"
 
     $processes += Start-Process -FilePath python -ArgumentList @(
         "-m", "uvicorn", "src.app.main:create_app", "--factory",
