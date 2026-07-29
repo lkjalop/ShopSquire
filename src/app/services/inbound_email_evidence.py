@@ -126,7 +126,7 @@ def store_raw_evidence(
             "(id, tenant_id, provider, provider_message_id, sha256, cipher, encryption_key_id, nonce_b64, "
             "ciphertext_b64, retention_until, legal_hold, created_at) "
             "VALUES (:id,:tenant,:provider,:message,:sha,'AES-256-GCM',:key_id,:nonce,:ciphertext,"
-            ":retention_until,0,:created_at)"
+            ":retention_until,:legal_hold,:created_at)"
         ),
         {
             "id": evidence_id,
@@ -138,6 +138,7 @@ def store_raw_evidence(
             "nonce": base64.b64encode(nonce).decode("ascii"),
             "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
             "retention_until": now + timedelta(days=retention_days),
+            "legal_hold": False,
             "created_at": now,
         },
     )
@@ -156,9 +157,9 @@ def purge_expired_evidence(
     rows = db.execute(
         text(
             "SELECT id, tenant_id FROM inbound_email_raw_evidence "
-            "WHERE legal_hold=0 AND retention_until < :now"
+            "WHERE legal_hold=:legal_hold AND retention_until < :now"
         ),
-        {"now": cutoff},
+        {"now": cutoff, "legal_hold": False},
     ).fetchall()
     for row in rows:
         _audit(
@@ -173,9 +174,9 @@ def purge_expired_evidence(
     result = db.execute(
         text(
             "DELETE FROM inbound_email_raw_evidence "
-            "WHERE legal_hold=0 AND retention_until < :now"
+            "WHERE legal_hold=:legal_hold AND retention_until < :now"
         ),
-        {"now": cutoff},
+        {"now": cutoff, "legal_hold": False},
     )
     return int(result.rowcount or 0)
 
