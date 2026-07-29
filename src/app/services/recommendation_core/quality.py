@@ -172,20 +172,26 @@ def catalog_authorization(db, shown_skus: List[str], *,
         from sqlalchemy import text as _t
         params = {f"s{i}": s for i, s in enumerate(shown_skus)}
         ph = ", ".join(f":{k}" for k in params)
-        rows = db.execute(_t(f"SELECT sku, COALESCE(active,1) FROM products WHERE sku IN ({ph})"),
-                          params).fetchall()
-        found = {str(r[0]): bool(r[1]) for r in rows}
-        v = sum(1 for s in shown_skus if s not in found)          # phantom sku
-        v += sum(1 for s in shown_skus if found.get(s) is False)  # inactive shown
-        from src.app.services.taxonomy_registry import sells_within
-        cls = db.execute(_t(
-            f"SELECT sku, node_handle FROM product_classification "
-            f"WHERE sku IN ({ph}) AND tenant_id = :t AND status = 'approved'"),
-            {**params, "t": str(tenant_id)}).fetchall()
-        classified = {str(sku) for sku, _ in cls}
-        for sku, node in cls:
-            if sells_within(db, str(node), tenant_id=str(tenant_id)) is False:
-                v += 1                                             # explicitly-unsold node
+        with db.begin_nested():
+            # Do not use COALESCE(active, 1): PostgreSQL models this column as
+            # boolean while SQLite uses integer affinity. Selecting the value and
+            # normalising in Python is portable across both authorities.
+            rows = db.execute(
+                _t(f"SELECT sku, active FROM products WHERE sku IN ({ph})"),
+                params,
+            ).fetchall()
+            found = {str(r[0]): bool(r[1]) for r in rows}
+            v = sum(1 for s in shown_skus if s not in found)          # phantom sku
+            v += sum(1 for s in shown_skus if found.get(s) is False)  # inactive shown
+            from src.app.services.taxonomy_registry import sells_within
+            cls = db.execute(_t(
+                f"SELECT sku, node_handle FROM product_classification "
+                f"WHERE sku IN ({ph}) AND tenant_id = :t AND status = 'approved'"),
+                {**params, "t": str(tenant_id)}).fetchall()
+            classified = {str(sku) for sku, _ in cls}
+            for sku, node in cls:
+                if sells_within(db, str(node), tenant_id=str(tenant_id)) is False:
+                    v += 1                                         # explicitly-unsold node
         out["violations"] = v
         out["classified"] = len(classified & set(shown_skus))
         return out

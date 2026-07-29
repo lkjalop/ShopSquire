@@ -10,16 +10,17 @@ from src.app.routers.approvals import enqueue_approval
 
 def _load_bundle_approval_rows(db) -> list[dict[str, Any]]:
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT id, payload, status, created_at, approved_at
-                FROM approvals
-                WHERE capability = 'bundle_discount'
-                ORDER BY datetime(created_at) DESC
-                """
-            )
-        ).mappings().all()
+        with db.begin_nested():
+            rows = db.execute(
+                text(
+                    """
+                    SELECT id, payload, status, created_at, approved_at
+                    FROM approvals
+                    WHERE capability = 'bundle_discount'
+                    ORDER BY created_at DESC
+                    """
+                )
+            ).mappings().all()
     except Exception:
         return []
     out: list[dict[str, Any]] = []

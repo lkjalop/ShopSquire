@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import os
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any
 
 from sqlalchemy import text
 from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2
 
-import logging
-logger = logging.getLogger("shopsquire.checkout_upsell")
 from src.app.services.product_taxonomy import (
     ACCESSORY_FAMILIES,
     infer_accessory_slug,
     infer_product_family,
     product_tags,
 )
+
+logger = logging.getLogger("shopsquire.checkout_upsell")
 
 
 _SUSPICIOUS_NAME_PAT = re.compile(
@@ -218,21 +219,25 @@ def _user_family_history(db, uid: str | None, lookback_days: int = 180) -> dict[
     if not user:
         return {}
     rows = []
+    cutoff = (datetime.utcnow() - timedelta(
+        days=max(1, int(lookback_days))
+    )).isoformat(sep=" ")
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT line_items
-                FROM draft_orders
-                WHERE customer_id = :uid
-                  AND tenant_id = :tenant
-                  AND datetime(created_at) >= datetime('now', :window_expr)
-                ORDER BY created_at DESC
-                LIMIT 150
-                """
-            ),
-            {"uid": user, "tenant": _ct(), "window_expr": f"-{max(1, int(lookback_days))} days"},
-        ).fetchall()
+        with db.begin_nested():
+            rows = db.execute(
+                text(
+                    """
+                    SELECT line_items
+                    FROM draft_orders
+                    WHERE customer_id = :uid
+                      AND tenant_id = :tenant
+                      AND created_at >= :cutoff
+                    ORDER BY created_at DESC
+                    LIMIT 150
+                    """
+                ),
+                {"uid": user, "tenant": _ct(), "cutoff": cutoff},
+            ).fetchall()
     except Exception as exc:   # observable, not silent (review-9 #7): a dead DB must not read
         logger.warning("upsell affinity history unavailable: %s", repr(exc)[:100])
         rows = []              # as 'no purchase history'
@@ -300,18 +305,22 @@ def _safe_json(raw: Any) -> dict:
 
 def _draft_order_lines(db, since_days: int = 90) -> list[list[dict]]:
     rows = []
+    cutoff = (datetime.utcnow() - timedelta(
+        days=max(1, int(since_days))
+    )).isoformat(sep=" ")
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT line_items
-                FROM draft_orders
-                WHERE tenant_id = :tenant
-                  AND datetime(created_at) >= datetime('now', :window_expr)
-                """
-            ),
-            {"tenant": _ct(), "window_expr": f"-{max(1, int(since_days))} days"},
-        ).fetchall()
+        with db.begin_nested():
+            rows = db.execute(
+                text(
+                    """
+                    SELECT line_items
+                    FROM draft_orders
+                    WHERE tenant_id = :tenant
+                      AND created_at >= :cutoff
+                    """
+                ),
+                {"tenant": _ct(), "cutoff": cutoff},
+            ).fetchall()
     except Exception as exc:   # observable, not silent (review-9 #7)
         logger.warning("upsell co-occurrence window unavailable: %s", repr(exc)[:100])
         return []
@@ -349,27 +358,29 @@ def _draft_order_lines(db, since_days: int = 90) -> list[list[dict]]:
 def _product_catalog(db) -> list[dict]:
     rows = []
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT p.sku, p.name, p.price_cents, p.specs, COALESCE(i.stock, 0) AS stock
-                FROM products p
-                LEFT JOIN inventory i ON i.product_id = p.id
-                WHERE COALESCE(p.active, 1) = 1
-                """
-            )
-        ).fetchall()
-    except Exception:
-        try:
+        with db.begin_nested():
             rows = db.execute(
                 text(
                     """
                     SELECT p.sku, p.name, p.price_cents, p.specs, COALESCE(i.stock, 0) AS stock
                     FROM products p
                     LEFT JOIN inventory i ON i.product_id = p.id
+                    WHERE COALESCE(p.active, 1) = 1
                     """
                 )
             ).fetchall()
+    except Exception:
+        try:
+            with db.begin_nested():
+                rows = db.execute(
+                    text(
+                        """
+                        SELECT p.sku, p.name, p.price_cents, p.specs, COALESCE(i.stock, 0) AS stock
+                        FROM products p
+                        LEFT JOIN inventory i ON i.product_id = p.id
+                        """
+                    )
+                ).fetchall()
         except Exception:
             rows = []
     out = []
@@ -427,18 +438,22 @@ def _product_catalog(db) -> list[dict]:
 
 def _interaction_stats(db, lookback_days: int = 30) -> dict[str, dict[str, int]]:
     rows = []
+    cutoff = (datetime.utcnow() - timedelta(
+        days=max(1, int(lookback_days))
+    )).isoformat(sep=" ")
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT sku, action, COUNT(*) as n
-                FROM recommend_interactions
-                WHERE datetime(event_time) >= datetime('now', :window_expr)
-                GROUP BY sku, action
-                """
-            ),
-            {"window_expr": f"-{max(1, int(lookback_days))} days"},
-        ).fetchall()
+        with db.begin_nested():
+            rows = db.execute(
+                text(
+                    """
+                    SELECT sku, action, COUNT(*) as n
+                    FROM recommend_interactions
+                    WHERE event_time >= :cutoff
+                    GROUP BY sku, action
+                    """
+                ),
+                {"cutoff": cutoff},
+            ).fetchall()
     except Exception:
         return {}
     out: dict[str, dict[str, int]] = {}

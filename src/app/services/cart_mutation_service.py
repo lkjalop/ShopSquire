@@ -48,6 +48,19 @@ def _now() -> datetime:
 
 def _ensure_plans_table() -> None:
     with db_session() as db:
+        # PostgreSQL and other production databases are migration-owned. Runtime
+        # DDL here created lock/race risk and could poison the transaction when a
+        # compatibility ALTER failed. Keep the bootstrap only for ephemeral
+        # SQLite tests that intentionally do not run Alembic.
+        dialect = str(
+            getattr(
+                getattr(getattr(db, "bind", None), "dialect", None),
+                "name",
+                "",
+            )
+        )
+        if dialect != "sqlite":
+            return
         db.execute(text("""
             CREATE TABLE IF NOT EXISTS cart_mutation_plans (
                 id          TEXT PRIMARY KEY,
@@ -65,7 +78,7 @@ def _ensure_plans_table() -> None:
                 expires_at  TEXT,
                 applied_at  TEXT
             )"""))
-        # additive column for pre-existing tables (runtime path until the P0.4 migration lands)
+        # Additive compatibility for old local SQLite files only.
         try:
             db.execute(text("ALTER TABLE cart_mutation_plans ADD COLUMN cart_version INTEGER NOT NULL DEFAULT 0"))
         except Exception as _alter_exc:   # already present (idempotent) — observable, not silent

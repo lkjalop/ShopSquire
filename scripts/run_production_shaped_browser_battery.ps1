@@ -16,6 +16,11 @@ if (-not $ArtifactRoot) {
     )
 }
 $resolvedRepo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+if (-not [System.IO.Path]::IsPathRooted($ArtifactRoot)) {
+    $ArtifactRoot = [System.IO.Path]::GetFullPath(
+        (Join-Path $resolvedRepo $ArtifactRoot)
+    )
+}
 New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
 $processes = @()
 
@@ -317,6 +322,32 @@ finally {
                 Stop-ProcessTree -ProcessId $process.Id
             }
         }
+    }
+    try {
+        $priorErrorPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $postgresLog = docker logs $pgName 2>&1
+        $postgresLog |
+            Out-File -LiteralPath (Join-Path $ArtifactRoot "postgres.log") -Encoding utf8
+        $ErrorActionPreference = $priorErrorPreference
+    }
+    catch {
+        $ErrorActionPreference = $priorErrorPreference
+        Write-Warning "postgres_log_capture_failed: $($_.Exception.Message)"
+    }
+    try {
+        $priorErrorPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $redisLog = docker logs $redisName 2>&1
+        $redisLog |
+            Out-File -LiteralPath (Join-Path $ArtifactRoot "redis.log") -Encoding utf8
+        $ErrorActionPreference = $priorErrorPreference
+    }
+    catch {
+        $ErrorActionPreference = $priorErrorPreference
+        Write-Warning "redis_log_capture_failed: $($_.Exception.Message)"
+    }
+    if (-not $KeepServices) {
         docker stop $redisName | Out-Null
         docker stop $pgName | Out-Null
     }
