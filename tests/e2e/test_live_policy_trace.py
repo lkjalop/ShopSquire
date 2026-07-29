@@ -57,21 +57,28 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
         assert trace_id
 
         tabs = [
-            "Events", "Execution", "Summary", "Why Recommended", "Intent", "Multimodal",
-            "Complexity", "Memory", "Security Matrix", "Procurement", "Audit Trail", "Raw",
+            ("Decision", "Events"), ("Decision", "Execution"), ("Decision", "Summary"),
+            ("Reasoning", "Why"), ("Reasoning", "Intent"),
+            ("Evidence & Risk", "Multimodal"), ("Reasoning", "Complexity"),
+            ("Reasoning", "Memory"), ("Evidence & Risk", "Security"),
+            ("Commercial Journey", "Procurement"),
+            ("Audit & Technical", "Audit Trail"), ("Audit & Technical", "Raw"),
         ]
-        for tab_name in tabs:
+        for section_name, tab_name in tabs:
             modal = page.get_by_test_id("decision-trace-modal")
-            modal.get_by_role("button", name=re.compile(rf"^{re.escape(tab_name)}\b")).click()
+            modal.get_by_role("button", name=section_name, exact=True).click()
+            modal.get_by_role("tab", name=re.compile(rf"^{re.escape(tab_name)}\b")).click()
             page.wait_for_timeout(200)
             assert modal.get_attribute("data-trace-id") == trace_id
             assert "Failed to load" not in modal.inner_text()
 
-        modal.get_by_role("button", name="Execution", exact=True).click()
+        modal.get_by_role("button", name="Decision", exact=True).click()
+        modal.get_by_role("tab", name="Execution", exact=True).click()
         execution = modal.inner_text()
         assert "Models propose" in execution
         assert "Platform gates authorize" in execution
-        modal.get_by_role("button", name="Intent", exact=True).click()
+        modal.get_by_role("button", name="Reasoning", exact=True).click()
+        modal.get_by_role("tab", name="Intent", exact=True).click()
         assert "lane: policy question" in modal.inner_text().lower()
         assert not console_errors
         assert not page_errors

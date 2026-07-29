@@ -47,6 +47,69 @@ type Trace = {
   timing_breakdown?: Record<string, any> | null;
 };
 
+export type TraceLeafTab =
+  | 'summary' | 'events' | 'execution'
+  | 'why' | 'intent' | 'memory' | 'complexity'
+  | 'evidence' | 'multimodal' | 'security'
+  | 'market' | 'procurement'
+  | 'audit' | 'raw';
+
+export const TRACE_SECTIONS = [
+  { id: 'decision', label: 'Decision', leaves: ['summary', 'events', 'execution'] },
+  { id: 'reasoning', label: 'Reasoning', leaves: ['why', 'intent', 'memory', 'complexity'] },
+  { id: 'evidence-risk', label: 'Evidence & Risk', leaves: ['evidence', 'multimodal', 'security'] },
+  { id: 'commercial', label: 'Commercial Journey', leaves: ['market', 'procurement'] },
+  { id: 'audit-technical', label: 'Audit & Technical', leaves: ['audit', 'raw'] },
+] as const satisfies ReadonlyArray<{
+  id: string;
+  label: string;
+  leaves: readonly TraceLeafTab[];
+}>;
+
+export const TRACE_LEAF_LABELS: Record<TraceLeafTab, string> = {
+  summary: 'Summary',
+  events: 'Events',
+  execution: 'Execution',
+  why: 'Why',
+  intent: 'Intent',
+  memory: 'Memory',
+  complexity: 'Complexity',
+  evidence: 'Evidence',
+  multimodal: 'Multimodal',
+  security: 'Security',
+  market: 'Market Intelligence',
+  procurement: 'Procurement',
+  audit: 'Audit Trail',
+  raw: 'Raw',
+};
+
+export function traceSectionForLeaf(leaf: TraceLeafTab) {
+  return TRACE_SECTIONS.find((section) => (
+    (section.leaves as readonly TraceLeafTab[]).includes(leaf)
+  )) || TRACE_SECTIONS[0];
+}
+
+export function normalizeTraceLeaf(value?: string): TraceLeafTab {
+  const candidate = String(value || '').trim() as TraceLeafTab;
+  return Object.prototype.hasOwnProperty.call(TRACE_LEAF_LABELS, candidate) ? candidate : 'events';
+}
+
+export async function fetchJsonWithDeadline(
+  url: string,
+  init: RequestInit = {},
+  deadlineMs = 8000,
+): Promise<any> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort('deadline_exceeded'), deadlineMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) throw new Error(`http_${response.status}`);
+    return await response.json();
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 // Icons
 const CloseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><path d="M18 6L6 18M6 6l12 12"/></svg>;
 const DetachIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>;
@@ -386,6 +449,55 @@ function getLinkedArtifactUrl(sigs: Record<string, any>): string | null {
   return /^https?:\/\//i.test(candidate) ? candidate : null;
 }
 
+export function HippographEvidenceSurface({ insights }: { insights: any[] }) {
+  if (!Array.isArray(insights) || insights.length === 0) return null;
+  return (
+    <section data-testid="hippograph-evidence-surface" aria-label="Hippograph provenance paths" className={styles.anchorBlock}>
+      <div className={styles.sectionTitle}>Hippograph Evidence Paths</div>
+      <div className={styles.muted}>
+        Evidence-only retrieval. It can explain or prioritize review, but cannot authorize a commercial action.
+      </div>
+      {insights.map((insight: any, index: number) => {
+        const path = insight?.evidence_path || {};
+        const health = insight?.source_health || {};
+        return (
+          <details key={`${insight?.id || 'insight'}-${index}`} style={{ marginTop: 8 }} open={index === 0}>
+            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+              {insight?.label || insight?.id || 'Related evidence'} · score {insight?.score ?? 'undefined'}
+              {' · '}{health?.status || 'unknown source health'}
+            </summary>
+            <div className={styles.kvRow}><span>Authority</span><span>{insight?.authority || path?.authority || 'evidence_only'}</span></div>
+            <div className={styles.kvRow}><span>Path</span><span>{Array.isArray(path?.nodes) && path.nodes.length ? path.nodes.join(' → ') : 'No bounded path available'}</span></div>
+            <div className={styles.kvRow}><span>Hops</span><span>{path?.hops ?? 'undefined'}</span></div>
+            {Array.isArray(health?.degraded_sources) && health.degraded_sources.length > 0 && (
+              <div data-testid="hippograph-degraded-sources" style={{ color: '#b45309', marginTop: 6 }}>
+                Degraded sources: {health.degraded_sources.map((source: any) => (
+                  `${source?.source || 'unknown'} (${source?.reason || source?.health || 'degraded'})`
+                )).join(', ')}
+              </div>
+            )}
+            {(path?.edges || []).map((edge: any, edgeIndex: number) => (
+              <div key={`${edge?.source || 'edge'}-${edgeIndex}`} style={{ borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 8 }}>
+                <div className={styles.kvRow}><span>Edge</span><span>{edge?.source} → {edge?.target}</span></div>
+                {(edge?.evidence || []).map((item: any, evidenceIndex: number) => (
+                  <div key={`${item?.evidence_id || evidenceIndex}`} className={styles.muted}>
+                    evidence {item?.evidence_id || 'unidentified'} · edge {item?.edge_id || 'unidentified'}
+                    {' · '}observed {item?.observed_at || 'unknown'}
+                    {' · '}effective {item?.effective_at || 'unknown'}
+                    {' · '}authority {item?.source_authority || 'unknown'}
+                    {' · '}health {item?.source_health || 'unknown'}
+                    {' · '}freshness {item?.freshness_weight ?? 'undefined'}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </details>
+        );
+      })}
+    </section>
+  );
+}
+
 export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab, evidence }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
@@ -399,14 +511,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const _TABS = ['events', 'summary', 'why', 'intent', 'multimodal', 'complexity', 'memory', 'security', 'market', 'procurement', 'evidence', 'audit', 'raw'] as const;
-  const [activeTab, setActiveTab] = useState<'events' | 'execution' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'market' | 'procurement' | 'evidence' | 'audit' | 'raw'>(
-    (initialTab && (_TABS as readonly string[]).includes(initialTab)) ? (initialTab as typeof _TABS[number]) : 'events');
+  const [activeTab, setActiveTab] = useState<TraceLeafTab>(() => normalizeTraceLeaf(initialTab));
+  const activeSection = traceSectionForLeaf(activeTab);
   // When this decision opened a procurement journey, badge the Procurement tab so the operator sees it
   // exists instead of having to click through blind. FulfilmentTraceLink resolves the case; it reports up.
   const [procurementCaseId, setProcurementCaseId] = useState<string | null>(null);
   const [auditTrail, setAuditTrail] = useState<any | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
   // Procurement tab drill-downs — the DRAFTED supplier RFQ + the case's bitemporal journey (its own audit),
   // fetched by trace so the whole procurement story lives on ONE tab (no jumping to the ops console). The
   // drafted RFQ carries a supplier contact, so it's shown ONLY when an owner/operator key is configured
@@ -442,6 +554,52 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const noTraceTelemetrySentRef = useRef(false);
   const effectiveTraceId = (typeof traceId === 'string' && traceId.trim()) ? traceId.trim() : (fallbackTraceId || null);
   const traceIdText = effectiveTraceId || '';
+  const selectTraceLeaf = (leaf: TraceLeafTab) => {
+    setActiveTab(leaf);
+    if (leaf === 'audit' && !auditTrail && traceIdText && !auditLoading) {
+      setAuditLoading(true);
+      setAuditError(null);
+      fetchJsonWithDeadline(
+        apiUrl(`/api/v1/decisions/${traceIdText}/audit-trail`),
+        { headers: authHeaders },
+      )
+        .then(d => setAuditTrail(d))
+        .catch((error) => setAuditError(
+          error?.name === 'AbortError'
+            ? 'Audit request exceeded the 8 second deadline.'
+            : 'Audit trail is currently unavailable.',
+        ))
+        .finally(() => setAuditLoading(false));
+    }
+  };
+  const focusTraceLeaf = (leaf: TraceLeafTab) => {
+    selectTraceLeaf(leaf);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`trace-leaf-${leaf}`)?.focus();
+    });
+  };
+  const handleLeafKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const leaves = [...activeSection.leaves] as TraceLeafTab[];
+    const index = leaves.indexOf(activeTab);
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % leaves.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + leaves.length) % leaves.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = leaves.length - 1;
+    else return;
+    event.preventDefault();
+    focusTraceLeaf(leaves[next]);
+  };
+  const traceLeafProps = (leaf: TraceLeafTab) => ({
+    id: `trace-leaf-${leaf}`,
+    role: 'tab',
+    'aria-selected': activeTab === leaf,
+    'aria-controls': `trace-panel-${leaf}`,
+    tabIndex: activeTab === leaf ? 0 : -1,
+  });
+  const sectionHasLeaf = (leaf: TraceLeafTab) => (
+    (activeSection.leaves as readonly TraceLeafTab[]).includes(leaf)
+  );
   const [payloadActionStatus, setPayloadActionStatus] = useState<Record<string, string>>({});
   const [linkedArtifactResults, setLinkedArtifactResults] = useState<Record<string, any>>({});
   const [runtimeSecurityResults, setRuntimeSecurityResults] = useState<Record<string, any>>({});
@@ -939,6 +1097,27 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       ? allDisplayEvents
       : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
   const marketProjectionEvents = allDisplayEvents.filter((event) => eventMatches(event, 'market_projection'));
+  const hippographInsights = (() => {
+    const candidates: any[] = [];
+    const append = (value: any) => {
+      if (Array.isArray(value)) candidates.push(...value);
+    };
+    append((trace as any)?.hippograph_insights);
+    append((trace as any)?.hippograph_shadow_insights);
+    allDisplayEvents.forEach((event) => {
+      append(event?.payload?.hippograph_insights);
+      append(event?.payload?.hippograph_shadow_insights);
+      append(event?.payload?.evidence_paths);
+    });
+    const seen = new Set<string>();
+    return candidates.filter((insight, index) => {
+      if (!insight || typeof insight !== 'object') return false;
+      const key = String(insight.id || insight.evidence_path?.path_id || `${insight.label || 'insight'}-${index}`);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
 
   const ms = trace?.model_selection || {};
   const persistedExecutionEvent = [...allDisplayEvents].reverse().find((evt: any) =>
@@ -1655,40 +1834,47 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         {!minimized && (
           <>
             {/* Tabs */}
-            <div className={styles.tabs}>
-              <button className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => setActiveTab('events')}>Events</button>
-              <button className={activeTab === 'execution' ? styles.activeTab : ''} onClick={() => setActiveTab('execution')}>Execution</button>
-              <button className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => setActiveTab('summary')}>Summary</button>
-              <button className={activeTab === 'why' ? styles.activeTab : ''} onClick={() => setActiveTab('why')}>Why Recommended</button>
-              <button className={activeTab === 'intent' ? styles.activeTab : ''} onClick={() => setActiveTab('intent')}>Intent</button>
-              <button className={activeTab === 'multimodal' ? styles.activeTab : ''} onClick={() => setActiveTab('multimodal')}>Multimodal</button>
-              <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
-              <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
-              <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
-              <button className={activeTab === 'market' ? styles.activeTab : ''} onClick={() => setActiveTab('market')}>
+            <div className={styles.sectionTabs} aria-label="Decision Trace sections">
+              {TRACE_SECTIONS.map((section) => (
+                <button
+                  key={section.id}
+                  className={activeSection.id === section.id ? styles.activeSectionTab : ''}
+                  onClick={() => {
+                    const currentIsInSection = (section.leaves as readonly TraceLeafTab[]).includes(activeTab);
+                    selectTraceLeaf(currentIsInSection ? activeTab : section.leaves[0]);
+                  }}
+                >
+                  {section.label}
+                </button>
+              ))}
+            </div>
+            <div className={styles.tabs} role="tablist" aria-label={`${activeSection.label} panels`} onKeyDown={handleLeafKeyDown}>
+              <button {...traceLeafProps('events')} hidden={!sectionHasLeaf('events')} data-testid="trace-leaf-events" className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('events')}>Events</button>
+              <button {...traceLeafProps('execution')} hidden={!sectionHasLeaf('execution')} data-testid="trace-leaf-execution" className={activeTab === 'execution' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('execution')}>Execution</button>
+              <button {...traceLeafProps('summary')} hidden={!sectionHasLeaf('summary')} data-testid="trace-leaf-summary" className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('summary')}>Summary</button>
+              <button {...traceLeafProps('why')} hidden={!sectionHasLeaf('why')} data-testid="trace-leaf-why" className={activeTab === 'why' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('why')}>Why</button>
+              <button {...traceLeafProps('intent')} hidden={!sectionHasLeaf('intent')} data-testid="trace-leaf-intent" className={activeTab === 'intent' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('intent')}>Intent</button>
+              <button {...traceLeafProps('multimodal')} hidden={!sectionHasLeaf('multimodal')} data-testid="trace-leaf-multimodal" className={activeTab === 'multimodal' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('multimodal')}>Multimodal</button>
+              <button {...traceLeafProps('complexity')} hidden={!sectionHasLeaf('complexity')} data-testid="trace-leaf-complexity" className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('complexity')}>Complexity</button>
+              <button {...traceLeafProps('memory')} hidden={!sectionHasLeaf('memory')} data-testid="trace-leaf-memory" className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('memory')}>Memory</button>
+              <button {...traceLeafProps('security')} hidden={!sectionHasLeaf('security')} data-testid="trace-leaf-security" className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('security')}>Security</button>
+              <button {...traceLeafProps('market')} hidden={!sectionHasLeaf('market')} data-testid="trace-leaf-market" className={activeTab === 'market' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('market')}>
                 Market Intelligence{marketProjectionEvents.length > 0 ? <span style={{ marginLeft: 5, color: '#2563eb', fontWeight: 700 }}>●</span> : null}
               </button>
-              <button className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => setActiveTab('procurement')}>
+              <button {...traceLeafProps('procurement')} hidden={!sectionHasLeaf('procurement')} data-testid="trace-leaf-procurement" className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('procurement')}>
                 Procurement{hasProcurementSignal ? <span title="Procurement activity is present in this decision (open to see the drafted RFQ + audit)" style={{ marginLeft: 5, color: '#059669', fontWeight: 700 }}>●</span> : null}
               </button>
-              {evidence && Array.isArray(evidence?.selected) && evidence.selected.length > 0 && (
-                <button className={activeTab === 'evidence' ? styles.activeTab : ''} onClick={() => setActiveTab('evidence')}>
-                  Evidence <span style={{ marginLeft: 4, fontWeight: 700 }}>{(evidence.citations || []).length}</span>
+              {(
+                <button {...traceLeafProps('evidence')} hidden={!sectionHasLeaf('evidence')} data-testid="trace-leaf-evidence" className={activeTab === 'evidence' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('evidence')}>
+                  Evidence {evidence ? <span style={{ marginLeft: 4, fontWeight: 700 }}>{(evidence?.citations || []).length}</span> : null}
                 </button>
               )}
-              <button className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => {
-                setActiveTab('audit');
-                if (!auditTrail && traceIdText && !auditLoading) {
-                  setAuditLoading(true);
-                  fetch(apiUrl(`/api/v1/decisions/${traceIdText}/audit-trail`), { headers: authHeaders })
-                    .then(r => r.json()).then(d => setAuditTrail(d)).catch(() => {}).finally(() => setAuditLoading(false));
-                }
-              }}>Audit Trail</button>
-              <button className={activeTab === 'raw' ? styles.activeTab : ''} onClick={() => setActiveTab('raw')}>Raw</button>
+              <button {...traceLeafProps('audit')} hidden={!sectionHasLeaf('audit')} data-testid="trace-leaf-audit" className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('audit')}>Audit Trail</button>
+              <button {...traceLeafProps('raw')} hidden={!sectionHasLeaf('raw')} data-testid="trace-leaf-raw" className={activeTab === 'raw' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('raw')}>Raw</button>
             </div>
 
             {/* Content */}
-            <div className={styles.body}>
+            <div className={styles.body} id={`trace-panel-${activeTab}`} role="tabpanel" aria-labelledby={`trace-leaf-${activeTab}`} tabIndex={0}>
               {!traceId && (
                 <div className={styles.empty} style={{ marginBottom: 10 }}>
                   No decision trace yet. Run a query (chat) or submit/analyze a CV case to generate a trace id.
@@ -2058,6 +2244,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
               {activeTab === 'evidence' && (
                 <div style={{ padding: '12px 14px' }}>
+                  <HippographEvidenceSurface insights={hippographInsights} />
                   {/* N1 (2026-07-07): the trust hierarchy IS the layout — trusted store records first
                       as flat rows; external evidence (web) rendered as bordered, badged quotes. */}
                   {(() => {
@@ -2102,6 +2289,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
               {activeTab === 'why' && (
                 <div className={styles.summaryPane}>
+                  <HippographEvidenceSurface insights={hippographInsights} />
                   {Array.isArray(whyAnchorSections) && whyAnchorSections.length > 0 ? (
                     (whyAnchorSections || []).map((sec: any, idx: number) => (
                       <div key={`anchor-${idx}`} className={styles.anchorBlock}>
@@ -4086,7 +4274,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               {activeTab === 'audit' && (
                 <div className={styles.summaryPane}>
                   {auditLoading && <div className={styles.empty}>Loading audit trail...</div>}
-                  {!auditLoading && !auditTrail && <div className={styles.empty}>No audit trail data. Click the tab to fetch.</div>}
+                  {!auditLoading && auditError && (
+                    <div className={styles.empty} role="alert">
+                      {auditError} No decision state was changed.
+                      <button onClick={() => selectTraceLeaf('audit')}>Retry</button>
+                    </div>
+                  )}
+                  {!auditLoading && !auditTrail && !auditError && <div className={styles.empty}>No audit trail data. Click the tab to fetch.</div>}
                   {auditTrail && (
                     <>
                       <div className={styles.sectionTitle}>Bitemporal Decision Audit</div>

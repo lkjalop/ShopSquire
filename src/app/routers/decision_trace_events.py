@@ -21,7 +21,6 @@ from src.app.services.decision_log import get_cached_trace_events
 from src.app.services.trace_contracts import apply_trace_contract
 import asyncio
 from src.app.services.db_read_routing import read_session
-from src.app.services.dependency_resilience import call_with_resilience
 from src.app.services.trace_taxonomy import normalize_trace_event_type
 
 router = APIRouter(prefix="/api/v1/trace", tags=["decision-trace"])
@@ -160,9 +159,9 @@ async def stream_trace_events(trace_id: str, request: Request):
     from starlette.responses import StreamingResponse
     _authorize_trace_read_request(request)
 
-    q = subscribe = None
+    q = None
     try:
-        from src.app.services.trace_broker import subscribe as _sub, unsubscribe as _unsub
+        from src.app.services.trace_broker import subscribe as _sub
         q = _sub(trace_id)
     except Exception:
         q = None
@@ -170,7 +169,7 @@ async def stream_trace_events(trace_id: str, request: Request):
     async def event_gen():
         # initial: emit existing events snapshot (best-effort)
         try:
-            with read_session(read_class="timeline") as db:
+            with read_session(read_class="timeline") as _db:
                 try:
                         from src.app.models.db import db_session as _db_session
                         with _db_session() as dbs:
@@ -217,7 +216,7 @@ async def stream_trace_events(trace_id: str, request: Request):
                 if await request.is_disconnected():
                     break
                 try:
-                    with read_session(read_class="timeline") as db:
+                    with read_session(read_class="timeline") as _db:
                         try:
                                 from src.app.models.db import db_session as _db_session
                                 with _db_session() as dbs:
@@ -297,7 +296,7 @@ async def ws_trace_events(trace_id: str, websocket: WebSocket):
         initial: list[dict[str, Any]] = []
         last_seen = "1970-01-01T00:00:00Z"
         try:
-            with read_session(read_class="timeline") as db:
+            with read_session(read_class="timeline") as _db:
                 try:
                     from src.app.models.db import db_session as _db_session
 
@@ -364,7 +363,7 @@ async def ws_trace_events(trace_id: str, websocket: WebSocket):
             # DB fallback polling for environments without active broker fanout.
             items = []
             try:
-                with read_session(read_class="timeline") as db:
+                with read_session(read_class="timeline") as _db:
                     try:
                         from src.app.models.db import db_session as _db_session
 
@@ -472,6 +471,7 @@ def get_decision_timeline(trace_id: str, request: Request):
     _authorize_trace_read_request(request)
     try:
         from src.app.models.db import db_session as _db_session
+        communication_events = []
         with _db_session() as db:
             try:
                 rows = db.execute(
@@ -480,6 +480,16 @@ def get_decision_timeline(trace_id: str, request: Request):
                 ).fetchall()
             except Exception:
                 rows = []
+            try:
+                from src.app.platform.tenant_context import current_tenant_id
+                from src.app.services.communication_lifecycle import timeline as communication_timeline
+                tenant_id = str(current_tenant_id() or "").strip()
+                if tenant_id:
+                    communication_events = communication_timeline(
+                        db, tenant_id=tenant_id, trace_ref=trace_id
+                    )
+            except Exception:
+                communication_events = []
         # Summaries
         summary = {
             "total_events": 0,
@@ -583,6 +593,29 @@ def get_decision_timeline(trace_id: str, request: Request):
                 "tags": tags,
                 "latency_ms": lat,
             })
+
+        for event in communication_events:
+            created_at = event.get("occurred_at")
+            events.append({
+                "id": event.get("event_id"),
+                "seq": None,
+                "event_type": f"communication:{event.get('state')}",
+                "source_type": event.get("actor_type"),
+                "source_id": event.get("actor_id"),
+                "target_type": "communication",
+                "target_id": event.get("observation_id"),
+                "payload": {
+                    "reason": event.get("reason"),
+                    "grounding_refs": event.get("grounding_refs"),
+                    "commercial_effect": event.get("commercial_effect"),
+                },
+                "created_at": created_at,
+                "timestamp": created_at,
+                "tags": ["COMMUNICATION", str(event.get("state") or "").upper()],
+                "latency_ms": None,
+            })
+            summary["total_events"] += 1
+        events.sort(key=lambda event: str(event.get("created_at") or ""))
 
         return {"events": events, "summary": summary}
     except Exception:

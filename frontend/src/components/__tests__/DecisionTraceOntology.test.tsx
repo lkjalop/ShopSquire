@@ -3,11 +3,34 @@ import { describe, expect, it } from 'vitest';
 import {
   compactAuthorityPath,
   legacyComponentOntology,
+  normalizeTraceLeaf,
   procurementQuarantineView,
   resolveWhyAnchorSections,
+  TRACE_SECTIONS,
+  traceSectionForLeaf,
 } from '../DecisionTrace';
 
 describe('Decision Trace component ontology', () => {
+  it('keeps all 14 legacy leaves reachable through five sections', () => {
+    const leaves = TRACE_SECTIONS.flatMap((section) => [...section.leaves]);
+    expect(TRACE_SECTIONS).toHaveLength(5);
+    expect(new Set(leaves).size).toBe(14);
+    expect(leaves).toEqual(expect.arrayContaining([
+      'summary', 'events', 'execution', 'why', 'intent', 'memory', 'complexity',
+      'evidence', 'multimodal', 'security', 'market', 'procurement', 'audit', 'raw',
+    ]));
+  });
+
+  it('preserves every old tracetab deep link including execution', () => {
+    for (const section of TRACE_SECTIONS) {
+      for (const leaf of section.leaves) {
+        expect(normalizeTraceLeaf(leaf)).toBe(leaf);
+        expect(traceSectionForLeaf(leaf).id).toBe(section.id);
+      }
+    }
+    expect(normalizeTraceLeaf('unknown')).toBe('events');
+  });
+
   it('reserves agent authority for model-directed components', () => {
     expect(legacyComponentOntology('Recommendation_Agent')).toMatchObject({
       kind: 'model',

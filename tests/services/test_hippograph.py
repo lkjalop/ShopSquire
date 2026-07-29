@@ -6,7 +6,9 @@ surface first in recall.
 """
 from __future__ import annotations
 
-from src.app.services.hippograph import project_graph, recall
+import pytest
+
+from src.app.services.hippograph import explain_path, project_graph, recall
 
 
 def _trace(s_type, s_id, t_type, t_id):
@@ -74,6 +76,70 @@ def test_recall_deterministic():
     rows = [_trace("user", "u1", "product", "P1"), _trace("user", "u1", "product", "P2")]
     g = project_graph(rows, [], catalog_skus=["P1", "P2"])
     assert recall(g, ["u1"]) == recall(g, ["u1"])  # stable ordering
+
+
+def test_temporal_projection_never_consumes_future_outcomes():
+    rows = [
+        {**_trace("user", "u1", "product", "PAST"), "id": "edge-past",
+         "observed_at": "2026-01-01T00:00:00Z"},
+        {**_trace("user", "u1", "product", "FUTURE"), "id": "edge-future",
+         "observed_at": "2026-08-01T00:00:00Z"},
+    ]
+    graph = project_graph(
+        rows, [], catalog_skus=["PAST", "FUTURE"],
+        as_of="2026-07-01T00:00:00Z", max_edge_age_days=365,
+    )
+    assert "PAST" in graph.nodes
+    assert ("u1", "FUTURE") not in graph.edges
+
+
+def test_repeated_untrusted_actor_cannot_outweigh_fresh_authoritative_evidence():
+    rows = [
+        {
+            **_trace("user", "u1", "product", "BAD"),
+            "id": f"sybil-{index}", "actor_hash": "same-actor",
+            "source_authority": "untrusted", "observed_at": "2026-06-30T00:00:00Z",
+        }
+        for index in range(20)
+    ]
+    rows.append({
+        **_trace("user", "u1", "product", "GOOD"),
+        "id": "authoritative-1", "actor_hash": "verified-source",
+        "source_authority": "authoritative", "observed_at": "2026-06-30T00:00:00Z",
+    })
+    graph = project_graph(
+        rows, [], catalog_skus=["BAD", "GOOD"],
+        as_of="2026-07-01T00:00:00Z", max_edge_age_days=365,
+        max_actor_contributions=3,
+    )
+    scores = dict(recall(graph, ["u1"], top_k=10))
+    assert scores["GOOD"] > scores["BAD"]
+
+
+def test_explanation_path_exposes_edge_and_bitemporal_provenance():
+    graph = project_graph(
+        [{
+            **_trace("user", "u1", "product", "P1"),
+            "id": "edge-1", "evidence_id": "evidence-1",
+            "observed_at": "2026-06-30T00:00:00Z",
+            "effective_at": "2026-06-29T00:00:00Z",
+            "source_authority": "authoritative",
+        }],
+        [], catalog_skus=["P1"], as_of="2026-07-01T00:00:00Z",
+    )
+    path = explain_path(graph, ["u1"], "P1")
+    assert path["authority"] == "evidence_only"
+    assert path["edges"][0]["evidence"][0] == {
+        "edge_id": "edge-1",
+        "evidence_id": "evidence-1",
+        "observed_at": "2026-06-30T00:00:00Z",
+        "effective_at": "2026-06-29T00:00:00Z",
+        "source_authority": "authoritative",
+        "source_health": "healthy",
+        "age_days": 1.0,
+        "freshness_weight": pytest.approx(1 - (1 / 90), abs=0.0001),
+        "actor_hash": None,
+    }
 
 
 # ── findings projection ──────────────────────────────────────────────────────

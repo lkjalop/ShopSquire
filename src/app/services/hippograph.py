@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.app.services.entity_resolution import resolve_brand, resolve_product, resolve_user
@@ -39,6 +40,8 @@ class HippoGraph:
     # adjacency; consumers can inspect these typed contributions without treating
     # them as authorization or a ranking verdict.
     edge_kinds: Dict[Tuple[str, str], Dict[str, float]] = field(default_factory=dict)
+    edge_evidence: Dict[Tuple[str, str], List[Dict[str, Any]]] = field(default_factory=dict)
+    degraded_sources: List[Dict[str, Any]] = field(default_factory=list)
 
 
 _TRACE_EDGE_WEIGHTS = {
@@ -96,6 +99,9 @@ def project_graph(
     known: Optional[Iterable[str]] = None,
     catalog_skus: Optional[Iterable[str]] = None,
     sku_pattern: Optional[str] = None,
+    as_of: Optional[str] = None,
+    max_edge_age_days: int = 90,
+    max_actor_contributions: int = 3,
 ) -> HippoGraph:
     """Build the in-memory graph from trace edges + conversion reward edges.
 
@@ -105,6 +111,12 @@ def project_graph(
     ids stay canonical instead of being treated as free-text names.
     """
     g = HippoGraph()
+    cutoff = datetime.now(timezone.utc)
+    if as_of:
+        cutoff = datetime.fromisoformat(str(as_of).replace("Z", "+00:00"))
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.replace(tzinfo=timezone.utc)
+    actor_counts: Dict[Tuple[str, str, str], int] = {}
 
     def ensure(nid: str, kind: str, label: str) -> HippoNode:
         n = g.nodes.get(nid)
@@ -113,13 +125,73 @@ def project_graph(
             g.nodes[nid] = n
         return n
 
-    def add_edge(s: str, d: str, w: float = 1.0, kind: str = "observed") -> None:
+    def add_edge(
+        s: str, d: str, w: float = 1.0, kind: str = "observed",
+        evidence: Optional[Dict[str, Any]] = None,
+    ) -> None:
         g.edges[(s, d)] = g.edges.get((s, d), 0.0) + w
         kinds = g.edge_kinds.setdefault((s, d), {})
         kinds[kind] = kinds.get(kind, 0.0) + w
         g.adjacency.setdefault(s, {})[d] = g.adjacency.setdefault(s, {}).get(d, 0.0) + w
         # half-weight reverse so recall can traverse either direction
         g.adjacency.setdefault(d, {})[s] = g.adjacency.setdefault(d, {}).get(s, 0.0) + w * 0.5
+        if evidence:
+            g.edge_evidence.setdefault((s, d), []).append(evidence)
+
+    def governed_weight(row: Dict[str, Any], base: float) -> Optional[Tuple[float, Dict[str, Any]]]:
+        observed_raw = row.get("observed_at") or row.get("created_at")
+        effective_raw = row.get("effective_at") or row.get("effective_from")
+        observed = None
+        effective = None
+        try:
+            if observed_raw:
+                observed = datetime.fromisoformat(str(observed_raw).replace("Z", "+00:00"))
+                if observed.tzinfo is None:
+                    observed = observed.replace(tzinfo=timezone.utc)
+            if effective_raw:
+                effective = datetime.fromisoformat(str(effective_raw).replace("Z", "+00:00"))
+                if effective.tzinfo is None:
+                    effective = effective.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+        if (observed and observed > cutoff) or (effective and effective > cutoff):
+            return None
+        health = str(row.get("source_health") or "healthy").lower()
+        if health in {"unavailable", "failed"}:
+            g.degraded_sources.append({
+                "source": row.get("source") or row.get("source_id"),
+                "health": health, "reason": row.get("source_health_reason") or "source_unavailable",
+            })
+            return None
+        authority = str(row.get("source_authority") or "unspecified").lower()
+        trust = {
+            "authoritative": 1.0, "approved": 1.0, "verified": 0.8,
+            "trace_observation": 1.0, "unspecified": 1.0,
+            "untrusted": 0.2, "synthetic": 0.1,
+        }.get(authority, 0.5)
+        health_factor = 0.25 if health == "degraded" else 1.0
+        if health == "degraded":
+            g.degraded_sources.append({
+                "source": row.get("source") or row.get("source_id"),
+                "health": health, "reason": row.get("source_health_reason") or "degraded",
+            })
+        age_days = 0.0
+        if observed:
+            age_days = max(0.0, (cutoff - observed).total_seconds() / 86400.0)
+        freshness = max(0.0, 1.0 - age_days / max(1, int(max_edge_age_days)))
+        actor = str(row.get("actor_hash") or row.get("subject_hash") or "")
+        evidence = {
+            "edge_id": str(row.get("edge_id") or row.get("id") or ""),
+            "evidence_id": str(row.get("evidence_id") or row.get("id") or ""),
+            "observed_at": str(observed_raw or "") or None,
+            "effective_at": str(effective_raw or "") or None,
+            "source_authority": authority,
+            "source_health": health,
+            "age_days": round(age_days, 3),
+            "freshness_weight": round(freshness, 4),
+            "actor_hash": actor or None,
+        }
+        return base * trust * health_factor * freshness, evidence
 
     for r in (trace_rows or []):
         s = _node_for(r.get("source_type"), r.get("source_id"), alias_map=alias_map, known=known, catalog_skus=catalog_skus, sku_pattern=sku_pattern)
@@ -130,17 +202,31 @@ def project_graph(
             ensure(*d)
         if s and d:
             kind, weight = _typed_edge(r.get("event_type"))
+            governed = governed_weight(r, weight)
+            if governed is None:
+                continue
+            weight, evidence = governed
+            actor_key = (s[0], d[0], str(evidence.get("actor_hash") or ""))
+            if actor_key[2]:
+                seen = actor_counts.get(actor_key, 0)
+                if seen >= max(1, int(max_actor_contributions)):
+                    continue
+                actor_counts[actor_key] = seen + 1
             # Negative outcomes suppress the target prior but do not create a
             # negative traversal edge (spreading activation assumes non-negative
             # relatedness). The outcome remains visible in edge_kinds.
             if weight < 0:
                 ensure(*d).weight += weight
-                add_edge(s[0], d[0], abs(weight) * 0.25, kind)
+                add_edge(s[0], d[0], abs(weight) * 0.25, kind, evidence)
             else:
-                add_edge(s[0], d[0], weight, kind)
+                add_edge(s[0], d[0], weight, kind, evidence)
 
     for c in (conversion_rows or []):
         val = _bounded_conversion_reward(c.get("value_cents"))
+        governed = governed_weight(c, val)
+        if governed is None:
+            continue
+        val, evidence = governed
         decision_id = str(c.get("decision_id") or "").strip()
         dn = f"decision:{decision_id}" if decision_id else None
         if dn:
@@ -152,8 +238,41 @@ def project_graph(
             node = ensure(ref.id, "product", ref.label)
             node.weight += val  # the reward signal recall ranks toward
             if dn:
-                add_edge(dn, ref.id, val, "purchased")
+                add_edge(dn, ref.id, val, "purchased", evidence)
     return g
+
+
+def explain_path(
+    graph: HippoGraph, seed_ids: Iterable[str], target_id: str, *, max_hops: int = 3
+) -> Dict[str, Any]:
+    """Return one bounded evidence path. This explains recall; it never grants authority."""
+    target = str(target_id)
+    frontier = [(str(seed), [str(seed)]) for seed in seed_ids if str(seed) in graph.nodes]
+    visited = {node for node, _path in frontier}
+    while frontier:
+        node, path = frontier.pop(0)
+        if node == target:
+            edges = []
+            for source, destination in zip(path, path[1:]):
+                direct = (source, destination)
+                reverse = (destination, source)
+                key = direct if direct in graph.edge_evidence or direct in graph.edges else reverse
+                edges.append({
+                    "source": source, "target": destination,
+                    "kinds": graph.edge_kinds.get(key, {}),
+                    "evidence": graph.edge_evidence.get(key, []),
+                })
+            return {
+                "nodes": path, "edges": edges, "hops": len(path) - 1,
+                "authority": "evidence_only",
+            }
+        if len(path) - 1 >= max_hops:
+            continue
+        for neighbour in sorted((graph.adjacency.get(node) or {})):
+            if neighbour not in visited:
+                visited.add(neighbour)
+                frontier.append((neighbour, [*path, neighbour]))
+    return {"nodes": [], "edges": [], "hops": None, "authority": "evidence_only"}
 
 
 def recall(

@@ -34,7 +34,7 @@ def build_hippograph_insights(
     try:
         import os
 
-        from src.app.services.hippograph import recall, resolve_product
+        from src.app.services.hippograph import explain_path, recall, resolve_product
         from src.app.services.hippograph_db import _DEFAULT_SKU_PATTERN, build_from_db
 
         # include_findings projects persisted M3 findings as `finding` nodes (fast — batch computes
@@ -96,6 +96,12 @@ def build_hippograph_insights(
                 "label": node.label,
                 "score": round(float(score), 4),
                 "reward_weight": round(float(node.weight), 2),
+                "evidence_path": explain_path(graph, seeds, nid),
+                "source_health": {
+                    "status": "degraded" if graph.degraded_sources else "healthy",
+                    "degraded_sources": graph.degraded_sources,
+                },
+                "authority": "evidence_only",
             })
             if len(out) >= top_k:
                 break

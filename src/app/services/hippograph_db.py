@@ -74,6 +74,7 @@ def build_from_db(
     include_human_feedback: bool = False,
     include_catalog: bool = False,
     anomaly_fn=None,
+    as_of: Optional[str] = None,
 ) -> HippoGraph:
     """Project the most recent ``limit`` trace + conversion rows into an in-memory hippograph. Set
     ``include_findings`` to also project M3 findings as ``finding`` nodes; ``include_human_feedback``
@@ -89,7 +90,7 @@ def build_from_db(
     try:
         rows = db.execute(
             text(
-                "SELECT source_type, source_id, target_type, target_id, event_type "
+                "SELECT source_type, source_id, target_type, target_id, event_type, id, created_at "
                 "FROM decision_trace_events WHERE COALESCE(tenant_id,'default')=:tenant "
                 "ORDER BY created_at DESC LIMIT :lim"
             ),
@@ -97,7 +98,9 @@ def build_from_db(
         ).fetchall()
         trace_rows = [
             {"source_type": r[0], "source_id": r[1], "target_type": r[2], "target_id": r[3],
-             "event_type": r[4]}
+             "event_type": r[4], "edge_id": r[5], "evidence_id": r[5],
+             "observed_at": r[6], "effective_at": r[6],
+             "source_authority": "trace_observation", "source_health": "healthy"}
             for r in rows
         ]
     except Exception:
@@ -107,7 +110,7 @@ def build_from_db(
     try:
         crows = db.execute(
             text(
-                "SELECT decision_id, attributed_skus_json, value_cents "
+                "SELECT decision_id, attributed_skus_json, value_cents, id, converted_at, created_at "
                 "FROM conversion_event WHERE COALESCE(tenant_id,'default')=:tenant "
                 "ORDER BY created_at DESC LIMIT :lim"
             ),
@@ -123,13 +126,20 @@ def build_from_db(
                     "decision_id": r[0],
                     "attributed_skus": skus if isinstance(skus, list) else [],
                     "value_cents": r[2],
+                    "edge_id": r[3],
+                    "evidence_id": r[3],
+                    "observed_at": r[5] or r[4],
+                    "effective_at": r[4],
+                    "source_authority": "authoritative",
+                    "source_health": "healthy",
                 }
             )
     except Exception:
         conv_rows = []
 
     graph = project_graph(
-        trace_rows, conv_rows, alias_map=alias_map, known=known, sku_pattern=sku_pattern
+        trace_rows, conv_rows, alias_map=alias_map, known=known,
+        sku_pattern=sku_pattern, as_of=as_of
     )
     if include_findings:
         graph = _maybe_project_findings(db, graph, tenant_id=tenant, limit=limit,

@@ -1,9 +1,9 @@
-"""Flag-ON proof that hippograph feedback reaches BOTH the response and the NQE agent.
+"""Flag-ON proof that Hippograph feedback reaches the V2 response as advisory evidence.
 
-GPT-5.5 found NQEInput.hippograph_context was [] even when hippograph_insights appeared in the
-response — i.e. feedback was annotation, not agent injection. This locks the fix: with the flag on,
-the recall reaches payload.hippograph_insights AND the NQE agent's NQEInput.hippograph_context.
-The recall builder is patched to a sentinel to isolate the WIRING from graph contents.
+The archived V1 path injected recall into ``NextQuestionEngine``. Production compatibility routing
+now uses V2, whose lexicographic ranker and clarification contract deliberately do not enroll graph
+recall as authority. This locks the current honest boundary: recall is visible in the response but
+does not silently nudge results without a separately authorized live experiment.
 """
 from __future__ import annotations
 
@@ -16,8 +16,7 @@ from sqlalchemy import text
 from src.app.main import app
 from src.app.models.db import db_session
 from src.app.services.recommendations import RecommendationService
-from tests.test_recommend import _write_flags
-from tests.utils import default_headers
+from tests.utils import default_headers, write_feature_flags
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
 _SENTINEL = [{"id": "GAM-HOT", "kind": "product", "label": "Hot Pick", "score": 9.9, "reward_weight": 5.0}]
@@ -28,10 +27,14 @@ client = TestClient(app, headers=default_headers())
 @pytest.fixture()
 def feedback_on(monkeypatch):
     monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.turn_router._default_llm_fn",
+        lambda _prompt, _timeout: "",
+    )
     orig = RecommendationService.retrieve_candidates
     RecommendationService.retrieve_candidates = lambda self, q, limit=10: []
     orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
-    _write_flags({
+    write_feature_flags({
         "USE_AGENT_CAPABILITIES": True, "AGENT_ROLLOUT_PERCENT": 100,
         "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
         "KILL_SWITCH": False, "DEGRADATION": {"enabled": True},
@@ -59,20 +62,14 @@ def feedback_on(monkeypatch):
         db.commit()
 
 
-def test_feedback_reaches_response_and_nqe(feedback_on, monkeypatch):
-    captured = {}
-    from src.app.flows.nqe import NextQuestionEngine
-    orig_propose = NextQuestionEngine.propose
-
-    def _cap(self, inp):
-        captured["ctx"] = list(getattr(inp, "hippograph_context", None) or [])
-        return orig_propose(self, inp)
-
-    monkeypatch.setattr(NextQuestionEngine, "propose", _cap)
+def test_feedback_reaches_response_without_becoming_v2_ranking_authority(feedback_on):
     r = client.get("/api/v1/recommend/suggest", params={"uid": "hgw-user", "query": "laptop for work under 1500"})
     assert r.status_code == 200, r.text
     body = r.json()
-    # 1) reaches the response
     assert body.get("hippograph_insights") == _SENTINEL
-    # 2) reaches the NQE agent (the exact gap GPT flagged: NQEInput.hippograph_context was []).
-    assert captured.get("ctx") == _SENTINEL, "NQEInput.hippograph_context must carry the recall"
+    assert not body.get("ranking_experiment")
+    assert all(
+        "_nudge_delta" not in row
+        for row in (body.get("products") or body.get("results") or [])
+        if isinstance(row, dict)
+    )
