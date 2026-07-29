@@ -97,10 +97,10 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p tmp test-results
-          timeout 180s alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
-          alembic current 2>&1 | tee test-results/migration-current.log
-          timeout 60s alembic downgrade -1 2>&1 | tee test-results/migration-rollback.log
-          timeout 60s alembic upgrade head 2>&1 | tee test-results/migration-reupgrade.log
+          timeout 180s poetry run alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
+          poetry run alembic current 2>&1 | tee test-results/migration-current.log
+          timeout 60s poetry run alembic downgrade -1 2>&1 | tee test-results/migration-rollback.log
+          timeout 60s poetry run alembic upgrade head 2>&1 | tee test-results/migration-reupgrade.log
           python scripts/seed_real_catalog.py
           python scripts/seed_gaming_laptops.py
           python -m scripts.seed_suppliers
@@ -201,7 +201,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p tmp test-results
-          timeout 180s alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
+          timeout 180s poetry run alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
       - name: Start worker and prove broker delivery
         run: |
           celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
