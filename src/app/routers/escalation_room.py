@@ -101,6 +101,12 @@ def _parse_ts(ts: str | None) -> datetime | None:
 def _ensure_incident_runtime_tables() -> None:
     try:
         eng = get_engine()
+        # PostgreSQL and every deployed database are migration-owned. A failed
+        # duplicate-column ALTER aborts the whole PostgreSQL transaction even
+        # when Python catches the statement exception. Runtime DDL is retained
+        # only for legacy, unmigrated SQLite demo files.
+        if eng.dialect.name != "sqlite":
+            return
         with eng.begin() as conn:
             for stmt in [
                 "ALTER TABLE incidents ADD COLUMN assigned_to TEXT",

@@ -816,7 +816,7 @@ def create_app() -> FastAPI:
         origin_regex = None
         if not origins:
             _app_env = os.getenv("APP_ENV", "local").strip().lower()
-            if _app_env in ("local", "dev", "development", "test"):
+            if _app_env in ("local", "dev", "development", "test", "testing"):
                 # DEV: allow ANY localhost/127.0.0.1 port so a demo on an alternate frontend port (5178, …)
                 # or backend port just works — no per-port CORS edit. allow_origin_regex echoes the specific
                 # origin, so it's compatible with allow_credentials (a wildcard '*' would not be). PROD still

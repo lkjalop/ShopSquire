@@ -159,7 +159,9 @@ class TicketingAgent:
                         "description": description,
                         "severity": severity,
                         "status": status,
-                        "approval_required": bool(approval_required),
+                        # The portable migration intentionally uses INTEGER so
+                        # SQLite and PostgreSQL share one schema contract.
+                        "approval_required": int(bool(approval_required)),
                         "trace_id": trace_id,
                         "tenant_id": tenant_id,
                         "evidence": json.dumps(evidence_snapshot or {}),
