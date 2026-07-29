@@ -65,6 +65,18 @@ services:
       redis:
         condition: service_healthy
     command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-graceful-shutdown", "30"]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=5)
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 30s
     volumes:
       - audit-worm:/var/lib/shopsquire/audit
     user: "shopsquire"
@@ -237,7 +249,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    command: ["celery", "-A", "src.app.workers.celery_app.celery_app", "beat", "--loglevel=INFO"]
+    command: ["python", "-m", "src.app.workers.leased_beat"]
     restart: unless-stopped
     user: "shopsquire"
     cap_drop:

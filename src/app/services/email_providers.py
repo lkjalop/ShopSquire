@@ -210,8 +210,9 @@ class SESProvider(BaseEmailProvider):
             except Exception as e:
                 return {"ok": False, "error": str(e)}
         try:
-            import boto3
-            client = boto3.client(
+            from src.app.providers.aws import get_client
+
+            client = get_client(
                 "ses",
                 aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
                 aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),

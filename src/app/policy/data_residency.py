@@ -165,6 +165,20 @@ _REGISTRY: Dict[str, ResidencyVerdict] = {
         signed_dpa=False,
         notes="Mistral AI is EU-based; GDPR framework applies.",
     ),
+    # Azure AI Foundry - region is deployment-controlled. A tenant DPA and the
+    # deployed destination region must be recorded before prompts are allowed.
+    "azure-foundry": ResidencyVerdict(
+        provider="azure-foundry",
+        allowed=True,
+        mechanism=TransferMechanism.SCCs,
+        destination_country=os.getenv("AZURE_AI_FOUNDRY_REGION", "unconfigured"),
+        signed_dpa=False,
+        dpa_date=None,
+        notes=(
+            "Region is controlled by the Azure deployment. Record the tenant DPA "
+            "and approved region before transferring production prompt data."
+        ),
+    ),
 }
 
 # ---------------------------------------------------------------------------
