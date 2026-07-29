@@ -1,5 +1,289 @@
 # Agnostic Market Intelligence and Procurement Roadmap — 2026-07-27
 
+## Execution delta — 2026-07-29
+
+The reordered work is now materially implemented locally:
+
+- The active V2 compatibility failures were migrated or restored at the
+  compatibility boundary. The reference matrix is green (21 tests), including
+  price/budget contracts, nested slots, use-case tags, refusal behavior and
+  route timing. A fresh rationale-bearing search can no longer be promoted to
+  `EXPLAIN` without a prior shortlist.
+- Experiment runs, assignments, results and evaluation are tenant-scoped.
+  Creation seals a versioned policy containing baseline, target metric,
+  eligibility, minimum sample/window, rollback threshold, guardrails and
+  terminal policy. Late and cross-tenant outcomes receive no credit. The
+  production schema is owned by Alembic migration
+  `20260825_tenant_experiment_policy`; experiment services now validate that
+  migration-owned schema and no longer issue runtime table, index or column
+  DDL. Experiment fixtures apply the migrations explicitly.
+- Migration `20260826_communication_lifecycle` and
+  `communication_lifecycle.py` provide an append-only, tenant-isolated,
+  idempotent projection with legal transition ordering and approved
+  fact/template grounding. Connector ingress, buyer reply, supplier outbox and
+  Party/case/trace reads are connected. Quarantine records prevented commercial
+  effect. Governed fulfillment supplier drafts now register their persisted
+  evidence as approved, versioned material-claim references before queueing.
+  The older standalone `supplier_communication.py` dispatch is now a frozen
+  compatibility-only surface. An architecture test prevents application code
+  from calling it; production supplier delivery uses the governed fulfillment
+  outbox.
+- Migration `20260827_party_identity_authority` records authority, provenance
+  and verification time on Party identities. Authenticated buyer principals,
+  approved supplier-registry recipients and verified connector senders bind
+  automatically inside the authoritative tenant transaction. Legacy or
+  request-selected identities cannot satisfy this boundary.
+- Decision Trace now exposes five sections while retaining all 14 leaf IDs,
+  existing `tracetab` links and leaf-keyed fetch effects. The missing
+  `execution` deep link is restored. Audit reads have an eight-second deadline
+  and a visible retry/error state. Twelve rendered frontend tests prove every
+  leaf remains reachable, legacy deep links (including `execution`) resolve,
+  keyboard/ARIA tab behavior works and section/leaf navigation adds no API
+  requests. The production build is green. The production-shaped local battery
+  is now green against isolated PostgreSQL and Redis: 9 React Playwright
+  journeys and three live SPA/security regressions passed. The malicious
+  trusted-supplier reply remained visible but could not change quote,
+  economics, PO or payment state. Hosted-runner proof remains outstanding.
+- Hippograph now returns evidence paths with edge/evidence identifiers,
+  observed/effective time, freshness, authority and source health. Temporal
+  evaluation excludes future evidence; old/degraded/untrusted and repeated
+  actor contributions are bounded. Why and Evidence now render bounded paths,
+  edge/evidence identifiers, observed/effective times and degraded-source
+  reasons while explicitly labelling Hippograph evidence-only. Independently
+  sealed relevance labels remain outstanding.
+- A clean PostgreSQL 16 migration reached
+  `20260827_party_identity_authority`; downgrade to
+  `20260826_communication_lifecycle` removed the three authority columns and
+  re-upgrade restored them. The rehearsal exposed and fixed two legacy pgvector
+  fallback migrations whose caught SQL errors previously poisoned the outer
+  PostgreSQL transaction when `vector` was unavailable.
+- Ninety-eight focused experiment/Party/migration tests, 54 communication and
+  procurement tests, 12 rendered Decision Trace tests, the 21-test reference
+  matrix and the production frontend build pass locally. The isolated
+  PostgreSQL/Redis/Celery/browser harness now proves migration, worker ping,
+  9/9 React journeys and 3/3 live SPA/security regressions locally. A
+  child-written exit-status contract removed a Windows PowerShell process-code
+  blind spot. Hosted proof and real shadow-pilot outcome evidence are not
+  complete and must not be represented as proven.
+- Portable cloud C0 prerequisites are implemented locally. `/healthz` remains
+  dependency-free liveness and `/readyz` checks serving readiness; compose uses
+  readiness for health. Celery beat now runs behind a token-bound renewable
+  Redis lease. Secret, object and model boundaries support optional
+  workload-identity Azure adapters while cloud SDK imports are confined to
+  provider modules. Every supported LLM result carries explicit model, model
+  version, prompt version and policy version fields. Fifteen focused adapter,
+  boundary and regression tests pass, Ruff passes, and `docker compose config`
+  validates.
+
+### Remaining order after this slice
+
+1. Split and land the mixed worktree as reviewable, ownership-safe commits.
+2. Run the same production-shaped workflow on GitHub-hosted runners and retain
+   migration, worker and browser artifacts. Local publication is blocked until
+   `gh auth login`; the current branch is also 1,155 commits ahead of its
+   published counterpart, so its publication delta must be reviewed rather
+   than force-pushed blindly.
+3. Deploy one minimal Azure core using Container Apps, PostgreSQL Flexible
+   Server, Azure Managed Redis, Blob WORM, Key Vault, ACR and OpenTelemetry.
+   Microsoft Foundry is an optional certified model endpoint, not the agent
+   substrate.
+4. After the cloud core is proven, add signed tenant/site/node identity and a
+   two-node partition harness. Claim at-least-once transport with deduplicated,
+   idempotent effects—not exactly-once replication. The core signs authority;
+   an edge may exercise only fresh delegated capabilities within their limits.
+5. Obtain one tenant-authorized shadow dataset, seal the baseline and measure
+   forecast value added and business outcomes before increasing autonomy.
+6. Record the polished demonstration after the UI/browser and deployment gates
+   pass. Package a customer-managed Marketplace offer only after its privacy,
+   support and publisher-access boundaries are reviewed.
+
+Do not add AKS, MongoDB, TiDB, Kafka, Flink or a read replica without a measured
+trigger. Broad feature expansion remains paused until hosted or design-partner
+evidence exposes a concrete gap.
+
+## Communication, trace and learning wiring reassessment — 2026-07-29
+
+This section supersedes the older remaining-work order where the two disagree.
+The platform does not need another broad subsystem. It needs the existing
+observation, communication, experiment, graph and trace boundaries connected
+under one tenant-safe contract and proved through the active V2 route.
+
+### Corrected implementation status
+
+- Conversation-to-observation extraction is already live for buyer chat.
+  `conversation_fact_observations.py` extracts bounded requirements, exclusions,
+  budgets/currencies, pack/UoM preferences, delivery constraints, payment-term
+  requests, recurring use cases and refusal reasons. It records provenance,
+  confidence, observation time, expiry and `observation_only` authority.
+  `chat.py` invokes it after message persistence, and the account timeline can
+  display the observations. The missing work is email projection, explicit
+  correction/revocation, PII/source-excerpt policy and stronger Party binding;
+  this feature must not be rebuilt.
+- `communication_observations.py` defines an idempotent tenant/channel/provider
+  message observation, but no production ingress or egress path calls it.
+  Supplier fulfillment, the durable outbox, connector inbox, buyer status
+  messages and chat therefore remain separate communication islands.
+- Supplier RFQ drafting is evidence-bound and caged behind fixed templates,
+  supplier allowlists, claim checks, evidence identifiers, content hashes and
+  approval/send gates. General buyer/customer drafting is not held to the same
+  claim-to-evidence contract.
+- Procurement already has an authoritative domain state machine and the outbox
+  has delivery/retry states. A generic communication lifecycle should be an
+  append-only projection of those events, not a second state machine capable of
+  overruling fulfillment or delivery truth.
+- The Party/account timeline and operator UI exist, but runtime communication
+  and procurement paths do not populate `account_activity`. It is not yet the
+  promised unified buyer/supplier/decision/outcome timeline.
+- Experiment evaluation supports windows, minimum samples, guardrails,
+  terminal decisions and automatic reversion. However, `experiment_run` is
+  global and governance pulse reads outcomes from a default tenant. Experiment
+  ownership, baseline, target, minimum detectable effect, minimum window,
+  rollback threshold and terminal policy are not sealed together at creation.
+- Hippograph remains evidence-only. Recall returns nodes and scores, not
+  provenance paths. Edges lack the metadata needed for time ageing and drift
+  analysis. The current distinct-UID poisoning test is not meaningful Sybil
+  resistance, and provisional relevance labels still require independent human
+  sealing.
+- `DecisionTrace.tsx` is a 4,000-line component with 14 flat leaf tabs. It has a
+  concrete deep-link defect: `execution` is accepted by the tab type and fetch
+  effects but omitted from `_TABS`, so `?tracetab=execution` falls back to
+  Events. Audit fetch failure is silently swallowed and is not bounded by the
+  shared timeout behavior. Existing React tests do not prove that all 14 panels
+  remain reachable or that request counts remain stable.
+- The active recommendation compatibility battery currently has 31 passing and
+  16 failing tests. Empty-product failures are primarily associated with test
+  fixtures that still seed the retired retrieval boundary. Price buckets,
+  nested slots, use-case tags, refusal notes, turn intent and route timing are
+  also named in the frozen compatibility surface and need explicit adjudication;
+  they must not disappear accidentally.
+
+### Reordered delivery plan
+
+#### P0 — Restore a truthful V2 contract baseline
+
+1. Classify each of the 16 failures as one of:
+   V2 fixture migration, required compatibility behavior, or frozen V1-only
+   characterization. Seed active tests through V2 taxonomy/catalog APIs rather
+   than mocking the retired retrieval service.
+2. Keep required edge behavior in `recommendation_compatibility.py` and
+   `recommendation_core/legacy_adapter.py`. Move intentionally retired behavior
+   into immutable characterization evidence with a written reason.
+3. Require the focused compatibility battery, archive-import architecture
+   tests, parity/golden/security tests and trace persistence tests to pass before
+   changing navigation or adaptive learning.
+4. Tenant-scope experiment definitions, assignments, observations and terminal
+   decisions. Replace runtime experiment DDL with migrations and remove the
+   global/default-tenant coupling in governance pulse.
+
+#### P1 — Connect the bounded communication and outcome spine
+
+1. Add append-only communication thread, message and transition records keyed
+   by tenant, Party, case, trace, purpose and provider identity. Store content
+   hashes and evidence references here; keep raw encrypted evidence in its
+   separate custody store.
+2. Project production events into that model:
+   connector ingress after identity/security/correlation; supplier draft and
+   approval; outbox queue/delivery/failure; governed supplier reply; buyer
+   status/draft delivery; and buyer chat observations.
+3. Derive `proposed`, `approved`, `queued`, `delivered`, `responded`, `expired`,
+   `failed` and `superseded` from authoritative domain events. Reject illegal
+   orderings and cross-tenant correlation. The projection must never execute a
+   purchase, mutate Party truth or release quarantined content.
+4. Add a dedicated tenant-scoped read router for communication timelines by
+   Party, case and trace. Do not enlarge the fulfillment router with generic
+   communication APIs.
+5. Introduce one grounded-message contract for buyer and supplier messages:
+   every material claim carries an approved fact/template reference, version,
+   authority and expiry. Supplier drafting adapts to this contract; it is not
+   replaced.
+6. Project delivered messages, replies, decisions and measured outcomes into
+   the account timeline. Preserve the underlying source event identifiers so
+   the UI can navigate back to evidence and Decision Trace.
+7. Seal an experiment specification at creation: tenant, baseline, target
+   metric, eligibility, attribution window, minimum sample/window, rollback
+   threshold, guardrails and terminal decision. Late or cross-tenant outcomes
+   must not receive credit.
+
+#### P2 — Reduce Decision Trace to five sections without changing its contract
+
+Use five top-level sections with the existing leaves:
+
+- Decision: Summary, Events, Execution
+- Reasoning: Why, Intent, Memory, Complexity
+- Evidence & Risk: Evidence, Multimodal, Security
+- Commercial Journey: Market Intelligence, Procurement
+- Audit & Technical: Audit Trail, Raw
+
+Implement an exported section-to-leaf mapping and derive the selected section
+from the active leaf, avoiding a second source of navigation truth. Keep leaf
+identifiers, `tracetab=<leaf>` deep links, existing fetch effects and test
+selectors. Fix the missing `execution` registry entry, reset stale initial-tab
+state when opening a new trace, and route audit loading through a bounded API
+helper with a visible error state. Specialist leaves with no data may be hidden
+through progressive disclosure, but must remain directly reachable by old deep
+links.
+
+The navigation change is green only when tests prove:
+
+- all 14 leaves are reachable through the five sections;
+- every old leaf deep link opens the same panel, including `execution`;
+- keyboard/ARIA tab behavior works;
+- API request names and counts are identical before and after for each leaf;
+- empty specialist panels are disclosed predictably rather than silently lost;
+- every populated panel answers what happened, why, evidence, uncertainty,
+  authority, changed/prevented state and next permitted action.
+
+#### P3 — Make Hippograph visibly evidential, not autonomous
+
+1. Return bounded provenance paths with source edge/evidence identifiers,
+   observed/effective times and tenant scope. Display these paths inside Why or
+   Evidence rather than adding another top-level tab.
+2. Add time-aware edge ageing, maximum graph growth, drift reporting and an
+   explicit degraded-source result instead of silently treating graph-load
+   failure as no evidence.
+3. Seal independently reviewed relevance labels. Evaluate with temporal
+   train/test separation, leakage checks, realistic cold-start/lifecycle
+   cohorts and multiple seeds.
+4. Replace distinct-UID counting with repeated-actor resistance grounded in
+   authenticated tenant membership and account/device trust signals. Synthetic
+   identities must not create independent evidence weight.
+5. Evaluate diversity, margin, availability and safety guardrails. Hippograph
+   may continue to retrieve or re-rank evidence in shadow mode; it cannot
+   increase procurement authority until a real shadow pilot shows lift without
+   guardrail regression.
+
+#### P4 — External proof and publication
+
+1. Run PostgreSQL migration rehearsal and the Redis/backend/worker/storefront/
+   admin browser battery in isolated hosted CI with retained diagnostics.
+2. Authenticate GitHub, inspect the 1,155-commit local/publication delta, publish
+   a reviewable branch and retain CI evidence. Do not represent local-green as
+   hosted-green.
+3. Obtain one design-partner shadow dataset and seal the V2 baseline before
+   evaluation. Measure business outcomes and forecast value added; synthetic
+   replay remains contract evidence, not proof of commercial lift.
+4. Record a polished 10–12 minute demonstration only after P0–P2 are green. The
+   demo should follow one trace across fact provenance, bounded reasoning,
+   communication approval/delivery/reply, prevented unsafe action and measured
+   outcome.
+5. Stop broad feature expansion until hosted evidence or a design-partner
+   outcome identifies a concrete gap.
+
+### Required red-to-green test layers
+
+- Unit: extraction expiry/revocation; grounded-claim rejection; communication
+  transition legality; experiment policy sealing; path ageing and leakage.
+- Integration: tenant isolation and idempotency across inbox, outbox, Party,
+  case, trace and outcomes; no observation may mutate authoritative facts.
+- Contract: V2 response/compatibility parity and frozen archive evidence.
+- React: five-section mapping, 14-leaf reachability, deep links, request-count
+  parity, loading/error/empty states and accessibility.
+- Browser: buyer decision to supplier draft, human approval, queued/delivered
+  projection, governed reply, timeline, trace and outcome; malicious or
+  poisoned evidence must leave quote, economics, PO and payment state unchanged.
+- Evaluation: temporal leakage, independently sealed labels, cohort/seed
+  stability, calibration and guardrail deltas against the sealed V2 baseline.
+
 ## Operational grounding and archive update — 2026-07-29
 
 The current no-credential foundation is materially stronger than the older
