@@ -49,7 +49,9 @@ jobs:
         python-version: ["3.10", "3.11"]
     services:
       postgres:
-        image: postgres:14
+        # Match the production-shaped migration/browser workflow and include
+        # the vector extension required by the canonical embedding schema.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
