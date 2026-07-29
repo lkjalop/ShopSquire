@@ -113,7 +113,7 @@ jobs:
           poetry run alembic current 2>&1 | tee test-results/migration-current.log
           timeout 60s poetry run alembic downgrade -1 2>&1 | tee test-results/migration-rollback.log
           timeout 60s poetry run alembic upgrade head 2>&1 | tee test-results/migration-reupgrade.log
-          poetry run python -m scripts.seed_profile_catalog electronics
+          poetry run python -m scripts.seed_portable_catalog
           poetry run python -m scripts.seed_suppliers
       - name: React component battery
         run: |
