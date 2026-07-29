@@ -272,7 +272,7 @@ def load_feature_flags(path: str) -> dict:
             "STOREFRONT_EMPHASIS_EXPERIMENT_ENABLED", "STOREFRONT_EMPHASIS_CANARY_FRACTION",
             "STOREFRONT_EMPHASIS_EXPERIMENT_ID",
             "RANKING_NUDGE_EXPERIMENT_ENABLED", "RANKING_NUDGE_CANARY_FRACTION",
-            "SALES_RESPONSE_NUDGE_ENABLED",
+            "SALES_RESPONSE_NUDGE_ENABLED", "SALES_RESPONSE_OVERSTOCK_UNITS",
             "RECOMMEND_NARRATION_MODE", "RECOMMEND_NARRATION_FORCE",
         )
         candidates = {k for k in out if isinstance(out.get(k), (str, bool, int, float))}

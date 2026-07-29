@@ -33,13 +33,24 @@ function Tail-IfPresent([string]$Name) {
     }
 }
 
+function Stop-ProcessTree([int]$ProcessId) {
+    $children = @(
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.ParentProcessId -eq $ProcessId }
+    )
+    foreach ($child in $children) {
+        Stop-ProcessTree -ProcessId ([int]$child.ProcessId)
+    }
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+}
+
 function Wait-BoundedProcess(
     [System.Diagnostics.Process]$Process,
     [int]$TimeoutSec,
     [string]$Label
 ) {
     if (-not $Process.WaitForExit($TimeoutSec * 1000)) {
-        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        Stop-ProcessTree -ProcessId $Process.Id
         throw "$Label timed out after $TimeoutSec seconds"
     }
     # Refresh the process wrapper so ExitCode is populated consistently.
@@ -86,6 +97,10 @@ try {
     $env:RECOMMEND_SUPPORT_HANDOFF_MODE = "on"
     $env:RECOMMEND_INVENTORY_READ_MODE = "on"
     $env:MULTI_INTENT_PLANNER_ENABLED = "1"
+    # The portable browser catalog carries 14-18 units per laptop. Treat 10+
+    # as the scenario's declared surplus so the market-adaptation case has a
+    # genuine actionable cohort instead of silently exercising a neutral one.
+    $env:SALES_RESPONSE_OVERSTOCK_UNITS = "10"
     $env:FULFILLMENT_DEMO_ENABLED = "1"
     $env:GATE_PROCUREMENT = "1"
     $env:USE_MOCK_LLM = "1"
@@ -102,6 +117,12 @@ try {
     $env:RATE_LIMIT_PER_IP_PER_MIN = "10000"
     $env:RATE_LIMIT_PER_MINUTE_IP = "10000"
     $env:RATE_LIMIT_PER_MINUTE_KEY = "10000"
+    # Keep quota enforcement enabled while preventing one browser case from
+    # consuming the shared test tenant's allowance and invalidating later,
+    # otherwise-independent multi-turn cases.
+    $env:TOKEN_BUDGET_ENABLED = "1"
+    $env:TOKEN_BUDGET_GUEST_DAILY_TOKENS = "1000000000"
+    $env:TOKEN_BUDGET_GUEST_DAILY_USD = "1000000"
 
     python -m alembic upgrade head *>&1 |
         Tee-Object -FilePath (Join-Path $ArtifactRoot "migration.log") | Out-Null
@@ -242,7 +263,7 @@ finally {
     if (-not $KeepServices) {
         foreach ($process in $processes) {
             if ($process -and -not $process.HasExited) {
-                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                Stop-ProcessTree -ProcessId $process.Id
             }
         }
         docker stop $redisName | Out-Null
