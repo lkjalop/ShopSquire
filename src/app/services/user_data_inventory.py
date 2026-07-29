@@ -64,7 +64,7 @@ def _safe_json(raw: Any) -> Any:
 
 
 def erase_redis(redis, uid: str) -> dict[str, Any]:
-    """Delete EVERY user-linked Redis key. Returns per-key outcome + count."""
+    """Delete v2 indexed memory plus pre-cutover and typed artifact keys."""
     keys = all_redis_keys(uid)
     erased: list[str] = []
     failed: list[str] = []
@@ -74,9 +74,31 @@ def erase_redis(redis, uid: str) -> dict[str, Any]:
             erased.append(key)
         except Exception:
             failed.append(key)
+    v2_erased = 0
+    try:
+        result = _memory.Memory(redis).erase_subject(uid)
+        v2_erased = int(result.get("erased_keys") or 0)
+    except Exception:
+        failed.append("memory:v2:subject_index")
+    cache_erased = 0
+    try:
+        from src.app.services.semantic_cache import CacheContract, SemanticCache
+
+        erasure_contract = CacheContract.resolve(
+            corpus_version="erasure",
+            policy_version="erasure",
+            model_version="erasure",
+            evidence_cutoff="erasure",
+            subject_id=uid,
+        )
+        cache_erased = SemanticCache(redis_client=redis).erase_scope(erasure_contract)
+    except Exception:
+        failed.append("cache:v2:subject_index")
     return {
-        "keys_total": len(keys),
-        "keys_erased": len(erased),
+        "keys_total": len(keys) + v2_erased + cache_erased,
+        "keys_erased": len(erased) + v2_erased + cache_erased,
+        "v2_indexed_keys_erased": v2_erased,
+        "v2_cache_keys_erased": cache_erased,
         "keys_failed": failed,
         "complete": not failed,
     }
@@ -94,6 +116,19 @@ def export_redis(redis, uid: str) -> dict[str, Any]:
             # Strip the "session:{uid}:" prefix for a clean export shape.
             short = key.split(":", 2)[-1]
             out[short] = _safe_json(val)
+    # Export every indexed v2 epoch without scanning other tenants/subjects.
+    try:
+        scope = _memory.Memory(redis).scope(
+            uid, subject_id=uid, session_epoch="export-index"
+        )
+        raw_keys = redis.smembers(scope.subject_index_key) or set()
+        for raw_key in raw_keys:
+            key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else str(raw_key)
+            value = redis.get(key)
+            if value is not None:
+                out[f"v2:{key.rsplit(':', 1)[-1]}:{key}"] = _safe_json(value)
+    except Exception:
+        pass
     return out
 
 

@@ -1,12 +1,32 @@
+"""Tenant- and session-scoped conversation memory.
+
+Every key is namespaced by tenant, subject, and session epoch.  The subject is
+normally the authenticated user (or bounded guest capability) and the epoch is
+the conversation/session generation.  Callers that have not yet adopted an
+explicit epoch remain compatible: their uid is used as both subject and epoch,
+which preserves the old per-uid behaviour without restoring UID-only keys.
+
+Keys are registered in a per-subject index so privacy erasure can remove every
+known session epoch without relying on a broad Redis scan.
+"""
+from __future__ import annotations
+
+import hashlib
 import json
 import os
 import time
+from dataclasses import dataclass
 from threading import RLock
 from typing import Any, Dict, Optional
 
 from redis import Redis
 
+from src.app.platform.tenant_context import current_tenant_id
 
+
+MEMORY_CONTRACT_VERSION = "2"
+# Deprecated v1 templates remain only so erasure/export can clean up data
+# written before the v2 scoped-key cutover. New writes never use these keys.
 SUMMARY_KEY = "session:{uid}:summary"
 KV_KEY = "session:{uid}:kv_state"
 RETRIEVAL_KEY = "session:{uid}:recent_retrieval"
@@ -15,377 +35,376 @@ STRUCTURED_STATE_KEY = "session:{uid}:structured_state"
 PRODUCT_MEMORY_BANK_KEY = "session:{uid}:product_memory_bank"
 OBSERVATION_LOG_KEY = "session:{uid}:observation_log"
 OBSERVATION_SUMMARY_KEY = "session:{uid}:observation_summary"
-PENDING_CLARIFICATION_KEY = "session:{tenant_id}:{uid}:pending_clarification"
+_FAMILIES = (
+    "summary",
+    "kv_state",
+    "recent_retrieval",
+    "agent_steps",
+    "structured_state",
+    "product_memory_bank",
+    "observation_log",
+    "observation_summary",
+    "pending_clarification",
+)
+
+
+def _identity_digest(value: str) -> str:
+    """Return a deterministic, non-PII key segment."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
+
+
+def _clean(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    return text or fallback
+
+
+@dataclass(frozen=True)
+class MemoryScope:
+    tenant_id: str
+    subject_id: str
+    session_epoch: str
+    contract_version: str = MEMORY_CONTRACT_VERSION
+
+    @classmethod
+    def resolve(
+        cls,
+        uid: str,
+        *,
+        tenant_id: str | None = None,
+        subject_id: str | None = None,
+        session_epoch: str | None = None,
+    ) -> "MemoryScope":
+        subject = _clean(subject_id, _clean(uid, "anonymous"))
+        # Compatibility default: a uid remains its own conversation epoch.
+        epoch = _clean(session_epoch, _clean(uid, "current"))
+        return cls(
+            tenant_id=_clean(tenant_id, current_tenant_id()),
+            subject_id=subject,
+            session_epoch=epoch,
+        )
+
+    @property
+    def tenant_segment(self) -> str:
+        return _identity_digest(self.tenant_id)
+
+    @property
+    def subject_segment(self) -> str:
+        return _identity_digest(self.subject_id)
+
+    @property
+    def epoch_segment(self) -> str:
+        return _identity_digest(self.session_epoch)
+
+    def key(self, family: str) -> str:
+        if family not in _FAMILIES and not family.startswith("episodic_"):
+            raise ValueError(f"unsupported_memory_family:{family}")
+        return (
+            f"memory:v{self.contract_version}:{self.tenant_segment}:"
+            f"{self.subject_segment}:{self.epoch_segment}:{family}"
+        )
+
+    @property
+    def subject_index_key(self) -> str:
+        return (
+            f"memory:v{self.contract_version}:index:"
+            f"{self.tenant_segment}:{self.subject_segment}"
+        )
 
 
 class Memory:
     _LOCAL_LOCK = RLock()
     _LOCAL_STORE: Dict[str, Dict[str, Any]] = {}
+    _LOCAL_INDEX: Dict[str, set[str]] = {}
 
-    def __init__(self, redis_client: Redis):
+    def __init__(
+        self,
+        redis_client: Redis | None,
+        *,
+        tenant_id: str | None = None,
+        subject_id: str | None = None,
+        session_epoch: str | None = None,
+    ):
         self.redis = redis_client
+        self._tenant_id = tenant_id
+        self._subject_id = subject_id
+        self._session_epoch = session_epoch
+        self.summary_ttl = self._env_ttl("CHAT_ACTIVE_TTL_SECONDS", "CHAT_TTL_SECONDS", 86400)
+        self.kv_ttl = self._env_ttl("CHAT_ACTIVE_TTL_SECONDS", "CHAT_TTL_SECONDS", 86400)
+        self.retrieval_ttl = self._env_ttl("RAG_CACHE_TTL_SECONDS", default=600)
+
+    @staticmethod
+    def _env_ttl(primary: str, secondary: str | None = None, default: int = 86400) -> int:
         try:
-            self.summary_ttl = int(os.getenv("CHAT_ACTIVE_TTL_SECONDS", os.getenv("CHAT_TTL_SECONDS", "86400")))
-        except Exception:
-            self.summary_ttl = 86400
+            raw = os.getenv(primary, os.getenv(secondary, str(default)) if secondary else str(default))
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            return default
+
+    def scope(
+        self,
+        uid: str,
+        *,
+        tenant_id: str | None = None,
+        subject_id: str | None = None,
+        session_epoch: str | None = None,
+    ) -> MemoryScope:
+        return MemoryScope.resolve(
+            uid,
+            tenant_id=tenant_id if tenant_id is not None else self._tenant_id,
+            subject_id=subject_id if subject_id is not None else self._subject_id,
+            session_epoch=session_epoch if session_epoch is not None else self._session_epoch,
+        )
+
+    def scoped_key(
+        self,
+        family: str,
+        uid: str,
+        *,
+        tenant_id: str | None = None,
+        subject_id: str | None = None,
+        session_epoch: str | None = None,
+    ) -> str:
+        return self.scope(
+            uid,
+            tenant_id=tenant_id,
+            subject_id=subject_id,
+            session_epoch=session_epoch,
+        ).key(family)
+
+    def _register_key(self, scope: MemoryScope, key: str, ttl: int) -> None:
+        index_key = scope.subject_index_key
         try:
-            self.kv_ttl = int(os.getenv("CHAT_ACTIVE_TTL_SECONDS", os.getenv("CHAT_TTL_SECONDS", "86400")))
+            if self.redis is not None:
+                self.redis.sadd(index_key, key)
+                # The index must never expire before any indexed value or a
+                # later erasure could miss an older long-lived epoch.
+                self.redis.expire(index_key, max(ttl, self.kv_ttl, 90 * 86400))
         except Exception:
-            self.kv_ttl = 86400
-        try:
-            self.retrieval_ttl = int(os.getenv("RAG_CACHE_TTL_SECONDS", "600"))
-        except Exception:
-            self.retrieval_ttl = 600
+            pass
+        with self._LOCAL_LOCK:
+            self._LOCAL_INDEX.setdefault(index_key, set()).add(key)
 
     def _local_get(self, key: str) -> Optional[str]:
-        try:
-            with self._LOCAL_LOCK:
-                row = self._LOCAL_STORE.get(key)
-                if not row:
-                    return None
-                exp = row.get("exp")
-                if exp is not None and float(exp) < time.time():
-                    self._LOCAL_STORE.pop(key, None)
-                    return None
-                return row.get("value")
-        except Exception:
-            return None
+        with self._LOCAL_LOCK:
+            row = self._LOCAL_STORE.get(key)
+            if not row:
+                return None
+            exp = row.get("exp")
+            if exp is not None and float(exp) <= time.time():
+                self._LOCAL_STORE.pop(key, None)
+                return None
+            return row.get("value")
 
     def _local_setex(self, key: str, ttl: int, value: str) -> None:
-        try:
-            exp = time.time() + max(1, int(ttl))
-            with self._LOCAL_LOCK:
-                self._LOCAL_STORE[key] = {"value": value, "exp": exp}
-        except Exception:
-            pass
+        with self._LOCAL_LOCK:
+            self._LOCAL_STORE[key] = {
+                "value": value,
+                "exp": time.time() + max(1, int(ttl)),
+            }
 
-    def get_context(self, uid: str) -> Dict[str, Any]:
-        summary = kv = retrieval = structured = product_bank = None
+    def _set_json(self, scope: MemoryScope, family: str, value: Any, ttl: int) -> None:
+        key = scope.key(family)
+        payload = json.dumps(value)
+        self._register_key(scope, key, ttl)
         try:
-            summary = self.redis.get(SUMMARY_KEY.format(uid=uid))
-            kv = self.redis.get(KV_KEY.format(uid=uid))
-            retrieval = self.redis.get(RETRIEVAL_KEY.format(uid=uid))
-            structured = self.redis.get(STRUCTURED_STATE_KEY.format(uid=uid))
-            product_bank = self.redis.get(PRODUCT_MEMORY_BANK_KEY.format(uid=uid))
-        except Exception:
-            pass
-        if not summary:
-            summary = self._local_get(SUMMARY_KEY.format(uid=uid))
-        if not kv:
-            kv = self._local_get(KV_KEY.format(uid=uid))
-        if not retrieval:
-            retrieval = self._local_get(RETRIEVAL_KEY.format(uid=uid))
-        if not structured:
-            structured = self._local_get(STRUCTURED_STATE_KEY.format(uid=uid))
-        if not product_bank:
-            product_bank = self._local_get(PRODUCT_MEMORY_BANK_KEY.format(uid=uid))
-        return {
-            "summary": json.loads(summary) if summary else None,
-            "kv": json.loads(kv) if kv else None,
-            "recent_retrieval": json.loads(retrieval) if retrieval else None,
-            "structured_state": json.loads(structured) if structured else None,
-            "product_memory_bank": json.loads(product_bank) if product_bank else None,
-        }
-
-    def touch_session(self, uid: str, ttl_seconds: int | None = None) -> None:
-        ttl = self.kv_ttl if ttl_seconds is None else max(1, int(ttl_seconds))
-        keys = [
-            SUMMARY_KEY.format(uid=uid),
-            KV_KEY.format(uid=uid),
-            RETRIEVAL_KEY.format(uid=uid),
-            AGENT_STEPS_KEY.format(uid=uid),
-            STRUCTURED_STATE_KEY.format(uid=uid),
-            PRODUCT_MEMORY_BANK_KEY.format(uid=uid),
-        ]
-        try:
-            for key in keys:
-                try:
-                    self.redis.expire(key, ttl)
-                except Exception:
-                    continue
-        except Exception:
-            pass
-
-    def clear_session(self, uid: str, *, tenant_id: str = "default") -> None:
-        keys = [
-            SUMMARY_KEY.format(uid=uid),
-            KV_KEY.format(uid=uid),
-            RETRIEVAL_KEY.format(uid=uid),
-            AGENT_STEPS_KEY.format(uid=uid),
-            STRUCTURED_STATE_KEY.format(uid=uid),
-            PRODUCT_MEMORY_BANK_KEY.format(uid=uid),
-            OBSERVATION_LOG_KEY.format(uid=uid),
-            OBSERVATION_SUMMARY_KEY.format(uid=uid),
-            PENDING_CLARIFICATION_KEY.format(
-                tenant_id=str(tenant_id or "default").strip() or "default",
-                uid=str(uid or "").strip(),
-            ),
-        ]
-        try:
-            self.redis.delete(*keys)
-        except Exception:
-            pass
-        try:
-            with self._LOCAL_LOCK:
-                for key in keys:
-                    self._LOCAL_STORE.pop(key, None)
-        except Exception:
-            pass
-
-    def set_pending_clarification(
-        self, uid: str, pending: Dict[str, Any], *, tenant_id: str = "default", ttl_seconds: int = 900,
-    ) -> None:
-        """Persist one bounded clarification turn independently of browser chat history."""
-        key = PENDING_CLARIFICATION_KEY.format(
-            tenant_id=str(tenant_id or "default").strip() or "default", uid=str(uid or "").strip(),
-        )
-        payload = json.dumps(pending if isinstance(pending, dict) else {})
-        ttl = max(30, min(int(ttl_seconds), 3600))
-        try:
-            self.redis.setex(key, ttl, payload)
+            if self.redis is None:
+                raise RuntimeError("redis_unavailable")
+            self.redis.setex(key, max(1, int(ttl)), payload)
         except Exception:
             self._local_setex(key, ttl, payload)
         else:
+            # A bounded local copy provides continuity during a later Redis outage.
             self._local_setex(key, ttl, payload)
 
-    def get_pending_clarification(self, uid: str, *, tenant_id: str = "default") -> Dict[str, Any]:
-        key = PENDING_CLARIFICATION_KEY.format(
-            tenant_id=str(tenant_id or "default").strip() or "default", uid=str(uid or "").strip(),
-        )
+    def _get_json(self, scope: MemoryScope, family: str, default: Any) -> Any:
+        key = scope.key(family)
         raw = None
         try:
-            raw = self.redis.get(key)
+            if self.redis is not None:
+                raw = self.redis.get(key)
         except Exception:
             pass
         if not raw:
             raw = self._local_get(key)
         try:
-            parsed = json.loads(raw) if raw else {}
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            return {}
+            return json.loads(raw) if raw else default
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return default
 
-    def clear_pending_clarification(self, uid: str, *, tenant_id: str = "default") -> None:
-        key = PENDING_CLARIFICATION_KEY.format(
-            tenant_id=str(tenant_id or "default").strip() or "default", uid=str(uid or "").strip(),
-        )
+    def get_context(self, uid: str, **scope_args: Any) -> Dict[str, Any]:
+        scope = self.scope(uid, **scope_args)
+        return {
+            "summary": self._get_json(scope, "summary", None),
+            "kv": self._get_json(scope, "kv_state", None),
+            "recent_retrieval": self._get_json(scope, "recent_retrieval", None),
+            "structured_state": self._get_json(scope, "structured_state", None),
+            "product_memory_bank": self._get_json(scope, "product_memory_bank", None),
+        }
+
+    def touch_session(self, uid: str, ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        ttl = self.kv_ttl if ttl_seconds is None else max(1, int(ttl_seconds))
+        scope = self.scope(uid, **scope_args)
+        for family in _FAMILIES:
+            key = scope.key(family)
+            try:
+                if self.redis is not None:
+                    self.redis.expire(key, ttl)
+            except Exception:
+                continue
+        # Deliberately do not refresh local fallback TTLs on read/touch: expiry
+        # remains a bounded retention promise, not a sliding indefinite history.
+
+    def clear_session(self, uid: str, **scope_args: Any) -> None:
+        scope = self.scope(uid, **scope_args)
+        keys = [scope.key(family) for family in _FAMILIES]
         try:
-            self.redis.delete(key)
+            if self.redis is not None:
+                self.redis.delete(*keys)
+                self.redis.srem(scope.subject_index_key, *keys)
+        except Exception:
+            pass
+        with self._LOCAL_LOCK:
+            for key in keys:
+                self._LOCAL_STORE.pop(key, None)
+            indexed = self._LOCAL_INDEX.get(scope.subject_index_key)
+            if indexed is not None:
+                indexed.difference_update(keys)
+
+    def erase_subject(
+        self,
+        subject_id: str,
+        *,
+        tenant_id: str | None = None,
+    ) -> Dict[str, Any]:
+        """Erase all indexed conversation epochs for one tenant-bound subject."""
+        scope = self.scope(
+            subject_id,
+            tenant_id=tenant_id,
+            subject_id=subject_id,
+            session_epoch="erasure-index",
+        )
+        index_key = scope.subject_index_key
+        keys: set[str] = set()
+        try:
+            if self.redis is not None:
+                raw_keys = self.redis.smembers(index_key) or set()
+                keys.update(
+                    item.decode("utf-8") if isinstance(item, bytes) else str(item)
+                    for item in raw_keys
+                )
+        except Exception:
+            pass
+        with self._LOCAL_LOCK:
+            keys.update(self._LOCAL_INDEX.get(index_key, set()))
+        try:
+            if self.redis is not None and keys:
+                self.redis.delete(*sorted(keys))
+            if self.redis is not None:
+                self.redis.delete(index_key)
+        except Exception:
+            pass
+        with self._LOCAL_LOCK:
+            for key in keys:
+                self._LOCAL_STORE.pop(key, None)
+            self._LOCAL_INDEX.pop(index_key, None)
+        return {
+            "tenant_id": scope.tenant_id,
+            "subject_id": subject_id,
+            "erased_keys": len(keys),
+            "contract_version": MEMORY_CONTRACT_VERSION,
+        }
+
+    def set_pending_clarification(
+        self,
+        uid: str,
+        pending: Dict[str, Any],
+        *,
+        tenant_id: str | None = None,
+        subject_id: str | None = None,
+        session_epoch: str | None = None,
+        ttl_seconds: int = 900,
+    ) -> None:
+        ttl = max(30, min(int(ttl_seconds), 3600))
+        scope = self.scope(
+            uid,
+            tenant_id=tenant_id,
+            subject_id=subject_id,
+            session_epoch=session_epoch,
+        )
+        self._set_json(scope, "pending_clarification", pending if isinstance(pending, dict) else {}, ttl)
+
+    def get_pending_clarification(self, uid: str, **scope_args: Any) -> Dict[str, Any]:
+        value = self._get_json(self.scope(uid, **scope_args), "pending_clarification", {})
+        return value if isinstance(value, dict) else {}
+
+    def clear_pending_clarification(self, uid: str, **scope_args: Any) -> None:
+        scope = self.scope(uid, **scope_args)
+        key = scope.key("pending_clarification")
+        try:
+            if self.redis is not None:
+                self.redis.delete(key)
+                self.redis.srem(scope.subject_index_key, key)
         except Exception:
             pass
         with self._LOCAL_LOCK:
             self._LOCAL_STORE.pop(key, None)
 
-    def set_summary(self, uid: str, summary: Dict[str, Any], ttl_seconds: int | None = None) -> None:
-        try:
-            ttl = self.summary_ttl if ttl_seconds is None else ttl_seconds
-            payload = json.dumps(summary)
-            self.redis.setex(SUMMARY_KEY.format(uid=uid), ttl, payload)
-        except Exception:
-            payload = json.dumps(summary)
-            ttl = self.summary_ttl if ttl_seconds is None else ttl_seconds
-            self._local_setex(SUMMARY_KEY.format(uid=uid), ttl, payload)
-        else:
-            self._local_setex(SUMMARY_KEY.format(uid=uid), ttl, payload)
+    def set_summary(self, uid: str, summary: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        self._set_json(self.scope(uid, **scope_args), "summary", summary, ttl_seconds or self.summary_ttl)
 
-    def set_kv(self, uid: str, kv: Dict[str, Any], ttl_seconds: int | None = None) -> None:
-        try:
-            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-            payload = json.dumps(kv)
-            self.redis.setex(KV_KEY.format(uid=uid), ttl, payload)
-        except Exception:
-            payload = json.dumps(kv)
-            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-            self._local_setex(KV_KEY.format(uid=uid), ttl, payload)
-        else:
-            self._local_setex(KV_KEY.format(uid=uid), ttl, payload)
+    def set_kv(self, uid: str, kv: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        self._set_json(self.scope(uid, **scope_args), "kv_state", kv, ttl_seconds or self.kv_ttl)
 
-    def get_kv(self, uid: str) -> Dict[str, Any]:
-        try:
-            raw = self.redis.get(KV_KEY.format(uid=uid))
-            if raw:
-                try:
-                    self.redis.expire(KV_KEY.format(uid=uid), self.kv_ttl)
-                except Exception:
-                    pass
-                return json.loads(raw)
-        except Exception:
-            pass
-        raw = self._local_get(KV_KEY.format(uid=uid))
-        try:
-            return json.loads(raw) if raw else {}
-        except Exception:
-            return {}
+    def get_kv(self, uid: str, **scope_args: Any) -> Dict[str, Any]:
+        value = self._get_json(self.scope(uid, **scope_args), "kv_state", {})
+        return value if isinstance(value, dict) else {}
 
-    def set_recent_retrieval(self, uid: str, facts: Dict[str, Any], ttl_seconds: int | None = None) -> None:
-        try:
-            ttl = self.retrieval_ttl if ttl_seconds is None else ttl_seconds
-            payload = json.dumps(facts)
-            self.redis.setex(RETRIEVAL_KEY.format(uid=uid), ttl, payload)
-        except Exception:
-            payload = json.dumps(facts)
-            ttl = self.retrieval_ttl if ttl_seconds is None else ttl_seconds
-            self._local_setex(RETRIEVAL_KEY.format(uid=uid), ttl, payload)
-        else:
-            self._local_setex(RETRIEVAL_KEY.format(uid=uid), ttl, payload)
+    def set_recent_retrieval(self, uid: str, facts: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        self._set_json(self.scope(uid, **scope_args), "recent_retrieval", facts, ttl_seconds or self.retrieval_ttl)
 
-    def set_structured_state(self, uid: str, state: Dict[str, Any], ttl_seconds: int | None = None) -> None:
-        try:
-            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-            payload = json.dumps(state)
-            self.redis.setex(STRUCTURED_STATE_KEY.format(uid=uid), ttl, payload)
-        except Exception:
-            payload = json.dumps(state)
-            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-            self._local_setex(STRUCTURED_STATE_KEY.format(uid=uid), ttl, payload)
-        else:
-            self._local_setex(STRUCTURED_STATE_KEY.format(uid=uid), ttl, payload)
+    def set_structured_state(self, uid: str, state: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        self._set_json(self.scope(uid, **scope_args), "structured_state", state, ttl_seconds or self.kv_ttl)
 
-    def get_structured_state(self, uid: str) -> Dict[str, Any]:
-        try:
-            raw = self.redis.get(STRUCTURED_STATE_KEY.format(uid=uid))
-            if raw:
-                try:
-                    self.redis.expire(STRUCTURED_STATE_KEY.format(uid=uid), self.kv_ttl)
-                except Exception:
-                    pass
-                parsed = json.loads(raw)
-                return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            pass
-        raw = self._local_get(STRUCTURED_STATE_KEY.format(uid=uid))
-        try:
-            parsed = json.loads(raw) if raw else {}
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            return {}
+    def get_structured_state(self, uid: str, **scope_args: Any) -> Dict[str, Any]:
+        value = self._get_json(self.scope(uid, **scope_args), "structured_state", {})
+        return value if isinstance(value, dict) else {}
 
-    def set_product_memory_bank(self, uid: str, bank: Dict[str, Any], ttl_seconds: int | None = None) -> None:
-        try:
-            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-            payload = json.dumps(bank)
-            self.redis.setex(PRODUCT_MEMORY_BANK_KEY.format(uid=uid), ttl, payload)
-        except Exception:
-            payload = json.dumps(bank)
-            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-            self._local_setex(PRODUCT_MEMORY_BANK_KEY.format(uid=uid), ttl, payload)
-        else:
-            self._local_setex(PRODUCT_MEMORY_BANK_KEY.format(uid=uid), ttl, payload)
+    def set_product_memory_bank(self, uid: str, bank: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        self._set_json(self.scope(uid, **scope_args), "product_memory_bank", bank, ttl_seconds or self.kv_ttl)
 
-    def get_product_memory_bank(self, uid: str) -> Dict[str, Any]:
-        try:
-            raw = self.redis.get(PRODUCT_MEMORY_BANK_KEY.format(uid=uid))
-            if raw:
-                try:
-                    self.redis.expire(PRODUCT_MEMORY_BANK_KEY.format(uid=uid), self.kv_ttl)
-                except Exception:
-                    pass
-                parsed = json.loads(raw)
-                return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            pass
-        raw = self._local_get(PRODUCT_MEMORY_BANK_KEY.format(uid=uid))
-        try:
-            parsed = json.loads(raw) if raw else {}
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            return {}
+    def get_product_memory_bank(self, uid: str, **scope_args: Any) -> Dict[str, Any]:
+        value = self._get_json(self.scope(uid, **scope_args), "product_memory_bank", {})
+        return value if isinstance(value, dict) else {}
 
-    def append_agent_step(self, uid: str, step: Dict[str, Any], ttl_seconds: int | None = None) -> None:
-        try:
-            # read existing list
-            key = AGENT_STEPS_KEY.format(uid=uid)
-            raw = self.redis.get(key)
-            data = json.loads(raw) if raw else []
-            data.append(step)
-            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-            payload = json.dumps(data)
-            self.redis.setex(key, ttl, payload)
-        except Exception:
-            try:
-                key = AGENT_STEPS_KEY.format(uid=uid)
-                raw = self._local_get(key)
-                data = json.loads(raw) if raw else []
-                data.append(step)
-                ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-                self._local_setex(key, ttl, json.dumps(data))
-            except Exception:
-                pass
-        else:
-            self._local_setex(key, ttl, payload)
+    def append_agent_step(self, uid: str, step: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        scope = self.scope(uid, **scope_args)
+        data = self._get_json(scope, "agent_steps", [])
+        if not isinstance(data, list):
+            data = []
+        data.append(step)
+        self._set_json(scope, "agent_steps", data, ttl_seconds or self.kv_ttl)
 
-    def get_agent_steps(self, uid: str) -> Optional[list]:
-        try:
-            key = AGENT_STEPS_KEY.format(uid=uid)
-            raw = self.redis.get(key)
-            if raw:
-                return json.loads(raw)
-            raw_local = self._local_get(key)
-            return json.loads(raw_local) if raw_local else []
-        except Exception:
-            try:
-                key = AGENT_STEPS_KEY.format(uid=uid)
-                raw_local = self._local_get(key)
-                return json.loads(raw_local) if raw_local else []
-            except Exception:
-                return []
+    def get_agent_steps(self, uid: str, **scope_args: Any) -> list:
+        value = self._get_json(self.scope(uid, **scope_args), "agent_steps", [])
+        return value if isinstance(value, list) else []
 
-    # ── Layer 2: Observation log (append-only event stream) ──
+    def append_observation(self, uid: str, observation: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        scope = self.scope(uid, **scope_args)
+        log = self._get_json(scope, "observation_log", [])
+        if not isinstance(log, list):
+            log = []
+        item = dict(observation or {})
+        item["ts"] = item.get("ts") or time.time()
+        log.append(item)
+        self._set_json(scope, "observation_log", log[-500:], ttl_seconds or self.kv_ttl)
 
-    def append_observation(self, uid: str, observation: Dict[str, Any], ttl_seconds: int | None = None) -> None:
-        """Append a raw agent observation to the session's observation log."""
-        key = OBSERVATION_LOG_KEY.format(uid=uid)
-        ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-        try:
-            raw = self.redis.get(key)
-            log = json.loads(raw) if raw else []
-        except Exception:
-            raw = self._local_get(key)
-            log = json.loads(raw) if raw else []
-        observation["ts"] = observation.get("ts") or time.time()
-        log.append(observation)
-        # Cap at 500 raw entries to bound memory
-        if len(log) > 500:
-            log = log[-500:]
-        payload = json.dumps(log)
-        try:
-            self.redis.setex(key, ttl, payload)
-        except Exception:
-            self._local_setex(key, ttl, payload)
+    def get_observation_log(self, uid: str, **scope_args: Any) -> list:
+        value = self._get_json(self.scope(uid, **scope_args), "observation_log", [])
+        return value if isinstance(value, list) else []
 
-    def get_observation_log(self, uid: str) -> list:
-        """Retrieve the raw observation log for a session."""
-        key = OBSERVATION_LOG_KEY.format(uid=uid)
-        try:
-            raw = self.redis.get(key)
-            if raw:
-                return json.loads(raw)
-        except Exception:
-            pass
-        raw = self._local_get(key)
-        return json.loads(raw) if raw else []
+    def set_observation_summary(self, uid: str, summary: Dict[str, Any], ttl_seconds: int | None = None, **scope_args: Any) -> None:
+        self._set_json(self.scope(uid, **scope_args), "observation_summary", summary, ttl_seconds or self.kv_ttl)
 
-    def set_observation_summary(self, uid: str, summary: Dict[str, Any], ttl_seconds: int | None = None) -> None:
-        """Store compressed observation summary (output of Reflector)."""
-        key = OBSERVATION_SUMMARY_KEY.format(uid=uid)
-        ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
-        payload = json.dumps(summary)
-        try:
-            self.redis.setex(key, ttl, payload)
-        except Exception:
-            self._local_setex(key, ttl, payload)
-
-    def get_observation_summary(self, uid: str) -> Dict[str, Any]:
-        """Retrieve compressed observation summary."""
-        key = OBSERVATION_SUMMARY_KEY.format(uid=uid)
-        try:
-            raw = self.redis.get(key)
-            if raw:
-                return json.loads(raw)
-        except Exception:
-            pass
-        raw = self._local_get(key)
-        try:
-            return json.loads(raw) if raw else {}
-        except Exception:
-            return {}
+    def get_observation_summary(self, uid: str, **scope_args: Any) -> Dict[str, Any]:
+        value = self._get_json(self.scope(uid, **scope_args), "observation_summary", {})
+        return value if isinstance(value, dict) else {}
