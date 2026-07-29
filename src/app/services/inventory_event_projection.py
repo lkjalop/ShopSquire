@@ -57,6 +57,8 @@ def _nominal_effect(
     *,
     default_location_id: str,
     receipts: dict[str, dict[str, Any]],
+    receipt_buckets: dict[str, str | None],
+    transfers: dict[str, dict[str, Any]],
 ) -> Effect:
     entity = observation.entity_type
     effect: Effect = {}
@@ -88,6 +90,7 @@ def _nominal_effect(
                 bucket,
             )
             _add(effect, key, quantity)
+        receipt_buckets[observation.external_id] = bucket
     elif entity == "inspection":
         receipt = receipts.get(str(payload["receipt_external_id"]))
         if receipt is None:
@@ -95,7 +98,8 @@ def _nominal_effect(
                 f"inspection_receipt_not_projected:{observation.external_id}"
             )
         quantity, uom = _quantity(payload)
-        source_bucket = _receipt_bucket(receipt)
+        receipt_id = str(payload["receipt_external_id"])
+        source_bucket = receipt_buckets.get(receipt_id, _receipt_bucket(receipt))
         outcome_bucket = {
             "accepted": (
                 "consigned"
@@ -116,18 +120,30 @@ def _nominal_effect(
             _add(effect, (variant, location, uom, source_bucket), -quantity)
         if outcome_bucket:
             _add(effect, (variant, location, uom, outcome_bucket), quantity)
+        receipt_buckets[receipt_id] = outcome_bucket
     elif entity == "transfer":
-        if payload["status"] not in {"in_transit", "received"}:
+        status = str(payload["status"])
+        prior = transfers.get(observation.external_id)
+        prior_status = str(prior["status"]) if prior else None
+        if status == prior_status:
             return effect
         quantity, uom = _quantity(payload)
         variant = str(payload["variant_id"])
         source = str(payload["from_location_id"])
         destination = str(payload["to_location_id"])
-        _add(effect, (variant, source, uom, "available"), -quantity)
-        target_bucket = (
-            "in_transit" if payload["status"] == "in_transit" else "available"
-        )
-        _add(effect, (variant, destination, uom, target_bucket), quantity)
+        if status == "in_transit":
+            _add(effect, (variant, source, uom, "available"), -quantity)
+            _add(effect, (variant, destination, uom, "in_transit"), quantity)
+        elif status == "received" and prior_status == "in_transit":
+            _add(effect, (variant, destination, uom, "in_transit"), -quantity)
+            _add(effect, (variant, destination, uom, "available"), quantity)
+        elif status == "received":
+            _add(effect, (variant, source, uom, "available"), -quantity)
+            _add(effect, (variant, destination, uom, "available"), quantity)
+        elif status == "cancelled" and prior_status == "in_transit":
+            _add(effect, (variant, destination, uom, "in_transit"), -quantity)
+            _add(effect, (variant, source, uom, "available"), quantity)
+        transfers[observation.external_id] = payload
     elif entity == "return":
         quantity, uom = _quantity(payload)
         bucket = {
@@ -203,6 +219,8 @@ def project_inventory_events(
     )
     balances: defaultdict[BalanceKey, Decimal] = defaultdict(Decimal)
     receipts: dict[str, dict[str, Any]] = {}
+    receipt_buckets: dict[str, str | None] = {}
+    transfers: dict[str, dict[str, Any]] = {}
     nominal_by_id: dict[str, Effect] = {}
     contribution_by_id: dict[str, Effect] = {}
     checkpoints: list[dict[str, Any]] = []
@@ -223,23 +241,25 @@ def project_inventory_events(
         if observation.entity_type == "location_atp":
             variant = str(payload["variant_id"])
             location = str(payload["location_id"])
-            candidates = {
+            candidates = [
                 (uom, value)
                 for (row_variant, row_location, uom, custody), value
                 in balances.items()
                 if row_variant == variant
                 and row_location == location
                 and custody == "available"
-            }
-            projected_uom = next(iter(candidates))[0] if candidates else (
+            ]
+            candidate_uoms = {uom for uom, _ in candidates}
+            projected_uom = next(iter(candidate_uoms)) if len(candidate_uoms) == 1 else (
                 str(
                     (payload.get("source_atp") or payload.get("on_hand") or {})
                     .get("uom") or ""
                 )
             )
-            projected = sum(
-                (value for _, value in candidates),
-                Decimal(0),
+            projected = (
+                sum((value for _, value in candidates), Decimal(0))
+                if len(candidate_uoms) <= 1
+                else None
             )
             source_atp = payload.get("source_atp")
             if source_atp:
@@ -257,7 +277,18 @@ def project_inventory_events(
             else:
                 observed = None
                 observed_basis = "unavailable"
-            difference = observed - projected if observed is not None else None
+            observed_uom = str(
+                (source_atp or payload.get("on_hand") or {}).get("uom") or ""
+            )
+            comparable = (
+                projected is not None
+                and (not projected_uom or projected_uom == observed_uom)
+            )
+            difference = (
+                observed - projected
+                if observed is not None and comparable
+                else None
+            )
             checkpoints.append({
                 "observation_id": observation_id,
                 "external_id": observation.external_id,
@@ -265,7 +296,9 @@ def project_inventory_events(
                 "variant_id": variant,
                 "location_id": location,
                 "uom": projected_uom,
-                "projected_available": _decimal_json(projected),
+                "projected_available": (
+                    _decimal_json(projected) if projected is not None else None
+                ),
                 "source_atp": (
                     _decimal_json(observed) if observed is not None else None
                 ),
@@ -275,11 +308,20 @@ def project_inventory_events(
                     if difference is not None else None
                 ),
                 "status": (
-                    "matched"
+                    "not_comparable"
+                    if not comparable
+                    else "matched"
                     if difference == 0
                     else "mismatch"
                     if difference is not None
-                    else "not_comparable"
+                    else "unavailable"
+                ),
+                "reason": (
+                    "multiple_projected_uoms"
+                    if len(candidate_uoms) > 1
+                    else "uom_mismatch"
+                    if projected_uom != observed_uom
+                    else None
                 ),
             })
             continue
@@ -289,6 +331,8 @@ def project_inventory_events(
             payload,
             default_location_id=default_location_id,
             receipts=receipts,
+            receipt_buckets=receipt_buckets,
+            transfers=transfers,
         )
         if observation.corrects_observation_id:
             target = nominal_by_id.get(observation.corrects_observation_id)
@@ -368,7 +412,7 @@ def project_inventory_events(
         for key, value in sorted(balances.items())
     ]
     mismatches = [
-        row for row in checkpoints if row["status"] == "mismatch"
+        row for row in checkpoints if row["status"] in {"mismatch", "not_comparable"}
     ]
     return {
         "tenant_id": tenant,
