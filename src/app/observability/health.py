@@ -13,6 +13,27 @@ _CACHE: Dict[str, Any] = {"ts": 0, "payload": None}
 _CACHE_TTL_SECONDS = 30
 
 
+def dependency_health_cached_snapshot() -> Dict[str, Any]:
+    """Return observed health without performing network or database probes."""
+    payload = _CACHE.get("payload")
+    if not isinstance(payload, dict):
+        return {
+            "timestamp": None,
+            "overall": "unknown",
+            "dependencies": {},
+            "age_seconds": None,
+            "stale": True,
+        }
+    now = int(time.time())
+    observed_at = int(_CACHE.get("ts", 0) or 0)
+    age = max(0, now - observed_at) if observed_at else None
+    return {
+        **payload,
+        "age_seconds": age,
+        "stale": age is None or age >= _CACHE_TTL_SECONDS,
+    }
+
+
 def _check_db() -> Dict[str, Any]:
     start = time.time()
     try:

@@ -37,7 +37,7 @@ import time
 from sqlalchemy import text
 from src.app.observability.metrics import chaos_injected_total
 from src.app.observability.metrics import record_cv_auto_decision, record_cv_escalation, record_security_event
-from src.app.observability.health import dependency_health_snapshot
+from src.app.observability.health import dependency_health_cached_snapshot
 from src.app.deps import security_sanitize, hash_uid
 from src.app.security.observer import analyze_payload
  
@@ -79,6 +79,7 @@ from src.app.policy.gate import evaluate_policy_gate
 from src.app.security.tool_intent_gate import evaluate_tool_intent
 from src.app.security.agent_guardrails import assess_agent_interaction
 from src.app.security.maestro_boundaries import validate_agent_action as _maestro_validate
+from src.app.security.guardrails import apply_guardrails
 
 logger = logging.getLogger("shopsquire.orchestrator")
 
@@ -330,11 +331,6 @@ class Orchestrator:
                 target_id=None,
                 payload=payload,
             )
-        except Exception:
-            pass
-
-        try:
-            print(f"[orch.run] after auto-decision block; proposal_keys={list(proposal.keys())[:8] if isinstance(proposal, dict) else None}")
         except Exception:
             pass
 
@@ -753,7 +749,7 @@ class Orchestrator:
             "structured_state": structured_state,
             "product_memory_bank": product_memory_bank,
             "live": live,
-            "dependency_health": dependency_health_snapshot(),
+            "dependency_health": dependency_health_cached_snapshot(),
         }
         # --- Layer 2/3/4 RECALL ---
         episodic_profile = {}
@@ -844,7 +840,7 @@ class Orchestrator:
         timings: dict[str, float] = {}
         t0 = time.time()
         trace_id = self._ensure_trace_id(payload)
-        trace_id = self._ensure_trace_id(payload)
+        tenant_id = payload.get("tenant_id") if isinstance(payload, dict) else None
         query = (payload.get("query") or payload.get("input") or "").strip()
         # Guardrails first
         try:
@@ -1282,7 +1278,7 @@ class Orchestrator:
                             _pv = None   # vision failure must not kill triage (same contract as before)
                     return _labels, _text, _triage, _pv
 
-                labels, text, cv_analysis, _product_vision_res = _run_async_safe(_cv_phase(images[0]))
+                labels, _ocr_text, cv_analysis, _product_vision_res = _run_async_safe(_cv_phase(images[0]))
                 try:
                     product_vision = _product_vision_res
                     if product_vision and not product_vision.error:
@@ -1492,7 +1488,7 @@ class Orchestrator:
                                     run_fraud=lambda: fraud_summary or {},
                                     run_inventory=lambda: inv_evals,
                                     tenant_id=str(tenant_id) if tenant_id else None,
-                                    budget=controller.state.tool_budget_remaining if hasattr(controller, "state") else None,
+                                    budget=tool_budget_remaining,
                                 )
                             )
                         except Exception:
@@ -2675,15 +2671,44 @@ class Orchestrator:
         # effects, but we still persist the decision for audit/observability.
         return not policy.get("approval_required", False) and not simulate_only
 
+    def _emit_synthesis_reasoning(
+        self,
+        *,
+        trace_id: str | None,
+        synthesis: Dict[str, Any] | None,
+        proposal: Dict[str, Any] | None = None,
+    ) -> None:
+        if not trace_id or not isinstance(synthesis, dict):
+            return
+        try:
+            event_payload = {
+                "stage": "phase3",
+                "synthesis_reasoning": synthesis,
+                "proposal_id": (proposal or {}).get("proposal_id"),
+                "synthesis_weight": synthesis.get("synthesis_weight"),
+            }
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="synthesis_reasoning",
+                source_type="orchestrator",
+                source_id="synthesis_engine",
+                target_type=None,
+                target_id=None,
+                payload=event_payload,
+            )
+        except Exception:
+            pass
+
     def _run_internal(self, uid: str, payload: Dict[str, Any], simulate_only: bool = False, use_rules: bool = False) -> OrchestratorResult:
         timings: dict[str, float] = {}
         t0 = time.time()
         trace_id = self._ensure_trace_id(payload)
         self._init_trace_runtime(trace_id)
-        try:
-            print(f"[orch.run] start trace_id={trace_id} uid={uid} simulate_only={simulate_only}")
-        except Exception:
-            pass
+        logger.debug(
+            "orchestrator_run_started trace_id=%s simulate_only=%s",
+            trace_id,
+            simulate_only,
+        )
         # In test/local runs where decision log DB isn't available, avoid
         # calling DB-backed logging functions to prevent OperationalError.
         # Respect monkeypatching in tests: only override if the globals still
@@ -3201,10 +3226,7 @@ class Orchestrator:
             record_agent_invocation("orchestrator", "proposed", None)
         except Exception:
             pass
-        try:
-            print("[orch.run] policy computed")
-        except Exception:
-            pass
+        logger.debug("orchestrator_policy_computed trace_id=%s", trace_id)
         # Policy gate evaluation (LLM/rules); attach to policy metadata and emit trace
         try:
             if getattr(self, "policy_gate", None) is not None:
@@ -3269,10 +3291,6 @@ class Orchestrator:
         timings["policy"] = t4 - t3
         # Auto-decision: allow CV-driven auto approve/deny when enabled and safe
         try:
-            try:
-                print(f"[orch.run] entering auto-decision block; flags.AUTO_CV_DECISIONS_ENABLED={self.flags.get('AUTO_CV_DECISIONS_ENABLED')}")
-            except Exception:
-                pass
             if self.flags.get("AUTO_CV_DECISIONS_ENABLED", False):
                 # Candidate sources: payload (e.g., /cv/upload), proposal['cv'], or proposal['cv_tier2']
                 candidate = None
@@ -3282,10 +3300,6 @@ class Orchestrator:
                     candidate = proposal.get("cv_tier2")
                 elif isinstance(proposal, dict) and proposal.get("cv"):
                     candidate = proposal.get("cv")
-                try:
-                    print(f"[orch.run] auto-decision candidate={candidate}")
-                except Exception:
-                    pass
                 if isinstance(candidate, dict):
                     # extract an explicit decision_action or nested verdict
                     decision_action = None
@@ -3304,10 +3318,6 @@ class Orchestrator:
                         policy_override_allowed = not policy.get("approval_required", False) or bool(simulate_only)
                         if policy_override_allowed:
                             proposal["auto_decision"] = {"action": decision_action, "source": "cv", "verdict": candidate.get("verdict")}
-                            try:
-                                print(f"[orch.run] set auto_decision={proposal.get('auto_decision')}")
-                            except Exception:
-                                pass
                             # Record a trace event for audit
                             try:
                                 if trace_id:
@@ -3326,10 +3336,6 @@ class Orchestrator:
                             try:
                                 tenant = payload.get("tenant_id") or payload.get("tenant") or None
                                 record_cv_auto_decision(decision_action, source="cv")
-                                try:
-                                    print(f"[orch.run] recorded metric for auto_decision {decision_action}")
-                                except Exception:
-                                    pass
                             except Exception:
                                 pass
                             # Return immediately with a proposed result when auto-decision applies
@@ -3381,34 +3387,6 @@ class Orchestrator:
                                 return OrchestratorResult(proposal=proposal, firewall=policy, executed=not simulate_only, timings=timings)
                             except Exception:
                                 pass
-        except Exception:
-            pass
-
-    def _emit_synthesis_reasoning(
-        self,
-        *,
-        trace_id: str | None,
-        synthesis: Dict[str, Any] | None,
-        proposal: Dict[str, Any] | None = None,
-    ) -> None:
-        if not trace_id or not isinstance(synthesis, dict):
-            return
-        try:
-            payload = {
-                "stage": "phase3",
-                "synthesis_reasoning": synthesis,
-                "proposal_id": (proposal or {}).get("proposal_id"),
-                "synthesis_weight": (synthesis.get("synthesis_weight") if isinstance(synthesis, dict) else None),
-            }
-            log_trace_event(
-                trace_id=trace_id,
-                event_type="synthesis_reasoning",
-                source_type="orchestrator",
-                source_id="synthesis_engine",
-                target_type=None,
-                target_id=None,
-                payload=payload,
-            )
         except Exception:
             pass
 
@@ -3514,7 +3492,6 @@ class Orchestrator:
                 # Wire ticketing for approvals on PB-POL playbooks
                 try:
                     if pbid in ("PB-POL-001", "PB-POL-002") and policy.get("approval_required", False):
-                        from src.app.services.ticketing import TicketingAgent
                         ta = TicketingAgent()
                         title = f"Approval workflow: {pbid}"
                         desc = f"Policy gate verdict requires approval. playbook={pbid}, trace_id={trace_id}"
@@ -3870,14 +3847,11 @@ class Orchestrator:
                     )
         except Exception:
             pass
-        try:
-            print(f"[orch.run] returning result trace_id={trace_id} executed={executed} proposal_keys={list(proposal.keys())[:12]}")
-        except Exception:
-            pass
-        try:
-            print("[orch.run] final return reached")
-        except Exception:
-            pass
+        logger.debug(
+            "orchestrator_run_completed trace_id=%s executed=%s",
+            trace_id,
+            executed,
+        )
         return OrchestratorResult(proposal=proposal, firewall=policy, executed=executed, timings=timings)
 
     def run(self, uid: str, payload: Dict[str, Any], simulate_only: bool = False, use_rules: bool = False) -> OrchestratorResult:
@@ -3888,16 +3862,8 @@ class Orchestrator:
         except Exception:
             trace_id = None
         try:
-            try:
-                print("[orch.run] wrapper invoked")
-            except Exception:
-                pass
             res = self._run_internal(uid, payload, simulate_only=simulate_only, use_rules=use_rules)
             if res is None:
-                try:
-                    print("[orch.run] internal returned None; using fallback")
-                except Exception:
-                    pass
                 raise RuntimeError("orchestrator_internal_return_none")
             return res
         except Exception as e:
@@ -3907,7 +3873,10 @@ class Orchestrator:
                     pid = (payload or {}).get("trace_id") or (payload or {}).get("decision_id")
                 except Exception:
                     pid = None
-                print(f"[orch.run] exception fallback: {e}")
+                logger.exception(
+                    "orchestrator_run_fallback trace_id=%s",
+                    pid or trace_id,
+                )
             except Exception:
                 pass
             self._emit_runtime_error(
