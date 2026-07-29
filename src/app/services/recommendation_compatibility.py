@@ -7,6 +7,61 @@ from typing import Any, Dict
 from fastapi import HTTPException
 
 
+def _persist_compatibility_outcome(
+    *,
+    trace_id: str,
+    tenant_id: str,
+    uid: str,
+    query: str,
+    status: str,
+    reason: str,
+    lane: str | None,
+    payload: Dict[str, Any],
+) -> None:
+    """Persist an honest terminal compatibility outcome without reshaping the response.
+
+    Refusals and unavailable V2 turns still expose a decision/trace identifier.  The
+    identifier must resolve through the canonical decision endpoint even though no
+    products or consequential actions were produced.
+    """
+    from src.app.services.decision_log import log_decision, log_trace_event
+
+    safe_summary = {
+        "status": status,
+        "reason": reason,
+        "lane": lane,
+        "action_executed": False,
+        "product_count": len(payload.get("products") or []),
+    }
+    log_trace_event(
+        trace_id=trace_id,
+        event_type="recommendation_compatibility_outcome",
+        source_type="boundary",
+        source_id="Recommendation_Compatibility",
+        target_type="decision",
+        target_id=trace_id,
+        payload=safe_summary,
+    )
+    log_decision(
+        agent_name="Recommendation_Compatibility",
+        input_data={"query": str(query or "")[:1000]},
+        retrieved_context={"compatibility_outcome": safe_summary},
+        proposed_action={
+            "decision_mode": "no_action",
+            "action_executed": False,
+            "reason": reason,
+            "lane": lane,
+            "evidence_items": [],
+        },
+        decision_id=trace_id,
+        tenant_id=tenant_id,
+        actor_id=uid or None,
+        actor_role="buyer",
+        event_type="recommendation_compatibility_outcome",
+        execution_status="blocked" if status == "blocked" else "unavailable",
+    )
+
+
 def serve_v2_compatibility(
     *,
     request: Any,
@@ -242,7 +297,7 @@ def serve_v2_compatibility(
             # The deprecated GET historically returned a safe 200 response for
             # content-policy refusals. Preserve that transport contract while
             # keeping the V2 guard verdict authoritative and returning no data.
-            return {
+            blocked_payload = {
                 "trace_id": trace_id,
                 "decision_id": trace_id,
                 "decision_trace_id": trace_id,
@@ -260,6 +315,17 @@ def serve_v2_compatibility(
                     "checked_boundary": "recommendation_facade",
                 },
             }
+            _persist_compatibility_outcome(
+                trace_id=trace_id,
+                tenant_id=tenant_id,
+                uid=str(params.get("uid") or ""),
+                query=str(params.get("query") or ""),
+                status="blocked",
+                reason=outcome.reason,
+                lane=outcome.lane,
+                payload=blocked_payload,
+            )
+            return blocked_payload
         raise HTTPException(
             status_code=429 if outcome.reason.startswith("quota:") else 403,
             detail={
@@ -312,4 +378,15 @@ def serve_v2_compatibility(
         ]
     if nqe_selection:
         unavailable["nqe_selection_applied"] = nqe_selection
+    unavailable.setdefault("decision_id", trace_id)
+    _persist_compatibility_outcome(
+        trace_id=trace_id,
+        tenant_id=tenant_id,
+        uid=str(params.get("uid") or ""),
+        query=str(params.get("query") or ""),
+        status=outcome.status,
+        reason=outcome.reason,
+        lane=outcome.lane,
+        payload=unavailable,
+    )
     return unavailable
