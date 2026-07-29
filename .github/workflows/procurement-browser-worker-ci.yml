@@ -15,6 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: shopsquire_test
+          POSTGRES_DB: shopsquire
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shopsquire"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
       redis:
         image: redis:7-alpine
         ports:
@@ -29,10 +41,12 @@ jobs:
       DISABLE_PLAYWRIGHT_TESTS: "0"
       PYTEST_PER_TEST_TIMEOUT_SEC: "120"
       PLAYWRIGHT_HTML_OPEN: never
-      DATABASE_URL: sqlite+pysqlite:///${{ github.workspace }}/tmp/browser.sqlite
-      DATABASE_URL_RO: sqlite+pysqlite:///${{ github.workspace }}/tmp/browser.sqlite
-      CATALOG_SEED_DB_PATH: ${{ github.workspace }}/tmp/browser.sqlite
+      DATABASE_URL: postgresql+psycopg2://postgres:shopsquire_test@127.0.0.1:5432/shopsquire
+      DATABASE_URL_RO: postgresql+psycopg2://postgres:shopsquire_test@127.0.0.1:5432/shopsquire
       REDIS_URL: redis://127.0.0.1:6379/0
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      CELERY_HMAC_KEY: ci-only-browser-worker-signing-key
       SHOPSQUIRE_RUNTIME_PROFILE: demo_v2
       RECOMMEND_CORE_MODE: primary
       RECOMMEND_CART_SERVE: "1"
@@ -81,9 +95,12 @@ jobs:
           npx --prefix frontend playwright install --with-deps chromium
       - name: Create isolated database and validate migrations
         run: |
+          set -o pipefail
           mkdir -p tmp test-results
-          timeout 120s alembic upgrade head
-          alembic current
+          timeout 180s alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
+          alembic current 2>&1 | tee test-results/migration-current.log
+          timeout 60s alembic downgrade -1 2>&1 | tee test-results/migration-rollback.log
+          timeout 60s alembic upgrade head 2>&1 | tee test-results/migration-reupgrade.log
           python scripts/seed_real_catalog.py
           python scripts/seed_gaming_laptops.py
           python -m scripts.seed_suppliers
@@ -94,12 +111,15 @@ jobs:
       - name: Start isolated backend and storefront
         run: |
           python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > test-results/backend.log 2>&1 &
+          celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
           npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 > test-results/storefront.log 2>&1 &
           npm --prefix src/frontend/admin-react run dev -- --host 127.0.0.1 --port 3001 > test-results/admin.log 2>&1 &
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:8080/health >/dev/null &&
                curl --fail --silent http://127.0.0.1:5173 >/dev/null &&
-               curl --fail --silent http://127.0.0.1:3001 >/dev/null; then
+               curl --fail --silent http://127.0.0.1:3001 >/dev/null &&
+               timeout 5s celery -A src.app.workers.celery_app:celery_app inspect ping |
+                 grep -q pong; then
               exit 0
             fi
             sleep 1
@@ -136,6 +156,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: shopsquire_test
+          POSTGRES_DB: shopsquire
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shopsquire"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
       redis:
         image: redis:7-alpine
         ports:
@@ -148,8 +180,8 @@ jobs:
     env:
       APP_ENV: testing
       PYTEST_PER_TEST_TIMEOUT_SEC: "90"
-      DATABASE_URL: sqlite+pysqlite:///${{ github.workspace }}/tmp/worker.sqlite
-      DATABASE_URL_RO: sqlite+pysqlite:///${{ github.workspace }}/tmp/worker.sqlite
+      DATABASE_URL: postgresql+psycopg2://postgres:shopsquire_test@127.0.0.1:5432/shopsquire
+      DATABASE_URL_RO: postgresql+psycopg2://postgres:shopsquire_test@127.0.0.1:5432/shopsquire
       REDIS_URL: redis://127.0.0.1:6379/0
       CELERY_BROKER_URL: redis://127.0.0.1:6379/1
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
@@ -167,8 +199,9 @@ jobs:
           pip install pytest pytest-timeout
       - name: Create dedicated worker database
         run: |
+          set -o pipefail
           mkdir -p tmp test-results
-          timeout 120s alembic upgrade head
+          timeout 180s alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
       - name: Start worker and prove broker delivery
         run: |
           celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
