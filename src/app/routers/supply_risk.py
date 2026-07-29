@@ -17,6 +17,9 @@ from src.app.security.auth import (
 )
 from src.app.services.market_source_registry import load_market_source_registry
 from src.app.services.public_market_source_fetch import fetch_public_market_source
+from src.app.services.qualified_alternative_workflow import (
+    propose_qualified_alternatives,
+)
 from src.app.services.supply_graph_repository import (
     approve_subject_mapping,
     bounded_dependency_paths,
@@ -117,6 +120,12 @@ class SupplierHypothesisObservationRequest(BaseModel):
 
 class HypothesisReevaluationRequest(BaseModel):
     decision_time: str
+
+
+class QualifiedAlternativeRequest(BaseModel):
+    target_currency: str = Field(min_length=3, max_length=3)
+    target_uom: str = Field(min_length=1, max_length=40)
+    quotes: list[dict[str, Any]] = Field(min_length=1, max_length=100)
 
 
 def _actor(role: str, subject: OperatorSubject) -> str:
@@ -250,6 +259,26 @@ def reevaluate_supply_hypothesis(
             hypothesis_id=hypothesis_id,
             decision_time=payload.decision_time,
             created_by=_actor(role, subject),
+        )
+    except ValueError as exc:
+        raise _workflow_error(exc) from exc
+
+
+@router.post("/hypotheses/{hypothesis_id}/qualified-alternatives")
+def qualified_alternative_proposal(
+    hypothesis_id: str,
+    payload: QualifiedAlternativeRequest,
+    role: str = Depends(require_role(_OPERATOR)),
+    subject: OperatorSubject = Depends(operator_subject),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return propose_qualified_alternatives(
+            db,
+            tenant_id=current_tenant_id(),
+            hypothesis_id=hypothesis_id,
+            created_by=_actor(role, subject),
+            **payload.model_dump(),
         )
     except ValueError as exc:
         raise _workflow_error(exc) from exc
