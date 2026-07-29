@@ -74,6 +74,11 @@ jobs:
       RATE_LIMIT_PER_IP_PER_MIN: "10000"
       RATE_LIMIT_PER_MINUTE_IP: "10000"
       RATE_LIMIT_PER_MINUTE_KEY: "10000"
+      MERCHANT_API_KEY: ci-browser-merchant-key
+      OWNER_API_KEY: ci-browser-owner-key
+      DEVELOPER_API_KEY: ci-browser-developer-key
+      VITE_API_KEY: ci-browser-merchant-key
+      VITE_OWNER_API_KEY: ci-browser-owner-key
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

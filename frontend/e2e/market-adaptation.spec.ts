@@ -20,6 +20,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(here, '../..');
 
 function devApiKey(): string {
+  if (process.env.VITE_API_KEY?.trim()) return process.env.VITE_API_KEY.trim();
   for (const rel of ['../.env.local', '../.env.development.local']) {
     try {
       const m = readFileSync(resolve(here, rel), 'utf8').match(/^VITE_API_KEY=(.*)$/m);
@@ -31,7 +32,7 @@ function devApiKey(): string {
 
 // inject / clear the demand signal via the demo script (runs at the repo root so the module import resolves)
 function seedDemand(args: string[]): void {
-  execFileSync('python', ['-m', 'scripts.demo_market_adaptation', ...args],
+  execFileSync('poetry', ['run', 'python', '-m', 'scripts.demo_market_adaptation', ...args],
     { cwd: REPO, env: { ...process.env, PYTHONIOENCODING: 'utf-8' }, stdio: 'pipe' });
 }
 

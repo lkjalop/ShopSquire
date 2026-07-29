@@ -17,6 +17,7 @@ import { dirname, resolve } from 'path';
  */
 
 function devApiKey(): string {
+  if (process.env.VITE_API_KEY?.trim()) return process.env.VITE_API_KEY.trim();
   const here = dirname(fileURLToPath(import.meta.url));
   for (const rel of ['../.env.local', '../.env.development.local']) {
     try {

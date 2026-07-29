@@ -6,6 +6,7 @@ import { dirname, resolve } from 'path';
 // The dev key the browser bundle already ships with (VITE_API_KEY) — used to seed the cart deterministically
 // over the API. Not a secret: it's inlined into the served JS.
 function devApiKey(): string {
+  if (process.env.VITE_API_KEY?.trim()) return process.env.VITE_API_KEY.trim();
   const here = dirname(fileURLToPath(import.meta.url));
   for (const rel of ['../.env.local', '../.env.development.local']) {
     try {

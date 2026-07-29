@@ -13,6 +13,7 @@ import { dirname, resolve } from 'path';
  */
 
 function envValue(name: string): string {
+  if (process.env[name]?.trim()) return process.env[name]!.trim();
   const here = dirname(fileURLToPath(import.meta.url));
   for (const rel of ['../.env.local', '../.env.development.local']) {
     try {
