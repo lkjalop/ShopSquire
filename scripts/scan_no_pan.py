@@ -70,6 +70,10 @@ def find_pans_in_text(text: str) -> List[str]:
     not an allowlisted test PAN. Empty list = clean."""
     hits: List[str] = []
     for m in _CANDIDATE_RE.finditer(text):
+        # Serialized decimal scores can have a 13-19 digit fractional part
+        # that happens to satisfy Luhn. They are numeric values, not PANs.
+        if m.start() >= 2 and text[m.start() - 1] == "." and text[m.start() - 2].isdigit():
+            continue
         raw = re.sub(r"[ -]", "", m.group(0))
         if not (13 <= len(raw) <= 19):
             continue
@@ -91,7 +95,10 @@ def scan_repo(root: Path, skip_files: Iterable[Path] = ()) -> List[Tuple[str, in
     skip_abs = {p.resolve() for p in skip_files}
     findings: List[Tuple[str, int, str]] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]  # prune before descending
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _SKIP_DIRS and not d.startswith(".tmp-")
+        ]  # prune generated test shards before descending
         for fname in filenames:
             path = Path(dirpath) / fname
             if path.suffix.lower() in _SKIP_SUFFIXES:

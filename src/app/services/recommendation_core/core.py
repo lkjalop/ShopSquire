@@ -438,8 +438,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 # this branch; an explicit quantity still wins above.
                 requested_quantity = int(prior_quantity)
                 quantity_inherited = True
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as exc:
+            logger.warning("ignored invalid inherited quantity: %s", exc)
 
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
 

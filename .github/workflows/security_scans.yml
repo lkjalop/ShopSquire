@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Run Trivy FS scan (JSON)
-        uses: aquasecurity/trivy-action@0.19.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           format: 'json'
@@ -45,7 +45,7 @@ jobs:
       - name: Upload artifact (Trivy FS)
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-fs.json
+          name: trivy-fs
           path: trivy-fs.json
       - name: Post to compliance registry (optional)
         if: ${{ env.API_BASE_URL != '' && env.ADMIN_API_KEY != '' }}
@@ -62,15 +62,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Generate SBOM (Syft)
-        uses: anchore/sbom-action@v0.15.9
+        uses: anchore/sbom-action@v0.24.0
         with:
           path: .
           format: spdx-json
           output-file: sbom.spdx.json
+          upload-artifact: false
       - name: Upload artifact (SBOM)
         uses: actions/upload-artifact@v4
         with:
-          name: sbom.spdx.json
+          name: sbom-spdx
           path: sbom.spdx.json
       - name: SBOM diff check (baseline optional)
         run: |
@@ -88,9 +89,10 @@ jobs:
             echo "COSIGN_ENABLED not true; skipping signing"
           fi
       - name: Upload signature (optional)
+        if: ${{ hashFiles('sbom.spdx.sig') != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sbom.spdx.sig
+          name: sbom-signature
           path: sbom.spdx.sig
 
   snyk-scan:
@@ -121,11 +123,13 @@ jobs:
           fi
           snyk test --file=pyproject.toml --package-manager=pip --json > snyk-python.json || true
       - name: Upload artifact (Snyk Python)
+        if: ${{ hashFiles('snyk-python.json') != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: snyk-python.json
+          name: snyk-python
           path: snyk-python.json
       - name: Post to compliance registry (optional)
+        if: ${{ hashFiles('snyk-python.json') != '' }}
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
@@ -152,7 +156,7 @@ jobs:
       - name: Upload artifact (pip-audit)
         uses: actions/upload-artifact@v4
         with:
-          name: pip-audit.json
+          name: pip-audit
           path: pip-audit.json
 
   # ── 8.4 SLSA provenance ──────────────────────────────────────────────────

@@ -404,7 +404,6 @@ def test_lint_actually_detects_flavour():
 #   recommend_nqe_helpers / query_decomposer / *_agent / *_parsing / use_case_advisor / vision_stage
 #                           → spec-key + brand/gpu literals → profile spec/keyword slots.
 _PENDING_EXCISION: dict[str, int] = {
-    "src/app/routers/recommend.py": 19,  # re-frozen 2026-07-07; tightened 20->19 (2026-07-12) as flavour excised
     "src/app/routers/chat.py": 17,  # re-frozen 2026-07-07 canary widening  # chat router: clarify-text + brand-alias literals → profile slots
     "src/app/services/recommend_image_hints.py": 13,
     "src/app/services/recommend_nqe_helpers.py": 8,  # re-frozen 2026-07-07 canary widening

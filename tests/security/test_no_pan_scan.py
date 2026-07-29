@@ -36,6 +36,10 @@ def test_ignores_non_pan_digit_runs():
     assert find_pans_in_text("phone +1 415 555 0100") == []
 
 
+def test_ignores_luhn_valid_decimal_fraction():
+    assert find_pans_in_text('"score": 10.506590338991952') == []
+
+
 def test_scan_repo_clean_and_dirty(tmp_path):
     (tmp_path / "ok.py").write_text("x = 'hello world'\nattempts = 600000\n", encoding="utf-8")
     assert scan_repo(tmp_path) == []

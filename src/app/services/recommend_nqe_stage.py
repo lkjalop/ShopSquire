@@ -18,6 +18,7 @@ ADAPTER (product-type-specific):
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 
@@ -32,6 +33,8 @@ from src.app.rag.retrieve import Retriever
 from src.app.services.decision_log import log_trace_event
 from src.app.services.query_understanding import QueryUnderstanding, build_query_understanding
 from src.app.services.recommend_nqe_helpers import build_nqe_asked_and_answered
+
+logger = logging.getLogger("shopsquire.recommend_nqe_stage")
 
 
 DOMAIN_REFINEMENT_QUESTION_IDS = {
@@ -85,16 +88,16 @@ def resolve_nqe_product_category(
         explicit = normalize_product_type_label(coarse_product_category(query))
         if explicit:
             return explicit
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("coarse product-category classification degraded: %s", exc)
     try:
         from src.app.services.category_router import detect_category
 
         detected = detect_category(query=query, constraints=constraints)
         if detected and detected != "general":
             return str(detected)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("profile category detection degraded: %s", exc)
     return "laptop" if "laptop" in str(query or "").lower() else "general"
 
 

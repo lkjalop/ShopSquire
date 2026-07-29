@@ -21,4 +21,4 @@ jobs:
         # remains reported separately and is not represented as green here.
         run: >-
           python scripts/ci_ruff_changed.py
-          --base "3ad65c6c318a6a7f59953373951dc96fb0d25e28"
+          --base "c76351e450ef0c080ef76c30ef880b4963e22ff5"
