@@ -36,6 +36,7 @@ def test_admin_account_api_is_tenant_scoped_and_proposal_only(tmp_path, monkeypa
         "20260810_account_intelligence.py",
         "20260814_conversation_fact_observations.py",
         "20260819_party_timeline.py",
+        "20260822_party_redirect_execution.py",
     ):
         _apply(engine, migration)
     set_engine(engine)
@@ -87,3 +88,66 @@ def test_admin_account_api_is_tenant_scoped_and_proposal_only(tmp_path, monkeypa
     )
     assert identity_event["status"] == "approved"
     assert identity_event["execution_allowed"] is False
+
+
+def test_owner_previews_and_executes_approved_redirect_without_moving_history(
+    tmp_path, monkeypatch
+):
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'accounts-execute.sqlite'}",
+        future=True,
+    )
+    for migration in (
+        "20260810_account_intelligence.py",
+        "20260819_party_timeline.py",
+        "20260822_party_redirect_execution.py",
+    ):
+        _apply(engine, migration)
+    set_engine(engine)
+    left = resolve_exact_external_identity(
+        tenant_id="default", source="csv", object_type="customer",
+        external_id="left-execute", party_type="buyer_account",
+    )["party_id"]
+    right = resolve_exact_external_identity(
+        tenant_id="default", source="csv", object_type="customer",
+        external_id="right-execute", party_type="buyer_account",
+    )["party_id"]
+    from src.app.services.account_intelligence import (
+        propose_party_merge,
+        resolve_identity_resolution_proposal,
+    )
+    proposal = propose_party_merge(
+        tenant_id="default", left_party_id=left, right_party_id=right,
+        evidence={}, proposed_by="proposal-creator",
+    )
+    resolve_identity_resolution_proposal(
+        tenant_id="default", proposal_id=proposal["id"],
+        resolution="approved", resolved_by="independent-reviewer",
+        note="Independent evidence review passed.",
+    )
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ABAC_ENABLED", "0")
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app, headers={"x-api-key": "local-owner-key"})
+
+    impact = client.get(
+        f"/api/v1/admin/accounts/identity/proposals/{proposal['id']}/impact"
+    )
+    assert impact.status_code == 200
+    assert impact.json()["executable"] is True
+    executed = client.post(
+        f"/api/v1/admin/accounts/identity/proposals/{proposal['id']}/execute",
+        json={
+            "expected_version": impact.json()["graph_version"],
+            "idempotency_key": "router-merge-execution",
+            "note": "Execute reviewed canonical redirect.",
+        },
+    )
+    assert executed.status_code == 200
+    assert executed.json()["historical_records_moved"] is False
+    canonical = client.get(
+        f"/api/v1/admin/accounts/identity/canonical/{left}"
+    )
+    assert canonical.status_code == 200
+    assert canonical.json()["canonical_party_id"] == right

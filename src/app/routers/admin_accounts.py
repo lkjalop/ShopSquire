@@ -17,11 +17,14 @@ from src.app.security.auth import (
     require_role,
 )
 from src.app.services.account_intelligence import (
+    execute_identity_resolution_proposal,
     get_account_timeline,
     list_identity_resolution_proposals,
     list_parties,
+    preview_identity_resolution_execution,
     propose_party_merge,
     propose_party_split,
+    resolve_canonical_party,
     resolve_identity_resolution_proposal,
 )
 
@@ -43,6 +46,12 @@ class IdentityResolutionBody(BaseModel):
     note: str = Field(min_length=3, max_length=1000)
 
 
+class IdentityExecutionBody(BaseModel):
+    expected_version: int = Field(ge=0)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    note: str = Field(min_length=3, max_length=1000)
+
+
 def _tenant() -> str:
     return str(current_tenant_id() or "default")
 
@@ -55,8 +64,18 @@ def _translate(exc: ValueError) -> HTTPException:
     detail = str(exc)
     if detail in {"party_not_in_tenant", "identity_proposal_not_in_tenant"}:
         return HTTPException(status_code=404, detail=detail)
-    if detail == "identity_proposal_already_resolved":
+    if detail in {
+        "identity_proposal_already_resolved",
+        "identity_graph_version_conflict",
+        "identity_execution_idempotency_conflict",
+        "identity_parties_already_merged",
+        "source_party_already_redirected",
+        "party_redirect_cycle_detected",
+        "active_merge_redirect_not_found",
+    }:
         return HTTPException(status_code=409, detail=detail)
+    if detail == "identity_execution_four_eyes_required":
+        return HTTPException(status_code=403, detail=detail)
     return HTTPException(status_code=400, detail=detail)
 
 
@@ -161,3 +180,54 @@ def resolve_identity_proposal(
         "authority": "human_disposition_only",
         "message": "Disposition recorded; execution remains a separate manual workflow.",
     }
+
+
+@router.get("/identity/proposals/{proposal_id}/impact")
+def identity_execution_impact(
+    proposal_id: str,
+    role: str = Depends(require_role(_OPERATORS)),
+) -> dict[str, Any]:
+    _ = role
+    try:
+        return preview_identity_resolution_execution(
+            tenant_id=_tenant(), proposal_id=proposal_id
+        )
+    except ValueError as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/identity/proposals/{proposal_id}/execute")
+def execute_identity_proposal(
+    proposal_id: str,
+    body: IdentityExecutionBody,
+    role: str = Depends(require_role([ROLE_OWNER])),
+    subject: OperatorSubject = Depends(operator_subject),
+) -> dict[str, Any]:
+    try:
+        result = execute_identity_resolution_proposal(
+            tenant_id=_tenant(),
+            proposal_id=proposal_id,
+            executed_by=_actor(role, subject),
+            expected_version=body.expected_version,
+            idempotency_key=body.idempotency_key,
+            note=body.note,
+        )
+    except ValueError as exc:
+        raise _translate(exc) from exc
+    return {
+        **result,
+        "authority": "owner_executed_append_only_redirect",
+        "message": "Canonical resolution changed; historical Party records were not moved.",
+    }
+
+
+@router.get("/identity/canonical/{party_id}")
+def canonical_party(
+    party_id: str,
+    role: str = Depends(require_role(_OPERATORS)),
+) -> dict[str, Any]:
+    _ = role
+    try:
+        return resolve_canonical_party(tenant_id=_tenant(), party_id=party_id)
+    except ValueError as exc:
+        raise _translate(exc) from exc

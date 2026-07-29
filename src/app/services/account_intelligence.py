@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from src.app.models.db import db_session
 
@@ -560,6 +561,38 @@ def get_account_timeline(
                     "execution_allowed": False,
                 }
             )
+        if "party_redirect_event" in table_names:
+            redirect_rows = db.execute(
+                text(
+                    """
+                    SELECT id,event_type,source_party_id,target_party_id,
+                           supersedes_event_id,graph_version,executed_by,
+                           execution_note,executed_at
+                    FROM party_redirect_event
+                    WHERE tenant_id=:tenant
+                      AND (source_party_id=:party OR target_party_id=:party)
+                    ORDER BY graph_version DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"tenant": tenant, "party": party, "limit": capped_limit},
+            ).fetchall()
+            for row in redirect_rows:
+                timeline.append(
+                    {
+                        "id": str(row[0]),
+                        "event_type": str(row[1]),
+                        "event_class": "party_redirect_execution",
+                        "occurred_at": str(row[8]),
+                        "authority": "owner_executed_append_only_redirect",
+                        "source_party_id": str(row[2]),
+                        "target_party_id": str(row[3]),
+                        "supersedes_event_id": str(row[4]) if row[4] else None,
+                        "graph_version": int(row[5]),
+                        "executed_by": str(row[6]),
+                        "execution_note": str(row[7]),
+                    }
+                )
         snapshot_row = db.execute(
             text(
                 """
@@ -662,7 +695,7 @@ def _propose_identity_resolution(
                 {
                     "id": proposal_id,
                     "tenant": tenant,
-                    "kind": f"link:{kind}",
+                    "kind": kind,
                     "left": left,
                     "right": right,
                     "evidence": evidence_json,
@@ -826,4 +859,328 @@ def resolve_identity_resolution_proposal(
         "resolution_note": resolution_note,
         "execution_allowed": False,
         "manual_execution_required": outcome == "approved",
+    }
+
+
+def _redirect_graph(db, *, tenant_id: str) -> tuple[int, dict[str, str], dict[str, Any]]:
+    rows = db.execute(
+        text(
+            """
+            SELECT id,event_type,source_party_id,target_party_id,
+                   supersedes_event_id,graph_version
+            FROM party_redirect_event
+            WHERE tenant_id=:tenant
+            ORDER BY graph_version,id
+            """
+        ),
+        {"tenant": tenant_id},
+    ).fetchall()
+    superseded = {str(row[4]) for row in rows if row[4]}
+    active_rows = [
+        row for row in rows
+        if str(row[1]) == "merge_redirect" and str(row[0]) not in superseded
+    ]
+    redirects = {str(row[2]): str(row[3]) for row in active_rows}
+    active_by_pair = {
+        (str(row[2]), str(row[3])): {
+            "id": str(row[0]),
+            "graph_version": int(row[5]),
+        }
+        for row in active_rows
+    }
+    return max((int(row[5]) for row in rows), default=0), redirects, active_by_pair
+
+
+def _canonical_from_graph(party_id: str, redirects: dict[str, str]) -> str:
+    current = party_id
+    seen: set[str] = set()
+    while current in redirects:
+        if current in seen:
+            raise ValueError("party_redirect_cycle_detected")
+        seen.add(current)
+        current = redirects[current]
+    return current
+
+
+def resolve_canonical_party(*, tenant_id: str, party_id: str) -> dict[str, Any]:
+    tenant = str(tenant_id or "").strip()
+    party = str(party_id or "").strip()
+    with db_session() as db:
+        if not _party_exists(db, tenant_id=tenant, party_id=party):
+            raise ValueError("party_not_in_tenant")
+        version, redirects, _ = _redirect_graph(db, tenant_id=tenant)
+    canonical = _canonical_from_graph(party, redirects)
+    path = [party]
+    while path[-1] in redirects:
+        path.append(redirects[path[-1]])
+    return {
+        "party_id": party,
+        "canonical_party_id": canonical,
+        "redirect_path": path,
+        "graph_version": version,
+        "redirected": canonical != party,
+    }
+
+
+def preview_identity_resolution_execution(
+    *, tenant_id: str, proposal_id: str
+) -> dict[str, Any]:
+    """Return bounded impact counts without mutating Party-owned records."""
+    tenant = str(tenant_id or "").strip()
+    proposal = str(proposal_id or "").strip()
+    with db_session() as db:
+        row = db.execute(
+            text(
+                """
+                SELECT decision_type,left_party_id,right_party_id,status,
+                       proposed_by,resolved_by
+                FROM identity_resolution_decision
+                WHERE tenant_id=:tenant AND id=:proposal
+                """
+            ),
+            {"tenant": tenant, "proposal": proposal},
+        ).fetchone()
+        if not row:
+            raise ValueError("identity_proposal_not_in_tenant")
+        kind, left, right = str(row[0]), str(row[1]), str(row[2])
+        version, redirects, active_by_pair = _redirect_graph(db, tenant_id=tenant)
+        canonical_left = _canonical_from_graph(left, redirects)
+        canonical_right = _canonical_from_graph(right, redirects)
+        tables = set(inspect(db.get_bind()).get_table_names())
+
+        def count(table: str, predicate: str, params: dict[str, Any]) -> int:
+            if table not in tables:
+                return 0
+            return int(
+                db.execute(
+                    text(f"SELECT COUNT(*) FROM {table} WHERE tenant_id=:tenant AND {predicate}"),
+                    {"tenant": tenant, **params},
+                ).scalar_one()
+            )
+
+        impacts = {
+            "external_identities": count(
+                "party_external_identity", "party_id=:party", {"party": left}
+            ),
+            "account_activities": count(
+                "account_activity", "party_id=:party", {"party": left}
+            ),
+            "account_observations": count(
+                "account_observation", "party_id=:party", {"party": left}
+            ),
+            "account_snapshots": count(
+                "account_intelligence_snapshot", "party_id=:party", {"party": left}
+            ),
+            "relationships": count(
+                "party_relationship",
+                "(from_party_id=:party OR to_party_id=:party)",
+                {"party": left},
+            ),
+        }
+        reversal = (
+            active_by_pair.get((left, right))
+            or active_by_pair.get((right, left))
+            if kind == "split_proposal"
+            else None
+        )
+    conflicts: list[str] = []
+    if kind == "merge_proposal":
+        if canonical_left == canonical_right:
+            conflicts.append("parties_already_resolve_to_same_canonical_party")
+        if canonical_left != left:
+            conflicts.append("source_party_already_redirected")
+        if canonical_right == left:
+            conflicts.append("merge_would_create_redirect_cycle")
+    elif kind == "split_proposal" and reversal is None:
+        conflicts.append("active_merge_redirect_not_found")
+    else:
+        if kind not in IDENTITY_PROPOSAL_TYPES:
+            conflicts.append("proposal_type_is_not_executable")
+    return {
+        "proposal_id": proposal,
+        "decision_type": kind,
+        "status": str(row[3]),
+        "source_party_id": left,
+        "target_party_id": right,
+        "canonical_source_party_id": canonical_left,
+        "canonical_target_party_id": canonical_right,
+        "graph_version": version,
+        "impact_counts": impacts,
+        "conflicts": conflicts,
+        "executable": str(row[3]) == "approved" and not conflicts,
+        "execution_policy": {
+            "moves_historical_records": False,
+            "append_only_redirect": True,
+            "separate_owner_execution_required": True,
+            "proposal_creator_may_execute": False,
+        },
+    }
+
+
+def execute_identity_resolution_proposal(
+    *,
+    tenant_id: str,
+    proposal_id: str,
+    executed_by: str,
+    expected_version: int,
+    idempotency_key: str,
+    note: str,
+) -> dict[str, Any]:
+    """Append a merge redirect or a split reversal after a separate approval."""
+    tenant = str(tenant_id or "").strip()
+    proposal = str(proposal_id or "").strip()
+    actor = str(executed_by or "").strip()
+    key = str(idempotency_key or "").strip()
+    execution_note = str(note or "").strip()
+    if not all((tenant, proposal, actor, key, execution_note)):
+        raise ValueError("identity_execution_scope_required")
+    if len(key) > 200:
+        raise ValueError("identity_execution_idempotency_key_too_long")
+    with db_session() as db:
+        replay = db.execute(
+            text(
+                """
+                SELECT id,proposal_id,event_type,source_party_id,target_party_id,
+                       graph_version,executed_by,supersedes_event_id
+                FROM party_redirect_event
+                WHERE tenant_id=:tenant AND idempotency_key=:key
+                """
+            ),
+            {"tenant": tenant, "key": key},
+        ).fetchone()
+        if replay:
+            if str(replay[1]) != proposal or str(replay[6]) != actor:
+                raise ValueError("identity_execution_idempotency_conflict")
+            return {
+                "event_id": str(replay[0]),
+                "proposal_id": str(replay[1]),
+                "event_type": str(replay[2]),
+                "source_party_id": str(replay[3]),
+                "target_party_id": str(replay[4]),
+                "graph_version": int(replay[5]),
+                "supersedes_event_id": str(replay[7]) if replay[7] else None,
+                "idempotent_replay": True,
+                "historical_records_moved": False,
+            }
+        decision = db.execute(
+            text(
+                """
+                SELECT decision_type,left_party_id,right_party_id,status,proposed_by
+                FROM identity_resolution_decision
+                WHERE tenant_id=:tenant AND id=:proposal
+                """
+            ),
+            {"tenant": tenant, "proposal": proposal},
+        ).fetchone()
+        if not decision:
+            raise ValueError("identity_proposal_not_in_tenant")
+        kind, left, right = (
+            str(decision[0]), str(decision[1]), str(decision[2])
+        )
+        if str(decision[3]) != "approved":
+            raise ValueError("identity_proposal_not_approved")
+        if str(decision[4] or "") == actor:
+            raise ValueError("identity_execution_four_eyes_required")
+        version, redirects, active_by_pair = _redirect_graph(db, tenant_id=tenant)
+        if int(expected_version) != version:
+            raise ValueError("identity_graph_version_conflict")
+        supersedes_event_id = None
+        if kind == "merge_proposal":
+            canonical_left = _canonical_from_graph(left, redirects)
+            canonical_right = _canonical_from_graph(right, redirects)
+            if canonical_left == canonical_right:
+                raise ValueError("identity_parties_already_merged")
+            if canonical_left != left:
+                raise ValueError("source_party_already_redirected")
+            if canonical_right == left:
+                raise ValueError("party_redirect_cycle_detected")
+            source, target = left, canonical_right
+            event_type = "merge_redirect"
+        elif kind == "split_proposal":
+            active = active_by_pair.get((left, right))
+            if active is None:
+                active = active_by_pair.get((right, left))
+            if active is None:
+                raise ValueError("active_merge_redirect_not_found")
+            source, target = (
+                (left, right) if (left, right) in active_by_pair else (right, left)
+            )
+            supersedes_event_id = str(active["id"])
+            event_type = "split_reversal"
+        else:
+            raise ValueError("proposal_type_is_not_executable")
+        next_version = version + 1
+        event_id = hashlib.sha256(
+            f"{tenant}|{proposal}|{event_type}|{next_version}|{key}".encode()
+        ).hexdigest()
+        try:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO party_redirect_event
+                    (id,tenant_id,proposal_id,event_type,source_party_id,target_party_id,
+                     supersedes_event_id,graph_version,idempotency_key,executed_by,
+                     execution_note)
+                    VALUES
+                    (:id,:tenant,:proposal,:event_type,:source,:target,:supersedes,
+                     :version,:key,:actor,:note)
+                    """
+                ),
+                {
+                    "id": event_id,
+                    "tenant": tenant,
+                    "proposal": proposal,
+                    "event_type": event_type,
+                    "source": source,
+                    "target": target,
+                    "supersedes": supersedes_event_id,
+                    "version": next_version,
+                    "key": key,
+                    "actor": actor,
+                    "note": execution_note,
+                },
+            )
+        except IntegrityError as exc:
+            db.rollback()
+            concurrent = db.execute(
+                text(
+                    """
+                    SELECT id,proposal_id,event_type,source_party_id,target_party_id,
+                           graph_version,executed_by,supersedes_event_id
+                    FROM party_redirect_event
+                    WHERE tenant_id=:tenant AND idempotency_key=:key
+                    """
+                ),
+                {"tenant": tenant, "key": key},
+            ).fetchone()
+            if concurrent and (
+                str(concurrent[1]) != proposal or str(concurrent[6]) != actor
+            ):
+                raise ValueError("identity_execution_idempotency_conflict") from exc
+            if concurrent:
+                return {
+                    "event_id": str(concurrent[0]),
+                    "proposal_id": str(concurrent[1]),
+                    "event_type": str(concurrent[2]),
+                    "source_party_id": str(concurrent[3]),
+                    "target_party_id": str(concurrent[4]),
+                    "graph_version": int(concurrent[5]),
+                    "supersedes_event_id": (
+                        str(concurrent[7]) if concurrent[7] else None
+                    ),
+                    "idempotent_replay": True,
+                    "historical_records_moved": False,
+                }
+            raise ValueError("identity_graph_version_conflict") from exc
+        db.commit()
+    return {
+        "event_id": event_id,
+        "proposal_id": proposal,
+        "event_type": event_type,
+        "source_party_id": source,
+        "target_party_id": target,
+        "graph_version": next_version,
+        "supersedes_event_id": supersedes_event_id,
+        "idempotent_replay": False,
+        "historical_records_moved": False,
     }
