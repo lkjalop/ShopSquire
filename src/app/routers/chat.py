@@ -213,7 +213,7 @@ def _store_chat_message(
         "tenant_id": str(tenant_id or current_tenant_id() or "default")[:128],
         "uid": bounded_uid,
         "session_id": bounded_session_id,
-        "session_epoch": str(session_epoch or bounded_session_id or "legacy")[:128],
+        "session_epoch": str(session_epoch or bounded_session_id or bounded_uid)[:128],
         "role": str(role or "assistant")[:32],
         "content": str(content or "")[:8000],
         "trace_id": str(trace_id or "")[:128] or None,
@@ -1385,7 +1385,7 @@ def _persist_chat_structured_state(
     mem = Memory(
         redis,
         tenant_id=tenant_id,
-        session_epoch=session_epoch or "legacy",
+        session_epoch=session_epoch,
     )
     prior = mem.get_structured_state(uid) or {}
     budget = _extract_budget_bounds(query)
@@ -1788,7 +1788,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     uid = _resolve_uid(payload, request)
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
     tenant_id = _request_tenant_id(request)
-    session_epoch = session_id or "legacy"
+    session_epoch = session_id or uid
     source_ip = request.client.host if request and request.client else ""
     # TEXT prompt-injection tally (ledger-only, no behavior change): classic override phrasings are
     # already harmless here (they fall through to a normal product turn — the LLM never sees them as
@@ -3520,7 +3520,7 @@ def chat_history(
 ) -> Dict[str, Any]:
     _ = role
     tenant_id = _request_tenant_id(request)
-    epoch = str(session_epoch or "legacy")[:128]
+    epoch = str(session_epoch or uid)[:128]
     params: Dict[str, Any] = {
         "tenant_id": tenant_id,
         "uid": uid,

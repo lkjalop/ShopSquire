@@ -58,7 +58,7 @@ def upgrade() -> None:
         op.execute(
             """
             UPDATE chat_messages
-            SET session_epoch = COALESCE(NULLIF(session_id, ''), 'legacy')
+            SET session_epoch = COALESCE(NULLIF(session_id, ''), uid)
             WHERE session_epoch IS NULL OR session_epoch = 'legacy'
             """
         )
