@@ -29,6 +29,20 @@ function Tail-IfPresent([string]$Name) {
     }
 }
 
+function Wait-BoundedProcess(
+    [System.Diagnostics.Process]$Process,
+    [int]$TimeoutSec,
+    [string]$Label
+) {
+    if (-not $Process.WaitForExit($TimeoutSec * 1000)) {
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        throw "$Label timed out after $TimeoutSec seconds"
+    }
+    # Refresh the process wrapper so ExitCode is populated consistently.
+    $Process.Refresh()
+    return $Process.ExitCode
+}
+
 docker run --name $pgName --rm -d --tmpfs /var/lib/postgresql/data `
     -e POSTGRES_PASSWORD=shopsquire_test -e POSTGRES_DB=shopsquire `
     -p 55434:5432 pgvector/pgvector:pg16 | Out-Null
@@ -168,12 +182,13 @@ try {
         $reactProcess = Start-Process -FilePath npx.cmd -ArgumentList @(
             "playwright", "test", "--reporter=line", "--workers=1"
         ) -WorkingDirectory (Get-Location).Path -WindowStyle Hidden -PassThru `
-            -Wait -RedirectStandardOutput (
+            -RedirectStandardOutput (
                 Join-Path $ArtifactRoot "react-playwright.log"
             ) -RedirectStandardError (
                 Join-Path $ArtifactRoot "react-playwright.err.log"
             )
-        $reactExit = $reactProcess.ExitCode
+        $reactExit = Wait-BoundedProcess `
+            -Process $reactProcess -TimeoutSec 600 -Label "react_playwright"
     }
     finally {
         Pop-Location
@@ -187,13 +202,14 @@ try {
         "tests/e2e/test_procurement_malicious_reply_playwright.py",
         "tests/e2e/test_live_policy_trace.py",
         "tests/e2e/test_live_procurement_closed_loop.py"
-    ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru -Wait `
+    ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (
             Join-Path $ArtifactRoot "spa-regressions.log"
         ) -RedirectStandardError (
             Join-Path $ArtifactRoot "spa-regressions.err.log"
         )
-    $spaExit = $spaProcess.ExitCode
+    $spaExit = Wait-BoundedProcess `
+        -Process $spaProcess -TimeoutSec 600 -Label "spa_regressions"
 
     Write-Output "LIVE_STACK_ARTIFACTS=$ArtifactRoot"
     Write-Output "REACT_PLAYWRIGHT_EXIT=$reactExit"

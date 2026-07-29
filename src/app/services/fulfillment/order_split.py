@@ -348,16 +348,33 @@ def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
                      "supplier_ref": g.get("supplier_ref"), "recipient_domain": g.get("recipient_domain")}
             if requirements:
                 patch["requirements"] = requirements  # buyer deadline/use_case/ship_to → cited in the RFQ (concrete deadline)
-            fwf.transition(db, case_id=cid, event="availability_assessed", actor=agent,
-                           reason_code="multi_line_order", state_patch=patch, trace_id=trace_id,
-                           now_iso=now_iso, tenant_id=tenant_id)
-            fwf.transition(db, case_id=cid, event="request_buyer_commitment", actor=agent,
-                           trace_id=trace_id, now_iso=now_iso, tenant_id=tenant_id)
+            assessed = fwf.transition(
+                db, case_id=cid, event="availability_assessed", actor=agent,
+                reason_code="multi_line_order", state_patch=patch, trace_id=trace_id,
+                now_iso=now_iso, tenant_id=tenant_id,
+            )
+            if not assessed.ok:
+                raise RuntimeError(
+                    f"availability_assessed_failed:{assessed.reason}"
+                )
+            awaiting = fwf.transition(
+                db, case_id=cid, event="request_buyer_commitment", actor=agent,
+                trace_id=trace_id, now_iso=now_iso, tenant_id=tenant_id,
+            )
+            if not awaiting.ok:
+                raise RuntimeError(
+                    f"request_buyer_commitment_failed:{awaiting.reason}"
+                )
             created.append({"case_id": cid, "supplier_ref": g.get("supplier_ref"),
                             "supplier_name": g.get("supplier_name"), "recipient_domain": g.get("recipient_domain"),
                             "lines": order_lines, "total_quantity": total_qty})
         except Exception as exc:
-            logger.debug("create_grouped_cases: group %s failed: %s", g.get("group_id"), exc)
+            db.rollback()
+            logger.warning(
+                "create_grouped_cases: group %s failed: %s",
+                g.get("group_id"),
+                exc,
+            )
     try:
         db.commit()
     except Exception as exc:

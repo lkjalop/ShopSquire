@@ -51,3 +51,14 @@ def test_supplier_baseline_runtime_ddl_is_sqlite_only() -> None:
     )[1].split("\ndef ", 1)[0]
     assert 'dialect != "sqlite"' in function
     assert "return" in function
+
+
+def test_fulfillment_repository_runtime_ddl_is_sqlite_only() -> None:
+    source = (
+        ROOT / "src/app/services/fulfillment/repository.py"
+    ).read_text(encoding="utf-8")
+    function = source.split(
+        "def ensure_tables(db) -> None:", 1,
+    )[1].split("\ndef ", 1)[0]
+    assert 'dialect != "sqlite"' in function
+    assert "return" in function

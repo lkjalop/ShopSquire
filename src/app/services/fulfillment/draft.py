@@ -468,7 +468,10 @@ def _sku_description(db, item_ref: str, tenant_id: str = "default") -> str:
     item_ref when the catalog has no matching row."""
     try:
         from sqlalchemy import text as _t
-        row = db.execute(_t("SELECT name, specs FROM products WHERE sku = :s AND COALESCE(active,1)=1 LIMIT 1"),
+        row = db.execute(_t(
+            "SELECT name, specs FROM products "
+            "WHERE sku = :s AND active IS NOT FALSE LIMIT 1"
+        ),
                          {"s": str(item_ref)}).fetchone()
         if not row:
             return str(item_ref)
@@ -855,6 +858,12 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
         # buyer/operator has a next step instead of a blocked case.
         _alts = no_supplier_alternatives(db, item_ref=item_ref, quantity=quantity, case_state=case_state,
                                          tenant_id=tenant_id)
+        # Draft construction is advisory/read-only and deliberately tolerates
+        # unavailable evidence sources. A caught PostgreSQL query error still
+        # marks its transaction aborted; end that read transaction before the
+        # governed workflow write so optional enrichment cannot become a
+        # misleading not_found transition.
+        db.rollback()
         res = workflow.transition(db, case_id=case_id, event="no_approved_supplier", actor=actor,
                                   reason_code="no_approved_supplier_on_allowlist",
                                   state_patch=({"fulfillment_alternatives": _alts} if _alts else None),
@@ -878,6 +887,9 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
         logger.debug("draft channel/terms enrichment skipped for %s: %s", draft.recipient_ref, exc)
     trace_for_selection = trace_id or (cur.source_trace_id if cur else None)
     _emit_supplier_selection_trace(trace_id=trace_for_selection, case_id=case_id, draft=draft, tenant_id=tenant_id)
+    # See the no-supplier path above: the draft/evidence phase owns no writes,
+    # so reset its read transaction before the authoritative state transition.
+    db.rollback()
     res = workflow.transition(
         db, case_id=case_id, event="external_message_drafted", actor=actor,
         reason_code="supplier_quote_drafted", confidence=draft.confidence,

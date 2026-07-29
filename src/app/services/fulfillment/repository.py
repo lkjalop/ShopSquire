@@ -81,6 +81,19 @@ def _tid(tenant_id: Any) -> str:
 
 
 def ensure_tables(db) -> None:
+    dialect = str(
+        getattr(
+            getattr(getattr(db, "bind", None), "dialect", None),
+            "name",
+            "",
+        )
+        or ""
+    ).lower()
+    # Production schemas are migration-owned. Re-running DDL inside every
+    # PostgreSQL workflow transaction creates avoidable lock/error surfaces.
+    if dialect and dialect != "sqlite":
+        return
+
     for ddl in _DDL:
         db.execute(text(ddl))
     for idx in _INDEXES:
