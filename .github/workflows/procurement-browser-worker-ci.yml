@@ -102,23 +102,23 @@ jobs:
           timeout 60s poetry run alembic downgrade -1 2>&1 | tee test-results/migration-rollback.log
           timeout 60s poetry run alembic upgrade head 2>&1 | tee test-results/migration-reupgrade.log
           python scripts/seed_real_catalog.py
-          python scripts/seed_gaming_laptops.py
-          python -m scripts.seed_suppliers
+          poetry run python scripts/seed_gaming_laptops.py
+          poetry run python -m scripts.seed_suppliers
       - name: React component battery
         run: |
           timeout 420s npm --prefix frontend test -- --run --reporter=verbose --testTimeout=15000
           timeout 180s npm --prefix src/frontend/admin-react test -- --run --reporter=verbose --testTimeout=15000
       - name: Start isolated backend and storefront
         run: |
-          python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > test-results/backend.log 2>&1 &
-          celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
+          poetry run python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > test-results/backend.log 2>&1 &
+          poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
           npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 > test-results/storefront.log 2>&1 &
           npm --prefix src/frontend/admin-react run dev -- --host 127.0.0.1 --port 3001 > test-results/admin.log 2>&1 &
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:8080/health >/dev/null &&
                curl --fail --silent http://127.0.0.1:5173 >/dev/null &&
                curl --fail --silent http://127.0.0.1:3001 >/dev/null &&
-               timeout 5s celery -A src.app.workers.celery_app:celery_app inspect ping |
+               timeout 5s poetry run celery -A src.app.workers.celery_app:celery_app inspect ping |
                  grep -q pong; then
               exit 0
             fi
@@ -137,9 +137,21 @@ jobs:
           LIVE_ADMIN_URL: http://127.0.0.1:3001
           LIVE_GMAIL_INGEST_SECRET: ci-browser-ingress-only
         run: |
-          timeout 240s pytest -vv -s tests/e2e/test_procurement_malicious_reply_playwright.py
-          timeout 240s pytest -vv -s tests/e2e/test_live_policy_trace.py
-          timeout 240s pytest -vv -s tests/e2e/test_live_procurement_closed_loop.py
+          timeout 240s poetry run pytest -vv -s tests/e2e/test_procurement_malicious_reply_playwright.py
+          timeout 240s poetry run pytest -vv -s tests/e2e/test_live_policy_trace.py
+          timeout 240s poetry run pytest -vv -s tests/e2e/test_live_procurement_closed_loop.py
+      - name: Reject transaction-abort signatures
+        if: always()
+        run: |
+          if grep -Eqi \
+            'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
+            test-results/backend.log test-results/celery.log; then
+            echo "::error::PostgreSQL transaction-abort signature found in runtime logs"
+            grep -Ein \
+              'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
+              test-results/backend.log test-results/celery.log
+            exit 1
+          fi
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -204,10 +216,10 @@ jobs:
           timeout 180s poetry run alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
       - name: Start worker and prove broker delivery
         run: |
-          celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
+          poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
           echo $! > test-results/celery.pid
           for attempt in $(seq 1 30); do
-            if timeout 5s celery -A src.app.workers.celery_app:celery_app inspect ping | grep -q pong; then
+            if timeout 5s poetry run celery -A src.app.workers.celery_app:celery_app inspect ping | grep -q pong; then
               exit 0
             fi
             sleep 1
@@ -215,11 +227,23 @@ jobs:
           exit 1
       - name: Worker, delivery, connector, and recovery suites
         run: |
-          timeout 420s pytest -vv \
+          timeout 420s poetry run pytest -vv \
             tests/services/fulfillment/test_outbound_delivery_jobs.py \
             tests/services/test_connector_runtime.py \
             tests/api/test_admin_inventory_netsuite_jobs.py \
             tests/api/test_admin_inventory_generic_deep_provider_jobs.py
+      - name: Reject worker transaction-abort signatures
+        if: always()
+        run: |
+          if grep -Eqi \
+            'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
+            test-results/celery.log; then
+            echo "::error::PostgreSQL transaction-abort signature found in worker logs"
+            grep -Ein \
+              'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
+              test-results/celery.log
+            exit 1
+          fi
       - name: Upload worker evidence
         if: always()
         uses: actions/upload-artifact@v4
