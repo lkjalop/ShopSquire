@@ -30,6 +30,7 @@ def _simulate_policy(
     reorder_quantity: int,
     lead_times: list[int],
     unit_cost_minor: int,
+    sale_price_minor: int,
     shock_day: int,
     shock_unit_cost_minor: int,
 ) -> dict[str, Any]:
@@ -70,9 +71,18 @@ def _simulate_policy(
             "reorder_quantity_units": int(reorder_quantity),
         },
         "fill_rate": round(filled / total_demand, 6),
+        "filled_units": filled,
         "lost_units": lost_units,
         "stockout_days": stockout_days,
         "average_on_hand_units": round(statistics.fmean(closing), 6),
+        "gross_margin_minor": filled * max(0, sale_price_minor - unit_cost_minor),
+        "working_capital_minor": round(
+            statistics.fmean(closing) * unit_cost_minor,
+        ),
+        "service_impact": round(
+            (filled / total_demand) - (stockout_days / len(demand)),
+            6,
+        ),
         "purchase_orders": purchase_orders,
         "purchased_units": purchased_units,
         "purchase_spend_minor": purchase_spend,
@@ -124,6 +134,9 @@ def compare_inventory_policies(
             )
         lead_times = [fallback]
     unit_cost = int(profile.get("unit_cost_minor") or 0)
+    sale_price = int(
+        profile.get("current_price_minor") or round(unit_cost * 1.5)
+    )
     shock_cost = int(round(
         unit_cost
         * (1.0 + float(profile.get("shock_cost_pass_through_pct") or 0.0) / 100.0)
@@ -133,6 +146,7 @@ def compare_inventory_policies(
         "initial_inventory": int(profile.get("initial_inventory") or 0),
         "lead_times": lead_times,
         "unit_cost_minor": unit_cost,
+        "sale_price_minor": sale_price,
         "shock_day": int(profile.get("shock_day") or len(history)),
         "shock_unit_cost_minor": shock_cost,
     }
@@ -181,6 +195,9 @@ def compare_inventory_policies(
                 "stockout_days",
                 "average_on_hand_units",
                 "purchase_spend_minor",
+                "gross_margin_minor",
+                "working_capital_minor",
+                "service_impact",
                 "bounded_utility",
             )
         },
@@ -191,6 +208,8 @@ def compare_inventory_policies(
             "limitations": [
                 "synthetic latent demand and replayed lead-time sequence only",
                 "not a causal estimate",
+                "margin uses the declared current price and base unit cost",
+                "working capital uses average units at base unit cost",
                 "does not price lost goodwill, expiry, storage, financing, or capacity",
                 "cannot increase autonomy",
             ],
