@@ -117,6 +117,11 @@ def upgrade() -> None:
         for table in immutable_tables:
             op.execute(
                 f"""
+                DROP TRIGGER IF EXISTS trg_{table}_no_mutation ON {table}
+                """
+            )
+            op.execute(
+                f"""
                 CREATE TRIGGER trg_{table}_no_mutation
                 BEFORE UPDATE OR DELETE ON {table}
                 FOR EACH ROW EXECUTE FUNCTION reject_supply_workflow_mutation()
@@ -124,6 +129,8 @@ def upgrade() -> None:
             )
     elif dialect == "sqlite":
         for table in immutable_tables:
+            op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_no_update")
+            op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_no_delete")
             op.execute(
                 f"""
                 CREATE TRIGGER trg_{table}_no_update
