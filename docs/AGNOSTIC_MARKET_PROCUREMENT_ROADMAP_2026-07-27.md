@@ -1,5 +1,69 @@
 # Agnostic Market Intelligence and Procurement Roadmap — 2026-07-27
 
+## Operational grounding and archive update — 2026-07-29
+
+The current no-credential foundation is materially stronger than the older
+status sections below:
+
+- inventory projections are now persisted as rebuildable, tenant/source-scoped
+  operational read models. They retain raw UoM custody balances, use
+  effective-dated governed conversions, quarantine negative/conservation/ATP
+  mismatches and expose rebuild status and exceptions in the admin UI;
+- supply nodes, bitemporal dependency edges, source mappings, bounded path
+  retrieval, contradiction scopes and immutable evidence bundles are
+  operational. Grounded hypotheses can produce proposal-only procurement
+  options and qualified-alternative RFQ drafts, but cannot enqueue delivery or
+  execute procurement;
+- multi-seed synthetic cohorts report conditional interval coverage and policy
+  utility by archetype, lifecycle, intermittency, lead time and disruption
+  regime. All such results remain `simulation_only`; waste is explicitly
+  undefined until lot-ageing semantics exist;
+- CPSC, World Bank and the pinned USGS MCS 2026 ScienceBase release now have
+  credential-free governed fetch paths. Licensing, origin, revision, cache and
+  source-health controls are tested. These signals remain advisory and cannot
+  establish SKU/BOM/supplier exposure without a dependency path;
+- Party merge redirects and direct split reversals are append-only,
+  graph-version checked, separately authorized and visible through impact
+  previews. Historical observations are never moved or rewritten;
+- the active legacy response transaction and supporting catalog, narration,
+  fraud, inventory, NQE and context seams have moved behind V2-owned services.
+  Exactly one direct legacy import remains:
+  `tests/test_recommend.py`, the large frozen characterization suite.
+  Production routing remains V2-owned. `recommend.py` is still about 11,900
+  physical lines because rollback bodies remain during parity observation;
+- a V2 trace defect exposed during extraction is fixed: blocked or unavailable
+  compatibility turns now persist the decision identifier that they return;
+- 2,953 service tests were collected and executed across eight isolated local
+  shards: 2,952 passed and one opt-in live protocol test was skipped. The admin
+  component test and production build pass. An empty SQLite database now
+  completes upgrade, one-step rollback and re-upgrade to
+  `20260823_supply_hypothesis_workflow`.
+
+Remaining work, in dependency order:
+
+1. Decompose `tests/test_recommend.py` into V2 contract tests,
+   compatibility-route contracts and frozen characterization evidence. Observe
+   the rollback window, remove the legacy router from `main.py`, then delete
+   `recommend.py`.
+2. Run the existing workflows on GitHub-hosted runners and retain shard,
+   migration and browser artifacts. This workstation still lacks an
+   authenticated `gh` session, so hosted-green is not claimed.
+3. Prove the migration chain and read models on production-shaped PostgreSQL;
+   SQLite rehearsal is not PostgreSQL certification.
+4. Add lot/expiry ageing so waste and perishable-policy utility become defined,
+   then add spend-weighted dependency concentration and multi-UoM aggregation.
+5. Automatically project governed supplier/buyer inbox observations into the
+   hypothesis workflow while retaining signed tenant binding, quarantine and
+   human authorization.
+6. Add hierarchical forecast reconciliation, lost-demand/substitution
+   estimation, conditional calibration diagnostics, forecast-value-added and
+   supplier reliability scoring with proper scoring rules.
+7. Run a design-partner shadow pilot using sealed forecasts and real
+   order/ATP/receipt/invoice outcomes. Synthetic replay proves contracts and
+   discrimination, not commercial lift.
+8. Reduce Ruff incrementally by owned subsystem. The changed boundaries are
+   checked; the legacy repository-wide baseline is not clean.
+
 ## Governed intelligence execution update — 2026-07-29
 
 The previously ordered no-credential work is now implemented locally:

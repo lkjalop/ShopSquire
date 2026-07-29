@@ -8,10 +8,10 @@
 
 ## What It Is
 
-ShopSquire implements the full agent stack required for zero-employee commerce operations:
-multi-agent recommendation pipeline, in-pipeline security enforcement, bitemporal decision
-audit trail, and autonomous exception handling. The owner dashboard is governance-only —
-it is never in the runtime path.
+ShopSquire is a policy-bounded prototype for commerce decision intelligence:
+multi-stage recommendations, forecast and supply-risk evaluation, governed procurement,
+in-pipeline security enforcement, bitemporal evidence and durable exception handling.
+Consequential actions remain behind explicit policy or human authorization.
 
 It is a **synthesis artifact**, not a green-field invention. The architecture was built against
 a formal autonomous e-commerce specification, the AI/retrieval layer against a structured RAG
@@ -20,9 +20,27 @@ depth from security architecture principles, practitioner sessions, and applied 
 into attacker evasion techniques. Each source contributed a distinct layer; the codebase is the
 proof that those layers were synthesised into one coherent system.
 
-The 13,904-line `recommend.py` is what iterative, prompt-assisted development against a formal
-specification produces before the R5 refactor. The finalizer pattern and scatter-gather scaffold
-already present in the codebase show where that extraction is heading.
+Production recommendation routing now uses the V2 compatibility boundary. The remaining legacy
+`recommend.py` file is being retired through characterized helper extraction rather than a risky
+rewrite; its remaining direct test imports are tracked explicitly.
+
+## AI/ML Portfolio Path
+
+For a concise, evidence-backed review:
+
+1. Read [the AI/ML portfolio and interview demo guide](docs/SHOPSQUIRE_AI_ML_PORTFOLIO_DEMO_GUIDE_2026-07-29.md).
+2. Open the admin Supply Risk workbench to show dependency grounding, uncertainty, adversarial
+   evidence and multi-seed policy evaluation.
+3. Open Account Intelligence to show authority-separated Party timelines and reversible,
+   append-only identity resolution.
+4. Run:
+
+   ```powershell
+   .\scripts\run_ai_ml_portfolio_proof.ps1 -IncludeUi
+   ```
+
+The generated proof is test evidence, not production certification. Real ERP reconciliation,
+external provider activation and measured design-partner outcomes remain separate claims.
 
 ---
 
