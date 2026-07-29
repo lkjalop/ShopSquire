@@ -74,8 +74,8 @@ jobs:
       - name: Install backend and browser dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest-playwright
+          pip install -e .
+          pip install pytest pytest-timeout pytest-playwright
           npm ci --prefix frontend
           npm ci --prefix src/frontend/admin-react
           npx --prefix frontend playwright install --with-deps chromium
@@ -163,7 +163,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -e .
+          pip install pytest pytest-timeout
       - name: Create dedicated worker database
         run: |
           mkdir -p tmp test-results

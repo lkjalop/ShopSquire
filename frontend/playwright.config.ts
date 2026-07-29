@@ -13,7 +13,7 @@ export default defineConfig({
   retries: 1,
   reporter: [['line']],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
     headless: true,
     actionTimeout: 20_000,
     trace: 'on',            // full Playwright trace (npx playwright show-trace ...) for every run

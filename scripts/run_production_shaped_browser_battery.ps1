@@ -19,6 +19,20 @@ $resolvedRepo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
 $processes = @()
 
+function Get-FreeTcpPort {
+    $listener = [System.Net.Sockets.TcpListener]::new(
+        [System.Net.IPAddress]::Loopback,
+        0
+    )
+    $listener.Start()
+    try {
+        return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+    }
+    finally {
+        $listener.Stop()
+    }
+}
+
 function Assert-NativeSuccess([string]$Label) {
     if ($LASTEXITCODE -ne 0) {
         throw "$Label failed with exit code $LASTEXITCODE"
@@ -47,23 +61,41 @@ function Stop-ProcessTree([int]$ProcessId) {
 function Wait-BoundedProcess(
     [System.Diagnostics.Process]$Process,
     [int]$TimeoutSec,
-    [string]$Label
+    [string]$Label,
+    [string]$ExitFile = ""
 ) {
     if (-not $Process.WaitForExit($TimeoutSec * 1000)) {
         Stop-ProcessTree -ProcessId $Process.Id
         throw "$Label timed out after $TimeoutSec seconds"
     }
-    # Refresh the process wrapper so ExitCode is populated consistently.
+    if ($ExitFile) {
+        for ($attempt = 0; $attempt -lt 20; $attempt++) {
+            if (Test-Path -LiteralPath $ExitFile) {
+                $rawExitCode = (Get-Content -LiteralPath $ExitFile -Raw).Trim()
+                if ($rawExitCode -match "^-?\d+$") {
+                    return [int]$rawExitCode
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        throw "$Label completed without a persisted exit code"
+    }
+    # Windows PowerShell can expose a null ExitCode for redirected children.
+    # Callers needing a reliable result must use the ExitFile contract above.
     $Process.Refresh()
-    return $Process.ExitCode
+    return [int]$Process.ExitCode
 }
 
 docker run --name $pgName --rm -d --tmpfs /var/lib/postgresql/data `
     -e POSTGRES_PASSWORD=shopsquire_test -e POSTGRES_DB=shopsquire `
-    -p 55434:5432 pgvector/pgvector:pg16 | Out-Null
+    -p 127.0.0.1::5432 pgvector/pgvector:pg16 | Out-Null
 Assert-NativeSuccess "live_postgres_start"
-docker run --name $redisName --rm -d -p 56379:6379 redis:7-alpine | Out-Null
+docker run --name $redisName --rm -d -p 127.0.0.1::6379 redis:7-alpine | Out-Null
 Assert-NativeSuccess "live_redis_start"
+$pgPort = ((docker port $pgName 5432/tcp) -split ":")[-1]
+Assert-NativeSuccess "live_postgres_port"
+$redisPort = ((docker port $redisName 6379/tcp) -split ":")[-1]
+Assert-NativeSuccess "live_redis_port"
 
 try {
     $ready = $false
@@ -82,12 +114,12 @@ try {
     $env:APP_ENV = "testing"
     $env:DATABASE_URL = (
         "postgresql+psycopg2://postgres:shopsquire_test@" +
-        "127.0.0.1:55434/shopsquire"
+        "127.0.0.1:$pgPort/shopsquire"
     )
     $env:DATABASE_URL_RO = $env:DATABASE_URL
-    $env:REDIS_URL = "redis://127.0.0.1:56379/0"
-    $env:CELERY_BROKER_URL = "redis://127.0.0.1:56379/1"
-    $env:CELERY_RESULT_BACKEND = "redis://127.0.0.1:56379/2"
+    $env:REDIS_URL = "redis://127.0.0.1:$redisPort/0"
+    $env:CELERY_BROKER_URL = "redis://127.0.0.1:$redisPort/1"
+    $env:CELERY_RESULT_BACKEND = "redis://127.0.0.1:$redisPort/2"
     $env:CELERY_HMAC_KEY = "local-browser-worker-signing-key"
     $env:SHOPSQUIRE_RUNTIME_PROFILE = "demo_v2"
     $env:RECOMMEND_CORE_MODE = "primary"
@@ -123,6 +155,15 @@ try {
     $env:TOKEN_BUDGET_ENABLED = "1"
     $env:TOKEN_BUDGET_GUEST_DAILY_TOKENS = "1000000000"
     $env:TOKEN_BUDGET_GUEST_DAILY_USD = "1000000"
+    $backendPort = Get-FreeTcpPort
+    $storefrontPort = Get-FreeTcpPort
+    $adminPort = Get-FreeTcpPort
+    $backendUrl = "http://127.0.0.1:$backendPort"
+    $storefrontUrl = "http://127.0.0.1:$storefrontPort"
+    $adminUrl = "http://127.0.0.1:$adminPort"
+    $env:VITE_API_BASE_URL = $backendUrl
+    $env:PLAYWRIGHT_BASE_URL = $storefrontUrl
+    $env:BACKEND_SMOKE_URL = $backendUrl
 
     python -m alembic upgrade head *>&1 |
         Tee-Object -FilePath (Join-Path $ArtifactRoot "migration.log") | Out-Null
@@ -143,7 +184,7 @@ try {
 
     $processes += Start-Process -FilePath python -ArgumentList @(
         "-m", "uvicorn", "src.app.main:create_app", "--factory",
-        "--host", "127.0.0.1", "--port", "8080"
+        "--host", "127.0.0.1", "--port", "$backendPort"
     ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $ArtifactRoot "backend.out.log") `
         -RedirectStandardError (Join-Path $ArtifactRoot "backend.err.log")
@@ -155,13 +196,13 @@ try {
         -RedirectStandardOutput (Join-Path $ArtifactRoot "worker.out.log") `
         -RedirectStandardError (Join-Path $ArtifactRoot "worker.err.log")
     $processes += Start-Process -FilePath npm.cmd -ArgumentList @(
-        "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173"
+        "run", "dev", "--", "--host", "127.0.0.1", "--port", "$storefrontPort"
     ) -WorkingDirectory (Join-Path $resolvedRepo "frontend") `
         -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $ArtifactRoot "storefront.out.log") `
         -RedirectStandardError (Join-Path $ArtifactRoot "storefront.err.log")
     $processes += Start-Process -FilePath npm.cmd -ArgumentList @(
-        "run", "dev", "--", "--host", "127.0.0.1", "--port", "3001"
+        "run", "dev", "--", "--host", "127.0.0.1", "--port", "$adminPort"
     ) -WorkingDirectory (Join-Path $resolvedRepo "src/frontend/admin-react") `
         -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $ArtifactRoot "admin.out.log") `
@@ -171,11 +212,11 @@ try {
     for ($attempt = 0; $attempt -lt 90; $attempt++) {
         try {
             $health = Invoke-WebRequest -UseBasicParsing `
-                -Uri "http://127.0.0.1:8080/healthz" -TimeoutSec 5
+                -Uri "$backendUrl/healthz" -TimeoutSec 5
             $store = Invoke-WebRequest -UseBasicParsing `
-                -Uri "http://127.0.0.1:5173" -TimeoutSec 2
+                -Uri $storefrontUrl -TimeoutSec 2
             $admin = Invoke-WebRequest -UseBasicParsing `
-                -Uri "http://127.0.0.1:3001" -TimeoutSec 2
+                -Uri $adminUrl -TimeoutSec 2
             if (
                 $health.StatusCode -eq 200 -and
                 $store.StatusCode -eq 200 -and
@@ -205,26 +246,34 @@ try {
 
     Push-Location (Join-Path $resolvedRepo "frontend")
     try {
-        $reactProcess = Start-Process -FilePath npx.cmd -ArgumentList @(
-            "playwright", "test", "--reporter=line", "--workers=1"
+        $reactExitFile = Join-Path $ArtifactRoot "react-playwright.exit"
+        $env:SHOPSQUIRE_CHILD_EXIT_FILE = $reactExitFile
+        $reactProcess = Start-Process -FilePath python -ArgumentList @(
+            (Join-Path $resolvedRepo "scripts/run_child_process.py"),
+            "npx.cmd", "playwright", "test", "--reporter=line", "--workers=1"
         ) -WorkingDirectory (Get-Location).Path -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput (
                 Join-Path $ArtifactRoot "react-playwright.log"
             ) -RedirectStandardError (
                 Join-Path $ArtifactRoot "react-playwright.err.log"
-            )
+        )
         $reactExit = Wait-BoundedProcess `
-            -Process $reactProcess -TimeoutSec 600 -Label "react_playwright"
+            -Process $reactProcess -TimeoutSec 600 -Label "react_playwright" `
+            -ExitFile $reactExitFile
     }
     finally {
+        Remove-Item Env:SHOPSQUIRE_CHILD_EXIT_FILE -ErrorAction SilentlyContinue
         Pop-Location
     }
 
     $env:RUN_LIVE_BROWSER_TESTS = "1"
-    $env:LIVE_SHOPPER_URL = "http://127.0.0.1:5173"
-    $env:LIVE_ADMIN_URL = "http://127.0.0.1:3001"
+    $env:LIVE_SHOPPER_URL = $storefrontUrl
+    $env:LIVE_ADMIN_URL = $adminUrl
+    $spaExitFile = Join-Path $ArtifactRoot "spa-regressions.exit"
+    $env:SHOPSQUIRE_CHILD_EXIT_FILE = $spaExitFile
     $spaProcess = Start-Process -FilePath python -ArgumentList @(
-        "-m", "pytest", "-vv", "-s",
+        (Join-Path $resolvedRepo "scripts/run_child_process.py"),
+        "python", "-m", "pytest", "-vv", "-s",
         "tests/e2e/test_procurement_malicious_reply_playwright.py",
         "tests/e2e/test_live_policy_trace.py",
         "tests/e2e/test_live_procurement_closed_loop.py"
@@ -233,9 +282,11 @@ try {
             Join-Path $ArtifactRoot "spa-regressions.log"
         ) -RedirectStandardError (
             Join-Path $ArtifactRoot "spa-regressions.err.log"
-        )
+    )
     $spaExit = Wait-BoundedProcess `
-        -Process $spaProcess -TimeoutSec 600 -Label "spa_regressions"
+        -Process $spaProcess -TimeoutSec 600 -Label "spa_regressions" `
+        -ExitFile $spaExitFile
+    Remove-Item Env:SHOPSQUIRE_CHILD_EXIT_FILE -ErrorAction SilentlyContinue
 
     Write-Output "LIVE_STACK_ARTIFACTS=$ArtifactRoot"
     Write-Output "REACT_PLAYWRIGHT_EXIT=$reactExit"
