@@ -16,6 +16,7 @@ from src.app.services.authoritative_business_feed import (
 )
 from src.app.services.inventory_event_projection import project_inventory_events
 from src.app.services.inventory_projection_read_model import (
+    inventory_projection_status,
     inventory_projection_rows,
     rebuild_inventory_projection,
 )
@@ -133,6 +134,31 @@ def test_rebuild_is_deterministic_idempotent_and_preserves_custody(tmp_path):
         assert connection.execute(
             text("SELECT COUNT(*) FROM inventory_projection_run")
         ).scalar_one() == 1
+
+
+def test_empty_authoritative_history_is_insufficient_not_execution_ready(tmp_path):
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'empty-projection.sqlite'}",
+        future=True,
+    )
+    _migrate(engine)
+    set_engine(engine)
+
+    result = rebuild_inventory_projection(tenant_id="tenant-a", source="wms")
+
+    assert result["status"] == "insufficient"
+    assert result["execution_allowed"] is False
+    status = inventory_projection_status(tenant_id="tenant-a", source="wms")
+    assert status["runs"][0]["status"] == "insufficient"
+    assert status["execution_policy"]["hidden_compensation_allowed"] is False
+    assert status["exceptions"][0]["exception_type"] == "insufficient_data"
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT exception_type FROM inventory_projection_exception "
+                "WHERE tenant_id='tenant-a'"
+            )
+        ).scalar_one() == "insufficient_data"
 
 
 def test_correction_reversal_and_negative_atp_mismatch_are_quarantined(tmp_path):

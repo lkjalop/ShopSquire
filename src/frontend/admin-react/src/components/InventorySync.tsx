@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { fetchInventoryConnectorSummary, fetchInventoryExternalStock, fetchInventorySyncRuns, runInventorySync } from '../api';
+import {
+  fetchInventoryConnectorSummary,
+  fetchInventoryExternalStock,
+  fetchInventoryProjectionStatus,
+  fetchInventorySyncRuns,
+  rebuildInventoryProjection,
+  runInventorySync,
+  type InventoryProjectionStatus,
+} from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer' };
 
@@ -7,15 +15,22 @@ export function InventorySync({ role }: Props) {
   const [summary, setSummary] = useState<any[]>([]);
   const [runs, setRuns] = useState<any[]>([]);
   const [snapshot, setSnapshot] = useState<any[]>([]);
+  const [projection, setProjection] = useState<InventoryProjectionStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [connectorId, setConnectorId] = useState('csv');
 
   async function refresh() {
-    const [c, r, s] = await Promise.all([fetchInventoryConnectorSummary(5), fetchInventorySyncRuns(50), fetchInventoryExternalStock(80)]);
+    const [c, r, s, p] = await Promise.all([
+      fetchInventoryConnectorSummary(5),
+      fetchInventorySyncRuns(50),
+      fetchInventoryExternalStock(80),
+      fetchInventoryProjectionStatus(),
+    ]);
     setSummary(c.items || []);
     setRuns(r.items || []);
     setSnapshot(s.items || []);
+    setProjection(p);
   }
 
   useEffect(() => {
@@ -36,6 +51,60 @@ export function InventorySync({ role }: Props) {
             Locked: Owner/Developer only.
           </div>
         )}
+      </div>
+
+      <div className="card" data-testid="inventory-projection-status">
+        <h4 style={{ marginTop: 0 }}>Governed inventory projection</h4>
+        <p className="page-sub">
+          Rebuildable location, variant, UoM and custody balances. Empty, mismatched or negative
+          projections cannot authorize execution.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <span className="badge">
+            Latest: {projection?.runs[0]?.status?.toUpperCase() || 'NOT BUILT'}
+          </span>
+          <span className="badge">
+            Hidden compensation: {projection?.execution_policy.hidden_compensation_allowed ? 'allowed' : 'prohibited'}
+          </span>
+          <span className="badge">
+            Exceptions: {projection?.exceptions.length || 0}
+          </span>
+        </div>
+        {projection?.runs[0] && (
+          <div className="page-sub" style={{ marginTop: 8 }}>
+            Source {projection.runs[0].source} · inputs {projection.runs[0].input_count} ·
+            {' '}hash <code>{projection.runs[0].projection_hash.slice(0, 12)}</code>
+          </div>
+        )}
+        {(projection?.exceptions || []).slice(0, 5).map((item) => (
+          <div key={item.id} className="callout" style={{ marginTop: 6 }}>
+            <strong>{item.exception_type.replace(/_/g, ' ')}</strong>
+            {' · '}{JSON.stringify(item.details)}
+          </div>
+        ))}
+        <button
+          className="btn secondary"
+          disabled={locked || loading || !connectorId}
+          style={{ marginTop: 8 }}
+          onClick={async () => {
+            setLoading(true);
+            setMsg('');
+            try {
+              const result = await rebuildInventoryProjection(connectorId);
+              setMsg(
+                `Projection: ${result.status} (${result.input_count} inputs, `
+                + `${result.exception_count} exceptions)`,
+              );
+              await refresh();
+            } catch (error: any) {
+              setMsg(error?.message || 'projection rebuild failed');
+            } finally {
+              setLoading(false);
+            }
+          }}
+        >
+          Rebuild governed projection
+        </button>
       </div>
 
       <div className="card">

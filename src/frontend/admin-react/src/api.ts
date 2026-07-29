@@ -441,6 +441,62 @@ export async function fetchInventoryConnectorSummary(limitSamples = 5): Promise<
   return http(`/api/v1/admin/inventory/connectors/summary?limit_samples=${limitSamples}`);
 }
 
+export type InventoryProjectionStatus = {
+  tenant_id: string;
+  source: string | null;
+  runs: Array<{
+    id: string;
+    source: string;
+    projection_version: number;
+    input_count: number;
+    projection_hash: string;
+    status: 'ready' | 'quarantined' | 'insufficient';
+    started_at: string;
+    finished_at: string;
+  }>;
+  exceptions: Array<{
+    id: string;
+    source: string;
+    projection_run_id: string;
+    exception_type: string;
+    observation_id?: string | null;
+    details: Record<string, any>;
+    created_at: string;
+  }>;
+  balance_summary: Array<{ source: string; status: string; row_count: number }>;
+  execution_policy: {
+    ready_required: true;
+    quarantined_projection_can_execute: false;
+    hidden_compensation_allowed: false;
+  };
+};
+
+export const fetchInventoryProjectionStatus = (source = '') =>
+  http<InventoryProjectionStatus>(
+    `/api/v1/admin/inventory/projections${source ? `?source=${encodeURIComponent(source)}` : ''}`,
+  );
+
+export const rebuildInventoryProjection = (source: string, defaultLocationId = 'location:primary') =>
+  http<{
+    run_id: string;
+    source: string;
+    status: 'ready' | 'quarantined' | 'insufficient';
+    projection_hash: string;
+    input_count: number;
+    balance_count: number;
+    exception_count: number;
+    execution_allowed: boolean;
+  }>(
+    '/api/v1/admin/inventory/projections/rebuild',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        source,
+        default_location_id: defaultLocationId,
+      }),
+    },
+  );
+
 export async function fetchSupplierRiskSummary(hours = 24 * 7): Promise<{
   window_hours: number;
   quarantined_updates: number;

@@ -78,11 +78,18 @@ def rebuild_inventory_projection(
     mismatches = projected["atp_reconciliation"]["mismatches"]
     conservation = projected["conservation"]["internal_movement_failures"]
     status = (
-        "quarantined"
+        "insufficient"
+        if not observations
+        else "quarantined"
         if negatives or mismatches or conservation
         else "ready"
     )
     exceptions: list[tuple[str, dict[str, Any]]] = []
+    if not observations:
+        exceptions.append((
+            "insufficient_data",
+            {"reason": "no_accepted_authoritative_inventory_observations"},
+        ))
     exceptions.extend(("negative_balance", row) for row in negatives)
     exceptions.extend(("atp_reconciliation", row) for row in mismatches)
     exceptions.extend(
@@ -242,3 +249,90 @@ def inventory_projection_rows(
         }
         for row in rows
     ]
+
+
+def inventory_projection_status(
+    *,
+    tenant_id: str,
+    source: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Return bounded projection/run/exception evidence for an operator."""
+    tenant = str(tenant_id or "").strip()
+    source_name = str(source or "").strip().lower()
+    if not tenant:
+        raise ValueError("inventory_projection_tenant_required")
+    capped = max(1, min(int(limit), 200))
+    source_clause = " AND source=:source" if source_name else ""
+    params: dict[str, Any] = {"tenant": tenant, "limit": capped}
+    if source_name:
+        params["source"] = source_name
+    with db_session() as db:
+        runs = db.execute(
+            text(
+                f"""
+                SELECT id,source,projection_version,input_count,projection_hash,
+                       status,started_at,finished_at
+                FROM inventory_projection_run
+                WHERE tenant_id=:tenant{source_clause}
+                ORDER BY finished_at DESC,id DESC
+                LIMIT :limit
+                """
+            ),
+            params,
+        ).mappings().all()
+        exceptions = db.execute(
+            text(
+                f"""
+                SELECT id,source,projection_run_id,exception_type,observation_id,
+                       details_json,created_at
+                FROM inventory_projection_exception
+                WHERE tenant_id=:tenant{source_clause}
+                ORDER BY created_at DESC,id DESC
+                LIMIT :limit
+                """
+            ),
+            params,
+        ).mappings().all()
+        balances = db.execute(
+            text(
+                f"""
+                SELECT source,status,COUNT(*) AS row_count
+                FROM inventory_projection_balance
+                WHERE tenant_id=:tenant{source_clause}
+                GROUP BY source,status
+                ORDER BY source,status
+                """
+            ),
+            {key: value for key, value in params.items() if key != "limit"},
+        ).mappings().all()
+    return {
+        "tenant_id": tenant,
+        "source": source_name or None,
+        "runs": [
+            {
+                **dict(row),
+                "id": str(row["id"]),
+                "projection_hash": str(row["projection_hash"]),
+                "started_at": str(row["started_at"]),
+                "finished_at": str(row["finished_at"]),
+            }
+            for row in runs
+        ],
+        "exceptions": [
+            {
+                **dict(row),
+                "id": str(row["id"]),
+                "projection_run_id": str(row["projection_run_id"]),
+                "details": json.loads(str(row["details_json"])),
+                "created_at": str(row["created_at"]),
+            }
+            for row in exceptions
+        ],
+        "balance_summary": [dict(row) for row in balances],
+        "execution_policy": {
+            "ready_required": True,
+            "quarantined_projection_can_execute": False,
+            "hidden_compensation_allowed": False,
+        },
+    }

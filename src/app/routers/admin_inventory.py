@@ -2,21 +2,69 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, require_role_or_oidc
-from src.app.erp.jobs import run_netsuite_delta_sync, enqueue_netsuite_outbound, run_netsuite_outbound_sync, _SnapshotConnector
+from src.app.erp.jobs import (
+    enqueue_netsuite_outbound,
+    run_netsuite_delta_sync,
+    run_netsuite_outbound_sync,
+)
 from src.app.erp.sync import sync_inventory
 from src.app.erp.provider_registry import load_provider
 from src.app.erp.connector_runtime import get_cursor_state
 from src.app.services.catalog_profile import invalidate_catalog_profile_cache
+from src.app.services.inventory_projection_read_model import (
+    inventory_projection_status,
+    rebuild_inventory_projection,
+)
 
 
 router = APIRouter(prefix="/api/v1/admin/inventory", tags=["admin-inventory"])
+
+
+class ProjectionRebuildBody(BaseModel):
+    source: str = Field(min_length=1, max_length=120)
+    default_location_id: str = Field(default="location:primary", min_length=1, max_length=160)
+
+
+@router.get("/projections")
+def projection_status(
+    source: str | None = None,
+    limit: int = 50,
+    role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    try:
+        return inventory_projection_status(
+            tenant_id=str(current_tenant_id() or "default"),
+            source=source,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/projections/rebuild")
+def rebuild_projection(
+    body: ProjectionRebuildBody,
+    role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    try:
+        return rebuild_inventory_projection(
+            tenant_id=str(current_tenant_id() or "default"),
+            source=body.source,
+            default_location_id=body.default_location_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _invalidate_catalog_profile_after_product_write(tenant_id: str | None) -> None:
