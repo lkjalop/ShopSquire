@@ -88,8 +88,8 @@ jobs:
       - name: Install backend and browser dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest pytest-timeout pytest-playwright
+          pip install poetry
+          poetry install --no-interaction --no-ansi --no-root
           npm ci --prefix frontend
           npm ci --prefix src/frontend/admin-react
           npx --prefix frontend playwright install --with-deps chromium
@@ -195,8 +195,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest pytest-timeout
+          pip install poetry
+          poetry install --no-interaction --no-ansi --no-root
       - name: Create dedicated worker database
         run: |
           set -o pipefail

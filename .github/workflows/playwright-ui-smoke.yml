@@ -31,8 +31,8 @@ jobs:
       - name: Prepare repo
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install -r requirements.txt || true
-          pip install -e . || true
+          pip install poetry
+          poetry install --no-interaction --no-ansi --no-root
 
       - name: Install frontend deps & Playwright browsers
         run: |
@@ -58,24 +58,42 @@ jobs:
       - name: Smoke check metrics, CORS, and WS connectivity
         run: |
           python - <<'PY'
-import time, requests, sys
-base='http://127.0.0.1:8081'
-try:
-    r=requests.get(base+'/health', timeout=3)
-    print('health', r.status_code)
-except Exception as e:
-    print('health error', e)
-try:
-    m=requests.get(base+'/metrics', timeout=3)
-    print('metrics', m.status_code, 'has_http_metric', 'shopsquire_http_requests_total' in m.text)
-except Exception as e:
-    print('metrics error', e)
-try:
-    o=requests.options(base+'/api/v1/decisions/stream', headers={'Origin':'http://localhost:5173','Access-Control-Request-Method':'GET'}, timeout=3)
-    print('options', o.status_code, 'ACAO=', o.headers.get('access-control-allow-origin'))
-except Exception as e:
-    print('options error', e)
-PY
+          import requests
+
+          base = 'http://127.0.0.1:8081'
+          try:
+              response = requests.get(base + '/health', timeout=3)
+              print('health', response.status_code)
+          except Exception as exc:
+              print('health error', exc)
+          try:
+              response = requests.get(base + '/metrics', timeout=3)
+              print(
+                  'metrics',
+                  response.status_code,
+                  'has_http_metric',
+                  'shopsquire_http_requests_total' in response.text,
+              )
+          except Exception as exc:
+              print('metrics error', exc)
+          try:
+              response = requests.options(
+                  base + '/api/v1/decisions/stream',
+                  headers={
+                      'Origin': 'http://localhost:5173',
+                      'Access-Control-Request-Method': 'GET',
+                  },
+                  timeout=3,
+              )
+              print(
+                  'options',
+                  response.status_code,
+                  'ACAO=',
+                  response.headers.get('access-control-allow-origin'),
+              )
+          except Exception as exc:
+              print('options error', exc)
+          PY
 
       - name: Run Playwright tests (if configured)
         run: |
