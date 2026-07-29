@@ -6,7 +6,7 @@ detection is cosmetic (a UI badge) instead of a correlated, alertable security e
 """
 from __future__ import annotations
 
-from src.app.routers.recommend import _image_security_event
+from src.app.services.image_security_event import image_security_event as _image_security_event
 
 _FW = {
     "mitre_atlas": ["AML.T0051"],

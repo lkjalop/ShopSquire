@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy import text
 
-from src.app.feature_flags import get_flags as _ff_get_flags
+from src.app.feature_flags import get_flags as load_feature_flags
 from src.app.models.db import db_session
 from src.app.observability.metrics import record_ticket
 from src.app.services.decision_log import log_decision
@@ -92,7 +92,7 @@ class TicketingAgent:
         approval_required: bool = False,
     ) -> Ticket:
         try:
-            flags = _ff_get_flags()
+            flags = load_feature_flags()
             rl = (flags or {}).get("TICKET_RATE_LIMIT", {"enabled": False, "per_min": 5})
             if rl.get("enabled"):
                 tenant_key = tenant_id or "default"
