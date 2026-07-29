@@ -83,6 +83,7 @@ def put_node_revision(
     revision_reason: str = "initial_observation",
     simulation_only: bool = False,
     recorded_at: datetime | str | None = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
     tenant = _tenant(tenant_id)
     key = str(logical_key or "").strip()
@@ -145,7 +146,8 @@ def put_node_revision(
         "recorded_from": recorded, "supersedes": supersedes,
         "reason": str(revision_reason), "identity_status": status,
     })
-    db.commit()
+    if commit:
+        db.commit()
     return {
         "id": row_id, "tenant_id": tenant, "logical_key": key,
         "node_type": kind, "supersedes_id": supersedes,
@@ -171,6 +173,7 @@ def put_edge_revision(
     revision_reason: str = "initial_observation",
     simulation_only: bool = False,
     recorded_at: datetime | str | None = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
     tenant = _tenant(tenant_id)
     key = str(logical_key or "").strip()
@@ -240,7 +243,8 @@ def put_edge_revision(
         "recorded_from": recorded, "supersedes": supersedes,
         "reason": str(revision_reason),
     })
-    db.commit()
+    if commit:
+        db.commit()
     return {
         "id": row_id, "tenant_id": tenant, "logical_key": key,
         "relationship_type": relationship, "supersedes_id": supersedes,
@@ -271,9 +275,19 @@ def bounded_dependency_paths(
     ), {"tenant": tenant, "at": stamp, "limit": edge_limit + 1}).mappings().all()
     truncated = len(edges) > edge_limit
     adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    stale_edge_count = 0
     for raw in edges[:edge_limit]:
         row = dict(raw)
         row["properties"] = json.loads(row.pop("properties_json") or "{}")
+        fresh_until = row["properties"].get("fresh_until")
+        if fresh_until:
+            try:
+                if _utc(fresh_until) <= stamp:
+                    stale_edge_count += 1
+                    continue
+            except (TypeError, ValueError):
+                stale_edge_count += 1
+                continue
         adjacency[str(row["from_node_id"])].append(row)
     queue = deque([(str(source_node_id), [], {str(source_node_id)})])
     found: list[list[dict[str, Any]]] = []
@@ -299,6 +313,10 @@ def bounded_dependency_paths(
         "paths": found,
         "max_depth": depth,
         "truncated": truncated or len(found) >= path_limit,
+        "stale_edge_count": stale_edge_count,
+        "freshness_status": (
+            "degraded_stale_edges_excluded" if stale_edge_count else "current_or_undeclared"
+        ),
         "authority": "advisory_only",
         "execution_allowed": False,
     }

@@ -29,6 +29,7 @@ from src.app.services.supply_graph_repository import (
     put_edge_revision,
     put_node_revision,
 )
+from src.app.services.supply_exposure_manifest import import_supply_exposure_manifest
 from src.app.services.synthetic_causal_evaluation import evaluate_scenario_cohorts
 from src.app.services.supply_hypothesis_workflow import (
     create_grounded_hypothesis,
@@ -96,6 +97,19 @@ class SubjectMappingRequest(BaseModel):
     mapping_basis: str = Field(min_length=1, max_length=500)
     provenance: dict[str, Any]
     valid_from: str | None = None
+
+
+class SupplyExposureManifestRequest(BaseModel):
+    schema_version: str = Field(min_length=1, max_length=50)
+    source_system: str = Field(min_length=1, max_length=120)
+    snapshot_id: str = Field(min_length=1, max_length=250)
+    revision: int = Field(ge=1)
+    observed_at: str
+    valid_from: str | None = None
+    fresh_until: str
+    provenance: dict[str, Any]
+    nodes: list[dict[str, Any]] = Field(min_length=1, max_length=500)
+    edges: list[dict[str, Any]] = Field(default_factory=list, max_length=2_000)
 
 
 class CausalEvaluationRequest(BaseModel):
@@ -354,6 +368,24 @@ def revise_supply_edge(
     try:
         return put_edge_revision(
             db, tenant_id=current_tenant_id(), **payload.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/graph/exposure-manifests")
+def import_supply_exposure(
+    payload: SupplyExposureManifestRequest,
+    role: str = Depends(require_role([ROLE_OWNER])),
+    subject: OperatorSubject = Depends(operator_subject),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return import_supply_exposure_manifest(
+            db,
+            tenant_id=current_tenant_id(),
+            manifest=payload.model_dump(exclude_none=True),
+            approved_by=_actor(role, subject),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
