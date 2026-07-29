@@ -7,7 +7,6 @@ Proves the two seams the frontend depends on:
   • chat._cart_mutation_short_circuit — forwards cart_mutation/cart/cart_updated (incl. the
     confirmation-card fields) verbatim and skips the product machinery.
 """
-import json
 import pathlib
 import uuid
 
@@ -176,6 +175,25 @@ def test_chat_short_circuit_forwards_explicit_budget_memory():
 
     assert out["confirmed_slots"]["budget_scope"] == "total"
     assert out["confirmed_slots"]["total_budget_cents"] == 11_000_000
+
+
+def test_chat_short_circuit_persists_quantity_for_follow_up_turns():
+    from src.app.deps import DummyRedis
+    from src.app.routers.chat import _cart_mutation_short_circuit
+    from src.app.services.memory import Memory
+
+    redis = DummyRedis()
+    out = _cart_mutation_short_circuit(
+        _suggest_cart_payload(requested_quantity=60),
+        q="actually make it 60 units",
+        uid="u-cart-memory",
+        db=None,
+        redis=redis,
+    )
+
+    assert out["requested_quantity"] == 60
+    state = Memory(redis).get_structured_state("u-cart-memory")
+    assert state["confirmed_slots"]["order_quantity"] == 60
 
 
 def test_chat_short_circuit_forwards_applied_cart():

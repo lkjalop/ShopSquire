@@ -427,7 +427,9 @@ def _is_budget_question(item: Dict[str, Any]) -> bool:
     )
 
 
-def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional[Dict[str, Any]]:
+def _cart_mutation_short_circuit(
+    data: Any, *, q: str, uid: str, db, redis=None,
+) -> Optional[Dict[str, Any]]:
     """CART-MUTATION short-circuit (V2 cart lane, extracted for testability): when the suggest
     hop returns a cart_mutation payload (RECOMMEND_CART_SERVE=on), build the MINIMAL chat
     response — the product/answer-quality/copywriting machinery below chat_query is irrelevant
@@ -466,7 +468,8 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
             "needs_confirmation": True,
             "plan": [],
         }
-    return {
+    response_slots = _extract_confirmed_slots(query=q, response=data)
+    out = {
         "products": [],
         "view_mode": "cards",
         "assistant_message": msg,
@@ -482,8 +485,12 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
         "decision_trace_id": tid,
         "trace_id": tid,
         "next_questions": [],
-        "confirmed_slots": _extract_confirmed_slots(query=q, response=data),
-        "requested_quantity": data.get("requested_quantity"),
+        "confirmed_slots": response_slots,
+        "requested_quantity": (
+            data.get("requested_quantity")
+            if data.get("requested_quantity") is not None
+            else response_slots.get("order_quantity")
+        ),
         "timing_breakdown": (
             data.get("timing_breakdown")
             if isinstance(data.get("timing_breakdown"), dict)
@@ -493,6 +500,19 @@ def _cart_mutation_short_circuit(data: Any, *, q: str, uid: str, db) -> Optional
         "needs_human_review": False,
         "security_route": "allow",
     }
+    try:
+        _persist_chat_structured_state(
+            redis=redis,
+            uid=uid,
+            query=q,
+            products=[],
+            trace_id=str(tid or "") or None,
+            assistant_message=msg,
+            confirmed_slots=response_slots,
+        )
+    except Exception:
+        logger.warning("cart-mutation structured-state persistence failed", exc_info=True)
+    return out
 
 
 def _budget_range_from_slots(slots: Dict[str, Any] | None, query: str) -> Dict[str, int | None]:
@@ -2343,7 +2363,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             # CART-MUTATION short-circuit (V2 cart lane): see _cart_mutation_short_circuit.
             if status_code == 200:
                 _cart_out = _cart_mutation_short_circuit(
-                    data, q=q, uid=_resolve_uid(payload, request), db=db)
+                    data,
+                    q=q,
+                    uid=_resolve_uid(payload, request),
+                    db=db,
+                    redis=redis,
+                )
                 if _cart_out is not None:
                     return _cart_out
             if status_code == 403 and isinstance(data, dict):
@@ -3077,6 +3102,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         assistant_message = data.get("assistant_message") or assistant_message
         products = []
 
+    response_confirmed_slots = dict(confirmed_slots or {})
+    response_confirmed_slots.update(
+        _extract_confirmed_slots(
+            query=q,
+            response=data if isinstance(data, dict) else {},
+        )
+    )
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -3092,7 +3124,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             data.get("needs_disambiguation") or (not products and next_questions)
         ),
         "nqe_selection_applied": data.get("nqe_selection_applied") or {},
-        "confirmed_slots": _extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else {}),
+        "confirmed_slots": response_confirmed_slots,
         "llm_model": data.get("llm_model"),
         "model_tier": data.get("model_tier"),
         "complexity": complexity_result,
@@ -3153,7 +3185,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # and the Decision Trace can SHOW the governed adaptation ("why these moved", gate allow/deny). Each
         # is present only when its flag-gated lever ran; the products themselves are already re-ranked.
         # bulk-order intent: the parsed unit count so Add buttons land the conversation's qty, not 1.
-        "requested_quantity": data.get("requested_quantity"),
+        "requested_quantity": (
+            data.get("requested_quantity")
+            if data.get("requested_quantity") is not None
+            else response_confirmed_slots.get("order_quantity")
+        ),
         # Whole-order sizing is consequential UI state too.  The storefront must be able to
         # reject a stale/stretch product whose requested quantity would exceed the accepted
         # total instead of blindly carrying requested_quantity into the cart.
@@ -3296,6 +3332,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 tenant_id=tenant_id,
                 ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
             )
+    except Exception:
+        logger.warning("pending chat clarification persistence failed", exc_info=True)
+    try:
         user_message_id = _store_chat_message(
             db,
             uid=uid,
@@ -3334,6 +3373,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             trace_id=decision_trace_id,
             session_id=session_id,
         )
+    except Exception:
+        logger.warning("chat message persistence failed", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    try:
         _persist_chat_structured_state(
             redis=redis,
             uid=uid,
@@ -3342,12 +3388,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             trace_id=decision_trace_id,
             assistant_message=str(out.get("assistant_message") or ""),
             recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
-            confirmed_slots=_extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else None),
+            confirmed_slots=response_confirmed_slots,
         )
         if pending_clarification_consumed:
             Memory(redis).clear_pending_clarification(uid, tenant_id=tenant_id)
     except Exception:
-        pass
+        logger.warning("chat structured-state persistence failed", exc_info=True)
     return out
 
 
