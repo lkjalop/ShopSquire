@@ -313,7 +313,8 @@ def emit_split_trace(trace_id: Optional[str], *, plan: Dict[str, Any]) -> None:
 def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
                          uid_hash: Optional[str] = None, trace_id: Optional[str] = None,
                          order_group_id: Optional[str] = None, now_iso: Optional[str] = None,
-                         requirements: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                         requirements: Optional[Dict[str, Any]] = None,
+                         tenant_id: str = "default") -> Dict[str, Any]:
     """Turn a split plan into REAL cases — ONE procurement case per supplier group (the case carries the
     group's order_lines, so its RFQ lists every SKU). Reuses the single-case machinery + GATE 1 (each case
     waits at AWAITING_BUYER_COMMITMENT; no supplier is contacted). All cases share one order_group_id so the
@@ -334,7 +335,7 @@ def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
         total_short = sum(int(l["shortfall"]) for l in order_lines)
         try:
             cid = fwf.open_case(db, buyer_uid_hash=(uid_hash or uid), source_trace_id=trace_id,
-                                requested_by="recommend")
+                                requested_by="recommend", tenant_id=tenant_id)
             if not cid:
                 continue
             line_availability = [
@@ -348,9 +349,10 @@ def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
             if requirements:
                 patch["requirements"] = requirements  # buyer deadline/use_case/ship_to → cited in the RFQ (concrete deadline)
             fwf.transition(db, case_id=cid, event="availability_assessed", actor=agent,
-                           reason_code="multi_line_order", state_patch=patch, trace_id=trace_id, now_iso=now_iso)
+                           reason_code="multi_line_order", state_patch=patch, trace_id=trace_id,
+                           now_iso=now_iso, tenant_id=tenant_id)
             fwf.transition(db, case_id=cid, event="request_buyer_commitment", actor=agent,
-                           trace_id=trace_id, now_iso=now_iso)
+                           trace_id=trace_id, now_iso=now_iso, tenant_id=tenant_id)
             created.append({"case_id": cid, "supplier_ref": g.get("supplier_ref"),
                             "supplier_name": g.get("supplier_name"), "recipient_domain": g.get("recipient_domain"),
                             "lines": order_lines, "total_quantity": total_qty})

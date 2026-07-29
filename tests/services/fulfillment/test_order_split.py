@@ -187,6 +187,24 @@ def test_create_grouped_cases_makes_one_case_per_supplier_group(db):
         assert cur.state_json["order_group_id"] == out["order_group_id"]
 
 
+def test_grouped_cases_preserve_authoritative_tenant_scope(db):
+    _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
+    ensure_supplier_coverage(db)
+    plan = plan_order_split(
+        db,
+        lines=[{"item_ref": "GAM-0002", "requested_qty": 7, "in_stock": 0}],
+        tenant_id="tenant-a",
+    )
+
+    out = create_grouped_cases(
+        db, plan=plan, uid="u1", tenant_id="tenant-a",
+    )
+
+    case_id = out["cases"][0]["case_id"]
+    assert wf.repository.current_version(db, case_id, "tenant-a") is not None
+    assert wf.repository.current_version(db, case_id, "default") is None
+
+
 def test_recommend_stage_routes_mixed_query_to_grouped_cases(monkeypatch):
     # the buyer-chat path: a mixed query → _maybe_multiline_order creates grouped cases + a buyer-safe summary
     from src.app.services import recommend_fulfillment_stage as stage

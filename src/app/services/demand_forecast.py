@@ -279,7 +279,13 @@ class DemandForecaster:
                     {
                         "tenant": self.tenant_id,
                         "sku": str(sku),
-                        "cutoff": cutoff,
+                        # Canonical event time is stored as normalized ISO-8601
+                        # text by the cross-database fact contract. Binding a
+                        # datetime makes PostgreSQL attempt TEXT >= TIMESTAMPTZ
+                        # and aborts the transaction. ISO text preserves the
+                        # intended chronological comparison for normalized
+                        # UTC event values on both PostgreSQL and SQLite.
+                        "cutoff": cutoff.isoformat(),
                     },
                 ).fetchall()
         except Exception:

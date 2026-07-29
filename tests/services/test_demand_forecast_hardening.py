@@ -74,8 +74,8 @@ def test_history_reads_tenant_scoped_canonical_purchase_facts(monkeypatch):
 
     assert captured["params"]["tenant"] == "tenant-a"
     assert captured["params"]["sku"] == "SKU-1"
-    assert isinstance(captured["params"]["cutoff"], datetime)
-    assert captured["params"]["cutoff"].tzinfo == timezone.utc
+    cutoff = datetime.fromisoformat(captured["params"]["cutoff"])
+    assert cutoff.tzinfo == timezone.utc
     assert "marketing_event_fact" in captured["sql"]
     assert "event_type = 'purchase'" in captured["sql"]
     assert "status = 'active'" in captured["sql"]

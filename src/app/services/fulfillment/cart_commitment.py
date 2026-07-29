@@ -322,6 +322,7 @@ def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]
 
     emit_split_trace(trace_id, plan=plan)
     created = create_grouped_cases(db, plan=plan, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
-                                   order_group_id=group_id, now_iso=now_iso, requirements=requirements)
+                                   order_group_id=group_id, now_iso=now_iso, requirements=requirements,
+                                   tenant_id=tenant_id)
     created["idempotent"] = False
     return created
