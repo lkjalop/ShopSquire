@@ -56,12 +56,6 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
         trace_id = modal.get_attribute("data-trace-id")
         assert trace_id
 
-        empty_panel_disclosure = modal.get_by_role(
-            "button",
-            name=re.compile(r"^Show empty panels"),
-        )
-        if empty_panel_disclosure.count():
-            empty_panel_disclosure.click()
         tabs = [
             ("Decision", "Events"), ("Decision", "Execution"), ("Decision", "Summary"),
             ("Reasoning", "Why"), ("Reasoning", "Intent"),
@@ -79,7 +73,16 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
                 "button",
                 name=re.compile(rf"^{re.escape(section_name)}\b"),
             ).click()
-            modal.get_by_role("tab", name=re.compile(rf"^{re.escape(tab_name)}\b")).click()
+            leaf_tab = modal.get_by_role(
+                "tab",
+                name=re.compile(rf"^{re.escape(tab_name)}\b"),
+            )
+            if not leaf_tab.count():
+                modal.get_by_role(
+                    "button",
+                    name=re.compile(r"^Show empty panels"),
+                ).click()
+            leaf_tab.click()
             page.wait_for_timeout(200)
             assert modal.get_attribute("data-trace-id") == trace_id
             assert "Failed to load" not in modal.inner_text()
