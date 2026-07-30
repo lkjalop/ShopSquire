@@ -19,7 +19,15 @@ def test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert():
 
     backend = os.getenv("BACKEND_SMOKE_URL", "http://127.0.0.1:8080").rstrip("/")
     admin = os.getenv("LIVE_ADMIN_URL", "http://127.0.0.1:3000").rstrip("/")
-    api_key = os.getenv("SHOPSQUIRE_API_KEY", "local-owner-key")
+    # Use the running stack's authoritative owner credential. Hosted CI
+    # intentionally replaces local defaults; falling back to a hard-coded
+    # development key made the security proof fail at case creation (401)
+    # before it exercised quarantine behavior.
+    api_key = (
+        os.getenv("SHOPSQUIRE_API_KEY")
+        or os.getenv("OWNER_API_KEY")
+        or "local-owner-key"
+    )
     ingest_secret = os.getenv("LIVE_GMAIL_INGEST_SECRET", "")
     if not ingest_secret:
         pytest.skip("set LIVE_GMAIL_INGEST_SECRET for live ingress proof")
