@@ -948,8 +948,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
 
             if policy_faq_answer(envelope.query) is not None:
                 lane = "POLICY_QUESTION"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("approved policy route clamp lookup failed: %s", repr(exc)[:120])
     elif _intent_hint in ("EXPLAIN", "COMPARE") and _has_prior_shortlist:
         lane = _intent_hint
     elif lane == "EXPLAIN" and not _has_prior_shortlist and _intent_hint in ("SEARCH", "FILTER"):
