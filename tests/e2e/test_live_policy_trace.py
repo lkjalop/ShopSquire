@@ -56,17 +56,24 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
         trace_id = modal.get_attribute("data-trace-id")
         assert trace_id
 
+        modal.get_by_role("button", name=re.compile(r"^Show empty panels")).click()
         tabs = [
             ("Decision", "Events"), ("Decision", "Execution"), ("Decision", "Summary"),
             ("Reasoning", "Why"), ("Reasoning", "Intent"),
-            ("Evidence & Risk", "Multimodal"), ("Reasoning", "Complexity"),
-            ("Reasoning", "Memory"), ("Evidence & Risk", "Security"),
+            ("Reasoning", "Memory"), ("Reasoning", "Complexity"),
+            ("Evidence & Risk", "Evidence"), ("Evidence & Risk", "Multimodal"),
+            ("Evidence & Risk", "Security"),
+            ("Commercial Journey", "Market Intelligence"),
             ("Commercial Journey", "Procurement"),
-            ("Audit & Technical", "Audit Trail"), ("Audit & Technical", "Raw"),
+            ("Advanced technical details", "Audit Trail"),
+            ("Advanced technical details", "Raw"),
         ]
         for section_name, tab_name in tabs:
             modal = page.get_by_test_id("decision-trace-modal")
-            modal.get_by_role("button", name=section_name, exact=True).click()
+            modal.get_by_role(
+                "button",
+                name=re.compile(rf"^{re.escape(section_name)}\b"),
+            ).click()
             modal.get_by_role("tab", name=re.compile(rf"^{re.escape(tab_name)}\b")).click()
             page.wait_for_timeout(200)
             assert modal.get_attribute("data-trace-id") == trace_id
