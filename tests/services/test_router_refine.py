@@ -408,6 +408,38 @@ def test_active_procurement_quantity_amendment_inherits_subject_and_budget_scope
     assert "office" in decision.use_cases
 
 
+def test_model_outage_quantity_amendment_beats_remembered_quantity(db):
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="actually make it 12 units",
+        uid="u1",
+        tenant_id="default",
+        session={
+            "active_workflow_lane": "PROCUREMENT",
+            "prior_node": "el-6-6",
+            "accepted_constraints": {
+                "quantity": 25,
+                "budget_max_cents": 150000,
+                "budget_scope": "per_unit",
+            },
+        },
+    )
+
+    def unavailable(*_args):
+        raise ConnectionError("model unavailable")
+
+    decision = route_turn(db, envelope, llm_fn=unavailable)
+
+    assert decision.source.startswith("fallback:")
+    assert decision.lane == "PROCUREMENT"
+    assert decision.node_handle == "el-6-6"
+    assert decision.subject_action == "continue"
+    assert decision.quantity == 12
+    assert decision.budget_scope == "per_unit"
+
+
 def test_current_order_quote_request_repairs_filter_to_procurement(db):
     from src.app.services.taxonomy_registry import add_sold_node
 

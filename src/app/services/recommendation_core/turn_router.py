@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re as _re
 import threading
 import time
 from functools import lru_cache
@@ -35,6 +36,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from src.app.services.attribute_registry import defs_union
 from src.app.services.catalog_classifier import candidate_nodes
 from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
+from src.app.services.recommendation_core.evidence import refusal_allowed
+from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
+from src.app.services.taxonomy_registry import (get_node, primary_sold_node, search_nodes,
+                                                sells_within, sold_nodes)
 
 _ROUTER_MAX_CONCURRENCY = max(1, min(int(os.getenv("ROUTER_MAX_CONCURRENCY", "1") or 1), 4))
 _ROUTER_GATE = threading.BoundedSemaphore(_ROUTER_MAX_CONCURRENCY)
@@ -47,11 +52,6 @@ def last_router_call_metrics() -> Dict[str, Any]:
 
 def _reset_router_call_metrics() -> None:
     _ROUTER_CALL_STATE.metrics = {}
-from src.app.services.recommendation_core.evidence import refusal_allowed
-from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
-from src.app.services.taxonomy_registry import (get_node, primary_sold_node, search_nodes,
-                                                sells_within, sold_nodes)
-
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
 _SEMANTIC_REFUSAL_MIN_SCORE = 0.72
@@ -100,7 +100,6 @@ _ALLOWED_OPS = (">=", "<=", ">", "<", "==")
 # device, you don't buy them AS the device. Routing here = a use-case signal, never a
 # product-gap refusal. Vertical-blind (no game/app names). Handle prefixes: 'so', 'so-…',
 # 'me', 'me-…'.
-import re as _re
 _WORKLOAD_RE = _re.compile(r"^(so|me)(-|$)")
 # a capability verb signals 'device to run/use X' (not 'buy X') — the purchase-vs-capability
 # disambiguator for software/media routes (review #4). Small, principled, vertical-blind.
@@ -424,16 +423,6 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     tenant-sold taxonomy candidate and recover an explicit quantity/budget scope with
     the shared grammars. The source remains a fallback so promotion metrics count it.
     """
-    named_handles = set(_query_named_sold_handles(db, envelope))
-    node = None
-    for candidate, _score in cands:
-        if (candidate.handle in named_handles
-                and sells_within(db, candidate.handle, tenant_id=envelope.tenant_id) is True):
-            node = candidate
-            break
-    if node is None:
-        return TurnDecision(source=f"fallback:{reason}")
-
     from src.app.services.bulk_intent import extract_quantity_span
     from src.app.services.budget_grammar import classify_budget_scope, parse_budget
 
@@ -445,7 +434,37 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     }
     parsed_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
     quantity = parsed_quantity[0] if parsed_quantity is not None else None
+    named_handles = set(_query_named_sold_handles(db, envelope))
+    node = None
+    subject_action = "switch"
+    for candidate, _score in cands:
+        if (candidate.handle in named_handles
+                and sells_within(db, candidate.handle, tenant_id=envelope.tenant_id) is True):
+            node = candidate
+            break
+    # A model outage must not let remembered quantity beat an explicit buyer
+    # amendment. Reuse a prior subject only for a bounded quantity phrase in an
+    # already-active procurement workflow, and revalidate that subject against
+    # this tenant's sold taxonomy. Ordinary fresh searches still degrade to an
+    # empty decision instead of inheriting hidden context.
+    session = envelope.session or {}
+    active_procurement = str(session.get("active_workflow_lane") or "").upper() == "PROCUREMENT"
+    if node is None and quantity is not None and active_procurement:
+        prior = get_node(str(session.get("prior_node") or ""))
+        if (prior is not None
+                and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True):
+            node = prior
+            subject_action = "continue"
+    if node is None:
+        return TurnDecision(source=f"fallback:{reason}")
+
     budget_scope = classify_budget_scope(envelope.query)
+    if budget_scope == "unknown" and subject_action == "continue":
+        accepted_scope = str(
+            (session.get("accepted_constraints") or {}).get("budget_scope") or ""
+        ).strip().lower()
+        if accepted_scope in {"total", "per_unit"}:
+            budget_scope = accepted_scope
     total_budget_cents = None
     if budget_scope == "total":
         parsed_budget = parse_budget(envelope.query)
@@ -459,6 +478,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         confidence=0.4,
         source=f"fallback:{reason}",
         requested_product_node=node.handle,
+        subject_action=subject_action,
         quantity=quantity,
         total_budget_cents=total_budget_cents,
         budget_scope=budget_scope,
