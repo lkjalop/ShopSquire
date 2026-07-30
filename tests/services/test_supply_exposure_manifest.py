@@ -91,9 +91,24 @@ def _manifest() -> dict:
                 "label": "Board Maker Shenzhen",
             },
             {
+                "logical_key": "region:cn-south",
+                "node_type": "region",
+                "label": "Southern China",
+            },
+            {
+                "logical_key": "lane:shenzhen-sydney",
+                "node_type": "logistics_lane",
+                "label": "Shenzhen to Sydney ocean lane",
+            },
+            {
                 "logical_key": "location:au-dc",
                 "node_type": "location",
                 "label": "Sydney DC",
+            },
+            {
+                "logical_key": "component:power-board-alt",
+                "node_type": "component",
+                "label": "Qualified alternative power board",
             },
         ],
         "edges": [
@@ -134,11 +149,32 @@ def _manifest() -> dict:
                 "confidence": 0.9,
             },
             {
-                "logical_key": "facility-dc",
+                "logical_key": "facility-region",
                 "from_logical_key": "facility:board-maker-sz",
-                "to_logical_key": "location:au-dc",
+                "to_logical_key": "region:cn-south",
+                "relationship_type": "located_in",
+                "confidence": 1.0,
+            },
+            {
+                "logical_key": "facility-lane",
+                "from_logical_key": "facility:board-maker-sz",
+                "to_logical_key": "lane:shenzhen-sydney",
                 "relationship_type": "transported_via",
                 "confidence": 0.8,
+            },
+            {
+                "logical_key": "lane-dc",
+                "from_logical_key": "lane:shenzhen-sydney",
+                "to_logical_key": "location:au-dc",
+                "relationship_type": "transported_via",
+                "confidence": 0.9,
+            },
+            {
+                "logical_key": "alternative-board",
+                "from_logical_key": "component:power-board-alt",
+                "to_logical_key": "component:power-board",
+                "relationship_type": "qualified_substitute_for",
+                "confidence": 0.95,
             },
         ],
     }
@@ -159,11 +195,23 @@ def test_manifest_connects_market_material_component_variant_and_supplier_locati
         approved_by="owner-1",
         imported_at="2026-07-02T00:00:00Z",
     )
-    assert result["node_count"] == 7
-    assert result["edge_count"] == 6
+    assert result["node_count"] == 10
+    assert result["edge_count"] == 9
     assert result["authority"] == "advisory_only"
     assert result["execution_allowed"] is False
     assert result["manifest_hash"].startswith("sha256:")
+    assert result["exposure_coverage"] == {
+        "market_anchor": True,
+        "component_or_material": True,
+        "product_or_variant": True,
+        "supplier": True,
+        "facility": True,
+        "region": True,
+        "freight_lane": True,
+        "qualified_substitute": True,
+    }
+    assert result["coverage_status"] == "complete"
+    assert result["missing_exposure_dimensions"] == []
 
     paths = bounded_dependency_paths(
         db,
@@ -171,7 +219,7 @@ def test_manifest_connects_market_material_component_variant_and_supplier_locati
         source_node_id=_node_id(db, "tenant-a", "index:copper"),
         target_node_id=_node_id(db, "tenant-a", "location:au-dc"),
         at="2026-08-01T00:00:00Z",
-        max_depth=6,
+        max_depth=8,
     )
     assert len(paths["paths"]) == 1
     assert [edge["relationship_type"] for edge in paths["paths"][0]] == [
@@ -180,6 +228,7 @@ def test_manifest_connects_market_material_component_variant_and_supplier_locati
         "composed_of",
         "supplied_by",
         "manufactured_at",
+        "transported_via",
         "transported_via",
     ]
 
@@ -202,7 +251,7 @@ def test_manifest_replay_is_idempotent_and_tenant_isolated(db):
     assert replay["manifest_hash"] == first["manifest_hash"]
     assert db.execute(text(
         "SELECT COUNT(*) FROM supply_node WHERE tenant_id='tenant-a'"
-    )).scalar_one() == 7
+    )).scalar_one() == 10
     assert db.execute(text(
         "SELECT COUNT(*) FROM supply_node WHERE tenant_id='tenant-b'"
     )).scalar_one() == 0
@@ -248,5 +297,36 @@ def test_expired_exposure_edges_are_excluded_from_later_reasoning(db):
         at="2026-11-01T00:00:00Z",
     )
     assert paths["paths"] == []
-    assert paths["stale_edge_count"] == 6
+    assert paths["stale_edge_count"] == 9
     assert paths["freshness_status"] == "degraded_stale_edges_excluded"
+
+
+def test_partial_manifest_reports_missing_exposure_dimensions_without_overclaiming(db):
+    partial = _manifest()
+    partial["nodes"] = [
+        node for node in partial["nodes"]
+        if node["node_type"] not in {"region", "logistics_lane"}
+        and node["logical_key"] != "component:power-board-alt"
+    ]
+    kept = {node["logical_key"] for node in partial["nodes"]}
+    partial["edges"] = [
+        edge for edge in partial["edges"]
+        if edge["from_logical_key"] in kept and edge["to_logical_key"] in kept
+    ]
+
+    result = import_supply_exposure_manifest(
+        db,
+        tenant_id="tenant-a",
+        manifest=partial,
+        approved_by="owner-1",
+        imported_at="2026-07-02T00:00:00Z",
+    )
+
+    assert result["coverage_status"] == "partial"
+    assert result["missing_exposure_dimensions"] == [
+        "freight_lane",
+        "qualified_substitute",
+        "region",
+    ]
+    assert result["authority"] == "advisory_only"
+    assert result["execution_allowed"] is False

@@ -25,6 +25,37 @@ MAX_NODES = 500
 MAX_EDGES = 2_000
 
 
+def _exposure_coverage(
+    node_specs: dict[str, dict[str, Any]],
+    edge_specs: list[dict[str, Any]],
+) -> dict[str, bool]:
+    """Report which evidence dimensions this snapshot actually establishes.
+
+    Coverage is descriptive, not authority. A partial manifest remains useful
+    for advisory paths, while callers can see exactly which links are absent.
+    """
+    node_types = {str(spec["node_type"]) for spec in node_specs.values()}
+    relationships = {
+        str(spec["relationship_type"]) for spec in edge_specs
+    }
+    return {
+        "market_anchor": bool(
+            node_types.intersection({"commodity_index", "price_index"})
+        ),
+        "component_or_material": bool(
+            node_types.intersection({"component", "material"})
+        ),
+        "product_or_variant": bool(
+            node_types.intersection({"product", "variant"})
+        ),
+        "supplier": "supplier" in node_types,
+        "facility": "facility" in node_types,
+        "region": "region" in node_types,
+        "freight_lane": "logistics_lane" in node_types,
+        "qualified_substitute": "qualified_substitute_for" in relationships,
+    }
+
+
 def _utc(value: Any) -> datetime:
     if isinstance(value, datetime):
         parsed = value
@@ -135,6 +166,10 @@ def import_supply_exposure_manifest(
         edge_specs.append(raw)
 
     digest = _manifest_hash(manifest)
+    coverage = _exposure_coverage(node_specs, edge_specs)
+    missing_dimensions = sorted(
+        dimension for dimension, present in coverage.items() if not present
+    )
     common = {
         "snapshot_id": snapshot,
         "snapshot_revision": revision,
@@ -208,6 +243,9 @@ def import_supply_exposure_manifest(
         "node_count": len(node_specs),
         "edge_count": len(edge_specs),
         "fresh_until": fresh_until.isoformat(),
+        "exposure_coverage": coverage,
+        "coverage_status": "complete" if not missing_dimensions else "partial",
+        "missing_exposure_dimensions": missing_dimensions,
         "authority": "advisory_only",
         "execution_allowed": False,
     }
