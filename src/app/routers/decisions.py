@@ -60,6 +60,7 @@ def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict
     products_summary = None
     right_panel_contract = None
     shopper_intent = None
+    authoritative_intent = None
     multimodal_fusion = None
     image_security = None
     input_query = None
@@ -82,6 +83,14 @@ def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict
                 shopper_intent = payload.get("shopper_intent")
             elif isinstance(payload.get("intent_analysis"), dict):
                 shopper_intent = payload.get("intent_analysis")
+        # Early shopper-intent events are observations made before routing is
+        # complete.  The finalized V2 recommendation result owns the served
+        # lane and must supersede those hints in Decision Trace.
+        if (
+            et == "recommendation_result"
+            and isinstance(payload.get("intent_analysis"), dict)
+        ):
+            authoritative_intent = payload.get("intent_analysis")
         if multimodal_fusion is None and isinstance(payload.get("multimodal_fusion"), dict):
             multimodal_fusion = payload.get("multimodal_fusion")
         if image_security is None and isinstance(payload.get("image_security"), dict):
@@ -144,7 +153,8 @@ def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict
         "decision_id": trace_id,
         "timestamp": (events[0].get("created_at") if events and isinstance(events[0], dict) else None),
         "input_query": input_query,
-        "intent_analysis": shopper_intent or {},
+        "intent_analysis": authoritative_intent or shopper_intent or {},
+        "_intent_authoritative": bool(authoritative_intent),
         "agent_chain": agent_chain,
         "rag_context": {"products_retrieved": len(products_summary or [])},
         "evidence": {},
@@ -1585,7 +1595,10 @@ def query_decision_trace(
                     base[key] = event_context.get(key)
             if not base.get("agent_chain") and event_context.get("agent_chain"):
                 base["agent_chain"] = event_context.get("agent_chain")
-            if not base.get("intent_analysis") and event_context.get("intent_analysis"):
+            if (
+                event_context.get("_intent_authoritative")
+                or not base.get("intent_analysis")
+            ) and event_context.get("intent_analysis"):
                 base["intent_analysis"] = event_context.get("intent_analysis")
         except Exception:
             pass
