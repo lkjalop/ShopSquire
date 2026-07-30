@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from typing import Dict, List
+from typing import Dict
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
@@ -132,8 +132,9 @@ def claim_order(token: str, payload: ClaimOrderPayload) -> Dict:
     email = payload.email.strip().lower()
     with db_session() as db:
         order = db.execute(
-            "SELECT id, customer_id, guest_email, draft_order_id FROM orders WHERE id = :oid",
-            {"oid": payload.order_id},
+            "SELECT id, customer_id, guest_email, draft_order_id "
+            "FROM orders WHERE id = :oid AND tenant_id = :tenant_id",
+            {"oid": payload.order_id, "tenant_id": _ct()},
         ).fetchone()
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -143,8 +144,9 @@ def claim_order(token: str, payload: ClaimOrderPayload) -> Dict:
         if guest_email != email:
             raise HTTPException(status_code=403, detail="Email mismatch")
         db.execute(
-            "UPDATE orders SET customer_id = :uid WHERE id = :oid",
-            {"uid": user_id, "oid": payload.order_id},
+            "UPDATE orders SET customer_id = :uid "
+            "WHERE id = :oid AND tenant_id = :tenant_id",
+            {"uid": user_id, "oid": payload.order_id, "tenant_id": _ct()},
         )
         if order[3]:
             db.execute(
@@ -152,8 +154,15 @@ def claim_order(token: str, payload: ClaimOrderPayload) -> Dict:
                 {"uid": user_id, "did": order[3], "t": _ct()},
             )
         db.execute(
-            "INSERT INTO order_sessions (id, uid, order_id) VALUES (:id, :uid, :oid)",
-            {"id": secrets.token_hex(16), "uid": user_id, "oid": payload.order_id},
+            "INSERT INTO order_sessions "
+            "(id, uid, order_id, tenant_id, tenant_ownership_status) "
+            "VALUES (:id, :uid, :oid, :tenant_id, 'derived_from_tenant_order')",
+            {
+                "id": secrets.token_hex(16),
+                "uid": user_id,
+                "oid": payload.order_id,
+                "tenant_id": _ct(),
+            },
         )
         db.commit()
     return {"claimed": True, "order_id": payload.order_id}

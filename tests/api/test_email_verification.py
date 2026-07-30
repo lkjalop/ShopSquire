@@ -17,7 +17,8 @@ def client(monkeypatch):
                         poolclass=StaticPool, future=True)
     import src.app.models.db as _dbmod
     orig = _dbmod.engine
-    _dbmod.engine = eng; _dbmod.set_engine(eng)
+    _dbmod.engine = eng
+    _dbmod.set_engine(eng)
     with eng.begin() as c:
         c.execute(text("CREATE TABLE orders (id TEXT PRIMARY KEY, customer_id TEXT, guest_email_hash TEXT, "
                        "total_cents INTEGER, status TEXT)"))
@@ -27,7 +28,8 @@ def client(monkeypatch):
     try:
         yield TestClient(app), auth
     finally:
-        _dbmod.engine = orig; _dbmod.set_engine(orig)
+        _dbmod.engine = orig
+        _dbmod.set_engine(orig)
 
 
 def test_register_is_unverified_then_verify(client):
@@ -42,8 +44,16 @@ def test_register_is_unverified_then_verify(client):
     from src.app.services.pii_crypto import pii_hash
     from src.app.models.db import db_session
     with db_session() as db:
-        db.execute(text("INSERT INTO orders (id, customer_id, guest_email_hash, total_cents, status) "
-                        "VALUES ('G-1', NULL, :h, 5000, 'paid')"), {"h": pii_hash("u@x.com")})
+        db.execute(text(
+            "INSERT INTO orders "
+            "(id, customer_id, tenant_id, tenant_ownership_status, guest_email_hash, total_cents, status) "
+            "VALUES ('G-1', NULL, 'default', 'authoritative_request_context', :h, 5000, 'paid')"
+        ), {"h": pii_hash("u@x.com")})
+        db.execute(text(
+            "INSERT INTO orders "
+            "(id, customer_id, tenant_id, tenant_ownership_status, guest_email_hash, total_cents, status) "
+            "VALUES ('G-OTHER', NULL, 'tenant-b', 'authoritative_request_context', :h, 5000, 'paid')"
+        ), {"h": pii_hash("u@x.com")})
         db.commit()
 
     # forge the verify token via the same issuer and hit the endpoint
@@ -56,7 +66,11 @@ def test_register_is_unverified_then_verify(client):
     with db_session() as db:
         ver = db.execute(text("SELECT email_verified FROM user_accounts WHERE id=:i"), {"i": uid}).scalar()
         owner = db.execute(text("SELECT customer_id FROM orders WHERE id='G-1'")).scalar()
+        other_owner = db.execute(
+            text("SELECT customer_id FROM orders WHERE id='G-OTHER'")
+        ).scalar()
     assert int(ver or 0) == 1 and owner == uid
+    assert other_owner is None
 
 
 def test_bad_token_rejected(client):

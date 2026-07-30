@@ -11,7 +11,6 @@ from sqlalchemy import text as sql_text
 from pydantic import BaseModel, EmailStr
 
 from src.app.models.db import db_session, get_engine, get_db
-from fastapi import Depends, Request
 from src.app.observability.tracing import get_tracer
 from src.app.repositories.catalog import CatalogRepository
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
@@ -204,13 +203,14 @@ def create_order_core(db, *, uid: str, items: list, customer_id: str | None = No
             )
             db.execute(
                 sql_text(
-                    "INSERT INTO orders (id, draft_order_id, customer_id, guest_email, guest_email_hash, guest_email_encrypted, total_cents, currency, status, trace_id) "
-                    "VALUES (:id, :draft_id, :customer_id, :guest_email, :guest_email_hash, :guest_email_encrypted, :total_cents, :currency, :status, :trace_id)"
+                    "INSERT INTO orders (id, draft_order_id, customer_id, tenant_id, tenant_ownership_status, guest_email, guest_email_hash, guest_email_encrypted, total_cents, currency, status, trace_id) "
+                    "VALUES (:id, :draft_id, :customer_id, :tenant_id, 'authoritative_request_context', :guest_email, :guest_email_hash, :guest_email_encrypted, :total_cents, :currency, :status, :trace_id)"
                 ),
                 {
                     "id": order_id,
                     "draft_id": draft_id,
                     "customer_id": customer_id,
+                    "tenant_id": current_tenant_id(),
                     "guest_email": None,
                     "guest_email_hash": guest_email_hash,
                     "guest_email_encrypted": guest_email_encrypted,
@@ -221,8 +221,17 @@ def create_order_core(db, *, uid: str, items: list, customer_id: str | None = No
                 },
             )
             db.execute(
-                sql_text("INSERT INTO order_sessions (id, uid, order_id) VALUES (:id, :uid, :order_id)"),
-                {"id": str(uuid.uuid4()), "uid": session_uid, "order_id": order_id},
+                sql_text(
+                    "INSERT INTO order_sessions "
+                    "(id, uid, order_id, tenant_id, tenant_ownership_status) "
+                    "VALUES (:id, :uid, :order_id, :tenant_id, 'derived_from_tenant_order')"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "uid": session_uid,
+                    "order_id": order_id,
+                    "tenant_id": current_tenant_id(),
+                },
             )
             try:
                 db.commit()

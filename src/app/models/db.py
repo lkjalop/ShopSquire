@@ -170,6 +170,8 @@ def _ensure_minimal_sqlite_tables(bind):
                     "  id TEXT PRIMARY KEY,\n"
                     "  draft_order_id TEXT,\n"
                     "  customer_id TEXT,\n"
+                    "  tenant_id TEXT,\n"
+                    "  tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified',\n"
                     "  guest_email TEXT,\n"
                     "  total_cents INT NOT NULL,\n"
                     "  currency TEXT NOT NULL DEFAULT 'USD',\n"
@@ -186,6 +188,8 @@ def _ensure_minimal_sqlite_tables(bind):
                     "  id TEXT PRIMARY KEY,\n"
                     "  uid TEXT NOT NULL,\n"
                     "  order_id TEXT NOT NULL,\n"
+                    "  tenant_id TEXT,\n"
+                    "  tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified',\n"
                     "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                     ")"
                 ))
@@ -782,6 +786,12 @@ def _ensure_minimal_sqlite_tables(bind):
                 except Exception:
                     pass
                 for _stmt in (
+                    "ALTER TABLE orders ADD COLUMN tenant_id TEXT",
+                    "ALTER TABLE orders ADD COLUMN tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified'",
+                    "ALTER TABLE order_sessions ADD COLUMN tenant_id TEXT",
+                    "ALTER TABLE order_sessions ADD COLUMN tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified'",
+                    "ALTER TABLE customers ADD COLUMN tenant_id TEXT",
+                    "ALTER TABLE customers ADD COLUMN tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified'",
                     "ALTER TABLE orders ADD COLUMN stripe_intent_id TEXT",
                     "ALTER TABLE orders ADD COLUMN tracking_number TEXT",
                     "ALTER TABLE orders ADD COLUMN carrier TEXT",
@@ -1009,6 +1019,8 @@ def _ensure_minimal_sqlite_tables(bind):
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS customers (\n"
                         "  id TEXT PRIMARY KEY,\n"
+                        "  tenant_id TEXT,\n"
+                        "  tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified',\n"
                         "  email TEXT,\n"
                         "  name TEXT,\n"
                         "  phone TEXT,\n"

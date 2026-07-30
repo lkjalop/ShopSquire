@@ -4,9 +4,7 @@ import hashlib
 import os
 import secrets
 import time
-import base64
 import hmac
-import json
 
 import jwt as pyjwt
 from datetime import datetime, timedelta
@@ -19,6 +17,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.policy.action_authority_matrix import AuthDecision, evaluate as evaluate_action_authority
 from src.app.security.csrf_middleware import generate_csrf_token, set_csrf_cookie
 from src.app.security.iam import log_iam_event, check_bruteforce, check_impossible_travel, emit_iam_anomaly
@@ -702,9 +701,13 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
                 )
                 # Keep customers table in sync for account UI convenience
                 db.execute(
-                    "INSERT INTO customers (id, email, email_hash, email_encrypted, name, created_at) VALUES (:id, :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP) ON CONFLICT (id) DO NOTHING",
+                    "INSERT INTO customers "
+                    "(id, tenant_id, tenant_ownership_status, email, email_hash, email_encrypted, name, created_at) "
+                    "VALUES (:id, :tenant_id, 'authenticated_request_context', :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (id) DO NOTHING",
                     {
                         "id": user_id,
+                        "tenant_id": current_tenant_id(),
                         "email": "REDACTED",
                         "email_hash": pii_hash(email),
                         "email_encrypted": encrypt_pii(email),
@@ -753,8 +756,15 @@ def verify_email(token: str) -> Dict:
         # bulk guest->member merge: claim any unclaimed guest orders that match this email hash.
         try:
             res = db.execute(sql_text(
-                "UPDATE orders SET customer_id = :cid WHERE customer_id IS NULL AND guest_email_hash = :h"),
-                {"cid": user_id, "h": pii_hash(email)})
+                "UPDATE orders SET customer_id = :cid "
+                "WHERE customer_id IS NULL AND guest_email_hash = :h "
+                "AND tenant_id = :tenant_id "
+                "AND tenant_ownership_status != 'unclassified'"),
+                {
+                    "cid": user_id,
+                    "h": pii_hash(email),
+                    "tenant_id": current_tenant_id(),
+                })
             merged = int(getattr(res, "rowcount", 0) or 0)
         except Exception:
             merged = 0
@@ -1152,9 +1162,13 @@ def google_callback(code: str | None = None, state: str | None = None):
                     },
                 )
             db.execute(
-                "INSERT INTO customers (id, email, email_hash, email_encrypted, name, created_at) VALUES (:id, :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP) ON CONFLICT (id) DO NOTHING",
+                "INSERT INTO customers "
+                "(id, tenant_id, tenant_ownership_status, email, email_hash, email_encrypted, name, created_at) "
+                "VALUES (:id, :tenant_id, 'authenticated_request_context', :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP) "
+                "ON CONFLICT (id) DO NOTHING",
                 {
                     "id": user_id,
+                    "tenant_id": current_tenant_id(),
                     "email": "REDACTED",
                     "email_hash": pii_hash(email),
                     "email_encrypted": encrypt_pii(email),

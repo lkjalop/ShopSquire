@@ -306,24 +306,19 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                              {"uid": uid, "t": tenant_id})
             deleted["draft_orders"] = getattr(res, "rowcount", 0) or 0
 
-            # These legacy tables do not yet carry authoritative tenant ownership.
-            # A tenant-scoped privacy operation must not erase another tenant's row.
-            legacy_counts = {
-                "order_sessions": int(db.execute(
-                    text("SELECT COUNT(*) FROM order_sessions WHERE uid=:uid"), {"uid": uid}
-                ).scalar() or 0),
-                "orders": int(db.execute(
-                    text("SELECT COUNT(*) FROM orders WHERE customer_id=:uid"), {"uid": uid}
-                ).scalar() or 0),
-                "customers": int(db.execute(
-                    text("SELECT COUNT(*) FROM customers WHERE id=:uid"), {"uid": uid}
-                ).scalar() or 0),
-            }
-            for table_name, count in legacy_counts.items():
+            from src.app.services.legacy_commerce_tenant_ownership import (
+                erase_authoritatively_owned_subject_rows,
+            )
+
+            legacy_result = erase_authoritatively_owned_subject_rows(
+                db, tenant_id=tenant_id, uid=uid
+            )
+            for table_name, count in legacy_result["unclassified"].items():
                 if count:
                     action_required.append(
                         f"authoritative_tenant_ownership_required:{table_name}:{count}"
                     )
+            deleted.update(legacy_result["deleted"])
 
             db.commit()
 
@@ -417,10 +412,16 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
     }
     try:
         with db_session() as db:
-            rows = db.execute(text("SELECT * FROM customers WHERE id = :uid"), {"uid": uid}).mappings().all()
+            rows = db.execute(
+                text("SELECT * FROM customers WHERE id=:uid AND tenant_id=:tenant_id"),
+                {"uid": uid, "tenant_id": _ct()},
+            ).mappings().all()
             export["customers"] = [dict(r) for r in rows]
 
-            rows = db.execute(text("SELECT * FROM order_sessions WHERE uid = :uid"), {"uid": uid}).mappings().all()
+            rows = db.execute(
+                text("SELECT * FROM order_sessions WHERE uid=:uid AND tenant_id=:tenant_id"),
+                {"uid": uid, "tenant_id": _ct()},
+            ).mappings().all()
             export["order_sessions"] = [dict(r) for r in rows]
             order_ids = [r.get("order_id") for r in export["order_sessions"] if r.get("order_id")]
 
@@ -437,16 +438,19 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
 
             if order_ids:
                 rows = db.execute(
-                    text("SELECT * FROM orders WHERE id IN :order_ids").bindparams(
+                    text(
+                        "SELECT * FROM orders WHERE tenant_id=:tenant_id "
+                        "AND id IN :order_ids"
+                    ).bindparams(
                         bindparam("order_ids", expanding=True)
                     ),
-                    {"order_ids": order_ids},
+                    {"order_ids": order_ids, "tenant_id": _ct()},
                 ).mappings().all()
                 export["orders"] = [dict(r) for r in rows]
             else:
                 rows = db.execute(
-                    "SELECT * FROM orders WHERE customer_id = :uid",
-                    {"uid": uid},
+                    "SELECT * FROM orders WHERE customer_id=:uid AND tenant_id=:tenant_id",
+                    {"uid": uid, "tenant_id": _ct()},
                 ).mappings().all()
                 export["orders"] = [dict(r) for r in rows]
 
@@ -459,9 +463,10 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                 text(
                     "SELECT id, agent_name, valid_from, input_data, retrieved_context, agent_reasoning, "
                     "proposed_action, policy_version, approval_required, execution_status "
-                    f"FROM decision_logs WHERE {_UID_WHERE_SQL} ORDER BY valid_from DESC"
+                    f"FROM decision_logs WHERE tenant_id=:tenant_id "
+                    f"AND {_UID_WHERE_SQL} ORDER BY valid_from DESC"
                 ),
-                params,
+                {**params, "tenant_id": _ct()},
             ).mappings().all()
             decisions = []
             decision_ids = []
