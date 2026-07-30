@@ -1417,6 +1417,24 @@ def test_edge_explain_hint_corrects_policy_misroute_only_with_prior_shortlist(db
     assert d2.lane == "POLICY_QUESTION"
 
 
+def test_approved_policy_hint_clamps_model_search_misroute(db):
+    env = TurnEnvelope.from_suggest_params(
+        query="What is your returns policy?",
+        uid="u1",
+        tenant_id="default",
+        intent_hint="POLICY_QUESTION",
+        session={},
+    )
+
+    decision = route_turn(
+        db,
+        env,
+        llm_fn=_route_stub("SEARCH", None),
+    )
+
+    assert decision.lane == "POLICY_QUESTION"
+
+
 def test_active_procurement_uses_model_continuity_to_correct_policy_conflict(db):
     session = {
         "prior_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"],
