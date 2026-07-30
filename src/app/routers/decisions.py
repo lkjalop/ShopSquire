@@ -86,6 +86,11 @@ def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict
             and isinstance(payload.get("intent_analysis"), dict)
         ):
             authoritative_intent = payload.get("intent_analysis")
+        if (
+            payload.get("intent_authority") == "finalized_route"
+            and isinstance(payload.get("intent_analysis"), dict)
+        ):
+            authoritative_intent = payload.get("intent_analysis")
         if multimodal_fusion is None and isinstance(payload.get("multimodal_fusion"), dict):
             multimodal_fusion = payload.get("multimodal_fusion")
         if image_security is None and isinstance(payload.get("image_security"), dict):

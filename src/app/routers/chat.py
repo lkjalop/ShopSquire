@@ -2662,7 +2662,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # bounded lane, project that authoritative decision through chat and Decision Trace instead
     # of retaining a contradictory heuristic label (for example POLICY_QUESTION -> SEARCH).
     backend_turn_intent = str(data.get("turn_intent") or "").strip().upper()
-    if backend_turn_intent in RECOMMENDATION_LANES:
+    backend_lane_authoritative = backend_turn_intent in RECOMMENDATION_LANES
+    if backend_lane_authoritative:
         turn_intent = backend_turn_intent
 
     # Map results into canonical product shape
@@ -2750,6 +2751,26 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         view_mode = "cards"
 
     decision_trace_id = data.get("decision_trace_id") or data.get("decision_id") or data.get("trace_id")
+    if decision_trace_id and backend_lane_authoritative:
+        try:
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="intent_classify",
+                source_type="stage",
+                source_id="V2_Recommendation_Facade",
+                target_type="chat",
+                target_id=None,
+                payload={
+                    "intent_analysis": {
+                        "lane": turn_intent,
+                        "intent": turn_intent,
+                        "source": "typed_facade_result",
+                    },
+                    "intent_authority": "finalized_route",
+                },
+            )
+        except Exception:
+            pass
     assistant_message = data.get("assistant_message") or data.get("message")
     if bool(image_security_posture.get("image_untrusted")):
         warning = str(

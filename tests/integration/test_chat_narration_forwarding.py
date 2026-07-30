@@ -112,7 +112,13 @@ async def _fake_policy_answer(*args, **kwargs):
 def test_chat_projects_authoritative_facade_lane(monkeypatch):
     from src.app.routers import chat as chat_router
 
+    trace_events = []
     monkeypatch.setattr(chat_router, "_call_recommend_in_process", _fake_policy_answer)
+    monkeypatch.setattr(
+        chat_router,
+        "log_trace_event",
+        lambda **event: trace_events.append(event),
+    )
     client = TestClient(create_app())
     response = client.post(
         "/api/v1/chat/query",
@@ -126,3 +132,11 @@ def test_chat_projects_authoritative_facade_lane(monkeypatch):
     assert "returns" in body["assistant_message"].lower()
     assert body["next_questions"] == []
     assert body["needs_disambiguation"] is False
+    finalized = [
+        event for event in trace_events
+        if event.get("event_type") == "intent_classify"
+        and (event.get("payload") or {}).get("intent_authority")
+        == "finalized_route"
+    ]
+    assert len(finalized) == 1
+    assert finalized[0]["payload"]["intent_analysis"]["lane"] == "POLICY_QUESTION"

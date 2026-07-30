@@ -39,3 +39,30 @@ def test_observational_intent_remains_available_without_final_result():
 
     assert context["intent_analysis"]["lane"] == "SEARCH"
     assert context["_intent_authoritative"] is False
+
+
+def test_finalized_facade_route_supersedes_ingress_hint():
+    context = _trace_context_from_events(
+        "trace-policy-fast-path",
+        [
+            {
+                "event_type": "intent_classify",
+                "payload": {"shopper_intent": {"lane": "SEARCH"}},
+            },
+            {
+                "event_type": "intent_classify",
+                "source_id": "V2_Recommendation_Facade",
+                "payload": {
+                    "intent_analysis": {
+                        "lane": "POLICY_QUESTION",
+                        "intent": "POLICY_QUESTION",
+                        "source": "typed_facade_result",
+                    },
+                    "intent_authority": "finalized_route",
+                },
+            },
+        ],
+    )
+
+    assert context["intent_analysis"]["lane"] == "POLICY_QUESTION"
+    assert context["_intent_authoritative"] is True
