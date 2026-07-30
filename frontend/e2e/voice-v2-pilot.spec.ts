@@ -100,6 +100,7 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
   await expect(trace.getByText('Authorizes', { exact: true }).first()).toBeVisible();
 
   await trace.getByRole('tab', { name: 'Events', exact: true }).click();
+  await trace.getByText(/Show raw event stream/i).click();
   await expect(trace.getByText(/Candidate Retrieval|Trace Persistence/i).first()).toBeVisible();
   await expect(trace.getByText(/Candidate_Retrieval_Agent/)).toHaveCount(0);
 
