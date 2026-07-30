@@ -188,8 +188,9 @@ jobs:
         with:
           name: procurement-runtime-evidence
           path: |
-            test-results/**
+            test-results/
             tmp/*.sqlite*
+          if-no-files-found: error
           retention-days: 14
 
   worker:
