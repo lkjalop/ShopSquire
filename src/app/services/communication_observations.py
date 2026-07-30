@@ -53,6 +53,16 @@ def record_message_observation(
     ).hexdigest()
     owns_session = db is None
     with (db_session() if owns_session else nullcontext(db)) as session:
+        if party_ref:
+            from src.app.services.communication_party_binding import (
+                require_authoritative_party_ref,
+            )
+
+            require_authoritative_party_ref(
+                session,
+                tenant_id=tenant,
+                party_ref=party_ref,
+            )
         existing = session.execute(
             text(
                 """
