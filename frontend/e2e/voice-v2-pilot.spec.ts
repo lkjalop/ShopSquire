@@ -125,7 +125,7 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
   await trace.getByRole('tab', { name: 'Memory', exact: true }).click();
   await expect(trace.getByText(/No memory\/cache events|Memory/i).first()).toBeVisible();
 
-  await trace.getByRole('button', { name: 'Evidence & Risk', exact: true }).click();
+  await trace.getByRole('button', { name: /^Evidence & Risk/ }).click();
   await trace.getByRole('tab', { name: 'Multimodal', exact: true }).click();
   await expect(trace.getByText('Voice Used', { exact: true })).toBeVisible();
   await expect(trace.getByText('Yes', { exact: true }).first()).toBeVisible();
@@ -133,7 +133,7 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
   await trace.getByRole('tab', { name: 'Security', exact: true }).click();
   await expect(trace.getByText(/Text-only turn.*no image uploaded/i)).toBeVisible();
 
-  await trace.getByRole('button', { name: 'Commercial Journey', exact: true }).click();
+  await trace.getByRole('button', { name: /^Commercial Journey/ }).click();
   await trace.getByRole('tab', { name: /Procurement/ }).click();
   await expect(trace.getByText(/No procurement .* activity/i)).toBeVisible();
 
