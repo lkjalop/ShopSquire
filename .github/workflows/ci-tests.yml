@@ -5,9 +5,14 @@ on:
     branches: [ main, master ]
   pull_request:
 
+concurrency:
+  group: general-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -24,10 +29,24 @@ jobs:
           pip install poetry poetry-plugin-export
           poetry export -f requirements.txt --without-hashes -o requirements.txt
           pip install -r requirements.txt
-          pip install pytest requests pyyaml playwright pytest-timeout
-          python -m playwright install
-      - name: Run tests
+          pip install pytest requests pyyaml pytest-timeout
+      - name: Run owned general test suite
         run: |
-          pytest -q
-        env:
-          RUN_INTEGRATION: 1
+          mkdir -p test-results
+          timeout --signal=TERM --kill-after=30s 1500s \
+            pytest -vv --timeout=120 --timeout-method=thread \
+              --junitxml=test-results/general.xml \
+              --ignore=tests/services \
+              --ignore=tests/e2e \
+              --ignore=tests/pw \
+              --ignore=tests/playwright \
+              --ignore=tests/browser \
+              --ignore=tests/load \
+              tests
+      - name: Upload general-suite diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: general-suite-diagnostics
+          path: test-results/**
+          retention-days: 14
