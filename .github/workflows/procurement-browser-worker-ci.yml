@@ -111,11 +111,11 @@ jobs:
       - name: Create isolated database and validate migrations
         run: |
           set -o pipefail
-          mkdir -p tmp test-results
-          timeout 180s poetry run alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
-          poetry run alembic current 2>&1 | tee test-results/migration-current.log
-          timeout 60s poetry run alembic downgrade -1 2>&1 | tee test-results/migration-rollback.log
-          timeout 60s poetry run alembic upgrade head 2>&1 | tee test-results/migration-reupgrade.log
+          mkdir -p tmp proof-artifacts
+          timeout 180s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-upgrade.log
+          poetry run alembic current 2>&1 | tee proof-artifacts/migration-current.log
+          timeout 60s poetry run alembic downgrade -1 2>&1 | tee proof-artifacts/migration-rollback.log
+          timeout 60s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-reupgrade.log
           poetry run python -m scripts.seed_portable_catalog
           poetry run python -m scripts.seed_suppliers
       - name: React component battery
@@ -124,10 +124,10 @@ jobs:
           timeout 180s npm --prefix src/frontend/admin-react test -- --run --reporter=verbose --testTimeout=15000
       - name: Start isolated backend and storefront
         run: |
-          poetry run python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > test-results/backend.log 2>&1 &
-          poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
-          npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 > test-results/storefront.log 2>&1 &
-          npm --prefix src/frontend/admin-react run dev -- --host 127.0.0.1 --port 3001 > test-results/admin.log 2>&1 &
+          poetry run python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > proof-artifacts/backend.log 2>&1 &
+          poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > proof-artifacts/celery.log 2>&1 &
+          npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 > proof-artifacts/storefront.log 2>&1 &
+          npm --prefix src/frontend/admin-react run dev -- --host 127.0.0.1 --port 3001 > proof-artifacts/admin.log 2>&1 &
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:8080/health >/dev/null &&
                curl --fail --silent http://127.0.0.1:5173 >/dev/null &&
@@ -166,19 +166,19 @@ jobs:
         run: |
           if grep -Eqi \
             'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
-            test-results/backend.log test-results/celery.log; then
+            proof-artifacts/backend.log proof-artifacts/celery.log; then
             echo "::error::PostgreSQL transaction-abort signature found in runtime logs"
             grep -Ein \
               'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
-              test-results/backend.log test-results/celery.log
+              proof-artifacts/backend.log proof-artifacts/celery.log
             exit 1
           fi
       - name: Inventory retained proof
         if: always()
         run: |
-          test -d test-results
-          find test-results frontend/test-results -type f -printf '%p\t%s bytes\n' |
-            sort | tee test-results/artifact-manifest.txt
+          test -d proof-artifacts
+          find proof-artifacts frontend/test-results -type f -printf '%p\t%s bytes\n' |
+            sort | tee proof-artifacts/artifact-manifest.txt
       - name: Upload browser and runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -187,7 +187,7 @@ jobs:
           path: |
             frontend/test-results/
             frontend/playwright-report/
-            test-results/
+            proof-artifacts/
             tmp/*.sqlite*
           if-no-files-found: error
           retention-days: 14
