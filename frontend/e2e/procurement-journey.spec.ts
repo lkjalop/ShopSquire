@@ -15,7 +15,7 @@ async function openProcurementTrace(page: Page) {
   await page.getByTitle('Decision Trace').click();
   const modal = page.getByTestId('decision-trace-modal');
   await expect(modal).toBeVisible();
-  await modal.getByRole('button', { name: 'Commercial Journey', exact: true }).click();
+  await modal.getByRole('button', { name: /^Commercial Journey/ }).click();
   await modal.getByRole('tab', { name: /Procurement/ }).click();
   await expect(modal.getByTestId('proc-drafted-rfq')).toBeVisible({ timeout: 45_000 });
   return modal;

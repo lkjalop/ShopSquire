@@ -57,7 +57,7 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         page.get_by_role("button", name="Confirm delivery plan", exact=True).click()
         page.get_by_test_id("cart-sourcing-note").wait_for(timeout=30_000)
         page.get_by_role("button", name="Decision Trace").click()
-        page.get_by_role("button", name="Commercial Journey", exact=True).click()
+        page.get_by_role("button", name=re.compile(r"^Commercial Journey\b")).click()
         page.get_by_role("tab", name="Procurement", exact=False).click()
         page.get_by_text("Drafted supplier RFQ", exact=False).first.wait_for(timeout=30_000)
         modal = page.get_by_test_id("decision-trace-modal")
@@ -75,24 +75,36 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         trace_tabs = [
             ("Decision", "Events"), ("Decision", "Execution"), ("Decision", "Summary"),
             ("Reasoning", "Why"), ("Reasoning", "Intent"),
-            ("Evidence & Risk", "Multimodal"), ("Reasoning", "Complexity"),
-            ("Reasoning", "Memory"), ("Evidence & Risk", "Security"),
+            ("Reasoning", "Memory"), ("Reasoning", "Complexity"),
+            ("Evidence & Risk", "Evidence"), ("Evidence & Risk", "Multimodal"),
+            ("Evidence & Risk", "Security"),
+            ("Commercial Journey", "Market Intelligence"),
             ("Commercial Journey", "Procurement"),
-            ("Audit & Technical", "Audit Trail"), ("Audit & Technical", "Raw"),
+            ("Advanced technical details", "Audit Trail"),
+            ("Advanced technical details", "Raw"),
         ]
-        evidence_tab = modal.get_by_role("tab", name=re.compile(r"^Evidence\b"))
-        if evidence_tab.count():
-            trace_tabs.insert(-2, ("Evidence & Risk", "Evidence"))
         for section_name, tab_name in trace_tabs:
             # Procurement and Evidence append a status badge/count to their accessible name.
             # Reacquire the modal because asynchronous trace projections can refresh its DOM.
             modal = page.get_by_test_id("decision-trace-modal")
-            modal.get_by_role("button", name=section_name, exact=True).click()
-            modal.get_by_role("tab", name=re.compile(rf"^{re.escape(tab_name)}\b")).click()
+            modal.get_by_role(
+                "button",
+                name=re.compile(rf"^{re.escape(section_name)}\b"),
+            ).click()
+            leaf_tab = modal.get_by_role(
+                "tab",
+                name=re.compile(rf"^{re.escape(tab_name)}\b"),
+            )
+            if not leaf_tab.count():
+                modal.get_by_role(
+                    "button",
+                    name=re.compile(r"^Show empty panels"),
+                ).click()
+            leaf_tab.click()
             page.wait_for_timeout(300)
             assert modal.get_attribute("data-trace-id") == original_trace_id
             assert "Failed to load" not in modal.inner_text()
-        modal.get_by_role("button", name="Commercial Journey", exact=True).click()
+        modal.get_by_role("button", name=re.compile(r"^Commercial Journey\b")).click()
         modal.get_by_role("tab", name=re.compile(r"^Procurement\b")).click()
 
         page.locator('button[title="Close"]').last.click()
@@ -111,7 +123,7 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         page.get_by_test_id("split-confirm").click()
         page.wait_for_timeout(4_000)
         page.get_by_role("button", name="Decision Trace").click()
-        page.get_by_role("button", name="Commercial Journey", exact=True).click()
+        page.get_by_role("button", name=re.compile(r"^Commercial Journey\b")).click()
         page.get_by_role("tab", name="Procurement", exact=False).click()
         page.get_by_text("Drafted supplier RFQ", exact=False).first.wait_for(timeout=30_000)
         modal = page.get_by_test_id("decision-trace-modal")
