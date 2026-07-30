@@ -22,7 +22,7 @@ def test_per_item_answer_refines_the_prior_buyer_turn():
         recent_messages=[{"role": "user", "content": "Need 5 workstations, budget 3000"}],
     )
 
-    assert merged.endswith("The stated budget is a per-item budget.")
+    assert merged.endswith("The stated budget is a per item budget.")
 
 
 def test_unknown_nqe_cannot_rewrite_the_query():
@@ -76,8 +76,11 @@ def test_plain_text_scope_answer_resolves_only_server_pending_question():
     )
     assert merged == (
         "work laptops budget 1200 to 1500, need 10 "
-        "The stated budget is a per-item budget."
+        "The stated budget is a per item budget."
     )
+    from src.app.services.budget_grammar import classify_budget_scope
+
+    assert classify_budget_scope(merged) == "per_unit"
 
 
 def test_plain_text_scope_cannot_rewrite_without_server_pending_question():

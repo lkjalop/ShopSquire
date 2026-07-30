@@ -901,7 +901,7 @@ def _merge_material_nqe_answer(
     scope_statement = (
         "The stated budget is the total budget for all requested units."
         if oid == "total"
-        else "The stated budget is a per-item budget."
+        else "The stated budget is a per item budget."
     )
     return f"{prior_query} {scope_statement}"
 

@@ -9,9 +9,30 @@ import pytest
 import logging
 import asyncio
 
-# Skip the entire Playwright test suite unless explicitly enabled.
-if os.getenv("DISABLE_PLAYWRIGHT_TESTS", "1").strip().lower() in ("1", "true", "yes"):
-    pytest.skip("Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)", allow_module_level=True)
+_PLAYWRIGHT_DISABLED = os.getenv("DISABLE_PLAYWRIGHT_TESTS", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+
+def pytest_collection_modifyitems(items):
+    """Skip this subtree without aborting repository-wide collection.
+
+    Calling ``pytest.skip(..., allow_module_level=True)`` while importing a
+    nested conftest aborts collection of the parent ``tests`` directory. That
+    made hosted CI report zero collected tests even though the service shards
+    were healthy. Browser tests remain opt-in, but their skip is now attached
+    to each collected item.
+    """
+    if not _PLAYWRIGHT_DISABLED:
+        return
+    marker = pytest.mark.skip(
+        reason="Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)"
+    )
+    for item in items:
+        if "/tests/pw/" in f"/{str(item.path).replace(chr(92), '/')}":
+            item.add_marker(marker)
 
 # Ensure Playwright can spawn subprocesses on Windows
 try:
