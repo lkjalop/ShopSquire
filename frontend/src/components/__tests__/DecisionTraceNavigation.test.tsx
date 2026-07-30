@@ -27,7 +27,13 @@ describe('Decision Trace rendered navigation', () => {
     renderTrace();
 
     for (const section of TRACE_SECTIONS) {
-      fireEvent.click(screen.getByRole('button', { name: section.label }));
+      if (section.id === 'audit-technical') {
+        fireEvent.click(screen.getByRole('button', { name: /Advanced technical details/i }));
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: new RegExp(section.label) }));
+      }
+      const reveal = screen.queryByRole('button', { name: /Show empty panels/i });
+      if (reveal) fireEvent.click(reveal);
       for (const leaf of section.leaves) {
         const tab = screen.getByTestId(`trace-leaf-${leaf}`);
         expect(tab).toBeVisible();
@@ -60,6 +66,24 @@ describe('Decision Trace rendered navigation', () => {
     fireEvent.keyDown(tablist, { key: 'Home' });
     expect(screen.getByTestId('trace-leaf-summary')).toHaveAttribute('aria-selected', 'true');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps trust cues persistent while progressively disclosing specialist panels', () => {
+    renderTrace('summary');
+    expect(screen.getByTestId('trace-trust-strip')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: /Evidence & Risk/i }));
+    expect(screen.getByTestId('trace-leaf-evidence')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /Show empty panels/i }));
+    expect(screen.getByTestId('trace-leaf-evidence')).toBeVisible();
+  });
+
+  it('places audit and raw behind an advanced disclosure and exposes mobile section navigation', () => {
+    renderTrace('summary');
+    expect(screen.getByTestId('trace-leaf-audit')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /Advanced technical details/i }));
+    expect(screen.getByTestId('trace-leaf-audit')).toBeVisible();
+    expect(screen.getByLabelText('Decision Trace section')).toBeInTheDocument();
   });
 
   it('renders bounded Hippograph provenance and degraded-source details', () => {
