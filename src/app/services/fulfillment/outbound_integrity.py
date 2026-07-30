@@ -38,15 +38,33 @@ _QR_HINT_RE = re.compile(r"(?i)(scan\s+(?:the\s+)?qr|qr\s*code|\bdata:image/)")
 # contact — so the broad buyer-facing PII scan (which flags dates as DOB, addresses, names)
 # over-triggers here. We flag only what must NEVER reach a supplier: payment cards + government
 # identity numbers. Secrets/credentials are handled separately (dlp_scrub_text) and hard-block.
-_PAN_RE = re.compile(r"(?<!\d)(?:\d[ \-]?){12,18}\d(?!\d)")           # 13-19 digit card
 _TFN_RE = re.compile(r"\b[1-9]\d{2}[ \-]\d{3}[ \-]\d{3}\b")           # AU Tax File Number
 _MEDICARE_RE = re.compile(r"\b[2-6]\d{3}[ \-]?\d{5}[ \-]?\d{1,2}\b")  # AU Medicare
+_UUID_RE = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
 
 
 def _sensitive_pii_hits(blob: str) -> int:
+    # Case references are UUIDs and belong in an RFQ subject. A digit-heavy
+    # UUID can contain a 13-digit hyphenated substring that resembles a PAN
+    # (for example ``48856-0636-4888``). Remove only canonical UUID tokens,
+    # then use the shared context/Luhn-aware PCI detector.
+    candidate_blob = _UUID_RE.sub("[CASE_REF]", blob)
     hits = 0
-    for pat in (_PAN_RE, _TFN_RE, _MEDICARE_RE):
-        if pat.search(blob):
+    try:
+        from src.app.security.pci import contains_pci_data
+
+        if contains_pci_data(candidate_blob):
+            hits += 1
+    except Exception:
+        # The secret scanner remains fail-closed separately. A PCI helper
+        # import defect must not make this pure integrity function raise.
+        pass
+    for pat in (_TFN_RE, _MEDICARE_RE):
+        if pat.search(candidate_blob):
             hits += 1
     return hits
 
@@ -89,14 +107,20 @@ def scan_outbound_supplier_message(subject: str, body: str, *, recipient: str = 
     # 2) Payloads we would RELAY — none of these belong in a machine-drafted RFQ.
     relay_block = False
     if _PROMPT_INJECTION_RE.search(blob):
-        findings.append("relayed_prompt_injection"); categories.append("relay_payload"); relay_block = True
+        findings.append("relayed_prompt_injection")
+        categories.append("relay_payload")
+        relay_block = True
     if _EXFIL_C2_RE.search(blob):
-        findings.append("relayed_exfil_or_c2"); categories.append("relay_payload"); relay_block = True
+        findings.append("relayed_exfil_or_c2")
+        categories.append("relay_payload")
+        relay_block = True
     if _URL_RE.search(blob):
         # An external link in an RFQ is anomalous (we don't send suppliers links) → review, not block.
-        findings.append("relayed_external_link"); categories.append("relay_link")
+        findings.append("relayed_external_link")
+        categories.append("relay_link")
     if _QR_HINT_RE.search(blob):
-        findings.append("relayed_qr_reference"); categories.append("relay_link")
+        findings.append("relayed_qr_reference")
+        categories.append("relay_link")
 
     # Decide: any secret leaving OR a failed secret scan OR any injected executable payload → BLOCK
     # (fail-closed on scan error); links/sensitive-PII/QR → REVIEW.

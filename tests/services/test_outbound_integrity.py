@@ -38,6 +38,15 @@ def test_pii_reviews():
     assert r["action"] == "review" and "sensitive_pii_in_outbound_body" in r["findings"]
 
 
+def test_uuid_case_reference_is_not_misclassified_as_card_data():
+    r = scan_outbound_supplier_message(
+        "RFQ - LAP-021 x 6 (ref 3ac48856-0636-4888-aa9c-878143c38fd3)",
+        "Please quote 6 units. This request does not constitute a purchase order.",
+    )
+    assert r["action"] == "allow"
+    assert r["dlp"]["sensitive_pii_hits"] == 0
+
+
 def test_transmit_chokepoint_blocks_and_traces(monkeypatch):
     # the _transmit_current_draft chokepoint must refuse to send a poisoned draft (both human +
     # autonomous route through it) and NOT advance the case state.
