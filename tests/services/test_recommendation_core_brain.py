@@ -1435,6 +1435,21 @@ def test_approved_policy_hint_clamps_model_search_misroute(db):
     assert decision.lane == "POLICY_QUESTION"
 
 
+def test_approved_policy_hint_survives_model_unavailable_fallback(db):
+    env = TurnEnvelope.from_suggest_params(
+        query="What is your returns policy?",
+        uid="u1",
+        tenant_id="default",
+        intent_hint="POLICY_QUESTION",
+        session={},
+    )
+
+    decision = route_turn(db, env, llm_fn=lambda _prompt, _timeout: "")
+
+    assert decision.lane == "POLICY_QUESTION"
+    assert decision.source == "fallback:model_unavailable"
+
+
 def test_active_procurement_uses_model_continuity_to_correct_policy_conflict(db):
     session = {
         "prior_lane": "PROCUREMENT", "shortlist_skus": ["LAP-1"],

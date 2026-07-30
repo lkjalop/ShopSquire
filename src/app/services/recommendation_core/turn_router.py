@@ -423,6 +423,22 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     tenant-sold taxonomy candidate and recover an explicit quantity/budget scope with
     the shared grammars. The source remains a fallback so promotion metrics count it.
     """
+    # An edge hint alone is not authority, but an approved policy template is. Preserve
+    # this read-only lane when the optional model router is unavailable so a hosted or
+    # edge deployment does not relabel an answer it can ground deterministically as SEARCH.
+    if str(envelope.intent_hint or "").strip().upper() == "POLICY_QUESTION":
+        try:
+            from src.app.services.answer_quality import policy_faq_answer
+
+            if policy_faq_answer(envelope.query) is not None:
+                return TurnDecision(
+                    lane="POLICY_QUESTION",
+                    confidence=1.0,
+                    source=f"fallback:{reason}",
+                )
+        except Exception as exc:
+            logger.debug("approved policy fallback lookup failed: %s", repr(exc)[:120])
+
     from src.app.services.bulk_intent import extract_quantity_span
     from src.app.services.budget_grammar import classify_budget_scope, parse_budget
 
