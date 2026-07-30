@@ -1,17 +1,13 @@
 from typing import Dict, Optional
-from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import StreamingResponse
 from fastapi import WebSocket, WebSocketDisconnect
 import logging
 
-from src.app.config import load_feature_flags, get_settings
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.models.db import db_session, get_engine, get_db
-from fastapi import Request, Depends
+from fastapi import Request
 from sqlalchemy import inspect as sa_inspect, text, create_engine
 import asyncio
-from src.app.models.decision_audit import DecisionAudit
 from src.app.services.persistence import write_audit_and_event
 from src.app.utils.webhook import send_webhook
 from src.app.observability.metrics import decisions_events_counter
@@ -19,7 +15,6 @@ from src.app.observability.tracing import get_tracer
 from pathlib import Path
 import json
 import time
-from sqlalchemy import text
 import uuid
 import os
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER, _env_role_key
@@ -727,7 +722,6 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
     async def event_gen():
         # Emit up to 60 seconds of updates
         deadline = asyncio.get_event_loop().time() + 60
-        last_id = None
         while asyncio.get_event_loop().time() < deadline:
             if await request.is_disconnected():
                 break
@@ -761,7 +755,6 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
                         "policy_version": r[4],
                         "execution_status": r[5],
                     }
-                    last_id = r[0]
                     break
             yield f"data: {json.dumps(payload)}\n\n"
             await asyncio.sleep(3)
@@ -1278,7 +1271,7 @@ def reopen_decision(decision_id: str, actor: str, comment: str | None = None, ro
                     logger.debug("[decisions.reopen] db.bind.url=%s id=%s", getattr(db.bind, 'url', None), decision_id)
                 except Exception:
                     pass
-                res = db.execute(stmt, {"id": decision_id})
+                db.execute(stmt, {"id": decision_id})
                 # Always write audit regardless of rowcount quirks
                 write_audit_and_event(decision_id, "reopen", actor, {"comment": comment})
                 db.commit()
