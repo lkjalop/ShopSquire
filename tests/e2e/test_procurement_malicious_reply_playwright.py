@@ -40,7 +40,10 @@ def test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert():
             json=payload or {},
             timeout=30,
         )
-        response.raise_for_status()
+        assert response.ok, (
+            f"POST {path} failed with HTTP {response.status_code}: "
+            f"{response.text[:2000]}"
+        )
         return response.json()
 
     case_id = post("/api/v1/fulfillment/cases", {"uid": "security-browser-buyer"})["case_id"]
@@ -56,9 +59,32 @@ def test_malicious_trusted_supplier_reply_is_visible_but_commercially_inert():
     if drafted["state"] == "NO_APPROVED_SUPPLIER":
         pytest.skip("trusted supplier fixture is not seeded")
     approval = post(f"/api/v1/fulfillment/cases/{case_id}/request-approval")
+    approved_draft = approval["state_json"]["draft"]
+    # Diagnose the exact fail-closed finding before the HTTP dispatch boundary.
+    # This is deliberately an assertion, not a scanner bypass: a contaminated
+    # fixture must fail with actionable evidence and must never be transmitted.
+    from src.app.services.fulfillment.outbound_integrity import (
+        scan_outbound_supplier_message,
+    )
+
+    integrity = scan_outbound_supplier_message(
+        approved_draft.get("subject", ""),
+        approved_draft.get("body", ""),
+        recipient=(
+            approved_draft.get("recipient_email")
+            or approved_draft.get("recipient_domain")
+            or ""
+        ),
+    )
+    assert integrity["action"] == "allow", (
+        "security fixture produced an unsafe outbound RFQ: "
+        f"{json.dumps(integrity, sort_keys=True)}; "
+        f"subject={approved_draft.get('subject')!r}; "
+        f"body={approved_draft.get('body')!r}"
+    )
     sent = post(
         f"/api/v1/fulfillment/cases/{case_id}/dispatch",
-        {"content_hash": approval["state_json"]["draft"]["content_hash"]},
+        {"content_hash": approved_draft["content_hash"]},
     )
     before = {
         key: sent["state_json"].get(key)

@@ -139,12 +139,7 @@ jobs:
             sleep 1
           done
           exit 1
-      - name: Storefront Playwright battery
-        working-directory: frontend
-        # One backend/database serves this suite. Serial execution prevents
-        # cross-spec market signals and cart writes from contaminating peers.
-        run: timeout 600s npx playwright test --reporter=line --workers=1
-      - name: Security, policy-trace, and closed-loop regressions
+      - name: Isolated malicious-reply security regression
         env:
           RUN_LIVE_BROWSER_TESTS: "1"
           LIVE_SHOPPER_URL: http://127.0.0.1:5173
@@ -152,6 +147,18 @@ jobs:
           LIVE_GMAIL_INGEST_SECRET: ci-browser-ingress-only
         run: |
           timeout 240s poetry run pytest -vv -s tests/e2e/test_procurement_malicious_reply_playwright.py
+      - name: Storefront Playwright battery
+        working-directory: frontend
+        # One backend/database serves this suite. Serial execution prevents
+        # cross-spec market signals and cart writes from contaminating peers.
+        run: timeout 600s npx playwright test --reporter=line --workers=1
+      - name: Policy-trace and closed-loop regressions
+        env:
+          RUN_LIVE_BROWSER_TESTS: "1"
+          LIVE_SHOPPER_URL: http://127.0.0.1:5173
+          LIVE_ADMIN_URL: http://127.0.0.1:3001
+          LIVE_GMAIL_INGEST_SECRET: ci-browser-ingress-only
+        run: |
           timeout 240s poetry run pytest -vv -s tests/e2e/test_live_policy_trace.py
           timeout 240s poetry run pytest -vv -s tests/e2e/test_live_procurement_closed_loop.py
       - name: Reject transaction-abort signatures
