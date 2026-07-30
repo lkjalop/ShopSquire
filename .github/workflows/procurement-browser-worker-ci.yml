@@ -164,6 +164,8 @@ jobs:
       - name: Reject transaction-abort signatures
         if: always()
         run: |
+          test -f proof-artifacts/backend.log
+          test -f proof-artifacts/celery.log
           if grep -Eqi \
             'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
             proof-artifacts/backend.log proof-artifacts/celery.log; then
@@ -240,12 +242,12 @@ jobs:
       - name: Create dedicated worker database
         run: |
           set -o pipefail
-          mkdir -p tmp test-results
-          timeout 180s poetry run alembic upgrade head 2>&1 | tee test-results/migration-upgrade.log
+          mkdir -p tmp proof-artifacts
+          timeout 180s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-upgrade.log
       - name: Start worker and prove broker delivery
         run: |
-          poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > test-results/celery.log 2>&1 &
-          echo $! > test-results/celery.pid
+          poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > proof-artifacts/celery.log 2>&1 &
+          echo $! > proof-artifacts/celery.pid
           for attempt in $(seq 1 30); do
             if timeout 5s poetry run celery -A src.app.workers.celery_app:celery_app inspect ping | grep -q pong; then
               exit 0
@@ -256,7 +258,7 @@ jobs:
       - name: Worker, delivery, connector, and recovery suites
         run: |
           timeout 420s poetry run pytest -vv \
-            --junitxml=test-results/worker-tests.xml \
+            --junitxml=proof-artifacts/worker-tests.xml \
             tests/services/fulfillment/test_outbound_delivery_jobs.py \
             tests/services/test_connector_runtime.py \
             tests/api/test_admin_inventory_netsuite_jobs.py \
@@ -264,21 +266,31 @@ jobs:
       - name: Reject worker transaction-abort signatures
         if: always()
         run: |
+          test -f proof-artifacts/celery.log
           if grep -Eqi \
             'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
-            test-results/celery.log; then
+            proof-artifacts/celery.log; then
             echo "::error::PostgreSQL transaction-abort signature found in worker logs"
             grep -Ein \
               'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
-              test-results/celery.log
+              proof-artifacts/celery.log
             exit 1
           fi
+      - name: Inventory retained worker proof
+        if: always()
+        run: |
+          test -f proof-artifacts/migration-upgrade.log
+          test -f proof-artifacts/celery.log
+          test -f proof-artifacts/worker-tests.xml
+          find proof-artifacts -type f -printf '%p\t%s bytes\n' |
+            sort | tee proof-artifacts/artifact-manifest.txt
       - name: Upload worker evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: procurement-worker-evidence
           path: |
-            test-results/
+            proof-artifacts/
             tmp/*.sqlite*
+          if-no-files-found: error
           retention-days: 14
