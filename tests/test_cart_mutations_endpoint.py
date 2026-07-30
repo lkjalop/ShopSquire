@@ -196,6 +196,29 @@ def test_chat_short_circuit_persists_quantity_for_follow_up_turns():
     assert state["confirmed_slots"]["order_quantity"] == 60
 
 
+def test_temporary_chat_short_circuit_does_not_persist_memory():
+    from src.app.deps import DummyRedis
+    from src.app.routers.chat import _cart_mutation_short_circuit
+    from src.app.services.memory import Memory
+
+    redis = DummyRedis()
+    out = _cart_mutation_short_circuit(
+        _suggest_cart_payload(requested_quantity=60),
+        q="actually make it 60 units",
+        uid="u-temporary-cart",
+        db=None,
+        redis=redis,
+        session_epoch="temporary-epoch",
+        persist_conversation=False,
+    )
+
+    assert out["requested_quantity"] == 60
+    assert Memory(
+        redis,
+        session_epoch="temporary-epoch",
+    ).get_structured_state("u-temporary-cart") == {}
+
+
 def test_chat_short_circuit_forwards_applied_cart():
     from src.app.routers.chat import _cart_mutation_short_circuit
     out = _cart_mutation_short_circuit(

@@ -463,21 +463,41 @@ def _classified_subject(db, skus: List[str], tenant_id: str) -> Optional[str]:
     return max(specific, key=lambda node: (node.depth, node.handle)).handle if specific else None
 
 
-def _read_session_slice(redis, uid: str, tenant_id: str, db: Any = None) -> Dict[str, Any]:
+def _read_session_slice(
+    redis,
+    uid: str,
+    tenant_id: str,
+    db: Any = None,
+    *,
+    session_epoch: str | None = None,
+    memory_enabled: bool = True,
+) -> Dict[str, Any]:
     """Best-effort immutable session slice, TENANT-SCOPED (GPT-5.6 #5c22575.3): the core's
     session namespace is session:{tenant}:{uid}:kv_state — never uid-alone (that would cross
     tenants). Consumed by prior-subject resolution later; populated now so the wiring is
     proven end-to-end."""
-    if redis is None or not uid:
+    if redis is None or not uid or not memory_enabled:
         return {}
     try:
-        raw = redis.get(f"session:{tenant_id}:{uid}:kv_state")
-        data = json.loads(raw) if raw else {}
+        from src.app.services.memory import Memory
+
+        data = Memory(
+            redis,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        ).get_structured_state(uid)
+        if (not isinstance(data, dict) or not data) and not session_epoch:
+            # Compatibility for non-chat callers that have not adopted an
+            # explicit epoch yet. Explicit epochs never read this shared key.
+            tenant_raw = redis.get(f"session:{tenant_id}:{uid}:kv_state")
+            tenant_data = json.loads(tenant_raw) if tenant_raw else {}
+            if isinstance(tenant_data, dict):
+                data = tenant_data
         if not isinstance(data, dict) or not data:
             # Transitional bridge: delegated legacy lanes still write an unscoped key. It is
             # unsafe for named tenants, so only the single-tenant demo namespace may read it.
             # Delete this branch once all lane postflights write the canonical scoped slice.
-            if tenant_id != "default":
+            if tenant_id != "default" or session_epoch:
                 return {}
             legacy_raw = redis.get(f"session:{uid}:kv_state")
             legacy = json.loads(legacy_raw) if legacy_raw else {}
@@ -616,7 +636,13 @@ def _run_guard(*, query: str, uid: str, image_labels: Optional[str],
 
 
 def _run_v2_intelligence_stage(
-    *, payload: Dict[str, Any], core: Any, envelope: Any, redis: Any
+    *,
+    payload: Dict[str, Any],
+    core: Any,
+    envelope: Any,
+    redis: Any,
+    session_epoch: str | None = None,
+    memory_enabled: bool = True,
 ) -> Dict[str, Any]:
     """Apply the shared governed intelligence stage to a V2-served slate.
 
@@ -642,6 +668,24 @@ def _run_v2_intelligence_stage(
         uid_hash = hashlib.sha256(str(envelope.uid or "").encode("utf-8")).hexdigest()
         constraints = dict(payload.get("constraints_used") or {})
         proposal = dict(payload.get("proposal") or {})
+        if memory_enabled:
+            stage_memory = Memory(
+                redis,
+                tenant_id=envelope.tenant_id,
+                session_epoch=session_epoch,
+            )
+        else:
+            class _EphemeralMemory:
+                def __init__(self) -> None:
+                    self.state: Dict[str, Any] = {}
+
+                def get_kv(self, _uid: str) -> Dict[str, Any]:
+                    return dict(self.state)
+
+                def set_kv(self, _uid: str, value: Dict[str, Any]) -> None:
+                    self.state = dict(value or {})
+
+            stage_memory = _EphemeralMemory()
         results = run_intelligence_stage(
             IntelligenceStageState(
                 results=results,
@@ -657,7 +701,7 @@ def _run_v2_intelligence_stage(
                 trace_id=envelope.trace_id,
                 decision_id=getattr(core, "decision_id", None),
             ),
-            mem=Memory(redis),
+            mem=stage_memory,
         )
         payload["results"] = results
         payload["products"] = results
@@ -692,6 +736,8 @@ def dispatch_recommendation_core_typed(
     intent_hint: Optional[str] = None,
     role: str = "",
     confirmed_slots: Optional[Dict[str, Any]] = None,
+    session_epoch: Optional[str] = None,
+    memory_enabled: bool = True,
     compatibility_cutover: bool = False,
     with_trace: Optional[Callable[[Dict[str, Any], str], Dict[str, Any]]] = None,
     record_failure: Optional[Callable[..., Any]] = None,
@@ -862,7 +908,16 @@ def dispatch_recommendation_core_typed(
                 cart_slice = _read_cart_slice(db, uid, tenant_id=tenant)
                 if cart_slice:
                     session = _merge_session_overrides(
-                        _read_session_slice(redis, uid, tenant, db), confirmed_slots)
+                        _read_session_slice(
+                            redis,
+                            uid,
+                            tenant,
+                            db,
+                            session_epoch=session_epoch,
+                            memory_enabled=memory_enabled,
+                        ),
+                        confirmed_slots,
+                    )
                     envelope = TurnEnvelope.from_suggest_params(
                         query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                         budget_max=budget_max, trace_id=trace_id, has_image=False,
@@ -892,7 +947,16 @@ def dispatch_recommendation_core_typed(
             # FULL envelope in the job (R10.1/P1.1): budget/session/image ride along so the
             # worker replays the turn production actually saw, not a query-only shadow of it.
             session = _merge_session_overrides(
-                _read_session_slice(redis, uid, tenant, db), confirmed_slots)
+                _read_session_slice(
+                    redis,
+                    uid,
+                    tenant,
+                    db,
+                    session_epoch=session_epoch,
+                    memory_enabled=memory_enabled,
+                ),
+                confirmed_slots,
+            )
             shadow_env = TurnEnvelope.from_suggest_params(
                 query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                 budget_max=budget_max, trace_id=trace_id,
@@ -929,7 +993,16 @@ def dispatch_recommendation_core_typed(
             return outcome("blocked", reason=f"guard:{guard.get('verdict') or 'unknown'}")
 
         session = _merge_session_overrides(
-            _read_session_slice(redis, uid, tenant, db), confirmed_slots)
+            _read_session_slice(
+                redis,
+                uid,
+                tenant,
+                db,
+                session_epoch=session_epoch,
+                memory_enabled=memory_enabled,
+            ),
+            confirmed_slots,
+        )
         # the search core is cart-blind; cart editing already ran above (parallel-run).
         envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
@@ -980,12 +1053,24 @@ def dispatch_recommendation_core_typed(
         # split-brain where V2 mutated session but legacy answered.
         payload = to_legacy(core)
         payload = _run_v2_intelligence_stage(
-            payload=payload, core=core, envelope=envelope, redis=redis,
+            payload=payload,
+            core=core,
+            envelope=envelope,
+            redis=redis,
+            session_epoch=session_epoch,
+            memory_enabled=memory_enabled,
         )
         payload = with_trace(payload, trace_id)
         try:
             from src.app.services.recommendation_postflight import run_postflight
-            run_postflight(redis, envelope, core, latency_ms=_latency_ms)
+            run_postflight(
+                redis,
+                envelope,
+                core,
+                latency_ms=_latency_ms,
+                session_epoch=session_epoch,
+                memory_enabled=memory_enabled,
+            )
         except Exception as _e_pf:
             logger.warning("postflight failed (non-fatal): %s", repr(_e_pf)[:120])
         return outcome("served", payload=payload, lane=core.lane)

@@ -429,6 +429,7 @@ def _cart_mutation_short_circuit(
     tenant_id: str | None = None,
     session_id: str | None = None,
     session_epoch: str | None = None,
+    persist_conversation: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """CART-MUTATION short-circuit (V2 cart lane, extracted for testability): when the suggest
     hop returns a cart_mutation payload (RECOMMEND_CART_SERVE=on), build the MINIMAL chat
@@ -441,6 +442,8 @@ def _cart_mutation_short_circuit(
     tid = data.get("decision_trace_id") or data.get("decision_id") or data.get("trace_id")
     msg = str(data.get("assistant_message") or data.get("message") or "").strip()
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         _store_chat_message(
             db,
             tenant_id=tenant_id,
@@ -463,7 +466,8 @@ def _cart_mutation_short_circuit(
                 trace_id=tid,
             )
     except Exception as _cm_exc:
-        logger.debug("cart-mutation chat persist skipped: %s", repr(_cm_exc)[:100])
+        if persist_conversation:
+            logger.debug("cart-mutation chat persist skipped: %s", repr(_cm_exc)[:100])
     multi_intent = None
     try:
         enabled = str(os.getenv("MULTI_INTENT_PLANNER_ENABLED", "")).strip().lower() in (
@@ -519,6 +523,8 @@ def _cart_mutation_short_circuit(
         "security_route": "allow",
     }
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         _persist_chat_structured_state(
             redis=redis,
             uid=uid,
@@ -531,7 +537,8 @@ def _cart_mutation_short_circuit(
             session_epoch=session_epoch,
         )
     except Exception:
-        logger.warning("cart-mutation structured-state persistence failed", exc_info=True)
+        if persist_conversation:
+            logger.warning("cart-mutation structured-state persistence failed", exc_info=True)
     return out
 
 
@@ -1593,6 +1600,12 @@ async def _call_recommend_in_process(
                 params.get("confirmed_slots")
                 if isinstance(params.get("confirmed_slots"), dict) else None
             ),
+            session_epoch=(
+                str(params.get("session_epoch") or "").strip() or None
+            ),
+            memory_enabled=(
+                str(params.get("memory_mode") or "standard").lower() != "temporary"
+            ),
             source_ip=(request.client.host if request.client else None),
         )
         if facade.served:
@@ -1812,6 +1825,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
     tenant_id = _request_tenant_id(request)
     session_epoch = session_id or uid
+    memory_mode = str((payload or {}).get("memory_mode") or "standard").strip().lower()
+    if memory_mode not in {"standard", "temporary"}:
+        raise HTTPException(status_code=400, detail="invalid_memory_mode")
+    persist_conversation = memory_mode == "standard"
     source_ip = request.client.host if request and request.client else ""
     # TEXT prompt-injection tally (ledger-only, no behavior change): classic override phrasings are
     # already harmless here (they fall through to a normal product turn — the LLM never sees them as
@@ -1852,6 +1869,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # cart is empty (e.g. an add-to-cart 409'd on stock).
     _prior_turn_shortlist: List[str] = []
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         _prior_ss = Memory(
             redis,
             tenant_id=tenant_id,
@@ -2035,6 +2054,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             "complexity": score_query_complexity(q, context={"has_image": True}),
         }
         try:
+            if not persist_conversation:
+                raise RuntimeError("temporary_chat")
             _store_chat_message(
                 db,
                 tenant_id=tenant_id,
@@ -2079,6 +2100,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "conversation_turn": int((payload or {}).get("conversation_turn") or 0),
     })
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         uid_for_cache = _resolve_uid(payload, request)
         if uid_for_cache and isinstance(image_hash_in, str) and image_hash_in.strip() and image_blob_bytes:
             mem = Memory(
@@ -2102,6 +2125,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # reference them for context continuity (avoids "context rot").
     # -----------------------------------------------------------------------
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         _uid_msg = uid
         _recent_msgs_raw = (payload or {}).get("recent_messages") or []
         if isinstance(_recent_msgs_raw, list) and _recent_msgs_raw:
@@ -2213,6 +2238,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             },
         }
         try:
+            if not persist_conversation:
+                raise RuntimeError("temporary_chat")
             _store_chat_message(
                 db,
                 tenant_id=tenant_id,
@@ -2287,7 +2314,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # Delegate through the in-process compatibility boundary. The mature suggest
     # contract remains authoritative until facade dispatch is fully hoisted.
     params = {"uid": uid, "query": _query_for_retrieval,
-              "trace_id": _recommend_ingress.trace_id}
+              "trace_id": _recommend_ingress.trace_id,
+              "session_epoch": session_epoch,
+              "memory_mode": memory_mode}
     if _deficit_reorder:
         params["reorder_consent_intent"] = "true"  # emphasize the backorder-consent answer downstream
     if turn_intent and turn_intent != "SEARCH":
@@ -2465,6 +2494,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     tenant_id=tenant_id,
                     session_id=session_id,
                     session_epoch=session_epoch,
+                    persist_conversation=persist_conversation,
                 )
                 if _cart_out is not None:
                     return _cart_out
@@ -2513,6 +2543,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         "security_route": str(image_security_posture.get("route") or "allow"),
                     }
                     try:
+                        if not persist_conversation:
+                            raise RuntimeError("temporary_chat")
                         uid = _resolve_uid(payload, request)
                         _store_chat_message(
                             db,
@@ -2561,6 +2593,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     "security_route": str(image_security_posture.get("route") or "review"),
                 }
                 try:
+                    if not persist_conversation:
+                        raise RuntimeError("temporary_chat")
                     uid = _resolve_uid(payload, request)
                     _store_chat_message(
                         db,
@@ -3462,6 +3496,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             data.get("agent_steps") or []
         )
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         material_question = next((item for item in (out.get("next_questions") or [])
                                   if isinstance(item, dict) and item.get("id") == "budget_scope"), None)
         if material_question and not nqe_selection:
@@ -3478,8 +3514,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
             )
     except Exception:
-        logger.warning("pending chat clarification persistence failed", exc_info=True)
+        if persist_conversation:
+            logger.warning("pending chat clarification persistence failed", exc_info=True)
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         user_message_id = _store_chat_message(
             db,
             uid=uid,
@@ -3523,12 +3562,15 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             session_epoch=session_epoch,
         )
     except Exception:
-        logger.warning("chat message persistence failed", exc_info=True)
+        if persist_conversation:
+            logger.warning("chat message persistence failed", exc_info=True)
         try:
             db.rollback()
         except Exception:
             pass
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         _persist_chat_structured_state(
             redis=redis,
             uid=uid,
@@ -3548,7 +3590,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 session_epoch=session_epoch,
             ).clear_pending_clarification(uid)
     except Exception:
-        logger.warning("chat structured-state persistence failed", exc_info=True)
+        if persist_conversation:
+            logger.warning("chat structured-state persistence failed", exc_info=True)
     return out
 
 

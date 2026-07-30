@@ -150,3 +150,30 @@ def test_authoritative_backend_lane_rejects_unknown_values():
     assert chat_router._authoritative_backend_lane({"turn_intent": "search"}) == "SEARCH"
     assert chat_router._authoritative_backend_lane({"policy_answered": True}) == "POLICY_QUESTION"
     assert chat_router._authoritative_backend_lane({"turn_intent": "invented_lane"}) is None
+
+
+def test_temporary_chat_is_not_written_to_history(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process", _fake_policy_answer)
+    client = TestClient(create_app())
+    headers = {"x-api-key": "local-merchant-key"}
+    response = client.post(
+        "/api/v1/chat/query",
+        json={
+            "uid": "u-temporary-history",
+            "query": "What's your returns policy?",
+            "session_id": "epoch-temporary-1",
+            "memory_mode": "temporary",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    history = client.get(
+        "/api/v1/chat/history",
+        params={"uid": "u-temporary-history", "session_epoch": "epoch-temporary-1"},
+        headers=headers,
+    )
+    assert history.status_code == 200
+    assert history.json()["items"] == []

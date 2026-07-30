@@ -242,6 +242,11 @@ def create_privacy_request(
 def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_OWNER]))) -> Dict:
     """GDPR Article 17: Right to Erasure."""
     uid_hash = hash_uid(uid)
+    tenant_id = _ct()
+    from src.app.services.privacy_deletion_orchestrator import finish_job, start_job
+
+    job_id = start_job(tenant_id=tenant_id, subject_hash=uid_hash)
+    action_required: List[str] = []
     deleted = {
         "decision_logs": 0,
         "decision_audits": 0,
@@ -251,11 +256,19 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
         "draft_orders": 0,
         "customers": 0,
         "session_memory": False,
+        "conversation_fact_observations": 0,
     }
     try:
         with db_session() as db:
             _where, params = _uid_patterns(uid, uid_hash)
-            ids = db.execute(text(f"SELECT id FROM decision_logs WHERE {_UID_WHERE_SQL}"), params).fetchall()
+            params["tenant_id"] = tenant_id
+            ids = db.execute(
+                text(
+                    f"SELECT id FROM decision_logs WHERE tenant_id=:tenant_id "
+                    f"AND {_UID_WHERE_SQL}"
+                ),
+                params,
+            ).fetchall()
             decision_ids = [r[0] for r in ids if r and r[0]]
             if decision_ids:
                 in_params = {"decision_ids": decision_ids}
@@ -274,27 +287,43 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                 )
                 deleted["decision_logs"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute(text("DELETE FROM order_sessions WHERE uid = :uid"), {"uid": uid})
-            deleted["order_sessions"] = getattr(res, "rowcount", 0) or 0
-
             res = db.execute(
                 text("DELETE FROM chat_messages WHERE tenant_id = :tenant_id AND uid = :uid"),
-                {"tenant_id": _ct(), "uid": uid},
+                {"tenant_id": tenant_id, "uid": uid},
             )
             deleted["chat_messages"] = getattr(res, "rowcount", 0) or 0
 
             res = db.execute(
-                "UPDATE orders SET customer_id = 'DELETED' WHERE customer_id = :uid",
-                {"uid": uid},
+                text(
+                    "DELETE FROM conversation_fact_observation "
+                    "WHERE tenant_id=:tenant_id AND subject_ref=:subject_ref"
+                ),
+                {"tenant_id": tenant_id, "subject_ref": uid_hash},
             )
-            deleted["orders"] = getattr(res, "rowcount", 0) or 0
+            deleted["conversation_fact_observations"] = getattr(res, "rowcount", 0) or 0
 
             res = db.execute(text("DELETE FROM draft_orders WHERE customer_id = :uid AND tenant_id = :t"),
-                             {"uid": uid, "t": _ct()})
+                             {"uid": uid, "t": tenant_id})
             deleted["draft_orders"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute(text("DELETE FROM customers WHERE id = :uid"), {"uid": uid})
-            deleted["customers"] = getattr(res, "rowcount", 0) or 0
+            # These legacy tables do not yet carry authoritative tenant ownership.
+            # A tenant-scoped privacy operation must not erase another tenant's row.
+            legacy_counts = {
+                "order_sessions": int(db.execute(
+                    text("SELECT COUNT(*) FROM order_sessions WHERE uid=:uid"), {"uid": uid}
+                ).scalar() or 0),
+                "orders": int(db.execute(
+                    text("SELECT COUNT(*) FROM orders WHERE customer_id=:uid"), {"uid": uid}
+                ).scalar() or 0),
+                "customers": int(db.execute(
+                    text("SELECT COUNT(*) FROM customers WHERE id=:uid"), {"uid": uid}
+                ).scalar() or 0),
+            }
+            for table_name, count in legacy_counts.items():
+                if count:
+                    action_required.append(
+                        f"authoritative_tenant_ownership_required:{table_name}:{count}"
+                    )
 
             db.commit()
 
@@ -306,10 +335,63 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
             deleted["session_memory"] = erase_redis(redis, uid)
         except Exception:
             deleted["session_memory"] = False
-
-        return {"status": "deleted", "uid": uid, "uid_hash": uid_hash, "deleted_records": deleted}
+        memory_result = deleted["session_memory"]
+        if not isinstance(memory_result, dict) or not memory_result.get("complete"):
+            action_required.append("redis_or_cache_erasure_incomplete")
+        outcome = finish_job(
+            job_id,
+            tenant_id=tenant_id,
+            stages={
+                "tenant_scoped_database": {
+                    "status": "completed",
+                    "deleted_records": {
+                        key: value for key, value in deleted.items() if key != "session_memory"
+                    },
+                },
+                "memory_and_cache": {
+                    "status": (
+                        "completed"
+                        if isinstance(memory_result, dict) and memory_result.get("complete")
+                        else "action_required"
+                    ),
+                    "result": memory_result,
+                },
+            },
+            action_required=action_required,
+        )
+        return {
+            "status": outcome["status"],
+            "job_id": job_id,
+            "uid_hash": uid_hash,
+            "deleted_records": deleted,
+            "action_required": action_required,
+        }
     except Exception as exc:
+        try:
+            finish_job(
+                job_id,
+                tenant_id=tenant_id,
+                stages={"tenant_scoped_database": {"status": "failed", "error": str(exc)[:240]}},
+                action_required=["operator_retry_required"],
+                failed=True,
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/deletion-jobs/{job_id}")
+def get_deletion_job(
+    job_id: str,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    _ = role
+    from src.app.services.privacy_deletion_orchestrator import get_job
+
+    job = get_job(job_id, tenant_id=_ct())
+    if job is None:
+        raise HTTPException(status_code=404, detail="privacy_deletion_job_not_found")
+    return job
 
 
 @router.get("/export/{uid}")

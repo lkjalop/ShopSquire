@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from src.app.services.recommendation_core.envelope import CoreResponse, TurnEnvelope
 
@@ -39,7 +39,13 @@ def _session_key(tenant_id: str, uid: str) -> str:
     return f"session:{tenant_id}:{uid}:kv_state"
 
 
-def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
+def write_session(
+    redis,
+    envelope: TurnEnvelope,
+    core: CoreResponse,
+    *,
+    session_epoch: str | None = None,
+) -> bool:
     """Persist the immutable session slice the facade reads next turn. Returns True on write."""
     if redis is None or not envelope.uid:
         return False
@@ -104,6 +110,15 @@ def write_session(redis, envelope: TurnEnvelope, core: CoreResponse) -> bool:
             "active_workflow_lane": active_workflow,
             "ts": int(time.time()),
         }
+        if session_epoch:
+            from src.app.services.memory import Memory
+
+            Memory(
+                redis,
+                tenant_id=envelope.tenant_id,
+                session_epoch=session_epoch,
+            ).set_structured_state(envelope.uid, slice_, ttl_seconds=_SESSION_TTL_S)
+            return True
         payload = json.dumps(slice_)
         key = _session_key(envelope.tenant_id, envelope.uid)
         try:
@@ -132,12 +147,26 @@ def emit_telemetry(envelope: TurnEnvelope, core: CoreResponse, *, latency_ms: in
         logger.info("core_turn %s", json.dumps(rec))
 
 
-def run_postflight(redis, envelope: TurnEnvelope, core: CoreResponse, *,
-                   latency_ms: int = 0, narrate: bool = False,
-                   executor: Any = None) -> Dict[str, Any]:
+def run_postflight(
+    redis,
+    envelope: TurnEnvelope,
+    core: CoreResponse,
+    *,
+    latency_ms: int = 0,
+    narrate: bool = False,
+    executor: Any = None,
+    session_epoch: str | None = None,
+    memory_enabled: bool = True,
+) -> Dict[str, Any]:
     """The shared side-effect stage. Returns an outcome dict for the trace; never raises."""
     out: Dict[str, Any] = {"session_written": False, "narration_job_id": None}
-    out["session_written"] = write_session(redis, envelope, core)
+    if memory_enabled:
+        out["session_written"] = write_session(
+            redis,
+            envelope,
+            core,
+            session_epoch=session_epoch,
+        )
     try:
         emit_telemetry(envelope, core, latency_ms=latency_ms)
     except Exception as exc:   # observable, not silent (no-silent-except ratchet)

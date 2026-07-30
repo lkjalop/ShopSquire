@@ -53,6 +53,8 @@ import {
   clearStoredUid,
   getStoredAuthIdentity,
   getOrCreateStoredUid,
+  getOrCreateConversationEpoch,
+  rotateConversationEpoch,
   setStoredAuthIdentity,
 } from './lib/browserSession';
 
@@ -472,6 +474,8 @@ export default function App() {
   const [whyDrawerLoading, setWhyDrawerLoading] = useState(false);
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = getOrCreateStoredUid();
+  const [conversationEpoch, setConversationEpoch] = useState(() => getOrCreateConversationEpoch());
+  const [temporaryChat, setTemporaryChat] = useState(false);
   // Dev-only debug metadata (LLM tier·model badge) is noise for a pilot buyer OR a live demo (the demo runs
   // the Vite dev server, so a DEV auto-enable leaks the badge on camera). Show it ONLY on an explicit opt-in
   // (localStorage 'shopsquire_debug'='1') — never to a normal shopper and never by default in a dev build.
@@ -1731,7 +1735,12 @@ export default function App() {
         }
       } else {
         // Build multimodal chat payload
-        const chatPayload: any = { uid, query: q };
+        const chatPayload: any = {
+          uid,
+          query: q,
+          session_id: conversationEpoch,
+          memory_mode: temporaryChat ? 'temporary' : 'standard',
+        };
         const copyProfileId = String(localStorage.getItem('shopsquire_copy_profile_id') || (import.meta as any).env?.VITE_COPY_PROFILE_ID || '').trim();
         const copyBrandName = String(localStorage.getItem('shopsquire_brand_name') || (import.meta as any).env?.VITE_BRAND_NAME || '').trim();
         const copyEnabled =
@@ -2677,6 +2686,24 @@ export default function App() {
 
               {/* Composer Card */}
               <div className={styles.chatFooter}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+                  <button
+                    type="button"
+                    className={styles.filterBtn}
+                    aria-pressed={temporaryChat}
+                    data-testid="temporary-chat-toggle"
+                    title="Temporary chat is not written to conversation history or memory"
+                    onClick={() => {
+                      const next = !temporaryChat;
+                      setTemporaryChat(next);
+                      setConversationEpoch(rotateConversationEpoch());
+                      setMessages([]);
+                      setConfirmedSlots({});
+                    }}
+                  >
+                    {temporaryChat ? 'Temporary chat: on' : 'Temporary chat: off'}
+                  </button>
+                </div>
                 {/* Thumbnail strip for attached images */}
                 {attachedThumbs.length > 0 && (
                   <div className={styles.thumbStrip}>

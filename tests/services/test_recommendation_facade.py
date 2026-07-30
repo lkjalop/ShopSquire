@@ -3,7 +3,7 @@ bucketing, the real shared guard blocking core ingress, and lane gating to legac
 import pytest
 
 from src.app.services import recommendation_facade as F
-from src.app.services.recommendation_core.envelope import CoreResponse, ProductCard, TurnEnvelope
+from src.app.services.recommendation_core.envelope import CoreResponse, ProductCard
 
 
 class _Redis:
@@ -524,3 +524,43 @@ def test_default_tenant_does_not_reactivate_finalized_legacy_procurement():
     bridged = F._read_session_slice(r, "u1", "default")
     assert bridged["prior_lane"] is None
     assert bridged["active_workflow_lane"] is None
+
+
+def test_session_slice_isolated_by_epoch_and_temporary_mode():
+    from src.app.deps import DummyRedis
+    from src.app.services.memory import Memory
+    from src.app.services.recommendation_facade import _read_session_slice
+
+    redis = DummyRedis()
+    Memory(
+        redis,
+        tenant_id="tenant-a",
+        session_epoch="epoch-one",
+    ).set_structured_state(
+        "buyer",
+        {
+            "last_node_handle": "computers.laptops",
+            "last_shortlist_skus": ["SKU-1"],
+            "constraints": {"budget_max_cents": 150_000},
+        },
+    )
+
+    assert _read_session_slice(
+        redis,
+        "buyer",
+        "tenant-a",
+        session_epoch="epoch-one",
+    )["shortlist_skus"] == ["SKU-1"]
+    assert _read_session_slice(
+        redis,
+        "buyer",
+        "tenant-a",
+        session_epoch="epoch-two",
+    ) == {}
+    assert _read_session_slice(
+        redis,
+        "buyer",
+        "tenant-a",
+        session_epoch="epoch-one",
+        memory_enabled=False,
+    ) == {}
