@@ -20,7 +20,10 @@ from src.app.services.inventory_valuation import (
     gmroi_evidence,
 )
 
-_CUTOFF = datetime(2026, 7, 30, tzinfo=timezone.utc)
+# Keep the evidence cutoff after every observation created during this test
+# run. Using midnight on the current date made the bitemporal contract
+# correctly hide rows ingested later that same day on hosted runners.
+_CUTOFF = datetime(2026, 8, 1, tzinfo=timezone.utc)
 
 
 def _apply_migrations(engine) -> None:

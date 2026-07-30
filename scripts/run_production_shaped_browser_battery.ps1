@@ -16,6 +16,19 @@ if (-not $ArtifactRoot) {
     )
 }
 $resolvedRepo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$frontendRoots = @(
+    (Join-Path $resolvedRepo "frontend"),
+    (Join-Path $resolvedRepo "src/frontend/admin-react")
+)
+foreach ($frontendRoot in $frontendRoots) {
+    $viteLauncher = Join-Path $frontendRoot "node_modules/.bin/vite.cmd"
+    if (-not (Test-Path -LiteralPath $viteLauncher)) {
+        throw (
+            "frontend_dependencies_missing:$frontendRoot; " +
+            "run npm ci --prefix `"$frontendRoot`""
+        )
+    }
+}
 if (-not [System.IO.Path]::IsPathRooted($ArtifactRoot)) {
     $ArtifactRoot = [System.IO.Path]::GetFullPath(
         (Join-Path $resolvedRepo $ArtifactRoot)
@@ -234,8 +247,15 @@ try {
         catch {
             # The bounded readiness loop reports process logs on failure.
         }
-        if ($processes[0].HasExited) {
-            throw "backend_exited_before_ready"
+        $serviceNames = @("backend", "worker", "storefront", "admin")
+        for ($processIndex = 0; $processIndex -lt $processes.Count; $processIndex++) {
+            if ($processes[$processIndex].HasExited) {
+                throw (
+                    $serviceNames[$processIndex] +
+                    "_exited_before_ready:exit_code=" +
+                    $processes[$processIndex].ExitCode
+                )
+            }
         }
         Start-Sleep -Seconds 1
     }

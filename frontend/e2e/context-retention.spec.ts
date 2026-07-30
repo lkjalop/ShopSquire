@@ -45,7 +45,13 @@ test('budget context survives raise + cut across turns (one session)', async ({ 
   const uid = `e2e-ctx-${Date.now()}`;
 
   await test.step('T1 · initial band 1200-1500 + qty 10 parsed', async () => {
-    const d = await chat(page, uid, 'work laptops budget 1200 to 1500, need 10');
+    const ambiguous = await chat(page, uid, 'work laptops budget 1200 to 1500, need 10');
+    expect(ambiguous.products || []).toHaveLength(0);
+    expect(ambiguous.needs_disambiguation).toBeTruthy();
+    expect(String(ambiguous.next_questions?.[0]?.id || '')).toBe('budget_scope');
+    // A multi-unit budget is materially ambiguous. Resolve the governed
+    // clarification before asserting retrieval and memory behavior.
+    const d = await chat(page, uid, 'per item');
     const ps = prices(d);
     expect(ps.length).toBeGreaterThan(0);
     // The stated maximum is hard; the minimum is a preference, so a lower-priced valid fit is allowed.
@@ -74,6 +80,9 @@ test('bulk quantity survives non-qty turns; a fresh amendment wins and then hold
   const uid = `e2e-qty-${Date.now()}`;
   const d1 = await chat(page, uid, 'i need 25 work laptops, budget 1200 to 1500');
   expect(Number(d1.requested_quantity)).toBe(25);
+  expect(d1.needs_disambiguation).toBeTruthy();
+  const scoped = await chat(page, uid, 'per item');
+  expect(Number(scoped.requested_quantity)).toBe(25);
   const d2 = await chat(page, uid, 'which of these has the best battery life?');
   expect(Number(d2.requested_quantity), 'memory FILLS on a no-qty turn').toBe(25);
   const d3 = await chat(page, uid, 'actually make it 12 units');

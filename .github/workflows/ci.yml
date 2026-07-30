@@ -116,13 +116,18 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
+          # This job is deliberately unsharded. Pin the collection contract so
+          # no inherited runner/repository variable can silently deselect the
+          # entire suite while coverage still imports the application.
+          PYTEST_SERVICE_SHARD_TOTAL: "1"
+          PYTEST_SERVICE_SHARD_INDEX: "0"
         run: |
           # The former 60% repository-wide threshold had never matched this
           # 82k-line mixed legacy/runtime surface (hosted baseline: 12.58%),
           # so every otherwise-green run failed by construction. Keep coverage
           # visible and ratchet from the measured baseline while subsystem
           # suites retain their focused behavioral gates.
-          python -m pytest -q tests --cov=src --cov-report=xml --cov-report=term-missing \
+          python -m pytest -vv tests --cov=src --cov-report=xml --cov-report=term-missing \
             --cov-fail-under=12
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

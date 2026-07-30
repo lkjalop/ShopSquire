@@ -86,6 +86,9 @@ jobs:
       DEVELOPER_API_KEY: ci-browser-developer-key
       VITE_API_KEY: ci-browser-merchant-key
       VITE_OWNER_API_KEY: ci-browser-owner-key
+      # Override developer .env files explicitly. The hosted backend listens
+      # on 8080; a local 8099 value would only test connection refusal.
+      VITE_API_BASE_URL: http://localhost:8080
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
