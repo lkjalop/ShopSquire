@@ -43,6 +43,14 @@ _CHAT_REPLAY_LOCAL: Dict[str, float] = {}
 _CHAT_REPLAY_LOCK = RLock()
 
 
+def _authoritative_backend_lane(data: Dict[str, Any]) -> Optional[str]:
+    """Resolve the finalized V2 lane without promoting unrecognized payload values."""
+    lane = str(data.get("turn_intent") or "").strip().upper()
+    if not lane and data.get("policy_answered") is True:
+        lane = "POLICY_QUESTION"
+    return lane if lane in RECOMMENDATION_LANES else None
+
+
 def _request_tenant_id(request: Request | None) -> str:
     """Return the tenant already authorized by the authentication dependency."""
     identity = (
@@ -2663,10 +2671,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # The pre-dispatch classifier is only an ingress hint. Once the typed facade returns a
     # bounded lane, project that authoritative decision through chat and Decision Trace instead
     # of retaining a contradictory heuristic label (for example POLICY_QUESTION -> SEARCH).
-    backend_turn_intent = str(data.get("turn_intent") or "").strip().upper()
-    if not backend_turn_intent and data.get("policy_answered") is True:
-        backend_turn_intent = "POLICY_QUESTION"
-    backend_lane_authoritative = backend_turn_intent in RECOMMENDATION_LANES
+    backend_turn_intent = _authoritative_backend_lane(data)
+    backend_lane_authoritative = backend_turn_intent is not None
     if backend_lane_authoritative:
         turn_intent = backend_turn_intent
 

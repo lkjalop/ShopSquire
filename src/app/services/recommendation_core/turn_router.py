@@ -416,6 +416,19 @@ def _authorization_changes(proposal: Dict[str, Any], accepted: Dict[str, Any]) -
 DEFAULT_DECISION = TurnDecision(source="default")
 
 
+def _approved_policy_lane(envelope: TurnEnvelope) -> bool:
+    """Return whether an ingress hint is backed by an approved policy answer."""
+    if str(envelope.intent_hint or "").strip().upper() != "POLICY_QUESTION":
+        return False
+    try:
+        from src.app.services.answer_quality import policy_faq_answer
+
+        return policy_faq_answer(envelope.query) is not None
+    except Exception as exc:
+        logger.debug("approved policy authority lookup failed: %s", repr(exc)[:120])
+        return False
+
+
 def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str) -> TurnDecision:
     """Recover only platform-verifiable facts when model routing is unavailable.
 
@@ -426,18 +439,12 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     # An edge hint alone is not authority, but an approved policy template is. Preserve
     # this read-only lane when the optional model router is unavailable so a hosted or
     # edge deployment does not relabel an answer it can ground deterministically as SEARCH.
-    if str(envelope.intent_hint or "").strip().upper() == "POLICY_QUESTION":
-        try:
-            from src.app.services.answer_quality import policy_faq_answer
-
-            if policy_faq_answer(envelope.query) is not None:
-                return TurnDecision(
-                    lane="POLICY_QUESTION",
-                    confidence=1.0,
-                    source=f"fallback:{reason}",
-                )
-        except Exception as exc:
-            logger.debug("approved policy fallback lookup failed: %s", repr(exc)[:120])
+    if _approved_policy_lane(envelope):
+        return TurnDecision(
+            lane="POLICY_QUESTION",
+            confidence=1.0,
+            source=f"fallback:{reason}",
+        )
 
     from src.app.services.bulk_intent import extract_quantity_span
     from src.app.services.budget_grammar import classify_budget_scope, parse_budget
@@ -942,14 +949,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # edge classifier into the general-purpose brain for fresh searches.
     _intent_hint = str(envelope.intent_hint or "").strip().upper()
     _has_prior_shortlist = bool((envelope.session or {}).get("shortlist_skus"))
-    if _intent_hint == "POLICY_QUESTION":
-        try:
-            from src.app.services.answer_quality import policy_faq_answer
-
-            if policy_faq_answer(envelope.query) is not None:
-                lane = "POLICY_QUESTION"
-        except Exception as exc:
-            logger.debug("approved policy route clamp lookup failed: %s", repr(exc)[:120])
+    if _intent_hint == "POLICY_QUESTION" and _approved_policy_lane(envelope):
+        lane = "POLICY_QUESTION"
     elif _intent_hint in ("EXPLAIN", "COMPARE") and _has_prior_shortlist:
         lane = _intent_hint
     elif lane == "EXPLAIN" and not _has_prior_shortlist and _intent_hint in ("SEARCH", "FILTER"):

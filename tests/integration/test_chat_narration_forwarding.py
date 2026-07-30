@@ -142,3 +142,11 @@ def test_chat_projects_authoritative_facade_lane(monkeypatch):
     ]
     assert len(finalized) == 1
     assert finalized[0]["payload"]["intent_analysis"]["lane"] == "POLICY_QUESTION"
+
+
+def test_authoritative_backend_lane_rejects_unknown_values():
+    from src.app.routers import chat as chat_router
+
+    assert chat_router._authoritative_backend_lane({"turn_intent": "search"}) == "SEARCH"
+    assert chat_router._authoritative_backend_lane({"policy_answered": True}) == "POLICY_QUESTION"
+    assert chat_router._authoritative_backend_lane({"turn_intent": "invented_lane"}) is None
