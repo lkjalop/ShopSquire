@@ -363,9 +363,11 @@ def _classify_turn_intent(query: str) -> str:
     # CLAIM-CHECKED support detection (shared predicate with recommend.py's classifier): only a genuine
     # post-purchase claim routes to the support lane. The old bare keyword list here hijacked pre-sales
     # policy questions ("what is your warranty policy?") into photo-triage with zero products.
-    from src.app.services.answer_quality import is_support_claim
+    from src.app.services.answer_quality import is_support_claim, policy_faq_answer
     if is_support_claim(q):
         return "SUPPORT_CLAIM"
+    if policy_faq_answer(q) is not None:
+        return "POLICY_QUESTION"
     if (
         " vs " in q
         or "compare" in q

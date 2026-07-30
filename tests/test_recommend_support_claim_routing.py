@@ -3,6 +3,7 @@ import json
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
+from src.app.routers.chat import _classify_turn_intent as classify_chat_turn_intent
 from src.app.services.query_classifier import classify_turn_intent
 from tests.utils import default_headers
 
@@ -18,6 +19,22 @@ def test_classify_turn_intent_treats_cracked_query_as_support_claim():
         followup_explain=False,
         explicit_constraint_update=False,
     ) == "SUPPORT_CLAIM"
+
+
+def test_chat_routes_approved_policy_question_before_search():
+    assert (
+        classify_chat_turn_intent("What is your returns policy?")
+        == "POLICY_QUESTION"
+    )
+
+
+def test_chat_keeps_post_purchase_warranty_damage_in_support():
+    assert (
+        classify_chat_turn_intent(
+            "My laptop screen cracked; can I make a warranty claim?"
+        )
+        == "SUPPORT_CLAIM"
+    )
 
 
 def test_recommend_routes_damage_score_cv_triage_to_support_panel():
