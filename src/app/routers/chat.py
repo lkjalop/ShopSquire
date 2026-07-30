@@ -2662,6 +2662,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # bounded lane, project that authoritative decision through chat and Decision Trace instead
     # of retaining a contradictory heuristic label (for example POLICY_QUESTION -> SEARCH).
     backend_turn_intent = str(data.get("turn_intent") or "").strip().upper()
+    if not backend_turn_intent and data.get("policy_answered") is True:
+        backend_turn_intent = "POLICY_QUESTION"
     backend_lane_authoritative = backend_turn_intent in RECOMMENDATION_LANES
     if backend_lane_authoritative:
         turn_intent = backend_turn_intent

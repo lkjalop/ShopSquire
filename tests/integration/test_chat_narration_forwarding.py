@@ -103,7 +103,9 @@ async def _fake_policy_answer(*args, **kwargs):
         "results": [],
         "assistant_message": "Approved returns policy.",
         "decision_trace_id": "trace-policy-v2",
-        "turn_intent": "POLICY_QUESTION",
+        # The policy fast path may omit the generic lane field but always owns
+        # this typed outcome.
+        "policy_answered": True,
         "routing_source": "model",
         "next_questions": [],
     }
