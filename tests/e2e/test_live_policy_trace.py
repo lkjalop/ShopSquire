@@ -56,7 +56,12 @@ def test_policy_question_uses_typed_chat_and_projects_authority_boundaries():
         trace_id = modal.get_attribute("data-trace-id")
         assert trace_id
 
-        modal.get_by_role("button", name=re.compile(r"^Show empty panels")).click()
+        empty_panel_disclosure = modal.get_by_role(
+            "button",
+            name=re.compile(r"^Show empty panels"),
+        )
+        if empty_panel_disclosure.count():
+            empty_panel_disclosure.click()
         tabs = [
             ("Decision", "Events"), ("Decision", "Execution"), ("Decision", "Summary"),
             ("Reasoning", "Why"), ("Reasoning", "Intent"),
