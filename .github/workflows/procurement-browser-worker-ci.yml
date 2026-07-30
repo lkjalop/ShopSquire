@@ -173,21 +173,20 @@ jobs:
               test-results/backend.log test-results/celery.log
             exit 1
           fi
-      - name: Upload browser media
+      - name: Inventory retained proof
+        if: always()
+        run: |
+          test -d test-results
+          find test-results frontend/test-results -type f -printf '%p\t%s bytes\n' |
+            sort | tee test-results/artifact-manifest.txt
+      - name: Upload browser and runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: procurement-browser-evidence
           path: |
-            frontend/test-results/**
-            frontend/playwright-report/**
-          retention-days: 14
-      - name: Upload migration and runtime evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: procurement-runtime-evidence
-          path: |
+            frontend/test-results/
+            frontend/playwright-report/
             test-results/
             tmp/*.sqlite*
           if-no-files-found: error
