@@ -1978,6 +1978,12 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
                 if security_matrix is None and isinstance(proposed_action.get("security_matrix"), dict):
                     security_matrix = proposed_action.get("security_matrix")
             events = _fetch_trace_events(str(trace_id))
+            event_context = _trace_context_from_events(str(trace_id), events)
+            if (
+                event_context.get("_intent_authoritative")
+                and event_context.get("intent_analysis")
+            ):
+                out["intent_analysis"] = event_context["intent_analysis"]
             for evt in reversed(events or []):
                 payload = evt.get("payload") if isinstance(evt, dict) else None
                 if not isinstance(payload, dict):
