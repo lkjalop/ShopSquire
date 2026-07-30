@@ -345,6 +345,15 @@ async def ws_trace_events(trace_id: str, websocket: WebSocket):
         await websocket.send_text(json.dumps(initial, ensure_ascii=False, default=str))
 
         while True:
+            # Poll the receive side as well as the broker/DB. Starlette only
+            # surfaces a client disconnect through receive(), so a send-only
+            # fallback loop otherwise survives the closing handshake forever.
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
+            except asyncio.TimeoutError:
+                pass
+            except WebSocketDisconnect:
+                break
             pushed = False
             if q is not None:
                 try:
@@ -400,6 +409,8 @@ async def ws_trace_events(trace_id: str, websocket: WebSocket):
             except Exception:
                 items = []
             await websocket.send_text(json.dumps(items or [], ensure_ascii=False, default=str))
+            if q is None:
+                await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         return
     except Exception:

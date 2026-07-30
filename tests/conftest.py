@@ -464,6 +464,45 @@ def pytest_sessionstart(session):
                         helpful BOOLEAN
                     )
                 """))
+                # Experiment persistence is migration-owned. The ephemeral
+                # session DB mirrors the current schema so services can validate
+                # it without reintroducing request-time DDL.
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS experiment_run (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL DEFAULT 'default',
+                        name TEXT NOT NULL,
+                        target_metric TEXT NOT NULL,
+                        policy_json TEXT NOT NULL,
+                        policy_version TEXT NOT NULL DEFAULT 'experiment-policy.v1',
+                        status TEXT NOT NULL DEFAULT 'draft',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        started_at TIMESTAMP,
+                        ended_at TIMESTAMP
+                    )
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS experiment_assignment (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL DEFAULT 'default',
+                        experiment_id TEXT NOT NULL,
+                        subject_hash TEXT NOT NULL,
+                        variant TEXT NOT NULL,
+                        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS experiment_result (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL DEFAULT 'default',
+                        experiment_id TEXT NOT NULL,
+                        variant TEXT,
+                        decision TEXT,
+                        uplift_pct REAL,
+                        evidence_json TEXT,
+                        decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
         except Exception:
             pass
     except Exception:

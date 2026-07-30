@@ -23,6 +23,21 @@ def _treatment_subject(exp: str) -> str:
     raise AssertionError("no treatment subject found")
 
 
+def _promote(db, experiment_id: str) -> None:
+    experiment_console.promote(
+        db,
+        tenant_id="default",
+        experiment_id=experiment_id,
+        baseline={"metric": "conversion", "window": "pre_activation"},
+        eligibility={"surface": "storefront", "cohort": "test"},
+        min_samples=2,
+        min_window_seconds=60,
+        rollback_threshold_pct=2.0,
+        guardrails={"margin": {"minimum_delta_pct": -2.0}},
+        terminal_policy={"allowed": ["keep", "scale", "revise", "revert"]},
+    )
+
+
 def test_flag_off_is_byte_identical_noop():
     p = {"right_panel": {"mode": "shopping"}}
     ap(p, flags={}, uid_hash="u1", profile_fn=_prof)
@@ -53,7 +68,7 @@ def test_not_live_records_but_does_not_apply():
 def test_live_treatment_applies_profile_copy_and_is_gated():
     exp = "storefront_emphasis_test_live"
     with db_session() as db:
-        experiment_console.promote(db, experiment_id=exp)
+        _promote(db, exp)
         db.commit()
     p = {"right_panel": {"mode": "shopping"}}
     ap(p, flags={"STOREFRONT_EMPHASIS_EXPERIMENT_ENABLED": "1", "STOREFRONT_EMPHASIS_CANARY_FRACTION": "1.0",
@@ -67,11 +82,11 @@ def test_live_treatment_applies_profile_copy_and_is_gated():
 def test_revert_disables_the_lever_globally():
     exp = "storefront_emphasis_test_revert"
     with db_session() as db:
-        experiment_console.promote(db, experiment_id=exp)
+        _promote(db, exp)
         db.commit()
     subject = _treatment_subject(exp)  # would be treatment IF live; revert must still suppress it
     with db_session() as db:
-        experiment_console.revert(db, experiment_id=exp)
+        experiment_console.revert(db, tenant_id="default", experiment_id=exp)
         db.commit()
     p = {"right_panel": {"mode": "shopping"}}
     ap(p, flags={"STOREFRONT_EMPHASIS_EXPERIMENT_ENABLED": "1", "STOREFRONT_EMPHASIS_CANARY_FRACTION": "1.0",
