@@ -82,7 +82,7 @@ def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict
         # complete.  The finalized V2 recommendation result owns the served
         # lane and must supersede those hints in Decision Trace.
         if (
-            et == "recommendation_result"
+            (et == "recommendation_result" or original == "recommendation_result")
             and isinstance(payload.get("intent_analysis"), dict)
         ):
             authoritative_intent = payload.get("intent_analysis")

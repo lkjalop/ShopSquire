@@ -10,8 +10,9 @@ def test_finalized_recommendation_intent_supersedes_early_observation():
                 "payload": {"shopper_intent": {"lane": "SEARCH"}},
             },
             {
-                "event_type": "recommendation_result",
+                "event_type": "feedback_loop",
                 "payload": {
+                    "_original_event_type": "recommendation_result",
                     "intent_analysis": {
                         "lane": "POLICY_QUESTION",
                         "intent": "POLICY_QUESTION",
