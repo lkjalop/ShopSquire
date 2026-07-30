@@ -862,13 +862,26 @@ def _merge_material_nqe_answer(
     promoted into hidden context.
     """
     selection = nqe_selection if isinstance(nqe_selection, dict) else {}
+    pending = pending_clarification if isinstance(pending_clarification, dict) else {}
     qid = str(selection.get("question_id") or "").strip().lower()
     oid = str(selection.get("option_id") or "").strip().lower()
+    # A buyer can answer the rendered question by typing instead of clicking its
+    # option. Recognize only the canonical budget-scope grammar and only while
+    # the server has an authoritative pending question. This preserves natural
+    # chat UX without allowing arbitrary old messages to become hidden context.
+    if not qid and str(pending.get("question_id") or "").strip().lower() == "budget_scope":
+        try:
+            from src.app.services.budget_grammar import classify_budget_scope
+
+            inferred = classify_budget_scope(query)
+        except Exception:
+            inferred = "unknown"
+        if inferred in {"total", "per_unit"}:
+            qid, oid = "budget_scope", inferred
     if qid != "budget_scope" or oid not in {"total", "per_unit"}:
         return query
 
     prior_query = ""
-    pending = pending_clarification if isinstance(pending_clarification, dict) else {}
     if str(pending.get("question_id") or "").strip().lower() == qid:
         allowed = {str(item).strip().lower() for item in (pending.get("allowed_option_ids") or [])}
         if oid in allowed:

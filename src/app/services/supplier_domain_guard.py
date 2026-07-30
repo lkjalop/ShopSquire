@@ -85,7 +85,11 @@ def is_trusted_supplier_domain(domain: str) -> bool:
             row = db.execute(
                 _text(
                     "SELECT COUNT(*) FROM trusted_supplier_domains "
-                    "WHERE active IS TRUE AND ("
+                    # The migration intentionally keeps this legacy flag as
+                    # INTEGER for SQLite/PostgreSQL parity. ``IS TRUE`` is
+                    # invalid for a PostgreSQL integer and previously caused
+                    # every approved supplier to fail closed in hosted runs.
+                    "WHERE COALESCE(active, 1) = 1 AND ("
                     "  domain = :d "
                     "  OR :d LIKE '%.' || domain"  # subdomain match
                     ")"

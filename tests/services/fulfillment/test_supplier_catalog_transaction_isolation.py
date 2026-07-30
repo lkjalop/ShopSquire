@@ -78,3 +78,16 @@ def test_seed_demo_is_repeatable_across_isolated_static_pool_fixtures(
     ).all()
     assert [row[0] for row in rows] == [sku, sku]
     assert all(json.loads(row[1]) for row in rows)
+
+
+def test_supplier_domain_guard_uses_portable_integer_active_predicate():
+    from pathlib import Path
+
+    guard_source = Path("src/app/services/supplier_domain_guard.py").read_text(encoding="utf-8")
+    function_source = guard_source.split("def is_trusted_supplier_domain", 1)[1].split(
+        "def validate_supplier_email", 1
+    )[0]
+    # Keep this migration-backed field portable. PostgreSQL rejects
+    # ``integer IS TRUE`` while SQLite happens to accept it.
+    assert "COALESCE(active, 1) = 1" in function_source
+    assert "active IS TRUE" not in function_source
