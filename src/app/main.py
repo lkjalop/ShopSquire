@@ -1331,7 +1331,7 @@ def create_app() -> FastAPI:
         # Skip noisy or low-value endpoints
         if request.method == "OPTIONS" or path in ("/health", "/healthz", "/metrics"):
             return await call_next(request)
-        if path.startswith("/api/v1/vision/triage") or path.startswith("/api/v1/recommend/suggest"):
+        if path.startswith("/api/v1/vision/triage"):
             return await call_next(request)
         # Allow per-request skip via header (for performance tests)
         try:

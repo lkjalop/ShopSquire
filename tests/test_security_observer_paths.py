@@ -34,6 +34,11 @@ client = TestClient(app, headers=default_headers())
 
 
 def _apply_schema():
+    # Collection imports other app modules that replace the process-global
+    # engine. Rebind both seams at test execution so observer persistence is
+    # proven against the same tenant/test database the assertion reads.
+    dbmod.set_engine(engine)
+    app.state.engine = engine
     schema_path = pathlib.Path("db/schema.sql")
     sql = schema_path.read_text(encoding="utf-8")
     statements = [s.strip() for s in sql.split(";") if s.strip()]
