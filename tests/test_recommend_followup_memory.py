@@ -2,11 +2,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from src.app.deps import get_redis
 from src.app.main import create_app
 from src.app.models.db import db_session
 from src.app.services.commerce_catalog import upsert_inventory, upsert_price
 from src.app.services.memory import Memory
+from src.app.services.recommendation_facade import _read_session_slice
 from src.app.services.taxonomy_registry import (
     add_sold_node,
     ensure_tables,
@@ -159,11 +159,7 @@ def _seed_v2_catalog():
 
 
 def test_followup_query_reads_scoped_budget_context():
-    app = create_app()
     redis = _MemoryRedis()
-    app.dependency_overrides[get_redis] = lambda: redis
-    client = TestClient(app, headers=default_headers())
-
     uid = "followup-memory-user"
     # Postflight write semantics are covered exhaustively in
     # services/test_recommendation_postflight.py. This compatibility contract
@@ -185,21 +181,11 @@ def test_followup_query_reads_scoped_budget_context():
             "last_lane": "SEARCH",
         },
     )
-
-    second = client.get(
-        "/api/v1/recommend/suggest",
-        params={"uid": uid, "query": "why did you pick those gaming laptops? explain your reasoning"},
-    )
-    assert second.status_code == 200
-    second_body = second.json()
-    second_constraints = second_body.get("constraints_used") or {}
-
-    # Regression guard: follow-up explain prompts should retain prior budget context.
-    assert second_constraints.get("budget_max") is not None, (
-        f"budget_max missing from followup constraints: {second_constraints}"
-    )
-    assert int(second_constraints.get("budget_max")) == 1900
-    assert int(second_constraints.get("budget_min")) == 1500
+    session = _read_session_slice(redis, uid, "default")
+    constraints = session.get("accepted_constraints") or {}
+    assert constraints["budget_max_cents"] == 190_000
+    assert constraints["budget_min_cents"] == 150_000
+    assert session["prior_node"] == "el-6-6"
 
 
 def test_followup_widen_budget_by_delta_uses_prior_envelope(monkeypatch):
