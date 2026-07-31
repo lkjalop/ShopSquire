@@ -1,8 +1,7 @@
 """Shared postflight: session writeback (the multi-turn memory the facade reads) + telemetry,
 best-effort and round-trippable through the facade's session reader."""
-import json
-
 from src.app.services import recommendation_facade as F
+from src.app.services.memory import Memory
 from src.app.services.recommendation_postflight import run_postflight, write_session
 from src.app.services.recommendation_core.envelope import CoreResponse, ProductCard, TurnEnvelope
 
@@ -28,6 +27,10 @@ def _core(env, **o):
     return c
 
 
+def _raw(redis, *, tenant_id="t1", uid="u1"):
+    return Memory(redis, tenant_id=tenant_id).get_structured_state(uid)
+
+
 def test_session_write_roundtrips_through_facade_reader():
     r = _Redis()
     env = _env(budget_max=2000)
@@ -38,7 +41,7 @@ def test_session_write_roundtrips_through_facade_reader():
     assert slice_["prior_lane"] == "SEARCH"
     assert slice_["active_workflow_lane"] is None
     # persisted content is complete for prior-subject resolution
-    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    raw = _raw(r)
     assert raw["last_lane"] == "SEARCH" and raw["constraints"]["use_cases"] == ["gaming"]
     assert raw["constraints"]["budget_max_cents"] == 200000
 
@@ -54,7 +57,7 @@ def test_followup_without_budget_refreshes_not_wipes():
                                        "requirements": {"ram_gb": [[">=", 16]]},
                                        "budget_inherited": True}
     assert write_session(r, env, core) is True
-    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    raw = _raw(r)
     assert raw["constraints"]["budget_max_cents"] == 230000        # refreshed, not wiped
     assert raw["constraints"]["requirements"] == {"ram_gb": [[">=", 16]]}
 
@@ -67,7 +70,7 @@ def test_inferred_retrieval_subject_is_persisted():
     core.extras["constraints_used"] = {"node_handle": "el-6-6"}
 
     assert write_session(r, env, core) is True
-    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    raw = _raw(r)
     assert raw["last_node_handle"] == "el-6-6"
 
 
@@ -84,7 +87,7 @@ def test_followup_without_products_or_quantity_preserves_prior_slice():
     core.extras["decision"] = {"node_handle": None, "quantity": None,
                                "total_budget_cents": None}
     assert write_session(r, env, core) is True
-    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    raw = _raw(r)
     assert raw["last_node_handle"] == "el-6-6"
     assert raw["last_shortlist_skus"] == ["LAP-OLD"]
     assert raw["constraints"]["quantity"] == 25
@@ -109,7 +112,7 @@ def test_followup_preserves_prior_brand_constraints_when_not_replaced():
         "preferred_brand": None,
     })
     assert write_session(r, env, core) is True
-    constraints = json.loads(r.store["session:t1:u1:kv_state"])["constraints"]
+    constraints = _raw(r)["constraints"]
     assert constraints["brand_filter"] == "Lenovo"
     assert constraints["exclude_brand"] == "Apple"
     assert constraints["preferred_brand"] == "Dell"
@@ -122,7 +125,7 @@ def test_named_workload_entities_roundtrip_for_consent_retry():
     core.extras["decision"]["workload_entities"] = [["game", "Black Myth Wukong"]]
 
     assert write_session(r, env, core) is True
-    constraints = json.loads(r.store["session:t1:u1:kv_state"])["constraints"]
+    constraints = _raw(r)["constraints"]
     assert constraints["workload_entities"] == [["game", "Black Myth Wukong"]]
 
 
@@ -144,7 +147,7 @@ def test_explicit_brand_clear_drops_all_prior_brand_constraints():
         "preferred_brand": None,
     })
     assert write_session(r, env, core) is True
-    constraints = json.loads(r.store["session:t1:u1:kv_state"])["constraints"]
+    constraints = _raw(r)["constraints"]
     assert constraints["brand_filter"] is None
     assert constraints["exclude_brand"] is None
     assert constraints["preferred_brand"] is None
@@ -162,7 +165,7 @@ def test_filter_followup_preserves_active_procurement_workflow():
     core.lane = "FILTER"
     core.extras["decision"]["subject_action"] = "continue"
     assert write_session(r, env, core) is True
-    raw = json.loads(r.store["session:t1:u1:kv_state"])
+    raw = _raw(r)
     assert raw["last_lane"] == "FILTER"
     assert raw["active_workflow_lane"] == "PROCUREMENT"
 
@@ -171,14 +174,17 @@ def test_session_write_is_tenant_scoped():
     r = _Redis()
     env = _env()
     write_session(r, env, _core(env))
-    assert "session:t1:u1:kv_state" in r.store          # not session:u1:...
-    assert F._read_session_slice(r, "u1", "t2") == {}    # different tenant → isolated
+    scoped_key = Memory(r, tenant_id="t1").scoped_key("structured_state", "u1")
+    assert scoped_key in r.store
+    assert "session:t1:u1:kv_state" not in r.store
+    assert F._read_session_slice(r, "u1", "t2") == {}
 
 
 def test_postflight_never_raises_and_reports():
     out = run_postflight(None, _env(), _core(_env()), latency_ms=42)   # redis=None
     assert out["session_written"] is False               # no redis → no write, no raise
-    r = _Redis(); env = _env()
+    r = _Redis()
+    env = _env()
     out = run_postflight(r, env, _core(env), latency_ms=42)
     assert out["session_written"] is True
 

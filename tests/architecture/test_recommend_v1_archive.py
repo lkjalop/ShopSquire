@@ -10,9 +10,12 @@ MANIFEST = ROOT / "tests/golden/recommend_v1_archive_manifest.json"
 
 
 def _sha256(path: Path) -> str:
-    # The sealed evidence paths are marked `-text` in .gitattributes, so Git
-    # preserves their exact archived bytes on every platform.
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Seal the Git-hosted content rather than a platform checkout's newline
+    # presentation. The archive was created on Windows with CRLF bytes, while
+    # the committed Git blob is LF; canonicalizing newlines makes the evidence
+    # seal identical on Windows and Linux without changing any source content.
+    content = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(content).hexdigest()
 
 
 def test_legacy_recommend_router_is_non_importable_and_hash_sealed() -> None:

@@ -44,6 +44,39 @@ class BudgetParse:
         return self.budget_min is not None or self.budget_max is not None
 
 
+def parse_budget_delta(text: str) -> Optional[int]:
+    """Return a signed, buyer-stated relative budget change in whole currency units.
+
+    Relative changes are intentionally separate from :func:`parse_budget`: treating
+    ``widen the budget by 600`` as a new 600-unit ceiling would erase the accepted
+    session constraint. The caller must have an authoritative prior budget before
+    applying this value.
+    """
+    q = str(text or "").lower()
+    if not q or not re.search(r"\b(?:budget|price\s+range)\b", q):
+        return None
+    up = bool(re.search(r"\b(?:widen|increase|raise|bump|expand|broaden|extend|loosen)\b", q))
+    down = bool(re.search(r"\b(?:reduce|decrease|lower|tighten|cut|shrink|narrow)\b", q))
+    if up == down:
+        return None
+    match = re.search(
+        rf"\bby\s*{_CUR}?\s*{_NUM}(?:\s*(?:-|to)\s*{_CUR}?\s*{_NUM})?",
+        q,
+    )
+    if not match:
+        return None
+    first = _to_int(match.group(1), match.group(2))
+    second = (
+        _to_int(match.group(3), match.group(4))
+        if match.lastindex and match.lastindex >= 4 and match.group(3)
+        else None
+    )
+    magnitude = max(value for value in (first, second) if value is not None)
+    if magnitude <= 0:
+        return None
+    return magnitude if up else -magnitude
+
+
 def classify_budget_scope(text: str) -> str:
     """Classify an explicitly stated budget as ``per_unit``, ``total`` or ``unknown``.
 

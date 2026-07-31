@@ -35,10 +35,6 @@ logger = logging.getLogger("shopsquire.recommendation_postflight")
 _SESSION_TTL_S = 60 * 60 * 6   # 6h — a shopping session, not forever
 
 
-def _session_key(tenant_id: str, uid: str) -> str:
-    return f"session:{tenant_id}:{uid}:kv_state"
-
-
 def write_session(
     redis,
     envelope: TurnEnvelope,
@@ -110,21 +106,20 @@ def write_session(
             "active_workflow_lane": active_workflow,
             "ts": int(time.time()),
         }
-        if session_epoch:
-            from src.app.services.memory import Memory
+        from src.app.services.memory import Memory
 
-            Memory(
-                redis,
-                tenant_id=envelope.tenant_id,
-                session_epoch=session_epoch,
-            ).set_structured_state(envelope.uid, slice_, ttl_seconds=_SESSION_TTL_S)
-            return True
-        payload = json.dumps(slice_)
-        key = _session_key(envelope.tenant_id, envelope.uid)
-        try:
-            redis.setex(key, _SESSION_TTL_S, payload)
-        except Exception:
-            redis.set(key, payload)   # DummyRedis / clients without setex
+        # The scoped Memory contract always has an epoch. Callers that have not
+        # adopted a distinct conversation generation use uid as the
+        # compatibility epoch; never write the transitional tenant+uid key.
+        Memory(
+            redis,
+            tenant_id=envelope.tenant_id,
+            session_epoch=session_epoch,
+        ).set_structured_state(
+            envelope.uid,
+            slice_,
+            ttl_seconds=_SESSION_TTL_S,
+        )
         return True
     except Exception as exc:
         logger.warning("session writeback failed (uid=%s): %s", envelope.uid, repr(exc)[:120])

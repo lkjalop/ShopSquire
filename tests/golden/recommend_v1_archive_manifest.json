@@ -5,13 +5,13 @@
   "production_authority": false,
   "legacy_router": {
     "archived_path": "archive/legacy/recommend_v1_2026-07-29.py.txt",
-    "sha256": "3ce64c84cda77f60c5623f06421bd9bdf2f54036344ce2ed902d454845893858",
+    "sha256": "2eb9c7a624efeaa5bbefe0633fe5da63ddc0680402fbb9742a0873e20c04cb08",
     "git_blob_before_archive": "c9b3bc8d13e7e02be6eef37b1340b124db25fa7a",
     "last_active_commit": "75ed65b8fc84fbd94ba32191236d423bac3f3674"
   },
   "legacy_characterization": {
     "archived_path": "tests/golden/recommend_v1_characterization.py.txt",
-    "sha256": "a2ed6157f6ffb8cc2c28d706cc8f8f4b9b99ab3cb6d3ffca6adde0bd49c365bd",
+    "sha256": "e890b8eb17e26ec2f89131fa7db694d4d11974f533f363135f659b0d20fcc746",
     "git_blob_before_archive": "c318b782515051792c8fe87daef06bd89c4d9489",
     "last_active_commit": "091ad5ceac93ed6628b697a64daae641907df0d6",
     "collected_tests": 62,

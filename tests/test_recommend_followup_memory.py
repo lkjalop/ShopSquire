@@ -1,9 +1,97 @@
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from src.app.main import create_app
+from src.app.models.db import db_session
 from src.app.services.memory import Memory
-from src.app.services.recommendations import RecommendationService
+from src.app.services.taxonomy_registry import (
+    add_sold_node,
+    ensure_tables,
+    upsert_classification,
+)
 from tests.utils import default_headers
+
+
+_CATALOG = (
+    ("MEM-LAP-1", "Gaming Laptop A", 150000, 10),
+    ("MEM-LAP-2", "Gaming Laptop B", 180000, 8),
+    ("MEM-LAP-3", "Gaming Laptop C", 190000, 6),
+    ("MEM-LAP-4", "Gaming Laptop D", 260000, 5),
+)
+
+
+@pytest.fixture(autouse=True)
+def _seed_v2_catalog():
+    """Use authoritative V2 catalog rows, not the retired retrieval seam."""
+    with db_session() as db:
+        ensure_tables(db)
+        sold_node_existed = bool(
+            db.execute(
+                text(
+                    "SELECT 1 FROM sold_taxonomy "
+                    "WHERE tenant_id = 'default' AND node_handle = 'el-6-6'"
+                )
+            ).first()
+        )
+        add_sold_node(db, node_handle="el-6-6", tenant_id="default")
+        for sku, name, price_cents, stock in _CATALOG:
+            db.execute(
+                text(
+                    "INSERT OR REPLACE INTO products "
+                    "(id, sku, name, price_cents, currency, specs, active) "
+                    "VALUES (:id, :sku, :name, :price, 'USD', :specs, 1)"
+                ),
+                {
+                    "id": sku,
+                    "sku": sku,
+                    "name": name,
+                    "price": price_cents,
+                    "specs": '{"ram_gb": 16, "storage_gb": 1024}',
+                },
+            )
+            db.execute(
+                text(
+                    "INSERT OR REPLACE INTO inventory "
+                    "(id, product_id, stock, warehouse) "
+                    "VALUES (:id, :product_id, :stock, 'default')"
+                ),
+                {
+                    "id": f"inv-{sku}",
+                    "product_id": sku,
+                    "stock": stock,
+                },
+            )
+            upsert_classification(
+                db,
+                sku=sku,
+                node_handle="el-6-6",
+                source="test_fixture",
+                status="approved",
+                tenant_id="default",
+            )
+        db.commit()
+    yield
+    with db_session() as db:
+        for sku, *_ in _CATALOG:
+            db.execute(
+                text(
+                    "DELETE FROM product_classification "
+                    "WHERE tenant_id = 'default' AND sku = :sku "
+                    "AND source = 'test_fixture'"
+                ),
+                {"sku": sku},
+            )
+            db.execute(text("DELETE FROM inventory WHERE product_id = :sku"), {"sku": sku})
+            db.execute(text("DELETE FROM products WHERE id = :sku"), {"sku": sku})
+        if not sold_node_existed:
+            db.execute(
+                text(
+                    "DELETE FROM sold_taxonomy "
+                    "WHERE tenant_id = 'default' AND node_handle = 'el-6-6'"
+                )
+            )
+        db.commit()
 
 
 def test_followup_query_keeps_budget_context(monkeypatch):
@@ -33,16 +121,6 @@ def test_followup_query_keeps_budget_context(monkeypatch):
     monkeypatch.setattr(Memory, "get_kv", _get_kv)
     monkeypatch.setattr(Memory, "set_structured_state", _set_structured)
     monkeypatch.setattr(Memory, "get_structured_state", _get_structured)
-
-    def _fake_candidates(self, query: str, limit: int = 10):
-        return [
-            {"id": "1", "sku": "SKU-1", "name": "Gaming Laptop A", "price_cents": 150000, "currency": "USD", "stock": 10},
-            {"id": "2", "sku": "SKU-2", "name": "Gaming Laptop B", "price_cents": 180000, "currency": "USD", "stock": 8},
-            {"id": "3", "sku": "SKU-3", "name": "Gaming Laptop C", "price_cents": 190000, "currency": "USD", "stock": 6},
-            {"id": "4", "sku": "SKU-4", "name": "Gaming Laptop D", "price_cents": 260000, "currency": "USD", "stock": 5},
-        ]
-
-    monkeypatch.setattr(RecommendationService, "retrieve_candidates", _fake_candidates)
 
     uid = "followup-memory-user"
 
@@ -87,14 +165,6 @@ def test_followup_widen_budget_by_delta_uses_prior_envelope(monkeypatch):
     monkeypatch.setattr(Memory, "get_context", _get_context)
     monkeypatch.setattr(Memory, "set_kv", _set_kv)
 
-    def _fake_candidates(self, query: str, limit: int = 10):
-        return [
-            {"id": "1", "sku": "SKU-1", "name": "Gaming Laptop A", "price_cents": 150000, "currency": "USD", "stock": 10},
-            {"id": "2", "sku": "SKU-2", "name": "Gaming Laptop B", "price_cents": 180000, "currency": "USD", "stock": 8},
-            {"id": "3", "sku": "SKU-3", "name": "Gaming Laptop C", "price_cents": 250000, "currency": "USD", "stock": 6},
-        ]
-
-    monkeypatch.setattr(RecommendationService, "retrieve_candidates", _fake_candidates)
     uid = "followup-memory-user-delta"
 
     first = client.get(

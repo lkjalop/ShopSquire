@@ -1,11 +1,51 @@
 """V2-only compatibility edge for the retired legacy /recommend/suggest surface."""
 from __future__ import annotations
 
-import uuid
+import os
 import re
+import threading
+import uuid
 from typing import Any, Dict
 
 from fastapi import HTTPException
+
+
+def _apply_narration_compatibility(payload: Dict[str, Any], redis: Any) -> None:
+    """Retain the bounded narration handshake without reviving V1 narration.
+
+    V2 already returns a deterministic evidence-grounded message. ``skip`` and
+    ``async`` must therefore never add a blocking model call; async exposes the
+    historical poll contract and completes the job with that safe V2 message.
+    """
+    mode = str(os.getenv("RECOMMEND_NARRATION_MODE", "blocking") or "blocking")
+    mode = mode.strip().lower()
+    if mode not in {"blocking", "skip", "async"}:
+        mode = "blocking"
+    timing = payload.get("timing_breakdown")
+    timing = dict(timing) if isinstance(timing, dict) else {}
+    timing["narration_mode"] = mode
+    if mode in {"skip", "async"}:
+        timing["summary_ms"] = 0
+    if mode == "async":
+        timing["narration_pending"] = True
+        from src.app.services.recommend_narration_jobs import (
+            new_job_id,
+            put_narration,
+            run_narration_job,
+        )
+
+        job_id = new_job_id()
+        put_narration(redis, job_id, status="pending", message=None)
+        message = str(payload.get("assistant_message") or payload.get("message") or "")
+        worker = threading.Thread(
+            target=run_narration_job,
+            args=(redis, job_id, lambda: message),
+            name=f"compat-narration-{job_id[:8]}",
+            daemon=True,
+        )
+        worker.start()
+        payload["llm_summary_job_id"] = job_id
+    payload["timing_breakdown"] = timing
 
 
 def _compatibility_use_case_tags(query: str, payload: Dict[str, Any]) -> list[str]:
@@ -413,6 +453,7 @@ def serve_v2_compatibility(
             payload["message"] = bounded_message
             payload["assistant_message"] = bounded_message
             payload.pop("right_panel", None)
+        _apply_narration_compatibility(payload, redis)
         from src.app.security.model_theft import protect_recommendation_output
 
         return protect_recommendation_output(payload, trace_id=trace_id)
@@ -455,6 +496,7 @@ def serve_v2_compatibility(
                 lane=outcome.lane,
                 payload=blocked_payload,
             )
+            _apply_narration_compatibility(blocked_payload, redis)
             return blocked_payload
         raise HTTPException(
             status_code=429 if outcome.reason.startswith("quota:") else 403,
@@ -519,4 +561,5 @@ def serve_v2_compatibility(
         lane=outcome.lane,
         payload=unavailable,
     )
+    _apply_narration_compatibility(unavailable, redis)
     return unavailable
