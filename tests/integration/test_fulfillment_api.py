@@ -373,12 +373,34 @@ def test_edit_draft_and_asof_routes_wired():
 
 
 def test_experiment_console_promote_observe_revert():
-    # operator levers over the live-adaptation experiment: promote → live, then revert → not live
-    p = client.post("/api/v1/fulfillment/market/experiment/promote", json={})
+    # operator levers over a uniquely scoped, sealed experiment policy
+    experiment_id = f"ranking-console-{uuid.uuid4()}"
+    policy = {
+        "experiment_id": experiment_id,
+        "baseline": {"variant": "control"},
+        "eligibility": {"surface": "recommendation"},
+        "min_samples": 30,
+        "min_window_seconds": 86400,
+        "rollback_threshold_pct": 2.0,
+        "guardrails": {"margin": "non_decreasing"},
+        "terminal_policy": {
+            "allowed": ["keep", "scale", "revise", "revert"],
+        },
+    }
+    p = client.post(
+        "/api/v1/fulfillment/market/experiment/promote",
+        json=policy,
+    )
     assert p.status_code == 200 and p.json()["live"] is True
-    s = client.get("/api/v1/fulfillment/market/experiment/state")
+    s = client.get(
+        "/api/v1/fulfillment/market/experiment/state",
+        params={"experiment_id": experiment_id},
+    )
     assert s.status_code == 200 and s.json()["live"] is True
-    rev = client.post("/api/v1/fulfillment/market/experiment/revert", json={})
+    rev = client.post(
+        "/api/v1/fulfillment/market/experiment/revert",
+        json={"experiment_id": experiment_id},
+    )
     assert rev.status_code == 200 and rev.json()["live"] is False
 
 

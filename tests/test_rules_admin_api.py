@@ -18,7 +18,9 @@ def test_rules_crud_and_preview():
         "title": "Intent: product_search",
         "domain": "recommend",
         "pattern": r"(?i)\bshow\s+me\b",
-        "priority": 10,
+        # Must outrank the migration-seeded product-search rule (priority 10).
+        # Equal-priority ordering is intentionally not an ownership contract.
+        "priority": 1,
         "active": 1,
     }
     r = client.post("/api/v1/rules/", headers=_owner_headers(), content=json.dumps(create_payload))
@@ -56,4 +58,3 @@ def test_rules_rejects_invalid_regex():
     bad = {"title": "bad", "domain": "recommend", "pattern": r"(", "priority": 10, "active": 1}
     r = client.post("/api/v1/rules/", headers=_owner_headers(), content=json.dumps(bad))
     assert r.status_code == 400
-
