@@ -47,7 +47,11 @@ def _seed_v2_catalog():
                     "sku": sku,
                     "name": name,
                     "price": price_cents,
-                    "specs": '{"ram_gb": 16, "storage_gb": 1024}',
+                    "specs": (
+                        '{"ram_gb": 16, "storage_gb": 1024, '
+                        '"gaming_style": true, "refresh_hz": 165, '
+                        '"gpu": "RTX 4060", "weight_kg": 1.6}'
+                    ),
                 },
             )
             db.execute(

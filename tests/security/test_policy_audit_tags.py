@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from src.app.models.db import db_session
 from src.app.policy.action_authority_matrix import AuthDecision
@@ -20,8 +20,22 @@ from src.app.policy.route_enforcement import enforce_action_authority
 
 def _latest_context(action: str) -> dict:
     with db_session() as db:
+        columns = {
+            str(column["name"])
+            for column in inspect(db.get_bind()).get_columns("policy_evaluation_log")
+        }
+        context_column = "context" if "context" in columns else "guardrails_json"
+        canonical_filter = (
+            "AND policy_version = 'execution_gate_matrix_v1'"
+            if "policy_version" in columns
+            else ""
+        )
         row = db.execute(
-            text("SELECT context FROM policy_evaluation_log WHERE action = :a ORDER BY created_at DESC, rowid DESC LIMIT 1"),
+            text(
+                f"SELECT {context_column} FROM policy_evaluation_log "
+                f"WHERE action = :a {canonical_filter} "
+                "ORDER BY created_at DESC LIMIT 1"
+            ),
             {"a": action},
         ).scalar()
     if not row:
@@ -34,9 +48,25 @@ def _latest_context(action: str) -> dict:
 
 def _count(action: str) -> int:
     with db_session() as db:
-        return int(db.execute(
-            text("SELECT COUNT(*) FROM policy_evaluation_log WHERE action = :a"), {"a": action}
-        ).scalar() or 0)
+        columns = {
+            str(column["name"])
+            for column in inspect(db.get_bind()).get_columns("policy_evaluation_log")
+        }
+        canonical_filter = (
+            "AND policy_version = 'execution_gate_matrix_v1'"
+            if "policy_version" in columns
+            else ""
+        )
+        return int(
+            db.execute(
+                text(
+                    "SELECT COUNT(*) FROM policy_evaluation_log "
+                    f"WHERE action = :a {canonical_filter}"
+                ),
+                {"a": action},
+            ).scalar()
+            or 0
+        )
 
 
 # ── framework_tags ──

@@ -62,7 +62,7 @@ class TestFastNarration:
         """Fast mode returns actual product results."""
         resp = fast_client.get(
             "/api/v1/recommend/suggest",
-            params={"uid": "demo-3", "query": "portable laptop for university"},
+            params={"uid": "demo-3", "query": "portable gaming laptop for university"},
             headers={"x-api-key": "local-owner-key"},
         )
         data = resp.json()
