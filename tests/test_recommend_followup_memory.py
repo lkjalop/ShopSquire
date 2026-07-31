@@ -40,7 +40,7 @@ def _seed_v2_catalog():
                 text(
                     "INSERT OR REPLACE INTO products "
                     "(id, sku, name, price_cents, currency, specs, active) "
-                    "VALUES (:id, :sku, :name, :price, 'USD', :specs, 1)"
+                    "VALUES (:id, :sku, :name, :price, 'AUD', :specs, 1)"
                 ),
                 {
                     "id": sku,

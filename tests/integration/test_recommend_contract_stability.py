@@ -19,15 +19,102 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
-from src.app.main import app
+from src.app.main import create_app
+from src.app.models.db import db_session
 from src.app.services.recommendation_response_finalizer import finalize_core_response
+from src.app.services.taxonomy_registry import (
+    add_sold_node,
+    ensure_tables,
+    upsert_classification,
+)
 from tests.utils import default_headers
 
-client = TestClient(app, headers=default_headers())
+_CONTRACT_SKU = "V2-CONTRACT-LAP-1"
+_CONTRACT_NODES = ("el-6-6", "el-6-11-2")
+
+
+@pytest.fixture(autouse=True)
+def _ground_v2_contract_catalog():
+    """Ground after the function-scoped migrated-database reset."""
+    with db_session() as db:
+        ensure_tables(db)
+        existing_nodes = {
+            node: bool(
+                db.execute(
+                    text(
+                        "SELECT 1 FROM sold_taxonomy "
+                        "WHERE tenant_id = 'default' AND node_handle = :node"
+                    ),
+                    {"node": node},
+                ).first()
+            )
+            for node in _CONTRACT_NODES
+        }
+        for node in _CONTRACT_NODES:
+            add_sold_node(db, node_handle=node, tenant_id="default")
+        db.execute(
+            text(
+                "INSERT OR REPLACE INTO products "
+                "(id, sku, name, price_cents, currency, specs, active) "
+                "VALUES (:sku, :sku, 'Grounded Gaming Laptop', 149900, "
+                "'AUD', :specs, 1)"
+            ),
+            {
+                "sku": _CONTRACT_SKU,
+                "specs": '{"ram_gb": 16, "storage_gb": 1024, "gaming_style": true}',
+            },
+        )
+        db.execute(
+            text(
+                "INSERT OR REPLACE INTO inventory "
+                "(id, product_id, stock, warehouse) "
+                "VALUES (:id, :sku, 8, 'default')"
+            ),
+            {"id": f"inv-{_CONTRACT_SKU}", "sku": _CONTRACT_SKU},
+        )
+        upsert_classification(
+            db,
+            sku=_CONTRACT_SKU,
+            node_handle="el-6-11-2",
+            source="v2_contract_fixture",
+            status="approved",
+            tenant_id="default",
+        )
+        db.commit()
+    yield
+    with db_session() as db:
+        db.execute(
+            text(
+                "DELETE FROM product_classification "
+                "WHERE tenant_id = 'default' AND sku = :sku "
+                "AND source = 'v2_contract_fixture'"
+            ),
+            {"sku": _CONTRACT_SKU},
+        )
+        db.execute(
+            text("DELETE FROM inventory WHERE product_id = :sku"),
+            {"sku": _CONTRACT_SKU},
+        )
+        db.execute(
+            text("DELETE FROM products WHERE id = :sku"),
+            {"sku": _CONTRACT_SKU},
+        )
+        for node, existed in existing_nodes.items():
+            if not existed:
+                db.execute(
+                    text(
+                        "DELETE FROM sold_taxonomy "
+                        "WHERE tenant_id = 'default' AND node_handle = :node"
+                    ),
+                    {"node": node},
+                )
+        db.commit()
 
 
 def _suggest(uid: str, query: str) -> dict:
+    client = TestClient(create_app(), headers=default_headers())
     r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query})
     assert r.status_code == 200, f"{uid}: HTTP {r.status_code} — {r.text[:300]}"
     body = r.json()
