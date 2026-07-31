@@ -5,6 +5,7 @@ from sqlalchemy import text
 from src.app.deps import get_redis
 from src.app.main import create_app
 from src.app.models.db import db_session
+from src.app.services.commerce_catalog import upsert_inventory, upsert_price
 from src.app.services.memory import Memory
 from src.app.services.taxonomy_registry import (
     add_sold_node,
@@ -100,10 +101,43 @@ def _seed_v2_catalog():
                 status="approved",
                 tenant_id="default",
             )
+            # The production feature set reads price and ATP from the canonical
+            # commerce boundary. Seeding only the retired products/inventory
+            # tables makes this contract depend on a developer's local flags.
+            upsert_price(
+                db,
+                sku=sku,
+                list_cents=price_cents,
+                source="test_fixture",
+                tenant_id="default",
+            )
+            upsert_inventory(
+                db,
+                sku=sku,
+                on_hand=stock,
+                source="test_fixture",
+                tenant_id="default",
+            )
         db.commit()
     yield
     with db_session() as db:
         for sku, *_ in _CATALOG:
+            db.execute(
+                text(
+                    "DELETE FROM inventory_level "
+                    "WHERE tenant_id = 'default' AND sku = :sku "
+                    "AND source = 'test_fixture'"
+                ),
+                {"sku": sku},
+            )
+            db.execute(
+                text(
+                    "DELETE FROM price_book_entry "
+                    "WHERE tenant_id = 'default' AND sku = :sku "
+                    "AND source = 'test_fixture'"
+                ),
+                {"sku": sku},
+            )
             db.execute(
                 text(
                     "DELETE FROM product_classification "
