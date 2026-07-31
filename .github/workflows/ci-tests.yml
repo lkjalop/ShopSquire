@@ -13,6 +13,22 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      APP_ENV: testing
+      CV_STRICT_RUNTIME_DEPS: "0"
+      DISABLE_PLAYWRIGHT_TESTS: "1"
+      DISABLE_TRACING: "1"
+      MODEL_WARMUP_ON_STARTUP: "0"
+      SECURITY_OBSERVER_SYNC: "1"
+      USE_LLM_RERANK: "0"
+      USE_LLM_SUMMARY: "0"
+      USE_MOCK_INVENTORY: "1"
+      USE_MOCK_LLM: "1"
+      USE_OLLAMA_INTENT: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -29,24 +45,59 @@ jobs:
           pip install poetry poetry-plugin-export
           poetry export -f requirements.txt --without-hashes -o requirements.txt
           pip install -r requirements.txt
-          pip install pytest requests pyyaml pytest-timeout
-      - name: Run owned general test suite
+          pip install pytest pytest-asyncio requests pyyaml pytest-timeout
+      - name: Run file-isolated general test shard
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: 12
         run: |
           mkdir -p test-results
-          timeout --signal=TERM --kill-after=30s 1500s \
-            pytest -vv --timeout=120 --timeout-method=thread \
-              --junitxml=test-results/general.xml \
-              --ignore=tests/services \
-              --ignore=tests/e2e \
-              --ignore=tests/pw \
-              --ignore=tests/playwright \
-              --ignore=tests/browser \
-              --ignore=tests/load \
-              tests
+          template_db="$RUNNER_TEMP/general-template-${SHARD_INDEX}.sqlite"
+          export DATABASE_URL="sqlite:///$template_db"
+          export DATABASE_URL_RO="$DATABASE_URL"
+          python -c "from src.app.models.init_db import ensure_metadata; ensure_metadata()"
+          python scripts/seed_products.py
+          mapfile -t files < <(
+            find tests -type f -name 'test_*.py' \
+              ! -path 'tests/services/*' \
+              ! -path 'tests/e2e/*' \
+              ! -path 'tests/pw/*' \
+              ! -path 'tests/playwright/*' \
+              ! -path 'tests/browser/*' \
+              ! -path 'tests/load/*' \
+              | sort
+          )
+          failures=0
+          selected=0
+          for index in "${!files[@]}"; do
+            if (( index % SHARD_TOTAL != SHARD_INDEX )); then
+              continue
+            fi
+            file="${files[$index]}"
+            selected=$((selected + 1))
+            safe_name="$(printf '%s' "$file" | tr '/.' '__')"
+            db_path="$RUNNER_TEMP/general-${SHARD_INDEX}-${index}.sqlite"
+            cp "$template_db" "$db_path"
+            export DATABASE_URL="sqlite:///$db_path"
+            export DATABASE_URL_RO="$DATABASE_URL"
+            echo "::group::${file}"
+            if ! timeout --signal=TERM --kill-after=15s 180s \
+              pytest -q --timeout=120 --timeout-method=thread \
+                --junitxml="test-results/${safe_name}.xml" \
+                "$file"; then
+              failures=$((failures + 1))
+            fi
+            echo "::endgroup::"
+            rm -f "$db_path" "$db_path-shm" "$db_path-wal"
+            git show HEAD:config/feature_flags.json > config/feature_flags.json
+            git show HEAD:config/security/cv_playbooks.json > config/security/cv_playbooks.json
+          done
+          echo "shard=${SHARD_INDEX}/${SHARD_TOTAL} files=${selected} failed_files=${failures}"
+          test "$failures" -eq 0
       - name: Upload general-suite diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: general-suite-diagnostics
+          name: general-suite-diagnostics-${{ matrix.shard }}
           path: test-results/**
           retention-days: 14

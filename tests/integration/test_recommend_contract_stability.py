@@ -123,17 +123,15 @@ def test_anchor_product_preserves_authoritative_currency():
     assert product["currency"] == "AUD"
 
 
-def test_zero_results_uses_message_not_assistant_message():
-    """Contract divergence the frontend depends on: the zero-results path emits
-    `message` (not `assistant_message`) and omits next_questions/right_panel.
-    Locking this prevents F3 narration extraction from silently unifying them."""
+def test_zero_results_preserves_message_alias_and_universal_assistant_message():
+    """V2 uses ``assistant_message`` universally while the compatibility route
+    retains the historical ``message`` alias for zero-result consumers."""
     body = _suggest("u-contract-zero", "laptop under $50")
     _assert_spine(body, "zero_results")
     assert "message" in body, "zero-results path must emit `message`"
-    assert "assistant_message" not in body, (
-        "zero-results path historically has NO assistant_message — if this changes "
-        "intentionally, update this test AND the frontend zero-state handler"
-    )
+    assert isinstance(body.get("assistant_message"), str)
+    assert body["assistant_message"]
+    assert body["message"] == body["assistant_message"]
 
 
 def test_off_domain_guard_shape():
