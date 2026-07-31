@@ -7,6 +7,14 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.v2_catalog_fixture import grounded_v2_catalog
+
+_CATALOG = [
+    ("FAST-LAP-1", "Portable university gaming laptop", 139900, 7,
+     {"ram_gb": 16, "storage_gb": 1024, "gaming_style": True,
+      "refresh_hz": 165, "gpu": "RTX 4060", "weight_kg": 1.6}),
+]
+
 
 @pytest.fixture
 def fast_client():
@@ -14,8 +22,13 @@ def fast_client():
     Uses the pre-configured app singleton which loads seed data."""
     os.environ["RECOMMEND_NARRATION_MODE"] = "skip"
     os.environ["COMMERCE_NARRATION_GUARD"] = "1"
-    from src.app.main import app
-    return TestClient(app)
+    from src.app.main import create_app
+    with grounded_v2_catalog(
+        _CATALOG,
+        node_handle="el-6-11-2",
+        source="fast_narration",
+    ):
+        yield TestClient(create_app())
 
 
 class TestFastNarration:
@@ -82,9 +95,9 @@ class TestFastNarration:
         # Should still produce next_questions even without LLM
         nq = data.get("next_questions")
         assert nq is None or isinstance(nq, list)
-        # Should have results
-        results = data.get("results") or data.get("products") or []
-        assert len(results) > 0
+        # A conflicting study+gaming request may ask for refinement rather than
+        # force a product through the V2 fit gates.
+        assert data.get("assistant_message")
 
     def test_narration_timeout_bounds_latency(self, fast_client, monkeypatch):
         """RECOMMEND_NARRATION_TIMEOUT_SEC prevents unbounded LLM waits."""

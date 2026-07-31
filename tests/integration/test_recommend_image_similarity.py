@@ -6,15 +6,31 @@ classification is profile-backed (category_router) + uses only safe labels, neve
 """
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
-from src.app.main import app
+from src.app.main import create_app
 from tests.utils import default_headers
+from tests.v2_catalog_fixture import grounded_v2_catalog
 
-client = TestClient(app, headers=default_headers())
+_CATALOG = [
+    ("IMG-LAP-1", "ThinkPad gaming laptop", 159900, 5,
+     {"ram_gb": 16, "storage_gb": 1024, "gaming_style": True}),
+]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ground_catalog():
+    with grounded_v2_catalog(
+        _CATALOG,
+        node_handle="el-6-11-2",
+        source="recommend_image_similarity",
+    ):
+        yield
 
 
 def _suggest(uid, **params):
+    client = TestClient(create_app(), headers=default_headers())
     r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": "gaming laptop under 1800", **params})
     assert r.status_code == 200
     return r.json()

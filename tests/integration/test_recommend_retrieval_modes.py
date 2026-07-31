@@ -9,17 +9,33 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
-from src.app.main import app
+from src.app.main import create_app
 from tests.utils import default_headers
+from tests.v2_catalog_fixture import grounded_v2_catalog
 
-client = TestClient(app, headers=default_headers())
+_CATALOG = [
+    ("RM-LAP-1", "Grounded gaming laptop", 149900, 6,
+     {"ram_gb": 16, "storage_gb": 1024, "gaming_style": True}),
+]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ground_catalog():
+    with grounded_v2_catalog(
+        _CATALOG,
+        node_handle="el-6-11-2",
+        source="retrieval_modes",
+    ):
+        yield
 
 _SPINE = {"results", "decision_trace_id", "constraints_used", "buyer_persona"}
 
 
 def _suggest(uid):
+    client = TestClient(create_app(), headers=default_headers())
     r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": "gaming laptop under 1800"})
     assert r.status_code == 200
     return r.json()

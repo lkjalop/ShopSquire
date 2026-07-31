@@ -652,6 +652,20 @@ def _run_v2_intelligence_stage(
     of either router and run it before trace finalization/session writeback.
     """
     results = list(payload.get("results") or payload.get("products") or [])
+    observations = list(getattr(envelope, "image_observations", ()) or ())
+    if observations:
+        observation = observations[0]
+        from src.app.platform.store_profile import profile_slot
+        from src.app.services.category_router import detect_category
+        from src.app.services.image_query_relationship import classify
+
+        payload["image_relationship"] = classify(
+            image_labels=list(getattr(observation, "labels", ()) or ()),
+            query=envelope.query,
+            image_suspicious=getattr(observation, "trust_mode", "text_only") == "text_only",
+            detect_category=detect_category,
+            companions_map=profile_slot("upsell_companions", default={}) or {},
+        )
     if not results:
         return payload
     try:

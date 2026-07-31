@@ -30,10 +30,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from src.app.main import app
+from src.app.main import create_app
 from src.app.models.db import db_session
-from src.app.services.recommendations import RecommendationService
 from tests.utils import default_headers, write_feature_flags
+from tests.v2_catalog_fixture import grounded_v2_catalog
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
 # Deterministic product-path flags so the gate is order-independent (other test
@@ -48,43 +48,30 @@ _PRODUCT_PATH_FLAGS = {
     "TEST_FORCE_BAD_SKU": False,
 }
 
-client = TestClient(app, headers=default_headers())
-
 # (sku, name, price_cents, stock) — FBP-3 is OOS to exercise the stock/cart gate.
 _CATALOG = [
-    ("FBP-1", "Dell Latitude 14 business laptop", 119900, 8),
-    ("FBP-2", "Lenovo ThinkPad T14 work laptop", 149900, 5),
-    ("FBP-3", "HP ProBook 450 office laptop", 99900, 0),
+    ("FBP-1", "Dell Latitude 14 business laptop", 119900, 8,
+     {"ram_gb": 16, "storage_gb": 1024, "display": "15.6 FHD"}),
+    ("FBP-2", "Lenovo ThinkPad T14 work laptop", 149900, 5,
+     {"ram_gb": 16, "storage_gb": 1024, "display": "15.6 FHD"}),
+    ("FBP-3", "HP ProBook 450 office laptop", 99900, 0,
+     {"ram_gb": 16, "storage_gb": 1024, "display": "15.6 FHD"}),
 ]
 _VALID_STOCK = {"in_stock", "low_stock", "very_low_stock", "out_of_stock", None}
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _seed():
-    orig = RecommendationService.retrieve_candidates
-    # Force the deterministic DB-fallback path so seeded products surface (same
-    # technique as tests/acceptance/test_reference_query_matrix.py).
-    RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
     _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
     write_feature_flags(_PRODUCT_PATH_FLAGS)
     _orig_narration = os.environ.get("RECOMMEND_NARRATION_MODE")
     os.environ["RECOMMEND_NARRATION_MODE"] = "skip"  # fast + deterministic
-    with db_session() as db:
-        for sku, name, cents, stock in _CATALOG:
-            db.execute(text(
-                "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
-                "VALUES (:id,:sku,:n,:c,'USD',:s,1)"),
-                # Rich specs so the products satisfy any use-case spec floors the pipeline may
-                # enrich (e.g. storage_gb_min:256) regardless of test ordering — keeps the gate
-                # order-independent.
-                {"id": sku, "sku": sku, "n": name, "c": cents,
-                 "s": '{"ram_gb": 16, "storage_gb": 1024, "display": "15.6 FHD"}'})
-            db.execute(text(
-                "INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
-                "VALUES (:i,:p,:st,'default')"), {"i": "inv-" + sku, "p": sku, "st": stock})
-        db.commit()
-    yield
-    RecommendationService.retrieve_candidates = orig
+    with grounded_v2_catalog(
+        _CATALOG,
+        node_handle="el-6-6",
+        source="frontend_backend_parity",
+    ):
+        yield
     if _orig_narration is None:
         os.environ.pop("RECOMMEND_NARRATION_MODE", None)
     else:
@@ -92,14 +79,10 @@ def _seed():
     if _orig_flags is not None:
         with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
             f.write(_orig_flags)
-    with db_session() as db:
-        for sku, *_ in _CATALOG:
-            db.execute(text("DELETE FROM inventory WHERE product_id=:p"), {"p": sku})
-            db.execute(text("DELETE FROM products WHERE id=:p"), {"p": sku})
-        db.commit()
 
 
 def _suggest(uid: str, query: str) -> dict:
+    client = TestClient(create_app(), headers=default_headers())
     r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query})
     assert r.status_code == 200, f"{uid}: HTTP {r.status_code} — {r.text[:400]}"
     body = r.json()
