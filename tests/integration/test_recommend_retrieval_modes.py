@@ -32,21 +32,21 @@ def test_shadow_default_mode():
     assert body.get("timing_breakdown", {}).get("retrieval_mode") in (None, "shadow")
 
 
-def test_fusion_mode_preserves_contract():
+def test_retired_fusion_setting_preserves_v2_contract():
     os.environ["RECOMMEND_RETRIEVAL_MODE"] = "fusion"
     try:
         body = _suggest("u-rm-fusion")
         assert _SPINE <= body.keys()
-        assert body.get("timing_breakdown", {}).get("retrieval_mode") == "fusion"
+        assert body.get("timing_breakdown", {}).get("retrieval_mode") != "fusion"
     finally:
         os.environ.pop("RECOMMEND_RETRIEVAL_MODE", None)
 
 
-def test_primary_mode_preserves_contract():
+def test_retired_primary_setting_preserves_v2_contract():
     os.environ["RECOMMEND_RETRIEVAL_MODE"] = "primary"
     try:
         body = _suggest("u-rm-primary")
         assert _SPINE <= body.keys()
-        assert body.get("timing_breakdown", {}).get("retrieval_mode") == "primary"
+        assert body.get("timing_breakdown", {}).get("retrieval_mode") != "primary"
     finally:
         os.environ.pop("RECOMMEND_RETRIEVAL_MODE", None)

@@ -83,10 +83,24 @@ class _FakeProcurementAsyncClient(_FakeAsyncClient):
         )
 
 
+async def _fake_recommend_in_process(request, params, *, redis, db, role):
+    response = await _FakeAsyncClient().get("in-process", params=params)
+    return response.status_code, response.json()
+
+
+async def _fake_procurement_in_process(request, params, *, redis, db, role):
+    response = await _FakeProcurementAsyncClient().get("in-process", params=params)
+    return response.status_code, response.json()
+
+
 def test_chat_query_persists_messages_and_history_reads(monkeypatch):
     from src.app.routers import chat as chat_router
 
-    monkeypatch.setattr(chat_router.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(
+        chat_router,
+        "_call_recommend_in_process",
+        _fake_recommend_in_process,
+    )
     app = create_app()
     client = TestClient(app)
     headers = {"x-api-key": "local-merchant-key"}
@@ -117,7 +131,11 @@ def test_chat_query_persists_messages_and_history_reads(monkeypatch):
 def test_chat_query_applies_copywriting_when_requested(monkeypatch):
     from src.app.routers import chat as chat_router
 
-    monkeypatch.setattr(chat_router.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(
+        chat_router,
+        "_call_recommend_in_process",
+        _fake_recommend_in_process,
+    )
     app = create_app()
     client = TestClient(app)
     headers = {"x-api-key": "local-merchant-key"}
@@ -147,7 +165,11 @@ def test_chat_query_applies_copywriting_when_requested(monkeypatch):
 def test_chat_query_preserves_buyer_safe_procurement_projection(monkeypatch):
     from src.app.routers import chat as chat_router
 
-    monkeypatch.setattr(chat_router.httpx, "AsyncClient", _FakeProcurementAsyncClient)
+    monkeypatch.setattr(
+        chat_router,
+        "_call_recommend_in_process",
+        _fake_procurement_in_process,
+    )
     app = create_app()
     client = TestClient(app)
 
