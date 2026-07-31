@@ -11,14 +11,19 @@ from fastapi.testclient import TestClient
 
 from src.app.main import create_app
 
-OWNER = "local-owner-key"
-DEVELOPER = "local-developer-key"
+OWNER = "test-kyv-owner-key"
+DEVELOPER = "test-kyv-developer-key"
 
 
 @pytest.fixture()
 def prod_client(monkeypatch):
     monkeypatch.setenv("APP_ENV", "staging")  # not-dev (dual-control enforces) but not prod (no strict-secrets/MFA)
     monkeypatch.setenv("SUPPLY_CHAIN_DUAL_CONTROL", "1")
+    monkeypatch.setenv("OWNER_API_KEY", OWNER)
+    monkeypatch.setenv("DEVELOPER_API_KEY", DEVELOPER)
+    # Tenant membership has a separate strict-mode contract. Isolate the
+    # independent dual-control boundary while retaining operator attribution.
+    monkeypatch.setenv("OPERATOR_TENANT_MEMBERSHIP_MODE", "audit")
     return TestClient(create_app(), headers={"x-api-key": OWNER})
 
 
@@ -71,6 +76,7 @@ def test_status_verified_requires_dual_control(prod_client):
 def test_dev_env_is_noop(monkeypatch):
     # default local env: no approver needed (behavior preserved for the demo/dev flow)
     monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("OWNER_API_KEY", OWNER)
     c = TestClient(create_app(), headers={"x-api-key": OWNER})
     r = c.post("/api/v1/admin/kyv/vendors", json=_reg_body("dc-dev.example"))
     assert r.status_code == 200, r.text

@@ -19,7 +19,21 @@ jobs:
       DISABLE_PLAYWRIGHT_TESTS: "1"
       DISABLE_TRACING: "1"
       MODEL_WARMUP_ON_STARTUP: "0"
+      # General shards exercise request volume and policy behavior, not
+      # production throttling. Keep limits finite but high so file order cannot
+      # leak shared fixed-window state into unrelated contracts.
+      RATE_LIMIT_PER_IP_PER_MIN: "10000"
+      RATE_LIMIT_PER_MINUTE_IP: "10000"
+      RATE_LIMIT_PER_MINUTE_KEY: "10000"
       SECURITY_OBSERVER_SYNC: "1"
+      SECURITY_OBSERVER_SAMPLE_RATE: "1"
+      # Non-dev authentication fails closed when role keys are absent. Supply
+      # deterministic CI-only credentials rather than local development keys.
+      # These values intentionally match the historical test fixtures. They
+      # are explicit job-local credentials, not non-dev application defaults.
+      MERCHANT_API_KEY: local-merchant-key
+      OWNER_API_KEY: local-owner-key
+      DEVELOPER_API_KEY: local-developer-key
       TEST_USE_PROVIDED_DATABASE: "1"
       USE_LLM_RERANK: "0"
       USE_LLM_SUMMARY: "0"

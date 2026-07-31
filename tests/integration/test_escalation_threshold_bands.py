@@ -1,7 +1,7 @@
 """End-to-end integration tests for the escalation threshold routing chain.
 
-Covers all three decision bands:
-  - auto_approve  (score < 30)
+Covers all three score bands and the consequential-action gate:
+  - require_human (score < 30 without a corroborated refundable order)
   - require_human (30 <= score < 70)
   - escalate_security (score >= 70)
 
@@ -81,10 +81,10 @@ def _submit_return(client: TestClient, sku: str = "TEST-SKU") -> dict:
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestAutoApprove:
-    """Score < auto_approve_max (30) → auto_approve, no human_review_tasks row."""
+class TestLowRiskHumanAuthorization:
+    """A low score alone cannot authorize a refund without order evidence."""
 
-    def test_low_score_auto_approves(self, monkeypatch, tmp_path):
+    def test_low_score_without_order_requires_human(self, monkeypatch, tmp_path):
         # Force compute_return_score to return a very low score
         monkeypatch.setattr(
             "src.app.routers.returns.compute_return_score",
@@ -93,22 +93,27 @@ class TestAutoApprove:
         client = _make_client(monkeypatch, tmp_path)
         body = _submit_return(client)
 
-        assert body["mode"] == "auto_approve"
+        assert body["mode"] == "require_human"
         assert body.get("decision_id")
         assert body.get("case_id")
-        assert (body.get("human_review") or {}).get("status") == "not_required"
+        assert (body.get("human_review") or {}).get("status") == "pending"
         assert body["score"]["score"] == 5.0
+        assert any(
+            signal.get("signal") == "auto_approve_downgraded"
+            for signal in body["score"].get("signals", [])
+        )
         # Thresholds should be present in response
         assert "thresholds" in body
         assert body["thresholds"]["auto_approve_max_score"] == 30.0
 
-        # DB: no human_review_tasks row for this case
+        # DB: the consequential refund remains pending human authorization.
         with db_session() as db:
             hr = db.execute(
-                text("SELECT id FROM human_review_tasks WHERE case_id = :cid"),
+                text("SELECT status FROM human_review_tasks WHERE case_id = :cid"),
                 {"cid": body["case_id"]},
             ).fetchone()
-            assert hr is None, "auto_approve should NOT create a human_review_tasks row"
+            assert hr is not None
+            assert hr[0] == "pending"
 
 
 class TestRequireHuman:
@@ -231,11 +236,12 @@ class TestThresholdBoundary:
         body = _submit_return(client)
         assert body["mode"] == "escalate_security"
 
-    def test_score_just_below_30_auto_approves(self, monkeypatch, tmp_path):
+    def test_score_just_below_30_still_requires_order_evidence(self, monkeypatch, tmp_path):
         monkeypatch.setattr(
             "src.app.routers.returns.compute_return_score",
             lambda pkg: {"score": 29.9, "factors": {}},
         )
         client = _make_client(monkeypatch, tmp_path)
         body = _submit_return(client)
-        assert body["mode"] == "auto_approve"
+        assert body["mode"] == "require_human"
+        assert (body.get("human_review") or {}).get("status") == "pending"
