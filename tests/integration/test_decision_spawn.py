@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
-def test_recommend_triggers_model_selection_and_next_questions(monkeypatch):
+def test_v2_recommend_surfaces_decision_and_feedback_trace(monkeypatch):
     # Ensure decision traces are enabled for the test run
     monkeypatch.setenv("DECISION_LOG_WRITES_ENABLED", "1")
     monkeypatch.setenv("MERCHANT_API_KEY", "local-merchant-key")
@@ -27,6 +27,25 @@ def test_recommend_triggers_model_selection_and_next_questions(monkeypatch):
     # Trace id should be present; clarifying questions may be emitted into the trace stream
     trace_id = data.get("trace_id") or data.get("decision_trace_id")
     assert trace_id
+    # V2 owns decision evidence on the typed response. A model proposal is
+    # optional: deterministic routing is valid and must not fabricate one.
+    decision = data.get("decision")
+    model_selection = data.get("model_selection")
+    if isinstance(decision, dict):
+        execution_steps = data.get("execution_steps") or []
+        assert any(step.get("authority") == "authorizes" for step in execution_steps)
+        assert any(step.get("authority") == "presents" for step in execution_steps)
+        if model_selection is not None:
+            assert isinstance(model_selection, dict)
+            assert model_selection.get("selected")
+            assert model_selection.get("authority") == "proposes"
+        assert data.get("execution_mode") in {"v2_served", "v2_compatibility"}
+    else:
+        # An unseeded shard may not have authoritative catalog evidence. V2
+        # must degrade honestly and must not fabricate a decision/model.
+        assert data.get("products") == []
+        assert data.get("action_executed") is False
+        assert model_selection is None
 
     # Poll the decision trace query endpoint until events appear or timeout
     events = []
@@ -43,7 +62,10 @@ def test_recommend_triggers_model_selection_and_next_questions(monkeypatch):
     assert events, "expected trace events but none were returned"
 
     types = {e.get("event_type") for e in events}
-    # Canonicalization maps `model_selection` -> `tier_decision` and `next_questions` -> `feedback_loop`.
-    assert "tier_decision" in types or "model_selection" in types
-    # `next_questions` emission is optional depending on NLP; accept either canonical or original if present.
-    assert ("feedback_loop" in types or "next_questions" in types) or True
+    assert "feedback_loop" in types
+    assert "model_selection" not in types
+    assert any(
+        (event.get("payload") or {}).get("_schema_version") == "1.0"
+        for event in events
+        if event.get("event_type") == "feedback_loop"
+    )
