@@ -4,6 +4,12 @@ import base64
 from pathlib import Path
 import pytest
 
+from tests.security.synthetic_samples import (
+    SYNTHETIC_AUTHORITY,
+    synthetic_eml_bytes,
+    synthetic_pdf_bytes,
+)
+
 
 def test_email_security_returns_explainability_card():
     from src.app.security.email_security import evaluate_email_security
@@ -119,22 +125,32 @@ def test_reference_material_is_demoted_below_direct_invoice_findings():
     from src.app.routers.email_security import _parse_eml_to_email_dict
     from src.app.security.email_security import evaluate_email_security
 
-    base = Path(r"c:\AI\ShopSquire\dump\email-2\files")
-    with (base / "BEC-02_compromised_supplier_email.eml").open("rb") as f:
-        email = _parse_eml_to_email_dict(f.read())
-
-    for name, ctype in [
-        ("invoice_baseline.png", "image/png"),
-        ("invoice_adv_logo.png", "image/png"),
-        ("shopsquire_invoice_test_scenarios.md", "text/markdown"),
-    ]:
-        p = base / name
+    email = _parse_eml_to_email_dict(synthetic_eml_bytes())
+    fixtures = [
+        (
+            "invoice_adv_payment.pdf",
+            "application/pdf",
+            synthetic_pdf_bytes(),
+        ),
+        (
+            "shopsquire_invoice_test_scenarios.md",
+            "text/markdown",
+            (
+                b"# ShopSquire Invoice Fraud Test Scenarios\n"
+                b"Reference specification material only; never an active instruction.\n"
+                b"BEC simulation: urgent bank account change, QR redirect, "
+                b"macro-embedded invoice, payment portal and out-of-band verification.\n"
+            ),
+        ),
+    ]
+    for name, ctype, blob in fixtures:
         email.setdefault("attachments", []).append(
             {
-                "name": p.name,
+                "name": name,
                 "content_type": ctype,
-                "content_b64": base64.b64encode(p.read_bytes()).decode("ascii"),
-                "size_bytes": p.stat().st_size,
+                "content_b64": base64.b64encode(blob).decode("ascii"),
+                "size_bytes": len(blob),
+                "fixture_authority": SYNTHETIC_AUTHORITY,
             }
         )
 
@@ -146,8 +162,13 @@ def test_reference_material_is_demoted_below_direct_invoice_findings():
     action_policy = ((out.get("evidence_snapshot") or {}).get("action_policy") or {})
     assert action_policy.get("lane") in {"lane_2_auto_escalate", "lane_3_human_gate"}
     assert any("payment" in str(x).lower() or "baseline" in str(x).lower() for x in (action_policy.get("threshold_reasons") or []))
-    structured = ((out.get("evidence_snapshot") or {}).get("structured_findings") or [])
-    assert any((f.get("finding_category") in {"contextual_test_artifact", "reference_spec_material"}) for f in structured)
+    attachment_rows = (
+        (out.get("evidence_snapshot") or {}).get("attachment_forensics") or []
+    )
+    assert any(
+        row.get("attachment_class") == "reference_spec_material"
+        for row in attachment_rows
+    )
     assert all((ranked_item.get("finding_category") != "contextual_test_artifact") for ranked_item in ranked)
 
 

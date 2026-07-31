@@ -3,6 +3,10 @@ from __future__ import annotations
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.protocol
+
 
 _RUNNER_PATH = Path(__file__).resolve().parent / "benchmarks" / "eval_runner.py"
 _SPEC = spec_from_file_location("benchmark_eval_runner", _RUNNER_PATH)
@@ -14,6 +18,9 @@ run_benchmark = _MODULE.run_benchmark
 
 def test_benchmark_runner_emits_metrics_and_results() -> None:
     out = run_benchmark()
+    assert out["claim_scope"] == (
+        "synthetic_protocol_evaluation_not_provider_certification"
+    )
     assert out["case_count"] >= 3
     assert "precision_proxy" in out
     assert "false_positive_leak_rate" in out

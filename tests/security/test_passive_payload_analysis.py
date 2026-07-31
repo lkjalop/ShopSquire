@@ -1,6 +1,15 @@
 from src.app.security.passive_payload_analysis import classify_passive_payload
 from src.app.security.email_attachment_parser import _extract_text
-from pathlib import Path
+from tests.security.synthetic_samples import (
+    synthetic_comment_only_bas_bytes,
+    synthetic_pdf_bytes,
+    synthetic_xlsm_bytes,
+)
+
+import pytest
+
+
+pytestmark = pytest.mark.protocol
 
 
 def test_classify_lolbin_payload_prefers_sandbox():
@@ -66,15 +75,15 @@ def test_classify_qr_prompt_injection_payload():
     assert out["runtime_confirmation_required"] is False
 
 
-def test_extract_xlsm_and_classify_real_fixture_lolbin():
-    path = Path("dump/Sec/Harbourside_Acquisition_Details_CONFIDENTIAL (1).xlsm")
-    blob = path.read_bytes()
-    text = _extract_text(blob, content_type="application/octet-stream", filename=path.name)
+def test_extract_synthetic_xlsm_and_classify_lolbin_protocol():
+    filename = "synthetic_security_protocol.xlsm"
+    blob = synthetic_xlsm_bytes()
+    text = _extract_text(blob, content_type="application/octet-stream", filename=filename)
     low = text.lower()
     assert "harbourside capital partners" in low
     assert "powershell" in low
     assert "certutil" in low
-    out = classify_passive_payload(filename=path.name, extracted_text=text)
+    out = classify_passive_payload(filename=filename, extracted_text=text)
     assert out["attack_hypothesis"] == "lolbin_command_sequence"
     assert "T1197" in out["possible_mitre_attack"]
     assert "T1105" in out["possible_mitre_attack"]
@@ -85,22 +94,22 @@ def test_extract_xlsm_and_classify_real_fixture_lolbin():
     assert "macros" in matched
 
 
-def test_classify_real_fixture_pdf_prefers_payment_fraud_over_ransomware():
-    path = Path("dump/Sec/Wire_Transfer_Authorization_Form.pdf")
-    blob = path.read_bytes()
-    text = _extract_text(blob, content_type="application/pdf", filename=path.name)
+def test_classify_synthetic_pdf_prefers_payment_fraud_over_ransomware():
+    filename = "synthetic_wire_transfer_protocol.pdf"
+    blob = synthetic_pdf_bytes()
+    text = _extract_text(blob, content_type="application/pdf", filename=filename)
     low = text.lower()
     assert "wire transfer authorization" in low
     assert "012-456" in low
-    out = classify_passive_payload(filename=path.name, extracted_text=text)
+    out = classify_passive_payload(filename=filename, extracted_text=text)
     assert out["attack_hypothesis"] == "payment_fraud"
     assert out["pasta_stage"] == "Stage4:ThreatAnalysis"
     assert out["suggested_next_step"] == "review"
 
 def test_benign_comment_only_bas_suppresses_execution_style_hypotheses():
-    path = Path("dump/Sec/VBA_SOURCE_SecurityModule.bas")
-    text = path.read_text(encoding="utf-8")
-    out = classify_passive_payload(filename=path.name, extracted_text=text)
+    filename = "synthetic_comment_only.bas"
+    text = synthetic_comment_only_bas_bytes().decode("utf-8")
+    out = classify_passive_payload(filename=filename, extracted_text=text)
     assert out["attack_hypothesis"] == "unknown"
     assert out["claim_status"] == "suppressed"
     matched = {str(item.get("hypothesis") or "") for item in (out.get("matched_hypotheses") or []) if isinstance(item, dict)}
@@ -108,10 +117,10 @@ def test_benign_comment_only_bas_suppresses_execution_style_hypotheses():
 
 
 def test_xlsm_lolbin_binary_provenance_is_emitted():
-    path = Path("dump/Sec/Harbourside_Acquisition_Details_CONFIDENTIAL (1).xlsm")
-    blob = path.read_bytes()
-    text = _extract_text(blob, content_type="application/octet-stream", filename=path.name)
-    out = classify_passive_payload(filename=path.name, extracted_text=text)
+    filename = "synthetic_security_protocol.xlsm"
+    blob = synthetic_xlsm_bytes()
+    text = _extract_text(blob, content_type="application/octet-stream", filename=filename)
+    out = classify_passive_payload(filename=filename, extracted_text=text)
     provenance = list(out.get("binary_mitre_provenance") or [])
     assert any(str(row.get("reason") or "").startswith("certutil -> T1105") for row in provenance)
     assert any("xlsm.vba.certutil_indicator" in (row.get("evidence_refs") or []) for row in provenance)

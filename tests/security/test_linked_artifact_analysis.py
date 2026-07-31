@@ -22,7 +22,8 @@ def test_linked_artifact_analysis_detects_pdf_ssn_and_pii(monkeypatch):
     assert out["linked_artifact_type"] == "pdf"
     assert out["pii_detected"] is True
     assert "ssn" in out["pii_type"]
-    assert "123-45-6789" in out["ssn_hits"]
+    assert "***-**-6789" in out["ssn_hits"]
+    assert "123-45-6789" not in str(out)
     assert out["linked_attack_hypothesis"] == "linked_pii_exposure"
 
 
@@ -54,7 +55,8 @@ def test_linked_artifact_analysis_follows_landing_page_to_pdf(monkeypatch):
     assert out["linked_artifact_available"] is True
     assert out["linked_artifact_type"] == "pdf"
     assert out["pii_detected"] is True
-    assert "123-45-6789" in out["ssn_hits"]
+    assert "***-**-6789" in out["ssn_hits"]
+    assert "123-45-6789" not in str(out)
     assert out["linked_final_url"] == "https://example.test/docs/ssn-sheet.pdf"
     assert out["linked_landing_page_url"] == "https://example.test/landing"
 
@@ -81,7 +83,8 @@ def test_linked_artifact_analysis_uses_pdf_ocr_when_text_extract_empty(monkeypat
     assert out["linked_artifact_type"] == "pdf"
     assert out["pii_detected"] is True
     assert out["linked_ocr_used"] is True
-    assert "123-45-6789" in out["ssn_hits"]
+    assert "***-**-6789" in out["ssn_hits"]
+    assert "123-45-6789" not in str(out)
 
 
 def test_provider_candidate_urls_supports_qr_scanned_page(monkeypatch):

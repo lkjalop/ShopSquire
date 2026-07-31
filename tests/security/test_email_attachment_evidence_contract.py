@@ -1,15 +1,24 @@
 import base64
-from pathlib import Path
+
+import pytest
 
 from src.app.security.email_security import evaluate_email_security
+from tests.security.synthetic_samples import (
+    SYNTHETIC_AUTHORITY,
+    synthetic_comment_only_bas_bytes,
+    synthetic_pdf_bytes,
+    synthetic_xlsm_bytes,
+)
 
 
-def _b64(path: Path) -> str:
-    return base64.b64encode(path.read_bytes()).decode("ascii")
+pytestmark = pytest.mark.protocol
+
+
+def _b64(blob: bytes) -> str:
+    return base64.b64encode(blob).decode("ascii")
 
 
 def test_attachment_evidence_contract_for_xlsm_pdf_bas_triplet():
-    base = Path("dump/Sec")
     payload = {
         "message_id": "msg-evidence-contract",
         "from_addr": "finance@balashnikovai.com.au",
@@ -20,17 +29,20 @@ def test_attachment_evidence_contract_for_xlsm_pdf_bas_triplet():
             {
                 "name": "Harbourside_Acquisition_Details_CONFIDENTIAL (1).xlsm",
                 "content_type": "application/vnd.ms-excel.sheet.macroEnabled.12",
-                "content_b64": _b64(base / "Harbourside_Acquisition_Details_CONFIDENTIAL (1).xlsm"),
+                "content_b64": _b64(synthetic_xlsm_bytes()),
+                "fixture_authority": SYNTHETIC_AUTHORITY,
             },
             {
                 "name": "VBA_SOURCE_SecurityModule.bas",
                 "content_type": "text/plain",
-                "content_b64": _b64(base / "VBA_SOURCE_SecurityModule.bas"),
+                "content_b64": _b64(synthetic_comment_only_bas_bytes()),
+                "fixture_authority": SYNTHETIC_AUTHORITY,
             },
             {
                 "name": "Wire_Transfer_Authorization_Form.pdf",
                 "content_type": "application/pdf",
-                "content_b64": _b64(base / "Wire_Transfer_Authorization_Form.pdf"),
+                "content_b64": _b64(synthetic_pdf_bytes()),
+                "fixture_authority": SYNTHETIC_AUTHORITY,
             },
         ],
         "dmarc_fail": False,
