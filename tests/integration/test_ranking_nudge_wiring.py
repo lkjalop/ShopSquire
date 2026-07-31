@@ -16,12 +16,50 @@ from sqlalchemy import text
 
 from src.app.main import app
 from src.app.models.db import db_session
-from src.app.services import experiments as ex
 from tests.experiment_helpers import create_sealed_experiment
 from tests.utils import default_headers
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
-client = TestClient(app, headers=default_headers())
+client = TestClient(
+    app,
+    # This suite owns experiment/ranking composition, not observer persistence.
+    # Avoid a background observer transaction racing the SQLite experiment gate.
+    headers={**default_headers(), "x-skip-observer": "1"},
+)
+
+
+def _delete_ranking_experiment(db) -> None:
+    """Own this fixture's experiment rows, including legacy duplicate names."""
+    experiment_ids = [
+        str(row[0])
+        for row in db.execute(
+            text(
+                "SELECT id FROM experiment_run "
+                "WHERE tenant_id='default' AND name='ranking_nudge_v1'"
+            )
+        ).fetchall()
+    ]
+    for experiment_id in experiment_ids:
+        db.execute(
+            text(
+                "DELETE FROM experiment_assignment "
+                "WHERE tenant_id='default' AND experiment_id=:experiment_id"
+            ),
+            {"experiment_id": experiment_id},
+        )
+        db.execute(
+            text(
+                "DELETE FROM experiment_result "
+                "WHERE tenant_id='default' AND experiment_id=:experiment_id"
+            ),
+            {"experiment_id": experiment_id},
+        )
+    db.execute(
+        text(
+            "DELETE FROM experiment_run "
+            "WHERE tenant_id='default' AND name='ranking_nudge_v1'"
+        )
+    )
 
 
 @pytest.fixture()
@@ -51,9 +89,11 @@ def nudge_stack(monkeypatch):
                         "VALUES ('RNW-1','RNW-1','RN Laptop',119900,'USD','{}',1)"))
         db.execute(text("INSERT OR REPLACE INTO inventory (id,product_id,stock,warehouse) "
                         "VALUES ('inv-rnw1','RNW-1',5,'default')"))
-        create_sealed_experiment(
+        _delete_ranking_experiment(db)
+        experiment_id = create_sealed_experiment(
             db, name="ranking_nudge_v1", target_metric="conversion"
         )
+        assert experiment_id, "migration-owned sealed experiment fixture was not created"
         db.commit()
     # Recall the first V2-served SKU; the compatibility route no longer uses
     # RecommendationService, so characterize the implementation that serves it.
@@ -72,7 +112,7 @@ def nudge_stack(monkeypatch):
     with db_session() as db:
         db.execute(text("DELETE FROM inventory WHERE product_id='RNW-1'"))
         db.execute(text("DELETE FROM products WHERE id='RNW-1'"))
-        db.execute(text("DELETE FROM experiment_run WHERE name='ranking_nudge_v1'"))
+        _delete_ranking_experiment(db)
         db.commit()
 
 
