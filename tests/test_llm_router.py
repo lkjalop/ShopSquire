@@ -42,6 +42,6 @@ def test_select_by_tier_and_generate_after_transfer_is_approved(monkeypatch):
     assert isinstance(resp3, dict)
 
     # global convenience
-    g = get_global_router()
+    get_global_router()
     r = generate_text("global call", tier=1)
     assert isinstance(r, dict)

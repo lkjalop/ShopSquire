@@ -9,11 +9,7 @@ Validates: scoring → threshold routing → decision_log persistence →
 human_review_tasks creation → response payload correctness.
 """
 import base64
-import json
-import os
-from io import BytesIO
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
