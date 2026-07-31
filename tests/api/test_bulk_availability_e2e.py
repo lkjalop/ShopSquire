@@ -19,9 +19,26 @@ from src.app.main import create_app
 def _seed_catalog():
     from sqlalchemy import text
     from src.app.models.db import db_session
+    from src.app.services.taxonomy_registry import (
+        add_sold_node,
+        ensure_tables,
+        upsert_classification,
+    )
     from scripts.seed_gaming_laptops import ensure_gaming_catalog
     with db_session() as db:
         ensure_gaming_catalog(db)
+        ensure_tables(db)
+        add_sold_node(db, node_handle="el-6-11-2", tenant_id="default")
+        rows = db.execute(text("SELECT sku FROM products WHERE sku LIKE 'GAM-%'")).fetchall()
+        for row in rows:
+            upsert_classification(
+                db,
+                sku=str(row[0]),
+                node_handle="el-6-11-2",
+                source="bulk_availability_e2e",
+                status="approved",
+                tenant_id="default",
+            )
         # The tenant test profile is AUD-authoritative. Keep this legacy seed in
         # that currency so the currency clamp, rather than an unrelated USD/AUD
         # mismatch, does not erase the availability fixture.
@@ -36,7 +53,7 @@ def test_bulk_availability_query_wired_end_to_end():
         "/api/v1/recommend/suggest",
         params={
             "uid": f"bulk-avail-e2e-{uuid.uuid4()}",
-            "query": "10 gaming laptops under $1800, can you deliver in 4 weeks?",
+            "query": "10 gaming laptops at $1800 each, can you deliver in 4 weeks?",
         },
         headers={"x-skip-observer": "1", "x-api-key": "local-merchant-key"},
     )

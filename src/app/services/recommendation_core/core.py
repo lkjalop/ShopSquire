@@ -1266,8 +1266,16 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
                        if envelope.budget_max_cents is not None else None),
         "use_case": decision.use_cases[0] if decision.use_cases else None,
     }
+    # Delivery language is a typed procurement constraint, not narration.
+    # Preserve the decomposer's bounded day count when projecting the V2 slate
+    # into the read-only fulfillment stage.
+    from src.app.services.query_decomposer import decompose
+
+    horizon_days = decompose(envelope.query).availability_horizon_days
+    if horizon_days is not None:
+        constraints["availability_horizon_days"] = int(horizon_days)
     projection: Dict[str, Any] = {}
-    run_fulfillment_stage(
+    availability_line = run_fulfillment_stage(
         results=[product.as_dict() for product in resp.products],
         constraints=constraints,
         payload=projection,
@@ -1281,6 +1289,10 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
         # into phantom line items and replace the selected SKU with a legacy alias.
         allow_query_order_split=False,
     )
+    if availability_line and availability_line.lower() not in resp.message.lower():
+        resp.message = " ".join(
+            part for part in (resp.message.strip(), availability_line.strip()) if part
+        )
     for key in ("availability", "fulfillment_options", "sourcing_intent"):
         if projection.get(key) is not None:
             resp.extras[key] = projection[key]
