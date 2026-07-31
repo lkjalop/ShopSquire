@@ -10,6 +10,138 @@ from typing import Any, Dict
 from fastapi import HTTPException
 
 
+def _record_maestro_ingress(trace_id: str) -> None:
+    """Persist the governed agent-boundary check for every compatibility turn.
+
+    MAESTRO validation is an authorization boundary, while the commerce guard is
+    a content boundary.  The V2 cutover retained the latter but accidentally
+    dropped the former's trace evidence.  Successful checks are material audit
+    evidence too, so do not rely on ``record_agent_action`` (which only records
+    violations).
+    """
+    from src.app.security.maestro_boundaries import (
+        MaestroViolationError,
+        validate_agent_action,
+    )
+    from src.app.services.decision_log import log_trace_event
+
+    try:
+        violations = validate_agent_action(
+            agent_name="Orchestrator",
+            data_scope="products",
+        )
+    except MaestroViolationError as exc:
+        serialized = [
+            {
+                "type": violation.violation_type,
+                "detail": violation.detail,
+                "severity": violation.severity,
+            }
+            for violation in exc.violations
+        ]
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="agent_guardrail",
+            source_type="security",
+            source_id="Orchestrator",
+            target_type="agent",
+            target_id="Orchestrator",
+            payload={
+                "maestro_checked": True,
+                "maestro_boundary": "Orchestrator",
+                "maestro_violations": serialized,
+                "maestro_blocked": True,
+                "tags": ["maestro", "maestro_block"],
+            },
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "maestro_boundary_violation",
+                "violations": serialized,
+                "trace_id": trace_id,
+            },
+        ) from exc
+
+    serialized = [
+        {
+            "type": violation.violation_type,
+            "detail": violation.detail,
+            "severity": violation.severity,
+        }
+        for violation in violations
+    ]
+    log_trace_event(
+        trace_id=trace_id,
+        event_type="agent_guardrail",
+        source_type="security",
+        source_id="Orchestrator",
+        target_type="agent",
+        target_id="Orchestrator",
+        payload={
+            "maestro_checked": True,
+            "maestro_boundary": "Orchestrator",
+            "maestro_violations": serialized,
+            "maestro_blocked": False,
+            "tags": ["maestro"] + (["maestro_violation"] if serialized else []),
+        },
+    )
+
+
+def _request_id(request: Any) -> str:
+    """Return the middleware-owned correlation id visible to this route."""
+    try:
+        from src.app.observability.logging import get_request_id
+
+        value = str(get_request_id() or "").strip()
+        if value and value != "-":
+            return value
+    except Exception:
+        pass
+    try:
+        return str(request.headers.get("x-request-id") or "").strip()
+    except Exception:
+        return ""
+
+
+def _emit_blocked_security_event(
+    *,
+    request: Any,
+    uid: str,
+    query: str,
+    trace_id: str,
+    request_id: str,
+    event_ref: str,
+    reason: str,
+) -> None:
+    """Emit one correlated observer event for a V2 guard refusal."""
+    try:
+        from src.app.security.observer import emit_security_event
+
+        emit_security_event(
+            "/api/v1/recommend/suggest",
+            {
+                "payload": {
+                    "uid": uid,
+                    "query": query,
+                    "trace_id": trace_id,
+                    "request_id": request_id,
+                    "event_ref": event_ref,
+                },
+                "analysis": {
+                    "signals": {reason: True},
+                    "verdict": "block",
+                    "severity": "high",
+                },
+            },
+            request=request,
+        )
+    except Exception:
+        # Security observation is evidence-only and must not replace the
+        # authoritative fail-closed commerce-guard verdict.
+        return
+
+
 def _apply_narration_compatibility(payload: Dict[str, Any], redis: Any) -> None:
     """Retain the bounded narration handshake without reviving V1 narration.
 
@@ -225,6 +357,7 @@ def serve_v2_compatibility(
         tenant_id=tenant_id,
     )
     trace_id = str(params.get("trace_id") or ingress.trace_id or uuid.uuid4())
+    _record_maestro_ingress(trace_id)
     from src.app.services.query_classifier import classify_query
 
     classification = classify_query(
@@ -468,10 +601,14 @@ def serve_v2_compatibility(
             # The deprecated GET historically returned a safe 200 response for
             # content-policy refusals. Preserve that transport contract while
             # keeping the V2 guard verdict authoritative and returning no data.
+            request_id = _request_id(request)
+            event_ref = f"blocked_suggest:{trace_id}"
             blocked_payload = {
                 "trace_id": trace_id,
                 "decision_id": trace_id,
                 "decision_trace_id": trace_id,
+                "request_id": request_id,
+                "event_ref": event_ref,
                 "status": "review_required",
                 "message": "I can't help with that request.",
                 "assistant_message": "I can't help with that request.",
@@ -486,6 +623,15 @@ def serve_v2_compatibility(
                     "checked_boundary": "recommendation_facade",
                 },
             }
+            _emit_blocked_security_event(
+                request=request,
+                uid=str(params.get("uid") or ""),
+                query=str(params.get("query") or ""),
+                trace_id=trace_id,
+                request_id=request_id,
+                event_ref=event_ref,
+                reason=outcome.reason,
+            )
             _persist_compatibility_outcome(
                 trace_id=trace_id,
                 tenant_id=tenant_id,

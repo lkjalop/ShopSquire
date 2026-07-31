@@ -51,7 +51,10 @@ def test_safe_recommend_trace_contains_maestro_guardrail_events(monkeypatch):
         q = client.get(
             f"/api/v1/decisions/{trace_id}/query",
             params={"include_events": "true"},
-            headers=_headers(),
+            # Trace polling is test introspection, not a shopper action. Avoid
+            # flooding the observer with its own polling requests and racing
+            # the subsequent correlation lookup out of the bounded result page.
+            headers={**_headers(), "x-skip-observer": "1"},
         )
         assert q.status_code == 200, q.text
         events = q.json().get("events") or []
