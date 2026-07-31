@@ -382,13 +382,18 @@ def test_shadow_enqueues_and_returns_none(monkeypatch):
 # ── session slice read ────────────────────────────────────────────────────────
 
 def test_session_slice_read_tenant_scoped():
-    import json
+    from src.app.services.memory import Memory
+
     r = _Redis()
-    # tenant-scoped key (GPT-5.6 #5c22575.3): session:{tenant}:{uid}:kv_state, never uid-alone
-    r.store["session:t1:u1:kv_state"] = json.dumps(
-        {"last_node_handle": "el-6-6", "last_lane": "PROCUREMENT",
-         "active_workflow_lane": "PROCUREMENT",
-         "last_shortlist_skus": ["LAP-1"]})
+    Memory(r, tenant_id="t1").set_structured_state(
+        "u1",
+        {
+            "last_node_handle": "el-6-6",
+            "last_lane": "PROCUREMENT",
+            "active_workflow_lane": "PROCUREMENT",
+            "last_shortlist_skus": ["LAP-1"],
+        },
+    )
     slice_ = F._read_session_slice(r, "u1", "t1")
     assert slice_["prior_node"] == "el-6-6" and slice_["shortlist_skus"] == ["LAP-1"]
     assert slice_["prior_lane"] == "PROCUREMENT"
