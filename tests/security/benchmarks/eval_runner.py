@@ -95,6 +95,7 @@ def run_benchmark() -> Dict[str, Any]:
         if isinstance(r.get("evidence_quality"), dict) and str(r["evidence_quality"].get("band") or "").upper() == "LOW"
     ) / max(len(results), 1)
     return {
+        "claim_scope": "synthetic_protocol_evaluation_not_provider_certification",
         "case_count": len(results),
         "tp_count": len(tp),
         "fp_count": len(fp),
