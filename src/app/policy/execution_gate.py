@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from src.app.policy.action_authority_matrix import AuthDecision, PolicyVerdict, evaluate as _evaluate
@@ -82,29 +83,77 @@ def _log_policy_evaluation(
     """Persist the verdict to policy_evaluation_log (P2 table). Defensive — a logging
     failure must never block the decision, but it IS the audit guarantee, so warn."""
     try:
+        from sqlalchemy import inspect as _inspect
         from sqlalchemy import text as _t
         from src.app.models.db import db_session
         with db_session() as db:
-            db.execute(
-                _t(
-                    "INSERT INTO policy_evaluation_log "
-                    "(id, decision_id, tenant_id, action, value_cents, decision, rule_id, "
-                    " reason, authority, context) VALUES "
-                    "(:id, :did, :tenant, :action, :val, :decision, :rule, :reason, :auth, :ctx)"
-                ),
-                {
-                    "id": uuid.uuid4().hex,
-                    "did": str((verdict.context or {}).get("decision_id") or ""),
-                    "tenant": tenant_id,
-                    "action": str(action),
-                    "val": int(value_cents or 0),
-                    "decision": str(verdict.decision.value),
-                    "rule": str(verdict.rule_id or ""),
-                    "reason": str(verdict.reason or ""),
-                    "auth": "matrix",
-                    "ctx": json.dumps({"actor": actor, **(verdict.context or {})}, default=str)[:4000],
-                },
-            )
+            columns = {
+                str(column["name"])
+                for column in _inspect(db.get_bind()).get_columns("policy_evaluation_log")
+            }
+            context = {"actor": actor, "tenant_id": tenant_id, **(verdict.context or {})}
+            common = {
+                "id": uuid.uuid4().hex,
+                "action": str(action),
+                "decision": str(verdict.decision.value),
+                "reason": str(verdict.reason or ""),
+                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            if "context" in columns:
+                db.execute(
+                    _t(
+                        "INSERT INTO policy_evaluation_log "
+                        "(id, decision_id, tenant_id, action, value_cents, decision, rule_id, "
+                        " reason, authority, context, created_at) VALUES "
+                        "(:id, :did, :tenant, :action, :val, :decision, :rule, :reason, "
+                        " :auth, :ctx, :created_at)"
+                    ),
+                    {
+                        **common,
+                        "did": str((verdict.context or {}).get("decision_id") or ""),
+                        "tenant": tenant_id,
+                        "val": int(value_cents or 0),
+                        "rule": str(verdict.rule_id or ""),
+                        "auth": "matrix",
+                        "ctx": json.dumps(context, default=str)[:4000],
+                    },
+                )
+            else:
+                terminal_outcome = {
+                    AuthDecision.ALLOW: "execute",
+                    AuthDecision.DUAL_CONTROL: "escalate_governance",
+                    AuthDecision.HUMAN_REVIEW: "escalate_governance",
+                    AuthDecision.BLOCK: "safe_pause",
+                }.get(verdict.decision, "safe_pause")
+                db.execute(
+                    _t(
+                        "INSERT INTO policy_evaluation_log "
+                        "(id, trace_id, policy_version, action, requester, decision, "
+                        " terminal_outcome, mode, enforced, reason, value_usd, confidence, "
+                        " guardrails_json, compromise_json, residual, created_at) VALUES "
+                        "(:id, :trace_id, :policy_version, :action, :requester, :decision, "
+                        " :terminal_outcome, :mode, :enforced, :reason, :value_usd, :confidence, "
+                        " :guardrails_json, :compromise_json, :residual, :created_at)"
+                    ),
+                    {
+                        **common,
+                        "trace_id": str(
+                            (verdict.context or {}).get("trace_id")
+                            or (verdict.context or {}).get("decision_id")
+                            or ""
+                        ),
+                        "policy_version": "execution_gate_matrix_v1",
+                        "requester": str(actor or "execution_gate"),
+                        "terminal_outcome": terminal_outcome,
+                        "mode": "active",
+                        "enforced": 1,
+                        "value_usd": float(value_cents or 0) / 100.0,
+                        "confidence": float((verdict.context or {}).get("confidence") or 0.0),
+                        "guardrails_json": json.dumps(context, default=str)[:4000],
+                        "compromise_json": json.dumps([], default=str),
+                        "residual": str(verdict.rule_id or ""),
+                    },
+                )
             db.commit()
     except Exception as exc:
         _log.warning("policy_evaluation_log write failed for action=%s: %s", action, exc)

@@ -223,11 +223,11 @@ def _control_evidence_rows(days: int) -> List[Dict[str, str]]:
         if ev in ("security_events", "incident_monitoring"):
             link = f"/api/v1/admin/compliance/evidence?days={days}"
         elif ev in ("decision_trace_events", "human_oversight_trace", "audit_evidence_ready"):
-            link = f"/api/v1/admin/compliance/live-feed?limit=50"
+            link = "/api/v1/admin/compliance/live-feed?limit=50"
         elif ev in ("iam_events",):
             link = "/api/v1/admin/iam/events?limit=100"
         else:
-            link = f"/api/v1/admin/grc/fingerprint-alerts?limit=100"
+            link = "/api/v1/admin/grc/fingerprint-alerts?limit=100"
         rows.append(
             {
                 "control_id": cid,
@@ -251,9 +251,17 @@ def build_decision_evidence(days: int = 30, limit: int = 25) -> Dict[str, Any]:
     rows: List[Any] = []
     with db_session() as db:
         try:
+            from sqlalchemy import inspect
+
+            columns = {
+                str(column["name"])
+                for column in inspect(db.get_bind()).get_columns("policy_evaluation_log")
+            }
+            context_column = "context" if "context" in columns else "guardrails_json"
             rows = list(db.execute(
                 text(
-                    "SELECT action, decision, reason, context, created_at FROM policy_evaluation_log "
+                    f"SELECT action, decision, reason, {context_column} AS context, created_at "
+                    "FROM policy_evaluation_log "
                     "WHERE created_at >= :since ORDER BY created_at DESC"
                 ),
                 {"since": since},

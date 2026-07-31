@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import os
 import threading
-import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from sqlalchemy import text
 
@@ -109,7 +108,12 @@ def _upsert_schedule_state(playbook_id: str, *, last_run_at: str | None, next_ru
         pass
 
 
-def _parse_next_due(last_next: str | None, interval_minutes: int) -> datetime:
+def _parse_next_due(
+    last_next: str | None,
+    interval_minutes: int,
+    *,
+    fallback_now: datetime | None = None,
+) -> datetime:
     if last_next:
         try:
             dt = datetime.fromisoformat(str(last_next).replace("Z", "+00:00"))
@@ -118,7 +122,7 @@ def _parse_next_due(last_next: str | None, interval_minutes: int) -> datetime:
             return dt
         except Exception:
             pass
-    return _utc_now()
+    return fallback_now or _utc_now()
 
 
 def run_scheduled_playbooks_cycle() -> Dict[str, Any]:
@@ -138,7 +142,11 @@ def run_scheduled_playbooks_cycle() -> Dict[str, Any]:
             continue
         interval_minutes = max(1, int(schedule.get("interval_minutes") or 1440))
         st = _get_schedule_state(pbid)
-        next_due = _parse_next_due(st.get("next_run_at"), interval_minutes)
+        next_due = _parse_next_due(
+            st.get("next_run_at"),
+            interval_minutes,
+            fallback_now=now,
+        )
         if now < next_due:
             continue
 
@@ -225,4 +233,3 @@ def stop_playbook_scheduler(app=None):
             th.join(timeout=2.0)
     except Exception:
         pass
-
