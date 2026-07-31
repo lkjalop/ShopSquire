@@ -1,5 +1,45 @@
 # Agnostic Market Intelligence and Procurement Roadmap — 2026-07-27
 
+## Closure release order — 2026-07-31
+
+This order supersedes older “remaining order” lists in this document.
+
+1. **Close the hosted general-test matrix.** The publication revision has green
+   worker/browser, service-shard, V2, security-scan and clean-checkout workflows.
+   The remaining general-suite failures must be owned as V2 contracts,
+   compatibility contracts, frozen characterization, provider-independent
+   protocol, fixture-dependent certification or current security-policy tests.
+   Tests are repaired or moved to their honest evidence tier; they are not
+   suppressed to make the matrix green.
+2. **Make every clean test database migration-first.** Apply the complete
+   Alembic chain to one template, seed through the canonical catalog boundary,
+   verify required schema and data, checkpoint SQLite WAL state, close the
+   connection and only then copy the template into isolated shards. PostgreSQL
+   upgrade/rollback remains a separate production-shaped release gate.
+3. **Certify the composed operator experience.** Re-run the production-shaped
+   Redis/backend/worker/storefront/admin battery, all Decision Trace deep links,
+   request-count and keyboard/ARIA checks, and the malicious trusted-supplier
+   before/after commercial-state regression. Synthetic attachment tests prove
+   protocol behavior; externally sourced fixture packs remain separately
+   labelled certification evidence.
+4. **Publish the three portfolio stories.** Present evidence-governed decisions,
+   dependency-grounded supply intelligence to bounded procurement, and
+   attack-resistant bounded autonomy. Do not market every tab as a separate
+   product.
+5. **Deploy one minimal cloud reference after hosted green.** Prefer the smallest
+   reversible Azure Container Apps or AWS container deployment that preserves
+   PostgreSQL, Redis, workload identity, secrets, object evidence, jobs and
+   OpenTelemetry. Microsoft Foundry and SageMaker are optional provider adapters
+   and evaluation/MLOps surfaces, not new sources of business authority.
+6. **Obtain external evidence.** Independent relevance-label review, one
+   tenant-authorized shadow dataset and real component/supplier/facility
+   mappings are human/data dependencies. Only those can support FVA, stockout,
+   GMROI, margin or workload claims and any increase in autonomous authority.
+7. **Stop broad feature work.** Refactor `chat.py`, `turn_router.py`, `main.py`
+   and large UI modules only when a reproduced failure identifies an ownership,
+   lifecycle, latency or isolation boundary. Record the polished demonstration
+   after the hosted release gate is fully green.
+
 ## Execution delta — 2026-07-29
 
 The reordered work is now materially implemented locally:

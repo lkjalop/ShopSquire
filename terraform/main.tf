@@ -26,16 +26,15 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
-  # Remote state — configure for your environment
-  backend "s3" {
-    bucket         = "shopsquire-terraform-state"
-    key            = "infra/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "shopsquire-tf-lock"
-  }
+  # State identity is supplied at init time. A public portfolio repository
+  # must not assume a bucket, region, or lock-table owned by the deployer.
+  backend "s3" {}
 }
 
 provider "aws" {
@@ -144,24 +143,24 @@ resource "aws_secretsmanager_secret_version" "db_creds" {
 }
 
 resource "aws_db_instance" "main" {
-  identifier              = "${var.project}-${var.env}"
-  engine                  = "postgres"
-  engine_version          = "16.2"
-  instance_class          = var.db_instance_class
-  allocated_storage       = var.db_storage_gb
-  max_allocated_storage   = var.db_max_storage_gb
-  storage_encrypted       = true
-  db_name                 = var.db_name
-  username                = var.db_username
-  password                = random_password.db_password.result
-  db_subnet_group_name    = aws_db_subnet_group.main.name
-  vpc_security_group_ids  = [aws_security_group.rds.id]
-  multi_az                = var.env == "production"
-  backup_retention_period = 7
-  backup_window           = "02:00-03:00"
-  maintenance_window      = "Mon:03:00-Mon:04:00"
-  deletion_protection     = var.env == "production"
-  skip_final_snapshot     = var.env != "production"
+  identifier                = "${var.project}-${var.env}"
+  engine                    = "postgres"
+  engine_version            = "16.2"
+  instance_class            = var.db_instance_class
+  allocated_storage         = var.db_storage_gb
+  max_allocated_storage     = var.db_max_storage_gb
+  storage_encrypted         = true
+  db_name                   = var.db_name
+  username                  = var.db_username
+  password                  = random_password.db_password.result
+  db_subnet_group_name      = aws_db_subnet_group.main.name
+  vpc_security_group_ids    = [aws_security_group.rds.id]
+  multi_az                  = var.env == "production"
+  backup_retention_period   = 7
+  backup_window             = "02:00-03:00"
+  maintenance_window        = "Mon:03:00-Mon:04:00"
+  deletion_protection       = var.env == "production"
+  skip_final_snapshot       = var.env != "production"
   final_snapshot_identifier = var.env == "production" ? "${var.project}-${var.env}-final" : null
 
   tags = local.common_tags
@@ -194,15 +193,15 @@ resource "aws_elasticache_replication_group" "main" {
   replication_group_id = "${var.project}-${var.env}"
   description          = "ShopSquire Redis ${var.env}"
 
-  node_type               = var.redis_node_type
-  num_cache_clusters      = var.env == "production" ? 2 : 1
-  port                    = 6379
-  subnet_group_name       = aws_elasticache_subnet_group.main.name
-  security_group_ids      = [aws_security_group.redis.id]
+  node_type                  = var.redis_node_type
+  num_cache_clusters         = var.env == "production" ? 2 : 1
+  port                       = 6379
+  subnet_group_name          = aws_elasticache_subnet_group.main.name
+  security_group_ids         = [aws_security_group.redis.id]
   automatic_failover_enabled = var.env == "production"
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
-  auth_token              = random_password.redis_auth.result
+  auth_token                 = random_password.redis_auth.result
 
   tags = local.common_tags
 }

@@ -35,6 +35,23 @@ It combines:
 - tenant-scoped evidence, security gates and decision traces;
 - shadow experiments, replay and bounded feedback through Hippograph.
 
+## Three portfolio stories
+
+The public project is intentionally presented through three end-to-end stories rather
+than as a catalogue of screens and agents:
+
+1. **Evidence-governed decisions** — a buyer request becomes a recommendation with
+   provenance, uncertainty, explicit authority and a replayable Decision Trace.
+2. **Supply intelligence to bounded procurement** — a market signal becomes relevant
+   only through a time-valid component, supplier, facility, region, freight or substitute
+   dependency path; the result is an option or proposal, never an unsupported causal claim.
+3. **Attack-resistant bounded autonomy** — untrusted messages and attachments are
+   observed, quarantined and enriched without being allowed to mutate quote, purchase-order,
+   inventory or payment state. Consequential execution remains policy- and human-gated.
+
+These stories share one canonical fact and control layer. They are not three disconnected
+AI demonstrations.
+
 ## Platform map
 
 ```text
@@ -151,7 +168,8 @@ production-shaped browser tests. They are not a substitute for real-world outcom
 | Forecast model discrimination on replayable synthetic histories | Tested locally |
 | Tenant-scoped supply-risk and procurement workbenches | Implemented locally |
 | Malicious supplier content cannot directly change economic state | Covered by service/browser regressions |
-| Hosted CI and PostgreSQL production-shaped migration evidence | Requires retained external artifacts |
+| Hosted worker/browser, service, V2 and security workflows | Proven on the publication branch; general contract matrix still being closed |
+| PostgreSQL production-shaped migration evidence | Empty PostgreSQL migration rehearsal is proven; retained hosted upgrade/rollback evidence remains a release gate |
 | Live Gmail/M365 and ERP/provider certification | Not claimed |
 | Reduced stockouts, increased margin or supplier performance | Requires a design-partner shadow pilot |
 
@@ -258,10 +276,11 @@ rewriting the decision layer.
 The highest-value next step is proof, not another broad feature wave:
 
 1. publish reproducible hosted CI and PostgreSQL migration artifacts;
-2. run a design-partner shadow pilot using real orders, ATP, receipts, invoices and outcomes;
-3. seal independent human relevance judgments;
-4. expose Hippograph recall, provenance and experiment impact in the operator trace;
-5. simplify Decision Trace into five progressive-disclosure sections;
+2. close the remaining general-suite failures as V2, compatibility, characterization,
+   protocol, certification-fixture or current-policy contracts;
+3. run a design-partner shadow pilot using real orders, ATP, receipts, invoices and outcomes;
+4. seal independent human relevance judgments;
+5. deploy one minimal cloud reference environment after the hosted gates are green;
 6. strangle remaining oversized composition surfaces such as `chat.py` and simplify `main.py`
    only where this reduces duplicate authority or operational risk.
 
