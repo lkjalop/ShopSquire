@@ -16,6 +16,12 @@ from sqlalchemy import text
 from src.app.main import app
 from src.app.models.db import db_session
 from src.app.services.recommendations import RecommendationService
+from src.app.services.taxonomy_registry import (
+    add_sold_node,
+    search_nodes,
+    upsert_classification,
+)
+from tests.taxonomy_helpers import apply_taxonomy_migration
 from tests.utils import default_headers, write_feature_flags
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
@@ -40,11 +46,40 @@ def feedback_on(monkeypatch):
         "KILL_SWITCH": False, "DEGRADATION": {"enabled": True},
         "HIPPOGRAPH_FEEDBACK_ENABLED": True,
     })
+    laptop_nodes = search_nodes("Laptops", limit=1)
+    assert laptop_nodes, "pinned taxonomy does not contain the laptop fixture node"
+    laptop_node = laptop_nodes[0]
+    sold_node_added = False
     with db_session() as db:
+        apply_taxonomy_migration(db)
         db.execute(text("INSERT OR REPLACE INTO products (id,sku,name,price_cents,currency,specs,active) "
-                        "VALUES ('HGW-1','HGW-1','HG Laptop',119900,'USD','{}',1)"))
+                        "VALUES ('HGW-1','HGW-1','HG Laptop',119900,'AUD','{}',1)"))
         db.execute(text("INSERT OR REPLACE INTO inventory (id,product_id,stock,warehouse) "
                         "VALUES ('inv-hgw1','HGW-1',5,'default')"))
+        existing_sold = db.execute(
+            text(
+                "SELECT 1 FROM sold_taxonomy "
+                "WHERE tenant_id='default' AND node_handle=:node_handle"
+            ),
+            {"node_handle": laptop_node.handle},
+        ).fetchone()
+        assert upsert_classification(
+            db,
+            sku="HGW-1",
+            node_handle=laptop_node.handle,
+            source="test_fixture",
+            confidence=1.0,
+            status="approved",
+            approved_by="test",
+        )
+        if not existing_sold:
+            assert add_sold_node(
+                db,
+                node_handle=laptop_node.handle,
+                source="test_fixture",
+                approved_by="test",
+            )
+            sold_node_added = True
         db.commit()
     # Patch the recall builder to a sentinel — isolates the kv→state.kv→NQEInput wiring from data.
     monkeypatch.setattr(
@@ -59,11 +94,32 @@ def feedback_on(monkeypatch):
     with db_session() as db:
         db.execute(text("DELETE FROM inventory WHERE product_id='HGW-1'"))
         db.execute(text("DELETE FROM products WHERE id='HGW-1'"))
+        db.execute(
+            text(
+                "DELETE FROM product_classification "
+                "WHERE tenant_id='default' AND sku='HGW-1'"
+            )
+        )
+        if sold_node_added:
+            db.execute(
+                text(
+                    "DELETE FROM sold_taxonomy "
+                    "WHERE tenant_id='default' AND node_handle=:node_handle "
+                    "AND source='test_fixture'"
+                ),
+                {"node_handle": laptop_node.handle},
+            )
         db.commit()
 
 
 def test_feedback_reaches_response_without_becoming_v2_ranking_authority(feedback_on):
-    r = client.get("/api/v1/recommend/suggest", params={"uid": "hgw-user", "query": "laptop for work under 1500"})
+    # Keep this projection proof independent of taxonomy onboarding. Hosted
+    # migration-first databases contain no product classifications until a
+    # tenant supplies them, so query the fixture-owned catalog identity.
+    r = client.get(
+        "/api/v1/recommend/suggest",
+        params={"uid": "hgw-user", "query": "HG Laptop", "budget_max": 1500},
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body.get("hippograph_insights") == _SENTINEL

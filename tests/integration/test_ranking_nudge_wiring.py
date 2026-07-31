@@ -16,7 +16,14 @@ from sqlalchemy import text
 
 from src.app.main import app
 from src.app.models.db import db_session
-from tests.experiment_helpers import create_sealed_experiment
+from src.app.services.experiments import ensure_tables as ensure_experiment_tables
+from src.app.services.taxonomy_registry import (
+    add_sold_node,
+    search_nodes,
+    upsert_classification,
+)
+from tests.experiment_helpers import apply_experiment_migrations, create_sealed_experiment
+from tests.taxonomy_helpers import apply_taxonomy_migration
 from tests.utils import default_headers
 
 _FLAGS_PATH = os.path.join("config", "feature_flags.json")
@@ -84,11 +91,44 @@ def nudge_stack(monkeypatch):
             "RANKING_NUDGE_EXPERIMENT_ID": "ranking_nudge_v1",
             "RANKING_NUDGE_CANARY_FRACTION": 1.0,
         }, flags_file)
+    laptop_nodes = search_nodes("Laptops", limit=1)
+    assert laptop_nodes, "pinned taxonomy does not contain the laptop fixture node"
+    laptop_node = laptop_nodes[0]
+    sold_node_added = False
     with db_session() as db:
+        apply_taxonomy_migration(db)
+        try:
+            ensure_experiment_tables(db)
+        except RuntimeError:
+            apply_experiment_migrations(db)
         db.execute(text("INSERT OR REPLACE INTO products (id,sku,name,price_cents,currency,specs,active) "
-                        "VALUES ('RNW-1','RNW-1','RN Laptop',119900,'USD','{}',1)"))
+                        "VALUES ('RNW-1','RNW-1','RN Laptop',119900,'AUD','{}',1)"))
         db.execute(text("INSERT OR REPLACE INTO inventory (id,product_id,stock,warehouse) "
                         "VALUES ('inv-rnw1','RNW-1',5,'default')"))
+        existing_sold = db.execute(
+            text(
+                "SELECT 1 FROM sold_taxonomy "
+                "WHERE tenant_id='default' AND node_handle=:node_handle"
+            ),
+            {"node_handle": laptop_node.handle},
+        ).fetchone()
+        assert upsert_classification(
+            db,
+            sku="RNW-1",
+            node_handle=laptop_node.handle,
+            source="test_fixture",
+            confidence=1.0,
+            status="approved",
+            approved_by="test",
+        )
+        if not existing_sold:
+            assert add_sold_node(
+                db,
+                node_handle=laptop_node.handle,
+                source="test_fixture",
+                approved_by="test",
+            )
+            sold_node_added = True
         _delete_ranking_experiment(db)
         experiment_id = create_sealed_experiment(
             db, name="ranking_nudge_v1", target_metric="conversion"
@@ -112,12 +152,34 @@ def nudge_stack(monkeypatch):
     with db_session() as db:
         db.execute(text("DELETE FROM inventory WHERE product_id='RNW-1'"))
         db.execute(text("DELETE FROM products WHERE id='RNW-1'"))
+        db.execute(
+            text(
+                "DELETE FROM product_classification "
+                "WHERE tenant_id='default' AND sku='RNW-1'"
+            )
+        )
+        if sold_node_added:
+            db.execute(
+                text(
+                    "DELETE FROM sold_taxonomy "
+                    "WHERE tenant_id='default' AND node_handle=:node_handle "
+                    "AND source='test_fixture'"
+                ),
+                {"node_handle": laptop_node.handle},
+            )
         _delete_ranking_experiment(db)
         db.commit()
 
 
 def _suggest(uid):
-    r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": "laptop for work under 1500"})
+    # Use the fixture-owned catalog identity. A migration-only hosted database
+    # intentionally has no tenant taxonomy/classification rows, so a broad
+    # natural-language phrase would test onboarding state rather than nudge
+    # projection.
+    r = client.get(
+        "/api/v1/recommend/suggest",
+        params={"uid": uid, "query": "RN Laptop", "budget_max": 1500},
+    )
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -127,8 +189,10 @@ def test_treatment_user_is_nudged(nudge_stack):
     # with a 100% canary fraction every subject is eligible, so the forced arm applies.
     nudge_stack.setattr("src.app.services.experiment_ops.assign_variant", lambda **k: "treatment")
     body = _suggest("rnw-treat")
+    assert body.get("products"), json.dumps(body, indent=2)
     exp = body.get("ranking_experiment")
-    assert exp and exp["variant"] == "treatment" and exp["live"] is True
+    assert exp, body
+    assert exp["variant"] == "treatment" and exp["live"] is True
     assert exp["nudged"] >= 1, body  # the recalled product was boosted
 
 
@@ -136,5 +200,6 @@ def test_control_user_is_untouched(nudge_stack):
     nudge_stack.setattr("src.app.services.experiment_ops.assign_variant", lambda **k: "control")
     body = _suggest("rnw-ctrl")
     exp = body.get("ranking_experiment")
-    assert exp and exp["variant"] == "control"
+    assert exp, body
+    assert exp["variant"] == "control"
     assert exp["nudged"] == 0  # control is never nudged
