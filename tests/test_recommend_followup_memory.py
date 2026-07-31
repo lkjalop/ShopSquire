@@ -158,23 +158,33 @@ def _seed_v2_catalog():
         db.commit()
 
 
-def test_followup_query_keeps_budget_context():
+def test_followup_query_reads_scoped_budget_context():
     app = create_app()
     redis = _MemoryRedis()
     app.dependency_overrides[get_redis] = lambda: redis
     client = TestClient(app, headers=default_headers())
 
     uid = "followup-memory-user"
-
-    first = client.get(
-        "/api/v1/recommend/suggest",
-        params={"uid": uid, "query": "show me computers that are portable and good for gaming between 1500 to 1900"},
+    # Postflight write semantics are covered exhaustively in
+    # services/test_recommendation_postflight.py. This compatibility contract
+    # owns the other half of the boundary: a real tenant/epoch-scoped Memory
+    # record must be consumed by a follow-up request. Do not make that assertion
+    # conditional on catalog retrieval also succeeding in an unrelated first
+    # request.
+    Memory(redis, tenant_id="default").set_structured_state(
+        uid,
+        {
+            "last_node_handle": "el-6-6",
+            "last_shortlist_skus": [sku for sku, *_ in _CATALOG],
+            "constraints": {
+                "budget_min_cents": 150_000,
+                "budget_max_cents": 190_000,
+                "requirements": {},
+                "use_cases": ["gaming"],
+            },
+            "last_lane": "SEARCH",
+        },
     )
-    assert first.status_code == 200
-    first_body = first.json()
-    first_constraints = first_body.get("constraints_used") or {}
-    assert int(first_constraints.get("budget_max")) == 1900
-    assert int(first_constraints.get("budget_min")) == 1500
 
     second = client.get(
         "/api/v1/recommend/suggest",
