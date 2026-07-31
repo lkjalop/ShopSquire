@@ -100,20 +100,20 @@ def test_followup_query_keeps_budget_context(monkeypatch):
     kv_state: dict[str, dict] = {}
     structured: dict[str, dict] = {}
 
-    def _get_context(self, uid: str):
+    def _get_context(self, uid: str, **_scope):
         kv = kv_state.get(uid) or {}
         return {"summary": None, "kv": kv, "recent_retrieval": None}
 
-    def _set_kv(self, uid: str, kv: dict, ttl_seconds=None):
+    def _set_kv(self, uid: str, kv: dict, ttl_seconds=None, **_scope):
         kv_state[uid] = dict(kv or {})
 
-    def _get_kv(self, uid: str):
+    def _get_kv(self, uid: str, **_scope):
         return dict(kv_state.get(uid) or {})
 
-    def _set_structured(self, uid: str, s: dict, ttl_seconds=None):
+    def _set_structured(self, uid: str, s: dict, ttl_seconds=None, **_scope):
         structured[uid] = dict(s or {})
 
-    def _get_structured(self, uid: str):
+    def _get_structured(self, uid: str, **_scope):
         return dict(structured.get(uid) or {})
 
     monkeypatch.setattr(Memory, "get_context", _get_context)

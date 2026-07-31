@@ -679,7 +679,15 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                 redacted["decision_audits"] = cnt
             # pseudonymize customers row for strict minimization
             try:
-                res = db.execute(text("UPDATE customers SET email = 'REDACTED', phone = NULL, first_name = 'REDACTED', last_name = NULL WHERE id = :uid"), {"uid": uid})
+                res = db.execute(
+                    text(
+                        "UPDATE customers "
+                        "SET email = 'REDACTED:' || id, phone = NULL, "
+                        "first_name = 'REDACTED', last_name = NULL "
+                        "WHERE id = :uid"
+                    ),
+                    {"uid": uid},
+                )
                 redacted["customers"] = getattr(res, "rowcount", 0) or 0
             except Exception:
                 redacted["customers"] = 0

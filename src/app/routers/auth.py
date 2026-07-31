@@ -56,6 +56,11 @@ SESSION_COOKIE_NAME = "shopsquire_session"
 API_KEY_COOKIE_NAME = "shopsquire_api_key"
 
 
+def _customer_email_tombstone(user_id: str) -> str:
+    """Non-PII legacy-column value that remains unique per customer row."""
+    return f"REDACTED:{user_id}"
+
+
 def _is_https_request(request: Request | None) -> bool:
     try:
         if request is None:
@@ -708,7 +713,7 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
                     {
                         "id": user_id,
                         "tenant_id": current_tenant_id(),
-                        "email": "REDACTED",
+                        "email": _customer_email_tombstone(user_id),
                         "email_hash": pii_hash(email),
                         "email_encrypted": encrypt_pii(email),
                         "name": payload.name or email.split("@")[0],
@@ -1169,7 +1174,7 @@ def google_callback(code: str | None = None, state: str | None = None):
                 {
                     "id": user_id,
                     "tenant_id": current_tenant_id(),
-                    "email": "REDACTED",
+                    "email": _customer_email_tombstone(user_id),
                     "email_hash": pii_hash(email),
                     "email_encrypted": encrypt_pii(email),
                     "name": name or email.split("@")[0],

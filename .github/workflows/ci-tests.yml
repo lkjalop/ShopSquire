@@ -138,10 +138,16 @@ jobs:
             export DATABASE_URL="sqlite:///$db_path"
             export DATABASE_URL_RO="$DATABASE_URL"
             echo "::group::${file}"
-            if ! timeout --signal=TERM --kill-after=30s 180s \
+            set +e
+            timeout --signal=TERM --kill-after=30s 180s \
               pytest -q --timeout=120 --timeout-method=thread \
                 --junitxml="test-results/${safe_name}.xml" \
-                "$file"; then
+                "$file"
+            status=$?
+            set -e
+            if (( status == 5 )) && grep -q "allow_module_level=True" "$file"; then
+              echo "::notice file=${file}::Explicit live-stack protocol precondition was unavailable"
+            elif (( status != 0 )); then
               failures=$((failures + 1))
             fi
             echo "::endgroup::"
