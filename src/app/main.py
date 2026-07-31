@@ -487,7 +487,11 @@ def create_app() -> FastAPI:
                                 seed_demo_supplier_history,
                                 seed_demo_vendor_contacts,
                             )
-                            ensure_supplier_coverage(db, commit=False)  # commits with the outer db.commit()
+                            ensure_supplier_coverage(db, commit=False)
+                            # The vendor and history seeders own independent sessions.
+                            # Publish this transaction first so a second SQLite writer
+                            # cannot wait behind startup's still-open catalog write.
+                            db.commit()
                             seed_demo_vendor_contacts()  # kyv_vendors manage their own session
                             seed_demo_supplier_history()  # supplier_baseline_events — prior-dealings context
                     except Exception:
