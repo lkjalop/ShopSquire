@@ -68,10 +68,17 @@ def test_paid_webhook_appends_succeeded_and_dispatch_events(client, monkeypatch)
     d = client.post("/api/v1/payments/checkout-initiate",
                     json={"uid": "u", "items": [{"sku": "X", "quantity": 1}]},
                     headers={"Idempotency-Key": "checkout-ledger-webhook"}).json()
-    client.post("/api/v1/payments/webhook",
-                content=json.dumps({"type": "payment_intent.succeeded",
-                                    "data": {"object": {"id": d["stripe_intent_id"]}}}),
-                headers={"Content-Type": "application/json"})
+    webhook = client.post(
+        "/api/v1/payments/webhook",
+        content=json.dumps({
+            "id": "evt_ledger_payment_succeeded",
+            "type": "payment_intent.succeeded",
+            "data": {"object": {"id": d["stripe_intent_id"]}},
+        }),
+        headers={"Content-Type": "application/json"},
+    )
+    assert webhook.status_code == 200, webhook.text
+    assert webhook.json()["outbox"] == {"checked": 2, "processed": 2, "failed": 0}
     from src.app.models.db import db_session
     from src.app.services.payment_ledger import ledger_for_order
     with db_session() as db:
@@ -93,11 +100,21 @@ def test_refund_two_step_then_settlement_reconciles(client):
     assert r2.status_code == 200 and r2.json()["amount_cents"] == 20000
     assert client.post("/api/v1/payments/refunds/ORD-L1/approve", headers=OWNER).status_code == 409
     # provider settles -> refund_settled appended, order returned, approved covers settled
-    client.post("/api/v1/payments/webhook",
-                content=json.dumps({"type": "charge.refunded",
-                                    "data": {"object": {"id": "ch_1", "payment_intent": "pi_demo_ledger1",
-                                                        "amount_refunded": 20000}}}),
-                headers={"Content-Type": "application/json"})
+    webhook = client.post(
+        "/api/v1/payments/webhook",
+        content=json.dumps({
+            "id": "evt_ledger_refund_settled",
+            "type": "charge.refunded",
+            "data": {"object": {
+                "id": "ch_1",
+                "payment_intent": "pi_demo_ledger1",
+                "amount_refunded": 20000,
+            }},
+        }),
+        headers={"Content-Type": "application/json"},
+    )
+    assert webhook.status_code == 200, webhook.text
+    assert webhook.json()["outbox"] == {"checked": 1, "processed": 1, "failed": 0}
     from src.app.models.db import db_session
     from src.app.services.payment_ledger import refund_state
     with db_session() as db:
