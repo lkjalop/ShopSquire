@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from src.app.deps import get_redis
 from src.app.main import create_app
 from src.app.models.db import db_session
 from src.app.services.memory import Memory
@@ -19,6 +20,31 @@ _CATALOG = (
     ("MEM-LAP-3", "Gaming Laptop C", 190000, 6),
     ("MEM-LAP-4", "Gaming Laptop D", 260000, 5),
 )
+
+
+class _MemoryRedis:
+    def __init__(self):
+        self.values: dict[str, str] = {}
+        self.sets: dict[str, set[str]] = {}
+
+    def get(self, key):
+        return self.values.get(key)
+
+    def setex(self, key, _ttl, value):
+        self.values[key] = value
+
+    def sadd(self, key, value):
+        self.sets.setdefault(key, set()).add(value)
+
+    def srem(self, key, *values):
+        self.sets.setdefault(key, set()).difference_update(values)
+
+    def expire(self, _key, _ttl):
+        return True
+
+    def delete(self, *keys):
+        for key in keys:
+            self.values.pop(key, None)
 
 
 @pytest.fixture(autouse=True)
@@ -98,33 +124,11 @@ def _seed_v2_catalog():
         db.commit()
 
 
-def test_followup_query_keeps_budget_context(monkeypatch):
+def test_followup_query_keeps_budget_context():
     app = create_app()
+    redis = _MemoryRedis()
+    app.dependency_overrides[get_redis] = lambda: redis
     client = TestClient(app, headers=default_headers())
-    kv_state: dict[str, dict] = {}
-    structured: dict[str, dict] = {}
-
-    def _get_context(self, uid: str, **_scope):
-        kv = kv_state.get(uid) or {}
-        return {"summary": None, "kv": kv, "recent_retrieval": None}
-
-    def _set_kv(self, uid: str, kv: dict, ttl_seconds=None, **_scope):
-        kv_state[uid] = dict(kv or {})
-
-    def _get_kv(self, uid: str, **_scope):
-        return dict(kv_state.get(uid) or {})
-
-    def _set_structured(self, uid: str, s: dict, ttl_seconds=None, **_scope):
-        structured[uid] = dict(s or {})
-
-    def _get_structured(self, uid: str, **_scope):
-        return dict(structured.get(uid) or {})
-
-    monkeypatch.setattr(Memory, "get_context", _get_context)
-    monkeypatch.setattr(Memory, "set_kv", _set_kv)
-    monkeypatch.setattr(Memory, "get_kv", _get_kv)
-    monkeypatch.setattr(Memory, "set_structured_state", _set_structured)
-    monkeypatch.setattr(Memory, "get_structured_state", _get_structured)
 
     uid = "followup-memory-user"
 
