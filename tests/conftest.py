@@ -300,9 +300,23 @@ def pytest_sessionstart(session):
         for thread in threading.enumerate()
         if thread.ident is not None
     }
-    # Isolate test DB for this session so stateful API tests don't collide.
-    db_file = os.path.join(tempfile.gettempdir(), f"shopsquire_test_{uuid.uuid4().hex}.sqlite")
-    session_db_url = f"sqlite+pysqlite:///{db_file}"
+    # Hosted file-isolated shards provide a migrated copy of the canonical
+    # template for each pytest process.  Preserve it instead of silently
+    # replacing it with an ensure_metadata-only database.  Other test runs
+    # retain the historical per-session isolation.
+    use_provided_database = os.getenv("TEST_USE_PROVIDED_DATABASE", "").strip().lower()
+    if use_provided_database in {"1", "true", "yes", "on"}:
+        session_db_url = os.environ.get("DATABASE_URL", "").strip()
+        if not session_db_url.startswith(("sqlite:///", "sqlite+pysqlite:///")):
+            raise RuntimeError(
+                "TEST_USE_PROVIDED_DATABASE requires an explicit SQLite DATABASE_URL"
+            )
+    else:
+        db_file = os.path.join(
+            tempfile.gettempdir(),
+            f"shopsquire_test_{uuid.uuid4().hex}.sqlite",
+        )
+        session_db_url = f"sqlite+pysqlite:///{db_file}"
     os.environ["DATABASE_URL"] = session_db_url
     os.environ["DATABASE_URL_RO"] = session_db_url
 
