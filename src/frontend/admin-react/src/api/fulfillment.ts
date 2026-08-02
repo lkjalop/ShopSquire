@@ -58,6 +58,8 @@ export interface AllocationWorkbenchView {
     committed_quantity: number;
     allocated_quantity: number;
     shortfall_quantity: number;
+    supplier_confirmed_quantity: number;
+    supplier_unresolved_quantity: number;
     allocation_pressure: number;
     oldest_queue_age_seconds: number;
   };

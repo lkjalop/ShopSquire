@@ -962,10 +962,22 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
     committed = [row for row in demands if row["stage"] == "committed"]
     total_requested = sum(row["requested_quantity"] for row in committed)
     total_allocated = sum(row["allocated_quantity"] for row in committed)
+    supplier_confirmed = sum(
+        max(0, int(row["covered_quantity"]) - int(row["allocated_quantity"]))
+        for row in committed
+        if row["promise_state"]
+    )
+    supplier_unresolved = sum(
+        int(row["shortfall_quantity"])
+        for row in committed
+        if row["promise_state"]
+    )
     return {"tenant_id": tenant_id, "sku": sku, "authority": "shadow_allocation",
             "execution_authority": "legacy_inventory_reservations",
             "summary": {"committed_quantity": total_requested, "allocated_quantity": total_allocated,
                         "shortfall_quantity": max(0, total_requested - total_allocated),
+                        "supplier_confirmed_quantity": supplier_confirmed,
+                        "supplier_unresolved_quantity": supplier_unresolved,
                         "allocation_pressure": (
                             round(max(0, total_requested - total_allocated) / total_requested, 4)
                             if total_requested else 0.0),

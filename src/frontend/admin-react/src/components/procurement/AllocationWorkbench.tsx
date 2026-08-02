@@ -48,6 +48,9 @@ export function AllocationWorkbench() {
         <Metric label="Committed" value={summary.committed_quantity} />
         <Metric label="Allocated" value={summary.allocated_quantity} />
         <Metric label="Shortfall" value={summary.shortfall_quantity} concern={summary.shortfall_quantity > 0} />
+        <Metric label="Supplier confirmed" value={summary.supplier_confirmed_quantity} />
+        <Metric label="Supplier unresolved" value={summary.supplier_unresolved_quantity}
+                concern={summary.supplier_unresolved_quantity > 0} />
         <Metric label="Allocation pressure" value={`${Math.round(summary.allocation_pressure * 100)}%`} concern={summary.allocation_pressure > 0} />
         <Metric label="Oldest queue" value={age(summary.oldest_queue_age_seconds)} concern={summary.oldest_queue_age_seconds > 3600} />
       </div>

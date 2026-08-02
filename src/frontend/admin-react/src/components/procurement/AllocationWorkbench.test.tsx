@@ -12,6 +12,7 @@ describe('AllocationWorkbench', () => {
       tenant_id: 't1', authority: 'shadow_allocation',
       execution_authority: 'legacy_inventory_reservations',
       summary: { committed_quantity: 80, allocated_quantity: 53, shortfall_quantity: 27,
+        supplier_confirmed_quantity: 18, supplier_unresolved_quantity: 9,
         allocation_pressure: 0.3375, oldest_queue_age_seconds: 720 },
       demands: [{ demand_ref: 'Demand abc12345', case_ref: 'Case def67890', sku: 'RGAM-0007',
         destination_id: 'SYD', stage: 'committed', requested_quantity: 80,
@@ -42,6 +43,10 @@ describe('AllocationWorkbench', () => {
     expect(screen.getAllByText('80').length).toBeGreaterThan(0);
     expect(screen.getAllByText('53').length).toBeGreaterThan(0);
     expect(screen.getAllByText('27').length).toBeGreaterThan(0);
+    expect(screen.getByText('Supplier confirmed')).toBeInTheDocument();
+    expect(screen.getAllByText('18').length).toBeGreaterThan(0);
+    expect(screen.getByText('Supplier unresolved')).toBeInTheDocument();
+    expect(screen.getAllByText('9').length).toBeGreaterThan(0);
     expect(screen.getByText('34%')).toBeInTheDocument();
     expect(screen.getAllByText('12m').length).toBeGreaterThan(0);
     expect(screen.getByText(/3 anonymized child demand/)).toBeInTheDocument();

@@ -35,6 +35,10 @@ def test_eight_buyer_pressure_wave_and_partial_recovery_are_visible():
         assert workbench.get_by_text("80", exact=True).first.is_visible()
         assert workbench.get_by_text("53", exact=True).first.is_visible()
         assert workbench.get_by_text("27", exact=True).first.is_visible()
+        assert workbench.get_by_text("Supplier confirmed", exact=True).is_visible()
+        assert workbench.get_by_text("18", exact=True).first.is_visible()
+        assert workbench.get_by_text("Supplier unresolved", exact=True).is_visible()
+        assert workbench.get_by_text("9", exact=True).first.is_visible()
         assert workbench.get_by_test_id("allocation-demand-row").count() == 8
         batch = workbench.get_by_test_id("allocation-sourcing-batch")
         workbench.locator("summary").click()

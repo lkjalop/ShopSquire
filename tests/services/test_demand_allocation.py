@@ -441,6 +441,9 @@ def test_supplier_partial_schedule_persists_and_recomputes_buyer_promise_idempot
         "FROM buyer_supply_promise"
     )).fetchone()
     assert tuple(promise) == ("partial", 7, 3, 1)
+    view = allocation_workbench(db, tenant_id="t1", sku="SKU-1")
+    assert view["summary"]["supplier_confirmed_quantity"] == 3
+    assert view["summary"]["supplier_unresolved_quantity"] == 3
 
 
 def test_workbench_anonymizes_buyers_and_reports_pressure_queue_and_child_count():
@@ -457,6 +460,8 @@ def test_workbench_anonymizes_buyers_and_reports_pressure_queue_and_child_count(
     assert view["summary"]["committed_quantity"] == 5
     assert view["summary"]["allocated_quantity"] == 2
     assert view["summary"]["shortfall_quantity"] == 3
+    assert view["summary"]["supplier_confirmed_quantity"] == 0
+    assert view["summary"]["supplier_unresolved_quantity"] == 0
     assert view["summary"]["allocation_pressure"] == 0.6
     assert view["sourcing_batches"][0]["child_demand_count"] == 1
     assert view["privacy"]["buyer_identities_exposed"] is False
