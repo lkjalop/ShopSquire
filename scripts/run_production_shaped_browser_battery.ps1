@@ -36,6 +36,7 @@ if (-not [System.IO.Path]::IsPathRooted($ArtifactRoot)) {
 }
 New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
 $processes = @()
+$receiverProcess = $null
 
 function Get-FreeTcpPort {
     $listener = [System.Net.Sockets.TcpListener]::new(
@@ -151,7 +152,16 @@ try {
     # as the scenario's declared surplus so the market-adaptation case has a
     # genuine actionable cohort instead of silently exercising a neutral one.
     $env:SALES_RESPONSE_OVERSTOCK_UNITS = "10"
+    # The market-adaptation browser story is an explicit shadow/demo contract.
+    # Keep the bounded nudge on here; production remains default-off unless a
+    # tenant experiment enables it.
+    $env:SALES_RESPONSE_NUDGE_ENABLED = "1"
     $env:FULFILLMENT_DEMO_ENABLED = "1"
+    # The recorded procurement contract proves the bounded GATE-1 behaviour:
+    # buyer commitment may draft an RFQ, but it may not send it. Keep this
+    # independent flag explicit so a clean checkout cannot silently stop at
+    # COMMITTED and make the browser proof depend on a developer's local flags.
+    $env:FULFILLMENT_AUTO_DRAFT_ON_COMMIT = "1"
     $env:GATE_PROCUREMENT = "1"
     $env:USE_MOCK_LLM = "1"
     $env:USE_OLLAMA_INTENT = "0"
@@ -176,12 +186,29 @@ try {
     $backendPort = Get-FreeTcpPort
     $storefrontPort = Get-FreeTcpPort
     $adminPort = Get-FreeTcpPort
+    $siemPort = Get-FreeTcpPort
     $backendUrl = "http://127.0.0.1:$backendPort"
     $storefrontUrl = "http://127.0.0.1:$storefrontPort"
     $adminUrl = "http://127.0.0.1:$adminPort"
     $env:VITE_API_BASE_URL = $backendUrl
     $env:PLAYWRIGHT_BASE_URL = $storefrontUrl
     $env:BACKEND_SMOKE_URL = $backendUrl
+    $env:SIEM_WEBHOOK_URL = "http://127.0.0.1:$siemPort/events"
+    $env:SECURITY_HANDOFF_INLINE = "1"
+
+    $receiverProcess = Start-Process -FilePath python -ArgumentList @(
+        (Join-Path $resolvedRepo "scripts/security_handoff_test_receiver.py"),
+        "--port", "$siemPort", "--output", (Join-Path $ArtifactRoot "siem-events.jsonl")
+    ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput (Join-Path $ArtifactRoot "siem-receiver.out.log") `
+        -RedirectStandardError (Join-Path $ArtifactRoot "siem-receiver.err.log")
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        try {
+            $siemHealth = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$siemPort/health" -TimeoutSec 2
+            if ($siemHealth.StatusCode -eq 200) { break }
+        }
+        catch { Start-Sleep -Milliseconds 200 }
+    }
 
     python -m alembic upgrade head *>&1 |
         Tee-Object -FilePath (Join-Path $ArtifactRoot "migration.log") | Out-Null
@@ -199,6 +226,11 @@ try {
             Join-Path $ArtifactRoot "supplier-seed.log"
         ) | Out-Null
     Assert-NativeSuccess "supplier_seed"
+    python -m scripts.seed_eight_buyer_allocation_demo *>&1 |
+        Tee-Object -FilePath (
+            Join-Path $ArtifactRoot "eight-buyer-allocation-seed.log"
+        ) | Out-Null
+    Assert-NativeSuccess "eight_buyer_allocation_seed"
 
     $processes += Start-Process -FilePath python -ArgumentList @(
         "-m", "uvicorn", "src.app.main:create_app", "--factory",
@@ -300,6 +332,7 @@ try {
         (Join-Path $resolvedRepo "scripts/run_child_process.py"),
         "python", "-m", "pytest", "-vv", "-s",
         "tests/e2e/test_procurement_malicious_reply_playwright.py",
+        "tests/e2e/test_live_allocation_workbench.py",
         "tests/e2e/test_live_policy_trace.py",
         "tests/e2e/test_live_procurement_closed_loop.py"
     ) -WorkingDirectory $resolvedRepo -WindowStyle Hidden -PassThru `
@@ -313,12 +346,63 @@ try {
         -ExitFile $spaExitFile
     Remove-Item Env:SHOPSQUIRE_CHILD_EXIT_FILE -ErrorAction SilentlyContinue
 
+    # A 200 response is not sufficient when a caught SQL error poisoned the
+    # request transaction and forced silent compatibility fallbacks. Treat the
+    # PostgreSQL aborted-transaction signature and unhandled tracebacks as hard
+    # browser-proof failures, and retain the exact lines in the artifact bundle.
+    $abortGatePath = Join-Path $ArtifactRoot "transaction-abort-gate.log"
+    $abortPatterns = @(
+        "\bERROR:",
+        "current transaction is aborted",
+        "InFailedSqlTransaction",
+        "\[unhandled_exception\]",
+        "Exception in ASGI application"
+    )
+    $abortHits = @()
+    try {
+        # Docker writes container logs to stderr even on success. Temporarily
+        # relax native-command error promotion so PowerShell does not turn a
+        # successful capture into a catch-only placeholder.
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $postgresGateLog = @(docker logs $pgName 2>&1)
+        $ErrorActionPreference = $previousErrorAction
+        $postgresGateLog |
+            Out-File -LiteralPath (Join-Path $ArtifactRoot "postgres.log") -Encoding utf8
+    }
+    catch {
+        "postgres_log_capture_failed: $($_.Exception.Message)" |
+            Set-Content -Path (Join-Path $ArtifactRoot "postgres.log") -Encoding UTF8
+    }
+    foreach ($serviceLog in @("backend.err.log", "worker.err.log", "postgres.log")) {
+        $serviceLogPath = Join-Path $ArtifactRoot $serviceLog
+        if (Test-Path $serviceLogPath) {
+            $abortHits += Select-String -Path $serviceLogPath -Pattern $abortPatterns
+        }
+    }
+    $abortHits | ForEach-Object { "{0}:{1}:{2}" -f $_.Path, $_.LineNumber, $_.Line } |
+        Set-Content -Path $abortGatePath -Encoding UTF8
+    $transactionAbortExit = if ($abortHits.Count -gt 0) { 1 } else { 0 }
+    $siemEventsPath = Join-Path $ArtifactRoot "siem-events.jsonl"
+    $siemTelemetryExit = 1
+    if (Test-Path -LiteralPath $siemEventsPath) {
+        $siemRows = @(Get-Content -LiteralPath $siemEventsPath | Where-Object { $_.Trim() })
+        if ($siemRows.Count -gt 0) {
+            $canonicalRows = @($siemRows | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object {
+                $_.schema_version -eq "shopsquire.security.v1" -and $_.tenant_id -and ($_.trace_id -or $_.decision_id)
+            })
+            if ($canonicalRows.Count -gt 0) { $siemTelemetryExit = 0 }
+        }
+    }
+
     Write-Output "LIVE_STACK_ARTIFACTS=$ArtifactRoot"
     Write-Output "REACT_PLAYWRIGHT_EXIT=$reactExit"
     Write-Output "SPA_REGRESSIONS_EXIT=$spaExit"
+    Write-Output "TRANSACTION_ABORT_GATE_EXIT=$transactionAbortExit"
+    Write-Output "SIEM_TELEMETRY_GATE_EXIT=$siemTelemetryExit"
     Tail-IfPresent "react-playwright.log"
     Tail-IfPresent "spa-regressions.log"
-    if ($reactExit -ne 0 -or $spaExit -ne 0) {
+    if ($reactExit -ne 0 -or $spaExit -ne 0 -or $transactionAbortExit -ne 0 -or $siemTelemetryExit -ne 0) {
         throw "browser_battery_failed"
     }
 }
@@ -336,6 +420,9 @@ catch {
     throw
 }
 finally {
+    if ($receiverProcess -and -not $receiverProcess.HasExited) {
+        Stop-ProcessTree -ProcessId $receiverProcess.Id
+    }
     if (-not $KeepServices) {
         foreach ($process in $processes) {
             if ($process -and -not $process.HasExited) {
