@@ -38,6 +38,56 @@ export interface JourneyEvent {
   state: string; event: string; actor_type: string; actor_id: string;
   reason_code?: string; evidence?: any; valid_from?: string; valid_to?: string | null;
 }
+export interface CommunicationEvent {
+  event_id: string; observation_id: string; state: string; actor_type: string;
+  actor_id?: string; reason?: string; grounding_refs?: string[];
+  commercial_effect?: 'prevented' | 'none' | string; occurred_at?: string;
+}
+export interface FulfillmentJourneyView {
+  journey: JourneyEvent[];
+  communications: CommunicationEvent[];
+  communication_status: string;
+}
+
+export interface AllocationWorkbenchView {
+  tenant_id: string;
+  sku?: string | null;
+  authority: string;
+  execution_authority: string;
+  summary: {
+    committed_quantity: number;
+    allocated_quantity: number;
+    shortfall_quantity: number;
+    allocation_pressure: number;
+    oldest_queue_age_seconds: number;
+  };
+  demands: Array<{
+    demand_ref: string; case_ref: string; sku: string; destination_id: string; stage: string;
+    requested_quantity: number; allocated_quantity: number; shortfall_quantity: number;
+    priority_tier: number; queue_age_seconds: number; promise_state?: string | null;
+    alternatives_required: boolean;
+  }>;
+  sourcing_batches: Array<{
+    batch_ref: string; sku: string; destination_id: string; status: string; quantity: number;
+    window_ends_at: string; child_demand_count: number; fulfillment_case_id?: string | null;
+  }>;
+  sourcing_waves: Array<{
+    wave_ref: string; supplier_id: string; supplier_facility_id: string; currency: string;
+    incoterm: string; merchant_destination_id: string; status: string; window_ends_at: string;
+    standalone_freight_cents: number; consolidated_freight_cents: number;
+    handling_cents: number; estimated_savings_cents: number; batch_count: number;
+    total_quantity: number;
+  }>;
+  route_proposals: Array<{
+    proposal_ref: string; case_ref: string; mode: string; status: string;
+    destination_token: string; eta_days: { min?: number | null; max?: number | null };
+    components: Record<string, any>; state_prevented?: string | null;
+    pii_release_authorized: boolean; created_at: string;
+    privacy: { status: string; jurisdiction?: string | null; purpose?: string | null;
+               retention_until?: string | null };
+  }>;
+  privacy: { buyer_identities_exposed: boolean; child_demands_anonymized: boolean };
+}
 // OPERATOR-only deal economics (margin / buyer-discount headroom / profit). Never buyer-facing.
 export interface DealEconomics {
   quantity: number; supplier_unit_cost_cents: number; retail_unit_cents: number;
@@ -127,9 +177,19 @@ const _fcPost = (path: string, body?: any) =>
 
 export const listFulfillmentCases = () =>
   http<{ cases: FulfillmentCaseRow[] }>(`/api/v1/fulfillment/cases`).then((d) => d.cases || []);
+export const fetchAllocationWorkbench = (sku?: string) =>
+  http<AllocationWorkbenchView>(
+    `/api/v1/admin/allocation/workbench${sku ? `?sku=${encodeURIComponent(sku)}` : ''}`,
+  );
 export const getFulfillmentCaseOp = (id: string) => http<FulfillmentCaseView>(`${_fc(id)}/operator-view`);
 export const getFulfillmentJourney = (id: string) =>
   http<{ journey: JourneyEvent[] }>(`${_fc(id)}/journey`).then((d) => d.journey || []);
+export const getFulfillmentJourneyView = (id: string) =>
+  http<FulfillmentJourneyView>(`${_fc(id)}/journey`).then((data) => ({
+    journey: data.journey || [],
+    communications: data.communications || [],
+    communication_status: data.communication_status || 'unavailable',
+  }));
 export const fcDraftQuote = (id: string, item_ref: string, quantity: number, estimated_value_cents = 0) =>
   _fcPost(`${_fc(id)}/draft-quote`, { item_ref, quantity, estimated_value_cents });
 // Phase 3: buyer qualification (human verifies intent before supplier contact).

@@ -14,11 +14,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   fcCaseAsOf, fcCaseOkf, fcCompareQuotes, fcEconomics, fcEditDraft, fcQuarantineDisposition,
   fcRfqFanout, fcSupplierCandidates,
-  getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
-  type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
+  getFulfillmentCaseOp, getFulfillmentJourneyView, listFulfillmentCases,
+  type CommunicationEvent, type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
   type RfqFanoutDraft, type SupplierCandidate,
 } from '../api';
 import ActionBar from './procurement/ActionBar';
+import AllocationWorkbench from './procurement/AllocationWorkbench';
 import AutonomyAudit from './procurement/AutonomyAudit';
 import CreateFromOrder from './procurement/CreateFromOrder';
 import ProcurementNotifications from './procurement/ProcurementNotifications';
@@ -40,6 +41,8 @@ export function ProcurementCases() {
   const [sel, setSel] = useState<string>('');
   const [view, setView] = useState<FulfillmentCaseView | null>(null);
   const [journey, setJourney] = useState<JourneyEvent[]>([]);
+  const [communications, setCommunications] = useState<CommunicationEvent[]>([]);
+  const [communicationStatus, setCommunicationStatus] = useState('unavailable');
   const [scenario, setScenario] = useState('full_quote');
   const [econ, setEcon] = useState<DealEconomics | null>(null);
   const [editSubject, setEditSubject] = useState('');
@@ -57,8 +60,14 @@ export function ProcurementCases() {
   const loadCase = useCallback((id: string) => {
     if (!id) return;
     setEcon(null); setAsOf(null); setCandidates([]); setFanout([]);  // per-case panels — clear when switching
-    Promise.all([getFulfillmentCaseOp(id), getFulfillmentJourney(id)])
-      .then(([v, j]) => { setView(v); setJourney(j); setError(null); })
+    Promise.all([getFulfillmentCaseOp(id), getFulfillmentJourneyView(id)])
+      .then(([v, activity]) => {
+        setView(v);
+        setJourney(activity.journey);
+        setCommunications(activity.communications);
+        setCommunicationStatus(activity.communication_status);
+        setError(null);
+      })
       .catch((e) => setError(e.message));
     // supplier shortlist (read-only review prefill) — best-effort, never blocks the case view
     fcSupplierCandidates(id).then((r) => setCandidates(r.candidates || [])).catch(() => setCandidates([]));
@@ -125,6 +134,7 @@ export function ProcurementCases() {
 
   return (
     <div className="procurement-cases" data-testid="procurement-cases">
+      <AllocationWorkbench />
       <AutonomyAudit />
       <ProcurementNotifications onActivity={loadList} />
       <CreateFromOrder onCreated={loadList} />
@@ -306,7 +316,9 @@ export function ProcurementCases() {
 
             <QuotePacket parsed={parsed} po={po} isDemoReply={isDemoReply} />
 
-            <CaseJourney journey={journey} asOfT={asOfT} setAsOfT={setAsOfT} asOf={asOf}
+            <CaseJourney journey={journey} communications={communications}
+                         communicationStatus={communicationStatus}
+                         asOfT={asOfT} setAsOfT={setAsOfT} asOf={asOf}
                          onReconstruct={onReconstruct} busy={busy} onExportOkf={onExportOkf} />
           </section>
         )}
