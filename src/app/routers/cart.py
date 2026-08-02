@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import uuid
+import hashlib
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -81,7 +82,8 @@ def apply_quantity_line(items: List[Dict], sku: str, target: int, stock: int,
                 it["shortfall"] = shortfall_meta["shortfall"]
                 it["available_now"] = shortfall_meta["available_now"]
             else:
-                it.pop("shortfall", None); it.pop("available_now", None)
+                it.pop("shortfall", None)
+                it.pop("available_now", None)
             found = True
             break
     if not found:
@@ -159,6 +161,28 @@ def _save_cart(cart_id: str, items: List[Dict]) -> None:
             {"items": json.dumps(items), "id": cart_id},
         )
         db.commit()
+
+
+def _project_provisional_demand(cart_id: str, uid: str, items: List[Dict]) -> Dict[str, Any]:
+    """Shadow projection only; legacy inventory reservations remain authoritative."""
+    try:
+        from src.app.services.demand_allocation import sync_provisional_cart_demand
+        with db_session() as db:
+            outcome = sync_provisional_cart_demand(
+                db,
+                tenant_id=_tenant(),
+                cart_id=cart_id,
+                buyer_ref_hash=hashlib.sha256(str(uid).encode()).hexdigest(),
+                items=items,
+            )
+            db.commit()
+            return outcome
+    except Exception as exc:
+        logging.getLogger("shopsquire.cart.demand_projection").warning(
+            "provisional demand projection degraded cart=%s error=%s", cart_id, type(exc).__name__
+        )
+        return {"status": "degraded", "authority": "provisional",
+                "allocates_supply": False, "reason": type(exc).__name__}
 
 
 # ── transactional cart primitives (P0.2 — the ONE-transaction mutation path) ────
@@ -611,6 +635,7 @@ def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_ME
         if not found:
             items.append({"sku": payload.sku, "quantity": requested_qty, "added_at": _now_ts()})
         _save_cart(cart_id, items)
+        demand_projection = _project_provisional_demand(cart_id, payload.uid, items)
         # S3 human-correction learning: adding a SKU to cart is an acceptance signal for that product
         # (gated by HUMAN_FEEDBACK_CAPTURE_ENABLED; inert + best-effort by default).
         try:
@@ -649,7 +674,7 @@ def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_ME
                 hydrated["upsell"] = {"trigger": "cart_add", "candidates": upsell}
         except Exception:
             pass  # Upsell failure is non-fatal
-        return {"cart_id": cart_id, **hydrated}
+        return {"cart_id": cart_id, **hydrated, "demand_projection": demand_projection}
 
 
 @router.put("/items")
@@ -695,10 +720,11 @@ def replace_items(payload: CartItemsPayload, role: str = Depends(require_role([R
         _ts = _now_ts()
         items = [{"sku": sku, "quantity": qty, "added_at": _ts} for sku, qty in aggregated.items()]
         _save_cart(cart_id, items)
+        demand_projection = _project_provisional_demand(cart_id, payload.uid, items)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
         hydrated = _with_bundle_state(cart_id=cart_id, uid=payload.uid, role=role, hydrated=hydrated)
-        return {"cart_id": cart_id, **hydrated}
+        return {"cart_id": cart_id, **hydrated, "demand_projection": demand_projection}
 
 
 @router.delete("/items/{sku}")
@@ -709,10 +735,11 @@ def remove_item(sku: str, uid: str, role: str = Depends(require_role([ROLE_MERCH
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.remove_item", signal=signal)
         items = [it for it in items if it.get("sku") != sku]
         _save_cart(cart_id, items)
+        demand_projection = _project_provisional_demand(cart_id, uid, items)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
         hydrated = _with_bundle_state(cart_id=cart_id, uid=uid, role=role, hydrated=hydrated)
-        return {"cart_id": cart_id, **hydrated}
+        return {"cart_id": cart_id, **hydrated, "demand_projection": demand_projection}
 
 
 @router.put("/items/{sku}")
@@ -739,10 +766,12 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
         items, shortfall_meta, _err2 = apply_quantity_line(
             items, sku, target, stock, bool(payload.allow_sourcing))
         _save_cart(cart_id, items)
+        demand_projection = _project_provisional_demand(cart_id, payload.uid, items)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
         hydrated = _with_bundle_state(cart_id=cart_id, uid=payload.uid, role=role, hydrated=hydrated)
         out = {"cart_id": cart_id, **hydrated}
+        out["demand_projection"] = demand_projection
         if shortfall_meta:
             out["sourcing_required"] = True
             out["sourcing_shortfall"] = {"sku": sku, **shortfall_meta}
@@ -769,6 +798,7 @@ def clear_cart(uid: str, redis=Depends(get_redis),
             except Exception:
                 pass
         _save_cart(cart_id, [])
+        demand_projection = _project_provisional_demand(cart_id, uid, [])
         # A cleared cart is a NEW shopping intent — yesterday's approved bundle discount must not ride
         # along onto whatever the buyer builds next (the stale "-$17,627 discount I didn't select" bug).
         try:
@@ -784,6 +814,7 @@ def clear_cart(uid: str, redis=Depends(get_redis),
             "currency": _store_currency(),
             "trace_id": _cart_trace_id(cart_id),
             "decision_trace_id": _cart_trace_id(cart_id),
+            "demand_projection": demand_projection,
         }
 
 

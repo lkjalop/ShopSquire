@@ -2157,6 +2157,16 @@ def create_app() -> FastAPI:
             logging.getLogger("shopsquire.startup").exception("failed_to_include_admin_inventory_router: %s", e)
         except Exception:
             pass
+
+    try:
+        from src.app.routers.allocation import buyer_router as buyer_allocation_router
+        from src.app.routers.allocation import router as allocation_router
+        app.include_router(allocation_router)
+        app.include_router(buyer_allocation_router)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed_to_include_allocation_router: %s", e)
     try:
         from src.app.routers.merchant_dashboard import router as merchant_dashboard_router
         app.include_router(merchant_dashboard_router)

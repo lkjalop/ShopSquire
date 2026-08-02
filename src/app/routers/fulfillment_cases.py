@@ -9,6 +9,7 @@ wholesale price, no supplier identity). The demo-reply endpoint is DEMO-gated (d
 from __future__ import annotations
 from src.app.feature_flags import get_flags as _ff_get_flags
 
+import logging
 import os
 from typing import Any, Dict, List, Optional
 
@@ -898,6 +899,52 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
                                                  uid=buyer_uid, trace_id=body.trace_id,
                                                  tenant_id=(principal.tenant_id if principal else "default"),
                                                  requirements=body.requirements)
+        # Shadow commitment ledger: buyer confirmation promotes demand authority, but the
+        # established inventory_reservations path remains the executor until PostgreSQL
+        # allocation-concurrency parity is certified.
+        try:
+            import hashlib
+            import json
+            from src.app.services.demand_allocation import project_committed_order_demand
+
+            requirements = body.requirements if isinstance(body.requirements, dict) else {}
+            destination_id = str(
+                requirements.get("destination_token") or requirements.get("destination_id") or ""
+            ).strip()
+            if not destination_id and requirements.get("ship_to"):
+                canonical_destination = json.dumps(
+                    requirements.get("ship_to"), sort_keys=True, separators=(",", ":")
+                )
+                destination_id = "destination:" + hashlib.sha256(
+                    canonical_destination.encode("utf-8")
+                ).hexdigest()[:16]
+            if not destination_id:
+                destination_id = "destination-unset"
+            result["demand_commitment_projection"] = project_committed_order_demand(
+                db,
+                tenant_id=(principal.tenant_id if principal else "default"),
+                order_id=body.order_id,
+                buyer_ref_hash=hashlib.sha256(str(buyer_uid).encode("utf-8")).hexdigest(),
+                lines=resolved,
+                destination_id=destination_id,
+                required_by=str(
+                    requirements.get("required_by") or requirements.get("needed_by")
+                    or requirements.get("deadline") or ""
+                ).strip() or None,
+                amendment_version=(str(body.trace_id or "amendment") if body.supersede else None),
+            )
+        except Exception as exc:
+            logging.getLogger("shopsquire.fulfillment.demand_projection").warning(
+                "committed demand projection degraded order=%s error=%s",
+                body.order_id,
+                type(exc).__name__,
+            )
+            result["demand_commitment_projection"] = {
+                "status": "degraded",
+                "authority": "buyer_committed",
+                "allocates_supply": False,
+                "reason": type(exc).__name__,
+            }
         _notify_from_confirm(db, result)
     return result
 
@@ -1638,7 +1685,14 @@ def demo_reply(case_id: str, body: DemoReplyBody, role: str = Depends(require_ro
     if body.scenario not in fsb.SCENARIOS:
         raise HTTPException(status_code=400, detail=f"unknown scenario; choose from {sorted(fsb.SCENARIOS)}")
     with db_session() as db:
-        reply = fsb.generate_reply(case_ref=case_id, scenario=body.scenario, requested_qty=body.requested_qty)
+        cur = fwf.repository.current_version(db, case_id)
+        draft = (cur.state_json.get("draft") if cur and isinstance(cur.state_json, dict) else None) or {}
+        reply = fsb.generate_reply(
+            case_ref=case_id,
+            scenario=body.scenario,
+            requested_qty=body.requested_qty,
+            sender_domain=str(draft.get("recipient_domain") or "") or None,
+        )
         res = fec.receive_email_reply(
             db,
             case_id=case_id,

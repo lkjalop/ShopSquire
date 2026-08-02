@@ -122,6 +122,27 @@ def _market_intelligence(state: IntelligenceStageState, results: List[Dict[str, 
         findings = mi.get("market_findings") or []
         evidence = mi.get("market_evidence") or {}
         note = mi.get("narration_note") or ""
+        if state.decision_id:
+            from src.app.platform.tenant_context import current_tenant_id
+            from src.app.services.temporal_invalidation import register_evidence_payload_dependencies
+
+            tenant_id = str(current_tenant_id() or "default")
+            with db_session() as dependency_db:
+                for insight in insights:
+                    if not isinstance(insight, dict) or not insight.get("id"):
+                        continue
+                    register_evidence_payload_dependencies(
+                        dependency_db, tenant_id=tenant_id, derived_type="hippograph_edge",
+                        derived_id=str(insight["id"]), evidence_items=[insight],
+                        default_source_type="hippograph_evidence",
+                    )
+                register_evidence_payload_dependencies(
+                    dependency_db, tenant_id=tenant_id, derived_type="market_evidence_bundle",
+                    derived_id=str(state.decision_id),
+                    evidence_items=[item for item in findings if isinstance(item, dict)],
+                    default_source_type="market_evidence",
+                )
+                dependency_db.commit()
         if not (insights or findings):
             return
         # LIVE mutates the response + memory (decision-affecting). SHADOW does NOT — it only observes via the
