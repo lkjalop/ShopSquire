@@ -68,6 +68,7 @@ def _load(path: str) -> dict[str, dict[str, Any]]:
                 "cpsc_recalls_json",
                 "usgs_mcs_sciencebase_csv",
                 "world_bank_pink_sheet_xlsx",
+                "nws_active_alerts_json",
             }:
                 raise ValueError("external_market_source_fetch_kind_invalid")
         domains = set(source["pestel_domains"])

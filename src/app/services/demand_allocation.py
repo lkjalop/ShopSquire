@@ -1136,6 +1136,8 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
                 excluded_supplier_id=str(batch_row[9] or ""),
             ),
         })
+    from src.app.services.disruption_intelligence import disruption_workbench_projection
+    from src.app.services.temporal_invalidation import tenant_cache_lifecycle_projection
     return {"tenant_id": tenant_id, "sku": sku, "authority": "shadow_allocation",
             "execution_authority": "legacy_inventory_reservations",
             "summary": {"committed_quantity": total_requested, "allocated_quantity": total_allocated,
@@ -1180,6 +1182,12 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
                  db, tenant_id=tenant_id, supplier_refs=supplier_refs,
              ),
             "recovery_options": recovery_options,
+            "disruption_impacts": disruption_workbench_projection(
+                db, tenant_id=tenant_id, sku=sku, limit=min(limit, 25),
+            ),
+            "temporal_cache_lifecycle": tenant_cache_lifecycle_projection(
+                db, tenant_id=tenant_id, limit=min(limit, 20),
+            ),
              "privacy": {"buyer_identities_exposed": False, "child_demands_anonymized": True}}
 
 

@@ -121,6 +121,31 @@ def _normalize_world_bank_query(query: dict[str, Any]) -> dict[str, str]:
     return {"series": "|".join(series), "signal_type": signal_type}
 
 
+def _normalize_nws_query(query: dict[str, Any]) -> dict[str, str]:
+    """Require a bounded geographic scope for the active-alert endpoint."""
+    point = str(query.get("point") or "").strip()
+    area = str(query.get("area") or "").strip().upper()
+    zone = str(query.get("zone") or "").strip().upper()
+    selected = sum(bool(value) for value in (point, area, zone))
+    if selected != 1:
+        raise ValueError("public_market_nws_single_scope_required")
+    if point:
+        match = re.fullmatch(r"(-?\d{1,2}(?:\.\d{1,6})?),(-?\d{1,3}(?:\.\d{1,6})?)", point)
+        if not match:
+            raise ValueError("public_market_nws_point_invalid")
+        latitude, longitude = (float(match.group(1)), float(match.group(2)))
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            raise ValueError("public_market_nws_point_invalid")
+        return {"point": f"{latitude:.6f},{longitude:.6f}"}
+    if area:
+        if not re.fullmatch(r"[A-Z]{2}", area):
+            raise ValueError("public_market_nws_area_invalid")
+        return {"area": area}
+    if not re.fullmatch(r"[A-Z]{2}[CZ]\d{3}|[A-Z]{2}\d{3}", zone):
+        raise ValueError("public_market_nws_zone_invalid")
+    return {"zone": zone}
+
+
 def _bounded_values(
     query: dict[str, Any],
     key: str,
@@ -405,6 +430,64 @@ def _cpsc_observations(
     return observations
 
 
+def _nws_observations(
+    payload: Any,
+    *,
+    request: dict[str, str],
+    retrieved_at: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+        raise ValueError("public_market_response_shape_invalid")
+    observations: list[dict[str, Any]] = []
+    for feature in payload["features"][:_MAX_ROWS]:
+        if not isinstance(feature, dict):
+            continue
+        properties = feature.get("properties")
+        if not isinstance(properties, dict):
+            continue
+        record_id = str(feature.get("id") or properties.get("id") or "").strip()
+        published = str(properties.get("sent") or "").strip()
+        effective = str(
+            properties.get("effective") or properties.get("onset") or published
+        ).strip()
+        if not record_id or not published or not effective:
+            continue
+        geocode = properties.get("geocode") if isinstance(properties.get("geocode"), dict) else {}
+        ugc = geocode.get("UGC") if isinstance(geocode.get("UGC"), list) else []
+        scope_ref = str(ugc[0]).strip() if ugc else next(iter(request.values()))
+        geography = str(properties.get("areaDesc") or scope_ref).strip()
+        measurement = {
+            "kind": "weather_alert",
+            "direction": "adverse",
+            "event": str(properties.get("event") or "")[:200],
+            "severity": str(properties.get("severity") or "unknown")[:40],
+            "certainty": str(properties.get("certainty") or "unknown")[:40],
+            "urgency": str(properties.get("urgency") or "unknown")[:40],
+            "message_type": str(properties.get("messageType") or "unknown")[:40],
+            "status": str(properties.get("status") or "unknown")[:40],
+            "headline": str(properties.get("headline") or "")[:500],
+            "source_url": record_id[:1000],
+            "supply_chain_stage": "transport_lane",
+        }
+        observations.append(govern_external_observation(
+            source_id="nws_weather_alerts",
+            source_record_id=record_id,
+            signal_type="lane_weather_risk",
+            subject_id=f"nws-zone:{scope_ref.casefold()}",
+            measurement=measurement,
+            geography=geography,
+            effective_from=effective,
+            effective_to=(
+                str(properties.get("ends") or properties.get("expires") or "").strip()
+                or None
+            ),
+            published_at=published,
+            available_at=published,
+            retrieved_at=retrieved_at,
+        ))
+    return observations
+
+
 def _world_bank_observations(
     body: bytes,
     *,
@@ -637,6 +720,9 @@ def fetch_public_market_source(
     if kind == "cpsc_recalls_json":
         request = _normalize_cpsc_query(query)
         provider_params = request
+    elif kind == "nws_active_alerts_json":
+        request = _normalize_nws_query(query)
+        provider_params = request
     elif kind == "usgs_mcs_sciencebase_csv":
         request = _normalize_usgs_query(query)
         provider_params = {}
@@ -747,6 +833,12 @@ def fetch_public_market_source(
             if kind == "cpsc_recalls_json":
                 normalized = _cpsc_observations(
                     json.loads(response.body.decode("utf-8")),
+                    retrieved_at=stamp.isoformat(),
+                )
+            elif kind == "nws_active_alerts_json":
+                normalized = _nws_observations(
+                    json.loads(response.body.decode("utf-8")),
+                    request=request,
                     retrieved_at=stamp.isoformat(),
                 )
             elif kind == "usgs_mcs_sciencebase_csv":

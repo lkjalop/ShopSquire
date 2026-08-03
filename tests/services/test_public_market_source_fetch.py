@@ -131,6 +131,7 @@ def test_registry_exposes_only_approved_live_origins():
     ]
     assert sorted(source["source_id"] for source in supported) == [
         "cpsc_recalls",
+        "nws_weather_alerts",
         "usgs_minerals",
         "world_bank_pink_sheet",
     ]
@@ -139,8 +140,67 @@ def test_registry_exposes_only_approved_live_origins():
     } == {
         "www.saferproducts.gov",
         "www.sciencebase.gov",
+        "api.weather.gov",
         "thedocs.worldbank.org",
     }
+
+
+def test_nws_alerts_require_bounded_scope_and_remain_advisory_lane_evidence():
+    db = _db()
+    body = json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "id": "https://api.weather.gov/alerts/fixture-1",
+            "type": "Feature",
+            "properties": {
+                "sent": "2026-08-03T01:00:00+00:00",
+                "effective": "2026-08-03T01:05:00+00:00",
+                "expires": "2026-08-03T08:00:00+00:00",
+                "status": "Actual",
+                "messageType": "Alert",
+                "event": "Severe Thunderstorm Warning",
+                "severity": "Severe",
+                "certainty": "Observed",
+                "urgency": "Immediate",
+                "headline": "Fixture warning for bounded protocol testing",
+                "areaDesc": "Los Angeles County",
+                "geocode": {"UGC": ["CAZ552"]},
+            },
+        }],
+    }).encode()
+    calls = []
+
+    def transport(url, params, headers, timeout):
+        calls.append((url, params, headers, timeout))
+        return PublicHttpResponse(200, {"etag": '"nws-v1"'}, body)
+
+    result = fetch_public_market_source(
+        db,
+        tenant_id="tenant-lane",
+        source_id="nws_weather_alerts",
+        query={"zone": "CAZ552"},
+        now=datetime(2026, 8, 3, 1, 10, tzinfo=timezone.utc),
+        transport=transport,
+        enabled=True,
+    )
+    assert calls[0][1] == {"zone": "CAZ552"}
+    assert result["outcome"] == "observed"
+    alert = result["observations"][0]
+    assert alert["signal_type"] == "lane_weather_risk"
+    assert alert["subject_id"] == "nws-zone:caz552"
+    assert alert["measurement"]["supply_chain_stage"] == "transport_lane"
+    assert alert["authority"] == "advisory_only"
+    assert alert["can_establish_sku_exposure"] is False
+    assert alert["execution_allowed"] is False
+
+    with pytest.raises(ValueError, match="public_market_nws_single_scope_required"):
+        fetch_public_market_source(
+            db,
+            tenant_id="tenant-lane",
+            source_id="nws_weather_alerts",
+            query={"zone": "CAZ552", "area": "CA"},
+            enabled=True,
+        )
 
 
 def test_fetch_persists_revision_and_reuses_tenant_scoped_cache():

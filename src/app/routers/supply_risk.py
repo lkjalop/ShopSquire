@@ -16,6 +16,10 @@ from src.app.security.auth import (
     require_role,
 )
 from src.app.services.market_source_registry import load_market_source_registry
+from src.app.services.disruption_intelligence import (
+    project_disruption_impact,
+    record_disruption_observation,
+)
 from src.app.services.public_market_source_fetch import fetch_public_market_source
 from src.app.services.qualified_alternative_workflow import (
     propose_qualified_alternatives,
@@ -58,6 +62,41 @@ class PublicSourceFetchRequest(BaseModel):
     statistics: list[str] | None = Field(default=None, max_length=5)
     countries: list[str] | None = Field(default=None, max_length=10)
     latest_year_only: bool = True
+    point: str | None = Field(default=None, max_length=32)
+    area: str | None = Field(default=None, max_length=2)
+    zone: str | None = Field(default=None, max_length=8)
+
+
+class DisruptionObservationRequest(BaseModel):
+    disruption_type: str = Field(min_length=1, max_length=80)
+    affected_node_ids: list[str] = Field(min_length=1, max_length=50)
+    geography: str | None = Field(default=None, max_length=120)
+    effective_from: str
+    effective_to: str | None = None
+    observed_at: str
+    retrieved_at: str
+    published_at: str | None = None
+    fresh_until: str
+    source_id: str = Field(min_length=1, max_length=160)
+    source_record_id: str = Field(min_length=1, max_length=250)
+    source_revision: str = Field(min_length=1, max_length=160)
+    source_licence: str = Field(min_length=1, max_length=250)
+    evidence_ref: str = Field(min_length=1, max_length=500)
+    severity: str = Field(min_length=1, max_length=32)
+    probability_range: tuple[float, float]
+    delay_range_days: tuple[int, int]
+    cost_impact_range_minor: tuple[int, int]
+    currency: str = Field(min_length=3, max_length=3)
+    claim_status: str = Field(min_length=1, max_length=32)
+    contradiction_status: str = Field(default="unchallenged", max_length=40)
+    contradiction_group: str | None = Field(default=None, max_length=250)
+
+
+class DisruptionProjectionRequest(BaseModel):
+    target_node_id: str = Field(min_length=1, max_length=64)
+    baseline_version: str = Field(min_length=1, max_length=160)
+    baseline: dict[str, Any]
+    decision_time: str
 
 
 class SupplyNodeRevisionRequest(BaseModel):
@@ -323,6 +362,45 @@ def public_sources(
             for source in sources.values()
         ],
     }
+
+
+@router.post("/disruptions")
+def create_disruption_observation(
+    payload: DisruptionObservationRequest,
+    role: str = Depends(require_role([ROLE_OWNER])),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        result = record_disruption_observation(
+            db, tenant_id=current_tenant_id(), **payload.model_dump(),
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/disruptions/{observation_id}/project")
+def create_disruption_projection(
+    observation_id: str,
+    payload: DisruptionProjectionRequest,
+    role: str = Depends(require_role([ROLE_OWNER])),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        result = project_disruption_impact(
+            db, tenant_id=current_tenant_id(), observation_id=observation_id,
+            **payload.model_dump(),
+        )
+        db.commit()
+        return result
+    except KeyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc.args[0])) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/sources/{source_id}/fetch")
