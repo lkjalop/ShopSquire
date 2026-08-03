@@ -709,6 +709,8 @@ def allocation_shadow_parity(
     case_id: str | None = None,
     persist: bool = True,
     accepted_difference_codes: Iterable[str] = (),
+    verified_difference_scopes: Iterable[dict[str, Any]] = (),
+    parity_exception_verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare the new shadow allocations with the legacy reservation executor.
 
@@ -720,6 +722,15 @@ def allocation_shadow_parity(
     if unsupported:
         raise ValueError(
             "unsupported_parity_difference_code:" + ",".join(unsupported)
+        )
+    verified_scopes = tuple(dict(scope) for scope in verified_difference_scopes)
+    unsupported_verified = sorted({
+        str(scope.get("difference_code") or "") for scope in verified_scopes
+        if str(scope.get("difference_code") or "") not in PARITY_DIFFERENCE_CODES
+    })
+    if unsupported_verified:
+        raise ValueError(
+            "unsupported_parity_difference_code:" + ",".join(unsupported_verified)
         )
     clause = " AND d.case_id=:case_id" if case_id else ""
     params: dict[str, Any] = {"t": tenant_id}
@@ -767,11 +778,16 @@ def allocation_shadow_parity(
                 difference_code = "shadow_quantity_higher"
             else:
                 difference_code = "legacy_quantity_higher"
+        signed_scope = next((scope for scope in verified_scopes if
+            scope.get("difference_code") == difference_code
+            and str(scope.get("sku") or "") in {"", key[1]}
+        ), None)
         comparisons.append({
             "case_id": key[0], "sku": key[1], **new,
             "legacy_reserved": legacy, "quantity_match": quantity_match,
             "difference_code": difference_code,
-            "difference_accepted": bool(difference_code in accepted),
+            "difference_accepted": bool(difference_code in accepted or signed_scope),
+            "parity_exception_id": signed_scope.get("id") if signed_scope else None,
         })
     new_total = sum(row["allocated"] for row in comparisons)
     legacy_total = sum(row["legacy_reserved"] for row in comparisons)
@@ -804,7 +820,10 @@ def allocation_shadow_parity(
               "quantity_parity_ready": quantity_parity_ready,
               "scope_parity_ready": scope_parity_ready,
               "replacement_ready": quantity_parity_ready and scope_parity_ready,
-              "execution_authority": "legacy_inventory_reservations"}
+              "execution_authority": "legacy_inventory_reservations",
+              "parity_exception_verification": parity_exception_verification or {
+                  "accepted": [], "rejected": [], "status": "not_evaluated"
+              }}
     if persist:
         run_id = str(uuid.uuid4())
         db.execute(text(
@@ -816,6 +835,30 @@ def allocation_shadow_parity(
             "details": json.dumps(report, sort_keys=True), "now": _now()})
         report["run_id"] = run_id
     return report
+
+
+def allocation_shadow_parity_from_register(
+    db,
+    *,
+    tenant_id: str,
+    case_id: str,
+    key_resolver,
+    persist: bool = True,
+    as_of: datetime | None = None,
+) -> dict[str, Any]:
+    """Apply only verified exact-case exceptions while legacy execution remains authoritative."""
+    from src.app.services.allocation_parity_exceptions import verified_exception_scopes
+
+    verification = verified_exception_scopes(
+        db, tenant_id=tenant_id, case_id=case_id, key_resolver=key_resolver,
+        allowed_codes=PARITY_DIFFERENCE_CODES, as_of=as_of,
+    )
+    verification["status"] = "verified" if not verification["rejected"] else "degraded"
+    return allocation_shadow_parity(
+        db, tenant_id=tenant_id, case_id=case_id, persist=persist,
+        verified_difference_scopes=verification["accepted"],
+        parity_exception_verification=verification,
+    )
 
 
 def apply_supplier_schedule(db, *, tenant_id: str, demand_id: str, supplier_id: str,

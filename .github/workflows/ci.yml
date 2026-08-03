@@ -126,6 +126,7 @@ jobs:
               --junitxml=test-results/postgres-${{ matrix.python-version }}.xml \
               tests/chaos/test_money_concurrency_postgres.py \
               tests/chaos/test_money_concurrency_http.py \
+              tests/chaos/test_demand_allocation_concurrency_postgres.py \
               tests/architecture/test_postgres_security_boundaries.py \
               tests/integration/test_db_postgres_timescale_matrix.py \
               tests/test_verify_db_migrations.py

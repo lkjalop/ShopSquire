@@ -1,13 +1,17 @@
 import json
+import base64
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from src.app.services.demand_allocation import (
     allocate_committed,
     allocation_shadow_parity,
+    allocation_shadow_parity_from_register,
     allocation_workbench,
     apply_supplier_schedule,
     commit_demand,
@@ -19,6 +23,10 @@ from src.app.services.demand_allocation import (
     sync_authoritative_location_atp,
     transition_demand,
     upsert_supply_snapshot,
+)
+from src.app.services.allocation_parity_exceptions import (
+    canonical_exception_bytes,
+    store_verified_exception,
 )
 from src.app.services.sourcing_backpressure import (
     SourcingBackpressurePolicy,
@@ -65,6 +73,11 @@ def _db():
     db.execute(text("""CREATE TABLE allocation_shadow_parity_run (
       id TEXT PRIMARY KEY,tenant_id TEXT,case_id TEXT,status TEXT,new_allocated_qty INTEGER,
       legacy_reserved_qty INTEGER,details_json TEXT,created_at TEXT)"""))
+    db.execute(text("""CREATE TABLE allocation_parity_exception (
+      id TEXT PRIMARY KEY,tenant_id TEXT,case_id TEXT,sku TEXT,difference_code TEXT,
+      rationale TEXT,evidence_ref TEXT,signer_id TEXT,key_id TEXT,payload_json TEXT,
+      signature_b64 TEXT,valid_from TEXT,expires_at TEXT,revoked_at TEXT,created_at TEXT,
+      UNIQUE(tenant_id,case_id,sku,difference_code,signature_b64))"""))
     db.execute(text("""CREATE TABLE supplier_schedule_allocation (
       id TEXT PRIMARY KEY,tenant_id TEXT,demand_id TEXT,supplier_id TEXT,evidence_id TEXT,status TEXT,
       quantity INTEGER,eta TEXT,observed_at TEXT,expires_at TEXT,created_at TEXT,
@@ -509,6 +522,101 @@ def test_shadow_parity_rejects_unknown_exception_codes():
         allocation_shadow_parity(
             db, tenant_id="t1", persist=False,
             accepted_difference_codes={"laptop_demo_exception"},
+        )
+
+
+def test_signed_parity_exception_is_exact_case_scoped_and_never_transfers_authority():
+    db = _db()
+    record_demand(
+        db, tenant_id="t1", idempotency_key="order-signed", case_id="order-signed",
+        sku="SKU-1", quantity=5, destination_id="destination:buyer", stage="committed",
+        priority_tier=50, fulfillment_location_id="SYD",
+    )
+    _snapshot(db, qty=5)
+    allocate_committed(db, tenant_id="t1", sku="SKU-1", location_id="SYD")
+    db.execute(text("""CREATE TABLE inventory_reservations (
+      id TEXT PRIMARY KEY,order_id TEXT,sku TEXT,qty INTEGER,status TEXT)"""))
+    db.execute(text(
+        "INSERT INTO inventory_reservations VALUES "
+        "('signed-r1','order-signed','SKU-1',3,'reserved')"
+    ))
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+    )
+    payload = {
+        "tenant_id": "t1", "case_id": "order-signed", "sku": "SKU-1",
+        "difference_code": "shadow_quantity_higher",
+        "rationale": "Legacy reservation records exclude the governed transfer quantity.",
+        "evidence_ref": "parity-run:2026-08-03:001", "signer_id": "operator-7",
+        "key_id": "ops-ed25519-v1", "valid_from": "2026-08-03T00:00:00Z",
+        "expires_at": "2026-08-10T00:00:00Z",
+    }
+    signature = base64.b64encode(private_key.sign(canonical_exception_bytes(payload))).decode()
+    stored = store_verified_exception(
+        db, payload=payload, signature_b64=signature, public_key_bytes=public_key,
+    )
+
+    report = allocation_shadow_parity_from_register(
+        db, tenant_id="t1", case_id="order-signed",
+        key_resolver=lambda tenant, key_id: public_key
+        if (tenant, key_id) == ("t1", "ops-ed25519-v1") else None,
+        as_of=datetime(2026, 8, 4, tzinfo=timezone.utc), persist=False,
+    )
+
+    assert report["status"] == "explained_difference"
+    assert report["comparisons"][0]["parity_exception_id"] == stored["id"]
+    assert report["parity_exception_verification"]["status"] == "verified"
+    assert report["replacement_ready"] is False
+    assert report["execution_authority"] == "legacy_inventory_reservations"
+
+
+def test_expired_parity_exception_fails_closed():
+    db = _db()
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+    )
+    payload = {
+        "tenant_id": "t1", "case_id": "order-expired", "sku": None,
+        "difference_code": "legacy_quantity_higher",
+        "rationale": "A bounded observation delay explains this measured difference.",
+        "evidence_ref": "parity-run:expired", "signer_id": "operator-7",
+        "key_id": "ops-ed25519-v1", "valid_from": "2026-08-01T00:00:00Z",
+        "expires_at": "2026-08-02T00:00:00Z",
+    }
+    signature = base64.b64encode(private_key.sign(canonical_exception_bytes(payload))).decode()
+    store_verified_exception(db, payload=payload, signature_b64=signature, public_key_bytes=public_key)
+    report = allocation_shadow_parity_from_register(
+        db, tenant_id="t1", case_id="order-expired",
+        key_resolver=lambda _tenant, _key: public_key,
+        as_of=datetime(2026, 8, 3, tzinfo=timezone.utc), persist=False,
+    )
+
+    assert report["parity_exception_verification"]["accepted"] == []
+    assert report["parity_exception_verification"]["rejected"][0]["reason"] == "outside_validity_window"
+
+
+def test_tampered_parity_exception_cannot_be_stored():
+    db = _db()
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+    )
+    payload = {
+        "tenant_id": "t1", "case_id": "order-tamper", "sku": "SKU-1",
+        "difference_code": "shadow_quantity_higher",
+        "rationale": "The signed evidence explains one bounded semantic difference.",
+        "evidence_ref": "parity-run:tamper", "signer_id": "operator-7",
+        "key_id": "ops-ed25519-v1", "valid_from": "2026-08-03T00:00:00Z",
+        "expires_at": "2026-08-10T00:00:00Z",
+    }
+    signature = base64.b64encode(private_key.sign(canonical_exception_bytes(payload))).decode()
+    payload["difference_code"] = "legacy_quantity_higher"
+
+    with pytest.raises(ValueError, match="invalid_parity_exception_signature"):
+        store_verified_exception(
+            db, payload=payload, signature_b64=signature, public_key_bytes=public_key,
         )
 
 
