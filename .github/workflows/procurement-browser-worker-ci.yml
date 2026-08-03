@@ -105,6 +105,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install poetry
           poetry install --no-interaction --no-ansi --no-root
+          # Python E2E tests launch Playwright through the Poetry environment.
+          # The Node install below uses a separately versioned browser cache and
+          # cannot satisfy the Python package's expected Chromium revision.
+          poetry run python -m playwright install --with-deps chromium
           npm ci --prefix frontend
           npm ci --prefix src/frontend/admin-react
           npx --prefix frontend playwright install --with-deps chromium
