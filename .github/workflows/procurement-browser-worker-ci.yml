@@ -228,6 +228,17 @@ jobs:
               proof-artifacts/backend.log proof-artifacts/celery.log
             exit 1
           fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("proof-artifacts/transaction-abort-gate.json").write_text(json.dumps({
+              "schema_version": "shopsquire.runtime_log_gate.v1",
+              "status": "pass",
+              "patterns": ["current transaction is aborted", "InFailedSqlTransaction", "SQLSTATE 25P02"],
+              "files": ["backend.log", "celery.log"],
+              "matched_signatures": 0,
+          }, indent=2), encoding="utf-8")
+          PY
       - name: Inventory retained proof
         if: always()
         run: |
@@ -329,6 +340,17 @@ jobs:
               proof-artifacts/celery.log
             exit 1
           fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("proof-artifacts/transaction-abort-gate.json").write_text(json.dumps({
+              "schema_version": "shopsquire.runtime_log_gate.v1",
+              "status": "pass",
+              "patterns": ["current transaction is aborted", "InFailedSqlTransaction", "SQLSTATE 25P02"],
+              "files": ["celery.log"],
+              "matched_signatures": 0,
+          }, indent=2), encoding="utf-8")
+          PY
       - name: Inventory retained worker proof
         if: always()
         run: |
