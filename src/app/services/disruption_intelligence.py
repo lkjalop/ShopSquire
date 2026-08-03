@@ -8,6 +8,7 @@ messages, or buyer promises.
 from __future__ import annotations
 
 import json
+import hashlib
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -402,3 +403,93 @@ def disruption_workbench_projection(
         payload["evidence"] = evidence
         projected.append(payload)
     return projected
+
+
+def draft_disruption_buyer_reviews(
+    db, *, tenant_id: str, projection_id: str,
+) -> dict[str, Any]:
+    """Draft truthful, case-scoped buyer reviews from a persisted proposal.
+
+    Only committed demand is eligible. The resulting communication lifecycle
+    starts at ``proposed``; this function cannot approve, queue, deliver, amend
+    a promise, capture payment, or expose another buyer's identity.
+    """
+    row = db.execute(text(
+        "SELECT p.projection_json,p.status,p.authority,p.observation_id,n.logical_key "
+        "FROM supply_disruption_impact_projection p JOIN supply_node n "
+        "ON n.id=p.target_node_id AND n.tenant_id=p.tenant_id "
+        "WHERE p.id=:id AND p.tenant_id=:tenant"
+    ), {"id": str(projection_id), "tenant": str(tenant_id)}).fetchone()
+    if row is None:
+        raise KeyError("disruption_projection_not_found")
+    if str(row[1]) != "bounded_recalculation_proposed" or str(row[2]) != "proposal_only":
+        return {
+            "status": "blocked",
+            "reason": "projection_not_eligible",
+            "draft_count": 0,
+            "auto_sent": False,
+            "human_authorization_required": True,
+        }
+    try:
+        projection = json.loads(str(row[0] or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("disruption_projection_malformed") from exc
+    eta = (((projection.get("impact") or {}).get("eta_days") or {}).get("proposed") or {})
+    if eta.get("low") is None or eta.get("high") is None:
+        raise ValueError("disruption_projection_eta_required")
+    logical_key = str(row[4] or "")
+    sku = logical_key.split(":", 1)[1] if ":" in logical_key else logical_key
+    demands = db.execute(text(
+        "SELECT id,case_id,quantity FROM demand_commitment WHERE tenant_id=:tenant "
+        "AND sku=:sku AND stage='committed' ORDER BY case_id,id"
+    ), {"tenant": str(tenant_id), "sku": sku}).fetchall()
+    from src.app.services.communication_observations import record_message_observation
+
+    drafts = []
+    evidence = projection.get("evidence") or {}
+    for demand in demands:
+        demand_id, case_id, quantity = str(demand[0]), str(demand[1]), int(demand[2])
+        identity = "|".join((str(tenant_id), str(projection_id), demand_id, case_id))
+        message_id = "disruption-review:" + hashlib.sha256(identity.encode()).hexdigest()
+        payload = {
+            "template_id": "buyer-disruption-review-v1",
+            "case_id": case_id,
+            "sku": sku,
+            "quantity": quantity,
+            "revised_eta_days": {"low": int(eta["low"]), "high": int(eta["high"])},
+            "wording": (
+                "A verified supply-chain observation may affect the delivery window. "
+                f"The current review range is {int(eta['low'])}-{int(eta['high'])} days. "
+                "No revised promise or payment change has been applied; an operator must review it."
+            ),
+            "claim_status": evidence.get("claim_status"),
+            "source_id": evidence.get("source_id"),
+            "source_revision": evidence.get("source_revision"),
+            "projection_id": str(projection_id),
+            "human_authorization_required": True,
+            "auto_sent": False,
+        }
+        result = record_message_observation(
+            db=db,
+            tenant_id=str(tenant_id),
+            party_type="buyer",
+            direction="outbound",
+            channel="internal_draft",
+            provider_message_id=message_id,
+            purpose="delivery_disruption_review",
+            consent_status="not_required",
+            security_status="clean",
+            sanitized_payload=payload,
+            case_ref=case_id,
+            evidence_ref=f"disruption_projection:{projection_id}",
+        )
+        drafts.append({"case_id": case_id, "demand_id": demand_id, **result})
+    return {
+        "status": "drafted_for_human_review" if drafts else "no_committed_demand",
+        "projection_id": str(projection_id),
+        "draft_count": len(drafts),
+        "drafts": drafts,
+        "auto_sent": False,
+        "human_authorization_required": True,
+        "state_prevented": ["buyer_promise_mutation", "payment_change", "message_delivery"],
+    }

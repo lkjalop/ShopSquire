@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.app.services.disruption_intelligence import (
+    draft_disruption_buyer_reviews,
     disruption_workbench_projection,
     project_disruption_impact,
     record_disruption_observation,
@@ -246,3 +247,47 @@ def test_verified_path_recalculates_bounded_commercial_proposals_without_mutatio
     assert disruption_workbench_projection(
         db, tenant_id="tenant-a", sku="another-sku",
     ) == []
+
+
+def test_verified_projection_drafts_case_scoped_buyer_reviews_without_sending(db, monkeypatch):
+    db.execute(text(
+        "CREATE TABLE demand_commitment (id TEXT,tenant_id TEXT,case_id TEXT,sku TEXT,"
+        "quantity INTEGER,stage TEXT)"
+    ))
+    db.execute(text(
+        "INSERT INTO demand_commitment VALUES "
+        "('d1','tenant-a','case-1','rgam-7',40,'committed'),"
+        "('d2','tenant-a','case-2','rgam-7',20,'provisional'),"
+        "('d3','tenant-b','case-other','rgam-7',10,'committed')"
+    ))
+    target = _node(db, "tenant-a", "variant:rgam-7", "variant")
+    db.execute(text(
+        "INSERT INTO supply_disruption_impact_projection "
+        "(id,tenant_id,observation_id,target_node_id,baseline_version,dependency_path_json,"
+        "projection_json,status,authority,created_at) VALUES "
+        "('p1','tenant-a','obs-1',:target,'v1','{}',:projection,"
+        "'bounded_recalculation_proposed','proposal_only','2026-08-03T10:00:00Z')"
+    ), {
+        "target": target["id"],
+        "projection": '{"impact":{"eta_days":{"proposed":{"low":10,"high":20}}},'
+        '"evidence":{"source_id":"abf","source_revision":"r1"}}',
+    })
+    recorded = []
+
+    monkeypatch.setattr(
+        "src.app.services.communication_observations.record_message_observation",
+        lambda **kwargs: recorded.append(kwargs) or {"id": "message-1", "duplicate": False},
+    )
+
+    result = draft_disruption_buyer_reviews(
+        db, tenant_id="tenant-a", projection_id="p1"
+    )
+
+    assert result["status"] == "drafted_for_human_review"
+    assert result["draft_count"] == 1
+    assert result["auto_sent"] is False
+    assert result["human_authorization_required"] is True
+    assert recorded[0]["case_ref"] == "case-1"
+    assert recorded[0]["sanitized_payload"]["quantity"] == 40
+    assert recorded[0]["sanitized_payload"]["revised_eta_days"] == {"low": 10, "high": 20}
+    assert "case-2" not in str(recorded)
