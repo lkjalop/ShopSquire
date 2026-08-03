@@ -8,6 +8,8 @@ import FulfilmentTraceLink from './FulfilmentTraceLink';
 import { explainProcEvent } from '../lib/procEventExplain';
 import { dealEconomicsStatus, formatDealMoney } from '../lib/dealEconomicsDisplay';
 import { shouldShowMissingAnchorReasoning } from '../lib/tracePresentation';
+import ArtifactSecuritySummary from './security/ArtifactSecuritySummary';
+import ProcurementOperationalTrace from './ProcurementOperationalTrace';
 
 type TraceEvent = {
   id?: string;
@@ -310,7 +312,7 @@ export function deriveTraceTrustStrip({
   const authorized = authorities.includes('authorizes') || /authorized|policy_gate/.test(eventText);
   const proposed = authorities.includes('proposes');
   const authority: TrustCue = humanApproved
-    ? { label: 'Human approved', detail: 'A recorded human authorization exists.', status: 'good' }
+    ? { label: 'Human step recorded', detail: 'A human authorized at least one recorded step; supplier-send and payment authority remain separately gated.', status: 'good' }
     : authorized
       ? { label: 'Platform authorized', detail: 'Deterministic policy or authority gates were recorded.', status: 'good' }
       : proposed
@@ -693,6 +695,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [procCase, setProcCase] = useState<any | null>(null);
   const [procCases, setProcCases] = useState<any[]>([]);  // ALL cases for the trace (multi-supplier → N RFQs)
   const [procHistory, setProcHistory] = useState<any | null>(null);
+  const [allocationView, setAllocationView] = useState<any | null>(null);
   // Procurement agent-row drill-down: row index → expanded (the payload is the evidence — one click deep).
   const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
@@ -782,6 +785,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [explainReplayLoading, setExplainReplayLoading] = useState(false);
   const apiBase = getApiBase();
   const explainReplayAbortRef = useRef<AbortController | null>(null);
+  // Optional explain/replay enrichment may exceed its deadline under load.
+  // Record one attempt per trace so a timeout cannot create a render-driven
+  // retry storm that starves the canonical snapshot and the rest of the API.
+  const explainReplayAttemptedTraceRef = useRef<string>('');
   const displayEventType = (evt: TraceEvent): string =>
     String(evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type || 'event');
 
@@ -969,7 +976,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         { credentials: 'include', headers },
       ).then(safeJson).catch(() => null);
       const cases: any[] = Array.isArray(allView?.cases) ? allView.cases : [];
-      setProcCases(cases);
+      // The projection may include prior superseded revisions so operators can
+      // audit an amendment. Those revisions are history, not additional
+      // suppliers. Rendering all of them as a "multi-supplier" fan-out mixed
+      // stale RFQ quantities into the current decision and made the first card
+      // nondeterministic. Prefer active cases; fall back to the superseded set
+      // only when the trace itself has no active revision.
+      const activeCases = cases.filter(
+        (item: any) => String(item?.state || '').toUpperCase() !== 'SUPERSEDED',
+      );
+      const visibleCases = activeCases.length ? activeCases : cases;
+      setProcCases(visibleCases);
       const orderGroupId = String(allView?.order_group_id || '');
       const embeddedHistory = allView?.amendment_history?.case_count
         ? allView.amendment_history
@@ -984,8 +1001,21 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       } else {
         setProcHistory(embeddedHistory);
       }
-      const primary = cases[0] || null;
+      const primary = visibleCases[0] || null;
       setProcCase(primary && (primary.case_id || primary.state) ? primary : null);
+      if (canSeeOperatorDraft && primary) {
+        const allocationSku = String(
+          primary?.state_json?.availability?.item_ref
+          || primary?.state_json?.draft?.commercial_scope?.item_ref || '',
+        ).trim();
+        const workbenchPath = `/api/v1/admin/allocation/workbench${allocationSku ? `?sku=${encodeURIComponent(allocationSku)}` : ''}`;
+        const allocation: any = await fetch(
+          apiUrl(workbenchPath), { credentials: 'include', headers },
+        ).then(safeJson).catch(() => null);
+        setAllocationView(allocation?.summary ? allocation : null);
+      } else {
+        setAllocationView(null);
+      }
       const cid = (primary && primary.case_id) || procurementCaseId;
       if (cid) {
         const jr: any = await fetch(
@@ -1219,6 +1249,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     if (!effectiveTraceId) return;
     if (!(activeTab === 'execution' || activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw')) return;
     if (explain || replay || explainReplayLoading) return;
+    if (explainReplayAttemptedTraceRef.current === effectiveTraceId) return;
+    explainReplayAttemptedTraceRef.current = effectiveTraceId;
     fetchExplainReplayLazy();
   }, [effectiveTraceId, activeTab, explain, replay, explainReplayLoading, fetchExplainReplayLazy]);
 
@@ -1669,8 +1701,20 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     if ((sec.extracted_text || sec.ocr_text || (sec.signals && Object.keys(sec.signals || {}).length > 0)) && sec) return [sec];
     return [];
   })();
+  const blockedArtifactStates = triageItems
+    .map((item: any) => String(item?.artifact?.state || item?.security?.artifact_state || '').toLowerCase())
+    .filter((state: string) => state && state !== 'clean');
+  if (blockedArtifactStates.length > 0) {
+    trustStrip.authority = {
+      label: blockedArtifactStates.includes('pending')
+        ? 'Read-only while inspection is pending'
+        : 'Commercial actions blocked',
+      detail: `Artifact authority is incomplete or denied (${Array.from(new Set(blockedArtifactStates)).join(', ')}).`,
+      status: 'warn',
+    };
+  }
 
-  /** One-line "why this fired" for the analyst ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â driven by hypothesis first, signals as fallback. */
+  /** One-line "why this fired" for the analyst -- driven by hypothesis first, signals as fallback. */
   function buildWhyFiredLine(sigs: Record<string, any>, payloadAnalysis: any): string | null {
     const hyp = payloadAnalysis?.attack_hypothesis;
     const DETECTION_MAP: Record<string, string> = {
@@ -1702,7 +1746,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     if (sigs.qr_code_detected) {
       const payloads: any[] = sigs.qr_payloads || [];
       if (payloads.length > 0) {
-        parts.push(`QR code detected in ${filename}. Decoded payload: "${payloads.map((p: any) => p.data).join('" / "')}".`);
+        parts.push(`QR code detected in ${filename}. ${payloads.length} decoded payload${payloads.length > 1 ? 's' : ''} retained as defanged security evidence; content is collapsed by default.`);
       } else {
         parts.push(`QR code detected in ${filename} but payload could not be fully decoded.`);
       }
@@ -1712,7 +1756,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     if (sigs.adversarial_detected) parts.push('Adversarial perturbation signature found; image may be crafted to mislead the classifier.');
     if (sigs.ai_generated_suspected) parts.push('High diffusion-model score ? image may be AI-generated.');
     if (payloadAnalysis.attack_hypothesis === 'ransomware' || sigs.ransomware_indicator) {
-      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â sandbox detonation required before any further processing. Do NOT execute on a live host.');
+      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR -- sandbox detonation required before any further processing. Do NOT execute on a live host.');
     } else if (payloadAnalysis.attack_hypothesis && payloadAnalysis.attack_hypothesis !== 'unknown') {
       parts.push(`Passive triage suggests ${String(payloadAnalysis.attack_hypothesis).replace(/_/g, ' ')} behavior.`);
     } else if (sigs.steg_suspicious) {
@@ -1938,7 +1982,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         const _profileSummary = _profiles.length > 0
           ? ` ${_profiles.map((p: any) => `${p.full_name || p.binary} (${p.mitre_sub_technique || 'MITRE'})`).join(' | ')}.`
           : '';
-        const _ransomwareWarning = _ransomware ? ' ÃƒÂ¢Ã…Â¡Ã‚Â \ufe0f Ransomware indicator ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â do NOT execute outside sandbox.' : '';
+        const _ransomwareWarning = _ransomware ? ' \u26a0\ufe0f Ransomware indicator -- do NOT execute outside sandbox.' : '';
         const _hypothesis = String(payloadAnalysis?.attack_hypothesis || 'unknown').replace(/_/g, ' ');
         const _payloadType = String(payloadAnalysis?.payload_type || 'unknown').replace(/_/g, ' ');
         const _nextStep = String(payloadAnalysis?.suggested_next_step || 'allow').replace(/_/g, ' ');
@@ -3361,11 +3405,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                           <span className={trustChannels?.visual_embedding_trusted ? styles.booleanYes : styles.booleanNo}>
                             visual:{trustChannels?.visual_embedding_trusted ? 'trusted' : 'untrusted'}
                           </span>
-                          {' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· '}
+                          {' · '}
                           <span className={trustChannels?.ocr_trusted ? styles.booleanYes : styles.booleanNo}>
                             ocr:{trustChannels?.ocr_trusted ? 'trusted' : 'untrusted'}
                           </span>
-                          {' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· '}
+                          {' · '}
                           <span className={trustChannels?.qr_trusted ? styles.booleanYes : styles.booleanNo}>
                             qr:{trustChannels?.qr_trusted ? 'trusted' : 'untrusted'}
                           </span>
@@ -3713,11 +3757,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         const clean = cleanFlag !== false && !sigs.qr_code_detected && !sigs.adversarial_detected && !sigs.steg_suspicious;
                         return (
                           <div key={idx} className={styles.triageBlock}>
+                            <ArtifactSecuritySummary
+                              item={t}
+                              batchItems={idx === 0 ? triageItems : []}
+                              monitoringDelivery={t?.security?.siem_handoff || (security as any)?.siem_handoff}
+                            />
                             <div className={styles.kvRow}>
                               <span>{filename}</span>
                               <span className={clean ? styles.tagGreen : styles.tagRed}>{clean ? 'Clean' : 'Flagged'}</span>
                             </div>
-                            {/* Why this fired ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â one-liner analyst detection reason */}
+                            {/* Why this fired -- one-line analyst detection reason */}
                             {!clean && (() => {
                               const _why = buildWhyFiredLine(sigs, payloadAnalysis);
                               return _why ? (
@@ -3850,7 +3899,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                     <div className={styles.sectionSubTitle}>Linked Artifact Provenance</div>
                                     <ul className={styles.playbookList}>
                                       {linkedArtifact.linked_artifact_provenance.map((row: any, pi: number) => (
-                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} Ã¢â‚¬Â¢ ${row?.extraction_method || 'extract'} Ã¢â‚¬Â¢ ${row?.match_ref || 'match'} Ã¢â‚¬Â¢ ${row?.confidence || 'unknown'}${row?.reason ? ` Ã¢â‚¬Â¢ ${row.reason}` : ''}`}</li>
+                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} · ${row?.extraction_method || 'extract'} · ${row?.match_ref || 'match'} · ${row?.confidence || 'unknown'}${row?.reason ? ` · ${row.reason}` : ''}`}</li>
                                       ))}
                                     </ul>
                                   </>
@@ -3947,22 +3996,27 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                 <div className={styles.sectionSubTitle}>Artifact Provenance</div>
                                 <ul className={styles.playbookList}>
                                   {artifactProvenance.map((row: any, pi: number) => (
-                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} Ã¢â‚¬Â¢ ${row?.extraction_method || 'extract'} Ã¢â‚¬Â¢ ${row?.match_ref || 'match'} Ã¢â‚¬Â¢ ${row?.confidence || 'unknown'}${row?.reason ? ` Ã¢â‚¬Â¢ ${row.reason}` : ''}`}</li>
+                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} · ${row?.extraction_method || 'extract'} · ${row?.match_ref || 'match'} · ${row?.confidence || 'unknown'}${row?.reason ? ` · ${row.reason}` : ''}`}</li>
                                   ))}
                                 </ul>
                               </>
                             )}
                             {/* Decoded QR payloads */}
                             {payloads.length > 0 && (
-                              <>
-                                <div className={styles.sectionSubTitle}>Decoded QR Payload{payloads.length > 1 ? 's' : ''}</div>
-                                {payloads.map((p: any, pi: number) => (
-                                  <div key={pi} className={styles.kvRow}>
+                              <details>
+                                <summary className={styles.sectionSubTitle}>Show {payloads.length} defanged decoded QR payload{payloads.length > 1 ? 's' : ''}</summary>
+                                {payloads.map((p: any, pi: number) => {
+                                  const defanged = String(p?.data || '')
+                                    .replace(/https?:\/\//ig, 'hxxps://')
+                                    .replace(/ignore\s+(?:all\s+)?previous/ig, '[instruction marker]')
+                                    .replace(/system\s*:/ig, '[role marker] ')
+                                    .slice(0, 240);
+                                  return <div key={pi} className={styles.kvRow}>
                                     <span>{p.type || 'QR'}</span>
-                                    <span className={styles.qrPayload} title={p.data}>{p.data}</span>
-                                  </div>
-                                ))}
-                              </>
+                                    <span className={styles.qrPayload}>{defanged}</span>
+                                  </div>;
+                                })}
+                              </details>
                             )}
                             {/* Active signal flags */}
                             <div className={styles.tagRow}>
@@ -4130,6 +4184,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             "Raw recorded payload" disclosure. */}
                         {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
 
+                        {canSeeOperatorDraft && allocationView?.summary && (
+                          <ProcurementOperationalTrace allocationView={allocationView} />
+                        )}
+
                         {canSeeOperatorDraft && !dealProjection && (
                           <div data-testid="proc-deal-economics" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
@@ -4148,9 +4206,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         {canSeeOperatorDraft && dealProjection && dealStatus && (
                           <div data-testid="proc-deal-economics" style={{ border: '1px solid #86efac', background: '#f0fdf4', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                              <strong>Live deal economics</strong>
+                              <strong>{dealProjection.simulation_only ? 'Scenario deal economics' : 'Live deal economics'}</strong>
                               <span style={{ color: dealProjection.verdict === 'below_floor' ? '#b91c1c' : '#166534', fontWeight: 700 }}>
-                                {dealStatus.verdict}
+                                {dealProjection.simulation_only ? 'ESTIMATED · ' : ''}{dealStatus.verdict}
                               </span>
                             </div>
                             <div style={{ color: '#4b5563', marginTop: 3 }}>
@@ -4717,7 +4775,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               {!trace && (
                 <div className={styles.empty}>
                   {traceIdText
-                    ? `Trace snapshot is not available yet for ${traceIdText}.`
+                    ? `Waiting for the durable trace snapshot for ${traceIdText}. No state or evidence is inferred while it is unavailable.`
                     : 'No backend trace id is available yet. Showing local image triage only.'}
                 </div>
               )}
