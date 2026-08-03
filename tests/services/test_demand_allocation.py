@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -18,6 +18,10 @@ from src.app.services.demand_allocation import (
     sync_authoritative_location_atp,
     transition_demand,
     upsert_supply_snapshot,
+)
+from src.app.services.sourcing_backpressure import (
+    SourcingBackpressurePolicy,
+    SourcingQueueState,
 )
 
 
@@ -273,6 +277,32 @@ def test_sourcing_backpressure_is_typed_and_non_executable():
 
     assert result == {"status": "blocked", "reason": "supplier_capacity_limit",
                       "sku": "SKU-1", "quantity": 12}
+    assert db.execute(text("SELECT COUNT(*) FROM sourcing_batch")).scalar() == 0
+
+
+def test_supplier_queue_policy_prevents_new_contact_and_routes_urgent_alternative():
+    db = _db()
+    _demand(db, "urgent-overload", stage="committed", qty=12)
+    policy = SourcingBackpressurePolicy(
+        max_open_requests=2, max_open_units=100, max_request_units=50,
+        max_dispatches_per_hour=2, acknowledgement_sla=timedelta(hours=2),
+    )
+    queue = SourcingQueueState(
+        open_requests=2, open_units=80, dispatches_last_hour=2,
+        oldest_unacknowledged_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+
+    result = consolidate_shortfalls(
+        db, tenant_id="t1", supplier_id="SUP-1",
+        window_ends_at="2026-08-02T01:00:00Z", urgency_bypass=True,
+        backpressure_policy=policy, supplier_queue_state=queue,
+    )[0]
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "supplier_backpressure"
+    assert result["admission_action"] == "seek_alternative"
+    assert result["external_contact_permitted"] is False
+    assert "query_approved_alternative_supplier" in result["next_permitted_actions"]
     assert db.execute(text("SELECT COUNT(*) FROM sourcing_batch")).scalar() == 0
 
 

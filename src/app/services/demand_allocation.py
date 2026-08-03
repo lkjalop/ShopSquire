@@ -15,6 +15,12 @@ from typing import Any, Iterable
 
 from sqlalchemy import text
 
+from src.app.services.sourcing_backpressure import (
+    SourcingBackpressurePolicy,
+    SourcingQueueState,
+    evaluate_sourcing_admission,
+)
+
 
 DEMAND_STAGES = frozenset({"provisional", "committed", "cancelled", "fulfilled"})
 PARITY_DIFFERENCE_CODES = frozenset({
@@ -494,7 +500,10 @@ def allocate_committed(db, *, tenant_id: str, sku: str, uom: str = "each",
 def consolidate_shortfalls(db, *, tenant_id: str, supplier_id: str | None,
                            window_ends_at: str, urgency_bypass: bool = False,
                            max_open_batches: int = 100,
-                           max_batch_quantity: int = 10_000) -> list[dict[str, Any]]:
+                           max_batch_quantity: int = 10_000,
+                           backpressure_policy: SourcingBackpressurePolicy | None = None,
+                           supplier_queue_state: SourcingQueueState | None = None,
+                           ) -> list[dict[str, Any]]:
     """Create one draft batch per compatible committed shortfall and retain every child demand."""
     rows = db.execute(text(
         "SELECT d.id,d.sku,d.uom,d.destination_id,d.quantity,"
@@ -552,6 +561,28 @@ def consolidate_shortfalls(db, *, tenant_id: str, supplier_id: str | None,
             "SELECT COUNT(*) FROM sourcing_batch WHERE tenant_id=:t AND status='draft'"
         ), {"t": tenant_id}).scalar() or 0)
         total = sum(quantity for _demand, quantity in children)
+        if backpressure_policy is not None:
+            if supplier_queue_state is None:
+                raise ValueError("supplier_queue_state_required_for_backpressure_policy")
+            admission = evaluate_sourcing_admission(
+                policy=backpressure_policy,
+                state=supplier_queue_state,
+                requested_units=total,
+                compatible_open_request=False,
+                urgent=urgency_bypass,
+            )
+            if admission.action != "open_request":
+                out.append({
+                    "status": "blocked",
+                    "reason": "supplier_backpressure",
+                    "admission_action": admission.action,
+                    "reason_codes": list(admission.reason_codes),
+                    "next_permitted_actions": list(admission.next_permitted_actions),
+                    "external_contact_permitted": admission.external_contact_permitted,
+                    "sku": sku,
+                    "quantity": total,
+                })
+                continue
         if open_count >= max_open_batches:
             out.append({"status": "blocked", "reason": "operator_queue_limit",
                         "sku": sku, "quantity": total})
