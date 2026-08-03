@@ -69,3 +69,40 @@ def test_qualified_substitute_is_a_versioned_relationship_not_an_identity_mappin
     assert first["idempotent"] is False and replay["idempotent"] is True
     assert db.execute(text("SELECT COUNT(*) FROM tenant_supply_mapping")).scalar() == 0
     assert db.execute(text("SELECT COUNT(*) FROM tenant_supply_relationship")).scalar() == 1
+
+
+def test_mapping_health_applies_per_type_freshness_slas():
+    db = _db()
+    common = {
+        "tenant_id": "t1",
+        "source": "tenant-master-data",
+        "source_version": "v1",
+        "confidence": 1.0,
+    }
+    for mapping_type, observed_at in (
+        ("product", "2026-08-03T09:30:00Z"),
+        ("supplier", "2026-08-03T09:00:00Z"),
+        ("facility", "2026-08-01T00:00:00Z"),
+    ):
+        register_supply_mapping(
+            db,
+            mapping_type=mapping_type,
+            external_id=f"external-{mapping_type}",
+            canonical_id=f"canonical-{mapping_type}",
+            observed_at=observed_at,
+            evidence_ref=f"feed:v1#{mapping_type}",
+            **common,
+        )
+
+    health = supply_mapping_health(
+        db,
+        tenant_id="t1",
+        evaluated_at="2026-08-03T10:00:00Z",
+        freshness_sla_hours={"product": 2, "supplier": 2, "facility": 24},
+    )
+
+    assert health["status"] == "degraded"
+    assert health["stale_mapping_types"] == ["facility"]
+    assert health["by_type"]["product"]["freshness_status"] == "fresh"
+    assert health["by_type"]["facility"]["freshness_status"] == "stale"
+    assert health["by_type"]["facility"]["age_hours"] == 58.0

@@ -142,13 +142,60 @@ def import_supply_mapping_csv(
             "replayed": sum(row["idempotent"] for row in results)}
 
 
-def supply_mapping_health(db, *, tenant_id: str) -> dict[str, Any]:
+def supply_mapping_health(
+    db,
+    *,
+    tenant_id: str,
+    evaluated_at: str | None = None,
+    freshness_sla_hours: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Report coverage and age without treating an old mapping as healthy.
+
+    SLAs are deployment policy, not facts embedded in the mapping rows. Callers
+    may supply a per-type policy; absent policy preserves the legacy coverage-
+    only result while still exposing age metadata when an evaluation time is
+    provided.
+    """
     rows = db.execute(text(
         "SELECT mapping_type,COUNT(*),MAX(observed_at),COUNT(DISTINCT source) "
         "FROM tenant_supply_mapping WHERE tenant_id=:t AND status='active' GROUP BY mapping_type"
     ), {"t": tenant_id}).fetchall()
-    by_type = {str(row[0]): {"active": int(row[1]), "latest_observed_at": row[2],
-                             "source_count": int(row[3])} for row in rows}
+    evaluated = _utc_time(evaluated_at) if evaluated_at else datetime.now(timezone.utc)
+    slas = {str(key): float(value) for key, value in (freshness_sla_hours or {}).items()}
+    by_type: dict[str, dict[str, Any]] = {}
+    stale: list[str] = []
+    for row in rows:
+        kind = str(row[0])
+        observed = _utc_time(str(row[2]))
+        age_hours = max(0.0, (evaluated - observed).total_seconds() / 3600)
+        sla = slas.get(kind)
+        freshness_status = "not_evaluated"
+        if sla is not None:
+            freshness_status = "fresh" if age_hours <= sla else "stale"
+            if freshness_status == "stale":
+                stale.append(kind)
+        by_type[kind] = {
+            "active": int(row[1]),
+            "latest_observed_at": row[2],
+            "source_count": int(row[3]),
+            "age_hours": round(age_hours, 3),
+            "freshness_sla_hours": sla,
+            "freshness_status": freshness_status,
+        }
     missing = sorted(MAPPING_TYPES - set(by_type))
-    return {"tenant_id": tenant_id, "status": "ready" if not missing else "incomplete",
-            "by_type": by_type, "missing_mapping_types": missing}
+    status = "incomplete" if missing else ("degraded" if stale else "ready")
+    return {
+        "tenant_id": tenant_id,
+        "status": status,
+        "evaluated_at": evaluated.isoformat(),
+        "by_type": by_type,
+        "missing_mapping_types": missing,
+        "stale_mapping_types": sorted(stale),
+    }
+
+
+def _utc_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

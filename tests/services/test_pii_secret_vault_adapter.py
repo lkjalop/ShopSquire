@@ -3,7 +3,10 @@ import json
 
 import pytest
 
-from src.app.adapters.pii_secret_vault import JsonSecretDestinationVault
+from src.app.adapters.pii_secret_vault import (
+    JsonSecretDestinationVault,
+    destination_vault_from_env,
+)
 
 
 def _record(*, tenant: str = "tenant-a", token: str = "dst-token-1") -> str:
@@ -64,3 +67,29 @@ def test_secret_vault_rejects_tampered_token_and_unavailable_fields():
             tenant_id="tenant-a", destination_token="dst-token-1",
             fields=frozenset({"date_of_birth"}), purpose="deliver_order",
         )
+
+
+def test_runtime_factory_fails_closed_without_a_provider(monkeypatch):
+    monkeypatch.delenv("DESTINATION_PII_VAULT_PROVIDER", raising=False)
+    with pytest.raises(RuntimeError, match="destination_pii_vault_provider_required"):
+        destination_vault_from_env()
+
+
+def test_runtime_factory_composes_azure_managed_identity_adapter(monkeypatch):
+    marker = object()
+    monkeypatch.setenv("DESTINATION_PII_VAULT_PROVIDER", "azure_key_vault")
+    monkeypatch.setenv("DESTINATION_PII_AZURE_VAULT_URL", "https://vault.example.test")
+    monkeypatch.setenv("DESTINATION_PII_SECRET_NAMESPACE", "tenant-destination")
+    monkeypatch.setattr(
+        JsonSecretDestinationVault,
+        "from_azure_key_vault",
+        classmethod(lambda cls, **kwargs: (marker, kwargs)),
+    )
+
+    vault, args = destination_vault_from_env()
+
+    assert vault is marker
+    assert args == {
+        "vault_url": "https://vault.example.test",
+        "namespace": "tenant-destination",
+    }

@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from typing import Any, Mapping
 
@@ -108,3 +109,35 @@ class JsonSecretDestinationVault:
         if missing:
             raise LookupError("destination_record_fields_unavailable:" + ",".join(missing))
         return {field: available[field] for field in sorted(requested)}
+
+
+def destination_vault_from_env() -> JsonSecretDestinationVault:
+    """Compose the production edge adapter without accepting secret values.
+
+    Azure uses ``DefaultAzureCredential`` and AWS uses the ambient workload
+    identity chain. Configuration contains only provider coordinates and the
+    non-sensitive locator namespace.
+    """
+    provider = str(os.getenv("DESTINATION_PII_VAULT_PROVIDER") or "").strip().lower()
+    namespace = str(
+        os.getenv("DESTINATION_PII_SECRET_NAMESPACE") or "shopsquire-destination"
+    ).strip()
+    if provider in {"azure", "azure_key_vault"}:
+        vault_url = str(os.getenv("DESTINATION_PII_AZURE_VAULT_URL") or "").strip()
+        if not vault_url:
+            raise RuntimeError("destination_pii_azure_vault_url_required")
+        return JsonSecretDestinationVault.from_azure_key_vault(
+            vault_url=vault_url,
+            namespace=namespace,
+        )
+    if provider in {"aws", "aws_secrets_manager"}:
+        region = str(os.getenv("DESTINATION_PII_AWS_REGION") or "").strip()
+        if not region:
+            raise RuntimeError("destination_pii_aws_region_required")
+        return JsonSecretDestinationVault.from_aws_secrets_manager(
+            region=region,
+            namespace=namespace,
+        )
+    if not provider:
+        raise RuntimeError("destination_pii_vault_provider_required")
+    raise RuntimeError(f"destination_pii_vault_provider_unsupported:{provider}")
