@@ -16,10 +16,7 @@ from urllib.parse import urlencode
 TextFetcher = Callable[[str, float, int], str]
 JsonFetcher = Callable[[str, float, int], dict[str, Any]]
 
-ABF_ICS_STATUS_URL = (
-    "https://www.abf.gov.au/help-and-support/ics/"
-    "integrated-cargo-system-%28ics%29/ics-notifications"
-)
+ABF_ICS_STATUS_URL = "https://icsnotifications.abf.gov.au/ics?id=ics_performance"
 NOAA_DATA_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
 DFAT_CONSOLIDATED_LIST_URL = (
     "https://www.dfat.gov.au/international-relations/security/sanctions/consolidated-list"
