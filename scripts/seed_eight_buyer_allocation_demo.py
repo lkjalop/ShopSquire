@@ -110,25 +110,52 @@ def seed() -> dict:
         allocation = allocate_committed(
             db, tenant_id=TENANT, sku=SKU, uom="each", location_id=LOCATION,
         )
-        batches = consolidate_shortfalls(
-            db, tenant_id=TENANT, supplier_id=supplier_id,
-            window_ends_at=(now + timedelta(minutes=30)).isoformat(),
-            # The scenario must remain reproducible even when run in a test database that contains
-            # unrelated historical draft batches. Production callers keep the governed default.
-            max_open_batches=10_000,
+        existing_sourcing = db.execute(text(
+            "SELECT b.id AS batch_id,b.window_ends_at,b.status,w.id AS wave_id "
+            "FROM sourcing_batch b "
+            "JOIN sourcing_batch_demand bd ON bd.batch_id=b.id "
+            "JOIN demand_commitment d ON d.id=bd.demand_id "
+            "LEFT JOIN sourcing_wave_batch wb ON wb.batch_id=b.id "
+            "LEFT JOIN sourcing_wave w ON w.id=wb.wave_id "
+            "WHERE b.tenant_id=:tenant AND b.sku=:sku AND b.supplier_id=:supplier "
+            "AND d.idempotency_key LIKE :scenario "
+            "ORDER BY b.created_at LIMIT 1"
+        ), {
+            "tenant": TENANT,
+            "sku": SKU,
+            "supplier": supplier_id,
+            "scenario": f"{SCENARIO}:buyer-%",
+        }).fetchone()
+        sourcing_window = (
+            str(existing_sourcing[1])
+            if existing_sourcing is not None
+            else (now + timedelta(minutes=30)).isoformat()
         )
-        batch = next((row for row in batches if row.get("sku") == SKU), None)
-        if batch is None:
-            raise RuntimeError(
-                f"eight_buyer_demo_batch_not_created: allocation={allocation!r}; batches={batches!r}"
+        if existing_sourcing is not None and existing_sourcing[3] is not None:
+            batch = {"id": str(existing_sourcing[0]), "sku": SKU,
+                     "status": str(existing_sourcing[2]), "idempotent": True}
+            wave = {"wave_id": str(existing_sourcing[3]), "idempotent": True,
+                    "external_action": "none"}
+        else:
+            batches = consolidate_shortfalls(
+                db, tenant_id=TENANT, supplier_id=supplier_id,
+                window_ends_at=sourcing_window,
+                # The scenario must remain reproducible even when run in a test database that contains
+                # unrelated historical draft batches. Production callers keep the governed default.
+                max_open_batches=10_000,
             )
-        wave = create_sourcing_wave(
-            db, tenant_id=TENANT, supplier_id=supplier_id,
-            supplier_facility_id=f"{supplier_id}:primary-dc", currency="AUD", incoterm="DAP",
-            merchant_destination_id="merchant:SYD", window_ends_at=(now + timedelta(minutes=30)).isoformat(),
-            batch_ids=[batch["id"]], standalone_freight_cents=18_000,
-            consolidated_freight_cents=12_000, handling_cents=2_000,
-        )
+            batch = next((row for row in batches if row.get("sku") == SKU), None)
+            if batch is None:
+                raise RuntimeError(
+                    f"eight_buyer_demo_batch_not_created: allocation={allocation!r}; batches={batches!r}"
+                )
+            wave = create_sourcing_wave(
+                db, tenant_id=TENANT, supplier_id=supplier_id,
+                supplier_facility_id=f"{supplier_id}:primary-dc", currency="AUD", incoterm="DAP",
+                merchant_destination_id="merchant:SYD", window_ends_at=sourcing_window,
+                batch_ids=[batch["id"]], standalone_freight_cents=18_000,
+                consolidated_freight_cents=12_000, handling_cents=2_000,
+            )
         db.commit()
     with db_session() as db:
         recovery = apply_supplier_schedule_to_batch(
@@ -144,11 +171,21 @@ def seed() -> dict:
         rfq = materialize_governed_rfq_for_wave(
             db, tenant_id=TENANT, wave_id=wave["wave_id"], trace_id="SIM-EIGHT-BUYER-TRACE",
         )
+        allocated_total = int(db.execute(text(
+            "SELECT COALESCE(SUM(a.quantity),0) FROM demand_allocation a "
+            "JOIN demand_commitment d ON d.id=a.demand_id "
+            "WHERE a.tenant_id=:tenant AND d.sku=:sku AND a.status='allocated' "
+            "AND d.idempotency_key LIKE :scenario"
+        ), {
+            "tenant": TENANT,
+            "sku": SKU,
+            "scenario": f"{SCENARIO}:buyer-%",
+        }).scalar() or 0)
         db.commit()
     return {
         "scenario": SCENARIO, "simulation_only": True, "sku": SKU,
         "buyer_count": len(demands), "requested": 80, "atp": 53,
-        "allocated": sum(int(row["quantity"]) for row in allocation["allocated"]),
+        "allocated": allocated_total,
         "shortfall": 27,
         "supplier_confirmed": recovery["confirmed_quantity"],
         "supplier_unresolved": recovery["unresolved_quantity"],
