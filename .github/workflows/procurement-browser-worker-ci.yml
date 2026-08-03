@@ -86,6 +86,8 @@ jobs:
       DEVELOPER_API_KEY: ci-browser-developer-key
       VITE_API_KEY: ci-browser-merchant-key
       VITE_OWNER_API_KEY: ci-browser-owner-key
+      SIEM_WEBHOOK_URL: http://127.0.0.1:18089/events
+      SECURITY_HANDOFF_INLINE: "1"
       # Override developer .env files explicitly. The hosted backend listens
       # on 8080; a local 8099 value would only test connection refusal.
       VITE_API_BASE_URL: http://localhost:8080
@@ -128,6 +130,7 @@ jobs:
           timeout 180s npm --prefix src/frontend/admin-react test -- --run --reporter=verbose --testTimeout=15000
       - name: Start isolated backend and storefront
         run: |
+          poetry run python scripts/security_handoff_test_receiver.py --port 18089 --output proof-artifacts/siem-events.jsonl > proof-artifacts/siem-receiver.log 2>&1 &
           poetry run python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > proof-artifacts/backend.log 2>&1 &
           poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > proof-artifacts/celery.log 2>&1 &
           npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 > proof-artifacts/storefront.log 2>&1 &
@@ -136,6 +139,7 @@ jobs:
             if curl --fail --silent http://127.0.0.1:8080/health >/dev/null &&
                curl --fail --silent http://127.0.0.1:5173 >/dev/null &&
                curl --fail --silent http://127.0.0.1:3001 >/dev/null &&
+               curl --fail --silent http://127.0.0.1:18089/health >/dev/null &&
                timeout 5s poetry run celery -A src.app.workers.celery_app:celery_app inspect ping |
                  grep -q pong; then
               exit 0
@@ -143,6 +147,48 @@ jobs:
             sleep 1
           done
           exit 1
+      - name: Prove canonical SIEM protocol handoff
+        run: |
+          poetry run python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.app.security.siem_adapter import emit_security_handoff
+
+          event = {
+              "schema_version": "shopsquire.security.v1",
+              "event_time": 1785739200,
+              "source": "hosted_protocol_probe",
+              "tenant_id": "ci-tenant",
+              "decision_id": "ci-siem-decision",
+              "trace_id": "ci-siem-trace",
+              "entity": {"message_id_hash": "sha256:protocol-probe"},
+              "verdict": {
+                  "severity": "medium", "action": "quarantine",
+                  "route": "human_review", "escalation": "security_operator",
+              },
+              "reasons": ["hosted_protocol_contract"],
+              "tags": ["certification:protocol_only"],
+              "ioc": {},
+              "evidence": {"claim_scope": "loopback receiver; not live SIEM certification"},
+          }
+          result = emit_security_handoff(event, force_inline=True)
+          Path("proof-artifacts/siem-handoff-result.json").write_text(
+              json.dumps(result, indent=2, sort_keys=True), encoding="utf-8",
+          )
+          assert "siem_webhook" in result["sent"], result
+          PY
+          test -s proof-artifacts/siem-events.jsonl
+          poetry run python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(line) for line in Path("proof-artifacts/siem-events.jsonl").read_text().splitlines()]
+          assert any(
+              row.get("schema_version") == "shopsquire.security.v1"
+              and row.get("trace_id") == "ci-siem-trace"
+              and "certification:protocol_only" in row.get("tags", [])
+              for row in rows
+          )
+          PY
       - name: Isolated malicious-reply security regression
         env:
           RUN_LIVE_BROWSER_TESTS: "1"
