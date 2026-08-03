@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS outbound_message (
     actor_type       TEXT,                     -- the approved transition intent, replayed on deferred delivery
     actor_id         TEXT,
     transition_event TEXT,
+    channel          TEXT DEFAULT 'email',
+    schedule_reason  TEXT,
+    sla_clock        TEXT DEFAULT 'unknown',
+    transport_eligible INTEGER DEFAULT 1,
     created_at       TEXT,
     updated_at       TEXT,
     UNIQUE (tenant_id, idempotency_key)
@@ -165,7 +169,8 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
             max_attempts: int = 5, tenant_id: str = "default", actor_type: str = "", actor_id: str = "",
             transition_event: str = "", now_iso: Optional[str] = None,
             grounding_materials: Optional[List[Dict[str, Any]]] = None,
-            party_ref: Optional[str] = None) -> Dict[str, Any]:
+            party_ref: Optional[str] = None, channel: str = "email",
+            response_expectation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Durably enqueue an outbound supplier message. IDEMPOTENT on (tenant, idempotency_key) — a retried
     enqueue of the same content_hash returns the existing row (deduped), never a second send. pending +
     due now. ``actor_type``/``actor_id``/``transition_event`` persist the already-approved workflow intent so a
@@ -174,6 +179,10 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
     if db is None or not idempotency_key:
         return {"message_id": None, "status": "skipped", "deduped": False}
     ts = _now_iso(now_iso)
+    from src.app.services.supplier_contact_schedule import decide_contact_schedule
+    schedule = decide_contact_schedule(
+        channel=channel, expectation=response_expectation, submitted_at=ts,
+    )
     try:
         existing = db.execute(text("SELECT id, status FROM outbound_message WHERE tenant_id=:t AND idempotency_key=:k LIMIT 1"),
                               {"t": tenant_id, "k": idempotency_key}).fetchone()
@@ -183,11 +192,14 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
         db.execute(text(
             "INSERT INTO outbound_message (id, tenant_id, case_id, recipient, subject, body, idempotency_key, "
             "status, attempts, max_attempts, next_attempt_at, ack_status, actor_type, actor_id, transition_event, "
+            "channel, schedule_reason, sla_clock, transport_eligible, "
             "created_at, updated_at) "
-            "VALUES (:i,:t,:c,:r,:s,:b,:k,'pending',0,:m,:n,'awaiting',:at,:ai,:te,:ts,:ts)"),
+            "VALUES (:i,:t,:c,:r,:s,:b,:k,:status,0,:m,:n,'awaiting',:at,:ai,:te,:channel,:reason,:sla,:eligible,:ts,:ts)"),
             {"i": mid, "t": tenant_id, "c": case_id, "r": recipient, "s": subject, "b": body,
-             "k": idempotency_key, "m": int(max_attempts), "n": ts, "at": actor_type, "ai": actor_id,
-             "te": transition_event, "ts": ts})
+             "k": idempotency_key, "m": int(max_attempts), "n": schedule.not_before,
+             "status": schedule.queue_state, "at": actor_type, "ai": actor_id,
+             "te": transition_event, "channel": schedule.channel, "reason": schedule.reason,
+             "sla": schedule.sla_clock, "eligible": 1 if schedule.transport_eligible else 0, "ts": ts})
         _project_lifecycle(
             db, tenant_id=tenant_id, message_id=mid, case_id=case_id,
             recipient=recipient, subject=subject, body=body, state="queued",
@@ -196,7 +208,9 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
             party_ref=party_ref,
         )
         db.commit()
-        return {"message_id": mid, "status": "pending", "deduped": False}
+        return {"message_id": mid, "status": schedule.queue_state, "deduped": False,
+                "channel": schedule.channel, "not_before": schedule.not_before,
+                "schedule_reason": schedule.reason, "sla_clock": schedule.sla_clock}
     except Exception as exc:
         logger.debug("outbound enqueue failed for %s: %s", case_id, exc)
         try:
@@ -232,7 +246,8 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
     try:
         _reclaim_stale(db, tenant_id=tenant_id, ts=ts)
         sql = ("SELECT id, case_id, recipient, subject, body, idempotency_key, attempts, max_attempts, "
-               "actor_type, actor_id, transition_event FROM outbound_message WHERE tenant_id=:t AND status='pending' "
+               "actor_type, actor_id, transition_event FROM outbound_message WHERE tenant_id=:t AND status IN ('pending','scheduled') "
+               "AND channel='email' AND transport_eligible=1 "
                "AND (next_attempt_at IS NULL OR next_attempt_at <= :ts) ")
         params: Dict[str, Any] = {"t": tenant_id, "ts": ts, "lim": int(limit)}
         if only_key:
@@ -250,7 +265,8 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
         # ATOMIC CLAIM: only the worker whose UPDATE flips pending→sending may transmit (rowcount guard).
         try:
             claim = db.execute(text("UPDATE outbound_message SET status='sending', attempts=attempts+1, "
-                                    "updated_at=:ts WHERE id=:i AND status='pending'"), {"ts": ts, "i": mid})
+                                    "updated_at=:ts WHERE id=:i AND status IN ('pending','scheduled')"),
+                               {"ts": ts, "i": mid})
             db.commit()
         except Exception as exc:
             logger.warning("outbound claim failed for %s: %s", mid, exc)
@@ -368,7 +384,8 @@ def send_now(db, *, case_id: str, recipient: str, subject: str, body: str, idemp
              actor_type: str = "", actor_id: str = "", transition_event: str = "",
              now_iso: Optional[str] = None,
              grounding_materials: Optional[List[Dict[str, Any]]] = None,
-             party_ref: Optional[str] = None) -> Dict[str, Any]:
+             party_ref: Optional[str] = None, channel: str = "email",
+             response_expectation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Synchronous RELIABLE send for the GATE-2 path: durably enqueue (idempotent on content_hash) then attempt
     THIS message once. Returns {status, provider_ref, detail}: 'sent' (caller transitions now), or 'pending'
     (transient failure — durably retryable by the background processor, the human can re-dispatch), or
@@ -378,7 +395,8 @@ def send_now(db, *, case_id: str, recipient: str, subject: str, body: str, idemp
     enqueue(db, case_id=case_id, recipient=recipient, subject=subject, body=body, idempotency_key=idempotency_key,
             max_attempts=max_attempts, tenant_id=tenant_id, actor_type=actor_type, actor_id=actor_id,
             transition_event=transition_event, now_iso=now_iso,
-            grounding_materials=grounding_materials, party_ref=party_ref)
+            grounding_materials=grounding_materials, party_ref=party_ref,
+            channel=channel, response_expectation=response_expectation)
     existing = get_by_key(db, idempotency_key=idempotency_key, tenant_id=tenant_id)
     if existing.get("status") == "sent":  # idempotent re-dispatch of an already-delivered message
         return {"status": "sent", "provider_ref": existing.get("provider_ref", ""), "detail": "deduped"}

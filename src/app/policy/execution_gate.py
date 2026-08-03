@@ -170,8 +170,103 @@ def decide(
     """Evaluate a consequential action and log the verdict. Returns a PolicyVerdict;
     the caller enforces. Fail-closed: an unmapped action returns HUMAN_REVIEW (via the
     matrix default), never ALLOW. Never raises."""
+    gate_context = dict(context or {})
+    artifact_ids = [str(x) for x in (gate_context.get("artifact_ids") or []) if str(x).strip()]
+    artifact_required = bool(gate_context.get("artifact_required"))
+    if artifact_ids or artifact_required:
+        try:
+            if not tenant_id:
+                raise ValueError("tenant_required_for_artifact_authority")
+            from src.app.models.db import db_session
+            from src.app.security.artifact_authority import evaluate_bound_artifacts
+            with db_session() as db:
+                artifact_result = evaluate_bound_artifacts(
+                    db,
+                    tenant_id=str(tenant_id),
+                    artifact_ids=artifact_ids,
+                )
+            gate_context["artifact_authority"] = {
+                "allowed": artifact_result.allowed,
+                "reason": artifact_result.reason,
+                "artifact_ids": list(artifact_result.artifact_ids),
+                "blocked_states": list(artifact_result.blocked_states),
+            }
+            if not artifact_result.allowed:
+                verdict = PolicyVerdict(
+                    decision=AuthDecision.BLOCK,
+                    reason=f"Artifact authority denied: {artifact_result.reason}",
+                    rule_id="ARTIFACT-01",
+                    alert_siem=True,
+                    create_ticket=True,
+                    ticket_priority="critical",
+                    context=gate_context,
+                )
+                record_policy_decision(action, value_cents, verdict, tenant_id=tenant_id, actor=actor)
+                return verdict
+        except Exception as exc:
+            verdict = PolicyVerdict(
+                decision=AuthDecision.BLOCK,
+                reason=f"Artifact authority unavailable — fail closed: {exc}",
+                rule_id="ARTIFACT-ERROR",
+                alert_siem=True,
+                create_ticket=True,
+                ticket_priority="critical",
+                context=gate_context,
+            )
+            record_policy_decision(action, value_cents, verdict, tenant_id=tenant_id, actor=actor)
+            return verdict
+    # Temporal promise authority is evaluated before the general action matrix. The
+    # model, UI, or connector cannot turn UNKNOWN quantity-by-deadline evidence into
+    # an accepted order or full payment merely by wording the request confidently.
+    promise_payload = gate_context.get("promise_feasibility")
+    if promise_payload:
+        promise_action = str(gate_context.get("promise_action") or "").strip()
+        if not promise_action:
+            promise_action = {
+                "order_accept": "promise_full",
+                "supplier_pay": "review",
+            }.get(str(action or "").strip().lower(), "review")
+        proposal = {
+            "action": promise_action,
+            "payment_action": gate_context.get("payment_action"),
+            "substitute_selected": bool(gate_context.get("substitute_selected")),
+            "buyer_substitute_consent": bool(gate_context.get("buyer_substitute_consent")),
+        }
+        try:
+            from src.app.services.promise_critic import critique_promise
+
+            criticism = critique_promise(
+                proposal=proposal, feasibility=dict(promise_payload),
+                calendar_expectation={
+                    "calendar_state": gate_context.get("calendar_state"),
+                    "freshness": gate_context.get("calendar_freshness"),
+                },
+            )
+            gate_context["temporal_promise_critic"] = criticism
+            if criticism["decision"] == "block":
+                verdict = PolicyVerdict(
+                    decision=AuthDecision.BLOCK,
+                    reason="Temporal promise authority denied: " + ",".join(criticism["reason_codes"]),
+                    rule_id="PROMISE-TEMPORAL-01",
+                    alert_siem=False,
+                    context=gate_context,
+                )
+                record_policy_decision(action, value_cents, verdict, tenant_id=tenant_id, actor=actor)
+                return verdict
+        except Exception as exc:
+            verdict = PolicyVerdict(
+                decision=AuthDecision.BLOCK,
+                reason=f"Temporal promise authority unavailable — fail closed: {exc}",
+                rule_id="PROMISE-TEMPORAL-ERROR",
+                alert_siem=True,
+                create_ticket=True,
+                ticket_priority="high",
+                context=gate_context,
+            )
+            record_policy_decision(action, value_cents, verdict, tenant_id=tenant_id, actor=actor)
+            return verdict
     try:
-        verdict = _evaluate(action, value_aud_cents=int(value_cents or 0), context=context or {})
+        verdict = _evaluate(action, value_aud_cents=int(value_cents or 0), context=gate_context)
     except Exception as exc:
         _log.warning("execution_gate.decide evaluate failed for %s: %s — failing closed", action, exc)
         verdict = PolicyVerdict(
@@ -179,7 +274,7 @@ def decide(
             reason="gate evaluation error — fail closed",
             rule_id="GATE_ERROR",
             alert_siem=True,
-            context=context or {},
+            context=gate_context,
         )
     record_policy_decision(action, value_cents, verdict, tenant_id=tenant_id, actor=actor)
     return verdict

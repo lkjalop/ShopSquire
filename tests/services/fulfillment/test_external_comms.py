@@ -33,15 +33,16 @@ _DRAFT = {"content_hash": "H1", "recipient_domain": "approved-supplier.example",
            "commercial_scope": {"item_ref": "SKU-1", "quantity": 6}}
 
 
-def _to_approved(db):
+def _to_approved(db, draft=None):
     cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
-                       now_iso="2026-06-26 09:00:00"); db.commit()
+                       now_iso="2026-06-26 09:00:00")
+    db.commit()
     wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
                   state_patch={"availability": {"shortfall": 6, "requested_qty": 10}}, now_iso="2026-06-26 09:00:01")
     wf.transition(db, case_id=cid, event="request_buyer_commitment", actor=AG(), now_iso="2026-06-26 09:00:02")
     wf.transition(db, case_id=cid, event="buyer_committed", actor=BU(), now_iso="2026-06-26 09:05:00")
     wf.transition(db, case_id=cid, event="external_message_drafted", actor=AG(),
-                  state_patch={"draft": dict(_DRAFT)}, now_iso="2026-06-26 09:05:10")
+                  state_patch={"draft": dict(draft or _DRAFT)}, now_iso="2026-06-26 09:05:10")
     wf.transition(db, case_id=cid, event="approval_requested", actor=AG(), now_iso="2026-06-26 09:05:15")
     wf.transition(db, case_id=cid, event="approval_granted", actor=HU(), now_iso="2026-06-26 09:10:00")
     assert wf.current_state(db, cid) == S.APPROVED_TO_SEND
@@ -60,6 +61,57 @@ def test_send_with_matching_hash_sends(db):
     cid = _to_approved(db)
     r = ec.send_approved(db, case_id=cid, actor=HU(), approval_content_hash="H1", now_iso="2026-06-26 09:10:05")
     assert r.ok and wf.current_state(db, cid) == S.QUOTE_SENT
+
+
+@pytest.mark.parametrize(
+    ("channel", "expected_reason"),
+    [
+        ("portal", "supplier_portal_human_task_required"),
+        ("edi", "supplier_edi_connector_required"),
+        ("cxml", "supplier_cxml_connector_required"),
+        ("api", "supplier_api_connector_required"),
+    ],
+)
+def test_email_transport_refuses_non_email_supplier_channel(db, channel, expected_reason):
+    draft = {**_DRAFT, "channel_plan": {"channel": channel}}
+    cid = _to_approved(db, draft=draft)
+
+    result = ec.send_approved(
+        db, case_id=cid, actor=HU(), approval_content_hash="H1",
+        now_iso="2026-06-26 09:10:05",
+    )
+
+    assert result.ok is False
+    assert result.reason == expected_reason
+    assert wf.current_state(db, cid) == S.APPROVED_TO_SEND
+
+
+def test_phone_supplier_contact_is_durably_queued_and_not_emailed(db):
+    draft = {
+        **_DRAFT,
+        "channel_plan": {
+            "channel": "phone",
+            "response_expectation": {
+                "transmission_state": "queue_until_open",
+                "sla_clock": "paused",
+                "next_open_at": "2026-06-29T23:00:00+00:00",
+            },
+        },
+    }
+    cid = _to_approved(db, draft=draft)
+    result = ec.send_approved(
+        db, case_id=cid, actor=HU(), approval_content_hash="H1",
+        now_iso="2026-06-28T01:00:00+00:00",
+    )
+    assert result.ok is False and result.http_status == 202
+    assert result.reason == "supplier_phone_contact_queued"
+    row = db.execute(text(
+        "SELECT channel,status,transport_eligible,next_attempt_at,sla_clock "
+        "FROM outbound_message WHERE case_id=:case_id"
+    ), {"case_id": cid}).one()
+    assert tuple(row) == (
+        "phone", "queued_contact", 0, "2026-06-29T23:00:00+00:00", "paused",
+    )
 
 
 def test_send_through_reliable_queue_when_flag_on(db, monkeypatch):
@@ -92,6 +144,25 @@ def test_trusted_reply_is_received(db):
                          provider_ref=reply["provider_ref"], trusted_fn=lambda d: d == sb.TRUSTED_DOMAIN,
                          now_iso="2026-06-26 09:26:00")
     assert r.ok and wf.current_state(db, cid) == S.QUOTE_RECEIVED
+
+
+def test_sandbox_reply_uses_selected_supplier_but_spoof_scenario_does_not():
+    selected = "selected-supplier.example"
+    benign = sb.generate_reply(
+        case_ref="FC-SELECTED",
+        scenario="full_quote",
+        requested_qty=4,
+        sender_domain=selected,
+    )
+    malicious = sb.generate_reply(
+        case_ref="FC-SELECTED",
+        scenario="untrusted_sender",
+        requested_qty=4,
+        sender_domain=selected,
+    )
+
+    assert benign["sender_domain"] == selected
+    assert malicious["sender_domain"] == sb.SPOOFED_DOMAIN
 
 
 def test_untrusted_sender_is_quarantined(db):

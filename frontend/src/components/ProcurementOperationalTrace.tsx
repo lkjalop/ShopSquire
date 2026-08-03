@@ -46,6 +46,13 @@ function slaStatus(value: unknown): string {
   return humanize(normalized);
 }
 
+function transmissionStatus(value: unknown): string {
+  const normalized = String(value || 'blocked_unknown').toLowerCase();
+  if (normalized === 'transmit_now') return 'transmit now';
+  if (normalized === 'queue_until_open') return 'contact queued until verified opening';
+  return 'blocked — timing authority unknown';
+}
+
 function money(cents: unknown, currency: unknown): string {
   const numeric = Number(cents);
   if (!Number.isFinite(numeric)) return 'unavailable';
@@ -175,6 +182,9 @@ export default function ProcurementOperationalTrace({
 }: ProcurementOperationalTraceProps) {
   const summary = allocationView?.summary;
   if (!summary) return null;
+  const promise = allocationView?.promise_calculation
+    || asArray(allocationView?.promise_calculations)[0]
+    || allocationView?.promise_feasibility;
 
   const disruptions = asArray(
     allocationView.disruption_observations
@@ -200,6 +210,84 @@ export default function ProcurementOperationalTrace({
         <span>Committed / allocated</span>
         <span>{summary.committed_quantity} / {summary.allocated_quantity}</span>
       </div>
+
+      {promise && (
+        <section data-testid="proc-promise-feasibility" style={nestedStyle} aria-label="Promise feasibility">
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <strong>Quantity-by-deadline feasibility</strong>
+            <span>{humanize(promise.feasibility)}</span>
+          </div>
+          <div style={rowStyle}>
+            <span>Buyer deadline</span>
+            <span>{safeText(promise.requested_arrival_at, 'not recorded')}</span>
+          </div>
+          <div style={rowStyle}>
+            <span>Feasible by deadline</span>
+            <span>{promise.quantity_by_deadline ?? promise.quantity_confirmed_by_deadline ?? 'unknown'} unit(s)</span>
+          </div>
+          <div style={rowStyle}>
+            <span>Later or unconfirmed</span>
+            <span>{promise.remaining_quantity ?? promise.unknown_quantity ?? 'unknown'} unit(s)</span>
+          </div>
+          {promise.earliest_arrival_range && (
+            <div>Arrival range: {safeText(promise.earliest_arrival_range.earliest, 'unknown')}
+              {' → '}{safeText(promise.earliest_arrival_range.latest, 'unknown')}</div>
+          )}
+          {promise.latest_viable_supplier_response_at && (
+            <div>Latest viable supplier response: {safeText(promise.latest_viable_supplier_response_at)}</div>
+          )}
+          {promise.carrier_cutoff_at && <div>Carrier cutoff: {safeText(promise.carrier_cutoff_at)}</div>}
+          {asArray(promise.failed_constraints || promise.reason_codes).length > 0 && (
+            <div>Failed or unresolved: {asArray(promise.failed_constraints || promise.reason_codes)
+              .map(humanize).join(' · ')}</div>
+          )}
+          <div>
+            Calculation {safeText(promise.calculation_version, 'unversioned')}
+            {' · '}evaluated {safeText(promise.evaluated_at, 'time not recorded')}
+          </div>
+          <div>State prevented: {humanize(promise.state_prevented || (
+            promise.feasibility === 'met' ? 'none' : 'unsupported full delivery promise'
+          ))}</div>
+        </section>
+      )}
+      {allocationView.outbound_contact_schedule && (
+        <section data-testid="proc-contact-schedule" style={nestedStyle} aria-label="Supplier contact schedule">
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <strong>Supplier contact schedule</strong>
+            <span>{humanize(allocationView.outbound_contact_schedule.queue_state)}</span>
+          </div>
+          <div style={rowStyle}><span>Channel</span><span>{humanize(allocationView.outbound_contact_schedule.channel)}</span></div>
+          <div style={rowStyle}><span>SLA clock</span><span>{humanize(allocationView.outbound_contact_schedule.sla_clock)}</span></div>
+          <div style={rowStyle}><span>Transport</span><span>{allocationView.outbound_contact_schedule.transport_eligible
+            ? 'eligible now' : 'not executable by email worker'}</span></div>
+          <div>Reason: {humanize(allocationView.outbound_contact_schedule.schedule_reason)}</div>
+          {allocationView.outbound_contact_schedule.not_before && (
+            <div>Not before: {safeText(allocationView.outbound_contact_schedule.not_before)}</div>
+          )}
+        </section>
+      )}
+      {allocationView.human_room && (
+        <section data-testid="proc-human-room" style={nestedStyle} aria-label="Procurement human room">
+          <strong>Human procurement support</strong>
+          <div style={rowStyle}><span>Room state</span><span>{humanize(allocationView.human_room.state)}</span></div>
+          <div style={rowStyle}><span>Assigned operator</span><span>{safeText(allocationView.human_room.assigned_operator_id, 'not assigned')}</span></div>
+          <div>Version {safeText(allocationView.human_room.version, 'not recorded')} Â· tenant and case scoped</div>
+        </section>
+      )}
+      {allocationView.payment_consequence && (
+        <section data-testid="proc-payment-consequence" style={nestedStyle} aria-label="Payment consequence">
+          <strong>Payment consequence</strong>
+          <div style={rowStyle}><span>Plan</span><span>{humanize(allocationView.payment_consequence.plan_type)}</span></div>
+          <div style={rowStyle}><span>Status</span><span>{humanize(allocationView.payment_consequence.status)}</span></div>
+          <div style={rowStyle}><span>Deposit</span><span>{money(allocationView.payment_consequence.deposit_amount_cents, allocationView.payment_consequence.currency)}</span></div>
+          <div style={rowStyle}><span>Balance</span><span>{money(allocationView.payment_consequence.balance_amount_cents, allocationView.payment_consequence.currency)}</span></div>
+          {allocationView.payment_consequence.terms_days && <div>Approved terms: Net {allocationView.payment_consequence.terms_days}</div>}
+          {allocationView.payment_consequence.authorization_expires_at && (
+            <div>Authorization expires: {safeText(allocationView.payment_consequence.authorization_expires_at)}</div>
+          )}
+          <div>State prevented: {humanize(allocationView.payment_consequence.state_prevented || 'none')}</div>
+        </section>
+      )}
       <div style={rowStyle}><span>Allocation pressure</span><span>{percent(summary.allocation_pressure)}%</span></div>
       <div style={rowStyle}><span>Oldest demand queue age</span><span>{duration(summary.oldest_queue_age_seconds)}</span></div>
       <div style={rowStyle}>
@@ -234,10 +322,38 @@ export default function ProcurementOperationalTrace({
           )}
           <div>
             Response SLA: {slaStatus(pressure.response_sla?.status)}
+            {pressure.response_sla?.basis === 'elapsed_compatibility' ? ' · elapsed compatibility clock' : ''}
             {pressure.response_sla?.queue_age_seconds != null
               ? ` · oldest unacknowledged ${duration(pressure.response_sla.queue_age_seconds)}`
               : ''}
           </div>
+          {pressure.temporal_response && (
+            <div data-testid="proc-temporal-response" style={nestedStyle}>
+              <div>
+                Supplier calendar: {humanize(pressure.temporal_response.calendar_state)}
+                {' · '}SLA clock {humanize(pressure.temporal_response.sla_clock)}
+              </div>
+              <div>Supplier contact: {transmissionStatus(pressure.temporal_response.transmission_state)}</div>
+              {pressure.temporal_response.supplier_local_time && (
+                <div>Supplier local time: {safeText(pressure.temporal_response.supplier_local_time)}</div>
+              )}
+              {pressure.temporal_response.next_open_at && (
+                <div>Next operating window: {safeText(pressure.temporal_response.next_open_at)}</div>
+              )}
+              <div>
+                Acknowledgement due: {safeText(pressure.temporal_response.acknowledgement_due_at, 'unknown')}
+                {' · '}quote due: {safeText(pressure.temporal_response.quote_due_at, 'unknown')}
+              </div>
+              <div>
+                Calendar {safeText(pressure.temporal_response.calendar_version, 'unversioned')}
+                {' · '}policy {safeText(pressure.temporal_response.policy_version, 'unversioned')}
+                {' · '}{humanize(pressure.temporal_response.freshness || 'unknown freshness')}
+              </div>
+              {pressure.temporal_response.reason && (
+                <div>Temporal authority: {humanize(pressure.temporal_response.reason)}</div>
+              )}
+            </div>
+          )}
           <div>
             {pressure.source_health?.source_id || 'source unavailable'} ·{' '}
             {pressure.source_health?.source_version || 'version unavailable'} ·{' '}

@@ -38,6 +38,28 @@ def test_unknown_state_is_empty():
     assert buyer_status_message(None, None) == ""
 
 
+def test_supplier_closed_status_pauses_clock_without_promising_a_reply_date():
+    msg = buyer_status_message("QUOTE_SENT", {
+        **_CS,
+        "supplier_response_expectation": {
+            "calendar_state": "closed", "sla_clock": "paused",
+            "next_open_at": "2026-08-10T23:00:00Z",
+        },
+    })
+    assert "response clock is paused" in msg.lower()
+    assert "next operating window" in msg.lower()
+    assert "2026-08-10" not in msg
+
+
+def test_unknown_supplier_calendar_is_explicitly_unverified():
+    msg = buyer_status_message("QUOTE_SENT", {
+        **_CS,
+        "supplier_response_expectation": {"calendar_state": "unknown"},
+    })
+    assert "timing is not yet verified" in msg.lower()
+    assert "no reply date is promised" in msg.lower()
+
+
 # ── bounded-autonomy send (claim-safe buyer notification over the transport seam) ──
 import pytest as _pytest  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402

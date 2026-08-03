@@ -17,6 +17,18 @@ const VIEW = {
     allocation_pressure: 0.3375,
     oldest_queue_age_seconds: 720,
   },
+  promise_calculation: {
+    calculation_version: 'promise-critical-path-v1', feasibility: 'unknown',
+    requested_arrival_at: '2026-08-11T07:00:00+00:00', evaluated_at: '2026-08-04T00:00:00+00:00',
+    quantity_by_deadline: 53, remaining_quantity: 27,
+    earliest_arrival_range: {
+      earliest: '2026-08-11T05:00:00+00:00', latest: '2026-08-12T03:00:00+00:00',
+    },
+    latest_viable_supplier_response_at: '2026-08-10T23:00:00+00:00',
+    carrier_cutoff_at: '2026-08-11T03:00:00+00:00',
+    failed_constraints: ['supplier_response_expectation_unknown'],
+    state_prevented: 'unsupported_full_delivery_promise',
+  },
   sourcing_batches: [{
     batch_ref: 'Batch b-27', quantity: 27, child_demand_count: 3, status: 'draft',
   }],
@@ -29,6 +41,14 @@ const VIEW = {
       dispatch_utilization: 0.667,
     },
     response_sla: { seconds: 7200, queue_age_seconds: 3600, status: 'within_sla' },
+    temporal_response: {
+      calendar_state: 'closed', sla_clock: 'paused', transmission_state: 'transmit_now',
+      supplier_local_time: '2026-08-03T18:00:00+10:00',
+      next_open_at: '2026-08-03T23:00:00+00:00',
+      acknowledgement_due_at: '2026-08-04T01:00:00+00:00',
+      quote_due_at: '2026-08-04T07:00:00+00:00',
+      calendar_version: 'cal-7', policy_version: 'response-3', freshness: 'current',
+    },
     source_health: {
       status: 'fresh', source_id: 'portal-adapter', source_version: 'snapshot-7',
       observed_at: '2026-08-03T11:00:00+00:00', expires_at: '2026-08-03T13:00:00+00:00',
@@ -54,18 +74,66 @@ describe('ProcurementOperationalTrace', () => {
 
     expect(screen.getByText('Shadow allocation')).toBeInTheDocument();
     expect(screen.getByText(/27 unconfirmed unit\(s\) cannot become a delivery promise/)).toBeInTheDocument();
+    const promise = screen.getByTestId('proc-promise-feasibility');
+    expect(promise).toHaveTextContent('Quantity-by-deadline feasibilityunknown');
+    expect(promise).toHaveTextContent('Feasible by deadline53 unit(s)');
+    expect(promise).toHaveTextContent('Later or unconfirmed27 unit(s)');
+    expect(promise).toHaveTextContent('Carrier cutoff: 2026-08-11T03:00:00+00:00');
+    expect(promise).toHaveTextContent('State prevented: unsupported full delivery promise');
     expect(screen.getByText(/3 anonymized child demand/)).toBeInTheDocument();
 
     const pressure = screen.getByTestId('proc-supplier-pressure');
     expect(within(pressure).getByText(/SUP-1 \/ FAC-SYD/)).toBeInTheDocument();
     expect(within(pressure).getByText(/80% open-unit envelope/)).toBeInTheDocument();
     expect(within(pressure).getByText(/Response SLA: within SLA/)).toBeInTheDocument();
+    const temporal = within(pressure).getByTestId('proc-temporal-response');
+    expect(temporal).toHaveTextContent('Supplier calendar: closed · SLA clock paused');
+    expect(temporal).toHaveTextContent('Supplier contact: transmit now');
+    expect(temporal).toHaveTextContent('Acknowledgement due: 2026-08-04T01:00:00+00:00');
+    expect(temporal).toHaveTextContent('Calendar cal-7 · policy response-3 · current');
     expect(within(pressure).getByText(/portal-adapter · snapshot-7 · fresh/)).toBeInTheDocument();
     expect(within(pressure).getByText(/New supplier contact: governed/)).toBeInTheDocument();
 
     expect(screen.getByText(/Estimated freight saving AUD 90/)).toBeInTheDocument();
     expect(screen.getByText(/ETA 5–8 days · calculated range, not a promise/)).toBeInTheDocument();
     expect(screen.getByText(/dispatch 1–2d · transit 2–3d · inspection 1–2d/)).toBeInTheDocument();
+  });
+
+  it('renders phone-only contact as queued rather than supplier contacted', () => {
+    const queued = {
+      ...VIEW,
+      supplier_pressure: [{
+        ...VIEW.supplier_pressure[0],
+        temporal_response: {
+          ...VIEW.supplier_pressure[0].temporal_response,
+          transmission_state: 'queue_until_open',
+        },
+      }],
+    };
+    render(<ProcurementOperationalTrace allocationView={queued} />);
+    const temporal = screen.getByTestId('proc-temporal-response');
+    expect(temporal).toHaveTextContent('Supplier contact: contact queued until verified opening');
+    expect(temporal).not.toHaveTextContent('supplier contacted');
+  });
+
+  it('renders durable contact, human-room and payment consequences without implying execution', () => {
+    render(<ProcurementOperationalTrace allocationView={{
+      ...VIEW,
+      outbound_contact_schedule: {
+        channel: 'phone', queue_state: 'queued_contact', transport_eligible: false,
+        not_before: '2026-08-10T23:00:00+00:00', sla_clock: 'paused',
+        schedule_reason: 'human_phone_contact_required',
+      },
+      human_room: { state: 'requested', assigned_operator_id: null, version: 1 },
+      payment_consequence: {
+        plan_type: 'deposit', status: 'deposit_authorization_required', currency: 'AUD',
+        deposit_amount_cents: 20000, balance_amount_cents: 80000,
+        state_prevented: 'balance_capture',
+      },
+    }} />);
+    expect(screen.getByTestId('proc-contact-schedule')).toHaveTextContent('not executable by email worker');
+    expect(screen.getByTestId('proc-human-room')).toHaveTextContent('requested');
+    expect(screen.getByTestId('proc-payment-consequence')).toHaveTextContent('State prevented: balance capture');
   });
 
   it('renders stale supplier state as blocked rather than healthy', () => {

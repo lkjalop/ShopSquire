@@ -15,6 +15,7 @@ from src.app.services.sourcing_backpressure import (
     SourcingBackpressurePolicy,
     SourcingQueueState,
 )
+from src.app.services.temporal_authority_repository import supplier_response_expectation
 
 
 def _utc(value: datetime | str | None) -> datetime | None:
@@ -174,6 +175,16 @@ def supplier_pressure_projection(
         oldest = _utc(queue[7])
         stale = expires is None or expires <= stamp
         queue_age = max(0, int((stamp - oldest).total_seconds())) if oldest else None
+        temporal_response = (
+            supplier_response_expectation(
+                db, tenant_id=tenant_id, supplier_id=supplier_id,
+                supplier_facility_id=facility_id, channel="email",
+                submitted_at=oldest,
+            ) if oldest is not None else {
+                "calendar_state": "unknown", "sla_clock": "unknown",
+                "reason": "no_unacknowledged_supplier_request",
+            }
+        )
         request_util = round(int(queue[4]) / int(policy[1]), 4)
         unit_util = round(int(queue[5]) / int(policy[2]), 4)
         dispatch_util = round(int(queue[6]) / int(policy[4]), 4)
@@ -184,7 +195,16 @@ def supplier_pressure_projection(
             reasons.append("supplier_open_unit_limit")
         if int(queue[6]) >= int(policy[4]):
             reasons.append("supplier_dispatch_rate_limit")
-        sla_breached = queue_age is not None and queue_age > int(policy[5])
+        acknowledgement_due = _utc(temporal_response.get("acknowledgement_due_at"))
+        if acknowledgement_due is not None:
+            sla_breached = stamp > acknowledgement_due
+            sla_basis = "business_calendar"
+        else:
+            # Compatibility fallback while a tenant has not yet onboarded calendar
+            # authority. The UI labels the temporal state UNKNOWN; this elapsed clock
+            # must not be presented as a business-hours prediction.
+            sla_breached = queue_age is not None and queue_age > int(policy[5])
+            sla_basis = "elapsed_compatibility"
         if sla_breached:
             reasons.append("supplier_acknowledgement_sla_breached")
         if stale:
@@ -209,7 +229,9 @@ def supplier_pressure_projection(
                       "open_unit_utilization": unit_util,
                       "dispatch_utilization": dispatch_util},
             "response_sla": {"seconds": int(policy[5]), "queue_age_seconds": queue_age,
-                             "status": "breached" if sla_breached else "within_sla"},
+                             "status": "breached" if sla_breached else "within_sla",
+                             "basis": sla_basis},
+            "temporal_response": temporal_response,
             "source_health": {"status": "stale" if stale else "fresh",
                               "source_id": str(queue[0]), "source_version": str(queue[1]),
                               "observed_at": observed.isoformat() if observed else None,

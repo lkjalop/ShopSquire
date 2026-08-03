@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Iterable
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from src.app.services.sourcing_backpressure import (
     SourcingBackpressurePolicy,
@@ -1103,6 +1103,79 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
         "ON a.tenant_id=r.tenant_id AND a.case_id=r.case_id AND a.destination_token=r.destination_token "
         "WHERE r.tenant_id=:t ORDER BY r.created_at DESC LIMIT :limit"
     ), params).fetchall()
+    promise_calculations: list[dict[str, Any]] = []
+    workbench_tables = set(inspect(db.connection()).get_table_names())
+    if "promise_calculation" in workbench_tables:
+        for case_id in sorted({str(row[1]) for row in rows if row[1]}):
+            promise_row = db.execute(text(
+                "SELECT option_id,calculation_version,requested_quantity,requested_arrival_at,"
+                "feasibility,confirmed_quantity,unknown_quantity,quantity_by_deadline,"
+                "latest_viable_response_at,earliest_arrival_at,latest_arrival_at,carrier_cutoff_at,"
+                "dispatch_ready_at,evaluated_at,response_expectation_json,reason_codes_json,"
+                "dependencies_json,calculated_at FROM promise_calculation "
+                "WHERE tenant_id=:tenant AND case_id=:case_id AND status='active' "
+                "ORDER BY calculated_at DESC LIMIT 1"
+            ), {"tenant": tenant_id, "case_id": case_id}).fetchone()
+            if promise_row is None:
+                continue
+            promise_calculations.append({
+                "case_ref": "Case " + hashlib.sha256(case_id.encode()).hexdigest()[:8],
+                "option_id": str(promise_row[0]), "calculation_version": str(promise_row[1]),
+                "requested_quantity": int(promise_row[2]), "requested_arrival_at": str(promise_row[3]),
+                "feasibility": str(promise_row[4]), "quantity_confirmed_by_deadline": int(promise_row[5]),
+                "unknown_quantity": int(promise_row[6]), "quantity_by_deadline": int(promise_row[7]),
+                "remaining_quantity": max(0, int(promise_row[2]) - int(promise_row[7])),
+                "latest_viable_supplier_response_at": promise_row[8],
+                "earliest_arrival_range": {"earliest": promise_row[9], "latest": promise_row[10]},
+                "carrier_cutoff_at": promise_row[11], "dispatch_ready_at": promise_row[12],
+                "evaluated_at": str(promise_row[13]),
+                "response_expectation": json.loads(str(promise_row[14] or "{}")),
+                "failed_constraints": json.loads(str(promise_row[15] or "[]")),
+                "dependency_versions": json.loads(str(promise_row[16] or "{}")),
+                "calculated_at": str(promise_row[17]),
+                "state_prevented": (
+                    None if str(promise_row[4]) == "met" else "unsupported_full_delivery_promise"
+                ),
+            })
+    case_ids = sorted({str(row[1]) for row in rows if row[1]})
+    outbound_contact_schedule = None
+    human_room = None
+    payment_consequence = None
+    if case_ids and "outbound_message" in workbench_tables:
+        params_cases = {f"case_{index}": value for index, value in enumerate(case_ids)}
+        clause = ",".join(f":case_{index}" for index in range(len(case_ids)))
+        outbound = db.execute(text(
+            "SELECT channel,status,next_attempt_at,schedule_reason,sla_clock,transport_eligible "
+            "FROM outbound_message WHERE tenant_id=:tenant AND case_id IN (" + clause + ") "
+            "ORDER BY created_at DESC LIMIT 1"
+        ), {"tenant": tenant_id, **params_cases}).first()
+        if outbound:
+            outbound_contact_schedule = {
+                "channel": str(outbound[0]), "queue_state": str(outbound[1]),
+                "not_before": outbound[2], "schedule_reason": outbound[3],
+                "sla_clock": str(outbound[4] or "unknown"),
+                "transport_eligible": bool(outbound[5]),
+            }
+    if case_ids and "procurement_human_room" in workbench_tables:
+        params_cases = {f"case_{index}": value for index, value in enumerate(case_ids)}
+        clause = ",".join(f":case_{index}" for index in range(len(case_ids)))
+        room = db.execute(text(
+            "SELECT state,assigned_operator_id,version,updated_at FROM procurement_human_room "
+            "WHERE tenant_id=:tenant AND case_id IN (" + clause + ") ORDER BY updated_at DESC LIMIT 1"
+        ), {"tenant": tenant_id, **params_cases}).first()
+        if room:
+            human_room = {"state": str(room[0]), "assigned_operator_id": room[1],
+                          "version": int(room[2]), "updated_at": str(room[3])}
+    if case_ids and "procurement_payment_consequence" in workbench_tables:
+        params_cases = {f"case_{index}": value for index, value in enumerate(case_ids)}
+        clause = ",".join(f":case_{index}" for index in range(len(case_ids)))
+        payment = db.execute(text(
+            "SELECT consequence_json FROM procurement_payment_consequence "
+            "WHERE tenant_id=:tenant AND case_id IN (" + clause + ") AND superseded_at IS NULL "
+            "ORDER BY created_at DESC LIMIT 1"
+        ), {"tenant": tenant_id, **params_cases}).first()
+        if payment:
+            payment_consequence = json.loads(str(payment[0] or "{}"))
     committed = [row for row in demands if row["stage"] == "committed"]
     total_requested = sum(row["requested_quantity"] for row in committed)
     total_allocated = sum(row["allocated_quantity"] for row in committed)
@@ -1149,6 +1222,11 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
                             if total_requested else 0.0),
                         "oldest_queue_age_seconds": max((row["queue_age_seconds"] for row in committed), default=0)},
             "demands": demands,
+            "promise_calculations": promise_calculations,
+            "promise_calculation": promise_calculations[0] if promise_calculations else None,
+            "outbound_contact_schedule": outbound_contact_schedule,
+            "human_room": human_room,
+            "payment_consequence": payment_consequence,
             "sourcing_batches": [
                 {"batch_ref": "Batch " + str(row[0])[:8], "sku": str(row[1]),
                  "destination_id": str(row[2]), "status": str(row[3]), "quantity": int(row[4]),
@@ -1397,6 +1475,16 @@ def materialize_governed_rfq_for_wave(
     lines = [{"item_ref": str(row[1]), "quantity": int(row[6])} for row in batches]
     total_quantity = sum(int(line["quantity"]) for line in lines)
     required_values = sorted(str(row[4]) for row in child_rows if row[4])
+    temporal_submitted_at = datetime.now(timezone.utc)
+    from src.app.services.temporal_authority_repository import (
+        record_temporal_expectation,
+        supplier_response_expectation,
+    )
+    response_expectation = supplier_response_expectation(
+        db, tenant_id=tenant_id, supplier_id=str(wave[1]),
+        supplier_facility_id=str(wave[2]), channel="email",
+        submitted_at=temporal_submitted_at,
+    )
     parent_rfq_ref = f"RFQ-WAVE-{hashlib.sha256((tenant_id + ':' + wave_id).encode()).hexdigest()[:16]}"
     child_refs = [hashlib.sha256(str(row[1]).encode()).hexdigest()[:12] for row in child_rows]
     state_json = {
@@ -1414,6 +1502,7 @@ def materialize_governed_rfq_for_wave(
         "child_batch_refs": [str(row[0]) for row in batches],
         "child_demand_count": len(child_rows),
         "child_demand_refs": child_refs,
+        "supplier_response_expectation": response_expectation,
     }
     case_id = workflow.open_case(
         db, buyer_uid_hash="wave:" + hashlib.sha256(wave_id.encode()).hexdigest()[:16],
@@ -1477,10 +1566,19 @@ def materialize_governed_rfq_for_wave(
             source_version=str(child[5] or "unknown"), derived_type="procurement_proposal",
             derived_id=parent_rfq_ref,
         )
+    temporal_record = None
+    if "temporal_expectation" in set(inspect(db.connection()).get_table_names()):
+        temporal_record = record_temporal_expectation(
+            db, tenant_id=tenant_id, subject_type="rfq", subject_id=parent_rfq_ref,
+            channel="email", submitted_at=temporal_submitted_at,
+            expectation=response_expectation,
+        )
     return {
         "status": "drafted", "fulfillment_case_id": case_id,
         "parent_rfq_ref": parent_rfq_ref, "content_hash": draft.content_hash,
         "child_batch_count": len(batches), "child_demand_count": len(child_rows),
         "lines": lines, "supplier_id": str(wave[1]),
+        "supplier_response_expectation": response_expectation,
+        "temporal_expectation_record": temporal_record,
         "human_approval_required": True, "external_action": "none", "idempotent": False,
     }

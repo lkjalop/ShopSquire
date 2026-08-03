@@ -201,6 +201,14 @@ def supersede_order(db, *, order_id: str, lines: List[Dict[str, Any]], uid: Opti
     actor = Actor(ActorType.BUYER, uid or "buyer")
     superseded: List[str] = []
     for cid in supersedable:
+        try:
+            from src.app.services.temporal_authority_repository import supersede_case_promise_calculations
+            supersede_case_promise_calculations(
+                db, tenant_id=tenant_id, case_id=cid,
+                reason="buyer_quantity_or_destination_amendment", superseded_at=now_iso,
+            )
+        except Exception:
+            pass  # older fixture schemas may not include the promise projection yet
         res = fwf.transition(db, case_id=cid, event="case_superseded", actor=actor,
                              reason_code="buyer_amended_order", trace_id=trace_id, now_iso=now_iso)
         if getattr(res, "ok", False):

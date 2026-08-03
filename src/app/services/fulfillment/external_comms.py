@@ -129,8 +129,93 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
     subject = str(draft.get("subject") or "")
     body = str(draft.get("body") or "")
     content_hash = str(draft.get("content_hash") or "")
+    artifact_ids = [str(value) for value in (draft.get("artifact_ids") or []) if str(value).strip()]
+    artifact_binding_ids: List[str] = []
+    if artifact_ids:
+        try:
+            from src.app.security.artifact_authority import bind_decision, evaluate_bound_artifacts
+
+            artifact_result = evaluate_bound_artifacts(
+                db, tenant_id=tenant_id, artifact_ids=artifact_ids,
+            )
+            if not artifact_result.allowed:
+                return workflow.TransitionResult(
+                    False, case_id, cur.state, "artifact_authority_blocked", http_status=409,
+                )
+            for artifact_id in artifact_ids:
+                binding = bind_decision(
+                    db,
+                    tenant_id=tenant_id,
+                    artifact_id=artifact_id,
+                    decision_kind="supplier_message",
+                    decision_id=content_hash,
+                )
+                artifact_binding_ids.append(str(binding["id"]))
+            if artifact_binding_ids:
+                from sqlalchemy import text as _sql_text
+                db.execute(
+                    _sql_text(
+                        "UPDATE artifact_decision_bindings SET status='queued' "
+                        "WHERE tenant_id=:tenant_id AND id IN ("
+                        + ",".join(f":binding_{idx}" for idx in range(len(artifact_binding_ids)))
+                        + ")"
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        **{f"binding_{idx}": value for idx, value in enumerate(artifact_binding_ids)},
+                    },
+                )
+        except Exception as exc:
+            _log.error("artifact authority unavailable for outbound %s: %s", case_id, repr(exc)[:160])
+            return workflow.TransitionResult(
+                False, case_id, cur.state, "artifact_authority_unavailable", http_status=503,
+            )
     transport_detail = ""
     party_ref = None
+    # This transport seam sends email.  A supplier's authoritative preferred
+    # channel must not be silently flattened into email: phone/portal become
+    # human tasks, while EDI/cXML/API require their dedicated connector.
+    channel_plan = draft.get("channel_plan") if isinstance(draft.get("channel_plan"), dict) else {}
+    channel = str(channel_plan.get("channel") or "email").strip().lower()
+    response_expectation = (
+        channel_plan.get("response_expectation")
+        or draft.get("supplier_response_expectation")
+        or (cur.state_json.get("supplier_response_expectation") if cur else None)
+        or {}
+    )
+    if channel == "phone":
+        # A phone preference is a durable operator task, never an excuse to flatten
+        # the contact into email and never a transport failure that disappears.
+        from src.app.services.fulfillment import outbound_queue as _oq
+        queued = _oq.enqueue(
+            db, case_id=case_id, recipient=recipient, subject=subject, body=body,
+            idempotency_key=content_hash, tenant_id=tenant_id,
+            actor_type=getattr(actor.type, "value", str(actor.type)), actor_id=actor.id,
+            transition_event=event, now_iso=now_iso, party_ref=party_ref,
+            channel=channel, response_expectation=response_expectation,
+        )
+        if queued.get("message_id"):
+            try:
+                from src.app.services.procurement_human_room import request_room
+                request_room(
+                    db, tenant_id=tenant_id, case_id=case_id, actor_id=actor.id,
+                    idempotency_key=f"phone-contact:{content_hash}", now_iso=now_iso,
+                )
+            except Exception:
+                pass  # migration-first; the durable phone queue remains authoritative.
+        return workflow.TransitionResult(
+            False, case_id, cur.state,
+            "supplier_phone_contact_queued" if queued.get("message_id") else "supplier_phone_queue_failed",
+            http_status=202 if queued.get("message_id") else 503,
+        )
+    if channel == "portal":
+        return workflow.TransitionResult(
+            False, case_id, cur.state, "supplier_portal_human_task_required", http_status=409,
+        )
+    if channel in {"edi", "cxml", "api"}:
+        return workflow.TransitionResult(
+            False, case_id, cur.state, f"supplier_{channel}_connector_required", http_status=409,
+        )
     try:
         from src.app.services.communication_party_binding import (
             bind_authoritative_party,
@@ -199,6 +284,7 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
                          idempotency_key=content_hash, transport=tx, tenant_id=tenant_id,
                          actor_type=getattr(actor.type, "value", str(actor.type)), actor_id=actor.id,
                          transition_event=event, now_iso=now_iso,
+                         channel=channel, response_expectation=response_expectation,
                          party_ref=party_ref,
                          grounding_materials=[
                              {
@@ -232,6 +318,19 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
                                   "transport": transport_detail}},
         tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
     if transition_result.ok and provider_ref:
+        if artifact_binding_ids:
+            try:
+                from sqlalchemy import text as _sql_text
+                db.execute(
+                    _sql_text(
+                        "UPDATE artifact_decision_bindings SET status='executed' "
+                        "WHERE tenant_id=:tenant_id AND decision_kind='supplier_message' "
+                        "AND decision_id=:decision_id"
+                    ),
+                    {"tenant_id": tenant_id, "decision_id": content_hash},
+                )
+            except Exception as exc:
+                _log.error("artifact binding execution mark failed for %s: %s", case_id, repr(exc)[:160])
         try:
             from src.app.services.email_thread_correlation import record_outbound_reference
 

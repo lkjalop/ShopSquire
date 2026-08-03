@@ -62,6 +62,36 @@ def test_enqueue_then_process_sends(db):
     assert row[0] == "sent" and row[1] == "PROV-1"
 
 
+def test_weekend_email_is_due_even_when_response_sla_is_paused(db):
+    q.enqueue(
+        db, case_id="weekend", recipient="s@x.com", subject="RFQ", body="...",
+        idempotency_key="weekend-email", channel="email",
+        response_expectation={"transmission_state": "transmit_now", "sla_clock": "paused"},
+        now_iso="2026-08-08T01:00:00+00:00",
+    )
+    out = q.process_pending(db, transport=_OkTransport(), now_iso="2026-08-08T01:00:01+00:00")
+    assert out["sent"] == 1
+    row = db.execute(text(
+        "SELECT channel,sla_clock,schedule_reason,status FROM outbound_message"
+    )).one()
+    assert tuple(row) == ("email", "paused", "email_transmits_sla_paused", "sent")
+
+
+def test_phone_contact_is_never_selected_by_email_worker(db):
+    q.enqueue(
+        db, case_id="phone", recipient="+61000000000", subject="Call supplier", body="...",
+        idempotency_key="phone-task", channel="phone",
+        response_expectation={
+            "transmission_state": "queue_until_open", "sla_clock": "paused",
+            "next_open_at": "2026-08-10T23:00:00+00:00",
+        }, now_iso="2026-08-08T01:00:00+00:00",
+    )
+    tx = _CountingTransport()
+    out = q.process_pending(db, transport=tx, now_iso="2026-08-11T00:00:00+00:00")
+    assert out["processed"] == 0 and tx.calls == 0
+    assert db.execute(text("SELECT status FROM outbound_message")).scalar_one() == "queued_contact"
+
+
 def test_enqueue_is_idempotent_no_double_send(db):
     a = _enq(db, key="same")
     b = _enq(db, key="same")

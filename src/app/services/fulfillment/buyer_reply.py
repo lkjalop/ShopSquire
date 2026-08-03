@@ -32,6 +32,17 @@ def buyer_status_message(state: Optional[str], case_state: Optional[Dict[str, An
     s = str(state or "").upper()
     n = _qty(case_state)
     qtxt = f"{n} units" if n else "your bulk request"
+    temporal = (case_state or {}).get("supplier_response_expectation") or {}
+    quote_sent = "We've requested a quote from an approved supplier."
+    if temporal.get("calendar_state") == "closed":
+        quote_sent += (
+            " Their response clock is paused outside their operating hours; "
+            "we'll reassess after their next operating window."
+        )
+    elif temporal.get("calendar_state") == "unknown":
+        quote_sent += " Their response timing is not yet verified, so no reply date is promised."
+    else:
+        quote_sent += " We'll share your options once they respond."
     msgs = {
         "AWAITING_BUYER_COMMITMENT": (
             f"We found a shortfall for {qtxt}. Confirm sourcing to proceed — no supplier is contacted and "
@@ -44,8 +55,7 @@ def buyer_status_message(state: Optional[str], case_state: Optional[Dict[str, An
             "Your sourcing request is awaiting a final internal check before we reach out to a supplier."),
         "AWAITING_SUPPLIER_INFO": (
             "We've asked the supplier a clarifying question and are waiting on their reply."),
-        "QUOTE_SENT": (
-            "We've requested a quote from an approved supplier. We'll share your options once they respond."),
+        "QUOTE_SENT": quote_sent,
         "QUOTE_RECEIVED": ("A supplier has responded — we're reviewing their reply now."),
         "QUOTE_VALIDATED": ("We've validated the supplier's response and are preparing your options."),
         "OPTIONS_READY": ("Your fulfilment options are ready — please review and choose how to proceed."),

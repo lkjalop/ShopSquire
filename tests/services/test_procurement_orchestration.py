@@ -143,6 +143,10 @@ def test_wave_materializes_one_supplier_bound_multiline_rfq_and_preserves_childr
     assert captured["lines"] == first["lines"]
     assert replay["idempotent"] is True
     assert replay["parent_rfq_ref"] == first["parent_rfq_ref"]
+    assert first["supplier_response_expectation"] == {
+        "calendar_state": "unknown", "sla_clock": "unknown",
+        "reason": "temporal_authority_schema_unavailable", "freshness": "missing",
+    }
     assert db.execute(text(
         "SELECT COUNT(DISTINCT fulfillment_case_id) FROM sourcing_batch"
     )).scalar() == 1
