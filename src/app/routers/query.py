@@ -8,6 +8,7 @@ from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, R
 from src.app.services.conversational_query import ConversationalQueryService
 from src.app.services.faq_v2 import resolve_faq_match
 from src.app.services.agentic_rag_pipeline import run_agentic_rag_pipeline
+from src.app.services.temporal_invalidation import register_cache_dependency
 from src.app.services.response_normalizer import ResponseNormalizer
 from src.app.models.db import get_db
 
@@ -26,11 +27,20 @@ def query(
         raise HTTPException(status_code=400, detail="query_required")
     use_agentic_rag = bool((payload or {}).get("dynamic_injection") or str((payload or {}).get("pipeline") or "").lower() == "agentic_rag")
     if use_agentic_rag:
+        def record_cache_dependency(item: dict[str, str]) -> None:
+            try:
+                register_cache_dependency(db, **item)
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
         out = run_agentic_rag_pipeline(
             question=q,
             trace_id=(payload or {}).get("trace_id"),
             context_budget_chars=int((payload or {}).get("context_budget_chars") or 1400),
             max_chunks=int((payload or {}).get("max_chunks") or 5),
+            cache_dependency_recorder=record_cache_dependency,
         )
         out["source"] = "agentic_rag"
         return out

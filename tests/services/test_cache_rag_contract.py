@@ -99,3 +99,41 @@ def test_agentic_rag_exposes_version_contract_and_stable_citations():
     assert first["citations"] == second["citations"]
     assert all(item.startswith("cite:v1:") for item in first["citations"])
     assert second["cache_hit"] is True
+
+
+def test_agentic_rag_exposes_exact_cache_dependency_to_temporal_composition():
+    dependencies = []
+    result = run_agentic_rag_pipeline(
+        question="What is the warranty process?",
+        tenant_id="tenant-temporal",
+        subject_id="buyer-temporal",
+        session_epoch="epoch-1",
+        corpus_version="faq-temporal-rev-7",
+        evidence_cutoff="2026-08-03T00:00:00Z",
+        cache_dependency_recorder=dependencies.append,
+    )
+
+    assert result["cache_dependency_registered"] is True
+    assert dependencies == [{
+        "tenant_id": "tenant-temporal",
+        "cache_key": result["cache_key"],
+        "source_type": "faq_corpus",
+        "source_id": "faq_bank",
+        "source_version": "faq-temporal-rev-7",
+    }]
+
+
+def test_unregistered_cache_entry_is_evicted_and_reported_as_degraded():
+    result = run_agentic_rag_pipeline(
+        question="What is the return process?",
+        tenant_id="tenant-temporal-failure",
+        corpus_version="faq-temporal-failure-rev-1",
+        evidence_cutoff="2026-08-03T00:00:00Z",
+        cache_dependency_recorder=lambda _item: (_ for _ in ()).throw(
+            RuntimeError("registry unavailable")
+        ),
+    )
+
+    assert result["cache_dependency_registered"] is False
+    assert result["cache_temporal_status"] == "degraded_dependency_unavailable"
+    assert result["cache_hit"] is False

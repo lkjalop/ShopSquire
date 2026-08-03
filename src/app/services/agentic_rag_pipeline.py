@@ -5,7 +5,7 @@ import json
 import os
 import re
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -242,6 +242,7 @@ def run_agentic_rag_pipeline(
     policy_version: str = "rag-injection-policy-v1",
     model_version: str = "deterministic-faq-decider-v1",
     evidence_cutoff: str = "bundled",
+    cache_dependency_recorder: Callable[[dict[str, str]], None] | None = None,
 ) -> Dict[str, Any]:
     tid = trace_id or f"rag-{uuid.uuid4()}"
     contract = CacheContract.resolve(
@@ -280,8 +281,9 @@ def run_agentic_rag_pipeline(
             ret = _retrieve(plan)
     else:
         ret = _retrieve(plan)
+    cache_key = contract.cache_key("agentic_rag_retrieval", retrieval_request)
     if not cache_hit:
-        _RAG_CACHE.set_versioned(
+        cache_key = _RAG_CACHE.set_versioned(
             namespace="agentic_rag_retrieval",
             request=retrieval_request,
             contract=contract,
@@ -289,6 +291,26 @@ def run_agentic_rag_pipeline(
             source_id="faq_bank",
             trust_score=0.78,
         )
+    cache_dependency_registered = False
+    cache_temporal_status = "unregistered"
+    if cache_dependency_recorder is not None:
+        try:
+            cache_dependency_recorder({
+                "tenant_id": contract.tenant_id,
+                "cache_key": cache_key,
+                "source_type": "faq_corpus",
+                "source_id": "faq_bank",
+                "source_version": contract.corpus_version,
+            })
+            cache_dependency_registered = True
+            cache_temporal_status = "registered"
+        except Exception:
+            # A value without a durable dependency cannot remain reusable. The
+            # current deterministic retrieval may still answer read-only, but
+            # subsequent turns must rebuild rather than serve an untracked hit.
+            _RAG_CACHE.delete(cache_key)
+            cache_hit = False
+            cache_temporal_status = "degraded_dependency_unavailable"
     log_trace_event(
         trace_id=tid,
         event_type="rag_retrieve",
@@ -356,6 +378,9 @@ def run_agentic_rag_pipeline(
             "evidence_cutoff": contract.evidence_cutoff,
         },
         "cache_hit": cache_hit,
+        "cache_key": cache_key,
+        "cache_dependency_registered": cache_dependency_registered,
+        "cache_temporal_status": cache_temporal_status,
         "answer": dec.answer,
         "confidence": dec.confidence,
         "citations": dec.citations,

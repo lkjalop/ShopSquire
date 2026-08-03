@@ -16,7 +16,7 @@ from sqlalchemy import text
 DERIVED_TYPES = frozenset({
     "hippograph_edge", "market_evidence_bundle", "procurement_proposal",
     "buyer_supply_promise", "fulfillment_route_proposal", "narration_fingerprint",
-    "allocation_projection",
+    "allocation_projection", "semantic_cache_entry",
 })
 
 
@@ -49,6 +49,30 @@ def register_derived_dependency(
     return {"dependency_id": dependency_id, "status": "active", "idempotent": False}
 
 
+def register_cache_dependency(
+    db,
+    *,
+    tenant_id: str,
+    cache_key: str,
+    source_type: str,
+    source_id: str,
+    source_version: str,
+) -> dict[str, Any]:
+    """Bind one exact cache key to one exact source revision."""
+    key = str(cache_key or "").strip()
+    if not key:
+        raise ValueError("cache_dependency_key_required")
+    return register_derived_dependency(
+        db,
+        tenant_id=tenant_id,
+        source_type=source_type,
+        source_id=source_id,
+        source_version=source_version,
+        derived_type="semantic_cache_entry",
+        derived_id=key,
+    )
+
+
 def invalidate_source_dependencies(
     db, *, tenant_id: str, source_type: str, source_id: str, source_version: str,
     reason: str,
@@ -73,6 +97,58 @@ def invalidate_source_dependencies(
                             "derived_id": str(row[2])})
     return {**params, "invalidated_count": len(invalidated), "invalidated": invalidated,
             "reason": str(reason), "rebuild_required": bool(invalidated)}
+
+
+def invalidate_source_and_schedule_rebuild(
+    db,
+    *,
+    tenant_id: str,
+    source_type: str,
+    source_id: str,
+    source_version: str,
+    reason: str,
+    cache: Any,
+    enqueue_rebuild: Any,
+) -> dict[str, Any]:
+    """Invalidate dependencies, evict cache entries, and enqueue idempotent rebuild work.
+
+    Non-cache derived records remain in the returned projector backlog. The function performs no
+    provider-specific queue or cache work; deployments inject those adapters.
+    """
+    result = invalidate_source_dependencies(
+        db,
+        tenant_id=tenant_id,
+        source_type=source_type,
+        source_id=source_id,
+        source_version=source_version,
+        reason=reason,
+    )
+    evicted = 0
+    enqueued = 0
+    projector_backlog = []
+    for item in result["invalidated"]:
+        if item["derived_type"] != "semantic_cache_entry":
+            projector_backlog.append(item)
+            continue
+        cache_key = str(item["derived_id"])
+        cache.delete(cache_key)
+        evicted += 1
+        enqueue_rebuild({
+            "job_type": "rebuild_temporal_cache_entry",
+            "tenant_id": str(tenant_id),
+            "cache_key": cache_key,
+            "source_type": str(source_type),
+            "source_id": str(source_id),
+            "source_version": str(source_version),
+            "reason": str(reason),
+        })
+        enqueued += 1
+    return {
+        **result,
+        "cache_entries_evicted": evicted,
+        "rebuilds_enqueued": enqueued,
+        "projector_backlog": projector_backlog,
+    }
 
 
 def invalidate_derived_dependencies(
