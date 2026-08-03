@@ -48,4 +48,11 @@ def test_eight_buyer_pressure_wave_and_partial_recovery_are_visible():
         assert wave.count() == 1
         assert "Estimate only" in wave.inner_text()
         assert "no RFQ, PO, shipment or payment executed" in wave.inner_text()
+        recovery = workbench.get_by_test_id("allocation-recovery-options")
+        assert recovery.is_visible()
+        assert recovery.get_by_test_id("allocation-alternative-supplier").count() >= 1
+        assert "availability unknown" in recovery.inner_text()
+        assert "confirmation required" in recovery.inner_text()
+        assert "unconfirmed supply presented as available" in recovery.inner_text()
+        assert "no supplier contact or order executed" in recovery.inner_text()
         browser.close()

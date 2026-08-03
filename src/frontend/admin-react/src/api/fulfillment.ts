@@ -88,6 +88,22 @@ export interface AllocationWorkbenchView {
     privacy: { status: string; jurisdiction?: string | null; purpose?: string | null;
                retention_until?: string | null };
   }>;
+  recovery_options?: Array<{
+    batch_ref: string; sku: string; unresolved_child_count: number; status: string;
+    reason?: string | null; state_prevented?: string | null; external_action: string;
+    alternative_suppliers: Array<{
+      supplier_id: string; supplier_name: string; approved_domain: string;
+      reliability_score: number; availability: 'unknown'; action: 'request_confirmation';
+      authority: { source: string; source_version: string; observed_at: string;
+                   evidence_ref: string; confidence: number; freshness: string };
+    }>;
+    qualified_substitutes: Array<{
+      sku: string; supplier_id: string; supplier_name: string; approved_domain: string;
+      qualification: string; availability: 'unknown'; action: 'request_confirmation';
+      authority: { source: string; source_version: string; observed_at: string;
+                   evidence_ref: string; confidence: number; freshness: string };
+    }>;
+  }>;
   privacy: { buyer_identities_exposed: boolean; child_demands_anonymized: boolean };
 }
 // OPERATOR-only deal economics (margin / buyer-discount headroom / profit). Never buyer-facing.

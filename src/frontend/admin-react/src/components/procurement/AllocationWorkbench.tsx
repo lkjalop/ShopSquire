@@ -34,6 +34,7 @@ export function AllocationWorkbench() {
     );
   }
   const summary = view.summary;
+  const recoveryOptions = view.recovery_options || [];
   return (
     <section data-testid="allocation-workbench"
              style={{ border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 10, padding: 12, marginBottom: 12 }}>
@@ -107,6 +108,38 @@ export function AllocationWorkbench() {
               <div>Destination shared as token: {route.destination_token}</div>
               <div>Privacy authority: {route.privacy.status}{route.privacy.jurisdiction ? ` · ${route.privacy.jurisdiction}` : ''}</div>
               {route.state_prevented && <div style={{ color: '#b45309' }}>Prevented: {route.state_prevented}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+      {recoveryOptions.length > 0 && (
+        <div style={{ marginTop: 10 }} data-testid="allocation-recovery-options">
+          <strong>Grounded recovery options</strong>
+          {recoveryOptions.map((recovery) => (
+            <div key={recovery.batch_ref}
+                 style={{ background: '#fff', border: '1px solid #fdba74', borderRadius: 8, padding: 8, marginTop: 6 }}>
+              <div><strong>{recovery.batch_ref}</strong> · {recovery.unresolved_child_count} affected anonymized demand(s)</div>
+              {recovery.alternative_suppliers.map((supplier) => (
+                <div key={supplier.supplier_id} data-testid="allocation-alternative-supplier" style={{ marginTop: 5 }}>
+                  Alternative supplier: <strong>{supplier.supplier_name}</strong> · availability <strong>unknown</strong> · confirmation required
+                  <small style={{ display: 'block', color: '#64748b' }}>
+                    Tenant-approved mapping · {supplier.authority.freshness} · {supplier.authority.source} {supplier.authority.source_version}
+                  </small>
+                </div>
+              ))}
+              {recovery.qualified_substitutes.map((substitute) => (
+                <div key={substitute.sku} data-testid="allocation-qualified-substitute" style={{ marginTop: 5 }}>
+                  Qualified substitute: <strong>{substitute.sku}</strong> · availability <strong>unknown</strong> · confirmation required
+                </div>
+              ))}
+              {recovery.status === 'insufficient_evidence' && (
+                <div style={{ color: '#b45309', marginTop: 5 }}>
+                  No fresh tenant-approved recovery mapping. Operator review required.
+                </div>
+              )}
+              <small style={{ display: 'block', marginTop: 5 }}>
+                Prevented: unconfirmed supply presented as available · no supplier contact or order executed
+              </small>
             </div>
           ))}
         </div>

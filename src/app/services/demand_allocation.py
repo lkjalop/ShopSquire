@@ -961,7 +961,7 @@ def apply_supplier_schedule_to_batch(
     ordering as internal ATP.  Every child receives its own promise version and evidence binding.
     """
     batch = db.execute(text(
-        "SELECT supplier_id,status,quantity FROM sourcing_batch WHERE id=:id AND tenant_id=:t"
+        "SELECT supplier_id,status,quantity,sku FROM sourcing_batch WHERE id=:id AND tenant_id=:t"
     ), {"id": batch_id, "t": tenant_id}).fetchone()
     if batch is None:
         raise KeyError("sourcing_batch_not_found")
@@ -1019,9 +1019,17 @@ def apply_supplier_schedule_to_batch(
         results.append(outcome)
     confirmed_total = sum(int(row.get("supplier_confirmed_qty") or 0) for row in results)
     unresolved_total = sum(int(row.get("shortfall_qty") or 0) for row in results)
+    from src.app.services.supply_recovery import project_supply_recovery
+    recovery = project_supply_recovery(
+        db, tenant_id=tenant_id, sku=str(batch[3]), excluded_supplier_id=supplier_id,
+    ) if unresolved_total > 0 else {
+        "status": "not_required", "alternative_suppliers": [],
+        "qualified_substitutes": [], "external_action": "none",
+    }
     return {"status": "applied", "batch_id": batch_id, "supplier_id": supplier_id,
             "confirmed_quantity": confirmed_total, "unresolved_quantity": unresolved_total,
             "alternatives_required": unresolved_total > 0, "demands": results,
+            "recovery": recovery,
             "allocation_policy": "priority_then_age_then_stable_id",
             "external_action": "none"}
 
@@ -1066,11 +1074,11 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
                         )})
     batches = db.execute(text(
         "SELECT b.id,b.sku,b.destination_id,b.status,b.quantity,b.window_ends_at,"
-        "COUNT(c.demand_id),b.fulfillment_case_id,b.draft_content_hash "
+        "COUNT(c.demand_id),b.fulfillment_case_id,b.draft_content_hash,b.supplier_id "
         "FROM sourcing_batch b LEFT JOIN sourcing_batch_demand c ON c.batch_id=b.id "
         "WHERE b.tenant_id=:t" + (" AND b.sku=:sku" if sku else "") +
         " GROUP BY b.id,b.sku,b.destination_id,b.status,b.quantity,b.window_ends_at,"
-        "b.fulfillment_case_id,b.draft_content_hash ORDER BY b.created_at DESC LIMIT :limit"
+        "b.fulfillment_case_id,b.draft_content_hash,b.supplier_id ORDER BY b.created_at DESC LIMIT :limit"
     ), params).fetchall()
     waves = db.execute(text(
         "SELECT w.id,w.supplier_id,w.supplier_facility_id,w.currency,w.incoterm,"
@@ -1109,6 +1117,25 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
         if row["promise_state"]
     )
     supplier_refs = [(str(row[1]), str(row[2])) for row in waves]
+    from src.app.services.supply_recovery import project_supply_recovery
+    recovery_options = []
+    for batch_row in batches:
+        needs_recovery = db.execute(text(
+            "SELECT COUNT(*) FROM sourcing_batch_demand c "
+            "JOIN buyer_supply_promise p ON p.tenant_id=:t AND p.demand_id=c.demand_id "
+            "WHERE c.batch_id=:batch AND p.alternatives_required IS TRUE"
+        ), {"t": tenant_id, "batch": str(batch_row[0])}).scalar()
+        if not int(needs_recovery or 0):
+            continue
+        recovery_options.append({
+            "batch_ref": "Batch " + str(batch_row[0])[:8],
+            "sku": str(batch_row[1]),
+            "unresolved_child_count": int(needs_recovery),
+            **project_supply_recovery(
+                db, tenant_id=tenant_id, sku=str(batch_row[1]),
+                excluded_supplier_id=str(batch_row[9] or ""),
+            ),
+        })
     return {"tenant_id": tenant_id, "sku": sku, "authority": "shadow_allocation",
             "execution_authority": "legacy_inventory_reservations",
             "summary": {"committed_quantity": total_requested, "allocated_quantity": total_allocated,
@@ -1149,10 +1176,11 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
                              "purpose": row[13], "retention_until": row[14]}}
                 for row in routes
             ],
-            "supplier_pressure": supplier_pressure_projection(
-                db, tenant_id=tenant_id, supplier_refs=supplier_refs,
-            ),
-            "privacy": {"buyer_identities_exposed": False, "child_demands_anonymized": True}}
+             "supplier_pressure": supplier_pressure_projection(
+                 db, tenant_id=tenant_id, supplier_refs=supplier_refs,
+             ),
+            "recovery_options": recovery_options,
+             "privacy": {"buyer_identities_exposed": False, "child_demands_anonymized": True}}
 
 
 def buyer_procurement_context(db, *, tenant_id: str, case_id: str,

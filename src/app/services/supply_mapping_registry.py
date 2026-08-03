@@ -79,6 +79,46 @@ def resolve_supply_mapping(
             "evidence_ref": str(row[4]), "confidence": float(row[5])}
 
 
+def register_supply_relationship(
+    db, *, tenant_id: str, relationship_type: str, subject_id: str, object_id: str,
+    source: str, source_version: str, observed_at: str, evidence_ref: str, confidence: float,
+) -> dict[str, Any]:
+    """Register a tenant-approved relationship without overloading identity mappings."""
+    tenant = str(tenant_id or "").strip()
+    relation = str(relationship_type or "").strip().lower()
+    subject = str(subject_id or "").strip()
+    object_ref = str(object_id or "").strip()
+    if relation not in {"qualified_substitute_for", "transported_via", "composed_of"}:
+        raise ValueError("invalid_supply_relationship")
+    if not all((tenant, subject, object_ref, source, source_version, evidence_ref)):
+        raise ValueError("invalid_supply_relationship")
+    score = float(confidence)
+    if not 0.0 <= score <= 1.0:
+        raise ValueError("invalid_supply_relationship_confidence")
+    observed = _time(observed_at)
+    identity = "|".join((tenant, relation, subject, object_ref, source, source_version))
+    relationship_id = hashlib.sha256(identity.encode()).hexdigest()
+    existing = db.execute(text(
+        "SELECT status FROM tenant_supply_relationship WHERE id=:id"
+    ), {"id": relationship_id}).fetchone()
+    if existing:
+        return {"relationship_id": relationship_id, "status": str(existing[0]), "idempotent": True}
+    db.execute(text(
+        "UPDATE tenant_supply_relationship SET status='superseded' WHERE tenant_id=:t "
+        "AND relationship_type=:kind AND subject_id=:subject AND object_id=:object "
+        "AND source=:source AND status='active'"
+    ), {"t": tenant, "kind": relation, "subject": subject, "object": object_ref, "source": source})
+    db.execute(text(
+        "INSERT INTO tenant_supply_relationship "
+        "(id,tenant_id,relationship_type,subject_id,object_id,source,source_version,observed_at,"
+        "evidence_ref,confidence,status) VALUES "
+        "(:id,:t,:kind,:subject,:object,:source,:version,:observed,:evidence,:confidence,'active')"
+    ), {"id": relationship_id, "t": tenant, "kind": relation, "subject": subject,
+        "object": object_ref, "source": source, "version": source_version,
+        "observed": observed, "evidence": evidence_ref, "confidence": score})
+    return {"relationship_id": relationship_id, "status": "active", "idempotent": False}
+
+
 def import_supply_mapping_csv(
     db, path: str | Path, *, tenant_id: str, source: str,
 ) -> dict[str, Any]:
