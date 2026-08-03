@@ -1,8 +1,6 @@
 """Reliable outbound queue — at-least-once send with retry/backoff/dead-letter, idempotency, 855-ack."""
 from __future__ import annotations
 
-import sqlite3
-
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker

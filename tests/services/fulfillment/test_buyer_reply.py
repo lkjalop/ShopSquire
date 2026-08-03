@@ -76,9 +76,12 @@ class _Sent:
 
 
 class _FakeTx:
-    def __init__(self): self.calls = []
+    def __init__(self):
+        self.calls = []
+
     def send(self, *, to, subject, body, idempotency_key=""):
-        self.calls.append({"to": to, "body": body, "key": idempotency_key}); return _Sent()
+        self.calls.append({"to": to, "body": body, "key": idempotency_key})
+        return _Sent()
 
 
 @_pytest.fixture()
@@ -93,7 +96,8 @@ def db():
 
 def _committed(db):
     cid = _wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
-                        now_iso="2026-06-29 09:00:00"); db.commit()
+                        now_iso="2026-06-29 09:00:00")
+    db.commit()
     _wf.transition(db, case_id=cid, event="availability_assessed", actor=_Actor(_AT.AGENT, "a"),
                    state_patch={"availability": {"shortfall": 6, "requested_qty": 50, "in_stock": 44}},
                    now_iso="2026-06-29 09:00:01")

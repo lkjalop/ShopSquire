@@ -101,7 +101,8 @@ def test_reduce_option_when_shortfall_and_no_supplier(db):
 # ── wiring through the workflow ──────────────────────────────────────────────
 def _to_validated(db):
     cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
-                       now_iso="2026-06-26 09:00:00"); db.commit()
+                       now_iso="2026-06-26 09:00:00")
+    db.commit()
     seq = [
         ("availability_assessed", AG(), {"availability": {"requested_qty": 10, "in_stock": 4, "shortfall": 6}}),
         ("request_buyer_commitment", AG(), None),
