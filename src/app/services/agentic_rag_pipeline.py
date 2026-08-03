@@ -243,6 +243,7 @@ def run_agentic_rag_pipeline(
     model_version: str = "deterministic-faq-decider-v1",
     evidence_cutoff: str = "bundled",
     cache_dependency_recorder: Callable[[dict[str, str]], None] | None = None,
+    cache_lifecycle_resolver: Callable[[dict[str, str]], dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     tid = trace_id or f"rag-{uuid.uuid4()}"
     contract = CacheContract.resolve(
@@ -266,12 +267,27 @@ def run_agentic_rag_pipeline(
         payload=plan.model_dump(),
     )
     retrieval_request = {"queries": plan.queries, "intent": plan.intent}
-    cached = _RAG_CACHE.get_versioned(
-        namespace="agentic_rag_retrieval",
-        request=retrieval_request,
-        contract=contract,
-        min_trust=0.7,
-    )
+    cache_key = contract.cache_key("agentic_rag_retrieval", retrieval_request)
+    lifecycle_before_read = None
+    cache_read_permitted = True
+    if cache_lifecycle_resolver is not None:
+        try:
+            lifecycle_before_read = cache_lifecycle_resolver({
+                "tenant_id": contract.tenant_id, "cache_key": cache_key,
+            })
+            cache_read_permitted = bool(lifecycle_before_read.get("servable"))
+        except Exception:
+            # A registry outage cannot make an unverified cached generation safe.
+            cache_read_permitted = False
+            lifecycle_before_read = {"status": "degraded_dependency_unavailable", "servable": False}
+    cached = None
+    if cache_read_permitted:
+        cached = _RAG_CACHE.get_versioned(
+            namespace="agentic_rag_retrieval",
+            request=retrieval_request,
+            contract=contract,
+            min_trust=0.7,
+        )
     cache_hit = isinstance(cached, dict)
     if cache_hit:
         try:
@@ -281,7 +297,6 @@ def run_agentic_rag_pipeline(
             ret = _retrieve(plan)
     else:
         ret = _retrieve(plan)
-    cache_key = contract.cache_key("agentic_rag_retrieval", retrieval_request)
     if not cache_hit:
         cache_key = _RAG_CACHE.set_versioned(
             namespace="agentic_rag_retrieval",
@@ -292,7 +307,7 @@ def run_agentic_rag_pipeline(
             trust_score=0.78,
         )
     cache_dependency_registered = False
-    cache_temporal_status = "unregistered"
+    cache_temporal_status = str((lifecycle_before_read or {}).get("status") or "unregistered")
     if cache_dependency_recorder is not None:
         try:
             cache_dependency_recorder({
@@ -381,6 +396,9 @@ def run_agentic_rag_pipeline(
         "cache_key": cache_key,
         "cache_dependency_registered": cache_dependency_registered,
         "cache_temporal_status": cache_temporal_status,
+        "cache_temporal_read_status": str(
+            (lifecycle_before_read or {}).get("status") or "unregistered"
+        ),
         "answer": dec.answer,
         "confidence": dec.confidence,
         "citations": dec.citations,

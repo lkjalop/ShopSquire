@@ -137,3 +137,27 @@ def test_unregistered_cache_entry_is_evicted_and_reported_as_degraded():
     assert result["cache_dependency_registered"] is False
     assert result["cache_temporal_status"] == "degraded_dependency_unavailable"
     assert result["cache_hit"] is False
+
+
+def test_durable_lifecycle_blocks_stale_provider_value_before_retrieval():
+    kwargs = {
+        "question": "How long do warranty returns take?",
+        "tenant_id": "tenant-lifecycle-guard",
+        "corpus_version": "faq-lifecycle-guard-v1",
+        "evidence_cutoff": "2026-08-03T05:00:00Z",
+        "cache_dependency_recorder": lambda _item: None,
+    }
+    first = run_agentic_rag_pipeline(
+        **kwargs, cache_lifecycle_resolver=lambda _item: {
+            "status": "unregistered", "servable": False,
+        },
+    )
+    second = run_agentic_rag_pipeline(
+        **kwargs, cache_lifecycle_resolver=lambda _item: {
+            "status": "invalidated", "servable": False,
+        },
+    )
+
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is False
+    assert second["cache_temporal_read_status"] == "invalidated"
