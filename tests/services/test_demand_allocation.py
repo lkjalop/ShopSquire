@@ -33,6 +33,7 @@ from src.app.services.sourcing_backpressure import (
     SourcingQueueState,
 )
 from src.app.services.supplier_sourcing_authority import (
+    load_sourcing_admission_context,
     persist_sourcing_policy,
     record_sourcing_queue_observation,
 )
@@ -333,6 +334,98 @@ def test_supplier_queue_policy_prevents_new_contact_and_routes_urgent_alternativ
     assert result["admission_action"] == "seek_alternative"
     assert result["external_contact_permitted"] is False
     assert "query_approved_alternative_supplier" in result["next_permitted_actions"]
+
+
+def test_persisted_supplier_authority_drives_consolidation_backpressure():
+    db = _db()
+    _demand(db, "supplier-pressure", stage="committed", qty=6, tier=20)
+    persist_sourcing_policy(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        policy_version="policy-v1", max_open_requests=2, max_open_units=10,
+        max_request_units=8, max_dispatches_per_hour=4,
+        acknowledgement_sla_seconds=900, effective_from="2026-08-03T00:00:00Z",
+    )
+    record_sourcing_queue_observation(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        source_id="portal-adapter", source_version="queue-v1",
+        observed_at="2026-08-03T00:10:00Z", expires_at="2026-08-03T01:10:00Z",
+        open_requests=2, open_units=7, dispatches_last_hour=1,
+        oldest_unacknowledged_at="2026-08-03T00:05:00Z",
+    )
+    context = load_sourcing_admission_context(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        now=datetime(2026, 8, 3, 0, 20, tzinfo=timezone.utc),
+    )
+
+    result = consolidate_shortfalls(
+        db, tenant_id="t1", supplier_id="SUP-1",
+        window_ends_at="2026-08-03T00:30:00Z", urgency_bypass=True,
+        backpressure_policy=context["policy"], supplier_queue_state=context["state"],
+    )[0]
+
+    assert context["status"] == "ready"
+    assert result["status"] == "blocked"
+    assert result["admission_action"] == "seek_alternative"
+    assert result["external_contact_permitted"] is False
+    assert "supplier_open_request_limit" in result["reason_codes"]
+
+
+def test_stale_supplier_queue_cannot_be_used_for_admission():
+    db = _db()
+    persist_sourcing_policy(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        policy_version="policy-v1", max_open_requests=2, max_open_units=10,
+        max_request_units=8, max_dispatches_per_hour=4,
+        acknowledgement_sla_seconds=900, effective_from="2026-08-03T00:00:00Z",
+    )
+    record_sourcing_queue_observation(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        source_id="email-adapter", source_version="queue-v1",
+        observed_at="2026-08-03T00:10:00Z", expires_at="2026-08-03T00:15:00Z",
+        open_requests=0, open_units=0, dispatches_last_hour=0,
+    )
+
+    context = load_sourcing_admission_context(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        now=datetime(2026, 8, 3, 0, 20, tzinfo=timezone.utc),
+    )
+
+    assert context["status"] == "degraded"
+    assert context["policy"] is None and context["state"] is None
+    assert "supplier_queue_stale" in context["reason_codes"]
+
+
+def test_consolidation_route_fails_closed_on_stale_persisted_supplier_authority(monkeypatch):
+    from src.app.routers import allocation as allocation_router
+
+    db = _db()
+    _demand(db, "route-pressure", stage="committed", qty=6, tier=20)
+    persist_sourcing_policy(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        policy_version="policy-v1", max_open_requests=2, max_open_units=10,
+        max_request_units=8, max_dispatches_per_hour=4,
+        acknowledgement_sla_seconds=900, effective_from="2026-08-01T00:00:00Z",
+    )
+    record_sourcing_queue_observation(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        source_id="portal-adapter", source_version="queue-stale",
+        observed_at="2026-08-01T00:10:00Z", expires_at="2026-08-01T00:15:00Z",
+        open_requests=0, open_units=0, dispatches_last_hour=0,
+    )
+    monkeypatch.setattr(allocation_router, "db_session", lambda: db)
+    monkeypatch.setattr(allocation_router, "_tenant", lambda: "t1")
+
+    result = allocation_router.consolidate(
+        allocation_router.ConsolidateBody(
+            supplier_id="SUP-1", supplier_facility_id="FAC-1",
+            window_ends_at="2026-08-04T00:00:00Z", urgency_bypass=False,
+        ),
+        role="owner",
+    )
+
+    assert result["batches"][0]["status"] == "blocked"
+    assert result["batches"][0]["state_prevented"] == "new_supplier_request"
+    assert result["external_action"] == "none"
     assert db.execute(text("SELECT COUNT(*) FROM sourcing_batch")).scalar() == 0
 
 

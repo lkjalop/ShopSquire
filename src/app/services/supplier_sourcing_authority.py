@@ -6,10 +6,15 @@ health. Portal, EDI, email, ERP and category-specific interpretation belongs in 
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from sqlalchemy import text
+
+from src.app.services.sourcing_backpressure import (
+    SourcingBackpressurePolicy,
+    SourcingQueueState,
+)
 
 
 def _utc(value: datetime | str | None) -> datetime | None:
@@ -211,3 +216,54 @@ def supplier_pressure_projection(
                               "expires_at": expires.isoformat() if expires else None},
         })
     return output
+
+
+def load_sourcing_admission_context(
+    db,
+    *,
+    tenant_id: str,
+    supplier_id: str,
+    supplier_facility_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Resolve the persisted policy and freshest queue observation for enforcement.
+
+    Missing or stale authority fails closed.  The returned dataclasses are deliberately
+    provider-neutral, so portal, EDI, ERP and communications adapters share one gate.
+    """
+    stamp = _utc(now or datetime.now(timezone.utc))
+    assert stamp is not None
+    projection = supplier_pressure_projection(
+        db, tenant_id=tenant_id,
+        supplier_refs=[(supplier_id, supplier_facility_id)], now=stamp,
+    )[0]
+    source_status = str((projection.get("source_health") or {}).get("status") or "missing")
+    if source_status != "fresh" or not projection.get("policy") or not projection.get("queue"):
+        return {
+            "status": "degraded", "policy": None, "state": None,
+            "reason_codes": list(projection.get("reason_codes") or ["supplier_authority_unavailable"]),
+            "evidence": projection,
+        }
+    policy_row = projection["policy"]
+    queue_row = projection["queue"]
+    response_sla = projection["response_sla"]
+    queue_age = response_sla.get("queue_age_seconds")
+    oldest = stamp - timedelta(seconds=int(queue_age)) if queue_age is not None else None
+    return {
+        "status": "ready",
+        "policy": SourcingBackpressurePolicy(
+            max_open_requests=int(policy_row["max_open_requests"]),
+            max_open_units=int(policy_row["max_open_units"]),
+            max_request_units=int(policy_row["max_request_units"]),
+            max_dispatches_per_hour=int(policy_row["max_dispatches_per_hour"]),
+            acknowledgement_sla=timedelta(seconds=int(response_sla["seconds"])),
+        ),
+        "state": SourcingQueueState(
+            open_requests=int(queue_row["open_requests"]),
+            open_units=int(queue_row["open_units"]),
+            dispatches_last_hour=int(queue_row["dispatches_last_hour"]),
+            oldest_unacknowledged_at=oldest,
+        ),
+        "reason_codes": list(projection.get("reason_codes") or []),
+        "evidence": projection,
+    }

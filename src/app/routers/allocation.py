@@ -30,6 +30,7 @@ from src.app.services.fulfillment.route_policy import (
     persist_route_proposal,
     withdraw_direct_shipping_authorization,
 )
+from src.app.services.supplier_sourcing_authority import load_sourcing_admission_context
 
 
 router = APIRouter(prefix="/api/v1/admin/allocation", tags=["admin-allocation"])
@@ -70,6 +71,7 @@ class AllocateBody(BaseModel):
 
 class ConsolidateBody(BaseModel):
     supplier_id: str | None = Field(default=None, max_length=180)
+    supplier_facility_id: str | None = Field(default=None, max_length=180)
     window_ends_at: str = Field(min_length=1, max_length=80)
     urgency_bypass: bool = False
 
@@ -173,12 +175,36 @@ def consolidate(body: ConsolidateBody,
                 role: str = Depends(require_role_or_oidc(_OPERATOR))) -> dict[str, Any]:
     _ = role
     with db_session() as db:
+        admission = None
+        if body.supplier_id and body.supplier_facility_id:
+            admission = load_sourcing_admission_context(
+                db, tenant_id=_tenant(), supplier_id=body.supplier_id,
+                supplier_facility_id=body.supplier_facility_id,
+            )
+            if admission["status"] != "ready":
+                return {
+                    "batches": [{
+                        "status": "blocked", "reason": "supplier_authority_unavailable",
+                        "reason_codes": admission["reason_codes"],
+                        "state_prevented": "new_supplier_request",
+                    }],
+                    "supplier_authority": admission["evidence"],
+                    "external_action": "none",
+                }
         batches = consolidate_shortfalls(
             db, tenant_id=_tenant(), supplier_id=body.supplier_id,
             window_ends_at=body.window_ends_at, urgency_bypass=body.urgency_bypass,
+            backpressure_policy=admission["policy"] if admission else None,
+            supplier_queue_state=admission["state"] if admission else None,
         )
         db.commit()
-        return {"batches": batches, "external_action": "none"}
+        return {
+            "batches": batches,
+            "supplier_authority": admission["evidence"] if admission else {
+                "status": "not_evaluated", "reason": "supplier_facility_not_supplied",
+            },
+            "external_action": "none",
+        }
 
 
 @router.post("/sourcing/{batch_id}/draft-rfq")
