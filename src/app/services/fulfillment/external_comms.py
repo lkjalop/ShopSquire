@@ -201,8 +201,15 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
                     db, tenant_id=tenant_id, case_id=case_id, actor_id=actor.id,
                     idempotency_key=f"phone-contact:{content_hash}", now_iso=now_iso,
                 )
-            except Exception:
-                pass  # migration-first; the durable phone queue remains authoritative.
+            except Exception as exc:
+                from src.app.services.safe_stage import record_partial_failure
+
+                record_partial_failure(
+                    "procurement_human_room_projection",
+                    exc,
+                    trace_id=trace_id,
+                    extra={"case_id": case_id, "channel": channel},
+                )
         return workflow.TransitionResult(
             False, case_id, cur.state,
             "supplier_phone_contact_queued" if queued.get("message_id") else "supplier_phone_queue_failed",

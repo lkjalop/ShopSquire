@@ -252,8 +252,15 @@ def generate_and_record(db, *, case_id: str, actor, deadline: Optional[str] = No
                     db, tenant_id=tenant_id, case_id=case_id, option_id=option.option_id,
                     result=promise, calculated_at=evaluated_at,
                 )
-            except Exception:
-                pass  # migration-first production schemas own durability; older fixtures may not.
+            except Exception as exc:
+                from src.app.services.safe_stage import record_partial_failure
+
+                record_partial_failure(
+                    "promise_calculation_projection",
+                    exc,
+                    trace_id=trace_id,
+                    extra={"case_id": case_id, "option_id": option.option_id},
+                )
     conf = float(vq.get("confidence") or 0.9)
     res = workflow.transition(
         db, case_id=case_id, event="fulfillment_options_generated", actor=actor, confidence=conf,
