@@ -20,6 +20,7 @@ from src.app.services.sourcing_backpressure import (
     SourcingQueueState,
     evaluate_sourcing_admission,
 )
+from src.app.services.supplier_sourcing_authority import supplier_pressure_projection
 
 
 DEMAND_STAGES = frozenset({"provisional", "committed", "cancelled", "fulfilled"})
@@ -1064,6 +1065,7 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
         for row in committed
         if row["promise_state"]
     )
+    supplier_refs = [(str(row[1]), str(row[2])) for row in waves]
     return {"tenant_id": tenant_id, "sku": sku, "authority": "shadow_allocation",
             "execution_authority": "legacy_inventory_reservations",
             "summary": {"committed_quantity": total_requested, "allocated_quantity": total_allocated,
@@ -1104,6 +1106,9 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
                              "purpose": row[13], "retention_until": row[14]}}
                 for row in routes
             ],
+            "supplier_pressure": supplier_pressure_projection(
+                db, tenant_id=tenant_id, supplier_refs=supplier_refs,
+            ),
             "privacy": {"buyer_identities_exposed": False, "child_demands_anonymized": True}}
 
 

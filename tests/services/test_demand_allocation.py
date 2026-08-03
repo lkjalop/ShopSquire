@@ -12,6 +12,7 @@ from src.app.services.demand_allocation import (
     apply_supplier_schedule,
     commit_demand,
     consolidate_shortfalls,
+    create_sourcing_wave,
     project_committed_order_demand,
     record_demand,
     sync_provisional_cart_demand,
@@ -22,6 +23,10 @@ from src.app.services.demand_allocation import (
 from src.app.services.sourcing_backpressure import (
     SourcingBackpressurePolicy,
     SourcingQueueState,
+)
+from src.app.services.supplier_sourcing_authority import (
+    persist_sourcing_policy,
+    record_sourcing_queue_observation,
 )
 
 
@@ -78,6 +83,18 @@ def _db():
       jurisdiction TEXT,purpose TEXT,permitted_fields_json TEXT,retention_until TEXT,status TEXT,
       authorized_by TEXT,authorized_at TEXT,withdrawn_at TEXT,audit_evidence_id TEXT,
       idempotency_key TEXT,UNIQUE(tenant_id,idempotency_key))"""))
+    db.execute(text("""CREATE TABLE supplier_sourcing_policy (
+      id TEXT PRIMARY KEY,tenant_id TEXT,supplier_id TEXT,supplier_facility_id TEXT,
+      policy_version TEXT,max_open_requests INTEGER,max_open_units INTEGER,
+      max_request_units INTEGER,max_dispatches_per_hour INTEGER,
+      acknowledgement_sla_seconds INTEGER,effective_from TEXT,status TEXT,created_at TEXT,
+      UNIQUE(tenant_id,supplier_id,supplier_facility_id,policy_version))"""))
+    db.execute(text("""CREATE TABLE supplier_sourcing_queue_observation (
+      id TEXT PRIMARY KEY,tenant_id TEXT,supplier_id TEXT,supplier_facility_id TEXT,
+      source_id TEXT,source_version TEXT,observed_at TEXT,expires_at TEXT,
+      open_requests INTEGER,open_units INTEGER,dispatches_last_hour INTEGER,
+      oldest_unacknowledged_at TEXT,created_at TEXT,
+      UNIQUE(tenant_id,supplier_id,supplier_facility_id,source_id,source_version))"""))
     db.execute(text("""CREATE TABLE temporal_dependency (
       id TEXT PRIMARY KEY,tenant_id TEXT,source_type TEXT,source_id TEXT,source_version TEXT,
       derived_type TEXT,derived_id TEXT,status TEXT,created_at TEXT,invalidated_at TEXT,
@@ -544,3 +561,69 @@ def test_workbench_anonymizes_buyers_and_reports_pressure_queue_and_child_count(
     assert view["sourcing_batches"][0]["child_demand_count"] == 1
     assert view["privacy"]["buyer_identities_exposed"] is False
     assert "buyer" not in view["demands"][0]
+
+
+def test_workbench_projects_fresh_supplier_pressure_and_response_sla():
+    db = _db()
+    observed = datetime.now(timezone.utc) - timedelta(hours=1)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    _demand(db, "supplier-pressure", stage="committed", qty=5)
+    batches = consolidate_shortfalls(
+        db, tenant_id="t1", supplier_id="SUP-1", window_ends_at="2100-08-03T18:00:00Z"
+    )
+    create_sourcing_wave(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        currency="AUD", incoterm="DAP", merchant_destination_id="SYD",
+        window_ends_at="2100-08-03T18:00:00Z", batch_ids=[batches[0]["id"]],
+        standalone_freight_cents=12000, consolidated_freight_cents=9000,
+        handling_cents=1000,
+    )
+    persist_sourcing_policy(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        policy_version="v1", max_open_requests=4, max_open_units=100,
+        max_request_units=50, max_dispatches_per_hour=3,
+        acknowledgement_sla_seconds=7200, effective_from="2026-08-03T00:00:00Z",
+    )
+    record_sourcing_queue_observation(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        source_id="portal-adapter", source_version="snapshot-7",
+        observed_at=observed, expires_at=expires,
+        open_requests=3, open_units=80, dispatches_last_hour=2,
+        oldest_unacknowledged_at=observed - timedelta(hours=1),
+    )
+
+    pressure = allocation_workbench(db, tenant_id="t1")["supplier_pressure"][0]
+
+    assert pressure["supplier_id"] == "SUP-1"
+    assert pressure["supplier_facility_id"] == "FAC-1"
+    assert pressure["status"] == "watch"
+    assert pressure["response_sla"]["status"] == "within_sla"
+    assert pressure["queue"]["open_unit_utilization"] == 0.8
+    assert pressure["source_health"]["status"] == "fresh"
+    assert pressure["external_contact_authority"] == "governed"
+
+
+def test_stale_supplier_queue_is_degraded_and_cannot_authorize_contact():
+    db = _db()
+    persist_sourcing_policy(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        policy_version="v1", max_open_requests=4, max_open_units=100,
+        max_request_units=50, max_dispatches_per_hour=3,
+        acknowledgement_sla_seconds=7200, effective_from="2026-08-03T00:00:00Z",
+    )
+    record_sourcing_queue_observation(
+        db, tenant_id="t1", supplier_id="SUP-1", supplier_facility_id="FAC-1",
+        source_id="portal-adapter", source_version="snapshot-old",
+        observed_at="2026-08-01T12:00:00Z", expires_at="2026-08-01T12:05:00Z",
+        open_requests=0, open_units=0, dispatches_last_hour=0,
+    )
+
+    from src.app.services.supplier_sourcing_authority import supplier_pressure_projection
+
+    pressure = supplier_pressure_projection(
+        db, tenant_id="t1", supplier_refs=[("SUP-1", "FAC-1")],
+        now=datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc),
+    )[0]
+    assert pressure["status"] == "degraded"
+    assert pressure["source_health"]["status"] == "stale"
+    assert pressure["external_contact_authority"] == "blocked"
