@@ -9,7 +9,10 @@ import { explainProcEvent } from '../lib/procEventExplain';
 import { dealEconomicsStatus, formatDealMoney } from '../lib/dealEconomicsDisplay';
 import { shouldShowMissingAnchorReasoning } from '../lib/tracePresentation';
 import ArtifactSecuritySummary from './security/ArtifactSecuritySummary';
-import ProcurementOperationalTrace from './ProcurementOperationalTrace';
+import ProcurementOperationalTrace, {
+  DisruptionEvidenceTrace,
+  TemporalCacheTechnicalTrace,
+} from './ProcurementOperationalTrace';
 
 type TraceEvent = {
   id?: string;
@@ -2609,6 +2612,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
               {activeTab === 'evidence' && (
                 <div style={{ padding: '12px 14px' }}>
+                  <DisruptionEvidenceTrace allocationView={allocationView} />
                   <HippographEvidenceSurface insights={hippographInsights} />
                   {/* N1 (2026-07-07): the trust hierarchy IS the layout — trusted store records first
                       as flat rows; external evidence (web) rendered as bordered, badged quotes. */}
@@ -4658,6 +4662,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
               {activeTab === 'audit' && (
                 <div className={styles.summaryPane}>
+                  <TemporalCacheTechnicalTrace allocationView={allocationView} />
                   {auditLoading && <div className={styles.empty}>Loading audit trail...</div>}
                   {!auditLoading && auditError && (
                     <div className={styles.empty} role="alert">

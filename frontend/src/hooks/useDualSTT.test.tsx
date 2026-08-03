@@ -43,7 +43,12 @@ describe('useDualSTT', () => {
 
   beforeEach(() => {
     recognition = new FakeRecognition();
-    (window as any).SpeechRecognition = vi.fn(() => recognition);
+    // The browser API is invoked with `new`; keep the fixture constructable so
+    // it exercises the same contract under Vitest 4.
+    function SpeechRecognitionMock() {
+      return recognition;
+    }
+    (window as any).SpeechRecognition = SpeechRecognitionMock;
     (window as any).webkitSpeechRecognition = undefined;
     (globalThis as any).MediaRecorder = FakeMediaRecorder;
     Object.defineProperty(navigator, 'mediaDevices', {

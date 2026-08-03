@@ -57,6 +57,37 @@ test('Commercial Journey renders governed supplier pressure, wave and route evid
         components: { dispatch_days: [1, 2], transit_days: [2, 3], inspection_days: [1, 2] },
         privacy: { status: 'not_required' },
       }],
+      disruption_impacts: [{
+        observation_id: 'obs-customs-1', disruption_type: 'customs_system_outage',
+        status: 'bounded_recalculation_proposed', claim_status: 'supported', severity: 'high',
+        authority: 'proposal_only', state_prevented: 'commercial_state_mutation',
+        evidence: {
+          source_id: 'official-customs', source_revision: 'r3',
+          source_licence: 'official-open-data-v1', evidence_ref: 'sha256:evidence-42',
+          claim_status: 'supported',
+        },
+        dependency_path: { edges: [
+          { from_node_id: 'variant:SKU-1', to_node_id: 'facility:shanghai' },
+          { from_node_id: 'facility:shanghai', to_node_id: 'lane:cn-syd' },
+        ] },
+        impact: {
+          eta_days: { before: { low: 5, high: 8 }, proposed: { low: 8, high: 16 } },
+          freight_cost_minor: { before: { low: 5000, high: 7000 }, proposed: { low: 7000, high: 12000 } },
+          contribution_margin: { before: 0.25, proposed: { low: 0.21, high: 0.24 } },
+        },
+        proposals: [
+          { type: 'buyer_promise_review', state: 'proposed_not_applied', eta_days: { low: 8, high: 16 } },
+          { type: 'payment_authorization_review', state: 'review_required', proposed_capture_minor: 0 },
+        ],
+      }],
+      temporal_cache_lifecycle: {
+        scope: 'tenant_operator_summary', case_specific: false, stale_content_served: false,
+        entries: [{
+          cache_key: 'cache:v2:agentic_rag_retrieval:demo', namespace: 'agentic_rag_retrieval',
+          status: 'rebuild_queued', current_generation: 1, source_version: 'faq-v1',
+          rebuild_job_id: 'job-1', rebuild_status: 'queued', servable: false,
+        }],
+      },
     } });
   });
 
@@ -69,4 +100,11 @@ test('Commercial Journey renders governed supplier pressure, wave and route evid
   await expect(trace.getByTestId('proc-sourcing-wave')).toContainText('Estimated freight saving AUD 90');
   await expect(trace.getByTestId('proc-route-proposal')).toContainText('ETA 5–8 days');
   await expect(trace.getByText(/27 unconfirmed unit\(s\) cannot become a delivery promise/)).toBeVisible();
+  await expect(trace.getByTestId('proc-active-disruption')).toContainText('customs system outage');
+  await expect(trace.getByTestId('proc-disruption-path')).toContainText('variant:SKU-1');
+  await expect(trace.getByTestId('proc-disruption-impact')).toContainText('ETA 5');
+  await expect(trace.getByTestId('proc-revised-promise')).toContainText('proposed not applied');
+  await expect(trace.getByTestId('proc-payment-effect')).toContainText('capture remains 0');
+  await expect(trace.getByTestId('proc-temporal-cache')).toContainText('rebuild queued');
+  await expect(trace.getByTestId('proc-temporal-cache')).toContainText('not evidence for this case');
 });
