@@ -5,6 +5,7 @@ import json
 import os
 import re
 import uuid
+from dataclasses import asdict
 from typing import Any, Callable, Dict, List
 
 from pydantic import BaseModel, Field
@@ -242,7 +243,7 @@ def run_agentic_rag_pipeline(
     policy_version: str = "rag-injection-policy-v1",
     model_version: str = "deterministic-faq-decider-v1",
     evidence_cutoff: str = "bundled",
-    cache_dependency_recorder: Callable[[dict[str, str]], None] | None = None,
+    cache_dependency_recorder: Callable[[dict[str, Any]], None] | None = None,
     cache_lifecycle_resolver: Callable[[dict[str, str]], dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     tid = trace_id or f"rag-{uuid.uuid4()}"
@@ -313,9 +314,19 @@ def run_agentic_rag_pipeline(
             cache_dependency_recorder({
                 "tenant_id": contract.tenant_id,
                 "cache_key": cache_key,
+                "namespace": "agentic_rag_retrieval",
                 "source_type": "faq_corpus",
                 "source_id": "faq_bank",
                 "source_version": contract.corpus_version,
+                "subject_type": "case" if contract.subject_id else "shared",
+                "subject_id": contract.subject_id,
+                "session_epoch": contract.session_epoch,
+                "rebuild_payload": {
+                    "schema_version": "shopsquire.cache-rebuild.v1",
+                    "namespace": "agentic_rag_retrieval",
+                    "request": retrieval_request,
+                    "contract": asdict(contract),
+                },
             })
             cache_dependency_registered = True
             cache_temporal_status = "registered"

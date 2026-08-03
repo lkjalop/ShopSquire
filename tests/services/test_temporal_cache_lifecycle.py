@@ -43,7 +43,36 @@ def _db():
       dispatch_attempts INTEGER DEFAULT 0,created_at TEXT,dispatched_at TEXT,started_at TEXT,
       finished_at TEXT,last_error TEXT,
       UNIQUE(tenant_id,idempotency_key))"""))
+    db.execute(text("""CREATE TABLE temporal_cache_binding (
+      id TEXT PRIMARY KEY,tenant_id TEXT,cache_key TEXT,namespace TEXT,subject_type TEXT,
+      subject_id TEXT,session_epoch TEXT,rebuild_payload_json TEXT,created_at TEXT,
+      UNIQUE(tenant_id,cache_key))"""))
     return db
+
+
+def test_cache_registration_persists_exact_case_identity_and_rebuild_recipe():
+    db = _db()
+    result = register_cache_dependency(
+        db,
+        tenant_id="tenant-a",
+        cache_key="cache:v2:agentic_rag_retrieval:key",
+        namespace="agentic_rag_retrieval",
+        source_type="faq_corpus",
+        source_id="faq_bank",
+        source_version="faq-bank-rev-1",
+        subject_type="case",
+        subject_id="case-42",
+        session_epoch="epoch-7",
+        rebuild_payload={"request": {"queries": ["returns"], "intent": "returns_warranty"}},
+    )
+    row = db.execute(text(
+        "SELECT subject_type,subject_id,session_epoch,rebuild_payload_json "
+        "FROM temporal_cache_binding WHERE tenant_id='tenant-a'"
+    )).fetchone()
+
+    assert result["cache_binding"] == "registered"
+    assert tuple(row[:3]) == ("case", "case-42", "epoch-7")
+    assert '"returns"' in row[3]
 
 
 def test_supersession_evicts_exact_cache_entry_and_enqueues_one_rebuild():

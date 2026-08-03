@@ -114,13 +114,17 @@ def test_agentic_rag_exposes_exact_cache_dependency_to_temporal_composition():
     )
 
     assert result["cache_dependency_registered"] is True
-    assert dependencies == [{
-        "tenant_id": "tenant-temporal",
-        "cache_key": result["cache_key"],
-        "source_type": "faq_corpus",
-        "source_id": "faq_bank",
-        "source_version": "faq-temporal-rev-7",
-    }]
+    assert dependencies[0]["tenant_id"] == "tenant-temporal"
+    assert dependencies[0]["cache_key"] == result["cache_key"]
+    assert dependencies[0]["source_type"] == "faq_corpus"
+    assert dependencies[0]["source_id"] == "faq_bank"
+    assert dependencies[0]["source_version"] == "faq-temporal-rev-7"
+    assert dependencies[0]["namespace"] == "agentic_rag_retrieval"
+    assert dependencies[0]["subject_type"] == "case"
+    assert dependencies[0]["subject_id"] == "buyer-temporal"
+    assert dependencies[0]["session_epoch"] == "epoch-1"
+    assert dependencies[0]["rebuild_payload"]["contract"]["subject_id"] == "buyer-temporal"
+    assert dependencies[0]["rebuild_payload"]["request"]["intent"]
 
 
 def test_unregistered_cache_entry_is_evicted_and_reported_as_degraded():

@@ -7,6 +7,7 @@ owning projector can rebuild them from the replacement fact.
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -241,6 +242,10 @@ def register_cache_dependency(
     source_id: str,
     source_version: str,
     namespace: str | None = None,
+    subject_type: str = "shared",
+    subject_id: str = "",
+    session_epoch: str = "",
+    rebuild_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind one exact cache key to one exact source revision."""
     key = str(cache_key or "").strip()
@@ -258,8 +263,46 @@ def register_cache_dependency(
         derived_type="semantic_cache_entry",
         derived_id=key,
     )
-    return {**dependency, "cache_status": generation["status"],
-            "cache_generation": generation["generation"]}
+    binding_status = "schema_unavailable"
+    if "temporal_cache_binding" in inspect(db.connection()).get_table_names():
+        cache_namespace = _cache_namespace(key, namespace)
+        identity_kind = str(subject_type or "shared").strip().lower()
+        identity = str(subject_id or "").strip()
+        epoch = str(session_epoch or "").strip()
+        if identity_kind not in {"case", "shared"}:
+            raise ValueError("cache_subject_type_invalid")
+        if identity_kind == "case" and not identity:
+            raise ValueError("cache_case_identity_required")
+        payload_json = json.dumps(
+            rebuild_payload or {}, sort_keys=True, separators=(",", ":"), default=str
+        )
+        existing = db.execute(text(
+            "SELECT namespace,subject_type,subject_id,session_epoch,rebuild_payload_json "
+            "FROM temporal_cache_binding WHERE tenant_id=:t AND cache_key=:k"
+        ), {"t": str(tenant_id), "k": key}).fetchone()
+        expected = (cache_namespace, identity_kind, identity, epoch, payload_json)
+        if existing and tuple(str(value or "") for value in existing) != expected:
+            raise ValueError("cache_binding_conflict")
+        if not existing:
+            material = "|".join((str(tenant_id), key, identity_kind, identity, epoch))
+            db.execute(text(
+                "INSERT INTO temporal_cache_binding "
+                "(id,tenant_id,cache_key,namespace,subject_type,subject_id,session_epoch,"
+                "rebuild_payload_json,created_at) VALUES "
+                "(:id,:t,:k,:ns,:kind,:subject,:epoch,:payload,:now)"
+            ), {
+                "id": hashlib.sha256(material.encode()).hexdigest(),
+                "t": str(tenant_id), "k": key, "ns": cache_namespace,
+                "kind": identity_kind, "subject": identity, "epoch": epoch,
+                "payload": payload_json, "now": _now(),
+            })
+        binding_status = "registered"
+    return {
+        **dependency,
+        "cache_status": generation["status"],
+        "cache_generation": generation["generation"],
+        "cache_binding": binding_status,
+    }
 
 
 def invalidate_source_dependencies(

@@ -152,6 +152,11 @@ class SemanticCache:
         v = self._local.get(key)
         return v
 
+    @property
+    def is_shared_backend(self) -> bool:
+        """Whether writes are visible across API and worker processes."""
+        return self._redis is not None
+
     def set(self, key: str, value: Any, ex: Optional[int] = None) -> None:
         if not key:
             return
