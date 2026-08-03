@@ -171,7 +171,10 @@ jobs:
               "ioc": {},
               "evidence": {"claim_scope": "loopback receiver; not live SIEM certification"},
           }
-          result = emit_security_handoff(event, force_inline=True)
+          # The published adapter is synchronous. Keep this proof compatible with
+          # a clean checkout instead of depending on an uncommitted async-adapter
+          # extension that adds a force_inline keyword.
+          result = emit_security_handoff(event)
           Path("proof-artifacts/siem-handoff-result.json").write_text(
               json.dumps(result, indent=2, sort_keys=True), encoding="utf-8",
           )
