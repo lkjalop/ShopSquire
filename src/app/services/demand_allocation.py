@@ -17,6 +17,13 @@ from sqlalchemy import text
 
 
 DEMAND_STAGES = frozenset({"provisional", "committed", "cancelled", "fulfilled"})
+PARITY_DIFFERENCE_CODES = frozenset({
+    "unallocated_committed_demand",
+    "shadow_only_allocation",
+    "legacy_only_reservation",
+    "shadow_quantity_higher",
+    "legacy_quantity_higher",
+})
 _ALLOWED_TRANSITIONS = {
     "provisional": frozenset({"committed", "cancelled"}),
     "committed": frozenset({"cancelled", "fulfilled"}),
@@ -663,13 +670,25 @@ def create_sourcing_wave(
             "idempotent": False, "external_action": "none"}
 
 
-def allocation_shadow_parity(db, *, tenant_id: str, case_id: str | None = None,
-                             persist: bool = True) -> dict[str, Any]:
+def allocation_shadow_parity(
+    db,
+    *,
+    tenant_id: str,
+    case_id: str | None = None,
+    persist: bool = True,
+    accepted_difference_codes: Iterable[str] = (),
+) -> dict[str, Any]:
     """Compare the new shadow allocations with the legacy reservation executor.
 
     Legacy rows have neither tenant nor location identity, so a report can prove quantity parity for
     a scoped order but can never certify tenant/location parity. That limitation is returned explicitly.
     """
+    accepted = frozenset(str(code).strip() for code in accepted_difference_codes)
+    unsupported = sorted(accepted - PARITY_DIFFERENCE_CODES)
+    if unsupported:
+        raise ValueError(
+            "unsupported_parity_difference_code:" + ",".join(unsupported)
+        )
     clause = " AND d.case_id=:case_id" if case_id else ""
     params: dict[str, Any] = {"t": tenant_id}
     if case_id:
@@ -700,17 +719,59 @@ def allocation_shadow_parity(db, *, tenant_id: str, case_id: str | None = None,
     for key in keys:
         new = new_by_key.get(key, {"committed": 0, "allocated": 0})
         legacy = legacy_by_key.get(key, 0)
-        comparisons.append({"case_id": key[0], "sku": key[1], **new,
-                            "legacy_reserved": legacy,
-                            "quantity_match": int(new["allocated"]) == int(legacy)})
+        allocated = int(new["allocated"])
+        quantity_match = allocated == int(legacy)
+        difference_code = None
+        if not quantity_match:
+            if key not in legacy_by_key:
+                difference_code = (
+                    "shadow_only_allocation"
+                    if allocated > 0
+                    else "unallocated_committed_demand"
+                )
+            elif key not in new_by_key:
+                difference_code = "legacy_only_reservation"
+            elif allocated > int(legacy):
+                difference_code = "shadow_quantity_higher"
+            else:
+                difference_code = "legacy_quantity_higher"
+        comparisons.append({
+            "case_id": key[0], "sku": key[1], **new,
+            "legacy_reserved": legacy, "quantity_match": quantity_match,
+            "difference_code": difference_code,
+            "difference_accepted": bool(difference_code in accepted),
+        })
     new_total = sum(row["allocated"] for row in comparisons)
     legacy_total = sum(row["legacy_reserved"] for row in comparisons)
-    status = "match" if comparisons and all(row["quantity_match"] for row in comparisons) else (
-        "insufficient" if not comparisons else "diverged"
+    differences = [row for row in comparisons if not row["quantity_match"]]
+    unaccepted = [row for row in differences if not row["difference_accepted"]]
+    status = (
+        "insufficient" if not comparisons else
+        "match" if not differences else
+        "explained_difference" if not unaccepted else
+        "diverged"
+    )
+    quantity_parity_ready = status in {"match", "explained_difference"}
+    # The legacy table cannot certify the two dimensions the replacement is
+    # designed to protect. An accepted quantity exception is evidence, not a
+    # waiver of tenant/location isolation.
+    scope_parity_ready = not any(
+        limitation in limitations
+        for limitation in {
+            "legacy_reservations_not_tenant_scoped",
+            "legacy_reservations_not_location_scoped",
+            "legacy_reservation_table_unavailable",
+        }
     )
     report = {"tenant_id": tenant_id, "case_id": case_id, "status": status,
               "new_allocated_qty": new_total, "legacy_reserved_qty": legacy_total,
               "comparisons": comparisons, "limitations": limitations,
+              "accepted_difference_codes": sorted(accepted),
+              "difference_count": len(differences),
+              "unaccepted_difference_count": len(unaccepted),
+              "quantity_parity_ready": quantity_parity_ready,
+              "scope_parity_ready": scope_parity_ready,
+              "replacement_ready": quantity_parity_ready and scope_parity_ready,
               "execution_authority": "legacy_inventory_reservations"}
     if persist:
         run_id = str(uuid.uuid4())

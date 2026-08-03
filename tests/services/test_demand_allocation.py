@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -415,6 +416,53 @@ def test_shadow_parity_reports_legacy_scope_limitations_and_quantity_match():
     assert report["comparisons"][0]["case_id"] == "order-9"
     assert "legacy_reservations_not_tenant_scoped" in report["limitations"]
     assert demand["id"]
+
+
+def test_shadow_parity_classifies_and_requires_explicit_difference_acceptance():
+    db = _db()
+    record_demand(
+        db, tenant_id="t1", idempotency_key="order-10", case_id="order-10",
+        sku="SKU-1", quantity=5, destination_id="destination:buyer",
+        stage="committed", priority_tier=50, fulfillment_location_id="SYD",
+    )
+    _snapshot(db, qty=5)
+    allocate_committed(db, tenant_id="t1", sku="SKU-1", location_id="SYD")
+    db.execute(text("""CREATE TABLE inventory_reservations (
+      id TEXT PRIMARY KEY,order_id TEXT,sku TEXT,qty INTEGER,status TEXT)"""))
+    db.execute(text(
+        "INSERT INTO inventory_reservations VALUES "
+        "('r2','order-10','SKU-1',3,'reserved')"
+    ))
+
+    unexplained = allocation_shadow_parity(
+        db, tenant_id="t1", case_id="order-10", persist=False,
+    )
+    explained = allocation_shadow_parity(
+        db, tenant_id="t1", case_id="order-10", persist=False,
+        accepted_difference_codes={"shadow_quantity_higher"},
+    )
+
+    assert unexplained["status"] == "diverged"
+    assert unexplained["comparisons"][0]["difference_code"] == "shadow_quantity_higher"
+    assert unexplained["unaccepted_difference_count"] == 1
+    assert unexplained["quantity_parity_ready"] is False
+    assert explained["status"] == "explained_difference"
+    assert explained["comparisons"][0]["difference_accepted"] is True
+    assert explained["quantity_parity_ready"] is True
+    # Legacy reservations have no tenant/location identity, so an explained
+    # quantity difference is still insufficient to transfer execution authority.
+    assert explained["scope_parity_ready"] is False
+    assert explained["replacement_ready"] is False
+    assert explained["execution_authority"] == "legacy_inventory_reservations"
+
+
+def test_shadow_parity_rejects_unknown_exception_codes():
+    db = _db()
+    with pytest.raises(ValueError, match="unsupported_parity_difference_code"):
+        allocation_shadow_parity(
+            db, tenant_id="t1", persist=False,
+            accepted_difference_codes={"laptop_demo_exception"},
+        )
 
 
 def test_supplier_partial_schedule_persists_and_recomputes_buyer_promise_idempotently():
