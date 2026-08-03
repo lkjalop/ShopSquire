@@ -345,6 +345,11 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
         "schedule": crontab(minute="15", hour="3"),  # 03:15 UTC daily, low-traffic window
         "args": (),
     }
+    beat_schedule["temporal-cache-rebuild-dispatch"] = {
+        "task": "src.app.tasks.temporal_cache_tasks.dispatch_temporal_cache_rebuilds",
+        "schedule": max(15, int(os.getenv("TEMPORAL_CACHE_DISPATCH_SECONDS", "30") or 30)),
+        "options": {"queue": default_q},
+    }
 
     # Email security polling — DMARC filesystem and inbox connector
     dmarc_poll_enabled = str(os.getenv("DMARC_POLL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -449,6 +454,8 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.experiment_ops_tasks.experiment_watchdog": {"queue": default_q},
             "src.app.tasks.fulfillment_tasks.retry_supplier_drafts": {"queue": default_q},
             "src.app.tasks.connector_recovery_tasks.recover_stalled_connector_jobs": {"queue": default_q},
+            "src.app.tasks.temporal_cache_tasks.rebuild_temporal_cache_entry": {"queue": default_q},
+            "src.app.tasks.temporal_cache_tasks.dispatch_temporal_cache_rebuilds": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -470,6 +477,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.vision_prewarm_tasks",
             "src.app.tasks.fulfillment_tasks",
             "src.app.tasks.connector_recovery_tasks",
+            "src.app.tasks.temporal_cache_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,
