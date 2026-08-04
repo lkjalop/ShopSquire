@@ -64,8 +64,8 @@ TERMINAL_RESOLUTIONS: Dict[str, ExceptionResolution] = {
     "pipeline_error":              ExceptionResolution(True, DISP_RETRY,    "market pipeline error: deferred for bounded retry"),
 }
 
-# Canonical exception_queue columns (the schema the resolver + authz + the test agree on). enqueue_exception
-# and ensure_exception_table own this so a domain (market/procurement) can queue without knowing the schema.
+# Canonical exception_queue columns. Alembic owns this schema; services only
+# verify it so replicas never race to alter production tables at runtime.
 _EXC_COLUMNS = (
     ("id", "TEXT"), ("tenant_id", "TEXT"), ("domain", "TEXT"), ("ref_id", "TEXT"),
     ("trace_id", "TEXT"), ("action", "TEXT"), ("requester", "TEXT"),
@@ -77,20 +77,15 @@ _EXC_COLUMNS = (
 
 
 def ensure_exception_table(db) -> None:
-    """Create exception_queue with the canonical schema IF absent, and idempotently ADD any missing
-    canonical column to a pre-existing (possibly divergent) table. This REPAIRS the legacy db.py schema
-    that lacked terminal_outcome/resolved_outcome — without it the authz + domain enqueues silently fail."""
-    from sqlalchemy import text as _t
-    cols = ", ".join(f"{n} {ty}" for n, ty in _EXC_COLUMNS)
-    db.execute(_t(f"CREATE TABLE IF NOT EXISTS exception_queue ({cols})"))
+    """Assert that migrations installed the canonical exception schema."""
     try:
         from sqlalchemy import inspect as _inspect
         have = {c["name"] for c in _inspect(db.connection()).get_columns("exception_queue")}
-    except Exception:
-        return  # introspection unavailable → the CREATE above already has every column on a fresh table
-    for name, ty in _EXC_COLUMNS:
-        if name not in have:
-            db.execute(_t(f"ALTER TABLE exception_queue ADD COLUMN {name} {ty}"))
+    except Exception as exc:
+        raise RuntimeError("exception_queue_migration_required") from exc
+    missing = sorted(name for name, _column_type in _EXC_COLUMNS if name not in have)
+    if missing:
+        raise RuntimeError(f"exception_queue_schema_incomplete:{','.join(missing)}")
 
 
 def enqueue_exception(*, domain: str, terminal_outcome: str, ref_id=None, reason=None,
@@ -106,10 +101,12 @@ def enqueue_exception(*, domain: str, terminal_outcome: str, ref_id=None, reason
         with db_session() as db:
             ensure_exception_table(db)
             db.execute(
-                _t("INSERT INTO exception_queue (id, tenant_id, domain, ref_id, terminal_outcome, reason, "
-                   "status, created_at) VALUES (:id,:tn,:dm,:rf,:to,:rs,'open',:ts)"),
+                _t("INSERT INTO exception_queue (id, tenant_id, domain, ref_id, action, requester, "
+                   "terminal_outcome, reason, status, created_at) "
+                   "VALUES (:id,:tn,:dm,:rf,:ac,'system',:to,:rs,'open',:ts)"),
                 {"id": str(_uuid.uuid4()), "tn": str(tenant_id or "default"), "dm": str(domain or ""),
                  "rf": (str(ref_id) if ref_id is not None else None), "to": str(terminal_outcome or ""),
+                 "ac": f"{str(domain or 'platform')}_exception",
                  "rs": (str(reason) if reason is not None else None), "ts": _now_iso()},
             )
             db.commit()
