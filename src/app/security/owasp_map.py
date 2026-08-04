@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from typing import Dict, Any, List
 
+TAXONOMY_EDITIONS = {
+    "owasp_llm": "OWASP Top 10 for LLM Applications 2025 v2.0",
+    "owasp_api": "OWASP API Security Top 10 2023",
+    "mitre_atlas": "MITRE ATLAS live catalog; mappings reviewed 2026-08-01",
+    "mitre_attack": "MITRE ATT&CK Enterprise live catalog; mappings reviewed 2026-08-01",
+}
+MAPPING_RULE_VERSION = "shopsquire.security-map.2026-08-01.1"
 
 OWASP_LLM_MAP = {
     "prompt_injection": "LLM01:PromptInjection",
@@ -13,39 +20,52 @@ OWASP_LLM_MAP = {
     "qr_url_suspicious": "LLM01:PromptInjection",
     "qr_external_url_detected": "LLM01:PromptInjection",
     "qr_external_url": "LLM01:PromptInjection",
-    "qr_label_destination_mismatch": "LLM05:SupplyChainVulnerabilities",
+    "qr_label_destination_mismatch": "LLM01:PromptInjection",
     "payment_social_engineering": "LLM01:PromptInjection",
     "cross_image_split_injection": "LLM01:PromptInjection",
     "agentic_tool_injection": "LLM01:PromptInjection",
     "prompt_injection_text": "LLM01:PromptInjection",
-    "cross_modal_mismatch": "LLM02:InsecureOutputHandling",
-    "manipulation_detected": "LLM02:InsecureOutputHandling",
-    "adversarial_detected": "LLM02:InsecureOutputHandling",
-    "ocr_yolo_label_conflict": "LLM02:InsecureOutputHandling",
-    "vision_yolo_conflict": "LLM02:InsecureOutputHandling",
-    "product_identity_low_confidence": "LLM02:InsecureOutputHandling",
+    "cross_modal_mismatch": "LLM05:ImproperOutputHandling",
+    "manipulation_detected": "LLM05:ImproperOutputHandling",
+    "adversarial_detected": "LLM05:ImproperOutputHandling",
+    "ocr_yolo_label_conflict": "LLM05:ImproperOutputHandling",
+    "vision_yolo_conflict": "LLM05:ImproperOutputHandling",
+    "product_identity_low_confidence": "LLM09:Misinformation",
     "multimodal_attack_surface_high": "LLM01:PromptInjection",
-    "pii": "LLM06:SensitiveInformationDisclosure",
-    "pci": "LLM06:SensitiveInformationDisclosure",
-    "pci_card_exposed": "LLM06:SensitiveInformationDisclosure",
-    "api_key": "LLM06:SensitiveInformationDisclosure",
-    "agentic_tool_abuse": "LLM08:ExcessiveAgency",
-    "data_exfiltration": "LLM06:SensitiveInformationDisclosure",
+    "pii": "LLM02:SensitiveInformationDisclosure",
+    "pci": "LLM02:SensitiveInformationDisclosure",
+    "pci_card_exposed": "LLM02:SensitiveInformationDisclosure",
+    "api_key": "LLM02:SensitiveInformationDisclosure",
+    "agentic_tool_abuse": "LLM06:ExcessiveAgency",
+    "data_exfiltration": "LLM02:SensitiveInformationDisclosure",
     # Broader mappings used by observer/correlation.
-    "supply_chain": "LLM05:SupplyChainVulnerabilities",
-    "training_poisoning": "LLM03:TrainingDataPoisoning",
-    "poisoning_attempt": "LLM03:TrainingDataPoisoning",
+    "supply_chain": "LLM03:SupplyChain",
+    "training_poisoning": "LLM04:DataAndModelPoisoning",
+    "poisoning_attempt": "LLM04:DataAndModelPoisoning",
     # OWASP LLM Top 10 2025 — additional mappings
-    "insecure_output": "LLM02:InsecureOutputHandling",
-    "model_denial_of_service": "LLM04:ModelDenialOfService",
-    "improper_output_handling": "LLM02:InsecureOutputHandling",
-    "overreliance": "LLM09:Overreliance",
-    "model_theft": "LLM10:ModelTheft",
-    "model_extraction": "LLM10:ModelTheft",
-    "systematic_query_pattern": "LLM10:ModelTheft",
-    "unbounded_consumption": "LLM04:ModelDenialOfService",
+    "insecure_output": "LLM05:ImproperOutputHandling",
+    "model_denial_of_service": "LLM10:UnboundedConsumption",
+    "improper_output_handling": "LLM05:ImproperOutputHandling",
+    "overreliance": "LLM09:Misinformation",
+    "model_theft": "LLM10:UnboundedConsumption",
+    "model_extraction": "LLM10:UnboundedConsumption",
+    "systematic_query_pattern": "LLM10:UnboundedConsumption",
+    "unbounded_consumption": "LLM10:UnboundedConsumption",
     "system_prompt_leak": "LLM07:SystemPromptLeakage",
-    "vector_db_poisoning": "LLM03:TrainingDataPoisoning",
+    "vector_db_poisoning": "LLM08:VectorAndEmbeddingWeaknesses",
+}
+
+
+# API mappings are design-control hypotheses until an observed event carries
+# the referenced evidence. They never authorize or block a workflow by label.
+OWASP_API_MAP = {
+    "foreign_return_claim_reference": "API1:2023 Broken Object Level Authorization",
+    "foreign_order_reference": "API1:2023 Broken Object Level Authorization",
+    "unauthorized_return_transition": "API5:2023 Broken Function Level Authorization",
+    "return_claim_automation_abuse": "API6:2023 Unrestricted Access to Sensitive Business Flows",
+    "return_evidence_external_reference": "API7:2023 Server Side Request Forgery",
+    "unversioned_return_endpoint": "API9:2023 Improper Inventory Management",
+    "untrusted_order_or_carrier_api": "API10:2023 Unsafe Consumption of APIs",
 }
 
 
@@ -65,13 +85,6 @@ MITRE_ATLAS_MAP = {
     "steg_suspicious": "AML.T0043",
     "manipulation_detected": "AML.T0043",
     "adversarial_detected": "AML.T0043",
-    "qr_code_detected": "AML.T0048",
-    "qr_external_url_detected": "AML.T0048",
-    "qr_external_url": "AML.T0048",
-    "qr_payload_vcard": "AML.T0048",
-    "qr_payload_wifi": "AML.T0048",
-    "qr_multi_mismatch": "AML.T0048",
-    "qr_label_destination_mismatch": "AML.T0048",
     "payment_social_engineering": "AML.T0051",
     "cross_image_split_injection": "AML.T0051",
     "agentic_tool_injection": "AML.T0051",
@@ -80,7 +93,6 @@ MITRE_ATLAS_MAP = {
     "encoded_payload_detected": "AML.T0051",
     "homoglyph_injection": "AML.T0051",
     "exif_text_injection": "AML.T0051",
-    "polyglot_suspected": "AML.T0048",
     "cross_modal_mismatch": "AML.T0043",
     "ocr_yolo_label_conflict": "AML.T0015",
     "vision_yolo_conflict": "AML.T0015",
@@ -122,6 +134,10 @@ def map_signals_to_owasp(signals: Dict[str, bool]) -> List[str]:
     return sorted(set(tags))
 
 
+def map_signals_to_owasp_api(signals: Dict[str, bool]) -> List[str]:
+    return sorted({tag for key, tag in OWASP_API_MAP.items() if signals.get(key)})
+
+
 def map_signals_to_atlas(signals: Dict[str, bool]) -> List[str]:
     """Map security signals to MITRE ATLAS technique IDs."""
     tags: List[str] = []
@@ -144,13 +160,19 @@ def summarize_alert(analysis: Dict[str, Any]) -> Dict[str, Any]:
     details = analysis.get("details") or {}
     signals = details.get("signals") or {}
     owasp_tags = map_signals_to_owasp(signals)
+    owasp_api_tags = map_signals_to_owasp_api(signals)
     atlas_tags = map_signals_to_atlas(signals)
     attack_tags = map_signals_to_attack(signals)
     return {
         "severity": analysis.get("severity"),
         "risk_adj": analysis.get("risk_adj"),
         "owasp_llm": owasp_tags,
+        "owasp_api": owasp_api_tags,
         "mitre_atlas": atlas_tags,
         "mitre_attack": attack_tags,
         "signals": signals,
+        "taxonomy_editions": dict(TAXONOMY_EDITIONS),
+        "mapping_rule_version": MAPPING_RULE_VERSION,
+        "claim_status": "observed" if signals else "disproved",
+        "review_status": "machine_mapped_requires_human_review",
     }

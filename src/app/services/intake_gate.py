@@ -14,7 +14,10 @@ from typing import Any, Dict, Tuple
 _WS_RE = re.compile(r"\s+")
 _URL_RE = re.compile(r"https?://[^\s<>()\"']+", re.IGNORECASE)
 _PROMPT_INSTR_RE = re.compile(
-    r"(?i)(ignore\s+previous|system\s*prompt|developer\s*mode|jailbreak|execute\s+shell|dump\s+database|export\s+all)"
+    r"(?i)(ignore\s+(?:all\s+)?previous|system\s*(?::|prompt)|developer\s+mode|jailbreak|"
+    r"execute\s+shell|dump\s+database|export\s+all|skip\s+(?:the\s+)?human\s+gate|"
+    r"approve(?:d)?\s*=\s*true|invoke\s+[a-z0-9_.-]+|authoritative\s+price\s+update|"
+    r"(?:state|present|claim)\s+.{0,80}\s+as\s+(?:a\s+)?fact)"
 )
 _SCRIPT_RE = re.compile(r"(?i)\b(powershell\s+-enc|cmd\.exe\s+/c|mshta\s+https?://|wscript|cscript|rundll32)\b")
 
@@ -88,6 +91,14 @@ _EXT_MIME_EXPECTED = {
     ".tiff": {"image/tiff"},
     ".webp": {"image/webp"},
     ".avif": {"image/avif"},
+    ".pdf": {"application/pdf"},
+    ".csv": {"text/csv", "text/plain", "application/csv"},
+    ".txt": {"text/plain"},
+    ".json": {"application/json", "text/json", "text/plain"},
+    ".zip": {"application/zip"},
+    ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/zip"},
+    ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/zip"},
+    ".xlsm": {"application/vnd.ms-excel.sheet.macroenabled.12", "application/zip"},
 }
 
 
@@ -421,13 +432,19 @@ def sanitize_ocr_text(text: str, *, max_len: int = 40_000) -> Tuple[str, Dict[st
     flags = []
     removed = 0
     cleaned = raw
-    for m in _PROMPT_INSTR_RE.findall(raw):
-        if m:
-            removed += 1
     try:
-        if _PROMPT_INSTR_RE.search(raw):
+        lines = raw.splitlines() or [raw]
+        safe_lines = []
+        for line in lines:
+            hits = list(_PROMPT_INSTR_RE.finditer(line))
+            if hits:
+                removed += max(1, len(hits))
+                safe_lines.append("[REMOVED_UNTRUSTED_INSTRUCTION]")
+            else:
+                safe_lines.append(line)
+        if removed:
             flags.append("prompt_instruction_present")
-            cleaned = _PROMPT_INSTR_RE.sub("[REMOVED_UNTRUSTED_INSTRUCTION]", raw)
+            cleaned = "\n".join(safe_lines)
     except Exception:
         cleaned = raw
     if cleaned != raw:
@@ -437,6 +454,7 @@ def sanitize_ocr_text(text: str, *, max_len: int = 40_000) -> Tuple[str, Dict[st
         "removed_instruction_hits": int(removed),
         "flags": flags,
         "text_hash": hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:16] if cleaned else None,
+        "model_context_allowed": removed == 0,
     }
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -68,7 +69,9 @@ def test_provider_timeout_is_degradation_not_security_risk(monkeypatch):
     assert body["analysis_state"]["analysis_degraded"] is True
     assert "vision_provider_timeout" in body["analysis_state"]["degraded_reasons"]
     assert body["analysis_state"]["security_risk"] is False
-    assert body["security"]["clean"] is True
+    assert body["security"]["clean"] is False
+    assert body["security"]["artifact_state"] == "degraded"
+    assert body["security"]["commercial_authority"] == "blocked"
 
 
 def test_provider_capacity_is_pending_not_security_risk(monkeypatch):
@@ -103,3 +106,54 @@ def test_provider_capacity_is_pending_not_security_risk(monkeypatch):
     assert state["analysis_degraded"] is True
     assert state["security_risk"] is False
     assert "vision_provider_busy" in state["degraded_reasons"]
+
+
+def test_elevated_steg_heuristic_is_advisory_until_detector_threshold(monkeypatch):
+    """A near-threshold compressed/blurred photo must not demand re-upload.
+
+    The signal remains visible for evidence and drift review, but only the
+    detector's calibrated ``is_suspicious`` verdict can make it an active
+    security block in the absence of another finding.
+    """
+    import src.app.routers.vision as vision
+    import src.app.security.steg_detector as steg
+    import src.app.services.product_identity_agent as identity
+
+    async def _labels(self, _blob, mode="visual_search"):
+        return ["laptop"], "", None
+
+    monkeypatch.setattr(vision.ManagedCVProvider, "get_labels_and_text", _labels)
+    monkeypatch.setattr(
+        vision.BasicCVTriage,
+        "analyze",
+        lambda self, _labels, _text, **_kwargs: {
+            "damage_type": "unknown", "severity": "undetermined", "confidence": 0.2,
+        },
+    )
+    monkeypatch.setattr(identity, "identify_product_from_text", lambda **_kwargs: {"identified": False})
+    monkeypatch.setattr(identity, "identify_product_from_image", lambda *_args, **_kwargs: {"identified": False})
+    monkeypatch.setattr(
+        steg,
+        "detect_steganography",
+        lambda _blob: SimpleNamespace(
+            is_suspicious=False,
+            steg_score=0.413,
+            explanations=["near-threshold compression heuristic"],
+            details={"threshold": 0.42},
+        ),
+    )
+
+    response = TestClient(create_app()).post(
+        "/api/v1/vision/triage",
+        headers={"x-api-key": "local-merchant-key"},
+        files={"image": ("blurred-product.png", _PNG_1X1, "image/png")},
+    )
+
+    assert response.status_code == 200
+    security = response.json()["security"]
+    assert security["signals"]["steg_score_elevated"] is True
+    assert security["signals"].get("steg_suspicious") is not True
+    assert security["clean"] is False
+    assert security["artifact_state"] == "degraded"
+    assert security["commercial_authority"] == "blocked"
+    assert security["reupload_needed"] is False

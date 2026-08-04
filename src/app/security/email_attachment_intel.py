@@ -6,7 +6,6 @@ import re
 import unicodedata
 from typing import Any, Dict, List, Tuple
 
-from src.app.config import get_settings, load_feature_flags
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.security.email_security_rules import extract_domain
 
@@ -303,6 +302,33 @@ def _forensics_from_attachments(attachments: List[Dict[str, Any]]) -> Tuple[List
                 )
         except Exception:
             pass
+        pdf_actions = a.get("pdf_actions") if isinstance(a.get("pdf_actions"), dict) else {}
+        active_actions = {str(k): int(v or 0) for k, v in pdf_actions.items() if int(v or 0) > 0}
+        if active_actions:
+            indicators.append(
+                {
+                    "type": "pdf_active_content",
+                    "value": {"attachment": name, "actions": active_actions},
+                    "reason": "PDF contains active or externally resolving actions",
+                }
+            )
+        external_relationships = list(a.get("office_external_relationships") or [])
+        if external_relationships:
+            indicators.append(
+                {
+                    "type": "office_external_relationship",
+                    "value": {"attachment": name, "count": len(external_relationships)},
+                    "reason": "Office document contains external relationships",
+                }
+            )
+        if int(a.get("office_macro_member_count") or 0) > 0:
+            indicators.append(
+                {
+                    "type": "office_macro_content",
+                    "value": {"attachment": name, "count": int(a.get("office_macro_member_count") or 0)},
+                    "reason": "Office document contains macro project members",
+                }
+            )
     return indicators, details
 
 
@@ -323,6 +349,9 @@ def _signal_weight(ind_type: str) -> float:
         "template_drift": 16.0,
         "logo_layout_mismatch": 14.0,
         "edited_region_artifact": 18.0,
+        "pdf_active_content": 40.0,
+        "office_external_relationship": 25.0,
+        "office_macro_content": 40.0,
         "compression_artifact_high": 12.0,
         "pdf_embedded_files": 28.0,
         "pdf_object_stream_heavy": 12.0,

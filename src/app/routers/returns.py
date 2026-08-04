@@ -1,13 +1,24 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
-from typing import Dict, Any, List
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi.responses import JSONResponse, Response
+from typing import Dict, Any
 import base64
+import hashlib
 import json
+import logging
+import time
 
 from src.app.services.returns import capture_evidence, compute_return_score
 from src.app.services.returns import mark_evidence_as_fraud
 from src.app.services.decision_log import log_decision, log_trace_event
 from src.app.services.nlp_contract import is_contract_like_text, run_contract_assist, evaluate_quality_gate
-from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
+from src.app.security.auth import (
+    OperatorSubject,
+    ROLE_DEVELOPER,
+    ROLE_MERCHANT,
+    ROLE_OWNER,
+    operator_subject,
+    require_role,
+)
 from src.app.policy.vertical_pack import load_vertical_pack, resolve_pack_id
 from src.app.rules.tier0_gate import run_tier0_gate
 from src.app.services.cases import create_case
@@ -17,8 +28,344 @@ from sqlalchemy import text as _text
 from src.app.cv.evidence_writer import EvidenceWriter
 from src.app.rules.config_defaults import escalation_triggers_defaults
 from src.app.services.fusion_scorer import compute_and_persist as compute_and_persist_fusion
+from src.app.platform.tenant_context import current_tenant_id
+from src.app.security.buyer_principal import resolve_buyer_principal
+from src.app.services.return_claims import (
+    assess_return_claim_abuse,
+    create_claim,
+    find_idempotent_claim,
+    get_claim,
+    list_claims,
+    load_encrypted_artifact,
+    queue_evidence_job,
+    set_evidence_legal_hold,
+    store_encrypted_artifacts,
+    transition_claim,
+    verify_owned_order,
+)
 
 router = APIRouter(prefix="/api/v1/returns", tags=["returns"])
+logger = logging.getLogger(__name__)
+
+
+def _operator_actor(subject: OperatorSubject, role: str) -> str:
+    return str(subject.user_id or subject.email or f"key:{role}")
+
+
+def _strict_return_files(body: Dict[str, Any]) -> list[dict[str, Any]]:
+    rows = body.get("images") or body.get("files") or []
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=422, detail="return_evidence_required")
+    if len(rows) > 8:
+        raise HTTPException(status_code=413, detail="return_evidence_file_count_exceeded")
+    out: list[dict[str, Any]] = []
+    total = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            raise HTTPException(status_code=422, detail="invalid_return_evidence_file")
+        encoded = str(row.get("b64") or row.get("content_b64") or "")
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="invalid_return_evidence_base64") from exc
+        if not raw:
+            raise HTTPException(status_code=422, detail="return_evidence_file_empty")
+        total += len(raw)
+        if len(raw) > 12 * 1024 * 1024 or total > 30 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="return_evidence_size_exceeded")
+        out.append({
+            "filename": row.get("filename") or row.get("name") or "upload.bin",
+            "content_type": row.get("content_type") or "application/octet-stream",
+            "bytes": raw,
+        })
+    return out
+
+
+@router.post("/claims", status_code=202)
+def create_return_claim(body: Dict[str, Any], request: Request):
+    """Fast, authenticated intake; raw files are encrypted before durable queuing."""
+    started = time.perf_counter()
+    principal = resolve_buyer_principal(request, supplied_uid=body.get("uid"))
+    if principal is None or not principal.verified:
+        raise HTTPException(status_code=401, detail="verified_buyer_identity_required")
+    sku = str(body.get("sku") or "").strip()
+    if not sku:
+        raise HTTPException(status_code=422, detail="sku_required")
+    idempotency_key = str(request.headers.get("idempotency-key") or "").strip()
+    if not 8 <= len(idempotency_key) <= 128:
+        raise HTTPException(status_code=428, detail="valid_idempotency_key_required")
+    files = _strict_return_files(body)
+    with db_session() as db:
+        existing = find_idempotent_claim(
+            db, tenant_id=principal.tenant_id, claimant_id=principal.subject,
+            idempotency_key=idempotency_key,
+        )
+        if existing:
+            return JSONResponse(status_code=202, content={**existing, "idempotent_replay": True})
+        verification = verify_owned_order(
+            db,
+            tenant_id=principal.tenant_id,
+            claimant_id=principal.subject,
+            sku=sku,
+            order_id=(str(body.get("order_id")) if body.get("order_id") else None),
+        )
+        try:
+            abuse = assess_return_claim_abuse(
+                db,
+                tenant_id=principal.tenant_id,
+                claimant_id=principal.subject,
+                order_id=verification.order_id,
+                evidence_digests=[hashlib.sha256(item["bytes"]).hexdigest() for item in files],
+            )
+        except PermissionError as exc:
+            try:
+                from src.app.observability.return_metrics import RETURN_AUTHORIZATION_BLOCKS
+
+                RETURN_AUTHORIZATION_BLOCKS.labels(reason="claim_velocity_limit").inc()
+            except Exception as metric_exc:
+                logger.debug("return authorization metric emission failed: %s", metric_exc)
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        claim = create_claim(
+            db,
+            tenant_id=principal.tenant_id,
+            claimant_id=principal.subject,
+            sku=sku,
+            description=str(body.get("description") or ""),
+            order_verification=verification,
+            abuse_assessment=abuse,
+            idempotency_key=idempotency_key,
+        )
+        evidence = store_encrypted_artifacts(
+            db,
+            tenant_id=principal.tenant_id,
+            claim_id=claim["claim_id"],
+            files=files,
+            actor_id=principal.subject,
+        )
+        job_id = queue_evidence_job(
+            db, tenant_id=principal.tenant_id, claim_id=claim["claim_id"]
+        )
+        db.commit()
+    try:
+        from src.app.tasks.return_evidence_tasks import process_return_evidence
+
+        process_return_evidence.delay(principal.tenant_id, job_id)
+    except Exception as exc:
+        # Durable queued state remains for the dispatcher/beat recovery path.
+        logger.warning("return evidence dispatch deferred claim=%s: %s", claim["claim_id"], exc)
+    try:
+        log_trace_event(
+            trace_id=claim["trace_id"],
+            event_type="return_claim_evidence_pending",
+            source_type="buyer",
+            source_id=principal.subject,
+            target_type="workflow",
+            target_id=claim["claim_id"],
+            payload={
+                "claim_id": claim["claim_id"], "status": claim["status"],
+                "order_verification_status": verification.status,
+                "abuse_status": abuse.status,
+                "abuse_reasons": list(abuse.reasons),
+                "evidence_count": len(evidence), "authority": "observation_only",
+                "state_changed": True, "commercial_action_prevented": True,
+            },
+        )
+    except Exception as exc:
+        # The canonical claim transaction is authoritative; trace projection is retryable.
+        logger.warning("return claim trace projection deferred claim=%s: %s", claim["claim_id"], exc)
+    payload = {
+        **claim,
+        "job_id": job_id,
+        "evidence": evidence,
+        "order_verification": {
+            "status": verification.status,
+            "order_id": verification.order_id,
+            "detail": verification.detail,
+        },
+        "abuse_assessment": {
+            "status": abuse.status,
+            "reasons": list(abuse.reasons),
+            "claimant_window_count": abuse.claimant_window_count,
+            "order_window_count": abuse.order_window_count,
+        },
+        "message": (
+            "Evidence accepted for bounded review. No refund, replacement, or repair was authorized."
+        ),
+    }
+    try:
+        from src.app.observability.return_metrics import RETURN_RESPONSE_SECONDS
+
+        RETURN_RESPONSE_SECONDS.labels(
+            milestone="first_useful_response", status=claim["status"]
+        ).observe(time.perf_counter() - started)
+    except Exception as exc:
+        logger.debug("return response metric emission failed: %s", exc)
+    return JSONResponse(status_code=202, content=payload)
+
+
+@router.get("/claims/{claim_id}")
+def read_return_claim(claim_id: str, request: Request):
+    principal = resolve_buyer_principal(request)
+    if principal is None or not principal.verified:
+        raise HTTPException(status_code=401, detail="verified_buyer_identity_required")
+    try:
+        with db_session() as db:
+            return get_claim(
+                db,
+                tenant_id=principal.tenant_id,
+                claim_id=claim_id,
+                claimant_id=principal.subject,
+            )
+    except LookupError as exc:
+        # Do not disclose whether the identifier exists for another buyer or tenant.
+        raise HTTPException(status_code=404, detail="return_claim_not_found") from exc
+
+
+@router.get("/operator/claims")
+def operator_return_queue(
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    _role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER])),
+):
+    try:
+        with db_session() as db:
+            return {
+                "claims": list_claims(
+                    db,
+                    tenant_id=str(current_tenant_id() or "default"),
+                    status=status,
+                    limit=limit,
+                )
+            }
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/operator/claims/{claim_id}")
+def operator_return_claim(
+    claim_id: str,
+    _role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER])),
+):
+    try:
+        with db_session() as db:
+            return get_claim(
+                db,
+                tenant_id=str(current_tenant_id() or "default"),
+                claim_id=claim_id,
+            )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="return_claim_not_found") from exc
+
+
+@router.post("/claims/{claim_id}/transition")
+def update_return_claim(
+    claim_id: str,
+    body: Dict[str, Any],
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER])),
+    subject: OperatorSubject = Depends(operator_subject),
+):
+    actor_id = _operator_actor(subject, role)
+    try:
+        with db_session() as db:
+            result = transition_claim(
+                db,
+                tenant_id=str(current_tenant_id() or "default"),
+                claim_id=claim_id,
+                to_status=str(body.get("status") or ""),
+                actor_type="operator",
+                actor_id=actor_id,
+                metadata={"reason": str(body.get("reason") or "")[:500]},
+            )
+            projection = get_claim(
+                db,
+                tenant_id=str(current_tenant_id() or "default"),
+                claim_id=claim_id,
+            )
+            db.commit()
+        try:
+            log_trace_event(
+                trace_id=str(projection.get("trace_id")),
+                event_type="return_claim_status_changed",
+                source_type="operator",
+                source_id=actor_id,
+                target_type="workflow",
+                target_id=claim_id,
+                payload={
+                    **result,
+                    "claim_id": claim_id,
+                    "authority": "operator_authorized",
+                    "state_changed": True,
+                    "recorded_at": projection.get("updated_at"),
+                },
+            )
+        except Exception:
+            pass
+        return result
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="return_claim_not_found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/claims/{claim_id}/evidence/{evidence_id}/legal-hold")
+def update_return_evidence_legal_hold(
+    claim_id: str,
+    evidence_id: str,
+    body: Dict[str, Any],
+    role: str = Depends(require_role([ROLE_OWNER])),
+    subject: OperatorSubject = Depends(operator_subject),
+):
+    purpose = str(body.get("purpose") or "").strip()
+    if not purpose:
+        raise HTTPException(status_code=422, detail="legal_hold_purpose_required")
+    try:
+        with db_session() as db:
+            set_evidence_legal_hold(
+                db,
+                tenant_id=str(current_tenant_id() or "default"),
+                claim_id=claim_id,
+                evidence_id=evidence_id,
+                enabled=bool(body.get("enabled")),
+                actor_id=_operator_actor(subject, role),
+                purpose=purpose[:500],
+            )
+            db.commit()
+        return {"claim_id": claim_id, "evidence_id": evidence_id, "legal_hold": bool(body.get("enabled"))}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="return_evidence_not_found") from exc
+
+
+@router.get("/claims/{claim_id}/evidence/{evidence_id}/content")
+def access_return_evidence(
+    claim_id: str,
+    evidence_id: str,
+    purpose: str = Query(min_length=3, max_length=500),
+    role: str = Depends(require_role([ROLE_OWNER])),
+    subject: OperatorSubject = Depends(operator_subject),
+):
+    """Audited break-glass access; browsers receive bytes without inline rendering."""
+    try:
+        with db_session() as db:
+            raw = load_encrypted_artifact(
+                db,
+                tenant_id=str(current_tenant_id() or "default"),
+                claim_id=claim_id,
+                evidence_id=evidence_id,
+                actor_id=_operator_actor(subject, role),
+                purpose=purpose,
+            )
+            db.commit()
+        return Response(
+            content=raw,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="return-evidence-{evidence_id}.bin"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="return_evidence_not_found") from exc
 
 
 def _value_cents_from_body(body: Dict[str, Any]) -> int:
@@ -54,7 +401,13 @@ def _cv_brand_mismatch(pkg: dict, expected: str) -> bool:
     return expected not in combined_cv and len(combined_cv.strip()) > 10
 
 
-def _corroborate_order(uid: str | None, sku: str, pkg: dict) -> dict:
+def _corroborate_order(
+    uid: str | None,
+    sku: str,
+    pkg: dict,
+    *,
+    tenant_id: str | None = None,
+) -> dict:
     """Check whether the submitted return matches an actual purchase for uid+sku.
 
     Queries the CANONICAL schema (orders JOIN draft_orders, scanning line_items JSON for the SKU) with the
@@ -71,17 +424,26 @@ def _corroborate_order(uid: str | None, sku: str, pkg: dict) -> dict:
         return {**_not_found, "fraud_score_delta": 15, "mismatch": True, "detail": "no_uid_provided"}
 
     # ── Canonical: orders (paid/shipped/delivered preferred) joined to their draft's line_items ──
+    tenant = str(tenant_id or current_tenant_id() or "default")
     try:
         with db_session() as db:
             rows = db.execute(
                 _text(
                     "SELECT o.id, o.status, o.created_at, o.total_cents, o.currency, d.line_items "
                     "FROM orders o LEFT JOIN draft_orders d ON d.id = o.draft_order_id "
-                    "WHERE o.customer_id = :uid ORDER BY o.created_at DESC LIMIT 50"
+                    "AND (d.tenant_id = :tenant OR (:tenant = 'default' AND d.tenant_id IS NULL)) "
+                    "WHERE o.customer_id = :uid AND "
+                    "(o.tenant_id = :tenant OR (:tenant = 'default' AND o.tenant_id IS NULL)) "
+                    "ORDER BY o.created_at DESC LIMIT 50"
                 ),
-                {"uid": uid},
+                {"uid": uid, "tenant": tenant},
             ).fetchall()
-    except Exception:
+    except Exception as exc:
+        if tenant != "default":
+            return {
+                **_not_found, "fraud_score_delta": 0, "mismatch": False,
+                "detail": "order_source_unavailable", "source_error": type(exc).__name__,
+            }
         rows = []
     best = None
     for r in rows or []:
@@ -99,7 +461,13 @@ def _corroborate_order(uid: str | None, sku: str, pkg: dict) -> dict:
         expected = ""
         try:
             with db_session() as db:
-                prow = db.execute(_text("SELECT name FROM products WHERE sku = :s LIMIT 1"), {"s": sku}).fetchone()
+                prow = db.execute(
+                    _text(
+                        "SELECT name FROM products WHERE sku = :s AND "
+                        "(tenant_id = :tenant OR (:tenant = 'default' AND tenant_id IS NULL)) LIMIT 1"
+                    ),
+                    {"s": sku, "tenant": tenant},
+                ).fetchone()
             expected = (str(prow[0]).split() or [""])[0] if prow and prow[0] else ""
         except Exception:
             expected = ""
@@ -113,6 +481,11 @@ def _corroborate_order(uid: str | None, sku: str, pkg: dict) -> dict:
         }
 
     # ── Legacy fallback: order_items (only exists in some environments) ──
+    if tenant != "default":
+        return {
+            **_not_found, "fraud_score_delta": 15, "mismatch": True,
+            "detail": "order_not_found",
+        }
     try:
         with db_session() as db:
             row = db.execute(
@@ -145,10 +518,22 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
 
     Expected body: { sku, uid (optional), images: [{filename, b64}], description }
     """
+    import os
+
+    app_env = str(os.getenv("APP_ENV") or "dev").strip().lower()
+    legacy_enabled = str(os.getenv("RETURN_LEGACY_SYNC_ENABLED") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if app_env in {"prod", "production", "staging"} and not legacy_enabled:
+        raise HTTPException(
+            status_code=410,
+            detail="legacy_return_intake_disabled_use_api_v1_returns_claims",
+        )
     sku = body.get("sku")
     if not sku:
         raise HTTPException(status_code=400, detail="sku required")
-    uid = body.get("uid")
+    principal = resolve_buyer_principal(request, supplied_uid=body.get("uid")) if request is not None else None
+    uid = principal.subject if principal is not None else body.get("uid")
     images_in = body.get("images") or []
     images = []
     for im in images_in:
@@ -160,22 +545,9 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
             b = b""
         images.append((fname, b))
 
-    tenant_id = None
-    try:
-        tenant_id = body.get("tenant_id")
-    except Exception:
-        tenant_id = None
-    if tenant_id is None:
-        try:
-            if request is not None and hasattr(request, "headers"):
-                tenant_id = request.headers.get("X-Tenant-Id") or request.headers.get("x-tenant-id")
-        except Exception:
-            tenant_id = None
-    if tenant_id is not None:
-        try:
-            tenant_id = str(tenant_id)
-        except Exception:
-            tenant_id = None
+    # Body/header tenant claims are data, never authority. Middleware and the
+    # verified buyer principal resolve the active tenant before this handler.
+    tenant_id = str((principal.tenant_id if principal is not None else current_tenant_id()) or "default")
 
     # Tier0 (rules-first) gate: avoid expensive CV/OCR work when images/policy fail.
     try:
@@ -241,7 +613,7 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
 
     # ── Order corroboration: verify uid+sku exists in orders; CV brand check ──
     try:
-        corroboration = _corroborate_order(uid, sku, pkg)
+        corroboration = _corroborate_order(uid, sku, pkg, tenant_id=tenant_id)
         pkg["order_corroboration"] = corroboration
         if corroboration.get("fraud_score_delta", 0) > 0:
             score["score"] = float(score.get("score") or 0) + corroboration["fraud_score_delta"]
@@ -600,12 +972,29 @@ def export_evidence(eid: str, role: str = Depends(require_role([ROLE_MERCHANT, R
         raise HTTPException(status_code=404, detail="evidence not found")
     with open(pkgf, "r", encoding="utf-8") as pf:
         data = pf.read()
+    try:
+        decoded = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=404, detail="evidence not found") from exc
+    evidence_tenant = str(decoded.get("tenant_id") or "default")
+    if evidence_tenant != str(current_tenant_id() or "default"):
+        raise HTTPException(status_code=404, detail="evidence not found")
     return {"evidence": data}
 
 
 @router.post("/{eid}/confirm_fraud")
 def confirm_fraud(eid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))):
     """Mark an evidence package as confirmed fraud (persist phashes)."""
+    import os
+
+    package_path = os.path.join("tmp", "returns", eid, "package.json")
+    try:
+        with open(package_path, "r", encoding="utf-8") as handle:
+            package = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=404, detail="evidence not found") from exc
+    if str(package.get("tenant_id") or "default") != str(current_tenant_id() or "default"):
+        raise HTTPException(status_code=404, detail="evidence not found")
     cnt = mark_evidence_as_fraud(eid)
     if cnt == 0:
         raise HTTPException(status_code=404, detail="evidence not found or no images")
