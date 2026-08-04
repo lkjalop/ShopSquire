@@ -16,6 +16,16 @@ def test_security_headers_present_on_health():
     assert "cross-origin-opener-policy" in r.headers
     assert "cross-origin-embedder-policy" in r.headers
     assert "cross-origin-resource-policy" in r.headers
+    # non-API responses keep the strict same-origin CORP
+    assert r.headers["cross-origin-resource-policy"] == "same-origin"
+
+
+def test_api_routes_get_cross_origin_corp_so_the_spa_can_read_them():
+    # the NotSameOrigin fix: /api/* must allow cross-origin resource reads (the buyer SPA calls the API
+    # cross-origin in dev); CORS still gates who. Non-API stays same-origin (asserted above).
+    client = TestClient(create_app(), headers={"x-api-key": "local-merchant-key"})
+    r = client.get("/api/v1/fulfillment/cases")
+    assert r.headers.get("cross-origin-resource-policy") == "cross-origin"
 
 
 def test_admin_grc_endpoints_shape():

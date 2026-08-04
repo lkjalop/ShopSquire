@@ -1,196 +1,158 @@
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
-import json
-import uuid
-import time
+"""Voice input/output adapters for the canonical typed chat path."""
+from __future__ import annotations
 
-from src.app.config import load_feature_flags, get_settings
-from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
-from src.app.services.voice_asr import WhisperLocalASRAdapter, decode_base64_audio
-from src.app.services.voice_tts import ElevenLabsTTSAdapter
-from src.app.services.voice_session import VoiceSessionManager
-from src.app.services.memory import Memory
-from src.app.security.firewall import TransactionFirewall
-from src.app.services.orchestrator import Orchestrator
+import os
+import time
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket
+
+from src.app.contracts.voice import (
+    VoiceASRRequest,
+    VoiceASRResponse,
+    VoiceTTSRequest,
+    VoiceTTSResponse,
+)
+from src.app.feature_flags import get_flags as _ff_get_flags
+from src.app.security.auth import (
+    ROLE_DEVELOPER,
+    ROLE_MERCHANT,
+    ROLE_OWNER,
+    require_role,
+)
 from src.app.services.decision_log import log_trace_event
-try:
-    # For voice→escalation handoff, reuse the room append helper
-    from src.app.routers.escalation_room import _append_chat as _append_escalation_chat
-except Exception:
-    _append_escalation_chat = None
+from src.app.services.voice_asr import WhisperCloudASRAdapter, decode_base64_audio
+from src.app.services.voice_tts import ElevenLabsTTSAdapter
 
 router = APIRouter(prefix="/api/v1/voice", tags=["voice"])
+_VOICE_ROLES = [ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]
 
 
-@router.post("/asr")
-def asr(audio_base64: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    flags = load_feature_flags(get_settings().feature_flags_path)
+def _max_audio_bytes() -> int:
+    try:
+        configured = int(os.getenv("VOICE_MAX_AUDIO_BYTES", str(5 * 1024 * 1024)))
+    except Exception:
+        configured = 5 * 1024 * 1024
+    return min(10 * 1024 * 1024, max(32, configured))
+
+
+def _tenant(value: Optional[str]) -> str:
+    tenant = str(value or "default").strip()
+    if not tenant or len(tenant) > 128:
+        raise HTTPException(status_code=400, detail="invalid_tenant")
+    return tenant
+
+
+@router.post("/asr", response_model=VoiceASRResponse)
+def asr(
+    request: VoiceASRRequest,
+    role: str = Depends(require_role(_VOICE_ROLES)),
+    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+) -> VoiceASRResponse:
+    """Transcribe bounded audio. The resulting text still enters through /chat/stream."""
+    flags = _ff_get_flags()
     cap = flags.get("CAPABILITIES", {}).get("voice", {"asr": False, "tts": False})
     if not cap.get("asr"):
         raise HTTPException(status_code=503, detail="ASR disabled")
-    audio = decode_base64_audio(audio_base64)
-    asr = WhisperLocalASRAdapter()
-    out = asr.transcribe_chunk(audio)
-    return {"transcript": out.get("text") or "", "confidence": out.get("confidence") or 0.0}
+    tenant_id = _tenant(x_tenant_id)
+    try:
+        audio = decode_base64_audio(request.audio_b64, max_bytes=_max_audio_bytes())
+    except OverflowError:
+        raise HTTPException(status_code=413, detail="audio_too_large")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid_audio")
+
+    started = time.monotonic()
+    adapter = WhisperCloudASRAdapter()
+    out = adapter.transcribe_chunk(
+        audio, lang_hint=request.language, format_hint=request.format,
+    )
+    latency_ms = round((time.monotonic() - started) * 1000.0, 1)
+    try:
+        log_trace_event(
+            trace_id=None,
+            event_type="voice_asr",
+            source_type="connector",
+            source_id=str(out.get("provider") or adapter.name),
+            target_type="stage",
+            target_id="chat_input",
+            payload={
+                "tenant_id": tenant_id,
+                "role": role,
+                "audio_bytes": len(audio),
+                "format": request.format,
+                "status": str(out.get("status") or "unavailable"),
+                "confidence": float(out.get("confidence") or 0.0),
+                "latency_ms": latency_ms,
+            },
+        )
+    except Exception:
+        # Telemetry cannot make a read-only adapter unavailable.
+        pass
+    return VoiceASRResponse(
+        transcript=str(out.get("text") or "")[:4000],
+        confidence=float(out.get("confidence") or 0.0),
+        provider=str(out.get("provider") or adapter.name),
+        status=str(out.get("status") or ("ready" if out.get("text") else "unavailable")),
+        latency_ms=latency_ms,
+    )
 
 
-@router.post("/tts")
-def tts(text: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    flags = load_feature_flags(get_settings().feature_flags_path)
+@router.post("/tts", response_model=VoiceTTSResponse)
+def tts(
+    request: VoiceTTSRequest,
+    role: str = Depends(require_role(_VOICE_ROLES)),
+    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+) -> VoiceTTSResponse:
+    """Synthesize optional playback without fabricating audio when providers are absent."""
+    flags = _ff_get_flags()
     cap = flags.get("CAPABILITIES", {}).get("voice", {"asr": False, "tts": False})
     if not cap.get("tts"):
         raise HTTPException(status_code=503, detail="TTS disabled")
-    tts = ElevenLabsTTSAdapter()
-    out = tts.synthesize(text)
-    return {"audio_base64": out.get("audio_base64") or "", "confidence": out.get("confidence") or 0.0}
+    tenant_id = _tenant(x_tenant_id)
+    started = time.monotonic()
+    adapter = ElevenLabsTTSAdapter()
+    out = adapter.synthesize(request.text, voice=request.voice)
+    latency_ms = round((time.monotonic() - started) * 1000.0, 1)
+    try:
+        log_trace_event(
+            trace_id=None,
+            event_type="voice_tts",
+            source_type="connector",
+            source_id=str(out.get("provider") or adapter.name),
+            target_type="stage",
+            target_id="chat_output",
+            payload={
+                "tenant_id": tenant_id,
+                "role": role,
+                "text_chars": len(request.text),
+                "status": str(out.get("status") or "unavailable"),
+                "latency_ms": latency_ms,
+            },
+        )
+    except Exception:
+        # Telemetry cannot make optional playback unavailable.
+        pass
+    return VoiceTTSResponse(
+        audio_base64=str(out.get("audio_base64") or ""),
+        confidence=float(out.get("confidence") or 0.0),
+        provider=str(out.get("provider") or "none"),
+        mime_type=out.get("mime_type"),
+        status=str(out.get("status") or ("ready" if out.get("audio_base64") else "unavailable")),
+        latency_ms=latency_ms,
+    )
 
 
 @router.websocket("/stream")
-async def voice_stream(ws: WebSocket):
-    """Bi-directional voice stream (ASR + orchestrator + TTS).
+async def voice_stream(ws: WebSocket) -> None:
+    """Retired compatibility route.
 
-    Client protocol (JSON frames):
-      - {"type":"init", "session_id":"...", "tenant_id":"..."}
-      - {"type":"audio", "data":"<base64>"}
-      - {"type":"commit"}  # triggers orchestration + TTS
-
-    Server frames:
-      - {"type":"transcript", "text":"...", "confidence":0.7}
-      - {"type":"response", "trace_id":"...", "proposal":{...}}
-      - {"type":"audio", "audio_base64":"..."}
+    Pilot voice uses ASR as an adapter and submits the transcript through
+    /chat/stream, preserving single-flight, typed-facade and action gates.
     """
     await ws.accept()
-    # Feature flags gate
-    flags = load_feature_flags(get_settings().feature_flags_path)
-    cap = flags.get("CAPABILITIES", {}).get("voice", {"asr": False, "tts": False})
-    if not (cap.get("asr") and cap.get("tts")):
-        await ws.send_text(json.dumps({"type": "error", "detail": "voice_disabled"}))
-        await ws.close(code=1003)
-        return
-
-    # Prepare adapters and session state
-    asr = WhisperLocalASRAdapter()
-    tts = ElevenLabsTTSAdapter()
-    mem = Memory()
-    firewall = TransactionFirewall()
-    orch = Orchestrator(memory=mem, firewall=firewall, flags=get_settings().feature_flags)
-    vsm = VoiceSessionManager(redis_client=getattr(mem, "redis", None), ttl_seconds=900)
-    session_id: Optional[str] = None
-    tenant_id: Optional[str] = None
-    transcript_accum: str = ""
-
-    try:
-        while True:
-            try:
-                raw = await ws.receive_text()
-            except WebSocketDisconnect:
-                break
-            except Exception:
-                # binary frame fallback
-                try:
-                    data_bytes = await ws.receive_bytes()
-                    raw = data_bytes.decode("utf-8", errors="ignore")
-                except Exception:
-                    await ws.send_text(json.dumps({"type": "error", "detail": "invalid_frame"}))
-                    continue
-            try:
-                msg = json.loads(raw)
-            except Exception:
-                await ws.send_text(json.dumps({"type": "error", "detail": "invalid_json"}))
-                continue
-
-            mtype = msg.get("type")
-            if mtype == "init":
-                session_id = msg.get("session_id") or str(uuid.uuid4())
-                tenant_id = msg.get("tenant_id")
-                await ws.send_text(json.dumps({"type": "init_ack", "session_id": session_id}))
-                continue
-
-            if mtype == "audio":
-                audio_b64 = msg.get("data") or ""
-                blob = decode_base64_audio(audio_b64)
-                tr = asr.transcribe_chunk(blob)
-                transcript_accum = vsm.append_transcript(session_id or "default", tr.get("text") or "").get("transcript")
-                await ws.send_text(json.dumps({"type": "transcript", "text": tr.get("text"), "confidence": tr.get("confidence")}))
-                continue
-
-            if mtype == "commit":
-                # Build payload and run orchestrator
-                trace_id = str(uuid.uuid4())
-                payload = {
-                    "query": transcript_accum,
-                    "tenant_id": tenant_id,
-                    "multi_turn": True,
-                    "trace_id": trace_id,
-                }
-                t0 = time.time()
-                result = orch.run(uid=session_id or "anonymous", payload=payload, simulate_only=False, use_rules=False)
-                dt_ms = int((time.time() - t0) * 1000.0)
-                try:
-                    log_trace_event(
-                        trace_id=trace_id,
-                        event_type="voice_commit",
-                        source_type="voice",
-                        source_id="voice_stream",
-                        target_type=None,
-                        target_id=None,
-                        payload={"latency_ms": dt_ms, "session_id": session_id, "tenant_id": tenant_id},
-                    )
-                except Exception:
-                    pass
-                await ws.send_text(json.dumps({"type": "response", "trace_id": trace_id, "proposal": result.proposal, "timings": result.timings}))
-                # If policy requires approval or proposal flags human review, hand off to escalation room
-                try:
-                    needs_review = False
-                    try:
-                        pg = result.firewall.get("policy_gate") if isinstance(result.firewall, dict) else None
-                        needs_review = bool(result.firewall.get("approval_required")) or (isinstance(pg, dict) and pg.get("verdict") == "escalate")
-                    except Exception:
-                        needs_review = bool(result.firewall.get("approval_required")) if isinstance(result.firewall, dict) else False
-                    try:
-                        if isinstance(result.proposal, dict) and result.proposal.get("needs_human_review"):
-                            needs_review = True
-                    except Exception:
-                        pass
-                    if needs_review and _append_escalation_chat is not None:
-                        incident_id = None
-                        try:
-                            tickets = result.proposal.get("tickets") if isinstance(result.proposal, dict) else None
-                            if isinstance(tickets, list) and tickets:
-                                incident_id = str(tickets[0].get("id")) if isinstance(tickets[0], dict) else None
-                        except Exception:
-                            incident_id = None
-                        # Fallback to trace_id when ticket not yet created
-                        incident_id = incident_id or trace_id
-                        summary_msg = "Voice session escalated: manual review required"
-                        meta = {
-                            "trace_id": trace_id,
-                            "session_id": session_id,
-                            "tenant_id": tenant_id,
-                            "reason": (result.firewall.get("policy_gate", {}).get("reason") if isinstance(result.firewall, dict) else None),
-                            "evidence_tags": (result.proposal.get("evidence_tags") if isinstance(result.proposal, dict) else None),
-                        }
-                        try:
-                            _append_escalation_chat(incident_id, role="assistant", message=summary_msg, meta=meta)
-                        except Exception:
-                            pass
-                        # Notify client to optionally join the room
-                        try:
-                            await ws.send_text(json.dumps({"type": "escalation", "incident_id": incident_id, "trace_id": trace_id}))
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                # Synthesize TTS for the top response line or summary
-                text = (result.proposal.get("reason") or "Here is the recommendation.") if isinstance(result.proposal, dict) else "Response ready."
-                audio = tts.synthesize(text)
-                await ws.send_text(json.dumps({"type": "audio", "audio_base64": audio.get("audio_base64"), "confidence": audio.get("confidence")}))
-                continue
-
-            # Unknown message type
-            await ws.send_text(json.dumps({"type": "error", "detail": "unknown_type"}))
-    finally:
-        try:
-            await ws.close()
-        except Exception:
-            pass
+    await ws.send_json({
+        "type": "error",
+        "detail": "legacy_voice_stream_disabled_use_chat_stream",
+    })
+    await ws.close(code=1008)

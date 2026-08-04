@@ -235,69 +235,98 @@ GAMING_LAPTOPS = [
 ]
 
 
-def main() -> None:
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+def ensure_gaming_catalog(db) -> int:
+    """Idempotently ensure the GAM-* gaming catalog exists WITH aligned inventory rows, using the
+    passed SQLAlchemy session (portable ``text()`` — works on SQLite AND Postgres, unlike the raw
+    sqlite3 path this replaces).
 
-    # Check current gaming laptop count
-    cur.execute("SELECT COUNT(*) FROM products WHERE sku LIKE 'GAM-%'")
-    existing = cur.fetchone()[0]
-    print(f"Existing gaming laptops (GAM-*): {existing}")
+    Inventory is the out_of_stock FIX: ``batch_stock_levels`` LEFT JOINs ``inventory`` on
+    ``product_id``, so a product with no inventory row reads stock 0 → ``out_of_stock``. This inserts
+    one aligned inventory row per product. Self-healing: an already-seeded product that is missing
+    its inventory row gets one added on the next run. Returns the count of NEW products inserted.
+    Safe to re-run (per-SKU existence check; never duplicates products or doubles stock).
+    """
+    from sqlalchemy import text as _t
+    import uuid as _uuid
+    import json as _json
+    from datetime import datetime as _dt
 
-    now = datetime.now(timezone.utc).isoformat()
     inserted = 0
-    skipped = 0
+    for i, lap in enumerate(GAMING_LAPTOPS):
+        sku = str(lap["sku"])
+        row = db.execute(_t("SELECT id FROM products WHERE sku = :sku"), {"sku": sku}).fetchone()
+        if row:
+            pid = row[0]
+        else:
+            pid = str(_uuid.uuid4())
+            db.execute(
+                _t(
+                    "INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at, image_url) "
+                    "VALUES (:id, :sku, :name, :price_cents, 'USD', :specs, 1, :updated_at, :image_url)"
+                ),
+                {
+                    "id": pid, "sku": sku, "name": str(lap["name"]),
+                    "price_cents": int(lap["price_cents"]), "specs": _json.dumps(lap["specs"]),
+                    "updated_at": _dt.utcnow(), "image_url": f"/static/images/{sku}.svg",
+                },
+            )
+            inserted += 1
+        # Aligned inventory row — the out_of_stock fix. Idempotent + self-healing. stock>10 → in_stock.
+        has_inv = db.execute(
+            _t("SELECT 1 FROM inventory WHERE product_id = :pid LIMIT 1"), {"pid": pid}
+        ).fetchone()
+        if not has_inv:
+            db.execute(
+                _t(
+                    "INSERT INTO inventory (id, product_id, stock, warehouse, updated_at) "
+                    "VALUES (:id, :pid, :stock, 'default', :updated_at)"
+                ),
+                {"id": str(_uuid.uuid4()), "pid": pid, "stock": 12 + i, "updated_at": _dt.utcnow()},
+            )
+    return inserted
 
-    # Ensure static images directory exists (for local dev; Docker bakes these at build time)
+
+def _ensure_svgs() -> None:
+    """Write the GAM-* SVG placeholders to static/images (Docker bakes these at build time)."""
     try:
         _STATIC_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     except Exception:
-        pass
-
+        return
     for lap in GAMING_LAPTOPS:
-        cur.execute("SELECT sku FROM products WHERE sku = ?", (lap["sku"],))
-        if cur.fetchone():
-            print(f"  SKIP (exists): {lap['sku']} {lap['name'][:50]}")
-            skipped += 1
-        else:
-            cur.execute(
-                """INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at, image_url)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    str(uuid.uuid4()),
-                    lap["sku"],
-                    lap["name"],
-                    lap["price_cents"],
-                    "USD",
-                    json.dumps(lap["specs"]),
-                    1,
-                    now,
-                    f"/static/images/{lap['sku']}.svg",
-                ),
-            )
-            print(f"  INSERTED: {lap['sku']}  ${lap['price_cents']//100:,}  {lap['name'][:55]}")
-            inserted += 1
-
-        # Generate SVG placeholder so product cards have an image to display
         svg_path = _STATIC_IMAGES_DIR / f"{lap['sku']}.svg"
         if not svg_path.exists():
             try:
                 svg_path.write_text(_svg_for_name(lap["name"]), encoding="utf-8")
-                print(f"  SVG: {svg_path.name}")
-            except Exception as exc:
-                print(f"  SVG write failed for {lap['sku']}: {exc}")
+            except Exception:
+                pass
 
-    conn.commit()
-    conn.close()
 
-    print(f"\nDone. Inserted={inserted} Skipped={skipped}")
-    print("Total gaming laptops now:")
-    conn2 = sqlite3.connect(DB_PATH)
-    cur2 = conn2.cursor()
-    cur2.execute("SELECT sku, name, price_cents FROM products WHERE sku LIKE 'GAM-%' ORDER BY price_cents")
-    for row in cur2.fetchall():
-        print(f"  {row[0]}  ${row[2]//100:,}  {row[1][:60]}")
-    conn2.close()
+def main() -> None:
+    """CLI: ensure SVGs + seed the GAM-* catalog (products + aligned inventory) via a SQLAlchemy
+    session bound to DATABASE_URL (falls back to the local demo DB). Unifies the insert path with the
+    app's cold-start hook so manual runs and auto-seed produce identical, in-stock results."""
+    from sqlalchemy import create_engine, text as _t
+    from sqlalchemy.orm import sessionmaker
+
+    _ensure_svgs()
+    db_url = os.getenv("DATABASE_URL") or f"sqlite:///{DB_PATH}"
+    print(f"Seeding gaming catalog into {db_url}")
+    engine = create_engine(db_url)
+    db = sessionmaker(bind=engine)()
+    try:
+        inserted = ensure_gaming_catalog(db)
+        db.commit()
+        print(f"Done. Inserted {inserted} new product(s) + aligned inventory.")
+        rows = db.execute(_t(
+            "SELECT p.sku, p.name, p.price_cents, COALESCE(SUM(i.stock), 0) AS stock "
+            "FROM products p LEFT JOIN inventory i ON i.product_id = p.id "
+            "WHERE p.sku LIKE 'GAM-%' GROUP BY p.sku, p.name, p.price_cents ORDER BY p.price_cents"
+        )).fetchall()
+        print("Gaming catalog now:")
+        for r in rows:
+            print(f"  {r[0]}  ${int(r[2]) // 100:,}  stock={r[3]}  {str(r[1])[:55]}")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

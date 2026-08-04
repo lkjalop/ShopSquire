@@ -60,8 +60,9 @@ class NotificationService:
             region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
             if not sender:
                 return None
-            import boto3
-            client = boto3.client("ses", region_name=region)
+            from src.app.providers.aws import get_client
+
+            client = get_client("ses", region_name=region)
             client.send_email(
                 Source=sender,
                 Destination={"ToAddresses": [to]},

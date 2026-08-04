@@ -11,6 +11,25 @@ from src.app.rag.retrieve import Retriever
 from src.app.services.decision_log import log_trace_event
 
 
+def _load_nqe_question_packs() -> Dict[str, Dict[str, Any]]:
+    """Load NQE question packs from the active StoreProfile.
+
+    Returns a dict keyed by question id (e.g. 'ask_gaming_depth') containing the
+    full question definition (text, goal, evidence_needed, source, options, triggers).
+    Falls back to empty dict if the profile lacks the slot — the inline transitional
+    packs fire in that case.
+    """
+    try:
+        from src.app.platform.store_profile import get_store_profile
+        profile = get_store_profile()
+        packs = profile.get("nqe_question_packs")
+        if isinstance(packs, dict):
+            return packs
+    except Exception:
+        pass
+    return {}
+
+
 @lru_cache(maxsize=1)
 def _load_use_case_kb() -> Dict[str, Any]:
     """Load data/use_case_kb.json once. Returns {} on any error."""
@@ -53,6 +72,9 @@ class NQEInput(BaseModel):
     answered_fields: Dict[str, Any] = {}
     # Extracted structured facts from conversation (Layer 1 memory)
     facts: Dict[str, Any] = {}
+    # Reward-weighted entities the hippograph recalls for this turn (advisory-OFF; populated only
+    # when HIPPOGRAPH_FEEDBACK_ENABLED). Carried for agent context; consumption is opt-in.
+    hippograph_context: List[Dict[str, Any]] = []
     # Image context fields (populated when image is uploaded)
     has_image: bool = False
     image_identity_confidence: float = 1.0  # 0.0 = unknown, 1.0 = fully identified
@@ -66,9 +88,13 @@ class NQEInput(BaseModel):
     detected_games: List[str] = []  # game titles mentioned in query
     detected_software: List[str] = []  # software names mentioned
     turn_intent: Optional[str] = None  # SEARCH | FILTER | EXPLAIN | COMPARE
+    order_quantity: Optional[int] = None
     # Stock context (set by recommend.py after candidate retrieval)
     oos_fraction: float = 0.0  # fraction of candidates that are out of stock (0.0–1.0)
     stock_filter_opted_in: bool = False  # True when user already chose "in-stock only"
+    # Grounding-ladder residual: the SPECIFIC identity clarification to ask when the
+    # ladder couldn't confirm the product (e.g. "Is this a Razer?"). Leads when set.
+    identity_residual_question: Optional[Dict[str, Any]] = None
 
 
 # ── Game / software detection from query text ──
@@ -169,8 +195,16 @@ def _personalize_q(template: str, query_text: str, context: Optional[Dict[str, A
         except Exception:
             pass
 
-    # Extract brand from query (common laptop brands)
-    _BRANDS = ["lenovo", "dell", "hp", "asus", "acer", "apple", "microsoft", "samsung", "razer", "msi", "lg"]
+    # Brand vocabulary is store FLAVOUR — read laptop-MAKER detection list from the
+    # StoreProfile (its own slot, NOT known_brands, which includes component makers like
+    # intel/amd/nvidia that must not be detected as a buyer's brand preference). Inline
+    # list kept as the proven fallback (parity-tested).
+    _BRANDS_FALLBACK = ["lenovo", "dell", "hp", "asus", "acer", "apple", "microsoft", "samsung", "razer", "msi", "lg"]
+    try:
+        from src.app.platform.store_profile import profile_slot as _ps
+        _BRANDS = [str(b).lower() for b in (_ps("nqe_brand_detect", default=_BRANDS_FALLBACK) or _BRANDS_FALLBACK)]
+    except Exception:
+        _BRANDS = _BRANDS_FALLBACK
     detected_brand: Optional[str] = next((b.title() for b in _BRANDS if b in q), None)
     if not detected_brand:
         detected_brand = str(ctx.get("brand") or "").strip().title() or None
@@ -289,7 +323,20 @@ class NextQuestionEngine:
         for k in (inp.answered_fields or {}):
             if str(k).lower() in _HIGH_SIGNAL_SLOTS:
                 _answered_high += 1
-        if _answered_high >= _CONVERGENCE_THRESHOLD:
+        _pending_b2b_clarification = False
+        if "b2b_requirements" in {
+            str(field or "").strip().lower() for field in (inp.missing_fields or [])
+        }:
+            try:
+                from src.app.services.b2b_intent import assess_b2b_intent
+
+                _pending_b2b_clarification = assess_b2b_intent(
+                    query_text,
+                    quantity=inp.order_quantity,
+                ).wants_procurement_questions
+            except Exception:
+                _pending_b2b_clarification = False
+        if _answered_high >= _CONVERGENCE_THRESHOLD and not _pending_b2b_clarification:
             # Enough info to recommend — emit trace and return no questions
             if inp.trace_id:
                 try:
@@ -509,22 +556,30 @@ class NextQuestionEngine:
             )
 
         # ── Image-aware questions ──
-        if inp.has_image and inp.image_identity_confidence < 0.6:
+        if inp.has_image and (inp.image_identity_confidence < 0.6 or inp.identity_residual_question):
+            _rq = inp.identity_residual_question if isinstance(inp.identity_residual_question, dict) else None
             questions.append(
                 NextQuestion(
                     id="ask_image_model",
-                    text="I can see the product in your photo but couldn't identify the exact model. Could you share the model number (usually on the bottom label or settings screen)?",
+                    text=(
+                        str(_rq["text"]) if _rq and _rq.get("text")
+                        else "I can see the product in your photo but couldn't identify the exact model. Could you share the model number (usually on the bottom label or settings screen)?"
+                    ),
                     goal="clarify_product_identity",
                     evidence_needed=["model_number"],
                     source="image_context",
+                    options=(_rq.get("options") if _rq and isinstance(_rq.get("options"), list) else []),
                 )
             )
 
-        # ── High school hobby/extracurricular probe ──
-        # Fire when use_case = high_school AND the user hasn't mentioned gaming/editing/
-        # music yet AND we haven't already asked.  One question routes a $699 mainstream
-        # pick to a $899 creator/gaming spec without requiring the user to know what RAM
-        # or GPU they need.
+        # ── Profile-driven domain question packs ──────────────────────────────
+        # Load question definitions from the active StoreProfile. Each pack defines
+        # trigger conditions, text, options, and goal. This replaces the hardcoded
+        # high_school / university / gaming / corporate blocks with config-driven
+        # questions so each vertical asks its own domain questions.
+        _nqe_packs = _load_nqe_question_packs()
+
+        # Detection flags (used both here and in the keep-set below)
         _hs_probe_not_asked = "high_school_activity" not in set(
             str(k).lower() for k in (inp.answered_fields or {})
         )
@@ -532,56 +587,6 @@ class NextQuestionEngine:
             w in (query_text or "").lower()
             for w in ("gaming", "game", "video edit", "editing", "music", "coding", "code", "design", "art", "graphics")
         )
-        if (
-            inp.detected_use_case in ("high_school", "student", "high_schooler")
-            and _hs_probe_not_asked
-            and _no_activity_signal
-        ):
-            questions.append(
-                NextQuestion(
-                    id="ask_high_school_activity",
-                    text=_personalize_q(
-                        "Any hobbies or after-school activities that need the laptop? "
-                        "This helps us pick the right specs without overspending.",
-                        query_text,
-                    ),
-                    goal="refine_use_case",
-                    evidence_needed=["high_school_activity"],
-                    source="use_case_disambiguation",
-                    options=[
-                        {"label": "School notes / browsing only — keep it light", "value": "high_school_basic"},
-                        {"label": "Casual gaming (Minecraft, Roblox, Fortnite)", "value": "gaming_light"},
-                        {"label": "Video editing / YouTube / content creation", "value": "content_creator"},
-                        {"label": "Music production / audio software", "value": "music_production"},
-                        {"label": "Coding / programming projects", "value": "engineering_student"},
-                        {"label": "Digital art / graphic design", "value": "design_student"},
-                    ],
-                )
-            )
-
-        # ── University subject specialization ──
-        if inp.detected_use_case == "university_general":
-            questions.append(
-                NextQuestion(
-                    id="ask_university_subject",
-                    text=_personalize_q("What subject or field are you studying? This helps me match specs to your workload.", query_text),
-                    goal="refine_use_case",
-                    evidence_needed=["academic_field"],
-                    source="use_case_disambiguation",
-                    options=[
-                        {"label": "Computer Science / IT", "value": "computer_science_student"},
-                        {"label": "Engineering / CAD", "value": "engineering_student"},
-                        {"label": "Data Science / ML", "value": "data_science_student"},
-                        {"label": "Design / Visual Arts", "value": "design_student"},
-                        {"label": "Architecture", "value": "architecture_student"},
-                        {"label": "Medical / Health Sciences", "value": "medical_student"},
-                        {"label": "Law", "value": "law_student"},
-                        {"label": "General Studies / Arts / Humanities", "value": "university_general"},
-                    ],
-                )
-            )
-
-        # ── Gaming depth question — what kind of games? ──
         _gaming_detected = any(
             w in (query_text or "").lower()
             for w in ["gaming", "game", "gamer", "play games", "fps", "esports"]
@@ -589,22 +594,145 @@ class NextQuestionEngine:
         _gaming_not_yet_asked = "gaming_depth" not in set(
             str(k).lower() for k in (inp.answered_fields or {})
         )
-        if _gaming_detected and _gaming_not_yet_asked and not detected_games:
-            questions.append(
-                NextQuestion(
-                    id="ask_gaming_depth",
-                    text=_personalize_q("What kind of games will you play? This determines the GPU level needed.", query_text),
-                    goal="refine_gaming_tier",
-                    evidence_needed=["game_titles", "gaming_tier"],
-                    source="use_case_disambiguation",
-                    options=[
-                        {"label": "Light (Minecraft, Roblox, LoL)", "value": "gaming_light"},
-                        {"label": "Casual (Fortnite, Apex, Valorant at 60fps)", "value": "gaming_casual"},
-                        {"label": "Competitive Esports (CS2, Valorant at 144fps+)", "value": "gaming_competitive"},
-                        {"label": "AAA Heavy (Cyberpunk, Space Marines 2, Starfield)", "value": "gaming_aaa_heavy"},
-                    ],
+        _corporate_detected = any(
+            w in (query_text or "").lower()
+            for w in ["office", "corporate", "work", "business", "professional"]
+        )
+        _corp_not_yet_asked = "corporate_subtype" not in set(
+            str(k).lower() for k in (inp.answered_fields or {})
+        )
+
+        # Fire profile-backed questions
+        for _pack_id, _pack in _nqe_packs.items():
+            if not isinstance(_pack, dict):
+                continue
+            # Check answered_field gate
+            _af = _pack.get("answered_field", "")
+            if _af and _af in set(str(k).lower() for k in (inp.answered_fields or {})):
+                continue
+            # Check trigger_use_cases
+            _trigger_ucs = _pack.get("trigger_use_cases") or []
+            _trigger_kws = _pack.get("trigger_query_keywords") or []
+            _trigger_qty_min = _pack.get("trigger_quantity_min")
+            _skip_kws = _pack.get("skip_if_query_contains") or []
+            _should_fire = False
+            if isinstance(_trigger_qty_min, int):
+                # Quantity is a SIGNAL, not a gate: fire procurement questions only when the buyer's
+                # INTENT is business/bulk (or ambiguous-bulk needing clarification) — not on a raw
+                # count alone. A personal multi-buy stays consumer; an absurd count is anomalous and
+                # handled by escalation, not a procurement question.
+                from src.app.services.b2b_intent import assess_b2b_intent
+                _b2b = assess_b2b_intent(query_text, quantity=inp.order_quantity, bulk_min=_trigger_qty_min)
+                if _b2b.wants_procurement_questions:
+                    _should_fire = True
+            elif _trigger_ucs and inp.detected_use_case in _trigger_ucs:
+                _should_fire = True
+                # Apply skip_if_query_contains
+                if _skip_kws and any(w in (query_text or "").lower() for w in _skip_kws):
+                    _should_fire = False
+            elif _trigger_kws and any(w in (query_text or "").lower() for w in _trigger_kws):
+                _should_fire = True
+                # For gaming: skip if specific games already detected
+                if _pack_id == "ask_gaming_depth" and detected_games:
+                    _should_fire = False
+                # For corporate: skip if subtype already resolved
+                if _pack_id == "ask_corporate_work_type" and corporate_sub:
+                    _should_fire = False
+            if _should_fire and _skip_kws and any(w in (query_text or "").lower() for w in _skip_kws):
+                _should_fire = False
+
+            if _should_fire:
+                questions.append(
+                    NextQuestion(
+                        id=_pack_id,
+                        text=_personalize_q(str(_pack.get("text", "")), query_text),
+                        goal=str(_pack.get("goal", "refine_use_case")),
+                        evidence_needed=list(_pack.get("evidence_needed") or []),
+                        source=str(_pack.get("source", "use_case_disambiguation")),
+                        options=list(_pack.get("options") or []),
+                    )
                 )
-            )
+
+        # ── Transitional fallback: fire inline electronics packs when profile lacks slot ──
+        if not _nqe_packs:
+            if (
+                inp.detected_use_case in ("high_school", "student", "high_schooler")
+                and _hs_probe_not_asked
+                and _no_activity_signal
+            ):
+                questions.append(
+                    NextQuestion(
+                        id="ask_high_school_activity",
+                        text=_personalize_q(
+                            "Any hobbies or after-school activities that need the laptop? "
+                            "This helps us pick the right specs without overspending.",
+                            query_text,
+                        ),
+                        goal="refine_use_case",
+                        evidence_needed=["high_school_activity"],
+                        source="use_case_disambiguation",
+                        options=[
+                            {"label": "School notes / browsing only — keep it light", "value": "high_school_basic"},
+                            {"label": "Casual gaming (Minecraft, Roblox, Fortnite)", "value": "gaming_light"},
+                            {"label": "Video editing / YouTube / content creation", "value": "content_creator"},
+                            {"label": "Music production / audio software", "value": "music_production"},
+                            {"label": "Coding / programming projects", "value": "engineering_student"},
+                            {"label": "Digital art / graphic design", "value": "design_student"},
+                        ],
+                    )
+                )
+            if inp.detected_use_case == "university_general":
+                questions.append(
+                    NextQuestion(
+                        id="ask_university_subject",
+                        text=_personalize_q("What subject or field are you studying? This helps me match specs to your workload.", query_text),
+                        goal="refine_use_case",
+                        evidence_needed=["academic_field"],
+                        source="use_case_disambiguation",
+                        options=[
+                            {"label": "Computer Science / IT", "value": "computer_science_student"},
+                            {"label": "Engineering / CAD", "value": "engineering_student"},
+                            {"label": "Data Science / ML", "value": "data_science_student"},
+                            {"label": "Design / Visual Arts", "value": "design_student"},
+                            {"label": "Architecture", "value": "architecture_student"},
+                            {"label": "Medical / Health Sciences", "value": "medical_student"},
+                            {"label": "Law", "value": "law_student"},
+                            {"label": "General Studies / Arts / Humanities", "value": "university_general"},
+                        ],
+                    )
+                )
+            if _gaming_detected and _gaming_not_yet_asked and not detected_games:
+                questions.append(
+                    NextQuestion(
+                        id="ask_gaming_depth",
+                        text=_personalize_q("What kind of games will you play? This determines the GPU level needed.", query_text),
+                        goal="refine_gaming_tier",
+                        evidence_needed=["game_titles", "gaming_tier"],
+                        source="use_case_disambiguation",
+                        options=[
+                            {"label": "Light (Minecraft, Roblox, LoL)", "value": "gaming_light"},
+                            {"label": "Casual (Fortnite, Apex, Valorant at 60fps)", "value": "gaming_casual"},
+                            {"label": "Competitive Esports (CS2, Valorant at 144fps+)", "value": "gaming_competitive"},
+                            {"label": "AAA Heavy (Cyberpunk, Space Marines 2, Starfield)", "value": "gaming_aaa_heavy"},
+                        ],
+                    )
+                )
+            if _corporate_detected and _corp_not_yet_asked and not corporate_sub:
+                questions.append(
+                    NextQuestion(
+                        id="ask_corporate_work_type",
+                        text=_personalize_q("What type of work will you mainly do? This helps me match the right specs.", query_text),
+                        goal="refine_use_case",
+                        evidence_needed=["work_type"],
+                        source="use_case_disambiguation",
+                        options=[
+                            {"label": "General Office (Email, Teams, Documents)", "value": "office_general"},
+                            {"label": "Finance / Data Analysis (Excel, Power BI, SAP)", "value": "office_finance"},
+                            {"label": "Executive / Travel (Presentations, Premium Build)", "value": "office_executive"},
+                        ],
+                    )
+                )
+
         # If specific game was mentioned, auto-resolve tier — no need to ask
         if detected_games and inp.trace_id:
             try:
@@ -619,30 +747,6 @@ class NextQuestionEngine:
                 )
             except Exception:
                 pass
-
-        # ── Corporate work type question ──
-        _corporate_detected = any(
-            w in (query_text or "").lower()
-            for w in ["office", "corporate", "work", "business", "professional"]
-        )
-        _corp_not_yet_asked = "corporate_subtype" not in set(
-            str(k).lower() for k in (inp.answered_fields or {})
-        )
-        if _corporate_detected and _corp_not_yet_asked and not corporate_sub:
-            questions.append(
-                NextQuestion(
-                    id="ask_corporate_work_type",
-                    text=_personalize_q("What type of work will you mainly do? This helps me match the right specs.", query_text),
-                    goal="refine_use_case",
-                    evidence_needed=["work_type"],
-                    source="use_case_disambiguation",
-                    options=[
-                        {"label": "General Office (Email, Teams, Documents)", "value": "office_general"},
-                        {"label": "Finance / Data Analysis (Excel, Power BI, SAP)", "value": "office_finance"},
-                        {"label": "Executive / Travel (Presentations, Premium Build)", "value": "office_executive"},
-                    ],
-                )
-            )
 
         # ── Touch screen / pen input question ──
         if touch_needed and "touch_screen" not in set(
@@ -912,24 +1016,34 @@ class NextQuestionEngine:
                 _keep_set.add('ask_corporate_work_type')
             if touch_needed:
                 _keep_set.add('ask_touch_screen_type')
-            if inp.has_image and inp.image_identity_confidence < 0.6:
+            if inp.has_image and (inp.image_identity_confidence < 0.6 or inp.identity_residual_question):
                 _keep_set.add('ask_image_model')
 
+            # B2B procurement leads over consumer use-case questions when the buyer is business/bulk
+            # (the pack only entered `out` when assess_b2b_intent wanted procurement questions).
+            _keep_set.add('ask_b2b_procurement')
             # 2. Generic slot coverage comes after domain-specific questions
             _keep_set.update({'ask_budget', 'ask_budget_tier', 'ask_use_case', 'ask_platform', 'ask_brand_pref'})
 
-            # Build result in priority order: domain-specific first, then generic slots
+            # Build result in priority order: procurement → domain-specific → generic slots
             _domain_priority = [
+                'ask_b2b_procurement',
                 'ask_high_school_activity',
                 'ask_university_subject', 'ask_gaming_depth', 'ask_software_confirm',
                 'ask_corporate_work_type', 'ask_touch_screen_type', 'ask_image_model',
             ]
+            # When the ladder genuinely couldn't identify the uploaded product, the
+            # identity clarification LEADS — it's the bounded-autonomy boundary
+            # (ask the human exactly when the evidence ran out).
+            if inp.identity_residual_question and 'ask_image_model' in _keep_set:
+                _domain_priority = ['ask_image_model'] + [p for p in _domain_priority if p != 'ask_image_model']
             _generic_priority = ['ask_budget_tier', 'ask_budget', 'ask_use_case', 'ask_platform', 'ask_brand_pref']
             _ordered_priority = _domain_priority + _generic_priority
             # Map each template id to the missing-field it covers so we never
             # consume two cap slots on the same field (e.g. ask_budget_tier AND
             # ask_budget both count for 'budget', leaving no room for brand_pref).
             _template_field_map: dict[str, str] = {
+                'ask_b2b_procurement': 'b2b_requirements',
                 'ask_high_school_activity': 'use_case',
                 'ask_budget_tier': 'budget',
                 'ask_budget': 'budget',

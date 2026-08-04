@@ -153,7 +153,15 @@ class TestStegImages:
             return []
         return json.loads(_MANIFEST.read_text(encoding="utf-8")).get("images", [])
 
-    @pytest.mark.parametrize("entry", _load_manifest_static(), ids=lambda e: e.get("output", "unknown"))
+    @pytest.mark.parametrize(
+        "entry",
+        _load_manifest_static(),
+        ids=lambda entry: (
+            entry.get("output", "unknown")
+            if isinstance(entry, dict)
+            else "manifest-entry"
+        ),
+    )
     def test_steg_image_cv_analyze(self, test_server, entry: Dict[str, Any]):
         """CV analyze must detect steganography, return evidence_tags, and
         respect the per-call timing budget."""

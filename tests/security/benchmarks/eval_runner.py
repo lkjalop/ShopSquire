@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from src.app.security.email_security import evaluate_email_security
+from tests.security.synthetic_samples import (
+    SYNTHETIC_AUTHORITY,
+    bytes_for_legacy_fixture,
+)
 
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -34,12 +38,17 @@ def _attachments_for(case: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for rel in case.get("attachments") or []:
         path = (_ROOT / str(rel)).resolve()
-        blob = path.read_bytes()
+        blob = path.read_bytes() if path.is_file() else bytes_for_legacy_fixture(path)
         rows.append(
             {
                 "filename": path.name,
                 "name": path.name,
                 "content": blob,
+                "fixture_authority": (
+                    "local_untracked_sample"
+                    if path.is_file()
+                    else SYNTHETIC_AUTHORITY
+                ),
             }
         )
     return rows
@@ -56,6 +65,7 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
     result = evaluate_email_security(email)
     security = result.get("security_analysis") if isinstance(result, dict) else {}
     return {
+        "claim_scope": "synthetic_protocol_evaluation_not_provider_certification",
         "id": case.get("id"),
         "bucket": case.get("_bucket"),
         "path": case.get("_path"),
@@ -85,6 +95,7 @@ def run_benchmark() -> Dict[str, Any]:
         if isinstance(r.get("evidence_quality"), dict) and str(r["evidence_quality"].get("band") or "").upper() == "LOW"
     ) / max(len(results), 1)
     return {
+        "claim_scope": "synthetic_protocol_evaluation_not_provider_certification",
         "case_count": len(results),
         "tp_count": len(tp),
         "fp_count": len(fp),

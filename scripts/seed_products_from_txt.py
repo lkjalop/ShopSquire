@@ -28,7 +28,22 @@ if str(ROOT) not in sys.path:
 from src.app.models.db import engine
 from src.app.models.init_db import ensure_metadata
 
-DEFAULT_SOURCE = Path("docs/laptop-products-exp.txt")
+def _default_source() -> Path:
+    """Canonical product catalog source — SAME preference order as
+    seed_demo_data._default_product_source (new-short -> new -> exp) so both seed paths populate the
+    SAME catalog and demo results are consistent regardless of which seeder ran. Override with
+    --source or PRODUCT_SOURCE_TXT."""
+    for candidate in (
+        "docs/laptop-products-new-short.txt",
+        "docs/laptop-products-new.txt",
+        "docs/laptop-products-exp.txt",
+    ):
+        if Path(candidate).exists():
+            return Path(candidate)
+    return Path("docs/laptop-products-new-short.txt")
+
+
+DEFAULT_SOURCE = _default_source()
 
 
 def parse_blocks(text: str) -> List[str]:
@@ -36,7 +51,7 @@ def parse_blocks(text: str) -> List[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def parse_product(block: str) -> Dict:
+def parse_product(block: str, *, currency: str = "AUD") -> Dict:
     lines = [l.strip() for l in block.splitlines() if l.strip()]
     name_line = lines[0]
     price = 0.0
@@ -89,7 +104,7 @@ def parse_product(block: str) -> Dict:
         'sku': sku,
         'name': name,
         'price_cents': int(round(price * 100)),
-        'currency': 'USD',
+        'currency': str(currency or "AUD").strip().upper(),
         'image_url': image_url,
         'specs': specs,
         'active': 1,
@@ -103,6 +118,10 @@ def main():
         default=os.getenv("PRODUCT_SOURCE_TXT", str(DEFAULT_SOURCE)),
         help="Path to product source text file.",
     )
+    parser.add_argument(
+        "--currency", default=os.getenv("STORE_CURRENCY", "AUD"),
+        help="ISO currency of prices in the source document (default: AUD).",
+    )
     args = parser.parse_args()
     src = Path(args.source)
     if not src.exists():
@@ -111,7 +130,10 @@ def main():
     ensure_metadata()
     raw = src.read_text(encoding='utf-8', errors='ignore')
     blocks = parse_blocks(raw)
-    products = [parse_product(b) for b in blocks]
+    currency = str(args.currency or "").strip().upper()
+    if len(currency) != 3 or not currency.isalpha():
+        parser.error("--currency must be a three-letter ISO code")
+    products = [parse_product(b, currency=currency) for b in blocks]
     print(f"Parsed {len(products)} products from {src}")
     with engine.begin() as conn:
         for p in products:

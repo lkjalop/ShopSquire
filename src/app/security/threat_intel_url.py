@@ -117,9 +117,10 @@ def _store_cache(url: str, source: str, result: Dict[str, Any]) -> None:
             db.execute(
                 text(
                     """
-                    INSERT OR REPLACE INTO threat_intel_cache
+                    INSERT INTO threat_intel_cache
                     (url_hash, url_prefix, source, result_json, queried_at, expires_at)
                     VALUES (:h, :prefix, :source, :result, :now, :expires)
+                    ON CONFLICT (url_hash) DO UPDATE SET source = EXCLUDED.source, result_json = EXCLUDED.result_json, queried_at = EXCLUDED.queried_at, expires_at = EXCLUDED.expires_at
                     """
                 ),
                 {

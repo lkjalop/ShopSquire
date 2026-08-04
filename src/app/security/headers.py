@@ -11,6 +11,11 @@ class SecurityHeadersMiddleware:
         self.app = app
         self.enabled = str(os.getenv("SECURITY_HEADERS_ENABLED", "1")).lower() in ("1", "true", "yes")
         self.headers: Iterable[Tuple[bytes, bytes]] = self._build_headers()
+        # An API consumed by the browser SPA (incl. cross-origin in dev: :5173 → :8080) must allow
+        # cross-origin resource reads, else CORP:same-origin blocks the fetch/stream with
+        # ERR_BLOCKED_BY_RESPONSE.NotSameOrigin even when CORS allows it. CORS still gates WHO may read with
+        # credentials; CORP only gates the no-cors block. Non-API responses keep the strict same-origin.
+        self.corp_api = self._env("SECURITY_CORP_API", "cross-origin").encode("utf-8")
 
     @staticmethod
     def _env(name: str, default: str) -> str:
@@ -46,7 +51,7 @@ class SecurityHeadersMiddleware:
         refp = self._env("SECURITY_REFERRER_POLICY", "strict-origin-when-cross-origin")
         perms = self._env(
             "SECURITY_PERMISSIONS_POLICY",
-            "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+            "camera=(), microphone=(self), geolocation=(), payment=(), usb=()",
         )
         coop = self._env("SECURITY_COOP", "same-origin")
         coep = self._env("SECURITY_COEP", "unsafe-none")
@@ -70,17 +75,67 @@ class SecurityHeadersMiddleware:
         if not self.enabled or scope.get("type") != "http":
             return await self.app(scope, receive, send)
 
+        is_api = str(scope.get("path") or "").startswith("/api/")
+
         async def send_wrapper(message):
             if message.get("type") == "http.response.start":
                 existing = {k.lower() for k, _ in message.get("headers", [])}
                 headers = list(message.get("headers", []))
                 for hk, hv in self.headers:
                     if hk not in existing:
-                        headers.append((hk, hv))
+                        # API responses are SPA-consumable cross-origin → relax only CORP for /api/*.
+                        if is_api and hk == b"cross-origin-resource-policy":
+                            headers.append((hk, self.corp_api))
+                        else:
+                            headers.append((hk, hv))
                 message["headers"] = headers
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+
+# PCI DSS 6.4.3 — script inventory + justification for the payment page. Each script that runs on
+# the checkout page is authorized and justified here; the CSP below enforces that ONLY these run.
+PAYMENT_PAGE_SCRIPT_INVENTORY = [
+    {
+        "src": "inline (per-response nonce)",
+        "purpose": "checkout bootstrap — read the cart snapshot, mount the Stripe Element, submit",
+        "owner": "shopsquire",
+        "integrity": "per-response CSP nonce",
+    },
+    {
+        "src": "https://js.stripe.com/v3/",
+        "purpose": "Stripe.js — PCI-compliant card tokenization; no PAN ever reaches our origin",
+        "owner": "stripe",
+        "integrity": "origin-pinned via CSP (Stripe.js cannot use SRI — Stripe rotates v3)",
+    },
+]
+
+
+def payment_page_csp(nonce: str) -> str:
+    """Strict Content-Security-Policy for a server-rendered payment page (PCI DSS 6.4.3 / 11.6.1
+    anti-e-skimming). Authorizes EXACTLY what a Stripe checkout needs and nothing else:
+
+      * script-src: 'self' + a per-response nonce (inline bootstrap) + js.stripe.com. No
+        'unsafe-inline', no wildcards — an injected/skimmer script is blocked and reported.
+      * frame-src/connect-src: scoped to Stripe Elements + the Stripe API.
+      * report-uri: violations (i.e. unauthorized script attempts) hit the CSP-report sink so
+        payment-page tampering is detected (11.6.1).
+
+    Stripe.js deliberately has no SRI hash (Stripe rotates v3); its integrity control is
+    official-origin pinning in script-src, documented in PAYMENT_PAGE_SCRIPT_INVENTORY."""
+    n = str(nonce or "")
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{n}' https://js.stripe.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob: https:; "
+        "connect-src 'self' https://api.stripe.com; "
+        "frame-src https://js.stripe.com https://hooks.stripe.com; "
+        "media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; "
+        "frame-ancestors 'none'; upgrade-insecure-requests; "
+        "report-uri /api/v1/security/csp-report"
+    )
 
 
 def secure_cookie_flags(*, oauth_flow: bool = False) -> dict:

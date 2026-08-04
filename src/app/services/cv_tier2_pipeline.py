@@ -469,6 +469,31 @@ def _extract_qr_payloads(image_bytes: bytes) -> Dict[str, Any]:
 
 
 def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: str | None = None) -> Dict[str, Any]:
+    """Image-hash-cached CV verdict. The tier2 analysis (detector + OCR + steg +
+    adversarial) is image-derived and deterministic, so a repeat of the SAME image
+    (demo, retry, multi-agent fan-out) is served from cache — taking cv/analyze
+    repeats from ~42s toward instant. Keyed by image + pack_id (meta/case_id is
+    context, not part of the verdict). Fail-open; only successful results cached."""
+    _vc_key = None
+    try:
+        from src.app.services import vision_cache as _vcache
+        _vc_key = _vcache.image_key(image_bytes, f"tier2:{pack_id or 'default'}")
+        _hit = _vcache.get(_vc_key)
+        if isinstance(_hit, dict):
+            return dict(_hit)
+    except Exception:
+        _vc_key = None
+    result = _run_tier2_impl(image_bytes, meta=meta, pack_id=pack_id)
+    if _vc_key and isinstance(result, dict) and not result.get("error"):
+        try:
+            from src.app.services import vision_cache as _vcache
+            _vcache.put(_vc_key, dict(result))
+        except Exception:
+            pass
+    return result
+
+
+def _run_tier2_impl(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: str | None = None) -> Dict[str, Any]:
     meta = meta or {}
     pack = get_model_pack(pack_id)
     detector_cfg = (pack.get("detector") or {}) if isinstance(pack.get("detector"), dict) else {}

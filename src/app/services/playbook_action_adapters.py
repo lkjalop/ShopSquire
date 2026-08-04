@@ -19,13 +19,8 @@ def _get_redis_client():
     if _REDIS_CLIENT is not None:
         return _REDIS_CLIENT
     try:
-        import redis
-        url = str(os.getenv("REDIS_URL", "") or "").strip()
-        if not url:
-            # default local
-            _REDIS_CLIENT = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True)
-        else:
-            _REDIS_CLIENT = redis.from_url(url, decode_responses=True)
+        from src.app.services.redis_factory import create_redis_client
+        _REDIS_CLIENT = create_redis_client()
         return _REDIS_CLIENT
     except Exception:
         return None
@@ -123,11 +118,17 @@ def shipping_action(action: Dict[str, Any], context: Dict[str, Any]) -> Dict[str
     try:
         provider = get_default_shipping_provider()
     except (RuntimeError, Exception) as exc:
-        return {"ok": True, "provider": "stub", "case_id": case_id, "stub": True,
+        # Honest: a missing provider is NOT a success. Surface stub=True, ok=False.
+        return {"ok": False, "provider": "stub", "case_id": case_id, "stub": True,
                 "note": str(exc)[:120]}
     shipment_info = {"case_id": case_id, "from_address": params.get("from_address"), "to_address": params.get("to_address"), "parcel": params.get("parcel")}
-    label = provider.create_label(shipment_info)
-    return {"ok": label.get("ok", False), "provider": provider.name, "case_id": case_id, "label": label}
+    try:
+        label = provider.create_label(shipment_info) or {}
+    except Exception as exc:
+        label = {"ok": False, "stub": True, "error": str(exc)[:160]}
+    ok = bool(label.get("ok"))
+    return {"ok": ok, "provider": provider.name, "case_id": case_id,
+            "stub": bool(label.get("stub")) or not ok, "label": label}
 
 
 def erp_action(action: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:

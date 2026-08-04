@@ -73,6 +73,9 @@ export function Overview({ role }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showOnlyChanges, setShowOnlyChanges] = useState(true);
   const [demoReadiness, setDemoReadiness] = useState<any | null>(null);
+  const [demoReadinessStatus, setDemoReadinessStatus] = useState<
+    'loading' | 'available' | 'disabled' | 'unavailable'
+  >('loading');
   const [personaSuccess, setPersonaSuccess] = useState<any | null>(null);
 
   useEffect(() => {
@@ -90,7 +93,20 @@ export function Overview({ role }: Props) {
         .then((d) => { if (!cancelled) setComplianceFeed(d.items || []); })
         .catch(() => {});
     }
-    fetchDemoReadiness(24).then((d) => { if (!cancelled) setDemoReadiness(d); }).catch(() => {});
+    setDemoReadinessStatus('loading');
+    fetchDemoReadiness(24)
+      .then((d) => {
+        if (!cancelled) {
+          setDemoReadiness(d);
+          setDemoReadinessStatus('available');
+        }
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setDemoReadiness(null);
+          setDemoReadinessStatus(err?.status === 404 ? 'disabled' : 'unavailable');
+        }
+      });
     fetchPersonaSuccess(7).then((d) => { if (!cancelled) setPersonaSuccess(d); }).catch(() => {});
     return () => { cancelled = true; };
   }, [role]);
@@ -99,18 +115,31 @@ export function Overview({ role }: Props) {
     if (!data.decision_series.length) return [];
     return data.decision_series;
   }, [data.decision_series]);
+  const readinessFallback = demoReadinessStatus === 'disabled'
+    ? 'Disabled'
+    : demoReadinessStatus === 'loading'
+      ? 'Loading'
+      : 'Unavailable';
+  const readinessValue = (value: unknown, format?: (n: number) => string) => {
+    if (demoReadinessStatus !== 'available' || typeof value !== 'number') return readinessFallback;
+    return format ? format(value) : value;
+  };
   return (
     <div className="stagger">
       <div className="grid-4">
         <div className="card">
           <h3>Revenue Today</h3>
           <div className="metric">${data.revenue_today.toLocaleString()}</div>
-          <div className="badge">+12.3% WoW</div>
+          <div className="badge" data-testid="revenue-comparison-status">
+            {data.revenue_today === 0 ? 'No revenue recorded today' : 'WoW comparison unavailable'}
+          </div>
         </div>
         <div className="card">
           <h3>Orders Today</h3>
           <div className="metric">{data.orders_today}</div>
-          <div className="badge">95.4% approved</div>
+          <div className="badge" data-testid="order-approval-status">
+            {data.orders_today === 0 ? 'No orders recorded today' : 'Approval rate unavailable'}
+          </div>
         </div>
         <div className="card">
           <h3>AI Autonomy</h3>
@@ -196,20 +225,25 @@ export function Overview({ role }: Props) {
       <div className="grid-2" style={{ marginTop: 16 }}>
         <div className="card">
           <h3>Security Posture</h3>
+          {demoReadinessStatus !== 'available' && (
+            <div className="page-sub" data-testid="demo-readiness-status">
+              Demo-readiness evidence: {readinessFallback.toLowerCase()}. Values below are not measured zeros.
+            </div>
+          )}
           <div className="list">
-            <div className="list-item"><div>Blocked attacks</div><strong>{demoReadiness?.security_posture?.blocked_attacks ?? 0}</strong></div>
-            <div className="list-item"><div>Escalations</div><strong>{demoReadiness?.security_posture?.escalations ?? 0}</strong></div>
-            <div className="list-item"><div>Supplier quarantines</div><strong>{demoReadiness?.security_posture?.supplier_quarantines ?? 0}</strong></div>
-            <div className="list-item"><div>API abuse blocked</div><strong>{demoReadiness?.security_posture?.api_abuse_blocked ?? 0}</strong></div>
+            <div className="list-item"><div>Blocked attacks</div><strong>{readinessValue(demoReadiness?.security_posture?.blocked_attacks)}</strong></div>
+            <div className="list-item"><div>Escalations</div><strong>{readinessValue(demoReadiness?.security_posture?.escalations)}</strong></div>
+            <div className="list-item"><div>Supplier quarantines</div><strong>{readinessValue(demoReadiness?.security_posture?.supplier_quarantines)}</strong></div>
+            <div className="list-item"><div>API abuse blocked</div><strong>{readinessValue(demoReadiness?.security_posture?.api_abuse_blocked)}</strong></div>
           </div>
         </div>
         <div className="card">
           <h3>Model Quality</h3>
           <div className="list">
-            <div className="list-item"><div>Upsell CTR</div><strong>{(((demoReadiness?.model_quality?.ctr ?? 0) as number) * 100).toFixed(1)}%</strong></div>
-            <div className="list-item"><div>Add-to-cart uplift</div><strong>{(((demoReadiness?.model_quality?.add_to_cart_rate ?? 0) as number) * 100).toFixed(1)}%</strong></div>
-            <div className="list-item"><div>Low-confidence fallback rate</div><strong>{(((demoReadiness?.model_quality?.low_confidence_fallback_rate ?? 0) as number) * 100).toFixed(1)}%</strong></div>
-            <div className="list-item"><div>Fallback count</div><strong>{demoReadiness?.model_quality?.low_confidence_count ?? 0}</strong></div>
+            <div className="list-item"><div>Upsell CTR</div><strong>{readinessValue(demoReadiness?.model_quality?.ctr, (n) => `${(n * 100).toFixed(1)}%`)}</strong></div>
+            <div className="list-item"><div>Add-to-cart uplift</div><strong>{readinessValue(demoReadiness?.model_quality?.add_to_cart_rate, (n) => `${(n * 100).toFixed(1)}%`)}</strong></div>
+            <div className="list-item"><div>Low-confidence fallback rate</div><strong>{readinessValue(demoReadiness?.model_quality?.low_confidence_fallback_rate, (n) => `${(n * 100).toFixed(1)}%`)}</strong></div>
+            <div className="list-item"><div>Fallback count</div><strong>{readinessValue(demoReadiness?.model_quality?.low_confidence_count)}</strong></div>
           </div>
         </div>
       </div>

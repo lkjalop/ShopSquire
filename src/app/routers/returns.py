@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any, List
 import base64
+import json
 
 from src.app.services.returns import capture_evidence, compute_return_score
 from src.app.services.returns import mark_evidence_as_fraud
@@ -40,57 +41,102 @@ def _value_cents_from_body(body: Dict[str, Any]) -> int:
     return 0
 
 
-def _corroborate_order(uid: str | None, sku: str, pkg: dict) -> dict:
-    """Check whether the submitted return matches an actual order for uid+sku.
-
-    Returns::
-
-        {
-            "order_found": bool,
-            "fraud_score_delta": int,   # 0 / 15 / 20
-            "mismatch": bool,
-            "detail": str,
-        }
-    """
-    if not uid:
-        return {"order_found": False, "fraud_score_delta": 15, "mismatch": True, "detail": "no_uid_provided"}
-    try:
-        with db_session() as db:
-            row = db.execute(
-                _text(
-                    "SELECT id, product_name, brand, sku FROM order_items "
-                    "WHERE user_id = :uid AND sku = :sku "
-                    "ORDER BY created_at DESC LIMIT 1"
-                ),
-                {"uid": uid, "sku": sku},
-            ).fetchone()
-    except Exception:
-        # Table may not exist in all environments — treat as inconclusive
-        return {"order_found": False, "fraud_score_delta": 0, "mismatch": False, "detail": "db_unavailable"}
-
-    if not row:
-        return {"order_found": False, "fraud_score_delta": 15, "mismatch": True, "detail": "no_matching_order"}
-
-    # Order found — compare CV-identified brand/product type against order record
-    order_brand = str(row[2] or "").lower().strip() if len(row) > 2 else ""
-    order_product = str(row[1] or "").lower().strip() if len(row) > 1 else ""
+def _cv_brand_mismatch(pkg: dict, expected: str) -> bool:
+    """Does the CV evidence FAIL to mention the expected brand/product token? (best-effort, len-guarded)"""
+    expected = str(expected or "").lower().strip()
+    if not expected:
+        return False
     cv_result = pkg.get("cv_result") or pkg.get("triage") or {}
     cv_labels = " ".join(cv_result.get("raw_labels") or pkg.get("labels") or []).lower()
     cv_text = (cv_result.get("extracted_text") or "").lower()
     cv_plain = (cv_result.get("plain_english") or "").lower()
     combined_cv = f"{cv_labels} {cv_text} {cv_plain}"
+    return expected not in combined_cv and len(combined_cv.strip()) > 10
 
-    mismatch = False
-    delta = 0
-    detail = "order_matched"
 
-    if order_brand and order_brand not in combined_cv and len(combined_cv.strip()) > 10:
-        # CV content doesn't mention the expected brand
-        mismatch = True
-        delta = 20
-        detail = f"brand_mismatch: order_brand='{order_brand}' not found in cv_output"
+def _corroborate_order(uid: str | None, sku: str, pkg: dict) -> dict:
+    """Check whether the submitted return matches an actual purchase for uid+sku.
 
-    return {"order_found": True, "fraud_score_delta": delta, "mismatch": mismatch, "detail": detail}
+    Queries the CANONICAL schema (orders JOIN draft_orders, scanning line_items JSON for the SKU) with the
+    legacy order_items table as a fallback. The old code queried ONLY order_items — a table that does not
+    exist in the live DB — so every production claim silently returned "db_unavailable"/delta 0 and
+    purchase corroboration was a NO-OP (found in the 2026-07-07 audit).
+
+    Returns {order_found, order_id, order_status, purchased_at, total_cents, currency,
+             fraud_score_delta (0/15/20), mismatch, detail}.
+    """
+    _not_found = {"order_found": False, "order_id": None, "order_status": None, "purchased_at": None,
+                  "total_cents": None, "currency": None}
+    if not uid:
+        return {**_not_found, "fraud_score_delta": 15, "mismatch": True, "detail": "no_uid_provided"}
+
+    # ── Canonical: orders (paid/shipped/delivered preferred) joined to their draft's line_items ──
+    try:
+        with db_session() as db:
+            rows = db.execute(
+                _text(
+                    "SELECT o.id, o.status, o.created_at, o.total_cents, o.currency, d.line_items "
+                    "FROM orders o LEFT JOIN draft_orders d ON d.id = o.draft_order_id "
+                    "WHERE o.customer_id = :uid ORDER BY o.created_at DESC LIMIT 50"
+                ),
+                {"uid": uid},
+            ).fetchall()
+    except Exception:
+        rows = []
+    best = None
+    for r in rows or []:
+        try:
+            items = json.loads(r[5]) if r[5] else []
+        except (json.JSONDecodeError, TypeError):
+            items = []
+        if any(str(it.get("sku") or "").strip().upper() == str(sku or "").strip().upper() for it in items if isinstance(it, dict)):
+            best = r
+            if str(r[1]) in ("paid", "shipped", "delivered"):
+                break  # prefer the most recent REFUNDABLE order; keep scanning otherwise
+    if best is not None:
+        # Brand/product mismatch: compare CV evidence to the CATALOG name for this SKU (canonical rows
+        # don't carry product_name/brand like the legacy table did).
+        expected = ""
+        try:
+            with db_session() as db:
+                prow = db.execute(_text("SELECT name FROM products WHERE sku = :s LIMIT 1"), {"s": sku}).fetchone()
+            expected = (str(prow[0]).split() or [""])[0] if prow and prow[0] else ""
+        except Exception:
+            expected = ""
+        mismatch = _cv_brand_mismatch(pkg, expected)
+        return {
+            "order_found": True, "order_id": str(best[0]), "order_status": str(best[1] or ""),
+            "purchased_at": str(best[2] or "") or None, "total_cents": int(best[3] or 0),
+            "currency": str(best[4] or "USD"),
+            "fraud_score_delta": 20 if mismatch else 0, "mismatch": mismatch,
+            "detail": (f"brand_mismatch: expected '{expected}' not in cv_output" if mismatch else "order_matched"),
+        }
+
+    # ── Legacy fallback: order_items (only exists in some environments) ──
+    try:
+        with db_session() as db:
+            row = db.execute(
+                _text(
+                    "SELECT id, product_name, brand, sku FROM order_items "
+                    "WHERE user_id = :uid AND sku = :sku ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"uid": uid, "sku": sku},
+            ).fetchone()
+    except Exception:
+        row = None
+        if not rows:
+            # BOTH schemas unavailable — genuinely inconclusive (do not penalize the buyer for our outage)
+            return {**_not_found, "fraud_score_delta": 0, "mismatch": False, "detail": "db_unavailable"}
+    if not row:
+        return {**_not_found, "fraud_score_delta": 15, "mismatch": True, "detail": "no_matching_order"}
+    order_brand = str(row[2] or "").lower().strip() if len(row) > 2 else ""
+    mismatch = _cv_brand_mismatch(pkg, order_brand)
+    return {
+        "order_found": True, "order_id": None, "order_status": None, "purchased_at": None,
+        "total_cents": None, "currency": None,
+        "fraud_score_delta": 20 if mismatch else 0, "mismatch": mismatch,
+        "detail": (f"brand_mismatch: order_brand='{order_brand}' not found in cv_output" if mismatch else "order_matched"),
+    }
 
 
 @router.post("/submit")
@@ -163,10 +209,13 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
             pass
         return {"evidence_id": None, "decision_id": dec_id, "mode": mode, "tier0": gate.details, "missing_views": gate.missing_views, "reasons": gate.reasons}
 
-    # Create a lightweight ReturnCase so evidence can be linked consistently
+    # Create a lightweight ReturnCase so evidence can be linked consistently.
+    # customer_id was previously None — the case never recorded WHO claimed (2026-07-07 audit), which
+    # both lost the claimant from the audit trail and made serial-returner detection impossible.
     case_id = None
     try:
-        case_id = create_case(order_id=None, issue_type="return", description=body.get("description") or "", tenant_id=tenant_id)
+        case_id = create_case(order_id=None, issue_type="return", description=body.get("description") or "",
+                              customer_id=uid, tenant_id=tenant_id)
     except Exception:
         case_id = None
 
@@ -201,6 +250,67 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
             )
     except Exception:
         pass
+
+    # ── Claim-policy signals: return/warranty windows, price sanity, evidence relevance, serial
+    # returner (config/rules/returns_policy.json; tenant-overridable). ACL posture: these raise the
+    # score toward human review — they NEVER auto-deny. ──
+    try:
+        from src.app.services.claim_policy import evaluate_claim_policy
+        _cvres = pkg.get("cv_result") or pkg.get("triage") or {}
+        policy_signals = evaluate_claim_policy(
+            corroboration=pkg.get("order_corroboration") or {},
+            claimed_value_cents=_value_cents_from_body(body),
+            labels=(_cvres.get("raw_labels") or pkg.get("labels") or []),
+            ocr_text=str(_cvres.get("extracted_text") or ""),
+            uid=uid,
+            tenant_id=tenant_id,
+            profile_id=pack_id,
+            has_images=bool(images),
+            images=images,
+        )
+        for sig in policy_signals:
+            score["score"] = float(score.get("score") or 0) + float(sig.get("delta") or 0)
+            score.setdefault("signals", []).append(sig)
+        if policy_signals:
+            pkg["claim_policy_signals"] = policy_signals
+    except Exception:
+        pass
+
+    # ── Claim grounding + ACL failure severity (R3 2026-07-07): claim_grounding.ground_claim was
+    # designed for exactly this and sat UNWIRED — evidence-reliability verdicts influenced nothing.
+    # A contradicted claim (text says X, CV evidence says otherwise) now raises the score toward
+    # human review; severity classifies major/minor so the LAWFUL remedy options render (major →
+    # consumer chooses refund/replacement/repair; minor → repair). Proposes only — humans confirm.
+    grounding = None
+    failure_severity = None
+    try:
+        from src.app.services.claim_grounding import ground_claim
+        from src.app.services.claim_policy import classify_failure_severity
+        _cvres = (pkg.get("cv_result") or pkg.get("triage") or {}) if isinstance(pkg, dict) else {}
+        _corr = pkg.get("order_corroboration") or {}
+        grounding = ground_claim(
+            str(body.get("description") or ""),
+            cv_evidence=({"damage_type": _cvres.get("damage_type"),
+                          "confidence": float(_cvres.get("confidence") or _cvres.get("damage_confidence") or 0.0)}
+                         if _cvres.get("damage_type") else None),
+            receipt_evidence={"verified": bool(_corr.get("order_found")),
+                              "confidence": 0.9 if _corr.get("order_id") else 0.5},
+        ).to_dict()
+        pkg["claim_grounding"] = grounding
+        if grounding.get("verdict") == "contradicted":
+            from src.app.rules.config_defaults import returns_policy_defaults as _rpd
+            _delta = int((_rpd(tenant_id=tenant_id) or {}).get("claim_contradicted_delta", 25) or 25)
+            score["score"] = float(score.get("score") or 0) + _delta
+            score.setdefault("signals", []).append(
+                {"signal": "claim_contradicted_by_evidence", "delta": _delta,
+                 "detail": f"grounding verdict=contradicted ({', '.join(grounding.get('evidence_sources') or [])})"})
+        failure_severity = classify_failure_severity(
+            description=str(body.get("description") or ""),
+            damage_type=str(_cvres.get("damage_type") or ""), tenant_id=tenant_id)
+        pkg["failure_severity"] = failure_severity
+    except Exception as _exc:
+        import logging as _lg
+        _lg.getLogger(__name__).warning("claim grounding/severity skipped: %s", _exc)
 
     # ── Multi-image mismatch detection ──
     # submit_return is a sync def; asyncio.run() creates a fresh event loop
@@ -301,18 +411,50 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
         mode = "require_human"
     else:
         mode = "escalate_security"
+
+    # ── Close the loop to the GOVERNED refund rail (2026-07-07 audit: an auto-approved claim previously
+    # went NOWHERE — no refund request was ever created; the claim and refund pipelines were disconnected).
+    # auto_approve now (a) requires a corroborated, refundable order — no order, no auto-refund — and
+    # (b) opens a refund REQUEST on the payment ledger. Human OWNER approval (GATE-2) still moves the money.
+    corroboration = pkg.get("order_corroboration") or {}
+    refund = None
     if mode == "auto_approve":
-        enforce_action_authority(
-            "refund",
-            value_aud_cents=_value_cents_from_body(body),
-            context={
-                "sku": sku,
-                "uid": uid,
-                "tenant_id": tenant_id,
-                "fraud_score": score.get("score"),
-                "decision_mode": mode,
-            },
-        )
+        _order_id = corroboration.get("order_id")
+        if not corroboration.get("order_found") or not _order_id:
+            mode = "require_human"
+            score.setdefault("signals", []).append(
+                {"signal": "auto_approve_downgraded", "delta": 0,
+                 "detail": "no_corroborated_refundable_order — refund cannot be raised without a purchase record"}
+            )
+        else:
+            enforce_action_authority(
+                "refund",
+                value_aud_cents=_value_cents_from_body(body),
+                context={
+                    "sku": sku,
+                    "uid": uid,
+                    "tenant_id": tenant_id,
+                    "fraud_score": score.get("score"),
+                    "decision_mode": mode,
+                },
+            )
+            try:
+                from src.app.services.refund_requests import create_refund_request
+                with db_session() as db:
+                    refund = create_refund_request(
+                        db, order_id=_order_id,
+                        amount_cents=(_value_cents_from_body(body) or None),
+                        reason=f"return_claim:{case_id or ''}",
+                        actor_type="agent", actor_id="returns.agent", clamp=True,
+                    )
+            except Exception as exc:
+                refund = {"ok": False, "error": f"refund_request_failed: {exc}"}
+            if not (refund or {}).get("ok"):
+                mode = "require_human"
+                score.setdefault("signals", []).append(
+                    {"signal": "auto_approve_downgraded", "delta": 0,
+                     "detail": str((refund or {}).get("error") or "refund_request_failed")}
+                )
 
     # Persist decision log for audit
     customer_tier = None
@@ -397,6 +539,41 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
             human_review = {"status": "pending", "ticket_id": None}
     except Exception:
         pass
+    # Escalation-room incident for anything a human must look at (2026-07-07 audit: the room accepted
+    # warranty/damage context but returns NEVER invoked it — reviewers had a bare task row with no room).
+    # Deliberately NOT gated on case_id (the task insert above is — a missing case must not silently
+    # drop the escalation). Failure is recorded on the response, never swallowed.
+    if mode in ("require_human", "escalate_security"):
+        try:
+            from src.app.routers.escalation_room import create_incident_record
+            _cvres = (pkg.get("cv_result") or pkg.get("triage") or {}) if isinstance(pkg, dict) else {}
+            _damage = _cvres.get("damage_types") or ([_cvres.get("damage_type")] if _cvres.get("damage_type") else [])
+            incident = create_incident_record(
+                case_id=case_id,
+                trace_id=dec_id,
+                reason="return_claim_review",
+                context={
+                    "issue_type": "return_claim",
+                    "damage_types": _damage,
+                    "warranty_candidate": bool(body.get("warranty_claim")) or None,
+                    "fraud_score": score.get("score"),
+                    "sku": sku,
+                    "uid": uid,
+                    "order_id": corroboration.get("order_id"),
+                    "decision_mode": mode,
+                    # R3: the reviewer opens the room already knowing the grounding verdict and which
+                    # remedies are LAWFUL to offer (major → buyer chooses; minor → repair path).
+                    "grounding_verdict": (grounding or {}).get("verdict"),
+                    "failure_severity": (failure_severity or {}).get("severity"),
+                    "remedy_options": (failure_severity or {}).get("remedy_options"),
+                    "safety_risk": (failure_severity or {}).get("safety_risk"),
+                },
+                created_by="returns.agent",
+                severity=("critical" if mode == "escalate_security" else "warn"),
+            )
+            human_review["incident_id"] = (incident or {}).get("incident_id") or (incident or {}).get("id")
+        except Exception as exc:
+            human_review["incident_error"] = str(exc)[:200]
 
     return {
         "case_id": case_id,
@@ -404,6 +581,9 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
         "decision_id": dec_id,
         "mode": mode,
         "score": score,
+        "refund": refund,
+        "grounding": grounding,
+        "failure_severity": failure_severity,
         "human_review": human_review,
         "fusion": fusion,
         "thresholds": {"auto_approve_max_score": auto_approve_max, "human_review_max_score": human_review_max, "escalate_security_min_score": escalate_min},

@@ -13,7 +13,7 @@ def test_payment_intent_idempotency(tmp_path, monkeypatch):
     monkeypatch.setattr(
         StripeClient,
         "create_payment_intent",
-        lambda self, amount_cents, currency="USD", metadata=None: {
+        lambda self, amount_cents, currency="USD", metadata=None, idempotency_key=None: {
             "id": "pi_mock_123",
             "amount": amount_cents,
             "currency": currency,
@@ -34,7 +34,7 @@ def test_payment_intent_idempotency(tmp_path, monkeypatch):
     data1 = r1.json()
     assert data1.get("status") in ("requires_payment_method", "requires_confirmation", None)
 
-    # Second with same idempotency_key should 409
+    # The endpoint-level query key is a reserve-once contract and rejects duplicates.
     r2 = client.post("/api/v1/payments/intent", params={"amount_cents": 9999, "currency": "USD", "idempotency_key": "abc123"}, headers={"x-api-key": "local-merchant-key"})
     assert r2.status_code == 409
 
@@ -51,5 +51,11 @@ def test_payment_intent_requires_configured_provider(tmp_path, monkeypatch):
         pass
     app = create_app()
     client = TestClient(app)
+    missing_key = client.post(
+        "/api/v1/payments/intent",
+        params={"amount_cents": 12345, "currency": "USD"},
+        headers={"x-api-key": "local-merchant-key"},
+    )
+    assert missing_key.status_code == 400
     r = client.post("/api/v1/payments/intent", params={"amount_cents": 12345, "currency": "USD", "idempotency_key": "new123"}, headers={"x-api-key": "local-merchant-key"})
     assert r.status_code == 503

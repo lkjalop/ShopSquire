@@ -6,6 +6,7 @@ Create Date: 2026-03-25
 """
 
 from alembic import op
+import sqlalchemy as sa
 
 
 revision = "20260325_add_faq_vectors"
@@ -18,11 +19,22 @@ def upgrade() -> None:
     bind = op.get_bind()
     dialect = str(getattr(getattr(bind, "dialect", None), "name", "") or "").lower()
     if "postgres" in dialect:
-        try:
-            op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        except Exception:
-            pass
-        try:
+        vector_enabled = bool(bind.execute(sa.text(
+            "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='vector')"
+        )).scalar())
+        if not vector_enabled:
+            # Extension installation can be unavailable or forbidden on managed
+            # Postgres. Isolate that optional attempt in a savepoint so failure
+            # cannot poison the surrounding Alembic transaction.
+            try:
+                with bind.begin_nested():
+                    bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+            except Exception:
+                pass
+            vector_enabled = bool(bind.execute(sa.text(
+                "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='vector')"
+            )).scalar())
+        if vector_enabled:
             op.execute(
                 """
                 CREATE TABLE IF NOT EXISTS faq_vectors (
@@ -32,7 +44,14 @@ def upgrade() -> None:
                 )
                 """
             )
-        except Exception:
+            op.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_faq_vectors_hnsw
+                ON faq_vectors
+                USING hnsw (embedding vector_cosine_ops)
+                """
+            )
+        else:
             op.execute(
                 """
                 CREATE TABLE IF NOT EXISTS faq_vectors (
@@ -42,16 +61,6 @@ def upgrade() -> None:
                 )
                 """
             )
-        try:
-            op.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_faq_vectors_hnsw
-                ON faq_vectors
-                USING hnsw (embedding vector_cosine_ops)
-                """
-            )
-        except Exception:
-            pass
         return
 
     op.execute(
@@ -66,8 +75,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    try:
-        op.execute("DROP INDEX IF EXISTS idx_faq_vectors_hnsw")
-    except Exception:
-        pass
+    op.execute("DROP INDEX IF EXISTS idx_faq_vectors_hnsw")
     op.execute("DROP TABLE IF EXISTS faq_vectors")

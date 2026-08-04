@@ -1,0 +1,20 @@
+[2m10:36:37 pm[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:36:37 pm[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/fulfillment/autonomous/audit?limit=50[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:36:37 pm[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/fulfillment/notifications?unseen_only=true&limit=10[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:36:37 pm[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/fulfillment/cases[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:36:43 pm[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/fulfillment/notifications?unseen_only=true&limit=10[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)

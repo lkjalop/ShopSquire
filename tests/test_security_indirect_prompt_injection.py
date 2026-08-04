@@ -60,14 +60,6 @@ def _enable_flags():
         )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Known pre-existing issue: specs.notes field is echoed verbatim in "
-        "scoring-factors JSON when followup_explain=true. "
-        "Spec sanitization in _use_case_rank_adjustment output needed (tracked)."
-    ),
-    strict=False,
-)
 def test_indirect_prompt_injection_from_catalog(monkeypatch):
     _apply_schema()
     _enable_flags()

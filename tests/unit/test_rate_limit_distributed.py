@@ -1,3 +1,6 @@
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from src.app.security import rate_limit as rl
 
 
@@ -16,3 +19,21 @@ def test_concurrency_slot_fallback_store_acquire_and_release():
     assert rl.acquire_concurrency_slot(key=key, limit=1, ttl_sec=60, fallback_store=store) is False
     rl.release_concurrency_slot(key=key, fallback_store=store)
     assert rl.acquire_concurrency_slot(key=key, limit=1, ttl_sec=60, fallback_store=store) is True
+
+
+def test_middleware_limit_is_a_429_response_not_an_asgi_500(monkeypatch):
+    monkeypatch.setattr(rl, "_redis_client", lambda: None)
+    rl._STATE.clear()
+    app = FastAPI()
+    app.add_middleware(rl.RateLimitMiddleware, per_min_key=1, per_min_ip=0)
+
+    @app.get("/probe")
+    def probe():
+        return {"ok": True}
+
+    client = TestClient(app)
+    headers = {"x-api-key": "bounded-test-key"}
+    assert client.get("/probe", headers=headers).status_code == 200
+    response = client.get("/probe", headers=headers)
+    assert response.status_code == 429
+    assert response.json()["detail"].startswith("key_rate_limit_exceeded")

@@ -22,6 +22,9 @@ def test_agent_to_agent_handoff_emits_trace_event(monkeypatch, tmp_path):
     db_path = tmp_path / "handoff.sqlite"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_path}")
     monkeypatch.setenv("DISABLE_TRACING", "1")
+    # General CI runs with APP_ENV=testing, where downstream trace delivery is
+    # intentionally off by default. This contract explicitly exercises it.
+    monkeypatch.setenv("TRACE_EVENT_OUTBOX_ENABLED", "1")
 
     eng = create_engine(
         f"sqlite+pysqlite:///{db_path}", connect_args={"check_same_thread": False}, future=True

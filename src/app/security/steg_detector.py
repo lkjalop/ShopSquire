@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -651,6 +652,102 @@ def _try_extract_lsb_content_flat(arr: Any) -> str | None:
         return None
 
 
+# ── Header-less LSB recovery (coverage for payloads with NO length-prefix) ──────
+# The length-prefix extractors above only recover payloads embedded by our own tool.
+# Many real embeds write raw ASCII into the LSB plane with no header (and sometimes
+# LSB-first bit order). This fallback scans the LSB byte stream for printable runs in
+# BOTH bit orderings and surfaces the most interesting one (URL / command / injection /
+# PII), so a demo shows a RECOVERED string, not just "statistically suspicious".
+_LSB_SCAN_BIT_CAP = 240000  # ~30 KB of payload — bounded for performance
+_INTERESTING_PAYLOAD_RE = re.compile(
+    r"https?://|www\.|\.onion|\bcurl\b|\bwget\b|powershell|cmd\.exe|certutil|bitsadmin|"
+    r"mshta|rundll32|regsvr32|wscript|base64|ignore (?:previous|above|all)|system prompt|"
+    r"disregard|exfiltrat|beacon|c2\b|callback|\bssn\b|\bcvv\b|\bcard number\b|password|api[_-]?key",
+    re.IGNORECASE,
+)
+
+
+def _lsb_to_bytes(bits: list, msb_first: bool = True) -> bytes:
+    out = bytearray()
+    order = range(7, -1, -1) if msb_first else range(0, 8)
+    for i in range(0, len(bits) - 7, 8):
+        byte = 0
+        for shift, b in zip(order, bits[i : i + 8]):
+            byte |= b << shift
+        out.append(byte)
+    return bytes(out)
+
+
+def _printable_runs(data: bytes, min_run: int = 10) -> List[str]:
+    runs: List[str] = []
+    cur: List[int] = []
+    for byte in data:
+        if 32 <= byte < 127 or byte in (9, 10, 13):
+            cur.append(byte)
+        else:
+            if len(cur) >= min_run:
+                runs.append(bytes(cur).decode("ascii", "replace"))
+            cur = []
+    if len(cur) >= min_run:
+        runs.append(bytes(cur).decode("ascii", "replace"))
+    return runs
+
+
+def _extract_lsb_printable_runs(arr: Any, channels: List[Any]) -> str | None:
+    """Recover a header-less ASCII payload from the LSB plane. Returns the most
+    interesting printable run (regex-matched) or a sufficiently long one, else None.
+    Precision-tuned: a generic run must be ≥24 chars to beat random-LSB noise; an
+    'interesting' run (URL/command/injection/PII) only needs ≥10."""
+    try:
+        candidates: List[str] = []
+        streams = [arr.flatten()] + [c.flatten() for c in channels if c is not None]
+        for s in streams:
+            bits = (s & 1).tolist()[:_LSB_SCAN_BIT_CAP]
+            for msb in (True, False):
+                candidates.extend(_printable_runs(_lsb_to_bytes(bits, msb), min_run=10))
+        if not candidates:
+            return None
+        interesting = [r for r in candidates if _INTERESTING_PAYLOAD_RE.search(r)]
+        if interesting:
+            return max(interesting, key=len)[:512]
+        longest = max(candidates, key=len)
+        return longest[:512] if len(longest) >= 24 else None
+    except Exception:
+        return None
+
+
+def classify_decoded_payload(text: str | None) -> Dict[str, Any]:
+    """Light classification of a recovered steg payload into a threat category +
+    framework tags. Mechanism only — the recovered string is NEVER shown to buyers."""
+    out: Dict[str, Any] = {"signals": [], "category": "unknown", "risk_score": 0}
+    try:
+        t = str(text or "")
+        if not t:
+            return out
+        tl = t.lower()
+        signals: List[str] = []
+        if re.search(r"powershell|cmd\.exe|certutil|bitsadmin|mshta|rundll32|regsvr32|wscript|\bcurl\b|\bwget\b", tl):
+            signals.append("lolbin_command_sequence")
+        if re.search(r"https?://|www\.|\.onion|beacon|c2\b|callback", tl):
+            signals.append("c2_beacon")
+        if re.search(r"ignore (?:previous|above|all)|disregard|system prompt|you are now|new instructions", tl):
+            signals.append("prompt_injection")
+        if re.search(r"exfiltrat|\bssn\b|\bcvv\b|card number|password|api[_-]?key|secret", tl):
+            signals.append("data_exfiltration_instruction")
+        if re.search(r"payment redirect|send payment|pay ?id|\bbsb\b|\biban\b|\bswift\b|"
+                     r"wire (?:transfer|to)|bitcoin|\bbtc\b|wallet address|account number", tl):
+            signals.append("payment_fraud")
+        # explicit exfil/payment intent outranks an incidental URL (c2)
+        cat_priority = ["payment_fraud", "data_exfiltration_instruction", "lolbin_command_sequence",
+                        "c2_beacon", "prompt_injection"]
+        category = next((s for s in cat_priority if s in signals), "suspicious_text" if t.strip() else "unknown")
+        risk = min(100, 40 + 20 * len(signals)) if signals else (20 if t.strip() else 0)
+        out.update({"signals": signals, "category": category, "risk_score": risk})
+    except Exception:
+        pass
+    return out
+
+
 def detect_steganography(
     image_bytes: bytes,
     *,
@@ -762,14 +859,23 @@ def detect_steganography(
     # from the flat RGB array (steg_embed.py / common tool format).
     # If extraction succeeds the image is definitively suspicious.
     extracted_content: str | None = None
+    extraction_method: str | None = None
     try:
         extracted_content = _try_extract_lsb_content(r_ch)
         if extracted_content is None:
             extracted_content = _try_extract_lsb_content(g_ch)
         if extracted_content is None:
             extracted_content = _try_extract_lsb_content_flat(arr)
+        if extracted_content is not None:
+            extraction_method = "length_prefix"
+        else:
+            # Fallback: header-less printable-run recovery (raw-LSB embeds).
+            extracted_content = _extract_lsb_printable_runs(arr, [r_ch, g_ch, b_ch])
+            if extracted_content is not None:
+                extraction_method = "printable_run"
     except Exception:
         extracted_content = None
+    decoded_classification = classify_decoded_payload(extracted_content) if extracted_content else None
     if extracted_content:
         composite = max(composite, thr + 0.10)
 
@@ -823,6 +929,8 @@ def detect_steganography(
             "threshold": thr,
             "avg_lsb_entropy": round(avg_entropy, 4),
             **({"decoded_content": extracted_content} if extracted_content else {}),
+            **({"extraction_method": extraction_method} if extraction_method else {}),
+            **({"decoded_classification": decoded_classification} if decoded_classification else {}),
             "composite_weights": {
                 "entropy": 0.16,
                 "chi_square": 0.13,

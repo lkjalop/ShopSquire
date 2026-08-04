@@ -22,14 +22,40 @@ Usage (Sprint R5 scatter-gather pattern):
 """
 
 import logging
+import json
 import math
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import text as _text
+from sqlalchemy import text as _text, bindparam
 
 from src.app.models.db import db_session
 
 logger = logging.getLogger("shopsquire.candidate_retriever")
+
+
+def _budget_cents(value: Optional[int]) -> Optional[int]:
+    """from_db callers pass shopper budgets in dollars; products store cents."""
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except Exception:
+        return None
+    # Preserve already-cent-like values from older internal callers.
+    if abs(numeric) >= 100_000:
+        return int(round(numeric))
+    return int(round(numeric * 100.0))
+
+
+def _obs(source: str, n: int, *, error: bool = False) -> None:
+    """Make retrieval-source outcomes observable (these paths swallow errors and
+    return [] — a silently-empty index should show up as a metric, not vanish)."""
+    try:
+        from src.app.observability.metrics import record_retrieval_source
+        outcome = "error" if error else ("empty" if n == 0 else "hit")
+        record_retrieval_source(source, outcome)
+    except Exception:
+        pass
 
 
 # ── RRF (Reciprocal Rank Fusion) ──────────────────────────────────────────────
@@ -98,10 +124,10 @@ def from_db(
 
         if budget_min is not None:
             conditions.append("p.price_cents >= :budget_min")
-            params["budget_min"] = int(budget_min)
+            params["budget_min"] = _budget_cents(budget_min)
         if budget_max is not None:
             conditions.append("p.price_cents <= :budget_max")
-            params["budget_max"] = int(budget_max)
+            params["budget_max"] = _budget_cents(budget_max)
         if brands:
             brand_placeholders = ", ".join(f":brand_{i}" for i in range(len(brands)))
             conditions.append(f"LOWER(p.brand) IN ({brand_placeholders})")
@@ -111,14 +137,36 @@ def from_db(
             conditions.append("(LOWER(p.category) LIKE :cat OR LOWER(p.name) LIKE :cat)")
             params["cat"] = f"%{str(category).lower()[:40]}%"
 
-        # Keyword relevance: simple LIKE matching (pgvector handles semantic)
+        # Keyword relevance: TOKENISED LIKE matching (pgvector handles semantic).
+        # Match ANY significant token, NOT the whole raw string. A multi-word query
+        # (several terms plus a price range) matched as `LIKE %whole phrase%` hits no
+        # product name → 0 results, which is why the scatter-gather DB leg returned empty
+        # for realistic queries (V2 parity = 0). Tokenising restores recall.
+        # CAST(... AS TEXT) is portable (Postgres + SQLite); `p.specs::text` was
+        # Postgres-only and made from_db raise → empty results on SQLite.
         if query:
-            q_safe = str(query or "")[:100]
-            conditions.append(
-                "(LOWER(p.name) LIKE :qt OR LOWER(p.brand) LIKE :qt "
-                "OR LOWER(COALESCE(p.specs::text, p.specs, '')) LIKE :qt)"
-            )
-            params["qt"] = f"%{q_safe.lower()}%"
+            import re as _re_tok
+            q_low = str(query or "")[:120].lower()
+            # conversational filler that should never drive catalog matching
+            _STOP = {
+                "show", "me", "the", "for", "with", "and", "you", "can", "get", "got",
+                "please", "looking", "that", "this", "into", "what", "which", "about",
+                "around", "are", "any", "some", "have", "want", "need", "give",
+            }
+            toks = [
+                t for t in _re_tok.split(r"[^a-z0-9]+", q_low)
+                if len(t) >= 3 and not t.isdigit() and t not in _STOP
+            ][:6]
+            if toks:
+                ors = []
+                for i, t in enumerate(toks):
+                    params[f"qt_{i}"] = f"%{t}%"
+                    ors.append(
+                        f"(LOWER(p.name) LIKE :qt_{i} "
+                        f"OR LOWER(COALESCE(p.brand,'')) LIKE :qt_{i} "
+                        f"OR LOWER(COALESCE(CAST(p.specs AS TEXT), '')) LIKE :qt_{i})"
+                    )
+                conditions.append("(" + " OR ".join(ors) + ")")
 
         where_clause = " AND ".join(conditions)
         sql = (
@@ -128,20 +176,33 @@ def from_db(
         with db_session() as db:
             rows = db.execute(_text(sql), params).fetchall()
 
-        return [
-            {
+        out = []
+        for r in rows:
+            raw_specs = r[5]
+            if isinstance(raw_specs, dict):
+                specs = raw_specs
+            elif isinstance(raw_specs, str) and raw_specs.strip():
+                try:
+                    parsed = json.loads(raw_specs)
+                    specs = parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    specs = {}
+            else:
+                specs = {}
+            out.append({
                 "sku": str(r[0]),
                 "name": str(r[1] or ""),
                 "brand": str(r[2] or ""),
                 "price_cents": int(r[3] or 0),
                 "image_url": str(r[4] or ""),
-                "specs": r[5] if isinstance(r[5], dict) else {},
+                "specs": specs,
                 "_source": "db",
-            }
-            for r in rows
-        ]
+            })
+        _obs("db", len(out))
+        return out
     except Exception as exc:
         logger.debug("from_db failed: %s", exc)
+        _obs("db", 0, error=True)
         return []
 
 
@@ -161,8 +222,9 @@ def from_vector(
         from src.app.services.visual_search import search_by_text
         results = search_by_text(query, top_k=top_k)
         if not results:
+            _obs("vector", 0)
             return []
-        return [
+        out = [
             {
                 "sku": str(r.get("sku") or ""),
                 "name": str(r.get("name") or ""),
@@ -174,8 +236,67 @@ def from_vector(
             for r in results
             if r.get("sku")
         ]
+        _obs("vector", len(out))
+        return out
     except Exception as exc:
         logger.debug("from_vector failed: %s", exc)
+        _obs("vector", 0, error=True)
+        return []
+
+
+# ── Caption / multimodal-RAG retrieval (pgvector product_embeddings) ──────────
+
+def from_caption(query: str, *, top_k: int = 20) -> List[Dict[str, Any]]:
+    """Semantic retrieval over the `product_embeddings` pgvector index — the rich
+    text embedding (name + specs + VLM visual caption). This is the multimodal-RAG
+    source: it reuses the EXISTING production embedding table + HNSW index +
+    `search_products_by_embedding`, not a new store. Empty on SQLite / cold index
+    (fail-open). RRF-merged alongside DB-keyword and CLIP-visual."""
+    try:
+        from src.app.services.embeddings import VectorStoreEmbeddings
+        from src.app.repositories.embeddings import search_products_by_embedding
+
+        emb = VectorStoreEmbeddings().embed_text_vector(query or "")
+        if not emb:
+            _obs("caption", 0)
+            return []
+        with db_session() as db:
+            hits = search_products_by_embedding(db, emb, top_k=top_k)
+            if not hits:
+                _obs("caption", 0)
+                return []
+            dist = {str(h.get("product_id")): float(h.get("distance") or 0.0) for h in hits if h.get("product_id") is not None}
+            ids = list(dist.keys())
+            if not ids:
+                _obs("caption", 0)
+                return []
+            rows = db.execute(
+                _text(
+                    "SELECT id, sku, name, brand, price_cents, image_url, specs "
+                    "FROM products WHERE CAST(id AS TEXT) IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": ids},
+            ).fetchall()
+        out = [
+            {
+                "sku": str(r[1] or ""),
+                "name": str(r[2] or ""),
+                "brand": str(r[3] or ""),
+                "price_cents": int(r[4] or 0),
+                "image_url": str(r[5] or ""),
+                "specs": r[6] if isinstance(r[6], dict) else {},
+                "score": round(1.0 - dist.get(str(r[0]), 1.0), 6),
+                "_source": "caption",
+            }
+            for r in rows
+            if str(r[1] or "")
+        ]
+        out.sort(key=lambda x: -float(x.get("score") or 0.0))
+        _obs("caption", len(out))
+        return out
+    except Exception as exc:
+        logger.debug("from_caption failed: %s", exc)
+        _obs("caption", 0, error=True)
         return []
 
 
@@ -235,6 +356,44 @@ def apply_inventory_filter(
 
 # ── Full retrieval pipeline (convenience wrapper for Sprint R5) ───────────────
 
+def retrieve_with_statuses(
+    query: str,
+    *,
+    budget_min: Optional[int] = None,
+    budget_max: Optional[int] = None,
+    brands: Optional[List[str]] = None,
+    category: Optional[str] = None,
+    top_n: int = 12,
+    hide_oos: bool = False,
+):
+    """Like retrieve_and_merge, but ALSO returns a typed per-source status map so a
+    degraded answer can say which leg errored/was empty (1.2). Each leg is timed and
+    classified full/empty/error; the merged candidates are identical to
+    retrieve_and_merge. Returns (candidates, {source: SourceStatus})."""
+    import time as _t
+    from src.app.services.commerce_source_status import SourceStatus
+
+    statuses: Dict[str, Any] = {}
+
+    def _timed(name: str, fn):
+        t0 = _t.perf_counter()
+        try:
+            hits = fn() or []
+            statuses[name] = SourceStatus.from_hits(name, hits, int((_t.perf_counter() - t0) * 1000))
+            return hits
+        except Exception as exc:  # legs fail-open, but defend the wrapper too
+            statuses[name] = SourceStatus.errored(name, str(exc), int((_t.perf_counter() - t0) * 1000))
+            return []
+
+    db_hits = _timed("catalog_db", lambda: from_db(
+        query, budget_min=budget_min, budget_max=budget_max, brands=brands, category=category))
+    vec_hits = _timed("clip_visual", lambda: from_vector(query, top_k=top_n))
+    cap_hits = _timed("caption_rag", lambda: from_caption(query, top_k=top_n))
+    merged = merge_rrf(db_hits, vec_hits, cap_hits, top_n=top_n * 2)
+    merged = apply_inventory_filter(merged, hide_oos=hide_oos)[:top_n]
+    return merged, statuses
+
+
 def retrieve_and_merge(
     query: str,
     *,
@@ -245,12 +404,15 @@ def retrieve_and_merge(
     top_n: int = 12,
     hide_oos: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Single-call retrieval: DB + vector → RRF merge → inventory filter.
+    """Single-call retrieval: DB-keyword + CLIP-visual + caption-RAG → RRF merge →
+    inventory filter.
 
-    This is the synchronous wrapper for the full pipeline. In Sprint R5, this
-    will be replaced by the async scatter-gather version using asyncio.gather().
+    Three RRF sources: DB keyword/filter (`from_db`), CLIP visual similarity
+    (`from_vector`), and multimodal caption-RAG over pgvector (`from_caption`).
+    Each fails open to [], so the merge degrades gracefully if any index is cold.
     """
     db_hits = from_db(query, budget_min=budget_min, budget_max=budget_max, brands=brands, category=category)
     vec_hits = from_vector(query, top_k=top_n)
-    merged = merge_rrf(db_hits, vec_hits, top_n=top_n * 2)
+    cap_hits = from_caption(query, top_k=top_n)
+    merged = merge_rrf(db_hits, vec_hits, cap_hits, top_n=top_n * 2)
     return apply_inventory_filter(merged, hide_oos=hide_oos)[:top_n]

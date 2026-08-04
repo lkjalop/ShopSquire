@@ -31,14 +31,22 @@ class XeroConnector:
         ensure_safe_outbound_url(url)
         with httpx.Client(timeout=self.timeout_seconds) as client:
             r = client.post(url, headers=self._headers(), json=payload)
-            return {"status_code": int(r.status_code), "ok": bool(200 <= r.status_code < 300), "body": r.json() if r.text else {}}
+            try:
+                body = r.json() if r.text else {}
+            except (TypeError, ValueError):
+                body = {"provider_text": str(r.text or "")[:500]}
+            return {"status_code": int(r.status_code), "ok": bool(200 <= r.status_code < 300), "body": body}
 
     def _get(self, path: str) -> Dict[str, Any]:
         url = f"{self.api_base}{path}"
         ensure_safe_outbound_url(url)
         with httpx.Client(timeout=self.timeout_seconds) as client:
             r = client.get(url, headers=self._headers())
-            return {"status_code": int(r.status_code), "ok": bool(200 <= r.status_code < 300), "body": r.json() if r.text else {}}
+            try:
+                body = r.json() if r.text else {}
+            except (TypeError, ValueError):
+                body = {"provider_text": str(r.text or "")[:500]}
+            return {"status_code": int(r.status_code), "ok": bool(200 <= r.status_code < 300), "body": body}
 
     def push_credit_note(self, decision_id: str, amount: float, reason: str) -> Dict[str, Any]:
         payload = {
@@ -47,7 +55,7 @@ class XeroConnector:
                     "Type": "ACCRECCREDIT",
                     "Reference": str(decision_id),
                     "LineItems": [{"Description": str(reason), "Quantity": 1, "UnitAmount": float(amount)}],
-                    "Status": "AUTHORISED",
+                    "Status": "DRAFT",
                 }
             ]
         }

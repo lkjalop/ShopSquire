@@ -33,8 +33,10 @@ CREATE TABLE IF NOT EXISTS inventory (
 CREATE TABLE IF NOT EXISTS draft_orders (
   id TEXT PRIMARY KEY,
   customer_id TEXT REFERENCES customers(id),
+  tenant_id TEXT NOT NULL DEFAULT 'default',   -- R10.2: cart identity = (tenant_id, customer_id)
   line_items TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft',
+  version INTEGER NOT NULL DEFAULT 0,          -- optimistic-concurrency token (P0.2 cart CAS)
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -48,7 +50,9 @@ CREATE TABLE IF NOT EXISTS orders (
   currency TEXT NOT NULL DEFAULT 'USD',
   status TEXT NOT NULL DEFAULT 'pending_payment',
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  trace_id TEXT,
+  decision_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS order_sessions (

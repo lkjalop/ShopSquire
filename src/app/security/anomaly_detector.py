@@ -3,13 +3,14 @@ from __future__ import annotations
 import re
 from typing import Dict, Any
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 
 # Lightweight anomaly detector scaffold for model-poison / DDOS-like signals.
 # This is intentionally conservative and non-blocking; productions should
 # replace with an online ML detector or Redis-based velocity checks.
 
 try:
-    _flags = load_feature_flags(get_settings().feature_flags_path)
+    _flags = _ff_get_flags()
 except Exception:
     _flags = {}
 _thr = (_flags or {}).get("SECURITY_THRESHOLDS", {})

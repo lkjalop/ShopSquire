@@ -5,6 +5,7 @@ import logging
 import json
 import os
 import re
+import uuid
 import ipaddress
 
 from sqlalchemy import text
@@ -65,6 +66,45 @@ def _is_public_ip(value: str) -> bool:
         return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
     except Exception:
         return False
+
+
+def compute_signal_multipliers(
+    rows: List[Dict[str, Any]],
+    *,
+    min_samples: int = 5,
+    floor: float = 0.5,
+    ceil: float = 1.5,
+) -> Dict[str, float]:
+    """Learn a per-signal weight multiplier from outcome feedback (the fraud feedback loop, pure).
+
+    For each signal, precision = confirmed_fraud / (confirmed_fraud + false_positive) over the cases
+    where the signal fired; multiplier = floor + (ceil-floor) * precision — so a signal that mostly
+    fires on CONFIRMED fraud is amplified toward `ceil`, one that mostly fires on FALSE POSITIVES is
+    damped toward `floor`. A signal is only adjusted once it has >= min_samples labeled firings
+    (otherwise omitted == neutral 1.0). No I/O; deterministic. This is what turns static weights into
+    weights that LEARN from confirmed/false-positive labels."""
+    pos: Dict[str, int] = {}
+    neg: Dict[str, int] = {}
+    for r in rows or []:
+        label = str((r or {}).get("label") or "").strip().lower()
+        sigs = (r or {}).get("signals") or {}
+        if not isinstance(sigs, dict):
+            continue
+        for s, v in sigs.items():
+            if not v:
+                continue
+            if label == "confirmed_fraud":
+                pos[s] = pos.get(s, 0) + 1
+            elif label == "false_positive":
+                neg[s] = neg.get(s, 0) + 1
+    out: Dict[str, float] = {}
+    for s in set(pos) | set(neg):
+        c, f = pos.get(s, 0), neg.get(s, 0)
+        if c + f < int(min_samples):
+            continue  # insufficient evidence -> neutral
+        precision = c / (c + f)
+        out[s] = round(floor + (ceil - floor) * precision, 4)
+    return out
 
 
 class FraudScorer:
@@ -218,14 +258,75 @@ class FraudScorer:
             "estimated_false_positive_cost_usd": fp_cost,
         }
 
+    _FEEDBACK_DDL = (
+        "CREATE TABLE IF NOT EXISTS fraud_feedback ("
+        "id TEXT PRIMARY KEY, case_id TEXT, label TEXT, score REAL, "
+        "signals_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+    )
+
+    def record_fraud_outcome(
+        self,
+        case_id: Optional[str],
+        label: str,
+        *,
+        signals: Optional[Dict[str, bool]] = None,
+        score: Optional[float] = None,
+    ) -> bool:
+        """Record a resolved outcome — the feedback the adaptive weights learn from. label is one of
+        confirmed_fraud / false_positive / legitimate. Lazily ensures the table; never raises."""
+        lbl = str(label or "").strip().lower()
+        if lbl not in ("confirmed_fraud", "false_positive", "legitimate"):
+            return False
+        try:
+            fired = {str(k): True for k, v in (signals or {}).items() if v}
+            with db_session() as db:
+                db.execute(text(self._FEEDBACK_DDL))
+                db.execute(
+                    text("INSERT INTO fraud_feedback (id, case_id, label, score, signals_json) "
+                         "VALUES (:id, :c, :l, :s, :j)"),
+                    {"id": uuid.uuid4().hex, "c": str(case_id or ""), "l": lbl,
+                     "s": float(score or 0.0), "j": json.dumps(fired)},
+                )
+                db.commit()
+            return True
+        except Exception:
+            return False
+
+    def learned_signal_weights(self) -> Dict[str, float]:
+        """Per-signal multipliers derived from accumulated feedback. Empty when there is no feedback
+        (so scoring stays at the static weights). Never raises."""
+        rows: List[Any] = []
+        try:
+            with db_session() as db:
+                db.execute(text(self._FEEDBACK_DDL))
+                rows = list(db.execute(text("SELECT label, signals_json FROM fraud_feedback")).fetchall())
+        except Exception:
+            return {}
+        parsed: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                sigs = json.loads(r[1] or "{}")
+            except Exception:
+                sigs = {}
+            parsed.append({"label": r[0], "signals": sigs})
+        return compute_signal_multipliers(parsed)
+
     def calculate_score(self, signals: Dict[str, bool]) -> float:
         score = 0.0
         max_possible = 0.0
         all_weights: Dict[str, float] = {}
         all_weights.update(self.WEIGHTS)
         all_weights.update(self.CV_WEIGHTS)
+        # Adaptive weights (FRAUD_ADAPTIVE_WEIGHTS, default OFF): scale each signal's weight by the
+        # multiplier learned from confirmed/false-positive feedback. Off -> identical to static.
+        mult: Dict[str, float] = {}
+        if str(os.getenv("FRAUD_ADAPTIVE_WEIGHTS", "0")).strip().lower() in ("1", "true", "yes", "on"):
+            try:
+                mult = self.learned_signal_weights()
+            except Exception:
+                mult = {}
         for k, v in signals.items():
-            w = all_weights.get(k, 0.1)
+            w = all_weights.get(k, 0.1) * float(mult.get(k, 1.0))
             max_possible += w
             if v:
                 score += w
@@ -256,7 +357,11 @@ class FraudScorer:
                 if not row:
                     return False, 0, False
                 return True, int(row[0] or 0), bool(row[1] or 0)
-        except Exception:
+        except Exception as exc:
+            # LOUD, not silent (Track A A4): a DB error here is indistinguishable from 'image never
+            # seen' at the tuple contract, so we cannot fail-closed without changing callers — but
+            # it must at least ALERT so a fraud-hash-table outage is visible, not a clean 0.
+            logger.error("fraud check_phash FAILED (treated as not-seen — ALERT): %s", repr(exc)[:120])
             return False, 0, False
 
     def upsert_phash(self, phash: Optional[str], case_id: Optional[str]) -> None:
@@ -290,6 +395,16 @@ class FraudScorer:
         case_id: Optional[str] = None,
     ) -> Tuple[float, str, Dict[str, bool]]:
         signals = dict(base_signals or {})
+        # MAESTRO boundary (audit): record that the fraud agent scored within its tool/data scope.
+        # Clean by definition (score_fraud/orders are in-boundary); in 'block' mode an out-of-scope
+        # call would raise. Never affects the score.
+        try:
+            from src.app.security.maestro_boundaries import record_agent_action as _maestro
+            from src.app.services.decision_log import log_trace_event as _fs_log
+            _maestro(agent_name="Fraud_Scoring_Agent", tool_name="score_fraud",
+                     data_scope="orders", trace_id=(case_id or None), log_fn=_fs_log)
+        except Exception:
+            pass
         if session_data:
             signals.update(BehavioralFraudDetector().analyze_session(session_data))
         # Serial mismatch

@@ -112,8 +112,7 @@ def _upload_to_s3_worm(
     if not bucket:
         return
     try:
-        import boto3  # type: ignore[import-untyped]
-        from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
+        from src.app.providers.aws import get_client
     except ImportError:
         _log.debug("boto3 not installed; S3 WORM upload skipped")
         return
@@ -137,7 +136,7 @@ def _upload_to_s3_worm(
         )
         body = json.dumps(record, ensure_ascii=False, sort_keys=True).encode()
 
-        client = boto3.client("s3", region_name=region)
+        client = get_client("s3", region_name=region)
         client.put_object(
             Bucket=bucket,
             Key=key,

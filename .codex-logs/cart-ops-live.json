@@ -1,0 +1,644 @@
+{
+  "cases": [
+    {
+      "name": "scoped_clear_old_items",
+      "ack": false,
+      "routed_to_search": false,
+      "cart_items": 3,
+      "body_tail": "ls\nMerino Wool Crew Knit\n$99\nAdd to Cart\nDetails\nWool Blend Overcoat\n$249\nAdd to Cart\nDetails\nPleated Midi Skirt\n$84\nAdd to Cart\nDetails\nFloral Summer Maxi Dress\n$139\nAdd to Cart\nDetails\nSuede Ankle Boots\n$169\nAdd to Cart\nDetails\nSilk Neck Scarf\n$45\nAdd to Cart\nDetails\nShopSquire Assistant\nAPI 742ms\n\u25cf\ncan you clear the old items from previous session?\nThere are no items carried over from a previous session \u2014 everything in the cart was added this session. Say \"clear my cart\" if you want to start completely fresh.\n\u2190 Back\nCart & Upsell\nYour Cart\nCart is empty. Add a product to see upsell suggestions.\nRecommended Add-Ons\nNo compatible add-ons found right now. We avoid showing unrelated products."
+    },
+    {
+      "name": "compound_cart_ops",
+      "latency_ms": 24686,
+      "has_card": true,
+      "has_remove_hp": true,
+      "has_remove_thinkpad": true,
+      "has_ideapad_20": true,
+      "routed_to_search_only": false,
+      "answered_delivery_question": true,
+      "body_tail": "\nWhy this product\nDetails\nLenovo Yoga Slim 7i Aura Edition 14\" 2.8K OLED Laptop (Intel Core Ultra 5)[1TB]\n$1,499\nLow stock \u2014 9 units remaining\nIn stock \u2022 Preferred brand\nWi-Fi 7\nAdd to Cart\nWhy this product\nDetails\nHP OmniBook 5 NG AI PC 14-he0013QU 14\" WUXGA OLED Copilot+ PC Laptop (Snapdragon X1)[512GB/16GB]\n$1,099\nIn stock\nIn stock \u2022 Preferred brand\nWi-Fi 6E\nAdd to Cart\nWhy this product\nDetails\nLenovo LOQ 15IRH8\nRTX 4060 | 16GB RAM | 144Hz\n$1,199\nIn stock\nIn stock \u2022 Preferred brand\n16GB RAM \u2022 512GB PCIe NVMe SSD\nAdd to Cart\nWhy this product\nDetails\nHP Laptop 15-fc0433AU 15.6\" FHD Laptop (Ryzen 5)[512GB]\n$649\nLow stock \u2014 9 units remaining\nIn stock \u2022 Preferred brand\nWi-Fi 6\nAdd to Cart\nWhy this product\nDetails\nHP Laptop 15-fc0474AU 15.6\" FHD laptop (Ryzen 7)[512GB]\n$899\nIn stock\nIn stock \u2022 Preferred brand\nWi-Fi 6\nAdd to Cart\nWhy this product\nDetails\nLenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]\n$5,999\nIn stock\nIn stock \u2022 Preferred brand\nWi-Fi 7\nAdd to Cart\nWhy this product\nDetails\nHP OmniBook Ultra 14\" 2.2K Laptop (Ryzen 9 AI HX 375)[1TB]\n$3,699\nIn stock\nIn stock \u2022 Preferred brand\nWi-Fi 7\nAdd to Cart\nWhy this product\nDetails"
+    }
+  ],
+  "seed_clear": [
+    [
+      "LAP-75988087",
+      200,
+      {
+        "cart_id": "fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "items": [
+          {
+            "sku": "LAP-75988087",
+            "quantity": 1,
+            "price_cents": 129900,
+            "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 512,
+              "display_inches": 14.0,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          }
+        ],
+        "subtotal_cents": 129900,
+        "currency": "USD",
+        "bundle_savings": {
+          "status": "progress",
+          "eligible": false,
+          "item_count": 1,
+          "distinct_item_count": 1,
+          "subtotal_cents": 129900,
+          "laptop_subtotal_cents": 129900,
+          "accessories_subtotal_cents": 0,
+          "applied_discount_percent": 0.0,
+          "requested_discount_percent": 0.0,
+          "discount_cents": 0,
+          "applied_discount_cents": 0,
+          "final_total_cents": 129900,
+          "estimated_final_total_cents": 129900,
+          "next_threshold_cents": 150000,
+          "amount_to_next_cents": 20100,
+          "approval_required": false,
+          "approval_badge": null,
+          "policy_decision": "allow",
+          "policy_reasons": [],
+          "message": "Add a laptop and a compatible accessory to unlock bundle pricing."
+        },
+        "trace_id": "cart:fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "decision_trace_id": "cart:fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "upsell": {
+          "trigger": "cart_add",
+          "candidates": [
+            {
+              "sku": "MON-E8F1A749",
+              "name": "Lenovo Legion R34w-30 34\" WQHD 180Hz Curved Gaming Monitor",
+              "brand": "Lenovo",
+              "price_cents": 49900,
+              "image_url": "/static/images/MON-E8F1A749.svg",
+              "stock": 21,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "MON-75852754",
+              "name": "LG UltraGear 24G411A 24\" FHD 144Hz Gaming Monitor",
+              "brand": "LG",
+              "price_cents": 18900,
+              "image_url": "/static/images/MON-75852754.svg",
+              "stock": 19,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "BAG-156C8941",
+              "name": "Lenovo Legion GB800 17\" Laptop Backpack (Black)",
+              "brand": "Lenovo",
+              "price_cents": 19900,
+              "image_url": "/static/images/BAG-156C8941.svg",
+              "stock": 15,
+              "reason": "Completes your setup"
+            }
+          ]
+        }
+      }
+    ],
+    [
+      "LAP-A9A67AB9",
+      200,
+      {
+        "cart_id": "fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "items": [
+          {
+            "sku": "LAP-75988087",
+            "quantity": 1,
+            "price_cents": 129900,
+            "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 512,
+              "display_inches": 14.0,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          },
+          {
+            "sku": "LAP-A9A67AB9",
+            "quantity": 1,
+            "price_cents": 199900,
+            "name": "Lenovo ThinkPad L13 Gen 6 13.3\" WUXGA AI PC Laptop (Intel Core Ultra 5-225U/Windows 11 Pro) [256GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 256,
+              "display_inches": 13.3,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          }
+        ],
+        "subtotal_cents": 329800,
+        "currency": "USD",
+        "bundle_savings": {
+          "status": "progress",
+          "eligible": false,
+          "item_count": 2,
+          "distinct_item_count": 2,
+          "subtotal_cents": 329800,
+          "laptop_subtotal_cents": 329800,
+          "accessories_subtotal_cents": 0,
+          "applied_discount_percent": 0.0,
+          "requested_discount_percent": 0.0,
+          "discount_cents": 0,
+          "applied_discount_cents": 0,
+          "final_total_cents": 329800,
+          "estimated_final_total_cents": 329800,
+          "next_threshold_cents": 200000,
+          "amount_to_next_cents": 0,
+          "approval_required": false,
+          "approval_badge": null,
+          "policy_decision": "allow",
+          "policy_reasons": [],
+          "message": "Add a laptop and a compatible accessory to unlock bundle pricing."
+        },
+        "trace_id": "cart:fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "decision_trace_id": "cart:fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "upsell": {
+          "trigger": "cart_add",
+          "candidates": [
+            {
+              "sku": "MON-E8F1A749",
+              "name": "Lenovo Legion R34w-30 34\" WQHD 180Hz Curved Gaming Monitor",
+              "brand": "Lenovo",
+              "price_cents": 49900,
+              "image_url": "/static/images/MON-E8F1A749.svg",
+              "stock": 21,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "MON-75852754",
+              "name": "LG UltraGear 24G411A 24\" FHD 144Hz Gaming Monitor",
+              "brand": "LG",
+              "price_cents": 18900,
+              "image_url": "/static/images/MON-75852754.svg",
+              "stock": 19,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "BAG-156C8941",
+              "name": "Lenovo Legion GB800 17\" Laptop Backpack (Black)",
+              "brand": "Lenovo",
+              "price_cents": 19900,
+              "image_url": "/static/images/BAG-156C8941.svg",
+              "stock": 15,
+              "reason": "Completes your setup"
+            }
+          ]
+        }
+      }
+    ],
+    [
+      "LAP-433AB371",
+      200,
+      {
+        "cart_id": "fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "items": [
+          {
+            "sku": "LAP-75988087",
+            "quantity": 1,
+            "price_cents": 129900,
+            "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 512,
+              "display_inches": 14.0,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          },
+          {
+            "sku": "LAP-A9A67AB9",
+            "quantity": 1,
+            "price_cents": 199900,
+            "name": "Lenovo ThinkPad L13 Gen 6 13.3\" WUXGA AI PC Laptop (Intel Core Ultra 5-225U/Windows 11 Pro) [256GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 256,
+              "display_inches": 13.3,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          },
+          {
+            "sku": "LAP-433AB371",
+            "quantity": 1,
+            "price_cents": 159900,
+            "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 1024,
+              "display_inches": 15.3,
+              "gpu": "UHD Graphics",
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6",
+              "webcam": "HD webcam",
+              "use_case": "business"
+            }
+          }
+        ],
+        "subtotal_cents": 489700,
+        "currency": "USD",
+        "bundle_savings": {
+          "status": "progress",
+          "eligible": false,
+          "item_count": 3,
+          "distinct_item_count": 3,
+          "subtotal_cents": 489700,
+          "laptop_subtotal_cents": 489700,
+          "accessories_subtotal_cents": 0,
+          "applied_discount_percent": 0.0,
+          "requested_discount_percent": 0.0,
+          "discount_cents": 0,
+          "applied_discount_cents": 0,
+          "final_total_cents": 489700,
+          "estimated_final_total_cents": 489700,
+          "next_threshold_cents": 200000,
+          "amount_to_next_cents": 0,
+          "approval_required": false,
+          "approval_badge": null,
+          "policy_decision": "allow",
+          "policy_reasons": [],
+          "message": "Add a laptop and a compatible accessory to unlock bundle pricing."
+        },
+        "trace_id": "cart:fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "decision_trace_id": "cart:fe9d619d-68bb-4c80-82aa-d6c431881eba",
+        "upsell": {
+          "trigger": "cart_add",
+          "candidates": [
+            {
+              "sku": "MON-E8F1A749",
+              "name": "Lenovo Legion R34w-30 34\" WQHD 180Hz Curved Gaming Monitor",
+              "brand": "Lenovo",
+              "price_cents": 49900,
+              "image_url": "/static/images/MON-E8F1A749.svg",
+              "stock": 21,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "MON-75852754",
+              "name": "LG UltraGear 24G411A 24\" FHD 144Hz Gaming Monitor",
+              "brand": "LG",
+              "price_cents": 18900,
+              "image_url": "/static/images/MON-75852754.svg",
+              "stock": 19,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "BAG-156C8941",
+              "name": "Lenovo Legion GB800 17\" Laptop Backpack (Black)",
+              "brand": "Lenovo",
+              "price_cents": 19900,
+              "image_url": "/static/images/BAG-156C8941.svg",
+              "stock": 15,
+              "reason": "Completes your setup"
+            }
+          ]
+        }
+      }
+    ]
+  ],
+  "seed_ops": [
+    [
+      "LAP-75988087",
+      200,
+      {
+        "cart_id": "6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "items": [
+          {
+            "sku": "LAP-75988087",
+            "quantity": 1,
+            "price_cents": 129900,
+            "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 512,
+              "display_inches": 14.0,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          }
+        ],
+        "subtotal_cents": 129900,
+        "currency": "USD",
+        "bundle_savings": {
+          "status": "progress",
+          "eligible": false,
+          "item_count": 1,
+          "distinct_item_count": 1,
+          "subtotal_cents": 129900,
+          "laptop_subtotal_cents": 129900,
+          "accessories_subtotal_cents": 0,
+          "applied_discount_percent": 0.0,
+          "requested_discount_percent": 0.0,
+          "discount_cents": 0,
+          "applied_discount_cents": 0,
+          "final_total_cents": 129900,
+          "estimated_final_total_cents": 129900,
+          "next_threshold_cents": 150000,
+          "amount_to_next_cents": 20100,
+          "approval_required": false,
+          "approval_badge": null,
+          "policy_decision": "allow",
+          "policy_reasons": [],
+          "message": "Add a laptop and a compatible accessory to unlock bundle pricing."
+        },
+        "trace_id": "cart:6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "decision_trace_id": "cart:6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "upsell": {
+          "trigger": "cart_add",
+          "candidates": [
+            {
+              "sku": "MON-E8F1A749",
+              "name": "Lenovo Legion R34w-30 34\" WQHD 180Hz Curved Gaming Monitor",
+              "brand": "Lenovo",
+              "price_cents": 49900,
+              "image_url": "/static/images/MON-E8F1A749.svg",
+              "stock": 21,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "MON-75852754",
+              "name": "LG UltraGear 24G411A 24\" FHD 144Hz Gaming Monitor",
+              "brand": "LG",
+              "price_cents": 18900,
+              "image_url": "/static/images/MON-75852754.svg",
+              "stock": 19,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "BAG-156C8941",
+              "name": "Lenovo Legion GB800 17\" Laptop Backpack (Black)",
+              "brand": "Lenovo",
+              "price_cents": 19900,
+              "image_url": "/static/images/BAG-156C8941.svg",
+              "stock": 15,
+              "reason": "Completes your setup"
+            }
+          ]
+        }
+      }
+    ],
+    [
+      "LAP-A9A67AB9",
+      200,
+      {
+        "cart_id": "6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "items": [
+          {
+            "sku": "LAP-75988087",
+            "quantity": 1,
+            "price_cents": 129900,
+            "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 512,
+              "display_inches": 14.0,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          },
+          {
+            "sku": "LAP-A9A67AB9",
+            "quantity": 1,
+            "price_cents": 199900,
+            "name": "Lenovo ThinkPad L13 Gen 6 13.3\" WUXGA AI PC Laptop (Intel Core Ultra 5-225U/Windows 11 Pro) [256GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 256,
+              "display_inches": 13.3,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          }
+        ],
+        "subtotal_cents": 329800,
+        "currency": "USD",
+        "bundle_savings": {
+          "status": "progress",
+          "eligible": false,
+          "item_count": 2,
+          "distinct_item_count": 2,
+          "subtotal_cents": 329800,
+          "laptop_subtotal_cents": 329800,
+          "accessories_subtotal_cents": 0,
+          "applied_discount_percent": 0.0,
+          "requested_discount_percent": 0.0,
+          "discount_cents": 0,
+          "applied_discount_cents": 0,
+          "final_total_cents": 329800,
+          "estimated_final_total_cents": 329800,
+          "next_threshold_cents": 200000,
+          "amount_to_next_cents": 0,
+          "approval_required": false,
+          "approval_badge": null,
+          "policy_decision": "allow",
+          "policy_reasons": [],
+          "message": "Add a laptop and a compatible accessory to unlock bundle pricing."
+        },
+        "trace_id": "cart:6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "decision_trace_id": "cart:6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "upsell": {
+          "trigger": "cart_add",
+          "candidates": [
+            {
+              "sku": "MON-E8F1A749",
+              "name": "Lenovo Legion R34w-30 34\" WQHD 180Hz Curved Gaming Monitor",
+              "brand": "Lenovo",
+              "price_cents": 49900,
+              "image_url": "/static/images/MON-E8F1A749.svg",
+              "stock": 21,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "MON-75852754",
+              "name": "LG UltraGear 24G411A 24\" FHD 144Hz Gaming Monitor",
+              "brand": "LG",
+              "price_cents": 18900,
+              "image_url": "/static/images/MON-75852754.svg",
+              "stock": 19,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "BAG-156C8941",
+              "name": "Lenovo Legion GB800 17\" Laptop Backpack (Black)",
+              "brand": "Lenovo",
+              "price_cents": 19900,
+              "image_url": "/static/images/BAG-156C8941.svg",
+              "stock": 15,
+              "reason": "Completes your setup"
+            }
+          ]
+        }
+      }
+    ],
+    [
+      "LAP-433AB371",
+      200,
+      {
+        "cart_id": "6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "items": [
+          {
+            "sku": "LAP-75988087",
+            "quantity": 1,
+            "price_cents": 129900,
+            "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 512,
+              "display_inches": 14.0,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          },
+          {
+            "sku": "LAP-A9A67AB9",
+            "quantity": 1,
+            "price_cents": 199900,
+            "name": "Lenovo ThinkPad L13 Gen 6 13.3\" WUXGA AI PC Laptop (Intel Core Ultra 5-225U/Windows 11 Pro) [256GB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 256,
+              "display_inches": 13.3,
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6E",
+              "webcam": "HD webcam",
+              "docking": "Thunderbolt 4",
+              "use_case": "business"
+            }
+          },
+          {
+            "sku": "LAP-433AB371",
+            "quantity": 1,
+            "price_cents": 159900,
+            "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+            "specs": {
+              "category": "laptop",
+              "ram_gb": 16,
+              "storage_gb": 1024,
+              "display_inches": 15.3,
+              "gpu": "UHD Graphics",
+              "gpu_discrete": false,
+              "os": "Windows 11",
+              "wifi": "Wi-Fi 6",
+              "webcam": "HD webcam",
+              "use_case": "business"
+            }
+          }
+        ],
+        "subtotal_cents": 489700,
+        "currency": "USD",
+        "bundle_savings": {
+          "status": "progress",
+          "eligible": false,
+          "item_count": 3,
+          "distinct_item_count": 3,
+          "subtotal_cents": 489700,
+          "laptop_subtotal_cents": 489700,
+          "accessories_subtotal_cents": 0,
+          "applied_discount_percent": 0.0,
+          "requested_discount_percent": 0.0,
+          "discount_cents": 0,
+          "applied_discount_cents": 0,
+          "final_total_cents": 489700,
+          "estimated_final_total_cents": 489700,
+          "next_threshold_cents": 200000,
+          "amount_to_next_cents": 0,
+          "approval_required": false,
+          "approval_badge": null,
+          "policy_decision": "allow",
+          "policy_reasons": [],
+          "message": "Add a laptop and a compatible accessory to unlock bundle pricing."
+        },
+        "trace_id": "cart:6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "decision_trace_id": "cart:6e2c2572-f59f-464b-8335-2d982b4c25ae",
+        "upsell": {
+          "trigger": "cart_add",
+          "candidates": [
+            {
+              "sku": "MON-E8F1A749",
+              "name": "Lenovo Legion R34w-30 34\" WQHD 180Hz Curved Gaming Monitor",
+              "brand": "Lenovo",
+              "price_cents": 49900,
+              "image_url": "/static/images/MON-E8F1A749.svg",
+              "stock": 21,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "MON-75852754",
+              "name": "LG UltraGear 24G411A 24\" FHD 144Hz Gaming Monitor",
+              "brand": "LG",
+              "price_cents": 18900,
+              "image_url": "/static/images/MON-75852754.svg",
+              "stock": 19,
+              "reason": "Completes your setup"
+            },
+            {
+              "sku": "BAG-156C8941",
+              "name": "Lenovo Legion GB800 17\" Laptop Backpack (Black)",
+              "brand": "Lenovo",
+              "price_cents": 19900,
+              "image_url": "/static/images/BAG-156C8941.svg",
+              "stock": 15,
+              "reason": "Completes your setup"
+            }
+          ]
+        }
+      }
+    ]
+  ]
+}

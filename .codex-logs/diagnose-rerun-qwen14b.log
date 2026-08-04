@@ -1,0 +1,90 @@
+case                      t sev       outcome                           mismatched dims                                               sec
+--------------------------------------------------------------------------------------------------------------------------------------------
+accessory_bag             0 BLOCKER   clarify_no_products->no_results   gates,message_class,turn,structure                            9.5s
+brand_negation            0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,right_panel,structure                             8.5s
+budget_band               0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,turn,right_panel,structure                        9.5s
+budget_binary_floor       0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,turn,right_panel,structure                        8.8s
+budget_cap_negated        0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,right_panel,structure                             10.7s
+cart_swap_via_suggest     0 DELEGATED answer_with_clarify->no_results                                                                 8.5s
+compare_two_models        0 BLOCKER   answer_with_clarify->no_results   gates,message_class,product_set,turn,right_panel,structure    8.6s
+deficit_reorder           0 DELEGATED empty->empty                                                                                    8.4s
+explain_followup          0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,turn,right_panel,structure                        9.1s
+explain_followup          1 BLOCKER   answer_with_clarify->no_results   gates,message_class,product_set,turn,right_panel,structure    8.1s
+filter_followup           0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,right_panel,structure                             8.2s
+filter_followup           1 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,right_panel,structure                             8.8s
+off_domain                0 BLOCKER   clarify_no_products->no_results   gates,message_class,turn,structure                            8.2s
+offcatalog_a100           0 BLOCKER   off_catalog->off_catalog          gates,turn,structure                                          9.5s
+offcatalog_never_listed   0 EXPECTED  MET                               gates,message_class,product_set,turn,right_panel,structure    8.2s
+offcatalog_paraphrase     0 BLOCKER   off_catalog->off_catalog          gates,turn,structure                                          8.8s
+persona_creator           0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,right_panel,structure                             8.5s
+policy_payment_plans      0 DELEGATED no_results->no_results                                                                          7.9s
+policy_returns            0 DELEGATED no_results->no_results                                                                          8.0s
+procurement_bulk          0 DELEGATED answer_with_clarify->no_results                                                                 8.7s
+search_budget             0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,turn,right_panel,structure                        8.5s
+search_university         0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,right_panel,structure                             8.0s
+spec_not_formfactor       0 EXPECTED  MET                               gates,message_class,product_set,structure                     8.9s
+support_claim_damage      0 DELEGATED clarify_no_products->no_results                                                                 8.2s
+workload_ai_finetune      0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,workload,right_panel,structure                    8.7s
+workload_cyberpunk        0 MAJOR     answer_with_clarify->answer_with_clarifyproduct_set,workload,right_panel,structure                    8.6s
+workload_valorant_fps     0 EXPECTED  MET                               gates,message_class,product_set,turn,workload,structure       9.0s
+
+SCORECARD (235s total): {
+ "total": 27,
+ "parity_cases": 18,
+ "delegated_cases": 6,
+ "by_severity": {
+  "BLOCKER": 6,
+  "MAJOR": 12,
+  "MINOR": 0,
+  "INFO": 0
+ },
+ "message_class_match_rate": 0.7778,
+ "product_set_membership_rate": 0.2222,
+ "top3_order_match_rate": 0.2222,
+ "gate_match_rate": 0.6667,
+ "expected_changes": 3,
+ "expected_changes_met": 3,
+ "quality": {
+  "cases": 21,
+  "product_expected_cases": 18,
+  "empty_rate": 0.2222,
+  "unauthorized_rate": 0.0,
+  "constraint_satisfaction": 0.7286,
+  "diversity": null,
+  "labeled_cases": 0,
+  "labeled_coverage": 0.0,
+  "precision_at_10": null,
+  "ndcg_at_10": null,
+  "thresholds": {
+   "precision_at_10_min": 0.6,
+   "ndcg_at_10_min": 0.6,
+   "constraint_satisfaction_min": 0.7,
+   "empty_rate_max": 0.15,
+   "unauthorized_rate_max": 0.0,
+   "diversity_min": 0.3,
+   "labeled_coverage_min": 0.3
+  },
+  "gates": {
+   "pass": false,
+   "failures": [
+    "empty_rate 0.222 > 0.15",
+    "labeled_coverage 0.000 < 0.3 (relevance UNMEASURED is a failure, not a pass)"
+   ]
+  }
+ },
+ "quality_evaluated": true,
+ "diagnostic_pass": false,
+ "gates_pass": false
+}
+QUALITY GATE: FAIL — ['empty_rate 0.222 > 0.15', 'labeled_coverage 0.000 < 0.3 (relevance UNMEASURED is a failure, not a pass)']
+
+-- CONSTRAINT-SATISFACTION DIAGNOSIS -------------------------------
+  shown products with a verdict: 140 (meets 102 / unknown 24 / fails 14)
+  constraint_sat = meets/total = 0.7286  [verdict dominance: unknown]
+  all-unknown products (wrong-category proxy): 18
+  suspected price-bleed requirements: 3
+  empty cases (expected products, got 0): 4 / 21
+  top UNKNOWN keys (missing spec / wrong category): [('ram_gb', 18), ('storage_gb', 13), ('gpu_vram_gb', 12), ('refresh_hz', 10), ('battery_hours', 7)]
+  top FAILED keys (present but below req):          [('ram_gb', 12), ('gpu_vram_gb', 7), ('storage_gb', 3)]
+  READ: DATA gap — more products are UNKNOWN than fail (missing catalog spec) | 3 suspected PRICE-BLEED requirement(s)
+  full per-product detail -> C:\AI\ShopSquire\tmp\quality_diagnosis.json

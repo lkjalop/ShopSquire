@@ -115,6 +115,7 @@ def vision_analyze_with_ollama(
                 import io
 
                 img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                img.thumbnail((1024, 1024))  # vision returns EMPTY on oversized images (e.g. 2048px) — bound it
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 norm_bytes = buf.getvalue()
@@ -137,6 +138,8 @@ def vision_analyze_with_ollama(
                                 "prompt": prompt,
                                 "images": [img_b64],
                                 "stream": False,
+                                # keep the VLM resident between images — reload was a big slice of 52-86s
+                                "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                                 "options": {"temperature": 0.0},
                             },
                             timeout=timeout_s,

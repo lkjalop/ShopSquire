@@ -3,6 +3,7 @@ import time
 from typing import Dict
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.deps import get_redis
 from src.app.observability.tracing import get_tracer
 from src.app.observability.metrics import record_cb_state
@@ -76,7 +77,7 @@ def answer(question: str, request: Request, redis=Depends(get_redis), role: str 
         )
         if not allow_model:
             raise HTTPException(status_code=429, detail={"message": "model_theft_guard", "reason": reason})
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed("support", flags=flags, source_id="Support_Autonomy_Governance_Agent")
         degradation_cfg = flags.get("DEGRADATION", {"enabled": True})
         now_ts = int(time.time())
@@ -150,7 +151,7 @@ def answer(question: str, request: Request, redis=Depends(get_redis), role: str 
 def intents(text: str, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("support.intents") as span:
         span.set_attribute("support.text_len", len(text or ""))
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed("support", flags=flags, source_id="Support_Autonomy_Governance_Agent")
         lower = text.lower()
         degradation_cfg = flags.get("DEGRADATION", {"enabled": True})

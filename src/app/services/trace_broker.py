@@ -47,12 +47,8 @@ async def _redis() -> Any:
     if _REDIS_CLIENT is not None:
         return _REDIS_CLIENT
     try:
-        import redis.asyncio as redis  # type: ignore
-    except Exception:
-        return None
-    try:
-        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        _REDIS_CLIENT = redis.from_url(url, decode_responses=True)
+        from src.app.services.redis_factory import create_redis_client
+        _REDIS_CLIENT = create_redis_client(async_client=True, decode_responses=True)
         return _REDIS_CLIENT
     except Exception:
         return None

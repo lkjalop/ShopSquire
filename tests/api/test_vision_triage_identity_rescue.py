@@ -14,6 +14,8 @@ _PNG_1X1 = base64.b64decode(
 
 def test_vision_triage_stage_b_identity_rescue_for_weak_labels(monkeypatch):
     import src.app.routers.vision as vision
+
+    monkeypatch.setenv("CV_IDENTITY_STAGE_B_ENABLED", "1")
     import src.app.services.product_identity_agent as pia
 
     async def _fake_labels_and_text(self, _blob: bytes, mode: str = "visual_search"):

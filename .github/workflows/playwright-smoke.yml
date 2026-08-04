@@ -25,6 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           poetry install --no-interaction --no-root
+          npm --prefix frontend ci
 
       - name: Install Playwright browsers
         run: |
@@ -33,5 +34,6 @@ jobs:
       - name: Run Playwright smoke tests
         env:
           DISABLE_TRACING: '1'
+          DISABLE_PLAYWRIGHT_TESTS: '0'
         run: |
-          poetry run python -m pytest -q tests/playwright
+          poetry run python -m pytest -q tests/pw/test_storefront_frontend_smoke.py

@@ -6,6 +6,7 @@ from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_
 from src.app.services.memory import Memory
 from src.app.security.firewall import TransactionFirewall
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.services.orchestrator import Orchestrator
 from src.app.services.decision_log import log_trace_event
 from src.app.policy.kill_switch import assert_autonomy_allowed
@@ -37,7 +38,7 @@ def orchestrate(req: OrchestrateRequest, role: str = Depends(require_role([ROLE_
     Runs pricing/decision flow with guardrails and persists decisions.
     """
     try:
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
     except Exception:
         flags = {}
     assert_autonomy_allowed(

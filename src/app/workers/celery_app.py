@@ -189,6 +189,14 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
     audit_chain_verify_min = max(1, min(60, int(float(os.getenv("AUDIT_CHAIN_VERIFY_MINUTES", "5") or 5))))
 
     beat_schedule = {}
+    connector_recovery_min = max(
+        1, min(60, int(os.getenv("CONNECTOR_RECOVERY_MINUTES", "5") or 5))
+    )
+    beat_schedule["connector-stalled-job-recovery"] = {
+        "task": "src.app.tasks.connector_recovery_tasks.recover_stalled_connector_jobs",
+        "schedule": crontab(minute=f"*/{connector_recovery_min}"),
+        "args": (),
+    }
     if poll_enabled:
         beat_schedule["security-crowdstrike-poll"] = {
             "task": "src.app.tasks.security_poll_tasks.poll_crowdstrike",
@@ -271,6 +279,146 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "args": (),
         }
 
+    # Market-intelligence pipeline — real ingestion → analysis → findings on a cadence (default-OFF).
+    market_pipeline_enabled = str(os.getenv("MARKET_PIPELINE_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    market_pipeline_min = max(1, int(os.getenv("MARKET_PIPELINE_INTERVAL_SEC", "1800"))) // 60
+    if market_pipeline_enabled:
+        beat_schedule["market-pipeline-refresh"] = {
+            "task": "src.app.tasks.market_analysis_tasks.run_market_pipeline",
+            "schedule": crontab(minute=f"*/{market_pipeline_min}"),
+            "args": (),
+        }
+
+    draft_retry_enabled = str(os.getenv("FULFILLMENT_DRAFT_RETRY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    if draft_retry_enabled:
+        beat_schedule["fulfillment-draft-retry"] = {
+            "task": "src.app.tasks.fulfillment_tasks.retry_supplier_drafts",
+            "schedule": crontab(minute="*"),
+            "args": (),
+        }
+
+    outbound_delivery_enabled = str(
+        os.getenv("OUTBOUND_DELIVERY_SWEEP_ENABLED", "1")
+    ).strip().lower() in ("1", "true", "yes", "on")
+    outbound_delivery_min = max(
+        1,
+        min(60, int(os.getenv("OUTBOUND_DELIVERY_SWEEP_MINUTES", "1") or 1)),
+    )
+    if outbound_delivery_enabled:
+        beat_schedule["outbound-delivery-sweep"] = {
+            "task": "src.app.tasks.fulfillment_tasks.sweep_outbound_delivery",
+            "schedule": crontab(minute=f"*/{outbound_delivery_min}"),
+            "args": (),
+        }
+
+    # Data-retention sweep — UNIFORM storage-limitation (idle draft carts, stale conversation, TTL-less
+    # Redis session keys). Default-OFF; NEVER IP/geo gated. Windows in config/retention_policy.json.
+    retention_sweep_enabled = str(os.getenv("RETENTION_SWEEP_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    retention_sweep_min = max(5, min(1440, int(float(os.getenv("RETENTION_SWEEP_INTERVAL_MINUTES", "60") or 60))))
+    # Vision-cache prewarm — the process-local sha cache goes cold on every restart; warm the demo
+    # image set on a cadence. Default-OFF; interval bounded 15min..24h.
+    vision_prewarm_enabled = str(os.getenv("VISION_PREWARM_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    vision_prewarm_min = max(15, min(1440, int(float(os.getenv("VISION_PREWARM_INTERVAL_MINUTES", "60") or 60))))
+    if vision_prewarm_enabled:
+        beat_schedule["vision-cache-prewarm"] = {
+            "task": "src.app.tasks.vision_prewarm_tasks.prewarm_vision_cache",
+            "schedule": crontab(minute=f"*/{vision_prewarm_min}") if vision_prewarm_min < 60
+                        else crontab(minute=0, hour=f"*/{max(1, vision_prewarm_min // 60)}"),
+            "args": (),
+        }
+
+    if retention_sweep_enabled:
+        if retention_sweep_min < 60:
+            _retention_sched = crontab(minute=f"*/{retention_sweep_min}")
+        else:
+            _retention_sched = crontab(minute=0, hour=f"*/{max(1, retention_sweep_min // 60)}")
+        beat_schedule["retention-sweep"] = {
+            "task": "src.app.tasks.retention_tasks.run_retention_sweep",
+            "schedule": _retention_sched,
+            "args": (),
+        }
+
+    # Auth token expiry cleanup — prune expired session_tokens + refresh_tokens daily.
+    # Without this, both tables grow unboundedly and auth query latency degrades over months.
+    beat_schedule["auth-token-prune"] = {
+        "task": "src.app.tasks.security_poll_tasks.prune_expired_auth_tokens",
+        "schedule": crontab(minute="15", hour="3"),  # 03:15 UTC daily, low-traffic window
+        "args": (),
+    }
+    beat_schedule["temporal-cache-rebuild-dispatch"] = {
+        "task": "src.app.tasks.temporal_cache_tasks.dispatch_temporal_cache_rebuilds",
+        "schedule": max(15, int(os.getenv("TEMPORAL_CACHE_DISPATCH_SECONDS", "30") or 30)),
+        "options": {"queue": default_q},
+    }
+
+    # Email security polling — DMARC filesystem and inbox connector
+    dmarc_poll_enabled = str(os.getenv("DMARC_POLL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    dmarc_poll_min = max(1, int(os.getenv("DMARC_POLL_INTERVAL_SEC", "900"))) // 60
+    if dmarc_poll_enabled:
+        beat_schedule["dmarc-filesystem-poll"] = {
+            "task": "src.app.tasks.email_poll_tasks.poll_dmarc_filesystem",
+            "schedule": crontab(minute=f"*/{dmarc_poll_min}"),
+            "args": (),
+        }
+    email_connector_enabled = str(os.getenv("EMAIL_CONNECTOR_POLL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    email_connector_min = max(1, int(os.getenv("EMAIL_CONNECTOR_POLL_INTERVAL_SEC", "300"))) // 60
+    if email_connector_enabled:
+        beat_schedule["email-connector-poll"] = {
+            "task": "src.app.tasks.email_poll_tasks.poll_email_connector",
+            "schedule": crontab(minute=f"*/{email_connector_min}"),
+            "args": (),
+        }
+    # Attribution E3 reward feed — the task self-gates, but only schedule it when enabled.
+    if str(os.getenv("ATTRIBUTION_REWARD_FEED_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["attribution-reward-feed"] = {
+            "task": "src.app.tasks.attribution_tasks.attribution_reward_feed",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('ATTRIBUTION_REWARD_FEED_INTERVAL_MIN', '60')))}"),
+            "args": (),
+        }
+    # Market signal backfill (Module 1 batch wiring) — schedule only when enabled.
+    if (str(os.getenv("MARKET_SIGNAL_BACKFILL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+            or str(os.getenv("MARKET_CANONICAL_FACTS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")):
+        beat_schedule["market-signal-backfill"] = {
+            "task": "src.app.tasks.market_signal_tasks.market_signal_backfill",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('MARKET_SIGNAL_BACKFILL_INTERVAL_MIN', '15')))}"),
+            "args": (),
+        }
+    # Experiment evaluation (the autonomous rollback cadence) — schedule only when enabled.
+    if str(os.getenv("EXPERIMENT_EVAL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["experiment-eval"] = {
+            "task": "src.app.tasks.experiment_tasks.evaluate_experiments",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('EXPERIMENT_EVAL_INTERVAL_MIN', '30')))}"),
+            "args": (),
+        }
+    # Market analysis (M3 detectors → persisted findings) — schedule only when enabled.
+    if str(os.getenv("MARKET_ANALYSIS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["market-analysis"] = {
+            "task": "src.app.tasks.market_analysis_tasks.run_market_analysis",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('MARKET_ANALYSIS_INTERVAL_MIN', '30')))}"),
+            "args": (),
+        }
+    # Human-feedback backfill (returns + finding corrections → learning signal) — only when enabled.
+    if str(os.getenv("HUMAN_FEEDBACK_BACKFILL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["human-feedback-backfill"] = {
+            "task": "src.app.tasks.human_feedback_tasks.human_feedback_backfill",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('HUMAN_FEEDBACK_BACKFILL_INTERVAL_MIN', '30')))}"),
+            "args": (),
+        }
+    # Shadow-action generation (findings → typed proposals, LOG-ONLY) — schedule only when enabled.
+    if str(os.getenv("SHADOW_ACTIONS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["shadow-actions"] = {
+            "task": "src.app.tasks.shadow_action_tasks.generate_shadow_actions",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('SHADOW_ACTIONS_INTERVAL_MIN', '30')))}"),
+            "args": (),
+        }
+    # Experiment watchdog (fail-safe pause if eval stale + zombie revert) — schedule only when enabled.
+    if str(os.getenv("EXPERIMENT_WATCHDOG_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["experiment-watchdog"] = {
+            "task": "src.app.tasks.experiment_ops_tasks.experiment_watchdog",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('EXPERIMENT_WATCHDOG_INTERVAL_MIN', '10')))}"),
+            "args": (),
+        }
+
     celery.conf.update(
         timezone="UTC",
         enable_utc=True,
@@ -292,7 +440,22 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.security_poll_tasks.check_config_integrity": {"queue": default_q},
             "src.app.tasks.security_poll_tasks.verify_prompt_hashes": {"queue": default_q},
             "src.app.tasks.security_poll_tasks.verify_audit_chain": {"queue": default_q},
+            "src.app.tasks.security_poll_tasks.prune_expired_auth_tokens": {"queue": default_q},
             "sandbox.detonate": {"queue": "security"},
+            "src.app.tasks.email_poll_tasks.poll_dmarc_filesystem": {"queue": default_q},
+            "src.app.tasks.email_poll_tasks.poll_email_connector": {"queue": default_q},
+            "src.app.tasks.email_enrichment_tasks.enrich_inbound_email": {"queue": default_q},
+            "src.app.tasks.attribution_tasks.attribution_reward_feed": {"queue": default_q},
+            "src.app.tasks.market_signal_tasks.market_signal_backfill": {"queue": default_q},
+            "src.app.tasks.experiment_tasks.evaluate_experiments": {"queue": default_q},
+            "src.app.tasks.market_analysis_tasks.run_market_analysis": {"queue": default_q},
+            "src.app.tasks.human_feedback_tasks.human_feedback_backfill": {"queue": default_q},
+            "src.app.tasks.shadow_action_tasks.generate_shadow_actions": {"queue": default_q},
+            "src.app.tasks.experiment_ops_tasks.experiment_watchdog": {"queue": default_q},
+            "src.app.tasks.fulfillment_tasks.retry_supplier_drafts": {"queue": default_q},
+            "src.app.tasks.connector_recovery_tasks.recover_stalled_connector_jobs": {"queue": default_q},
+            "src.app.tasks.temporal_cache_tasks.rebuild_temporal_cache_entry": {"queue": default_q},
+            "src.app.tasks.temporal_cache_tasks.dispatch_temporal_cache_rebuilds": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -301,11 +464,32 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.incident_ops_tasks",
             "src.app.tasks.anomaly_tasks",
             "src.app.tasks.sandbox_tasks",
+            "src.app.tasks.email_poll_tasks",
+            "src.app.tasks.email_enrichment_tasks",
+            "src.app.tasks.attribution_tasks",
+            "src.app.tasks.market_signal_tasks",
+            "src.app.tasks.experiment_tasks",
+            "src.app.tasks.market_analysis_tasks",
+            "src.app.tasks.human_feedback_tasks",
+            "src.app.tasks.shadow_action_tasks",
+            "src.app.tasks.experiment_ops_tasks",
+            "src.app.tasks.retention_tasks",
+            "src.app.tasks.vision_prewarm_tasks",
+            "src.app.tasks.fulfillment_tasks",
+            "src.app.tasks.connector_recovery_tasks",
+            "src.app.tasks.temporal_cache_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,
         worker_prefetch_multiplier=1,
         task_acks_late=True,
+        # If a worker process is killed mid-task (OOM, SIGKILL), reject the message
+        # back to the broker so it gets requeued rather than silently lost.
+        task_reject_on_worker_lost=True,
+        # Global time limits: soft limit sends SIGTERM to the task (allowing cleanup);
+        # hard limit sends SIGKILL after an extra 60s. Both configurable via env.
+        task_soft_time_limit=int(os.getenv("CELERY_TASK_SOFT_TIMEOUT_SEC", "300")),
+        task_time_limit=int(os.getenv("CELERY_TASK_HARD_TIMEOUT_SEC", "360")),
     )
     return celery
 

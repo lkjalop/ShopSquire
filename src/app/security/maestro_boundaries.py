@@ -155,6 +155,55 @@ AGENT_BOUNDARIES: Dict[str, AgentBoundary] = {
         ]),
         risk_tier="critical",
     ),
+    # Procurement: prepares + drafts ONLY. It can rank suppliers, gather evidence (hippograph /
+    # market-intel / external benchmark), draft a quote request and generate options — but it has ZERO
+    # autonomous value authority and CANNOT send. The external send is human-fired (domain GATE 2 +
+    # execution_gate SUP-04). Registered so MAESTRO is real defense-in-depth, not fail-open.
+    "Procurement_Agent": AgentBoundary(
+        agent_name="Procurement_Agent",
+        allowed_tools=frozenset([
+            "assess_availability", "rank_suppliers", "gather_evidence",
+            "draft_external_message", "generate_fulfillment_options", "propose_purchase_order",
+        ]),
+        allowed_data_scopes=frozenset(["products", "inventory", "suppliers", "market_signals"]),
+        max_autonomous_value_usd=0.0,   # NEVER auto-commits commercial value
+        can_write_db=True,
+        can_call_external_api=False,    # it DRAFTS; it does not transmit
+        can_invoke_llm=True,            # drafting + parsing may use an LLM (within policy)
+        can_escalate=True,
+        allowed_peers=frozenset(["Supplier_Communication_Agent", "Inventory_Agent", "Escalation_Agent"]),
+        risk_tier="high",
+    ),
+    # Supplier comms: the transport boundary. Zero autonomous value — every send is human-approved
+    # (held by execution_gate SUP-04). Registered so an unregistered-agent fail-open can't bypass it.
+    "Supplier_Communication_Agent": AgentBoundary(
+        agent_name="Supplier_Communication_Agent",
+        allowed_tools=frozenset(["dispatch_supplier_message", "stage_draft"]),
+        allowed_data_scopes=frozenset(["suppliers"]),
+        max_autonomous_value_usd=0.0,   # NEVER auto-sends a commercial commitment
+        can_write_db=True,
+        can_call_external_api=True,     # it is the transport — but only on a human-approved send
+        can_invoke_llm=False,
+        can_escalate=True,
+        allowed_peers=frozenset(["Procurement_Agent", "Escalation_Agent"]),
+        risk_tier="critical",
+    ),
+    # Supplier inbox reader: READ-ONLY context gatherer. Summarizes recent dealings with an
+    # ALREADY-resolved supplier domain (last invoice, prior messages, contact) to enrich a draft. It
+    # cannot write, cannot send, cannot escalate, and NEVER picks the recipient (the allowlist stays
+    # authoritative). Registered so an unregistered-agent fail-open can't grant it more than this.
+    "Supplier_Inbox_Reader": AgentBoundary(
+        agent_name="Supplier_Inbox_Reader",
+        allowed_tools=frozenset(["read_supplier_history"]),
+        allowed_data_scopes=frozenset(["suppliers", "emails"]),
+        max_autonomous_value_usd=0.0,
+        can_write_db=False,
+        can_call_external_api=False,
+        can_invoke_llm=False,
+        can_escalate=False,
+        allowed_peers=frozenset(["Procurement_Agent"]),
+        risk_tier="medium",
+    ),
     "Debate_Coordinator": AgentBoundary(
         agent_name="Debate_Coordinator",
         allowed_tools=frozenset(["run_debate", "score_risk"]),
@@ -263,6 +312,18 @@ AGENT_BOUNDARIES: Dict[str, AgentBoundary] = {
         can_call_external_api=True,
         can_invoke_llm=False,
         allowed_peers=frozenset(["Orchestrator"]),
+        risk_tier="high",
+    ),
+    "Supplier_Communication_Agent": AgentBoundary(
+        agent_name="Supplier_Communication_Agent",
+        # Draft freely; the SEND is the consequential tool — gated by execution_gate AND this boundary.
+        allowed_tools=frozenset(["draft_supplier_message", "dispatch_supplier_message"]),
+        allowed_data_scopes=frozenset(["suppliers", "orders", "inventory"]),
+        max_autonomous_value_usd=0.0,  # cannot auto-approve any spend; outbound send is human-gated
+        can_write_db=False,
+        can_call_external_api=True,    # emails a supplier via the injected mailer (allowlisted recipient)
+        can_invoke_llm=True,           # drafts the message
+        allowed_peers=frozenset(["Orchestrator", "Inventory_Agent"]),
         risk_tier="high",
     ),
 }
@@ -393,6 +454,46 @@ def validate_agent_action(
         if blocking:
             raise MaestroViolationError(blocking)
 
+    return violations
+
+
+def record_agent_action(
+    *,
+    agent_name: str,
+    tool_name: Optional[str] = None,
+    data_scope: Optional[str] = None,
+    target_agent: Optional[str] = None,
+    value_usd: float = 0.0,
+    trace_id: Optional[str] = None,
+    log_fn: Optional[Any] = None,
+) -> List[BoundaryViolation]:
+    """validate_agent_action + AUDIT — record any boundary violations to the decision trace so MAESTRO
+    enforcement on the recommend / supplier / fraud paths is OBSERVABLE, not silent.
+
+    In 'block' enforcement mode the underlying validate raises MaestroViolationError on a high/critical
+    violation (the caller converts it to a 403 / held action); in 'audit'/'warn' (default) it returns
+    the violation list and behaviour is unchanged. The log sink is injected so this stays dependency-
+    light. Returns the violations (empty = within boundary). Never raises beyond MaestroViolationError."""
+    violations = validate_agent_action(
+        agent_name=agent_name, tool_name=tool_name, data_scope=data_scope,
+        target_agent=target_agent, value_usd=value_usd,
+    )
+    if violations and log_fn is not None:
+        try:
+            log_fn(
+                trace_id=trace_id, event_type="maestro_boundary", source_type="agent",
+                source_id=str(agent_name), target_type="system", target_id=None,
+                payload={
+                    "maestro_checked": True,
+                    "enforcement_mode": _ENFORCEMENT_MODE,
+                    "violations": [
+                        {"type": v.violation_type, "severity": v.severity, "detail": v.detail[:200]}
+                        for v in violations
+                    ],
+                },
+            )
+        except Exception:
+            pass
     return violations
 
 

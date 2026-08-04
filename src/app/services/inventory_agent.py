@@ -20,6 +20,7 @@ from src.app.services.inventory_supplier_guard import (
     evaluate_auto_po_policy,
 )
 from src.app.services.decision_bundle import write_immutable_decision_bundle
+from src.app.security.authorization_engine import authorize_action
 import os
 
 
@@ -80,6 +81,9 @@ class ReorderRecommendation:
     supplier_trust_band: str = "medium"
     anomaly_score: float = 0.0
     source_confirmations: Optional[Dict[str, Any]] = None
+    tenant_id: Optional[str] = None
+    currency: Optional[str] = None
+    proposal_id: Optional[str] = None
 
 
 class InventoryAgent:
@@ -89,8 +93,10 @@ class InventoryAgent:
     decision logging utilities so all recommendations are auditable.
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, *, tenant_id: str = "default"):
+        self.tenant_id = str(tenant_id or "").strip()
+        if not self.tenant_id:
+            raise ValueError("tenant_id is required")
 
     # STOCK_RULES: deterministic stock interaction rules (simplified)
     STOCK_RULES = {
@@ -394,7 +400,7 @@ class InventoryAgent:
                 if "postgres" in dialect:
                     sql = (
                         "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "FROM order_items oi JOIN orders o ON o.id = oi.order_id "
                         "WHERE oi.sku = :sku AND o.created_at >= (CURRENT_DATE - (:days * INTERVAL '1 day')) "
                         "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
                     )
@@ -402,7 +408,7 @@ class InventoryAgent:
                 else:
                     sql = (
                         "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "FROM order_items oi JOIN orders o ON o.id = oi.order_id "
                         "WHERE oi.sku = :sku AND datetime(o.created_at) >= datetime('now', :window) "
                         "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
                     )
@@ -446,7 +452,7 @@ class InventoryAgent:
                 if "postgres" in dialect:
                     sql = (
                         "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "FROM order_items oi JOIN orders o ON o.id = oi.order_id "
                         "WHERE oi.sku = :sku AND o.created_at >= (CURRENT_DATE - (:days * INTERVAL '1 day')) "
                         "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
                     )
@@ -454,7 +460,7 @@ class InventoryAgent:
                 else:
                     sql = (
                         "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "FROM order_items oi JOIN orders o ON o.id = oi.order_id "
                         "WHERE oi.sku = :sku AND datetime(o.created_at) >= datetime('now', :window) "
                         "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
                     )
@@ -471,7 +477,9 @@ class InventoryAgent:
             try:
                 from src.app.services.demand_forecast import DemandForecaster
 
-                fc = DemandForecaster().forecast_sku(sku, horizon_days=14)
+                fc = DemandForecaster(tenant_id=self.tenant_id).forecast_sku(
+                    sku, horizon_days=14
+                )
                 means = [float((d or {}).get("mean") or 0.0) for d in (fc.daily or [])]
                 if means:
                     avg = float(sum(means) / float(max(1, len(means))))
@@ -489,8 +497,20 @@ class InventoryAgent:
                         "quarantined_points": int(((fc.meta or {}).get("quarantined_points") or 0)),
                         "poison_guard": (fc.meta or {}).get("poison_guard"),
                     }
-            except Exception:
-                pass
+            except Exception as exc:
+                return {
+                    "method": "canonical_unavailable",
+                    "daily_demand": 0.0,
+                    "std_daily": 0.0,
+                    "variance": 0.0,
+                    "high_variance": False,
+                    "cv": 0.0,
+                    "mape": None,
+                    "quarantined_points": 0,
+                    "poison_guard": {"enabled": True, "trust_weighted": True},
+                    "evidence_status": "degraded",
+                    "error_type": type(exc).__name__,
+                }
 
         days = int(os.environ.get("INV_FORECAST_DAYS", "45") or 45)
         alpha = float(os.environ.get("INV_EWMA_ALPHA", "0.3") or 0.3)
@@ -572,7 +592,7 @@ class InventoryAgent:
                                    COALESCE(s.late_deliveries_30d, 0) as late_deliveries_30d
                             FROM suppliers s
                             JOIN supplier_products sp ON sp.supplier_id = s.id
-                            WHERE sp.sku = :sku
+                            WHERE sp.sku = :sku AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1
                             """
                         ),
                         {"sku": sku},
@@ -587,7 +607,7 @@ class InventoryAgent:
                                    0 as recent_sla_breaches, 0 as late_deliveries_30d
                             FROM suppliers s
                             JOIN supplier_products sp ON sp.supplier_id = s.id
-                            WHERE sp.sku = :sku
+                            WHERE sp.sku = :sku AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1
                             """
                         ),
                         {"sku": sku},
@@ -685,39 +705,67 @@ class InventoryAgent:
             pass
         return {"id": None, "unit_cost": 0.0, "lead_time": 7}
 
-    def _persist_supplier_score_audit(self, sku: str, supplier_id: str, score: float, payload: Dict[str, Any]) -> None:
+    def _rank_suppliers(self, sku: str, top_n: int = 3) -> List[Dict[str, Any]]:
+        """Read-only top-N approved suppliers for a SKU, scored with the same weights as
+        _get_best_supplier (no audit write — this is a review PREVIEW, not the draft path). Returns [] when
+        no supplier carries the SKU. Used by the supplier-contact candidates agent."""
         try:
             with db_session() as db:
-                try:
-                    db.execute(
-                        text(
-                            """
-                            CREATE TABLE IF NOT EXISTS supplier_score_audits (
-                                id TEXT PRIMARY KEY,
-                                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                                sku TEXT,
-                                supplier_id TEXT,
-                                score REAL,
-                                payload TEXT
-                            )
-                            """
-                        )
-                    )
-                except Exception:
-                    pass
+                rows = db.execute(
+                    text("SELECT s.id, s.unit_cost, s.lead_time_days, COALESCE(s.moq,0), "
+                         "COALESCE(s.on_time_rate,0), COALESCE(s.reliability_score,0), "
+                         "COALESCE(s.recent_sla_breaches,0), COALESCE(s.late_deliveries_30d,0) "
+                         "FROM suppliers s JOIN supplier_products sp ON sp.supplier_id=s.id "
+                         "WHERE sp.sku=:sku AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1"),
+                    {"sku": str(sku)},
+                ).fetchall()
+        except Exception:
+            return []
+        if not rows:
+            return []
+        costs = [float(r[1] or 0.0) for r in rows]
+        leads = [int(r[2] or 7) for r in rows]
+        moqs = [int(r[3] or 0) for r in rows]
+        min_cost, max_cost = min(costs), max(costs)
+        min_lead, max_lead = min(leads), max(leads)
+        min_moq, max_moq = min(moqs), max(moqs)
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            cost, lead, moq = float(r[1] or 0.0), int(r[2] or 7), int(r[3] or 0)
+            on_time, rel = float(r[4] or 0.0), float(r[5] or 0.0)
+            sla, late = int(r[6] or 0), int(r[7] or 0)
+            nc = 1.0 if max_cost == min_cost else (cost - min_cost) / (max_cost - min_cost)
+            nl = 1.0 if max_lead == min_lead else (lead - min_lead) / (max_lead - min_lead)
+            nm = 0.0 if max_moq == min_moq else (moq - min_moq) / (max_moq - min_moq)
+            pen = min(1.0, 0.15 * sla + 0.05 * late)
+            score = (0.4 * (1.0 - nc) + 0.25 * (1.0 - nl) + 0.2 * max(0.0, min(1.0, on_time))
+                     + 0.1 * max(0.0, min(1.0, rel)) + 0.05 * (1.0 - nm) - 0.15 * pen)
+            out.append({"id": r[0], "unit_cost": cost, "lead_time": lead, "moq": moq,
+                        "on_time_rate": on_time, "reliability": rel, "recent_sla_breaches": sla,
+                        "late_deliveries_30d": late, "score": round(score, 4)})
+        out.sort(key=lambda c: -c["score"])
+        return out[: max(1, int(top_n))]
+
+    def _persist_supplier_score_audit(self, sku: str, supplier_id: str, score: float, payload: Dict[str, Any]) -> None:
+        try:
+            from src.app.platform.tenant_context import current_tenant_id
+            tenant_id = str(current_tenant_id() or "default")
+            with db_session() as db:
                 db.execute(
                     text(
                         """
-                        INSERT INTO supplier_score_audits (id, sku, supplier_id, score, payload)
-                        VALUES (:id, :sku, :supplier_id, :score, :payload)
+                        INSERT INTO supplier_score_audits
+                          (id, tenant_id, sku, supplier_id, score, payload)
+                        VALUES (:id, :tenant_id, :sku, :supplier_id, :score, :payload)
                         """
                     ),
                     {
                         "id": str(uuid.uuid4()),
+                        "tenant_id": tenant_id,
                         "sku": sku,
                         "supplier_id": supplier_id,
                         "score": float(score),
-                        "payload": str(payload),
+                        "payload": json.dumps(payload, default=str),
                     },
                 )
                 try:
@@ -970,7 +1018,13 @@ class InventoryAgent:
                 break
         return suggestions
 
-    def execute_reorder(self, recommendation: ReorderRecommendation, approval: Optional[str] = None) -> Dict[str, Any]:
+    def execute_reorder(
+        self,
+        recommendation: ReorderRecommendation,
+        approval: Optional[str] = None,
+        *,
+        governed_approval: bool = False,
+    ) -> Dict[str, Any]:
         thr = _get_inventory_thresholds()
         approval_min = float(thr["reorder_cost_approval_usd"])
         trust_score = float(getattr(recommendation, "supplier_trust_score", 0.7) or 0.7)
@@ -983,6 +1037,36 @@ class InventoryAgent:
             supplier_risk=(1.0 - trust_score),
             anomaly_score=anomaly_score,
         )
+
+        # ── Unified Authorization Engine gate (Tier-1 control) ──
+        # This is the genuinely AUTONOMOUS supplier-order decision, so it carries
+        # an agent lane (requester="Inventory_Agent"). In shadow mode the verdict
+        # is logged + traced but NOT enforced (should_block() is always False), so
+        # the existing gates below remain authoritative until this action is flipped
+        # to active via AUTHZ_ENGINE_MODE. authorize_action never raises.
+        _est_cost = float(getattr(recommendation, "estimated_cost", 0.0) or 0.0)
+        _conditions: List[str] = []
+        if trust_band == "low" or trust_score < 0.5:
+            _conditions.append("supplier_unverified")
+        _authz = authorize_action(
+            "supplier_order",
+            requester="Inventory_Agent",
+            value_usd=_est_cost,
+            conditions=_conditions,
+            subject_id=str(getattr(recommendation, "supplier_id", "") or getattr(recommendation, "sku", "") or ""),
+            idempotency_key=f"reorder:{getattr(recommendation, 'sku', '')}:{_est_cost}",
+            metadata={"urgency": getattr(recommendation, "urgency", ""), "anomaly_score": anomaly_score},
+        )
+        # Creating a supplier PO is consequential. A shadow deny/escalation is
+        # never permission on this boundary.
+        if not _authz.allowed:
+            return {
+                "status": "blocked_by_authorization_engine",
+                "reason": _authz.reason,
+                "terminal_outcome": _authz.terminal_outcome,
+                "residual": _authz.residual,
+            }
+
         # Enforce supplier trust and policy gates before downstream execution/data thresholds.
         if trust_band == "low" or trust_score < 0.5:
             try:
@@ -1080,8 +1164,11 @@ class InventoryAgent:
                         "ticket_id": ticket_id,
                         "playbook_tag": "data_not_ready",
                     }
-            except Exception:
-                pass
+            except Exception as exc:
+                return {
+                    "status": "data_readiness_unavailable",
+                    "reason": f"readiness_check_failed:{type(exc).__name__}",
+                }
 
         # If above threshold, require an approved ticket id
         needs_reason = getattr(recommendation, "requires_human_review_reason", None)
@@ -1099,36 +1186,42 @@ class InventoryAgent:
                 except Exception:
                     pass
                 return {"status": "approval_required", "reason": reason, "threshold": approval_min, "cost": recommendation.estimated_cost}
-            # approval provided: verify ticket is approved
-            try:
-                tagent = TicketingAgent()
-                t = tagent.get_ticket(approval)
-                if not t:
+            # The dedicated reorder boundary has already verified a durable
+            # approval record bound to the immutable proposal hash.
+            if governed_approval:
+                pass
+            # Legacy/direct callers must still present an approved ticket.
+            else:
+                # approval provided: verify ticket is approved
+                try:
+                    tagent = TicketingAgent()
+                    t = tagent.get_ticket(approval)
+                    if not t:
+                        try:
+                            from src.app.observability.metrics import record_inventory_reorder_approval
+                            record_inventory_reorder_approval("ticket_missing")
+                        except Exception:
+                            pass
+                        return {"status": "approval_required", "reason": "ticket_missing", "ticket": approval}
+                    if t.status != "approved":
+                        try:
+                            from src.app.observability.metrics import record_inventory_reorder_approval
+                            record_inventory_reorder_approval("ticket_not_approved")
+                        except Exception:
+                            pass
+                        return {"status": "approval_required", "reason": "ticket_not_approved", "ticket": approval, "ticket_status": t.status}
                     try:
                         from src.app.observability.metrics import record_inventory_reorder_approval
-                        record_inventory_reorder_approval("ticket_missing")
+                        record_inventory_reorder_approval("approved")
                     except Exception:
                         pass
-                    return {"status": "approval_required", "reason": "ticket_missing", "ticket": approval}
-                if t.status != "approved":
+                except Exception:
                     try:
                         from src.app.observability.metrics import record_inventory_reorder_approval
-                        record_inventory_reorder_approval("ticket_not_approved")
+                        record_inventory_reorder_approval("verification_failed")
                     except Exception:
                         pass
-                    return {"status": "approval_required", "reason": "ticket_not_approved", "ticket": approval, "ticket_status": t.status}
-                try:
-                    from src.app.observability.metrics import record_inventory_reorder_approval
-                    record_inventory_reorder_approval("approved")
-                except Exception:
-                    pass
-            except Exception:
-                try:
-                    from src.app.observability.metrics import record_inventory_reorder_approval
-                    record_inventory_reorder_approval("verification_failed")
-                except Exception:
-                    pass
-                return {"status": "approval_required", "reason": "ticket_verification_failed", "ticket": approval}
+                    return {"status": "approval_required", "reason": "ticket_verification_failed", "ticket": approval}
         else:
             try:
                 from src.app.observability.metrics import record_inventory_reorder_approval
@@ -1138,32 +1231,48 @@ class InventoryAgent:
         try:
             po_number = str(uuid.uuid4())
             expected_days = recommendation.lead_time_days
-            # Persist a simple PO record into purchase_orders table if present
+            # Persist the PO before reporting success. A missing/broken PO store
+            # is a hard failure, never a synthetic "po_created" response.
             try:
                 with db_session() as db:
                     db.execute(
                         text(
                             """
-                            INSERT INTO purchase_orders (id, supplier_id, sku, quantity, unit_cost, status, expected_delivery)
-                            VALUES (:id, :supplier_id, :sku, :qty, :unit_cost, :status, :expected)
+                            INSERT INTO purchase_orders (
+                                id, tenant_id, reorder_proposal_id, supplier_id, sku,
+                                quantity, unit_cost, landed_unit_cost_cents, currency,
+                                status, expected_delivery
+                            )
+                            VALUES (
+                                :id, :tenant_id, :proposal_id, :supplier_id, :sku,
+                                :qty, :unit_cost, :unit_cost_cents, :currency,
+                                :status, :expected
+                            )
                             """
                         ),
                         {
                             "id": po_number,
+                            "tenant_id": str(getattr(recommendation, "tenant_id", None) or self.tenant_id),
+                            "proposal_id": getattr(recommendation, "proposal_id", None),
                             "supplier_id": recommendation.supplier_id,
                             "sku": recommendation.sku,
                             "qty": recommendation.quantity,
                             "unit_cost": float(recommendation.estimated_cost / max(1, recommendation.quantity)),
+                            "unit_cost_cents": int(round(
+                                float(recommendation.estimated_cost)
+                                * 100.0 / max(1, recommendation.quantity)
+                            )),
+                            "currency": str(getattr(recommendation, "currency", None) or ""),
                             "status": "created",
                             "expected": f"in {expected_days} days",
                         },
                     )
-                    try:
-                        db.commit()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    db.commit()
+            except Exception as exc:
+                return {
+                    "status": "failed",
+                    "reason": f"po_persistence_failed:{type(exc).__name__}",
+                }
 
             # Log execution decision
             try:
@@ -1184,7 +1293,7 @@ class InventoryAgent:
                     trace_id=po_number,
                     actor_type="agent",
                     actor_id="inventory_agent",
-                    tenant_id="default",
+                    tenant_id=self.tenant_id,
                     resource_id=str(recommendation.sku),
                     action="auto_po_create",
                     policy_version="v1",
@@ -1216,7 +1325,7 @@ class InventoryAgent:
                         "bundle_hash": bundle.get("bundle_hash"),
                         "actor_type": "agent",
                         "actor_id": "inventory_agent",
-                        "tenant_id": "default",
+                        "tenant_id": self.tenant_id,
                         "resource_id": str(recommendation.sku),
                         "decision": "allow",
                         "policy_version": "v1",

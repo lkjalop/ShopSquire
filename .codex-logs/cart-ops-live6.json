@@ -1,0 +1,22 @@
+[
+  {
+    "name": "scoped_clear",
+    "before_items": 3,
+    "after_items": 1,
+    "sent_in_body": false,
+    "ack_removed": false,
+    "routed_to_search": false,
+    "cart_empty_visible": false,
+    "tail": " Sneakers\n$119\nAdd to Cart\nDetails\nStructured Tote Bag\n$149\nAdd to Cart\nDetails\nSilk Camisole Top\n$59\nAdd to Cart\nDetails\nMerino Wool Crew Knit\n$99\nAdd to Cart\nDetails\nWool Blend Overcoat\n$249\nAdd to Cart\nDetails\nPleated Midi Skirt\n$84\nAdd to Cart\nDetails\nFloral Summer Maxi Dress\n$139\nAdd to Cart\nDetails\nSuede Ankle Boots\n$169\nAdd to Cart\nDetails\nSilk Neck Scarf\n$45\nAdd to Cart\nDetails\nShopSquire Assistant\nAPI 406ms\n\u25cf\n\nHi! I'm your ShopSquire assistant.\n\nAsk me about laptops, compare models, or get recommendations.\n\nYou can also paste or drag images into this chat.\n\nGaming\nBudget\nCompare\nSpecs"
+  },
+  {
+    "name": "compound_ops",
+    "latency_ms": 15220,
+    "has_card": true,
+    "has_remove_hp": true,
+    "has_remove_thinkpad": true,
+    "has_ideapad_20": true,
+    "search_only": false,
+    "delivery_answer": true
+  }
+]

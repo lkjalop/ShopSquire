@@ -3,6 +3,7 @@ const AUTH_NAME_KEY = 'auth_name';
 const ROLE_KEY = 'role';
 const UID_KEY = 'uid';
 const OWNER_KEY = 'ss_owner_key';
+const CONVERSATION_EPOCH_KEY = 'ss_conversation_epoch';
 
 function session(): Storage | null {
   try {
@@ -56,6 +57,22 @@ export function getStoredUid(): string {
   return s ? String(s.getItem(UID_KEY) || '') : '';
 }
 
+export function getOrCreateStoredUid(): string {
+  const existing = getStoredUid().trim();
+  if (existing) return existing;
+  let suffix = '';
+  try {
+    suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2, 18);
+  } catch {
+    suffix = Math.random().toString(36).slice(2, 18);
+  }
+  const uid = `guest-${suffix}`.slice(0, 128);
+  setStoredUid(uid);
+  return uid;
+}
+
 export function setStoredUid(uid: string): void {
   const s = session();
   if (!s) return;
@@ -66,6 +83,34 @@ export function clearStoredUid(): void {
   const s = session();
   if (!s) return;
   s.removeItem(UID_KEY);
+}
+
+function randomEpoch(): string {
+  let suffix = '';
+  try {
+    suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2, 18);
+  } catch {
+    suffix = Math.random().toString(36).slice(2, 18);
+  }
+  return `epoch-${suffix}`.slice(0, 128);
+}
+
+export function getOrCreateConversationEpoch(): string {
+  const s = session();
+  const existing = s ? String(s.getItem(CONVERSATION_EPOCH_KEY) || '').trim() : '';
+  if (existing) return existing;
+  const epoch = randomEpoch();
+  if (s) s.setItem(CONVERSATION_EPOCH_KEY, epoch);
+  return epoch;
+}
+
+export function rotateConversationEpoch(): string {
+  const epoch = randomEpoch();
+  const s = session();
+  if (s) s.setItem(CONVERSATION_EPOCH_KEY, epoch);
+  return epoch;
 }
 
 export function getOwnerApiKey(): string {

@@ -86,12 +86,11 @@ def _aws_sm_get(secret_id: str, key: Optional[str] = None) -> Optional[str]:
     if not region:
         return None
     try:
-        import boto3  # type: ignore
+        from src.app.providers.aws import get_secret_value
     except Exception:
         return None
     try:
-        client = boto3.client("secretsmanager", region_name=region)
-        res = client.get_secret_value(SecretId=secret_id)
+        res = get_secret_value(secret_id, region)
         sval = res.get("SecretString")
         if sval is None:
             return None
@@ -109,10 +108,31 @@ def _aws_sm_get(secret_id: str, key: Optional[str] = None) -> Optional[str]:
         return None
 
 
+def _azure_kv_get(
+    vault_name: str,
+    secret_name: str,
+    version: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve a Key Vault secret through workload identity/default credentials."""
+    try:
+        from src.app.providers.azure import get_key_vault_secret
+    except Exception:
+        return None
+    vault = str(vault_name or "").strip()
+    if not vault or not secret_name:
+        return None
+    vault_url = vault if vault.startswith("https://") else f"https://{vault}.vault.azure.net"
+    try:
+        return get_key_vault_secret(vault_url, secret_name, version)
+    except Exception:
+        return None
+
+
 def _parse_secret_ref(value: str) -> tuple[str, str, Optional[str]]:
     # Supported:
     # vault://path#key
     # aws-sm://secret-id#key
+    # azure-kv://vault-name/secret-name#version
     # env://ENV_VAR_NAME
     raw = str(value or "")
     if "://" not in raw:
@@ -134,7 +154,14 @@ def resolve_secret(value_or_ref: str | None, *, default: str | None = None) -> s
     # This prevents accidentally interpreting ordinary URIs (e.g. `postgresql://`,
     # `redis://`, `https://`) as secret references and falling back to defaults.
     scheme = raw.split("://", 1)[0].lower()
-    if scheme not in ("vault", "aws-sm", "aws-secretsmanager", "env"):
+    if scheme not in (
+        "vault",
+        "aws-sm",
+        "aws-secretsmanager",
+        "azure-kv",
+        "azure-keyvault",
+        "env",
+    ):
         return raw
     cache_key = f"ref:{raw}"
     cached = _cache_get(cache_key)
@@ -146,6 +173,10 @@ def resolve_secret(value_or_ref: str | None, *, default: str | None = None) -> s
         out = _vault_get(locator, key)
     elif scheme in ("aws-sm", "aws-secretsmanager"):
         out = _aws_sm_get(locator, key)
+    elif scheme in ("azure-kv", "azure-keyvault"):
+        vault_name, separator, secret_name = locator.partition("/")
+        if separator:
+            out = _azure_kv_get(vault_name, secret_name, key)
     elif scheme == "env":
         out = _env_fallback(locator, default)
     if out is None:
@@ -184,6 +215,10 @@ def get_secret(name: str, default: str | None = None) -> str | None:
     elif provider in ("aws-sm", "aws-secretsmanager"):
         prefix = os.getenv("SECRETS_AWS_PREFIX", "shopsquire/")
         out = _aws_sm_get(f"{prefix}{name}", None)
+    elif provider in ("azure-kv", "azure-keyvault"):
+        vault_name = os.getenv("SECRETS_AZURE_VAULT_NAME", "")
+        prefix = os.getenv("SECRETS_AZURE_PREFIX", "")
+        out = _azure_kv_get(vault_name, f"{prefix}{name.lower()}", None)
     if out is None:
         out = default
     return _cache_put(cache_key, out)

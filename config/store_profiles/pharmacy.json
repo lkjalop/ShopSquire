@@ -1,0 +1,1056 @@
+{
+  "_comment": "PHARMACY StoreProfile — the agnostic proof. Same shape as electronics.json, totally different flavour. As each electronics flavour slot is excised from the core into a profile read, this profile proves the core stays agnostic: a pharmacy query must NOT inherit laptop brands, GPU specs, or laptop price bands. Today only brand_price_floors + nqe_brand_detect are profile-backed; this profile grows as R2/R3 excise more slots. A high-stakes/regulated vertical is the right proof because the control/evidence moat (claim-guard, policy gate, audit) matters most here.",
+  "id": "pharmacy",
+  "version": "2026-06-19",
+  "_complexity_keywords_comment": "Domain-specific terms that signal a complex query needing medium+ model tier. Zero laptop/GPU tokens.",
+  "complexity_keywords": [
+    "interaction",
+    "contraindication",
+    "dosage",
+    "schedule",
+    "pregnancy",
+    "breastfeeding",
+    "renal",
+    "hepatic",
+    "allergy",
+    "adverse",
+    "side effect",
+    "overdose",
+    "therapeutic",
+    "pharmacokinetic",
+    "bioavailability",
+    "half-life",
+    "controlled substance",
+    "schedule 4",
+    "schedule 8",
+    "compounding",
+    "formulation",
+    "excipient"
+  ],
+  "known_brands": [
+    "panadol",
+    "nurofen",
+    "chemists own",
+    "blackmores",
+    "swisse",
+    "cenovis",
+    "bioglan",
+    "sukin",
+    "cetaphil",
+    "dettol",
+    "listerine",
+    "betadine"
+  ],
+  "nqe_brand_detect": [
+    "panadol",
+    "nurofen",
+    "blackmores",
+    "swisse",
+    "cenovis",
+    "bioglan",
+    "sukin",
+    "cetaphil",
+    "dettol"
+  ],
+  "_manufacturers_comment": "Agnostic proof: the SAME 3-axis schema (manufacturer / product line / vs type) with pharmacy flavour and zero laptop/GPU tokens. Lines are product ranges (Panadol Osteo, Swisse Ultiboost).",
+  "manufacturers": {
+    "panadol": {
+      "lines": [
+        "panadol osteo",
+        "panadol rapid"
+      ],
+      "aliases": [
+        "panadol"
+      ]
+    },
+    "nurofen": {
+      "lines": [
+        "nurofen zavance"
+      ],
+      "aliases": [
+        "nurofen"
+      ]
+    },
+    "blackmores": {
+      "lines": [
+        "bio c",
+        "fish oil"
+      ],
+      "aliases": [
+        "blackmores"
+      ]
+    },
+    "swisse": {
+      "lines": [
+        "ultiboost"
+      ],
+      "aliases": [
+        "swisse"
+      ]
+    },
+    "cetaphil": {
+      "lines": [
+        "gentle cleanser",
+        "daily moisturiser"
+      ],
+      "aliases": [
+        "cetaphil"
+      ]
+    }
+  },
+  "primary_types": [
+    "medicine",
+    "supplement",
+    "personal_care"
+  ],
+  "price_bands_usd": {
+    "medicine": [
+      2,
+      80
+    ],
+    "supplement": [
+      5,
+      120
+    ],
+    "personal_care": [
+      3,
+      60
+    ],
+    "first_aid": [
+      2,
+      50
+    ],
+    "baby": [
+      3,
+      90
+    ],
+    "device": [
+      10,
+      400
+    ],
+    "accessory": [
+      2,
+      200
+    ]
+  },
+  "_product_type_rules_comment": "Agnostic proof: the SAME mechanism (product_classifier) classifies pharmacy products from THIS profile — zero laptop/GPU flavour. Ordered, first-match-wins, specific before primary.",
+  "spec_units": [
+    "mg",
+    "ml",
+    "mcg",
+    "iu",
+    "g"
+  ],
+  "gpu_prefixes": [],
+  "product_type_rules": [
+    {
+      "type": "device",
+      "pattern": "\\b(thermometer|blood pressure monitor|bp monitor|nebuli[sz]er|glucose|pulse oxim|inhaler device|hot water bottle|heat pack)\\b"
+    },
+    {
+      "type": "first_aid",
+      "pattern": "\\b(bandage|plaster|band-?aid|gauze|antiseptic|wound|dressing|first aid|sting relief)\\b"
+    },
+    {
+      "type": "baby",
+      "pattern": "\\b(nappy|nappies|diaper|baby formula|infant formula|baby wipe|teething)\\b"
+    },
+    {
+      "type": "personal_care",
+      "pattern": "\\b(shampoo|conditioner|moisturi[sz]er|sunscreen|toothpaste|cleanser|body wash|soap|deodorant|lip balm|hand cream)\\b"
+    },
+    {
+      "type": "supplement",
+      "pattern": "\\b(vitamin|multivitamin|fish oil|omega-?3|probiotic|magnesium|collagen|zinc|calcium|supplement|herbal)\\b"
+    },
+    {
+      "type": "medicine",
+      "pattern": "\\b(paracetamol|ibuprofen|aspirin|antihistamine|panadol|nurofen|tablet|capsule|syrup|lozenge|cough|cold|flu|pain relief|antacid|laxative)\\b"
+    }
+  ],
+  "brand_price_floors_usd": {
+    "blackmores": 10,
+    "swisse": 8,
+    "cetaphil": 8,
+    "cenovis": 6
+  },
+  "use_case_budget_floors": {
+    "pain_relief": 5,
+    "cold_flu": 6,
+    "allergy": 8,
+    "vitamins": 10,
+    "skincare": 8,
+    "baby_care": 6
+  },
+  "use_case_patterns": {
+    "pain_relief": "\\b(pain|headache|migraine|ache|aches|sore|cramp|analgesic|paracetamol|ibuprofen|nurofen|panadol)\\b",
+    "cold_flu": "\\b(cold|flu|cough|congestion|sore throat|fever|decongestant|sinus|blocked nose)\\b",
+    "allergy": "\\b(allerg\\w*|antihistamine|hay ?fever|itch\\w*|hives|sneez\\w*)\\b",
+    "vitamins": "\\b(vitamin|multivitamin|supplement|immune|wellness|mineral|fish oil|omega|probiotic)\\b",
+    "skincare": "\\b(skin ?care|skin|moisturi\\w*|cleanser|acne|eczema|dry skin|sunscreen|spf)\\b",
+    "baby_care": "\\b(baby|infant|nappy|nappies|diaper|formula|teething|baby wipe)\\b"
+  },
+  "use_cases": {
+    "pain_relief": {
+      "nqe_question": "ask_symptom_type"
+    },
+    "cold_flu": {
+      "nqe_question": "ask_symptom_type"
+    },
+    "allergy": {
+      "nqe_question": "ask_drowsy_preference"
+    },
+    "vitamins": {
+      "nqe_question": "ask_health_goal"
+    },
+    "skincare": {
+      "nqe_question": "ask_skin_type"
+    },
+    "baby_care": {
+      "nqe_question": "ask_age_band"
+    }
+  },
+  "_use_case_keyword_map_comment": "Pharmacy use-case keyword matching (excised from use_case_advisor). Vertical-exclusive — must NOT contain gaming/laptop/GPU keywords.",
+  "use_case_keyword_map": {
+    "pain_relief": [
+      "pain",
+      "headache",
+      "migraine",
+      "body pain",
+      "ache",
+      "sore",
+      "cramp",
+      "back pain",
+      "neck pain",
+      "joint pain",
+      "period pain",
+      "menstrual",
+      "toothache",
+      "analgesic"
+    ],
+    "cold_flu": [
+      "cold",
+      "flu",
+      "cough",
+      "sore throat",
+      "congestion",
+      "blocked nose",
+      "sinus",
+      "runny nose",
+      "fever",
+      "chills",
+      "phlegm"
+    ],
+    "allergy": [
+      "allergy",
+      "allergies",
+      "antihistamine",
+      "hay fever",
+      "hayfever",
+      "itchy",
+      "hives",
+      "sneezing",
+      "dust mite",
+      "pollen"
+    ],
+    "vitamins": [
+      "vitamin",
+      "vitamins",
+      "supplement",
+      "multivitamin",
+      "immune",
+      "immunity",
+      "energy boost",
+      "iron",
+      "fish oil",
+      "omega",
+      "probiotic",
+      "magnesium",
+      "zinc"
+    ],
+    "skincare": [
+      "skincare",
+      "skin care",
+      "moisturiser",
+      "moisturizer",
+      "cleanser",
+      "acne",
+      "eczema",
+      "dry skin",
+      "oily skin",
+      "sunscreen",
+      "spf",
+      "anti-aging"
+    ],
+    "baby_care": [
+      "baby",
+      "infant",
+      "nappy",
+      "nappies",
+      "diaper",
+      "formula",
+      "teething",
+      "baby wipe",
+      "colic",
+      "gripe water"
+    ],
+    "first_aid": [
+      "first aid",
+      "bandage",
+      "plaster",
+      "antiseptic",
+      "wound",
+      "dressing",
+      "burn",
+      "sting"
+    ],
+    "digestive": [
+      "digestive",
+      "indigestion",
+      "heartburn",
+      "antacid",
+      "bloating",
+      "constipation",
+      "laxative",
+      "diarrhoea",
+      "nausea"
+    ]
+  },
+  "use_case_keyword_priority": [
+    "first_aid",
+    "baby_care",
+    "digestive",
+    "pain_relief",
+    "cold_flu",
+    "allergy",
+    "skincare",
+    "vitamins"
+  ],
+  "use_case_to_persona": {
+    "pain_relief": "patient",
+    "cold_flu": "patient",
+    "allergy": "patient",
+    "vitamins": "wellness",
+    "skincare": "wellness",
+    "baby_care": "parent",
+    "first_aid": "patient",
+    "digestive": "patient"
+  },
+  "_nqe_question_packs_comment": "Pharmacy-domain NQE clarifying questions. Zero laptop/GPU/gaming content.",
+  "nqe_question_packs": {
+    "ask_symptom_type": {
+      "trigger_use_cases": [
+        "pain_relief",
+        "cold_flu"
+      ],
+      "answered_field": "symptom_type",
+      "text": "Can you describe the main symptom? This helps me suggest the right product.",
+      "goal": "refine_symptom",
+      "evidence_needed": [
+        "symptom_type"
+      ],
+      "source": "use_case_disambiguation",
+      "options": [
+        {
+          "label": "Headache / migraine",
+          "value": "headache"
+        },
+        {
+          "label": "Body aches / muscle pain",
+          "value": "body_pain"
+        },
+        {
+          "label": "Joint pain / arthritis",
+          "value": "joint_pain"
+        },
+        {
+          "label": "Period pain / cramps",
+          "value": "period_pain"
+        },
+        {
+          "label": "Sore throat / cough",
+          "value": "throat_cough"
+        },
+        {
+          "label": "Blocked nose / congestion",
+          "value": "congestion"
+        }
+      ]
+    },
+    "ask_drowsy_preference": {
+      "trigger_use_cases": [
+        "allergy"
+      ],
+      "answered_field": "drowsy_preference",
+      "text": "Do you need a non-drowsy option (for daytime) or is drowsy/sedating OK?",
+      "goal": "refine_formulation",
+      "evidence_needed": [
+        "drowsy_preference"
+      ],
+      "source": "use_case_disambiguation",
+      "options": [
+        {
+          "label": "Non-drowsy (daytime use)",
+          "value": "non_drowsy"
+        },
+        {
+          "label": "Drowsy is OK (nighttime / sleep aid)",
+          "value": "drowsy_ok"
+        },
+        {
+          "label": "Not sure — recommend the most popular",
+          "value": "no_preference"
+        }
+      ]
+    },
+    "ask_health_goal": {
+      "trigger_use_cases": [
+        "vitamins"
+      ],
+      "answered_field": "health_goal",
+      "text": "What's your main health goal? This helps narrow the right supplement.",
+      "goal": "refine_use_case",
+      "evidence_needed": [
+        "health_goal"
+      ],
+      "source": "use_case_disambiguation",
+      "options": [
+        {
+          "label": "Immune support / general wellness",
+          "value": "immune"
+        },
+        {
+          "label": "Energy / fatigue",
+          "value": "energy"
+        },
+        {
+          "label": "Bone / joint health",
+          "value": "bone_joint"
+        },
+        {
+          "label": "Skin / hair / nails",
+          "value": "beauty"
+        },
+        {
+          "label": "Gut health / digestion",
+          "value": "gut_health"
+        },
+        {
+          "label": "Pregnancy / prenatal",
+          "value": "prenatal"
+        }
+      ]
+    },
+    "ask_skin_type": {
+      "trigger_use_cases": [
+        "skincare"
+      ],
+      "answered_field": "skin_type",
+      "text": "What's your skin type? This helps match the right formulation.",
+      "goal": "refine_formulation",
+      "evidence_needed": [
+        "skin_type"
+      ],
+      "source": "use_case_disambiguation",
+      "options": [
+        {
+          "label": "Dry / sensitive",
+          "value": "dry_sensitive"
+        },
+        {
+          "label": "Oily / acne-prone",
+          "value": "oily_acne"
+        },
+        {
+          "label": "Combination",
+          "value": "combination"
+        },
+        {
+          "label": "Normal — just looking for basics",
+          "value": "normal"
+        }
+      ]
+    },
+    "ask_age_band": {
+      "trigger_use_cases": [
+        "baby_care"
+      ],
+      "answered_field": "age_band",
+      "text": "How old is the baby/child? Age determines the right formulations and dosages.",
+      "goal": "refine_eligibility",
+      "evidence_needed": [
+        "age_band"
+      ],
+      "source": "use_case_disambiguation",
+      "options": [
+        {
+          "label": "Newborn (0–3 months)",
+          "value": "newborn"
+        },
+        {
+          "label": "Infant (3–12 months)",
+          "value": "infant"
+        },
+        {
+          "label": "Toddler (1–3 years)",
+          "value": "toddler"
+        },
+        {
+          "label": "Child (3–12 years)",
+          "value": "child"
+        }
+      ]
+    }
+  },
+  "spec_constraints": {
+    "pack_size": {
+      "pattern": "\\b(\\d{1,3})\\s*(pack|tablets|capsules|caps)\\b",
+      "field": "pack_size_min"
+    },
+    "strength_mg": {
+      "pattern": "\\b(\\d{2,4})\\s*mg\\b",
+      "field": "strength_mg"
+    }
+  },
+  "_regulatory_comment": "Pharmacy is WHY the control moat matters: dosage/age/schedule are POLICY, not recommendation. These belong in the merchant policy + execution gate, not the recommender.",
+  "policy_flags": {
+    "schedule_gated": true,
+    "age_restricted_types": [
+      "medicine"
+    ],
+    "no_health_claims_without_evidence": true,
+    "max_pack_per_order_enforced": true
+  },
+  "upsell_companions": {
+    "medicine": [
+      "first_aid",
+      "device"
+    ],
+    "supplement": [
+      "personal_care"
+    ],
+    "personal_care": [
+      "supplement"
+    ]
+  },
+  "_image_relevance_comment": "Tokens for CV triage relevance gate. An image matching relevant_image_tokens is on-topic; matching off_topic_image_tokens is flagged. Zero laptop/GPU tokens.",
+  "relevant_image_tokens": [
+    "medicine",
+    "tablet",
+    "capsule",
+    "pill",
+    "bottle",
+    "box",
+    "package",
+    "blister",
+    "pharmacy",
+    "supplement",
+    "vitamin",
+    "cream",
+    "ointment",
+    "inhaler",
+    "syringe",
+    "bandage",
+    "thermometer",
+    "label",
+    "barcode",
+    "prescription",
+    "receipt",
+    "panadol",
+    "nurofen",
+    "blackmores",
+    "swisse",
+    "cetaphil",
+    "dettol"
+  ],
+  "off_topic_image_tokens": [
+    "laptop",
+    "computer",
+    "gpu",
+    "keyboard",
+    "mouse",
+    "monitor",
+    "gaming",
+    "shirt",
+    "dress",
+    "shoes",
+    "pants",
+    "jacket"
+  ],
+  "_persona_patterns_comment": "ADAPTER: buyer-persona detection keywords (recommend_persona core algo is vertical-blind). Phase 2A P0.",
+  "persona_patterns": {
+    "patient": [
+      "\\bpain\\b",
+      "\\bheadache\\b",
+      "\\bache\\b",
+      "\\bsick\\b",
+      "\\bcold\\b",
+      "\\bflu\\b",
+      "\\bfever\\b",
+      "\\bcough\\b",
+      "\\ballerg\\w*\\b",
+      "\\bcongestion\\b",
+      "\\bwound\\b",
+      "\\bfirst\\s?aid\\b",
+      "\\bindigestion\\b",
+      "\\bheartburn\\b",
+      "\\bnausea\\b"
+    ],
+    "wellness": [
+      "\\bvitamin\\b",
+      "\\bsupplement\\b",
+      "\\bimmune\\b",
+      "\\benergy\\b",
+      "\\bwellness\\b",
+      "\\bskincare\\b",
+      "\\bmoisturi[sz]er\\b",
+      "\\bserum\\b",
+      "\\banti[\\s-]?aging\\b",
+      "\\bnutrition\\b"
+    ],
+    "parent": [
+      "\\bbaby\\b",
+      "\\binfant\\b",
+      "\\btoddler\\b",
+      "\\bnappy\\b",
+      "\\bdiaper\\b",
+      "\\bformula\\b",
+      "\\bnewborn\\b",
+      "\\bchild\\b",
+      "\\bkids?\\b"
+    ]
+  },
+  "_spec_extraction_rules_comment": "ADAPTER (Phase 2A): vertical spec metrics for ranking. numeric=spec_key from structured catalog specs; flags=token presence in name/specs. Consumed by recommend_utils._extract_candidate_numeric_specs + ranking_rules.",
+  "spec_extraction_rules": {
+    "numeric": [
+      {
+        "out": "strength_mg",
+        "spec_key": "strength_mg",
+        "patterns": []
+      },
+      {
+        "out": "pack_size",
+        "spec_key": "pack_size",
+        "patterns": []
+      }
+    ],
+    "flags": [
+      {
+        "out": "non_drowsy",
+        "any": [
+          "non-drowsy",
+          "non drowsy",
+          "daytime"
+        ]
+      },
+      {
+        "out": "fast_acting",
+        "any": [
+          "fast acting",
+          "fast-acting",
+          "rapid",
+          "express"
+        ]
+      },
+      {
+        "out": "childrens",
+        "any": [
+          "children",
+          "kids",
+          "infant",
+          "paediatric",
+          "pediatric",
+          "junior"
+        ]
+      },
+      {
+        "out": "sugar_free",
+        "any": [
+          "sugar free",
+          "sugar-free"
+        ]
+      }
+    ]
+  },
+  "_ranking_rules_comment": "ADAPTER (Phase 2A): use-case ranking rules. A rule fires when use_case matches; each met condition (metric op value) adds delta+reason. Metrics from spec_extraction_rules. Consumed by recommend_ranking.use_case_rank_adjustment.",
+  "ranking_rules": [
+    {
+      "use_cases": [
+        "cold_flu",
+        "allergy"
+      ],
+      "conditions": [
+        {
+          "metric": "non_drowsy",
+          "op": "truthy",
+          "delta": 1.0,
+          "reason": "non-drowsy for daytime relief"
+        },
+        {
+          "metric": "fast_acting",
+          "op": "truthy",
+          "delta": 0.6,
+          "reason": "fast-acting relief"
+        }
+      ]
+    },
+    {
+      "use_cases": [
+        "pain_relief"
+      ],
+      "conditions": [
+        {
+          "metric": "fast_acting",
+          "op": "truthy",
+          "delta": 0.8,
+          "reason": "fast-acting pain relief"
+        },
+        {
+          "metric": "strength_mg",
+          "op": ">=",
+          "value": 400,
+          "delta": 0.5,
+          "reason": "higher strength for stronger pain"
+        }
+      ]
+    },
+    {
+      "use_cases": [
+        "baby_care"
+      ],
+      "conditions": [
+        {
+          "metric": "childrens",
+          "op": "truthy",
+          "delta": 1.5,
+          "reason": "formulated for children"
+        },
+        {
+          "metric": "sugar_free",
+          "op": "truthy",
+          "delta": 0.4,
+          "reason": "sugar-free is gentler for kids"
+        }
+      ]
+    }
+  ],
+  "_external_research_allowlist_comment": "ADAPTER: per-vertical web-research domain allowlist (illustrative — configure per deployment). Resolved per-request by recommend.py via profile_slot; safe internet search never reaches a domain outside this list.",
+  "external_research_allowlist": [
+    "drugs.com",
+    "nhs.uk",
+    "medlineplus.gov"
+  ],
+  "nqe_use_case_fallback_question": {
+    "text": "To point you to the right product, is this for everyday wellbeing, managing a specific symptom, or ongoing condition support?",
+    "options": [
+      {
+        "id": "use_case_wellbeing",
+        "label": "Everyday wellbeing"
+      },
+      {
+        "id": "use_case_symptom",
+        "label": "Specific symptom relief"
+      },
+      {
+        "id": "use_case_condition",
+        "label": "Ongoing condition support"
+      }
+    ]
+  },
+  "supplier_message_templates": {
+    "reorder": {
+      "subject": "Reorder request — {item}",
+      "body": "Dear {supplier_name},\n\nWe wish to reorder {item}{details}. Please confirm batch availability, expiry dating, unit price, and lead time. Supply must meet current regulatory and cold-chain requirements where applicable.\n\nThis is a draft prepared for pharmacist review before sending.\n\nRegards,\n{sender_name}"
+    },
+    "price_query": {
+      "subject": "Pricing enquiry — {item}",
+      "body": "Dear {supplier_name},\n\nPlease confirm current pricing and any contract/volume terms for {item}. {details}\n\nDraft for review.\n\nRegards,\n{sender_name}"
+    },
+    "stock_check": {
+      "subject": "Stock and expiry check — {item}",
+      "body": "Dear {supplier_name},\n\nPlease confirm available stock, batch numbers, and expiry dating for {item}, and the next restock date. {details}\n\nDraft for review.\n\nRegards,\n{sender_name}"
+    }
+  },
+  "cv_returns_pack": "electronics",
+  "narration_spec_dimensions": [
+    {
+      "label": "Active",
+      "variants": [
+        {
+          "key": "active_ingredient"
+        }
+      ]
+    },
+    {
+      "label": "Strength",
+      "variants": [
+        {
+          "key": "strength_mg",
+          "unit": "mg"
+        }
+      ]
+    },
+    {
+      "label": "Form",
+      "variants": [
+        {
+          "key": "form"
+        }
+      ]
+    },
+    {
+      "label": "Pack",
+      "variants": [
+        {
+          "key": "pack_size",
+          "unit": " ct"
+        }
+      ]
+    }
+  ],
+  "category_keywords": {
+    "vitamin": [
+      "vitamin",
+      "supplement",
+      "multivitamin"
+    ],
+    "pain relief": [
+      "painkiller",
+      "paracetamol",
+      "ibuprofen",
+      "analgesic"
+    ],
+    "first aid": [
+      "bandage",
+      "plaster",
+      "antiseptic",
+      "gauze"
+    ],
+    "skincare": [
+      "moisturiser",
+      "sunscreen",
+      "cleanser",
+      "serum"
+    ],
+    "cold and flu": [
+      "decongestant",
+      "lozenge",
+      "cough syrup"
+    ],
+    "pack": [
+      "pack",
+      "box",
+      "bottle"
+    ]
+  },
+  "demo_fallback_catalog": [
+    {
+      "sku": "PHM-VIT-001",
+      "name": "Vitamin D3 1000IU (180 tablets)",
+      "price": 19.0,
+      "category": "vitamin",
+      "specs": {
+        "count": 180
+      },
+      "price_cents": 1900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-VIT-001"
+    },
+    {
+      "sku": "PHM-PAI-002",
+      "name": "Ibuprofen 200mg (96 pack)",
+      "price": 12.0,
+      "category": "pain relief",
+      "specs": {
+        "strength_mg": 200
+      },
+      "price_cents": 1200,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-PAI-002"
+    },
+    {
+      "sku": "PHM-FAK-003",
+      "name": "First Aid Kit — Family Size",
+      "price": 39.0,
+      "category": "first aid",
+      "specs": {
+        "pieces": 120
+      },
+      "price_cents": 3900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-FAK-003"
+    },
+    {
+      "sku": "PHM-SUN-004",
+      "name": "SPF50+ Sunscreen 200ml",
+      "price": 16.0,
+      "category": "skincare",
+      "specs": {
+        "spf": 50
+      },
+      "price_cents": 1600,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-SUN-004"
+    },
+    {
+      "sku": "PHM-CLD-005",
+      "name": "Cold & Flu Day/Night (48 caps)",
+      "price": 15.0,
+      "category": "cold and flu",
+      "specs": {
+        "count": 48
+      },
+      "price_cents": 1500,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-CLD-005"
+    },
+    {
+      "id": "PHM-VIT-006",
+      "sku": "PHM-VIT-006",
+      "name": "Vitamin C 1000mg (100 tablets)",
+      "price_cents": 1400,
+      "currency": "USD",
+      "category": "vitamin",
+      "stock": 30,
+      "specs": {
+        "count": 100,
+        "strength_mg": 1000
+      }
+    },
+    {
+      "id": "PHM-VIT-007",
+      "sku": "PHM-VIT-007",
+      "name": "Multivitamin Daily (90 capsules)",
+      "price_cents": 2200,
+      "currency": "USD",
+      "category": "vitamin",
+      "stock": 28,
+      "specs": {
+        "count": 90
+      }
+    },
+    {
+      "id": "PHM-PAI-008",
+      "sku": "PHM-PAI-008",
+      "name": "Paracetamol 500mg (100 pack)",
+      "price_cents": 900,
+      "currency": "USD",
+      "category": "pain relief",
+      "stock": 36,
+      "specs": {
+        "strength_mg": 500,
+        "count": 100
+      }
+    },
+    {
+      "id": "PHM-SKN-009",
+      "sku": "PHM-SKN-009",
+      "name": "Moisturising Cream 500ml",
+      "price_cents": 1800,
+      "currency": "USD",
+      "category": "skincare",
+      "stock": 26,
+      "specs": {
+        "volume_ml": 500
+      }
+    },
+    {
+      "id": "PHM-ALG-010",
+      "sku": "PHM-ALG-010",
+      "name": "Antihistamine Allergy Relief (30 tablets)",
+      "price_cents": 1300,
+      "currency": "USD",
+      "category": "allergy",
+      "stock": 30,
+      "specs": {
+        "count": 30
+      }
+    },
+    {
+      "id": "PHM-DIG-011",
+      "sku": "PHM-DIG-011",
+      "name": "Digital Thermometer",
+      "price_cents": 2400,
+      "currency": "USD",
+      "category": "device",
+      "stock": 22,
+      "specs": {
+        "type": "digital"
+      }
+    },
+    {
+      "id": "PHM-HYG-012",
+      "sku": "PHM-HYG-012",
+      "name": "Hand Sanitiser 500ml (70% alcohol)",
+      "price_cents": 800,
+      "currency": "USD",
+      "category": "hygiene",
+      "stock": 50,
+      "specs": {
+        "volume_ml": 500,
+        "alcohol_pct": 70
+      }
+    }
+  ],
+  "delivery_policy": {
+    "currency": "USD",
+    "base_fee_cents": 700,
+    "split_shipment_fee_cents": 400,
+    "free_shipping_threshold_cents": 7500,
+    "backorder_enabled": true
+  },
+  "supplier_routing_rules": [
+    {
+      "match": {
+        "category": "vitamin"
+      },
+      "suppliers": [
+        "SUP-NUTRA"
+      ]
+    },
+    {
+      "match": {
+        "category": "first aid"
+      },
+      "suppliers": [
+        "SUP-MEDSUP"
+      ]
+    }
+  ],
+  "policy_faq": {
+    "returns": "For safety, medicines can't be returned once dispatched unless faulty; unopened non-medicinal items within 30 days.",
+    "shipping": "Free delivery over $75; standard $7. Pharmacist-only lines may need extra verification time.",
+    "warranty": "All products are sourced from licensed wholesalers with full batch traceability."
+  },
+  "budget_floor": 5,
+  "_capabilities_comment": "CAPABILITY REGISTRY (B1, 2026-07-08). The store's declared boundary: what it does NOT offer, the autonomy ceiling, and backorder policy. capability_registry.py turns the query-relevant subset into an authoritative narration-preamble note so ANY model answers honestly for infinite phrasings (model A/B rounds 3-4: every model fabricated payment plans because this fact was never handed to it). Declarative: a new gap = one line here, not a new if-branch in recommend.py. `custom` entries are vertical-specific {slug: {pattern, statement}}; universal slugs (payment_plans/in_house_financing/leasing/trade_in) are detected by the agnostic core.",
+  "capabilities": {
+    "does_not_offer": [
+      "payment_plans",
+      "in_house_financing",
+      "leasing",
+      "trade_in"
+    ],
+    "payment_methods": [
+      "credit/debit card",
+      "HICAPS (health fund)"
+    ],
+    "autonomy_limits": {
+      "max_autonomous_order_value_usd": 2000
+    },
+    "fulfilment": {
+      "backorder": false
+    },
+    "custom": {
+      "prescription_required": {
+        "pattern": "prescription|scheduled|pharmacist[- ]only",
+        "statement": "Prescription and pharmacist-only items require verification before dispatch; the assistant cannot waive this."
+      }
+    }
+  }
+}

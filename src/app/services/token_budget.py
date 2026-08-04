@@ -55,8 +55,13 @@ class TokenBudget:
             self.enabled = get_settings().app_env.lower() in ("production", "prod")
         self.limits = {
             "guest": {
-                "daily_tokens": _env_int("TOKEN_BUDGET_GUEST_DAILY_TOKENS", 1000),
-                "daily_usd": _env_float("TOKEN_BUDGET_GUEST_DAILY_USD", 0.10),
+                # A 1,000-token default admitted only one normal recommendation
+                # turn (the estimator reserves 500 response tokens), breaking
+                # the minimum multi-turn buyer journey in production-shaped
+                # environments. Keep a bounded default, but permit roughly one
+                # short shopping conversation.
+                "daily_tokens": _env_int("TOKEN_BUDGET_GUEST_DAILY_TOKENS", 10000),
+                "daily_usd": _env_float("TOKEN_BUDGET_GUEST_DAILY_USD", 1.00),
             },
             "basic": {
                 "daily_tokens": _env_int("TOKEN_BUDGET_BASIC_DAILY_TOKENS", 10000),

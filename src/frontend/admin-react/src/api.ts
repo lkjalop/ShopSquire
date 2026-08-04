@@ -1,16 +1,14 @@
-export type DecisionRow = {
-  id: string;
-  agent_name: string;
-  valid_from?: string;
-  valid_to?: string | null;
-  system_from?: string;
-  system_to?: string | null;
-  input_data?: any;
-  proposed_action?: any;
-  policy_version?: string;
-  approval_required?: boolean;
-  execution_status?: string;
-};
+// Operator admin API. The shared client + the decisions/fulfillment/marketIntel domains live in
+// ./api/*; this file is the BARREL (re-exports them) plus the remaining admin/BI/security endpoints.
+// (admin bulk extraction into ./api/admin.ts is a mechanical follow-up — it's off the procurement path.)
+import { http, httpResponse, apiBase } from './api/client';
+
+export * from './api/client';        // setClientApiKey, clearClientApiKey, http, httpResponse, apiBase
+export * from './api/decisions';     // Decision* types + decision query/trace/lifecycle
+export * from './api/fulfillment';   // fulfilment cases + PO + economics
+export * from './api/marketIntel';   // replay (market-intelligence)
+export * from './api/accounts';      // Party/account timeline + governed identity proposals
+export * from './api/supplyRisk';    // governed causal supply-risk replay
 
 export type ApprovalItem = {
   id: string;
@@ -20,112 +18,6 @@ export type ApprovalItem = {
   status: 'pending' | 'approved' | 'rejected';
   created_at?: string;
 };
-
-const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;
-const API_KEY_ENV = (import.meta.env.VITE_API_KEY as string) || '';
-let VOLATILE_API_KEY = '';
-const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-function getCsrfToken(): string {
-  if (typeof document === 'undefined') return '';
-  const entry = document.cookie
-    .split(';')
-    .map((c) => c.trim())
-    .find((c) => c.startsWith('ss_csrf='));
-  return entry ? entry.slice('ss_csrf='.length) : '';
-}
-
-function getApiKey(): string {
-  return API_KEY_ENV || VOLATILE_API_KEY || '';
-}
-
-export function setClientApiKey(key: string) {
-  VOLATILE_API_KEY = String(key || '').trim();
-}
-
-export function clearClientApiKey() {
-  VOLATILE_API_KEY = '';
-}
-
-async function http<T>(path: string, opts?: RequestInit): Promise<T> {
-  const url = `${API_BASE.replace(/\/$/, '')}${path}`;
-  const method = String(opts?.method || 'GET').toUpperCase();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (opts?.headers) {
-    if (opts.headers instanceof Headers) {
-      opts.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-    } else if (Array.isArray(opts.headers)) {
-      opts.headers.forEach(([key, value]) => {
-        headers[key] = value;
-      });
-    } else {
-      Object.assign(headers, opts.headers as Record<string, string>);
-    }
-  }
-  const key = getApiKey();
-  if (key) headers['x-api-key'] = key;
-  if (STATE_CHANGING.has(method)) {
-    const csrf = getCsrfToken();
-    if (csrf) headers['X-CSRF-Token'] = csrf;
-  }
-  const r = await fetch(url, { ...opts, headers, credentials: 'include' });
-  if (!r.ok) {
-    let detail = '';
-    try {
-      const body = await r.json();
-      detail = body?.detail ? String(body.detail) : (body?.error ? String(body.error) : '');
-    } catch {
-      detail = '';
-    }
-    const err: any = new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ''}`);
-    err.status = r.status;
-    err.detail = detail;
-    throw err;
-  }
-  return r.json();
-}
-
-async function httpResponse(path: string, opts?: RequestInit): Promise<Response> {
-  const url = `${API_BASE.replace(/\/$/, '')}${path}`;
-  const method = String(opts?.method || 'GET').toUpperCase();
-  const headers: Record<string, string> = {};
-  if (opts?.headers) {
-    if (opts.headers instanceof Headers) {
-      opts.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-    } else if (Array.isArray(opts.headers)) {
-      opts.headers.forEach(([key, value]) => {
-        headers[key] = value;
-      });
-    } else {
-      Object.assign(headers, opts.headers as Record<string, string>);
-    }
-  }
-  const key = getApiKey();
-  if (key) headers['x-api-key'] = key;
-  if (STATE_CHANGING.has(method)) {
-    const csrf = getCsrfToken();
-    if (csrf) headers['X-CSRF-Token'] = csrf;
-  }
-  const r = await fetch(url, { ...opts, headers, credentials: 'include' });
-  if (!r.ok) {
-    let detail = '';
-    try {
-      const body = await r.json();
-      detail = body?.detail ? String(body.detail) : (body?.error ? String(body.error) : '');
-    } catch {
-      detail = '';
-    }
-    const err: any = new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ''}`);
-    err.status = r.status;
-    err.detail = detail;
-    throw err;
-  }
-  return r;
-}
 
 export async function setApiKeyCookie(apiKey: string): Promise<{ ok: boolean }> {
   return http(`/api/v1/auth/api-key-cookie`, {
@@ -199,6 +91,39 @@ export async function fetchLiveFeed(): Promise<{ items: { type: string; id: stri
 
 export async function fetchAnalytics(days: number): Promise<{ days: number; series: any }> {
   return http(`/api/v1/admin/analytics?days=${days}`);
+}
+
+export type MetricEvidence = {
+  metric: string;
+  tenant_id: string;
+  subject_type: string;
+  subject_id: string;
+  value: number | null;
+  unit?: string | null;
+  currency?: string | null;
+  as_of: string;
+  status: 'observed' | 'estimated' | 'simulated' | 'insufficient_data' | 'unavailable';
+  confidence: number;
+  coverage: number;
+  source_count: number;
+  source_records: string[];
+  provenance_chain: string[];
+  definition_version: string;
+  visibility: 'buyer' | 'operator' | 'auditor';
+  reason?: string | null;
+  metadata: Record<string, any>;
+};
+
+export type ExecutiveMetricProjection = {
+  tenant_id: string;
+  metrics: MetricEvidence[];
+  data_quality: Record<string, number | null>;
+  estimates: Record<string, any>;
+  actions: any[];
+};
+
+export async function fetchExecutiveMetrics(): Promise<ExecutiveMetricProjection> {
+  return http(`/api/v1/admin/bi/executive-metrics`);
 }
 
 export type TransactionTimeseriesPoint = {
@@ -434,95 +359,6 @@ export async function updateOrderStatus(orderId: string, status: string): Promis
   });
 }
 
-export async function fetchDecisions(): Promise<DecisionRow[]> {
-  const data = await http<{ results: DecisionRow[] }>(`/api/v1/decisions/query`);
-  return data.results || [];
-}
-
-
-export async function fetchDecisionsFiltered(params: { agent?: string }): Promise<DecisionRow[]> {
-  const q = new URLSearchParams();
-  if (params.agent) q.set('agent_name', params.agent);
-  const data = await http<{ results: DecisionRow[] }>(`/api/v1/decisions/query?${q.toString()}`);
-  return data.results || [];
-}
-
-export type DecisionTraceEvent = {
-  id: string;
-  seq?: number | null;
-  trace_id?: string;
-  event_type?: string;
-  source_type?: string | null;
-  source_id?: string | null;
-  target_type?: string | null;
-  target_id?: string | null;
-  payload?: any;
-  created_at?: string;
-};
-
-export type DecisionTraceQuery = {
-  decision_id: string;
-  timestamp?: string;
-  input_query?: string | null;
-  intent_analysis?: any;
-  agent_chain?: any[];
-  rag_context?: any;
-  evidence?: any;
-  recommendation?: any;
-  policy_gates?: any;
-  bitemporal?: any;
-  model_selection?: any;
-  events?: DecisionTraceEvent[];
-};
-
-export type DecisionCausalGraph = {
-  trace_id: string;
-  nodes: Array<{
-    id: string;
-    event_type?: string;
-    source_type?: string;
-    source_id?: string;
-    target_type?: string;
-    target_id?: string;
-    created_at?: string;
-  }>;
-  edges: Array<{ from: string; to: string; type?: string }>;
-};
-
-export async function fetchDecisionTraceQuery(traceId: string): Promise<DecisionTraceQuery> {
-  return http(`/api/v1/decisions/${encodeURIComponent(traceId)}/query?include_events=true`);
-}
-
-export async function fetchDecisionSession(sessionId: string): Promise<{ session_id: string; count: number; decisions: any[] }> {
-  return http(`/api/v1/decisions/session/${encodeURIComponent(sessionId)}`);
-}
-
-export async function fetchDecisionCausal(traceId: string): Promise<DecisionCausalGraph> {
-  return http(`/api/v1/decisions/trace/${encodeURIComponent(traceId)}/causal`);
-}
-
-export async function fetchInterleavingSummary(traceId: string): Promise<{ summary: any }> {
-  return http(`/api/v1/admin/interleaving/${encodeURIComponent(traceId)}/summary`);
-}
-
-export async function approveDecision(decisionId: string, approvedBy: string): Promise<void> {
-  await http(`/api/v1/decisions/${encodeURIComponent(decisionId)}/approve?approved_by=${encodeURIComponent(approvedBy)}`, { method: 'POST' });
-}
-
-export async function rejectDecision(decisionId: string, rejectedBy: string, reason?: string): Promise<void> {
-  const q = new URLSearchParams();
-  q.set('rejected_by', rejectedBy);
-  if (reason) q.set('reason', reason);
-  await http(`/api/v1/decisions/${encodeURIComponent(decisionId)}/reject?${q.toString()}`, { method: 'POST' });
-}
-
-export async function reopenDecision(decisionId: string, actor: string, comment?: string): Promise<void> {
-  const q = new URLSearchParams();
-  q.set('actor', actor);
-  if (comment) q.set('comment', comment);
-  await http(`/api/v1/decisions/${encodeURIComponent(decisionId)}/reopen?${q.toString()}`, { method: 'POST' });
-}
-
 export async function fetchFlags(): Promise<Record<string, any>> {
   return http(`/api/v1/admin/flags`);
 }
@@ -604,6 +440,62 @@ export async function fetchInventoryExternalStock(limit = 200): Promise<{ items:
 export async function fetchInventoryConnectorSummary(limitSamples = 5): Promise<{ items: any[] }> {
   return http(`/api/v1/admin/inventory/connectors/summary?limit_samples=${limitSamples}`);
 }
+
+export type InventoryProjectionStatus = {
+  tenant_id: string;
+  source: string | null;
+  runs: Array<{
+    id: string;
+    source: string;
+    projection_version: number;
+    input_count: number;
+    projection_hash: string;
+    status: 'ready' | 'quarantined' | 'insufficient';
+    started_at: string;
+    finished_at: string;
+  }>;
+  exceptions: Array<{
+    id: string;
+    source: string;
+    projection_run_id: string;
+    exception_type: string;
+    observation_id?: string | null;
+    details: Record<string, any>;
+    created_at: string;
+  }>;
+  balance_summary: Array<{ source: string; status: string; row_count: number }>;
+  execution_policy: {
+    ready_required: true;
+    quarantined_projection_can_execute: false;
+    hidden_compensation_allowed: false;
+  };
+};
+
+export const fetchInventoryProjectionStatus = (source = '') =>
+  http<InventoryProjectionStatus>(
+    `/api/v1/admin/inventory/projections${source ? `?source=${encodeURIComponent(source)}` : ''}`,
+  );
+
+export const rebuildInventoryProjection = (source: string, defaultLocationId = 'location:primary') =>
+  http<{
+    run_id: string;
+    source: string;
+    status: 'ready' | 'quarantined' | 'insufficient';
+    projection_hash: string;
+    input_count: number;
+    balance_count: number;
+    exception_count: number;
+    execution_allowed: boolean;
+  }>(
+    '/api/v1/admin/inventory/projections/rebuild',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        source,
+        default_location_id: defaultLocationId,
+      }),
+    },
+  );
 
 export async function fetchSupplierRiskSummary(hours = 24 * 7): Promise<{
   window_hours: number;
@@ -996,6 +888,7 @@ export async function fetchMaestroBoundaries(opts?: {
 }
 
 
+export async function runEmailSecurityReplayLab(payload?: {
   tenant_id?: string;
   incident_ids?: string[];
   decision_ids?: string[];
@@ -1305,11 +1198,11 @@ export async function fetchSCSwarm(jobId: string): Promise<SCSwarmJob> {
 }
 
 export function streamSCScenario(id: string): EventSource {
-  const url = `${API_BASE.replace(/\/$/, '')}/api/v1/admin/supply-chain-sim/run/${encodeURIComponent(id)}/stream`;
+  const url = `${apiBase()}/api/v1/admin/supply-chain-sim/run/${encodeURIComponent(id)}/stream`;
   return new EventSource(url, { withCredentials: true });
 }
 
 export function streamSCAll(): EventSource {
-  const url = `${API_BASE.replace(/\/$/, '')}/api/v1/admin/supply-chain-sim/run-all/stream`;
+  const url = `${apiBase()}/api/v1/admin/supply-chain-sim/run-all/stream`;
   return new EventSource(url, { withCredentials: true });
 }

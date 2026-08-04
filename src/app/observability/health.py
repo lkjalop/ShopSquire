@@ -13,6 +13,27 @@ _CACHE: Dict[str, Any] = {"ts": 0, "payload": None}
 _CACHE_TTL_SECONDS = 30
 
 
+def dependency_health_cached_snapshot() -> Dict[str, Any]:
+    """Return observed health without performing network or database probes."""
+    payload = _CACHE.get("payload")
+    if not isinstance(payload, dict):
+        return {
+            "timestamp": None,
+            "overall": "unknown",
+            "dependencies": {},
+            "age_seconds": None,
+            "stale": True,
+        }
+    now = int(time.time())
+    observed_at = int(_CACHE.get("ts", 0) or 0)
+    age = max(0, now - observed_at) if observed_at else None
+    return {
+        **payload,
+        "age_seconds": age,
+        "stale": age is None or age >= _CACHE_TTL_SECONDS,
+    }
+
+
 def _check_db() -> Dict[str, Any]:
     start = time.time()
     try:
@@ -24,15 +45,35 @@ def _check_db() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": str(exc), "last_ok": None, "latency_ms": None}
 
 
+# up/down transition memory so a MID-RUN Redis death produces ONE screaming log line instead of
+# silent per-call timeouts (the outage mode that cost days of confused latency numbers).
+_REDIS_LAST_STATUS: Dict[str, Any] = {"status": None}
+
+
 def _check_redis() -> Dict[str, Any]:
+    import logging as _l
     start = time.time()
     try:
         redis_client = get_redis()
+        # The DummyRedis dev fallback answers every call in-process — it must NOT read as healthy,
+        # or a memory-less server looks fine while losing context every turn (observed live).
+        if type(redis_client).__name__ == "DummyRedis":
+            raise ConnectionError("dummy_fallback: Redis was unreachable when first used; "
+                                  "session memory is a no-op stub")
         if hasattr(redis_client, "ping"):
             redis_client.ping()
         latency_ms = int((time.time() - start) * 1000)
+        if _REDIS_LAST_STATUS["status"] == "unhealthy":
+            _l.getLogger("shopsquire.health").warning("memory store (Redis) RECOVERED — session memory active again")
+        _REDIS_LAST_STATUS["status"] = "healthy"
         return {"status": "healthy", "latency_ms": latency_ms, "last_ok": int(time.time())}
     except Exception as exc:
+        if _REDIS_LAST_STATUS["status"] != "unhealthy":
+            _l.getLogger("shopsquire.health").critical(
+                "MEMORY STORE (Redis) WENT DOWN mid-run: %s — session memory is GONE (context loss "
+                "every turn) and every request now pays connection-timeout latency. "
+                "Fix: Docker Desktop up, then `docker compose up -d redis`.", str(exc)[:120])
+        _REDIS_LAST_STATUS["status"] = "unhealthy"
         return {"status": "unhealthy", "error": str(exc), "last_ok": None, "latency_ms": None}
 
 

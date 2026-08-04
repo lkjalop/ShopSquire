@@ -7,12 +7,13 @@ import unicodedata
 from typing import Any, Dict, List, Tuple
 
 from src.app.config import get_settings, load_feature_flags
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.security.email_security_rules import extract_domain
 
 
 def _thresholds() -> Dict[str, Any]:
     try:
-        return (load_feature_flags(get_settings().feature_flags_path) or {}).get("SECURITY_THRESHOLDS", {}) or {}
+        return (_ff_get_flags() or {}).get("SECURITY_THRESHOLDS", {}) or {}
     except Exception:
         return {}
 

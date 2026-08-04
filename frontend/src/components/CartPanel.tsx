@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './CartPanel.module.css';
 import type { Product } from '../App';
-import { apiUrl, safeJson } from '../lib/api';
+import { apiUrl, safeJson, confirmCartSourcing, commitFulfillmentCase } from '../lib/api';
+import { sourcedCasesFrom, sourcedCaseCountFrom } from '../lib/sourcing';
+import { withRetry } from '../lib/retry';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
+import { ACCESSORY_UPSELL_TRACE_LABEL } from '../lib/tracePresentation';
+import SplitFulfillmentCard from './SplitFulfillmentCard';
 
 type CartItem = { sku: string; quantity: number; price_cents?: number; name?: string; specs?: Record<string, any> | null };
 type BundleSavings = {
@@ -29,7 +33,16 @@ export default function CartPanel({
   onRemove,
   onClear,
   onAdd,
+  onSetQty,
+  traceId,
   onTraceId,
+  onSourcingTraceId,
+  priorSkus,
+  onClearPrior,
+  sourcingRequirements,
+  sourcingOrderId,
+  confirmedSourcingOrderId,
+  onConfirmedSourcingOrderId,
 }: {
   uid: string;
   cart: CartState | null;
@@ -37,7 +50,16 @@ export default function CartPanel({
   onRemove: (sku: string) => Promise<void>;
   onClear: () => Promise<void>;
   onAdd: (sku: string) => Promise<void>;
+  onSetQty?: (sku: string, qty: number) => Promise<void>;
+  traceId?: string | null;
   onTraceId?: (traceId: string | null) => void;
+  onSourcingTraceId?: (traceId: string) => void;
+  priorSkus?: string[];                    // items carried over from a previous session (App snapshots)
+  onClearPrior?: () => Promise<void>;      // remove ONLY those, keeping what was added this session
+  sourcingRequirements?: Record<string, any>; // deadline/use-case/ship-to from the recommendation turn
+  sourcingOrderId?: string | null;             // stable PR identity; cart_id is only a legacy fallback
+  confirmedSourcingOrderId?: string | null;    // survives panel unmounts during conversational amendments
+  onConfirmedSourcingOrderId?: (orderId: string | null) => void;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const [upsells, setUpsells] = useState<Product[]>([]);
@@ -111,19 +133,150 @@ export default function CartPanel({
   }, [API_KEY, uid, upsellQuery, cartSkus]);
 
   useEffect(() => {
-    onTraceId?.(upsellTraceId);
-  }, [upsellTraceId, onTraceId]);
+    // Do NOT let the checkout-upsell trace REPLACE the main recommendation/procurement decision trace:
+    // the Decision Trace the buyer opens must stay pinned to the laptop/bulk decision, not accessory
+    // upsells — otherwise Events / Why-Recommended / the Procurement tab tell the wrong story. Only
+    // surface the upsell trace upward when there is NO main trace to preserve (the upsell trace id is
+    // still shown inline below regardless).
+    if (upsellTraceId && !traceId) onTraceId?.(upsellTraceId);
+  }, [upsellTraceId, traceId, onTraceId]);
 
   const items = cart?.items || [];
   const bundle = cart?.bundle_savings;
-  const goToCheckout = () => {
-    // Persist cart snapshot so the checkout page can show an order summary
+  const [sourcingNote, setSourcingNote] = useState<string | null>(null);
+  const [sourcedSplitKey, setSourcedSplitKey] = useState<string | null>(null);
+  const [checkingSourcing, setCheckingSourcing] = useState(false);
+  // Pre-payment split-fulfilment confirmation. The card reports whether the cart splits (a supplier-backed
+  // second shipment exists) and whether the buyer has confirmed the plan; checkout is gated on that confirm.
+  const [splitHasSplit, setSplitHasSplit] = useState(false);
+  const [splitConfirmed, setSplitConfirmed] = useState(false);
+  // A stable signature of the cart lines (sku:qty) — the split card re-fetches whenever this changes.
+  const splitKey = useMemo(
+    () => (cart?.items || []).map((i) => `${i.sku}:${i.quantity}`).sort().join('|'),
+    [cart],
+  );
+  const sourcingNeedsReview = Boolean(sourcedSplitKey && sourcedSplitKey !== splitKey);
+  useEffect(() => {
+    if (items.length === 0) onConfirmedSourcingOrderId?.(null);
+  }, [items.length, onConfirmedSourcingOrderId]);
+  const nameForSku = (sku: string): string => {
+    const it = (cart?.items || []).find((x) => x.sku === sku);
+    return it ? productDisplayName(it) : sku;
+  };
+  const onSplitState = (hasSplit: boolean, confirmed: boolean) => {
+    setSplitHasSplit(hasSplit);
+    setSplitConfirmed(confirmed);
+  };
+  // The delivery-plan card is the real CTA; the footer "Confirm delivery plan first" is a helper that
+  // scrolls to it (rather than a dead disabled button that looks broken).
+  const splitCardRef = useRef<HTMLDivElement>(null);
+  const scrollToPlan = () => splitCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Confirm sourcing for the CURRENT cart, transparently SUPERSEDING when the cart CHANGED since a prior
+  // confirm of this same order. Without this the backend returns `amend_required` + the STALE cases (the
+  // previous order's SKUs/qty), and the Procurement tab would open the OLD RFQ — the wrong story for a
+  // demo. On amend we re-source with supersede=true so the returned (nested `created`) cases match the
+  // current cart. Returns null when a supplier was already engaged (past the send gate) — that is an
+  // operator-driven amendment and must not be auto-superseded.
+  const sourceCurrentCart = async () => {
+    // A cart survives "clear my cart", so cart_id alone cannot identify one procurement journey.
+    // Prefer the immutable recommendation trace when the core did not issue an explicit procurement
+    // request id; subsequent amendments keep that trace pinned and therefore retain continuity.
+    const cid = confirmedSourcingOrderId
+      || sourcingOrderId
+      || traceId
+      || cart?.cart_id;
+    if (!cid) return null;
+    // Pass the current decision trace so the sourcing case records source_trace_id — the Decision Trace
+    // → Procurement tab resolves the drafted RFQ by-trace (was null → 404 → empty tab).
+    const lines = items.map((i) => ({ item_ref: i.sku, quantity: i.quantity }));
+    let res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, false, sourcingRequirements);
+    if (res.amend_required) {
+      res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, true, sourcingRequirements);
+    }
+    if (res.status !== 'operator_required') {
+      onConfirmedSourcingOrderId?.(cid);
+    }
+    return res.status === 'operator_required' ? null : res;
+  };
+  // GATE 1 on "Confirm delivery plan": committing the plan IS the buyer commitment — it creates the
+  // sourcing cases and auto-drafts the supplier RFQs (human-gated, never sent). Payment capture is a
+  // LATER, PCI-gated step — a demo can show the drafted RFQ without ever touching payment credentials.
+  const confirmPlanSourcing = async () => {
     try {
-      sessionStorage.setItem('shopsquire_checkout_cart', JSON.stringify(cart));
+      if (!cart?.cart_id || !items.length) return;
+      const res = await sourceCurrentCart();
+      if (!res) {
+        setSourcingNote('This order changed after a supplier was already engaged — an operator must amend it. Nothing was re-sent.');
+        return;
+      }
+      const cases = sourcedCasesFrom(res);
+      const caseCount = sourcedCaseCountFrom(res);
+      if (traceId && caseCount > 0) onSourcingTraceId?.(traceId);
+      setSourcedSplitKey(splitKey);
+      if (res.idempotent) {
+        setSourcingNote(`${caseCount} sourcing request(s) were already confirmed earlier. No duplicate RFQ was created; open the original case in Admin to review its draft and audit.`);
+        return;
+      }
+      let committed = 0;
+      for (const c of cases) {
+        // retry once: a multi-case commit burst can hit a transient write lock — without the retry one
+        // supplier's case silently stays uncommitted and its RFQ is never drafted (observed live).
+        try {
+          await withRetry(() => commitFulfillmentCase((c as any).case_id, uid));
+          committed += 1;
+        } catch {
+          // Report the partial failure below. The case remains visible in the operator queue for retry.
+        }
+      }
+      if (committed === caseCount && caseCount > 0) {
+        setSourcingNote(`${caseCount} sourcing request(s) committed — supplier RFQ(s) drafted for human review (nothing sent). Open Decision Trace → Procurement to see the drafts + audit.`);
+        // Do NOT overwrite the decision trace id with order_group_id here: the Procurement tab resolves
+        // the case via /cases/by-trace/{source_trace_id}; traceId already IS that trace.
+      } else if (caseCount > 0) {
+        setSourcingNote(`${committed} of ${caseCount} sourcing request(s) committed. The remaining case(s) need operator retry; no draft is claimed for them.`);
+      } else if (res.status === 'superseded') {
+        setSourcingNote('The previous supplier request was retired because the updated cart is fully in stock. Nothing new was drafted or sent.');
+      }
+    } catch {
+      setSourcingNote('The delivery plan was confirmed, but sourcing could not be recorded. Retry or ask an operator; no supplier message was sent.');
+    }
+  };
+  const splitBlocksCheckout = splitHasSplit && !splitConfirmed;
+
+  const proceedToCheckout = () => {
+    // Persist cart snapshot (+ uid, so checkout can create the REAL order server-side)
+    try {
+      sessionStorage.setItem('shopsquire_checkout_cart', JSON.stringify({ ...cart, uid }));
     } catch {
       // sessionStorage unavailable — continue anyway
     }
     window.location.href = '/ui/checkout';
+  };
+  // Bridge: at checkout, route any SHORT-STOCK cart lines to sourcing (GATE 1). In-stock lines create no
+  // case; idempotent on cart_id; rate-limited server-side; best-effort (never blocks checkout). When a
+  // sourcing request is created we pause so the buyer sees it, then they proceed to checkout for the rest.
+  const goToCheckout = async () => {
+    setCheckingSourcing(true);
+    try {
+      if (cart?.cart_id && items.length) {
+        const res = await sourceCurrentCart();  // amend-aware: supersedes stale cases if the cart changed
+        if (!res) {
+          setSourcingNote('This order changed after a supplier was already engaged — an operator must amend it before checkout.');
+          setCheckingSourcing(false);
+          return;
+        }
+        const caseCount = sourcedCaseCountFrom(res);
+        if (caseCount > 0) {
+          setSourcingNote(`${caseCount} item group(s) are short on stock — a sourcing request was created (no supplier contacted yet). In-stock items can check out now.`);
+          setCheckingSourcing(false);
+          return;
+        }
+      }
+    } catch {
+      // sourcing is best-effort — fall through to normal checkout
+    }
+    setCheckingSourcing(false);
+    proceedToCheckout();
   };
   const openApprovalReview = () => {
     const approvalId = String(bundle?.approval_id || '').trim();
@@ -194,18 +347,45 @@ export default function CartPanel({
                 <div className={styles.name}>{productDisplayName(it)}</div>
                 {productSubtitle(it) && <div className={styles.sku}>{productSubtitle(it)}</div>}
                 <div className={styles.sku}>{it.sku}</div>
-                <div className={styles.qty}>Qty: {it.quantity}</div>
+                {onSetQty ? (
+                  <div className={styles.qty} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>Qty:</span>
+                    <button type="button" aria-label={`decrease ${it.sku}`} className={styles.btn}
+                            disabled={it.quantity <= 1}
+                            onClick={() => onSetQty(it.sku, it.quantity - 1)}>−</button>
+                    <span data-testid={`qty-${it.sku}`}>{it.quantity}</span>
+                    <button type="button" aria-label={`increase ${it.sku}`} className={styles.btn}
+                            onClick={() => onSetQty(it.sku, it.quantity + 1)}>＋</button>
+                  </div>
+                ) : (
+                  <div className={styles.qty}>Qty: {it.quantity}</div>
+                )}
               </div>
               <div className={styles.rowRight}>
-                <div className={styles.price}>
-                  {typeof it.price_cents === 'number' ? `$${(it.price_cents / 100).toLocaleString()}` : '-'}
-                </div>
+                {typeof it.price_cents === 'number' ? (
+                  <div className={styles.price} data-testid={`line-price-${it.sku}`}>
+                    {it.quantity > 1 ? (
+                      <>
+                        <span style={{ color: '#6b7280', fontSize: 12, fontWeight: 400 }}>
+                          {it.quantity} × ${(it.price_cents / 100).toLocaleString()} = </span>
+                        ${((it.price_cents * it.quantity) / 100).toLocaleString()}
+                      </>
+                    ) : `$${(it.price_cents / 100).toLocaleString()}`}
+                  </div>
+                ) : (
+                  <div className={styles.price}>-</div>
+                )}
                 <div className={styles.btnRow}>
                   <button className={styles.btn} onClick={() => onRemove(it.sku)}>Remove</button>
                 </div>
               </div>
             </div>
           ))}
+
+          <div ref={splitCardRef}>
+            <SplitFulfillmentCard uid={uid} refreshKey={splitKey} nameFor={nameForSku} onSplitState={onSplitState}
+                                  onConfirmed={confirmPlanSourcing} />
+          </div>
 
           <div className={styles.row}>
             <div className={styles.rowLeft}>
@@ -217,10 +397,50 @@ export default function CartPanel({
               <div className={styles.btnRow}>
                 <button className={styles.btn} onClick={() => onRefresh()}>Refresh</button>
                 <button className={styles.btn} onClick={() => onClear()}>Clear</button>
-                <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={goToCheckout}>Checkout</button>
+                {(priorSkus?.length ?? 0) > 0 && onClearPrior && (
+                  // the two-choice clear: drop ONLY the items carried over from a previous session,
+                  // keeping everything the buyer added this session
+                  <button className={styles.btn} data-testid="cart-clear-prior" onClick={() => onClearPrior()}
+                          title="Remove only the items carried over from your previous session — keeps what you added just now">
+                    Clear previous ({priorSkus!.length})
+                  </button>
+                )}
+                {sourcingNeedsReview
+                  ? <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-confirm-updated-plan"
+                            disabled={checkingSourcing} onClick={confirmPlanSourcing}>
+                      {checkingSourcing ? 'Updating plan…' : 'Confirm updated delivery plan'}
+                    </button>
+                  : sourcingNote
+                  ? <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-proceed"
+                            onClick={proceedToCheckout}>Continue to checkout</button>
+                  : splitBlocksCheckout
+                    // NOT the primary CTA and NOT a dead disabled button — a secondary helper that jumps to
+                    // the real "Confirm delivery plan" control above so the buyer knows what to do next.
+                    ? <button className={styles.btn} data-testid="cart-confirm-plan-first" onClick={scrollToPlan}
+                              title="Jump to the delivery plan above and confirm it to unlock checkout">
+                        ↑ Confirm delivery plan first
+                      </button>
+                    : <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-checkout"
+                              disabled={checkingSourcing} onClick={goToCheckout}>
+                        {checkingSourcing ? 'Checking stock…' : 'Checkout'}
+                      </button>}
               </div>
             </div>
           </div>
+          {sourcingNote && !sourcingNeedsReview && (
+            <div data-testid="cart-sourcing-note" role="status"
+                 style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #fcd34d',
+                          background: '#fffbeb', fontSize: 13 }}>
+              {sourcingNote}
+            </div>
+          )}
+          {sourcingNeedsReview && (
+            <div data-testid="cart-sourcing-stale" role="status"
+                 style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #f59e0b',
+                          background: '#fffbeb', fontSize: 13 }}>
+              Your cart changed after the supplier plan was confirmed. Confirm the updated plan before checkout; the prior RFQ will be superseded and nothing is sent automatically.
+            </div>
+          )}
         </>
       )}
 
@@ -307,7 +527,7 @@ export default function CartPanel({
 
       {upsellTraceId && (
         <div className={styles.muted}>
-          Decision Trace available: <span className={styles.sku}>{upsellTraceId}</span>
+          {ACCESSORY_UPSELL_TRACE_LABEL}: <span className={styles.sku}>{upsellTraceId}</span>
         </div>
       )}
     </div>

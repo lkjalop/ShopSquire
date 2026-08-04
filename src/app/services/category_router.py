@@ -1,126 +1,141 @@
-"""Product category detection and NQE template routing.
+"""Product category detection and NQE template routing — VERTICAL-BLIND CORE.
 
 Given a user query (and optional image labels), detects the product
 category (e.g., laptop, phone, clothing, kitchen, furniture) and
 returns the appropriate NQE template bank key for the template store.
+
+This module carries NO flavour. The category/brand/use-case/spec patterns and the
+image-label map are resolved PER REQUEST from the active StoreProfile (cached by
+profile id, like store_profile). An electronics tenant gets electronics patterns
+(config/store_profiles/electronics.json `entity_*` slots); a fashion/pharmacy tenant
+derives its patterns from its own manufacturers / use_case_patterns / product_type_rules
+via the accessor fallbacks — so a non-electronics request is NEVER scored against
+electronics brands or use-cases.
 """
 from __future__ import annotations
 
 import re
 from collections import Counter
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# ── Category keyword maps (order matters: first match wins) ──────
-_CATEGORY_PATTERNS: List[Tuple[str, List[str]]] = [
-    ("fresh_produce", [
-        r"\bfruit\b", r"\bapple\b", r"\bbanana\b", r"\borange\b", r"\bpear\b",
-        r"\bmango\b", r"\bgrape\b", r"\bmelon\b", r"\bberry\b", r"\bstrawberry\b",
-        r"\bblueberry\b", r"\braspberry\b", r"\bavocado\b", r"\bvegetable\b",
-        r"\blettuce\b", r"\bspinach\b", r"\bbroccoli\b", r"\bcarrot\b",
-        r"\bcabbage\b", r"\bcauliflower\b", r"\btomato\b", r"\bcucumber\b",
-        r"\bonion\b", r"\bpotato\b", r"\bpumpkin\b", r"\bproduce\b",
-        r"\bgrocery\b", r"\bfresh\s?produce\b",
-    ]),
-    # Electronics — computers
-    ("laptop", [
-        r"\blaptops?\b", r"\bnotebooks?\b", r"\bultrabook\b", r"\bmacbook\b",
-        r"\bchromebook\b", r"\bthinkpad\b", r"\bideapad\b", r"\blegion\b",
-        # Laptop brand / gaming keywords used as image labels or in queries
-        r"\bmsi\b", r"\brazer\b", r"\balienware\b", r"\bomen\b",
-        r"\bvivobook\b", r"\bzenbook\b", r"\brog\b", r"\btuf\b",
-        r"\bspectre\b", r"\benvy\b", r"\bvictus\b",
-        r"\bgaming\s+laptop\b", r"\bgaming\s+notebook\b",
-    ]),
-    ("desktop", [r"\bdesktop\b", r"\bgaming\s?pc\b", r"\btower\b", r"\bmini\s?pc\b"]),
-    ("phone", [r"\bphone\b", r"\bsmartphone\b", r"\biphone\b", r"\bgalaxy\b", r"\bpixel\b", r"\bmobile\b"]),
-    ("tablet", [r"\btablet\b", r"\bipad\b", r"\bgalaxy\s?tab\b"]),
-    ("monitor", [r"\bmonitor\b", r"\bdisplay\b", r"\bscreen\b"]),
-    # Appliances / kitchen
-    ("kitchen", [
-        r"\bkitchen\b", r"\bmixer\b", r"\bblender\b", r"\btoaster\b",
-        r"\bmicrowave\b", r"\bfridge\b", r"\brefrigerator\b", r"\bdishwasher\b",
-        r"\boven\b", r"\bcoffee\s?maker\b", r"\bair\s?fryer\b",
-    ]),
-    # Home / furniture
-    ("furniture", [
-        r"\bsofa\b", r"\bcouch\b", r"\bbed\b", r"\bmattress\b", r"\bdesk\b",
-        r"\bchair\b", r"\bbookshelf\b", r"\bwardrobe\b", r"\btable\b",
-    ]),
-    # Clothing / fashion
-    ("clothing", [
-        r"\bshirt\b", r"\bt-?shirt\b", r"\bjacket\b", r"\bdress\b", r"\bshoes?\b",
-        r"\bsneaker\b", r"\bjeans\b", r"\bpants\b", r"\bskirt\b", r"\bcoat\b",
-        r"\bsweater\b", r"\bhoodie\b", r"\bboots?\b",
-    ]),
-    # TV / AV
-    ("tv", [r"\btelevision\b", r"\btv\b", r"\boled\b", r"\bqled\b", r"\bsoundbar\b"]),
-    # Accessories / peripherals
-    ("accessory", [
-        r"\bkeyboard\b", r"\bmouse\b", r"\bcharger\b", r"\badapter\b",
-        r"\bdock\b", r"\bheadset\b", r"\bearbuds?\b", r"\bheadphone\b",
-        r"\bwebcam\b", r"\bspeaker\b",
-    ]),
-]
+# ── Per-request (active-vertical) pattern resolution ─────────────────────────────
+# Each accessor reads the active profile's explicit `entity_*` slot if present, else
+# derives an equivalent from the profile's existing data (so non-electronics verticals
+# work without hand-authored entity slots). Cached by resolved profile id.
 
-_COMPILED_PATTERNS: List[Tuple[str, List[re.Pattern]]] = [
-    (cat, [re.compile(p, re.IGNORECASE) for p in pats])
-    for cat, pats in _CATEGORY_PATTERNS
-]
+@lru_cache(maxsize=8)
+def _compiled_category_patterns_for(pid: str) -> List[Tuple[str, List[re.Pattern]]]:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("entity_category_patterns", profile_id=pid, default=None)
+    if isinstance(raw, list) and raw:
+        return [(slug, [re.compile(p, re.IGNORECASE) for p in pats]) for slug, pats in raw]
+    # Fallback: derive from product_type_rules (type -> its single pattern).
+    rules = profile_slot("product_type_rules", profile_id=pid, default=None) or []
+    out: List[Tuple[str, List[re.Pattern]]] = []
+    for r in rules:
+        t = (r or {}).get("type")
+        pat = (r or {}).get("pattern")
+        if t and pat:
+            out.append((str(t), [re.compile(pat, re.IGNORECASE)]))
+    return out
 
-# Image labels (from CV) → category hints
-_IMAGE_LABEL_MAP: Dict[str, str] = {
-    "fruit": "fresh_produce",
-    "apple": "fresh_produce",
-    "banana": "fresh_produce",
-    "orange": "fresh_produce",
-    "pear": "fresh_produce",
-    "mango": "fresh_produce",
-    "grape": "fresh_produce",
-    "strawberry": "fresh_produce",
-    "blueberry": "fresh_produce",
-    "raspberry": "fresh_produce",
-    "avocado": "fresh_produce",
-    "vegetable": "fresh_produce",
-    "lettuce": "fresh_produce",
-    "spinach": "fresh_produce",
-    "broccoli": "fresh_produce",
-    "carrot": "fresh_produce",
-    "cabbage": "fresh_produce",
-    "cauliflower": "fresh_produce",
-    "tomato": "fresh_produce",
-    "cucumber": "fresh_produce",
-    "onion": "fresh_produce",
-    "potato": "fresh_produce",
-    "produce": "fresh_produce",
-    "grocery": "fresh_produce",
-    "laptop": "laptop", "notebook": "laptop", "keyboard": "accessory",
-    # Laptop brand labels that may appear from CV or filename parsing
-    "msi": "laptop", "razer": "laptop", "alienware": "laptop",
-    "rog": "laptop", "tuf gaming": "laptop", "vivobook": "laptop",
-    "spectre": "laptop", "envy": "laptop", "victus": "laptop",
-    "gaming laptop": "laptop", "gaming notebook": "laptop",
-    "phone": "phone", "cell phone": "phone", "smartphone": "phone",
-    "television": "tv", "tv": "tv", "monitor": "monitor",
-    "sofa": "furniture", "couch": "furniture", "bed": "furniture",
-    "shirt": "clothing", "dress": "clothing", "shoe": "clothing",
-    "refrigerator": "kitchen", "oven": "kitchen", "microwave": "kitchen",
-}
+
+@lru_cache(maxsize=8)
+def _image_label_map_for(pid: str) -> Dict[str, str]:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("entity_image_label_map", profile_id=pid, default=None)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+@lru_cache(maxsize=8)
+def _brand_patterns_for(pid: str) -> List[Tuple[str, re.Pattern]]:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("entity_brand_patterns", profile_id=pid, default=None)
+    if isinstance(raw, dict) and raw:
+        return [(b, re.compile(p, re.IGNORECASE)) for b, p in raw.items()]
+    # Fallback: derive from manufacturers (name + aliases + product lines).
+    mans = profile_slot("manufacturers", profile_id=pid, default=None) or {}
+    out: List[Tuple[str, re.Pattern]] = []
+    for name, spec in mans.items():
+        toks = [name] + list((spec or {}).get("aliases") or []) + list((spec or {}).get("lines") or [])
+        toks = [re.escape(str(t)) for t in toks if t]
+        if toks:
+            out.append((str(name), re.compile(r"\b(" + "|".join(toks) + r")\b", re.IGNORECASE)))
+    return out
+
+
+@lru_cache(maxsize=8)
+def _use_case_patterns_for(pid: str) -> List[Tuple[str, re.Pattern]]:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("entity_use_case_patterns", profile_id=pid, default=None)
+    if isinstance(raw, dict) and raw:
+        return [(uc, re.compile(p, re.IGNORECASE)) for uc, p in raw.items()]
+    # Fallback: derive from the profile's use_case_patterns slot.
+    ucp = profile_slot("use_case_patterns", profile_id=pid, default=None) or {}
+    return [(uc, re.compile(p, re.IGNORECASE)) for uc, p in ucp.items()]
+
+
+@lru_cache(maxsize=8)
+def _spec_patterns_for(pid: str) -> List[Tuple[str, str, re.Pattern]]:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("entity_spec_patterns", profile_id=pid, default=None)
+    if isinstance(raw, list) and raw:
+        return [(n, u, re.compile(p, re.IGNORECASE)) for n, u, p in raw]
+    return []
+
+
+@lru_cache(maxsize=8)
+def _category_preference_for(pid: str) -> List[str]:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("entity_category_preference", profile_id=pid, default=None)
+    return [str(x) for x in raw] if isinstance(raw, list) else []
+
+
+@lru_cache(maxsize=8)
+def _template_banks_for(pid: str) -> frozenset:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("entity_template_banks", profile_id=pid, default=None)
+    return frozenset(str(x) for x in raw) if isinstance(raw, list) else frozenset()
+
+
+def _active_pid() -> str:
+    from src.app.platform.store_profile import active_profile_id
+    return active_profile_id()
+
+
+def reset_cache() -> None:
+    """Clear the per-profile pattern caches (test isolation / profile reload)."""
+    for fn in (
+        _compiled_category_patterns_for,
+        _image_label_map_for,
+        _brand_patterns_for,
+        _use_case_patterns_for,
+        _spec_patterns_for,
+        _category_preference_for,
+        _template_banks_for,
+    ):
+        try:
+            fn.cache_clear()
+        except Exception:
+            pass
 
 
 def category_from_image_labels(image_labels: List[str] | None = None) -> str | None:
+    label_map = _image_label_map_for(_active_pid())
     counts: Counter[str] = Counter()
     for label in (image_labels or []):
         lbl = str(label or "").lower().strip()
         # Exact-match lookup first
-        mapped = _IMAGE_LABEL_MAP.get(lbl)
+        mapped = label_map.get(lbl)
         if mapped:
             counts[mapped] += 1
             continue
         # Multi-word label: check if any individual word is a known exact key
         words = lbl.replace("-", " ").split()
         for word in words:
-            word_mapped = _IMAGE_LABEL_MAP.get(word)
+            word_mapped = label_map.get(word)
             if word_mapped:
                 counts[word_mapped] += 1
                 break
@@ -131,7 +146,7 @@ def category_from_image_labels(image_labels: List[str] | None = None) -> str | N
     top_categories = [cat for cat, n in ranked if n == top_count]
     if len(top_categories) == 1:
         return top_categories[0]
-    for preferred in ("laptop", "phone", "tablet", "monitor", "accessory", "fresh_produce"):
+    for preferred in _category_preference_for(_active_pid()):
         if preferred in top_categories:
             return preferred
     return top_categories[0]
@@ -162,7 +177,7 @@ def detect_category(
     # 2. Query text matching
     text = (query or "").lower()
     if text:
-        for cat, patterns in _COMPILED_PATTERNS:
+        for cat, patterns in _compiled_category_patterns_for(_active_pid()):
             for p in patterns:
                 if p.search(text):
                     return cat
@@ -181,11 +196,10 @@ def nqe_template_key(category: str) -> str:
     Returns the key used to look up templates in the TemplateStore
     (e.g. "default" for laptop, "clothing" for clothing).
     """
-    # Categories with dedicated template banks
-    _HAS_BANK = {"clothing", "kitchen", "furniture", "tv", "phone", "tablet"}
-    if category in _HAS_BANK:
+    # Categories with dedicated template banks (profile-defined)
+    if category in _template_banks_for(_active_pid()):
         return category
-    # Everything else falls back to default (laptop-oriented) bank
+    # Everything else falls back to default bank
     return "default"
 
 
@@ -200,44 +214,6 @@ def route(
 
 
 # ── Multi-Category NER ───────────────────────────────────────────
-
-# Entity patterns: brand names, specs, use-cases
-_BRAND_PATTERNS: List[Tuple[str, re.Pattern]] = [
-    ("apple", re.compile(r"\b(apple|macbook|iphone|ipad|airpods?|imac)\b", re.I)),
-    ("samsung", re.compile(r"\b(samsung|galaxy)\b", re.I)),
-    ("dell", re.compile(r"\b(dell|xps|inspiron|latitude|alienware)\b", re.I)),
-    ("hp", re.compile(r"\b(hp|pavilion|envy|spectre|omen|elitebook)\b", re.I)),
-    ("lenovo", re.compile(r"\b(lenovo|thinkpad|ideapad|legion|yoga)\b", re.I)),
-    ("asus", re.compile(r"\b(asus|rog|zenbook|vivobook|tuf)\b", re.I)),
-    ("acer", re.compile(r"\b(acer|aspire|predator|nitro|swift)\b", re.I)),
-    ("microsoft", re.compile(r"\b(microsoft|surface)\b", re.I)),
-    ("google", re.compile(r"\b(google|pixel|chromebook)\b", re.I)),
-    ("sony", re.compile(r"\b(sony|playstation|bravia)\b", re.I)),
-    ("lg", re.compile(r"\blg\b", re.I)),
-    ("nvidia", re.compile(r"\b(nvidia|geforce|rtx|gtx)\b", re.I)),
-    ("amd", re.compile(r"\b(amd|ryzen|radeon)\b", re.I)),
-    ("intel", re.compile(r"\b(intel|core\s?i[3579])\b", re.I)),
-]
-
-_USE_CASE_PATTERNS: List[Tuple[str, re.Pattern]] = [
-    ("gaming", re.compile(r"\b(gaming|gamer|game|esports?|fps)\b", re.I)),
-    ("video_editing", re.compile(r"\b(video\s?edit|premiere|davinci|final\s?cut|render)\b", re.I)),
-    ("programming", re.compile(r"\b(coding|programming|developer|IDE|compil)\b", re.I)),
-    ("business", re.compile(r"\b(business|office|enterprise|corporate|professional)\b", re.I)),
-    ("student", re.compile(r"\b(student|school|university|college|homework)\b", re.I)),
-    ("creative", re.compile(r"\b(creative|design|photo|illustrat|photoshop)\b", re.I)),
-    ("streaming", re.compile(r"\b(stream|twitch|youtube|content\s?creat)\b", re.I)),
-    ("travel", re.compile(r"\b(travel|portable|lightweight|on\s?the\s?go|commut)\b", re.I)),
-    ("home_office", re.compile(r"\b(home\s?office|work\s?from\s?home|remote\s?work|wfh)\b", re.I)),
-]
-
-_SPEC_PATTERNS: List[Tuple[str, str, re.Pattern]] = [
-    ("ram", "gb", re.compile(r"\b(\d+)\s?(?:gb?\s?)?ram\b", re.I)),
-    ("storage", "gb", re.compile(r"\b(\d+)\s?(?:gb|tb)\s?(?:ssd|nvme|storage|hdd|hard\s?drive)\b", re.I)),
-    ("screen_size", "inches", re.compile(r"\b(\d{2}(?:\.\d)?)[- ]?(?:in(?:ch)?|\")\b", re.I)),
-    ("weight", "lbs", re.compile(r"\b(\d+(?:\.\d+)?)\s?(?:lbs?|pounds?|kg)\b", re.I)),
-    ("battery", "hours", re.compile(r"\b(\d+)\s?(?:hr|hour|battery)\b", re.I)),
-]
 
 
 def detect_entities(
@@ -256,6 +232,7 @@ def detect_entities(
             "primary_category": "laptop",
         }
     """
+    pid = _active_pid()
     text = (query or "").lower()
     categories: List[Dict[str, Any]] = []
     brands: List[str] = []
@@ -264,7 +241,7 @@ def detect_entities(
 
     # Detect all matching categories from text
     if text:
-        for cat, patterns in _COMPILED_PATTERNS:
+        for cat, patterns in _compiled_category_patterns_for(pid):
             match_count = sum(1 for p in patterns if p.search(text))
             if match_count > 0:
                 confidence = min(0.6 + match_count * 0.15, 1.0)
@@ -286,19 +263,19 @@ def detect_entities(
 
     # Extract brands
     if text:
-        for brand_name, pattern in _BRAND_PATTERNS:
+        for brand_name, pattern in _brand_patterns_for(pid):
             if pattern.search(text):
                 brands.append(brand_name)
 
     # Extract use-cases
     if text:
-        for use_case, pattern in _USE_CASE_PATTERNS:
+        for use_case, pattern in _use_case_patterns_for(pid):
             if pattern.search(text):
                 use_cases.append(use_case)
 
     # Extract specs
     if text:
-        for spec_name, unit, pattern in _SPEC_PATTERNS:
+        for spec_name, unit, pattern in _spec_patterns_for(pid):
             m = pattern.search(text)
             if m:
                 specs[spec_name] = {"value": m.group(1), "unit": unit}

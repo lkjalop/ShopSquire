@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 _BUDGET_HINT = re.compile(r"\$?\s*([\d,]{3,6})")
@@ -28,8 +28,16 @@ def _extract_price_range_from_message(message: str) -> Tuple[int | None, int | N
     return (min(lo, hi), max(lo, hi))
 
 
+_NEGATED_OVER_RE = re.compile(r"\b(?:nothing|not|no|none|never|under|below|max|at most|no more than|no higher than)\b[^.?!]{0,20}?\b(?:over|above|more than|greater than)\b")
+
+
 def _extract_budget_threshold(query: str) -> int | None:
+    """A genuine 'is it over $X?' binary question. Returns None when 'over/above' is NEGATED
+    ('nothing over $1,900', 'not above $2000') — those are CAPS, not over-thresholds (GPT-5.6 #4,
+    2026-07-10: the negated form produced a nonsensical 'Usually no.' binary answer)."""
     q = str(query or "").lower()
+    if _NEGATED_OVER_RE.search(q):
+        return None
     m = re.search(r"(?:over|above|more than|greater than)\s*\$?\s*([\d,]{3,6})", q)
     if m:
         return _to_int(m.group(1))
@@ -38,12 +46,19 @@ def _extract_budget_threshold(query: str) -> int | None:
 
 def _extract_query_budget_bounds(query: str) -> Tuple[int | None, int | None]:
     q = str(query or "").lower()
-    m_range = re.search(r"(?:between|from)\s*\$?\s*([\d,]{2,6})\s*(?:and|to|-)\s*\$?\s*([\d,]{2,6})", q)
-    if m_range:
-        lo = _to_int(m_range.group(1))
-        hi = _to_int(m_range.group(2))
-        if lo is not None and hi is not None:
-            return (min(lo, hi), max(lo, hi))
+    # A cue-anchored OR $-anchored range so bare bulk phrasings parse too: "budget 1500 to 1900",
+    # "price 1500-1900", "$1500-$1900 each". Without an anchor a bare "1500 to 1900" is too ambiguous
+    # (spec ranges, counts) — the anchor (between/from/budget/price/a leading $) keeps it a BUDGET range.
+    for pat in (
+        r"(?:between|from|budget(?:\s+(?:is|of))?|price(?:\s+range)?)\s*\$?\s*([\d,]{3,6})\s*(?:and|to|-|–|—)\s*\$?\s*([\d,]{3,6})",
+        r"\$\s*([\d,]{3,6})\s*(?:and|to|-|–|—)\s*\$?\s*([\d,]{3,6})",
+    ):
+        m_range = re.search(pat, q)
+        if m_range:
+            lo = _to_int(m_range.group(1))
+            hi = _to_int(m_range.group(2))
+            if lo is not None and hi is not None:
+                return (min(lo, hi), max(lo, hi))
     m_under = re.search(r"(?:under|below|less than|<)\s*\$?\s*([\d,]{2,6})", q)
     if m_under:
         return (None, _to_int(m_under.group(1)))
@@ -51,6 +66,74 @@ def _extract_query_budget_bounds(query: str) -> Tuple[int | None, int | None]:
     if m_over:
         return (_to_int(m_over.group(1)), None)
     return (None, None)
+
+
+_DAMAGE_RE = re.compile(
+    r"\b(broken|damaged|cracked|shattered|not working|faulty|dead pixel|screen damage|bsod|"
+    r"blue screen|stop code|repair|replacement)\b")
+_POLICY_WORD_RE = re.compile(r"\b(warranty|returns?|refunds?|support)\b")
+_POST_PURCHASE_RE = re.compile(
+    r"\b(my|i bought|i purchased|i got|i received|i ordered|arrived|came with|send (it )?back)\b")
+
+
+def is_support_claim(query: str) -> bool:
+    """CLAIM-CHECKED support detection, shared by every lane that routes to repair/return handling.
+
+    The support lane may only claim a turn that is genuinely a post-purchase CLAIM: damage/fault words are
+    inherently post-purchase; bare policy words (warranty/return/refund/support) additionally need
+    possession/purchase context. Without this, "what is your warranty policy?" (pre-sales FAQ) and
+    "gaming laptop under 2000. also what warranty do you offer?" (mixed ask) were hijacked into
+    photo-triage with zero products — the same disease as the inventory-lane "can i get" hijack."""
+    q = str(query or "").strip().lower()
+    if not q:
+        return False
+    if _DAMAGE_RE.search(q):
+        return True
+    return bool(_POLICY_WORD_RE.search(q) and _POST_PURCHASE_RE.search(q))
+
+
+_POLICY_TOPIC_RES = {
+    "warranty": re.compile(r"\bwarrant\w*\b"),
+    "returns": re.compile(r"\breturns?\b|\brefunds?\b|\bchange of mind\b"),
+    "shipping": re.compile(r"\bshipping\b|\bdelivery\b|\bship\b|\bfreight\b"),
+    "price_match": re.compile(r"\bprice\s*match\w*\b|\bbeat\s+(?:the\s+)?price\b"),
+    "payment": re.compile(r"\bpayment\s+(?:method|option)\w*\b|\bhow\s+(?:can|do)\s+i\s+pay\b|"
+                          r"\bpay(?:ment)?\s+(?:with|by|via)\b|\baccept\s+(?:paypal|afterpay|visa|"
+                          r"mastercard|amex|klarna|zip)\b|\bpaypal\b|\bafterpay\b|\binstalments?\b|\binstallments?\b"),
+    "contact": re.compile(r"\bcontact\s+(?:you|support|us|customer\s+service)\b|\bget\s+in\s+touch\b|"
+                          r"\bphone\s+number\b|\bemail\s+(?:address|you)\b|\bcustomer\s+(?:service|support)\b"),
+    "repair": re.compile(r"\brepairs?\b|\bfix\s+(?:my|the|it)\b|\brepairer\b|\bservice\s+cent(?:re|er)\b"),
+    "store_locations": re.compile(r"\bstore\s+location\w*\b|\bphysical\s+store\b|\bbrick\s*(?:and|&)\s*mortar\b|"
+                                  r"\bvisit\s+(?:a\s+|your\s+)?store\b|\bin\s*-?store\b|\bshowroom\b"),
+}
+
+
+def policy_faq_answer(query: str) -> Optional[str]:
+    """Answer a PRE-SALES policy question from the StoreProfile's ``policy_faq`` slot — content is DATA
+    the store wrote, never invented by core (prohibited-claims discipline). Returns the matched topics'
+    text, or an honest "a teammate will confirm" line when the store hasn't filled the slot, or None when
+    the query isn't a policy question at all (caller proceeds normally). Post-purchase claims are NOT
+    handled here — is_support_claim() owns those."""
+    q = str(query or "").strip().lower()
+    if not q or is_support_claim(q):
+        return None
+    topics = [t for t, rx in _POLICY_TOPIC_RES.items() if rx.search(q)]
+    # only claim clearly policy-shaped asks: a topic word + a question/policy cue
+    if not topics or not re.search(r"\bpolic\w+\b|\bwhat(?:'s| is| are)\b|\bhow\b|\bdo you\b|\bwhat do you\b|\?", q):
+        return None
+    try:
+        from src.app.platform.store_profile import profile_slot
+        slot = profile_slot("policy_faq", default=None)
+    except Exception:
+        slot = None
+    if not isinstance(slot, dict) or not slot:
+        return ("Good pre-purchase question — I don't want to guess policy terms, so I've flagged it for a "
+                "teammate to confirm the specifics. Meanwhile I can keep helping with products.")
+    parts = [str(slot[t]) for t in topics if slot.get(t)]
+    if not parts:
+        return ("That policy detail isn't in my approved answers yet — a teammate will confirm it. "
+                "Meanwhile I can keep helping with products.")
+    return " ".join(parts)
 
 
 def decompose_intent_and_questions(
@@ -153,9 +236,17 @@ def score_answer_coverage(*, query: str, message: str, required_answers: List[st
     return {"covered": covered, "missing": missing, "ok": len(missing) == 0}
 
 
-def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_message: str) -> str:
+def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_message: str,
+                            bulk_budget: Dict[str, Any] | None = None) -> str:
     # Prefer stated user budget over any price range found in the LLM message text
     q_lo, q_hi = _extract_query_budget_bounds(query)
+    # A whole-order cap cannot be compared directly with unit prices. The recommendation
+    # pipeline already authorizes and emits the derived per-unit cap; reuse that structured
+    # decision instead of reparsing the total as though it were a single-product budget.
+    if isinstance(bulk_budget, dict) and str(bulk_budget.get("scope") or "").lower() == "total":
+        per_unit = bulk_budget.get("per_unit_cap")
+        if isinstance(per_unit, (int, float)) and per_unit > 0:
+            q_lo, q_hi = None, int(per_unit)
     # Also try "around $N" / "budget $N" / "about $N" patterns
     _around = re.search(r"(?:around|about|roughly|approx\.?|budget\s+(?:of\s+)?)\$?\s*([\d,]{3,6})", str(query or ""), re.I)
     if _around and q_hi is None:
@@ -166,10 +257,13 @@ def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_
     prices = [int(float(p.get("price") or 0)) for p in (products or []) if p.get("price") is not None]
     if prices and (lo_msg is None or hi_msg is None):
         lo_msg, hi_msg = min(prices), max(prices)
-    # Override with actual product price range + user budget ceiling
+    # The band must reflect the BUYER'S budget, not the raw product price range — over-budget
+    # "performance-fit" lane items must never inflate it (the $1,900 query that read "$1,199-$5,999").
+    # Floor = cheapest IN-BUDGET option; ceiling = the buyer's stated cap when they gave one.
     if prices:
-        lo_msg = min(prices)
-        hi_msg = q_hi if q_hi and q_hi > max(prices) else max(prices)
+        in_budget = [p for p in prices if (q_hi is None or p <= q_hi)]
+        lo_msg = min(in_budget) if in_budget else min(prices)
+        hi_msg = q_hi if q_hi is not None else max(prices)
     threshold = _extract_budget_threshold(query)
     direct = None
     if threshold is not None and hi_msg is not None:
@@ -177,8 +271,45 @@ def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_
     if direct is None:
         direct = "For your case,"
     if lo_msg is not None and hi_msg is not None:
-        return f"{direct} a practical budget band is ${lo_msg:,}-${hi_msg:,}. {base_message}".strip()
+        # Never print a reversed band (a mis-parsed cap once produced "$1,599-$1,500"): the floor is the
+        # cheapest in-budget option and the ceiling the buyer's cap, so order them defensively.
+        lo_band, hi_band = min(lo_msg, hi_msg), max(lo_msg, hi_msg)
+        return f"{direct} a practical budget band is ${lo_band:,}-${hi_band:,}. {base_message}".strip()
     return f"{direct} {base_message}".strip()
+
+
+def _clamp_bulk_budget_prose(
+    *, message: str, products: List[Dict[str, Any]], bulk_budget: Dict[str, Any] | None,
+) -> str:
+    """Remove model prose that contradicts an authorized whole-order calculation."""
+    if not isinstance(bulk_budget, dict) or str(bulk_budget.get("scope") or "").lower() != "total":
+        return message
+    total = bulk_budget.get("total")
+    if not isinstance(total, (int, float)):
+        total = bulk_budget.get("total_budget")
+    quantity = bulk_budget.get("quantity")
+    if not isinstance(total, (int, float)) or not isinstance(quantity, (int, float)) or quantity <= 0:
+        return message
+    prices = []
+    for product in products or []:
+        try:
+            price = float(product.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices.append(price)
+    if not prices or not all(price * float(quantity) <= float(total) + 0.005 for price in prices):
+        return message
+
+    contradiction_markers = (
+        "would exceed the total budget", "total would be too high",
+        "exceeds the total budget", "over the total budget",
+        "far above what's needed", "far above what is needed",
+    )
+    paragraphs = [part.strip() for part in re.split(r"\n{2,}", str(message or "")) if part.strip()]
+    kept = [part for part in paragraphs
+            if not any(marker in part.lower() for marker in contradiction_markers)]
+    return "\n\n".join(kept).strip() or message
 
 
 def _render_no_match(*, query: str, products: List[Dict[str, Any]]) -> str:
@@ -236,8 +367,12 @@ def apply_answer_quality(
     has_image: bool,
     buyer_persona: str | None,
     brand_name: str | None,
+    bulk_budget: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    msg = str(assistant_message or "").strip()
+    msg = _clamp_bulk_budget_prose(
+        message=str(assistant_message or "").strip(), products=products,
+        bulk_budget=bulk_budget,
+    )
     decomp = decompose_intent_and_questions(
         query=query,
         turn_intent=turn_intent,
@@ -254,7 +389,8 @@ def apply_answer_quality(
 
     rewritten = msg
     if template_id == "budget_decision_template":
-        rewritten = _render_budget_decision(query=query, products=products, base_message=msg)
+        rewritten = _render_budget_decision(query=query, products=products, base_message=msg,
+                                             bulk_budget=bulk_budget)
     elif template_id == "no_match_explain_template":
         rewritten = _render_no_match(query=query, products=products)
     elif template_id == "cv_reupload_with_text_fallback_template":
@@ -269,7 +405,8 @@ def apply_answer_quality(
     )
     if not bool(cov.get("ok")) and "direct_answer_first_sentence" in (cov.get("missing") or []):
         if template_id == "budget_decision_template":
-            rewritten = _render_budget_decision(query=query, products=products, base_message=rewritten)
+            rewritten = _render_budget_decision(query=query, products=products, base_message=rewritten,
+                                                 bulk_budget=bulk_budget)
         elif template_id == "no_match_explain_template":
             rewritten = _render_no_match(query=query, products=products)
 
@@ -292,5 +429,3 @@ def apply_answer_quality(
         "template_selected": {"template_id": template_id, "reason": templ.get("reason")},
         "answer_coverage_scored": cov2,
     }
-
-

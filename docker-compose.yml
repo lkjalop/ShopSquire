@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   api:
     build: .
@@ -8,8 +7,11 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
       REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
-      RUN_MIGRATIONS: "1"
-      AUTO_MIGRATE: "1"
+      # APP_ENV controls security guards: "local" = dev permissive, "staging" or "production" = enforced.
+      # Set to "production" to enforce JWT_SIGNING_KEY, Redis TLS/ACL, and other prod guards.
+      APP_ENV: "${APP_ENV:-staging}"
+      RUN_MIGRATIONS: "0"
+      AUTO_MIGRATE: "0"
       DB_MIGRATION_GUARD: "1"
       INTERNAL_MTLS_REQUIRED: "1"
       CHAT_REPLAY_REQUIRE_NONCE: "1"
@@ -27,6 +29,33 @@ services:
       FRAUD_GRAPH_NEO4J_ENABLED: "1"
       NEO4J_URI: "bolt://neo4j:7687"
       NEO4J_PASSWORD: "${NEO4J_PASSWORD:-neo4j-change-me}"
+      # MAESTRO agent boundary enforcement.
+      # "audit"  → log violations only (default, safe for development)
+      # "warn"   → log + emit warning, continue execution (recommended for demo/staging)
+      # "block"  → raise MaestroViolationError for critical/high violations (production)
+      MAESTRO_ENFORCEMENT_MODE: "warn"
+      # Recommendation latency lever — LLM narration was measured at ~85-91% of route latency, so the
+      # blocking narration call is what pushes complex queries to 10-13s. Env wins over the
+      # config/feature_flags.json value ("blocking").
+      #   async    → return the deterministic grounded answer immediately (<5s warm) AND compute the LLM
+      #              prose out-of-band (GET /api/v1/recommend/narration/{job_id}). Demo-friendly default.
+      #   skip     → deterministic grounded answer only; no prose computed (no wasted background work).
+      #   blocking → wait for the LLM prose, capped at RECOMMEND_NARRATION_TIMEOUT_SEC then fall back.
+      RECOMMEND_NARRATION_MODE: "${RECOMMEND_NARRATION_MODE:-async}"
+      RECOMMEND_NARRATION_TIMEOUT_SEC: "${RECOMMEND_NARRATION_TIMEOUT_SEC:-6}"
+      # Shipping label providers — set API keys to enable real label generation.
+      # Without keys the provider returns a structured error (no crash).
+      # AUSPOST_API_KEY: ""          # AusPost eParcel — developers.auspost.com.au
+      # AUSPOST_ACCOUNT_NUMBER: ""
+      # STARTRACK_API_KEY: ""        # StarTrack — uses same AusPost developer portal
+      # STARTRACK_ACCOUNT_NUMBER: ""
+      # EASYPOST_API_KEY: ""         # EasyPost multi-carrier — easypost.com
+      # SHIPSTATION_API_KEY: ""      # ShipStation — shipstation.com
+      # SHIPSTATION_API_SECRET: ""
+      # RAGAS LLM evaluation — requires an LLM provider key.
+      # Without a key the service falls back to heuristic scoring.
+      # RAGAS_ENABLED: "1"
+      # OPENAI_API_KEY: ""           # Used by ragas for faithfulness evaluation
     ports:
       - "8080:8080"
     depends_on:
@@ -34,7 +63,21 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+      migrate:
+        condition: service_completed_successfully
+    command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080", "--timeout-graceful-shutdown", "30"]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=5)
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 30s
     volumes:
       - audit-worm:/var/lib/shopsquire/audit
     user: "shopsquire"
@@ -45,6 +88,30 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=512M
+
+  migrate:
+    build: .
+    container_name: shopsquire_migrate
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      APP_ENV: "${APP_ENV:-staging}"
+      AUTO_MIGRATE: "0"
+      DB_MIGRATION_GUARD: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    user: "shopsquire"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128M
 
   db:
     image: pgvector/pgvector:pg16
@@ -207,7 +274,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    command: ["celery", "-A", "src.app.workers.celery_app.celery_app", "beat", "--loglevel=INFO"]
+    command: ["python", "-m", "src.app.workers.leased_beat"]
     restart: unless-stopped
     user: "shopsquire"
     cap_drop:

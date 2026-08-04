@@ -303,6 +303,33 @@ def perturb_confidence_score(score: float, *, trace_id: str | None = None) -> fl
     return round(perturbed, 6)
 
 
+def protect_recommendation_output(
+    payload: dict[str, Any], *, trace_id: str | None
+) -> dict[str, Any]:
+    """Apply LLM10 hardening to externally visible recommendation confidence values."""
+    out = payload if isinstance(payload, dict) else {}
+    try:
+        for result in out.get("results") or []:
+            if not isinstance(result, dict) or result.get("confidence") is None:
+                continue
+            try:
+                result["confidence"] = perturb_confidence_score(
+                    float(result.get("confidence") or 0.0), trace_id=trace_id
+                )
+            except (TypeError, ValueError):
+                pass
+        if out.get("confidence_calibrated") is not None:
+            try:
+                out["confidence_calibrated"] = perturb_confidence_score(
+                    float(out.get("confidence_calibrated") or 0.0), trace_id=trace_id
+                )
+            except (TypeError, ValueError):
+                pass
+    except Exception:
+        pass
+    return out
+
+
 def detect_systematic_probing(
     *,
     redis_client: Any,

@@ -1,0 +1,48 @@
+{
+ "id": "deficit_reorder",
+ "lane": "procurement",
+ "notes": "CONTRACT FORK ON RECORD: this query hits the INVENTORY FAST-PATH, which returns a different top-level shape (answer/recommendations/inventory/nqe/timing) than the full pipeline (assistant_message/products). The X9 deficit routing fix lives on the chat lane, not this endpoint. V2 must unify or deliberately honor this fork.",
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:51:33.794333+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-deficit_reorder-0710235129"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "I need 50 units but you only have a few in stock, am I ok waiting for a reorder?",
+     "uid": "corpus-deficit_reorder-0710235129"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 4032,
+   "response": {
+    "recommendations": [],
+    "nqe": null,
+    "answer": "I can check stock levels for you. Could you name the specific product or model?",
+    "inventory": {
+     "sku": null,
+     "name": null,
+     "stock_level": null,
+     "rule_id": null
+    },
+    "source": "inventory_no_sku_match",
+    "injection_blocked": false,
+    "timing": {
+     "route_ms": 4013
+    },
+    "trace_id": "4caabf6a-8889-4a62-9689-68c23566aa84",
+    "decision_trace_id": "4caabf6a-8889-4a62-9689-68c23566aa84",
+    "decision_id": "4caabf6a-8889-4a62-9689-68c23566aa84",
+    "_trace_recommendation_persisted": true
+   },
+   "narration": null,
+   "contract_violations": []
+  }
+ ]
+}

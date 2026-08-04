@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -7,13 +8,13 @@ import uuid
 import base64
 import hashlib
 import os
+import anyio
 from threading import RLock
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy import text as sql_text
+from sqlalchemy.orm import Session
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.deps import get_redis
@@ -21,21 +22,67 @@ from src.app.models.db import get_db
 from src.app.services.memory import Memory
 from src.app.services.llm_provider import select_ollama_model, ollama_generate, is_complex_query, score_query_complexity
 from src.app.services.search_events import log_search_event
-from src.app.security.model_theft import enforce_model_theft_rate_limit, enforce_model_theft_policy_gate
 from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.decision_log import log_trace_event
 from src.app.services.copywriting import maybe_apply_copywriting
 from src.app.services.answer_quality import apply_answer_quality
 from src.app.services.response_normalizer import ResponseNormalizer
+from src.app.services.price_conversion import cents_to_dollars, dollars_to_cents
 from src.app.security.dread_scorer import compute_dread
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
+from src.app.services.recommendation_core.envelope import LANES as RECOMMENDATION_LANES
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 _CHAT_REPLAY_LOCAL: Dict[str, float] = {}
 _CHAT_REPLAY_LOCK = RLock()
+
+
+def _authoritative_backend_lane(data: Dict[str, Any]) -> Optional[str]:
+    """Resolve the finalized V2 lane without promoting unrecognized payload values."""
+    lane = str(data.get("turn_intent") or "").strip().upper()
+    if not lane and data.get("policy_answered") is True:
+        lane = "POLICY_QUESTION"
+    return lane if lane in RECOMMENDATION_LANES else None
+
+
+def _request_tenant_id(request: Request | None) -> str:
+    """Return the tenant already authorized by the authentication dependency."""
+    identity = (
+        getattr(getattr(request, "state", None), "operator_identity", None)
+        if request is not None else None
+    )
+    tenant_id = str(getattr(identity, "tenant_id", "") or "").strip()
+    if tenant_id:
+        return tenant_id
+    from src.app.platform.tenant_context import current_tenant_id
+    return str(current_tenant_id() or "default")
+
+
+def _chat_in_progress(*, idempotency_key: str = "") -> Dict[str, Any]:
+    return {
+        "status": "in_progress",
+        "retryable": True,
+        "retry_after_ms": 750,
+        "idempotency_key": str(idempotency_key or "")[:128] or None,
+        "assistant_message": (
+            "I’m still working on that request. Retrying with the same "
+            "request key will return the completed result without running it twice."
+        ),
+    }
+
+
+def _chat_request_timeout_seconds() -> float:
+    try:
+        configured = float(os.getenv("CHAT_REQUEST_TIMEOUT_SEC", "30") or 30)
+    except (TypeError, ValueError):
+        configured = 30.0
+    return max(0.1, min(configured, 120.0))
 
 
 def _resolve_uid(payload: Dict[str, Any] | None, request: Request | None = None) -> str:
@@ -73,6 +120,23 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
         out["budget_min"] = budget.get("budget_min")
     if budget.get("budget_max") is not None:
         out["budget_max"] = budget.get("budget_max")
+    # Preserve whole-order budget semantics across the CART_MUTATE short circuit. Without these
+    # typed fields, a later quantity change falls back to the budget from the original search.
+    try:
+        from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+
+        budget_scope = classify_budget_scope(query)
+        parsed_budget = parse_budget(query)
+        if budget_scope == "total" and parsed_budget and parsed_budget.budget_max is not None:
+            total_budget = int(parsed_budget.budget_max)
+            if total_budget > 0:
+                out["budget_scope"] = "total"
+                out["total_budget_cents"] = total_budget * 100
+                out["budget_max"] = total_budget
+        elif budget_scope == "per_unit":
+            out["budget_scope"] = "per_unit"
+    except Exception:
+        logger.warning("confirmed-slot budget parsing failed", exc_info=True)
     brands = _extract_brand_mentions(query)
     if brands:
         out["brands"] = brands[:6]
@@ -80,6 +144,12 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
     data = response if isinstance(response, dict) else {}
     applied = data.get("nqe_selection_applied") if isinstance(data.get("nqe_selection_applied"), dict) else {}
     used = data.get("constraints_used") if isinstance(data.get("constraints_used"), dict) else {}
+    # LONG-HORIZON qty memory: the bulk unit count survives non-qty turns the same way budget does —
+    # turn 1 "need 25 laptops", turn 3 "which has the best battery?" must still know it's a 25-unit
+    # conversation (Add buttons + procurement previews read requested_quantity every turn).
+    _rq = data.get("requested_quantity")
+    if isinstance(_rq, (int, float)) and 1 <= int(_rq) <= 1000:
+        out["order_quantity"] = int(_rq)
     for key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition", "buyer_persona", "issue_type"):
         v = applied.get(key)
         if v is None:
@@ -92,6 +162,15 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
             vv = used.get(key)
         if isinstance(vv, list) and vv:
             out[key] = vv[:12]
+    # The legacy chat extractor sees every catalog brand token as positive.  Reconcile it
+    # with the shared core's clamped exclusion before persisting session memory.
+    excluded = {str(v).strip().lower() for v in (out.get("brand_excludes") or []) if str(v).strip()}
+    if excluded and isinstance(out.get("brands"), list):
+        kept = [v for v in out["brands"] if str(v).strip().lower() not in excluded]
+        if kept:
+            out["brands"] = kept
+        else:
+            out.pop("brands", None)
     if isinstance(data.get("product_identity"), dict):
         ident = data.get("product_identity") or {}
         if ident.get("constraints"):
@@ -119,80 +198,101 @@ def _chat_replay_mark_once(redis, *, replay_key: str, ttl_seconds: int) -> bool:
         return True
 
 
-def _ensure_chat_messages_table(db) -> None:
-    dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
-    if "sqlite" in dialect:
-        db.execute(
-            sql_text(
-                """
-                CREATE TABLE IF NOT EXISTS chat_messages (
-                  id TEXT PRIMARY KEY,
-                  uid TEXT NOT NULL,
-                  session_id TEXT,
-                  role TEXT NOT NULL,
-                  content TEXT NOT NULL,
-                  trace_id TEXT,
-                  created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-        )
-    else:
-        db.execute(
-            sql_text(
-                """
-                CREATE TABLE IF NOT EXISTS chat_messages (
-                  id TEXT PRIMARY KEY,
-                  uid TEXT NOT NULL,
-                  session_id TEXT NULL,
-                  role TEXT NOT NULL,
-                  content TEXT NOT NULL,
-                  trace_id TEXT NULL,
-                  created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-                """
-            )
-        )
-    db.commit()
-
-
-def _store_chat_message(db, *, uid: str, role: str, content: str, trace_id: str | None, session_id: str | None = None) -> None:
+def _store_chat_message(
+    db,
+    *,
+    uid: str,
+    role: str,
+    content: str,
+    trace_id: str | None,
+    session_id: str | None = None,
+    tenant_id: str | None = None,
+    session_epoch: str | None = None,
+) -> str | None:
     if not str(content or "").strip():
-        return
-    _ensure_chat_messages_table(db)
-    db.execute(
-        sql_text(
-            """
-            INSERT INTO chat_messages (id, uid, session_id, role, content, trace_id)
-            VALUES (:id, :uid, :session_id, :role, :content, :trace_id)
-            """
-        ),
-        {
-            "id": str(uuid.uuid4()),
-            "uid": str(uid or "anonymous")[:128],
-            "session_id": str(session_id or "")[:128] or None,
-            "role": str(role or "assistant")[:32],
-            "content": str(content or "")[:8000],
-            "trace_id": str(trace_id or "")[:128] or None,
-        },
-    )
-    db.commit()
+        return None
+    from src.app.platform.tenant_context import current_tenant_id
+
+    message_id = str(uuid.uuid4())
+    bounded_uid = str(uid or "anonymous")[:128]
+    bounded_session_id = str(session_id or "")[:128] or None
+    params = {
+        "id": message_id,
+        "tenant_id": str(tenant_id or current_tenant_id() or "default")[:128],
+        "uid": bounded_uid,
+        "session_id": bounded_session_id,
+        "session_epoch": str(session_epoch or bounded_session_id or bounded_uid)[:128],
+        "role": str(role or "assistant")[:32],
+        "content": str(content or "")[:8000],
+        "trace_id": str(trace_id or "")[:128] or None,
+    }
+
+    # Chat history is optional evidence. Persist it in an isolated transaction so
+    # a failed optional/retrieval query on the request session cannot turn this
+    # insert into PostgreSQL 25P02 or discard unrelated decision evidence.
+    bind = db.get_bind() if hasattr(db, "get_bind") else getattr(db, "bind", None)
+    if bind is None:
+        raise RuntimeError("chat_message_store_requires_database_bind")
+    with Session(bind=bind, future=True) as message_db:
+        message_db.execute(
+            sql_text(
+                """
+                INSERT INTO chat_messages
+                    (id, tenant_id, uid, session_id, session_epoch, role, content, trace_id)
+                VALUES
+                    (:id, :tenant_id, :uid, :session_id, :session_epoch, :role, :content, :trace_id)
+                """
+            ),
+            params,
+        )
+        message_db.commit()
+    return message_id
 
 
 def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
+    """Parse a budget from natural phrasings into {budget_min, budget_max}. Handles ranges (between/from/
+    bare 'X to Y'/'$X-$Y'), ceilings (under/below/up to), floors (over/at least), PER-UNIT budgets
+    ('$1900 each', 'per laptop'), and fuzzy amounts ('budget about 1900', 'spend ~$2000', a lone '$1900').
+    Amounts require 3+ digits so quantities like '15 laptops' are never read as a price.
+
+    Delegates FIRST to the canonical budget_grammar; local patterns are legacy fallback only."""
+    from src.app.services.budget_grammar import parse_budget as _canon
+    _bp = _canon(query)
+    if _bp is not None and _bp.found:
+        return {"budget_min": _bp.budget_min, "budget_max": _bp.budget_max}
     q = str(query or "").lower()
-    # Parse explicit budget expressions into a stable structured shape.
-    m_between = re.search(r"\bbetween\s*\$?([\d,]+)\s*(?:and|to|-)\s*\$?([\d,]+)\b", q)
-    if m_between:
-        lo = int(str(m_between.group(1)).replace(",", ""))
-        hi = int(str(m_between.group(2)).replace(",", ""))
+
+    def _n(s: str) -> int:
+        return int(str(s).replace(",", ""))
+
+    # 1) explicit range — between/from X to/and/- Y, "$X-$Y", or a bare "X to Y" (both 3-5 digit)
+    m = (re.search(r"\b(?:between|from)\s*\$?([\d,]{3,7})\s*(?:and|to|\-|–)\s*\$?([\d,]{3,7})", q)
+         or re.search(r"\$\s*([\d,]{3,6})\s*(?:to|\-|–)\s*\$?\s*([\d,]{3,6})", q)
+         or re.search(r"\b(\d{3,5})\s*(?:to|\-|–)\s*(\d{3,5})\b", q))
+    if m:
+        lo, hi = _n(m.group(1)), _n(m.group(2))
         return {"budget_min": min(lo, hi), "budget_max": max(lo, hi)}
-    m_under = re.search(r"\b(?:under|below|max(?:imum)?|up to)\s*\$?([\d,]+)\b", q)
-    if m_under:
-        return {"budget_min": None, "budget_max": int(str(m_under.group(1)).replace(",", ""))}
-    m_over = re.search(r"\b(?:over|above|min(?:imum)?|at least)\s*\$?([\d,]+)\b", q)
-    if m_over:
-        return {"budget_min": int(str(m_over.group(1)).replace(",", "")), "budget_max": None}
+    # 2) ceiling
+    m = re.search(r"\b(?:under|below|max(?:imum)?|up to|no more than|less than)\s*\$?([\d,]{3,7})\b", q)
+    if m:
+        return {"budget_min": None, "budget_max": _n(m.group(1))}
+    # 3) floor
+    m = re.search(r"\b(?:over|above|min(?:imum)?|at least|more than)\s*\$?([\d,]{3,7})\b", q)
+    if m:
+        return {"budget_min": _n(m.group(1)), "budget_max": None}
+    # 4) per-unit ceiling — "1900 each", "$1,800 per laptop/unit/device/seat/pc/person"
+    m = re.search(r"\$?([\d,]{3,7})\s*(?:each\b|a ?piece\b|apiece\b|per\s+(?:unit|laptop|device|machine|seat|pc|person|user))", q)
+    if m:
+        return {"budget_min": None, "budget_max": _n(m.group(1))}
+    # 5) budget/spend/afford amount (optionally fuzzy) — "budget is about 1900", "can spend 2000"
+    m = re.search(r"(?:budget|spend|afford\w*)\b[^\d$]{0,18}\$?([\d,]{3,7})", q)
+    if m:
+        return {"budget_min": None, "budget_max": _n(m.group(1))}
+    # 6) fuzzy/lone money amount — "about $1900", "around 2000", or a lone "$1900" not part of a range
+    m = (re.search(r"(?:about|around|approx\w*|roughly|~)\s*\$?\s*([\d,]{3,7})", q)
+         or re.search(r"\$\s*([\d,]{3,6})\b(?!\s*(?:to|\-|–))", q))
+    if m:
+        return {"budget_min": None, "budget_max": _n(m.group(1))}
     return {"budget_min": None, "budget_max": None}
 
 
@@ -225,28 +325,57 @@ def _is_budget_query_text(query: str | None) -> bool:
     )
 
 
+_DEFICIT_OBS_RE = re.compile(
+    r"only\s+have\s+a?\s*few|few\s+in\s+stock|limited\s+stock|not\s+enough\s+(?:in\s+)?stock|"
+    r"wait\w*\s+(?:for|on)\s+(?:a\s+)?(?:re-?order|re-?stock|restock|backorder|back-?order|the\s+rest|stock)|"
+    r"ok\s+(?:to\s+|with\s+)?wait|back-?order|re-?order",
+    re.I,
+)
+_BULK_QTY_RE = re.compile(r"\b(\d{2,5})\s+[a-z][a-z\s]{0,24}?(?:laptop|desktop|monitor|tablet|unit|machine|device|pc)s?\b", re.I)
+
+
+def _strip_deficit_observation(q: str) -> str:
+    """Remove the shortfall-observation tail from a deficit-reorder query so retrieval sees only
+    the bulk need. 'i need 50 dell laptops but you only have a few in stock, am i ok waiting for a
+    reorder?' -> 'i need 50 dell laptops'. Conservative: only cuts at an observation connector so
+    a plain bulk request is never truncated."""
+    cut = re.split(
+        r"\b(?:but|and)\s+(?:you|i|we)\s+(?:only\s+have|have\s+only|think|know)\b|"
+        r"\bbut\s+(?:you\s+)?(?:only\s+have|have\s+a?\s*few|few\s+in\s+stock|limited\s+stock)\b|"
+        r",?\s*(?:am\s+i\s+ok|is\s+it\s+ok|ok\s+(?:to\s+|with\s+)?wait)\b",
+        q, maxsplit=1, flags=re.I,
+    )[0].strip().rstrip(",")
+    return cut if len(cut) >= 6 else q
+
+
+def _is_deficit_reorder_query(q: str) -> bool:
+    """A bulk QUANTITY need + a deficit/reorder OBSERVATION ("i need 50 dell laptops but you only
+    have a few in stock, ok waiting for a reorder?"). The buyer is acknowledging a shortfall and
+    asking about backorder — NOT requesting a low-stock filter. Without this it hit
+    _classify_turn_intent's `"only " in q` -> FILTER -> the "few in stock" filter zeroed retrieval
+    (live: 0 products, backorder capability fact never reached the answer). Routing it to SEARCH
+    lets the bulk-sourcing path run (products + sourcing preview + the reorder-consent narration)."""
+    if not _DEFICIT_OBS_RE.search(q):
+        return False
+    return bool(_BULK_QTY_RE.search(q)) or bool(re.search(r"\b\d{2,5}\b", q))
+
+
 def _classify_turn_intent(query: str) -> str:
     q = str(query or "").strip().lower()
     if not q:
         return "SEARCH"
-    if any(
-        tok in q
-        for tok in (
-            "warranty",
-            "return",
-            "refund",
-            "broken",
-            "damaged",
-            "crack",
-            "repair",
-            "replacement",
-            "blue screen",
-            "bsod",
-            "stop code",
-            "support",
-        )
-    ):
+    # Deficit/reorder-consent BEFORE the FILTER branch: a "you only have a few in stock, ok to
+    # wait for a reorder?" turn is a bulk-sourcing intent, not a stock filter (2026-07-09).
+    if _is_deficit_reorder_query(q):
+        return "SEARCH"
+    # CLAIM-CHECKED support detection (shared predicate with recommend.py's classifier): only a genuine
+    # post-purchase claim routes to the support lane. The old bare keyword list here hijacked pre-sales
+    # policy questions ("what is your warranty policy?") into photo-triage with zero products.
+    from src.app.services.answer_quality import is_support_claim, policy_faq_answer
+    if is_support_claim(q):
         return "SUPPORT_CLAIM"
+    if policy_faq_answer(q) is not None:
+        return "POLICY_QUESTION"
     if (
         " vs " in q
         or "compare" in q
@@ -288,6 +417,129 @@ def _is_budget_question(item: Dict[str, Any]) -> bool:
         tok in text or tok in qid
         for tok in ("budget", "price range", "price", "widen_budget", "budget_range", "increase_match_space")
     )
+
+
+def _cart_mutation_short_circuit(
+    data: Any,
+    *,
+    q: str,
+    uid: str,
+    db,
+    redis=None,
+    tenant_id: str | None = None,
+    session_id: str | None = None,
+    session_epoch: str | None = None,
+    persist_conversation: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """CART-MUTATION short-circuit (V2 cart lane, extracted for testability): when the suggest
+    hop returns a cart_mutation payload (RECOMMEND_CART_SERVE=on), build the MINIMAL chat
+    response — the product/answer-quality/copywriting machinery below chat_query is irrelevant
+    (and message-REWRITING) for a cart edit. Forwards the C1 card fields verbatim
+    (needs_confirmation/plan_id/ops ride inside cart_mutation). Returns None when this turn is
+    not a cart mutation. /chat/stream inherits (it emits chat_query's result verbatim)."""
+    if not isinstance(data, dict) or data.get("cart_mutation") is None:
+        return None
+    tid = data.get("decision_trace_id") or data.get("decision_id") or data.get("trace_id")
+    msg = str(data.get("assistant_message") or data.get("message") or "").strip()
+    try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
+        _store_chat_message(
+            db,
+            tenant_id=tenant_id,
+            uid=uid,
+            session_id=session_id,
+            session_epoch=session_epoch,
+            role="user",
+            content=q,
+            trace_id=tid,
+        )
+        if msg:
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="assistant",
+                content=msg,
+                trace_id=tid,
+            )
+    except Exception as _cm_exc:
+        if persist_conversation:
+            logger.debug("cart-mutation chat persist skipped: %s", repr(_cm_exc)[:100])
+    multi_intent = None
+    try:
+        enabled = str(os.getenv("MULTI_INTENT_PLANNER_ENABLED", "")).strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        if not enabled:
+            from src.app.feature_flags import get_flags as _get_flags
+
+            enabled = bool(_get_flags().get("MULTI_INTENT_PLANNER_ENABLED", False))
+        if enabled:
+            from src.app.services.multi_intent_live import plan_live
+
+            multi_intent = plan_live(str(q or ""), str(uid))
+    except Exception as exc:
+        # A cart action is still bounded by its own confirmation contract. Keep
+        # the planner failure visible instead of silently dropping the other
+        # obligations from a mixed buyer turn.
+        multi_intent = {
+            "warnings": [f"multi_intent planner error: {str(exc)[:120]}"],
+            "needs_confirmation": True,
+            "plan": [],
+        }
+    response_slots = _extract_confirmed_slots(query=q, response=data)
+    out = {
+        "products": [],
+        "view_mode": "cards",
+        "assistant_message": msg,
+        "cart_mutation": data.get("cart_mutation"),
+        "cart_updated": bool(data.get("cart_updated")),
+        "cart": data.get("cart"),
+        "multi_intent": multi_intent,
+        "turn_intent": "CART_MUTATE",
+        "execution_mode": data.get("execution_mode") or "v2_served",
+        "execution_lane": data.get("execution_lane") or "CART_MUTATE",
+        "delegation_reason": data.get("delegation_reason"),
+        "action_executed": bool(data.get("action_executed")),
+        "decision_trace_id": tid,
+        "trace_id": tid,
+        "next_questions": [],
+        "confirmed_slots": response_slots,
+        "requested_quantity": (
+            data.get("requested_quantity")
+            if data.get("requested_quantity") is not None
+            else response_slots.get("order_quantity")
+        ),
+        "timing_breakdown": (
+            data.get("timing_breakdown")
+            if isinstance(data.get("timing_breakdown"), dict)
+            else {}
+        ),
+        "blocked": False,
+        "needs_human_review": False,
+        "security_route": "allow",
+    }
+    try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
+        _persist_chat_structured_state(
+            redis=redis,
+            uid=uid,
+            query=q,
+            products=[],
+            trace_id=str(tid or "") or None,
+            assistant_message=msg,
+            confirmed_slots=response_slots,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        )
+    except Exception:
+        if persist_conversation:
+            logger.warning("cart-mutation structured-state persistence failed", exc_info=True)
+    return out
 
 
 def _budget_range_from_slots(slots: Dict[str, Any] | None, query: str) -> Dict[str, int | None]:
@@ -471,6 +723,22 @@ def _build_anchor_sections(
     sections: List[Dict[str, Any]] = []
     weights = _persona_rank_weights(use_case_key, buyer_persona)
     for idx, img in enumerate(imgs):
+        # Off-domain image (e.g. produce) → do NOT fabricate a "Best 3 matches for this image" product
+        # group; the separate off-domain banner explains it. Agnostic relevance check (profile tokens).
+        try:
+            from src.app.services.cv_triage_basic import classify_image_relevance
+            _labels = img.get("labels") if isinstance(img.get("labels"), list) else []
+            _cr = img.get("catalog_relevance") if isinstance(img.get("catalog_relevance"), dict) else {}
+            # skip the "matches for this image" group when EITHER the relevance classifier says off_topic OR
+            # an explicit off-domain flag is set (the classifier needs good CV labels; the flag is the backstop
+            # so a mislabelled off-domain image can't still claim "Best 3 matches for this image" — screenshot 007).
+            _off = (classify_image_relevance(_labels, str(img.get("ocr_text") or "")) == "off_topic"
+                    or bool(img.get("off_domain")) or bool(_cr.get("off_domain"))
+                    or str(img.get("image_relevance") or "").strip().lower() == "off_topic")
+            if _off:
+                continue
+        except Exception:
+            pass
         anchor = _image_anchor_hint(img, idx)
         scored: List[tuple[float, Dict[str, Any]]] = []
         for p in products:
@@ -503,8 +771,8 @@ def _build_anchor_sections(
         )
         uc = str(use_case_key or buyer_persona or anchor.get("use_case_hint") or "general").replace("_", " ")
         summary = (
-            f"Best 3 matches for this image in {budget_phrase}. "
-            f"Prioritized for {uc} based on brand/form-factor hint and price fit."
+            f"Closest catalog picks for your image + text, in {budget_phrase}. "
+            f"Prioritized for {uc} on brand/form-factor and price fit."
         )
         sections.append(
             {
@@ -596,6 +864,71 @@ def _extract_brand_mentions(query: str) -> List[str]:
             if mapped not in out:
                 out.append(mapped)
     return out
+
+
+def _merge_material_nqe_answer(
+    *, query: str, nqe_selection: Dict[str, Any] | None,
+    recent_messages: List[Dict[str, Any]] | None,
+    pending_clarification: Dict[str, Any] | None = None,
+) -> str:
+    """Resolve a bounded material answer against the turn that asked for it.
+
+    NQE buttons submit their short label as the visible user message.  For slots that change
+    authorization semantics, that label is not a standalone query: it must refine the preceding
+    buyer request.  Only known question/option IDs are accepted; arbitrary button text is never
+    promoted into hidden context.
+    """
+    selection = nqe_selection if isinstance(nqe_selection, dict) else {}
+    pending = pending_clarification if isinstance(pending_clarification, dict) else {}
+    qid = str(selection.get("question_id") or "").strip().lower()
+    oid = str(selection.get("option_id") or "").strip().lower()
+    # A buyer can answer the rendered question by typing instead of clicking its
+    # option. Recognize only the canonical budget-scope grammar and only while
+    # the server has an authoritative pending question. This preserves natural
+    # chat UX without allowing arbitrary old messages to become hidden context.
+    if not qid and str(pending.get("question_id") or "").strip().lower() == "budget_scope":
+        try:
+            from src.app.services.budget_grammar import classify_budget_scope
+
+            inferred = classify_budget_scope(query)
+        except Exception:
+            inferred = "unknown"
+        if inferred in {"total", "per_unit"}:
+            qid, oid = "budget_scope", inferred
+    if qid != "budget_scope" or oid not in {"total", "per_unit"}:
+        return query
+
+    prior_query = ""
+    if str(pending.get("question_id") or "").strip().lower() == qid:
+        allowed = {str(item).strip().lower() for item in (pending.get("allowed_option_ids") or [])}
+        if oid in allowed:
+            prior_query = str(pending.get("original_query") or "").strip()
+    for item in reversed(recent_messages or []):
+        if prior_query:
+            break
+        if not isinstance(item, dict) or str(item.get("role") or "").strip().lower() != "user":
+            continue
+        candidate = str(item.get("content") or "").strip()
+        if candidate and candidate.casefold() != str(query or "").strip().casefold():
+            prior_query = candidate
+            break
+    if not prior_query:
+        return query
+
+    scope_statement = (
+        "The stated budget is the total budget for all requested units."
+        if oid == "total"
+        else "The stated budget is a per item budget."
+    )
+    return f"{prior_query} {scope_statement}"
+
+
+def _include_adaptive_metadata(out: Dict[str, Any], source: Dict[str, Any]) -> None:
+    """Copy only adaptive levers that actually ran; absence is a public contract."""
+    for key in ("sales_response_nudge", "ranking_experiment", "storefront_emphasis"):
+        value = source.get(key)
+        if isinstance(value, dict):
+            out[key] = value
 
 
 def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -707,6 +1040,17 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
     encoded = bool(s.get("encoded_payload_detected"))
     polyglot = bool(s.get("polyglot_suspected"))
     ocr_uncertain = bool(s.get("ocr_low_confidence_uncertain"))
+    analysis_pending = bool(
+        s.get("analysis_pending") or s.get("vision_pending") or s.get("fast_triage_timeout")
+    )
+    analysis_degraded = bool(
+        ocr_uncertain or s.get("vision_timeout") or s.get("ocr_timeout")
+        or s.get("vision_error") or s.get("ocr_error")
+    )
+    security_risk = bool(
+        qr_external or qr_injection or ocr_injection or manipulation or steg
+        or adversarial >= 0.35 or encoded or polyglot
+    )
 
     hard_lock = bool(
         polyglot
@@ -724,18 +1068,10 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
         or steg
         or adversarial >= 0.5
         or encoded
-        or ocr_uncertain
     )
     degraded = bool(
         qr_detected
-        or qr_external
-        or qr_injection
-        or ocr_injection
-        or manipulation
-        or steg
-        or adversarial >= 0.35
-        or encoded
-        or ocr_uncertain
+        or security_risk
     )
     if hard_lock:
         route = "lockdown"
@@ -754,8 +1090,16 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
         route = "visual_sanitized"
         severity = "warn"
         message = (
-            "Image looks untrusted. Continuing in text-only mode; reupload a clean product-only photo for precise visual matching."
+            "Embedded or unverified image channels were ignored. Safe visual matching can continue."
         )
+    elif analysis_pending:
+        route = "analysis_pending"
+        severity = "info"
+        message = "Image analysis is still running. I will not use incomplete image evidence yet."
+    elif analysis_degraded:
+        route = "analysis_degraded"
+        severity = "info"
+        message = "Some image details could not be verified. Visual matches remain available, but uncertain text was ignored."
     else:
         route = "allow"
         severity = "info"
@@ -763,12 +1107,211 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
     return {
         "route": route,
         "severity": severity,
-        "image_untrusted": bool(degraded),
-        "image_degraded_mode": bool(degraded and not hard_lock),
+        "security_risk": security_risk,
+        "analysis_degraded": analysis_degraded,
+        "analysis_pending": analysis_pending,
+        "image_untrusted": security_risk,
+        "image_degraded_mode": bool((degraded or analysis_degraded) and not hard_lock),
         "needs_human_review": bool(needs_review),
         "chat_lockdown": bool(hard_lock),
         "warning_message": message,
     }
+
+
+def _derive_attack_intent_and_repercussions(cv_signals: Dict[str, Any] | None) -> tuple[str, str]:
+    """Map detected CV signals to a plain-English attacker intent + likely repercussions.
+
+    Briefs the human SOC reviewer on *why* an upload was flagged and what could go
+    wrong if the image-derived signals were trusted blindly.
+    """
+    s = cv_signals if isinstance(cv_signals, dict) else {}
+    intents: List[str] = []
+    repercussions: List[str] = []
+    if s.get("qr_prompt_injection") or s.get("qr_external_url_detected") or s.get("qr_code_detected"):
+        intents.append(
+            "QR-borne indirect prompt injection / redirect to an external "
+            "(possible credential-harvest or malware) URL"
+        )
+        repercussions.append(
+            "agent goal hijack, shopper redirected to a malicious site, possible "
+            "credential/account compromise"
+        )
+    if s.get("ocr_prompt_injection"):
+        intents.append("text-in-image prompt injection to override system instructions")
+        repercussions.append("policy bypass, unauthorised tool or action execution by the agent")
+    if s.get("steg_suspicious"):
+        intents.append("steganographic payload smuggling (covert data/command channel)")
+        repercussions.append("covert data exfiltration or staged second-stage payload delivery")
+    if float(s.get("adversarial_score") or 0.0) >= 0.5:
+        intents.append("adversarial perturbation crafted to evade the CV classifiers")
+        repercussions.append("model evasion, mislabelled product, downstream fraud")
+    if s.get("manipulation_detected"):
+        intents.append("image manipulation / forgery")
+        repercussions.append("return or warranty fraud, fabricated evidence")
+    if s.get("encoded_payload_detected") or s.get("polyglot_suspected"):
+        intents.append("encoded / polyglot file payload (a file valid as two formats at once)")
+        repercussions.append("parser confusion, sandbox escape, malware delivery")
+    if not intents:
+        intents.append("untrusted or anomalous image upload")
+        repercussions.append("elevated review required before any image-derived signal can be trusted")
+    return "; ".join(intents), "; ".join(repercussions)
+
+
+def _summarize_recognized_product(labels: List[str] | None) -> Optional[str]:
+    """Best-effort short human label for what the image shows, from SAFE visual labels.
+
+    Lets us keep shopping context in the user-facing message even when the image
+    was flagged — we still recognised the product, we just quarantined the
+    malicious channel (QR/OCR/steg). Returns None when nothing is recognisable.
+    """
+    toks = [str(x).lower() for x in (labels or []) if str(x).strip()]
+    if not toks:
+        return None
+    blob = " ".join(toks)
+    _is_gaming = any(
+        t in blob for t in ("gaming", "rog", "legion", "raider", "predator", "nitro", "alienware", "omen", "tuf")
+    )
+    if any(t in blob for t in ("laptop", "notebook", "macbook")):
+        return "gaming laptop" if _is_gaming else "laptop"
+    if any(t in blob for t in ("desktop", "tower", "workstation")) or "pc" in toks:
+        return "gaming PC" if _is_gaming else "desktop PC"
+    if any(t in blob for t in ("phone", "smartphone", "iphone")):
+        return "phone"
+    if any(t in blob for t in ("tablet", "ipad")):
+        return "tablet"
+    if any(t in blob for t in ("monitor", "display", "screen")):
+        return "monitor"
+    if any(t in blob for t in ("headphone", "headset", "earphone")):
+        return "headset"
+    return toks[0]
+
+
+def _assess_image_compromise_breach(
+    *,
+    merged_text: str,
+    cv_signals: Dict[str, Any] | None,
+    source_ip: str | None,
+    uid: str | None,
+    image_hash: str | None,
+    posture: Dict[str, Any],
+    request: Any = None,
+) -> Dict[str, Any]:
+    """Run a synchronous breach assessment for a compromised image upload.
+
+    Enriches the requester IP via ASN/GeoIP (known-bad-actor scoring), maps the
+    attack to MITRE ATLAS / OWASP tags, and notifies humans by persisting a
+    security event that auto-routes to an incident + WORM audit. Returns a
+    structured summary for the chat response.
+
+    NEVER blocks the recommendation — this is the warn-and-continue path.
+    """
+    from src.app.security.observer import analyze_payload, emit_security_event
+
+    intent, repercussions = _derive_attack_intent_and_repercussions(cv_signals)
+    sec_payload: Dict[str, Any] = {
+        "query": str(merged_text or "")[:1000],
+        "source": "chat_image_compromise",
+    }
+    if source_ip:
+        sec_payload["ip"] = source_ip
+    if uid:
+        sec_payload["uid"] = uid
+    if cv_signals:
+        sec_payload["cv_signals"] = cv_signals
+
+    severity = str(posture.get("severity") or "high")
+    details: Dict[str, Any] = {}
+    try:
+        analysis = analyze_payload(sec_payload)
+        if isinstance(analysis, dict):
+            severity = str(analysis.get("severity") or severity)
+            details = analysis.get("details") if isinstance(analysis.get("details"), dict) else {}
+    except Exception:
+        details = {}
+
+    geo: Dict[str, Any] = {}
+    signals: Dict[str, Any] = {}
+    try:
+        geo = ((details.get("network") or {}).get("geo")) or {}
+        signals = details.get("signals") or {}
+    except Exception:
+        geo, signals = {}, {}
+
+    # Known-bad-actor determination via ASN / GeoIP risk.
+    bad_asn: set = set()
+    try:
+        from src.app.security.observer import _load_bad_asn
+        bad_asn = set(_load_bad_asn())
+    except Exception:
+        bad_asn = set()
+    is_bad_actor = bool(
+        signals.get("ip_risk")
+        or float(geo.get("risk") or 0.0) >= 0.7
+        or geo.get("is_hosting")
+        or geo.get("is_vpn")
+        or (geo.get("asn") in bad_asn if geo.get("asn") is not None else False)
+    )
+    ip_assessment = {
+        "ip_hash": ((details.get("network") or {}).get("ip_hash")),
+        "asn": geo.get("asn"),
+        "asn_org": geo.get("asn_org"),
+        "country": geo.get("country"),
+        "is_hosting": bool(geo.get("is_hosting")),
+        "is_vpn": bool(geo.get("is_vpn")),
+        "risk": float(geo.get("risk") or 0.0),
+        "known_bad_actor": is_bad_actor,
+        "geo_country_mismatch": bool(signals.get("geo_country_mismatch")),
+    }
+
+    # Notify humans: persist a security event that auto-routes to an incident + WORM.
+    human_notified = False
+    try:
+        emit_security_event(
+            path="/api/v1/chat/image-compromise",
+            payload={
+                **sec_payload,
+                "attack_intent": intent,
+                "repercussions": repercussions,
+                "image_hash": str(image_hash or "")[:64],
+                "ip_assessment": ip_assessment,
+            },
+            request=request,
+        )
+        human_notified = True
+    except Exception:
+        human_notified = False
+
+    assessment = {
+        "severity": severity,
+        "attack_intent": intent,
+        "potential_repercussions": repercussions,
+        "ip_assessment": ip_assessment,
+        "mitre_atlas": (details.get("mitre_atlas") or [])[:8],
+        "owasp_llm_top10": (details.get("owasp_llm_top10") or [])[:8],
+        "owasp_agentic_top10": (details.get("owasp_agentic_top10") or [])[:8],
+        "human_notified": human_notified,
+        "route": str(posture.get("route") or "escalate"),
+    }
+    try:
+        log_trace_event(
+            trace_id=None,
+            event_type="image_compromise_breach_assessment",
+            source_type="agent",
+            source_id="Security_Observer_Agent",
+            target_type="chat",
+            target_id=uid,
+            payload={
+                "severity": severity,
+                "attack_intent": intent,
+                "known_bad_actor": is_bad_actor,
+                "asn": geo.get("asn"),
+                "country": geo.get("country"),
+                "image_hash": str(image_hash or "")[:64],
+            },
+        )
+    except Exception:
+        pass
+    return assessment
 
 
 def _derive_qr_details(sig: Dict[str, Any] | None, posture: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -778,7 +1321,12 @@ def _derive_qr_details(sig: Dict[str, Any] | None, posture: Dict[str, Any] | Non
 
 
 def _image_trust_channels(posture: Dict[str, Any] | None) -> Dict[str, bool]:
-    route = str((posture or {}).get("route") or "allow")
+    posture = posture or {}
+    route = str(posture.get("route") or "allow")
+    if posture.get("analysis_pending"):
+        return {"visual_embedding_trusted": False, "ocr_trusted": False, "qr_trusted": False}
+    if posture.get("analysis_degraded") and not posture.get("security_risk"):
+        return {"visual_embedding_trusted": True, "ocr_trusted": False, "qr_trusted": False}
     if route == "allow":
         return {"visual_embedding_trusted": True, "ocr_trusted": True, "qr_trusted": True}
     if route == "visual_sanitized":
@@ -861,8 +1409,14 @@ def _persist_chat_structured_state(
     assistant_message: str | None = None,
     recent_messages: List[Dict[str, Any]] | None = None,
     confirmed_slots: Dict[str, Any] | None = None,
+    tenant_id: str | None = None,
+    session_epoch: str | None = None,
 ) -> None:
-    mem = Memory(redis)
+    mem = Memory(
+        redis,
+        tenant_id=tenant_id,
+        session_epoch=session_epoch,
+    )
     prior = mem.get_structured_state(uid) or {}
     budget = _extract_budget_bounds(query)
     brands = _extract_brand_mentions(query)
@@ -889,6 +1443,14 @@ def _persist_chat_structured_state(
             if isinstance(value, list) and not value:
                 continue
             merged_slots[str(key)] = value
+    excluded = {str(v).strip().lower() for v in (merged_slots.get("brand_excludes") or [])
+                if str(v).strip()}
+    if excluded and isinstance(merged_slots.get("brands"), list):
+        kept = [v for v in merged_slots["brands"] if str(v).strip().lower() not in excluded]
+        if kept:
+            merged_slots["brands"] = kept
+        else:
+            merged_slots.pop("brands", None)
     if merged_slots:
         out["confirmed_slots"] = merged_slots
         if merged_slots.get("budget_min") is not None:
@@ -929,6 +1491,188 @@ def _persist_chat_structured_state(
     mem.set_product_memory_bank(uid, bank)
 
 
+async def _idem_single_flight(
+    redis,
+    key: str,
+    producer,
+    *,
+    wait_timeout_seconds: float = 2.0,
+):
+    """SINGLE-FLIGHT over an Idempotency-Key (review-7 P0): the first request produces the result
+    and caches it; a concurrent DUPLICATE — the stream-timeout → /chat/query fallback carrying the
+    SAME key — WAITS for and returns that cached result instead of resolving the model a second
+    time (which would duplicate proposals, traces, and chat persistence). Cart apply was already
+    idempotent via the plan CAS; this closes the resolve/serve side. Fail-open: a flaky redis
+    never blocks a turn."""
+    result_key, lock_key = key + ":result", key + ":lock"
+    token = str(uuid.uuid4())   # OWNERSHIP token (R10.3/review-8 #8): only the current lease
+    #                             holder may release — an unconditional delete let a slow
+    #                             producer (lease expired, successor claimed) delete the
+    #                             SUCCESSOR's lock, opening a third concurrent production.
+    try:
+        cached = redis.get(result_key)
+    except Exception:
+        cached = None
+    if cached:
+        try:
+            return json.loads(cached)
+        except Exception:
+            pass
+    try:
+        claimed = bool(redis.set(lock_key, token, nx=True, ex=90))
+    except Exception:
+        claimed = True   # redis unavailable → don't block; just run (degrade to today's behavior)
+    if not claimed:
+        wait_deadline = time.monotonic() + max(
+            0.0, min(float(wait_timeout_seconds or 0.0), 10.0),
+        )
+        while time.monotonic() < wait_deadline:
+            await asyncio.sleep(
+                min(0.05, max(0.0, wait_deadline - time.monotonic())),
+            )
+            try:
+                cached = redis.get(result_key)
+            except Exception:
+                cached = None
+            if cached:
+                try:
+                    return json.loads(cached)
+                except Exception:
+                    break
+        try:
+            return _chat_in_progress(idempotency_key=key.rsplit(":", 1)[-1])
+        except Exception:
+            pass
+    try:
+        result = await producer()
+        try:
+            redis.setex(result_key, 120, json.dumps(result, default=str))
+        except Exception as _ce:
+            logger.debug("idem result cache skipped: %s", repr(_ce)[:80])
+        return result
+    finally:
+        # COMPARE-AND-DELETE: release only if the lock still carries OUR token. (get+delete has
+        # a tiny window vs a Lua CAD; it removes the whole failure class the unconditional
+        # delete had, and both redis clients here — real + Dummy — lack scripting.)
+        try:
+            held = redis.get(lock_key)
+            held = held.decode() if isinstance(held, bytes) else held
+            if held == token:
+                redis.delete(lock_key)
+        except Exception as _de:
+            logger.debug("idem lock release skipped: %s", repr(_de)[:80])
+
+
+async def _call_recommend_in_process(
+    request: Request,
+    params: Dict[str, Any],
+    *,
+    redis: Any,
+    db: Any,
+    role: str,
+) -> tuple[int, Dict[str, Any]]:
+    """Dispatch through the typed facade and its V2 compatibility cutover."""
+    from src.app.services.recommendation_delegation_policy import (
+        compatibility_cutover_enabled,
+        v2_only_unavailable_response,
+    )
+    from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
+
+    def _invoke() -> Dict[str, Any]:
+        from src.app.observability.metrics import record_recommendation_dispatch
+
+        tenant_id = _request_tenant_id(request)
+        observed_lane = str(params.get("turn_intent") or "").upper() or None
+        facade = dispatch_recommendation_core_typed(
+            db, redis,
+            query=str(params.get("query") or ""), uid=str(params.get("uid") or ""),
+            tenant_id=tenant_id,
+            budget_max=params.get("budget_max"), budget_min=params.get("budget_min"),
+            trace_id=str(params.get("trace_id") or uuid.uuid4()),
+            image_labels=params.get("image_labels"), image_ocr=params.get("image_ocr_text"),
+            image_hash=params.get("image_hash"), image_intent=params.get("image_intent"),
+            image_product_identity=params.get("image_product_identity"),
+            image_cv_signals=params.get("image_cv_signals"),
+            external_research_consent=(
+                str(params.get("external_research_consent") or "").lower() == "true"),
+            intent_hint=params.get("turn_intent"), role=role, request=request,
+            confirmed_slots=(
+                params.get("confirmed_slots")
+                if isinstance(params.get("confirmed_slots"), dict) else None
+            ),
+            session_epoch=(
+                str(params.get("session_epoch") or "").strip() or None
+            ),
+            memory_enabled=(
+                str(params.get("memory_mode") or "standard").lower() != "temporary"
+            ),
+            source_ip=(request.client.host if request.client else None),
+        )
+        if facade.served:
+            record_recommendation_dispatch(
+                outcome="v2_served", lane=facade.lane or observed_lane, reason="served",
+            )
+            served = dict(facade.payload or {})
+            served.setdefault("execution_mode", "v2_served")
+            served.setdefault("execution_lane", facade.lane)
+            return served
+        if facade.status == "blocked":
+            record_recommendation_dispatch(
+                outcome="blocked", lane=facade.lane or observed_lane, reason=facade.reason,
+            )
+            status_code = 429 if str(facade.reason).startswith("quota:") else 403
+            raise HTTPException(status_code=status_code, detail={
+                "message": "Request blocked by recommendation guard",
+                "reason": facade.reason,
+                "trace_id": str(params.get("trace_id") or "") or None,
+            })
+        if not compatibility_cutover_enabled():
+            record_recommendation_dispatch(
+                outcome="v2_unavailable", lane=facade.lane or observed_lane,
+                reason=facade.reason or facade.status,
+            )
+            return v2_only_unavailable_response(
+                status=facade.status,
+                reason=facade.reason,
+                lane=facade.lane,
+                trace_id=str(params.get("trace_id") or ""),
+            )
+        from src.app.services.recommendation_compatibility import (
+            serve_v2_compatibility,
+        )
+        try:
+            delegated = serve_v2_compatibility(
+                request=request, params=params, redis=redis, db=db, role=role,
+            )
+        except Exception:
+            record_recommendation_dispatch(
+                outcome="error", lane=facade.lane or observed_lane,
+                reason=facade.reason or facade.status,
+            )
+            raise
+        record_recommendation_dispatch(
+            outcome="v2_compatibility", lane=facade.lane or observed_lane,
+            reason=facade.reason or facade.status,
+        )
+        delegated = dict(delegated or {})
+        delegated.setdefault("execution_mode", "v2_compatibility")
+        delegated.setdefault("delegation_reason", facade.reason or facade.status)
+        delegated.setdefault("execution_lane", facade.lane)
+        return delegated
+
+    try:
+        # The outer chat boundary applies a real deadline. AnyIO defaults to shielding worker threads
+        # from cancellation, which would make asyncio.wait_for continue waiting for a stuck sync facade.
+        # Abandon the await on cancellation so the HTTP request can degrade on time. Dependencies inside
+        # _invoke must remain side-effect-safe and carry their own I/O deadlines because Python cannot
+        # forcibly stop the abandoned thread.
+        data = await anyio.to_thread.run_sync(_invoke, abandon_on_cancel=True)
+        return 200, data if isinstance(data, dict) else {}
+    except HTTPException as exc:
+        detail = exc.detail
+        return int(exc.status_code), detail if isinstance(detail, dict) else {"detail": detail}
+
+
 @router.post("/query")
 async def chat_query(
     request: Request,
@@ -937,6 +1681,56 @@ async def chat_query(
     db=Depends(get_db),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
+    """Single-flight entry (review-7 P0). Idempotency-Key rides both /chat/stream and this
+    fallback; when present, the second in-flight duplicate returns the first's cached result
+    rather than double-resolving. No key (or no redis) → straight through."""
+    idem = (request.headers.get("Idempotency-Key") or request.headers.get("idempotency-key")
+            or (payload or {}).get("idempotency_key"))
+
+    async def _run() -> Dict[str, Any]:
+        if not idem or redis is None:
+            return await _chat_query_impl(request, payload, redis, db, role)
+        try:
+            configured_wait = float(
+                os.getenv("CHAT_SINGLE_FLIGHT_WAIT_SEC", "2") or 2,
+            )
+        except (TypeError, ValueError):
+            configured_wait = 2.0
+        wait_budget = min(
+            max(0.05, _chat_request_timeout_seconds() - 0.1),
+            max(0.05, configured_wait),
+        )
+        return await _idem_single_flight(
+            redis,
+            f"chat:idem:{str(idem)[:128]}",
+            lambda: _chat_query_impl(request, payload, redis, db, role),
+            wait_timeout_seconds=wait_budget,
+        )
+
+    try:
+        return await asyncio.wait_for(
+            _run(),
+            timeout=_chat_request_timeout_seconds(),
+        )
+    except asyncio.TimeoutError:
+        return _chat_in_progress(idempotency_key=str(idem or ""))
+
+
+def _effective_chat_query(payload: Dict[str, Any]) -> tuple[str, bool, Any]:
+    """Normalize typed and transcribed input before any routing decision.
+
+    A transcript is provenance, not a second semantic channel. When the browser
+    submits both fields, the typed query remains authoritative and both must be
+    semantically identical by frontend contract.
+    """
+    source = payload or {}
+    typed = str(source.get("query") or "").strip()
+    voice = source.get("voice_transcript")
+    voice_text = str(voice or "").strip() if isinstance(voice, str) else ""
+    return typed or voice_text, bool(voice_text), source.get("voice_confidence")
+
+
+async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str) -> Dict:
     """Chat query wrapper that delegates to recommendation endpoint and
     returns a canonical UI-friendly shape.
 
@@ -945,15 +1739,9 @@ async def chat_query(
     New:     { query, uid, images?: [{labels, ocr_text, hash, damage_score, confidence}],
                image_intent?, voice_transcript?, voice_confidence?, recent_messages? }
     """
-    q = (payload or {}).get("query") or ""
-
-    # -----------------------------------------------------------------------
-    # Merge voice transcript into query when present
-    # -----------------------------------------------------------------------
-    voice_transcript = (payload or {}).get("voice_transcript")
-    voice_confidence = (payload or {}).get("voice_confidence")
-    if isinstance(voice_transcript, str) and voice_transcript.strip() and not q.strip():
-        q = voice_transcript.strip()
+    q, voice_used, voice_confidence = _effective_chat_query(payload)
+    submitted_query = q
+    voice_transcript = q if voice_used else None
 
     # -----------------------------------------------------------------------
     # Normalize multimodal image payload (new array format → legacy flat)
@@ -1023,14 +1811,50 @@ async def chat_query(
                 merged["qr_redirect_probe"] = sig.get("qr_redirect_probe")
         image_cv_signals_in = merged
     image_security_posture = _derive_image_security_posture(image_cv_signals_in)
+    breach_assessment: Optional[Dict[str, Any]] = None
+    # How the (untrusted) image was handled downstream:
+    #   "sanitized_visual" = kept safe product recognition, quarantined QR/OCR/steg
+    #   "text_only_fallback" = pixels themselves suspect (adversarial/manipulated) → ask to clarify
+    image_handling_mode: Optional[str] = None
+    recognized_image_label: Optional[str] = None
 
     if not q.strip():
         raise HTTPException(status_code=400, detail="query_required")
 
     uid = _resolve_uid(payload, request)
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
+    tenant_id = _request_tenant_id(request)
+    session_epoch = session_id or uid
+    memory_mode = str((payload or {}).get("memory_mode") or "standard").strip().lower()
+    if memory_mode not in {"standard", "temporary"}:
+        raise HTTPException(status_code=400, detail="invalid_memory_mode")
+    persist_conversation = memory_mode == "standard"
     source_ip = request.client.host if request and request.client else ""
+    # TEXT prompt-injection tally (ledger-only, no behavior change): classic override phrasings are
+    # already harmless here (they fall through to a normal product turn — the LLM never sees them as
+    # instructions), but every attempt is RECORDED as a refused_request so security/QA see the pressure.
+    try:
+        if re.search(r"\b(?:ignore|disregard|forget|override)\b.{0,40}\b(?:instructions?|prompts?|rules?|polic\w+|previous|above)\b"
+                     r"|\byou\s+are\s+now\b|\bsystem\s+prompt\b|\bjailbreak\b|\bdeveloper\s+mode\b", q, re.I):
+            from src.app.services.capability_gap import GAP_REFUSED_REQUEST, record_gap
+            from src.app.deps import hash_uid as _huid
+            from src.app.models.db import db_session as _db_session
+            with _db_session() as _idb:
+                record_gap(_idb, category=GAP_REFUSED_REQUEST, utterance=str(q)[:300],
+                           refusal_reason="prompt_injection_suspected", surface="chat",
+                           uid_hash=_huid(uid) if uid else None)
+    except Exception as _inj_exc:
+        logger.debug("injection ledger write failed: %s", _inj_exc)
     turn_intent = _classify_turn_intent(q)
+    # Deficit-reorder: the buyer's shortfall OBSERVATION ("but you only have a few in stock, am i
+    # ok waiting for a reorder?") is not a retrieval constraint — suggest()'s parser reads
+    # "few in stock" as a low-stock filter and zeroes results. Strip the observation so retrieval
+    # sees the clean bulk request ("50 dell laptops" -> products + sourcing preview); the reorder
+    # intent is preserved via _deficit_reorder so the availability/backorder answer still fires.
+    _deficit_reorder = _is_deficit_reorder_query(q)
+    _query_for_retrieval = q
+    if _deficit_reorder:
+        _query_for_retrieval = _strip_deficit_observation(q)
     copywriting_requested = bool((payload or {}).get("copywriting_enabled") is True)
     copy_profile_id = str((payload or {}).get("copy_profile_id") or "").strip() or None
     copy_surface = str((payload or {}).get("copy_surface") or "storefront").strip() or "storefront"
@@ -1040,16 +1864,37 @@ async def chat_query(
         copy_profile_inline = None
 
     # Reload confirmed slots at turn start to keep context continuity explicit.
+    # Also capture the PRIOR turn's shortlist NOW (before this turn's recommend overwrites it) so the
+    # multi-intent planner can bind "actually 15 instead" to the item the buyer was just shown when the
+    # cart is empty (e.g. an add-to-cart 409'd on stock).
+    _prior_turn_shortlist: List[str] = []
     try:
-        _prior_ss = Memory(redis).get_structured_state(uid) or {}
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
+        _prior_ss = Memory(
+            redis,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        ).get_structured_state(uid) or {}
         _confirmed_in = _prior_ss.get("confirmed_slots") if isinstance(_prior_ss.get("confirmed_slots"), dict) else {}
-        if _confirmed_in:
-            payload["confirmed_slots"] = _confirmed_in
+        _confirmed_request = (
+            payload.get("confirmed_slots")
+            if isinstance(payload.get("confirmed_slots"), dict) else {}
+        )
+        if _confirmed_in or _confirmed_request:
+            payload["confirmed_slots"] = {**_confirmed_in, **_confirmed_request}
+        _ls = _prior_ss.get("last_shortlist_skus") or _prior_ss.get("last_valid_shortlist_skus")
+        if isinstance(_ls, list):
+            _prior_turn_shortlist = [str(s) for s in _ls if s][:5]
     except Exception:
         pass
 
     # Replay protection: reject immediate duplicates from retries/replays.
     try:
+        # SKIP when invoked from the /chat/stream wrapper: chat_stream calls chat_query internally, so
+        # marking here would make the frontend's stream→/chat/query FALLBACK look like a duplicate (the
+        # 409 chat_replay_detected demo blocker). Only the terminal /chat/query enforces replay protection.
+        _skip_replay = bool((payload or {}).get("_internal_skip_replay"))
         replay_nonce = str(
             (payload or {}).get("nonce")
             or (payload or {}).get("message_id")
@@ -1082,11 +1927,11 @@ async def chat_query(
         replay_key = hashlib.sha256(replay_material.encode("utf-8")).hexdigest()
         replay_ttl = int(os.getenv("CHAT_REPLAY_TTL_SECONDS", "20") or 20)
         require_nonce = str(os.getenv("CHAT_REPLAY_REQUIRE_NONCE", "0")).strip().lower() in ("1", "true", "yes", "on")
-        if require_nonce and not replay_nonce:
+        if require_nonce and not replay_nonce and not _skip_replay:
             raise HTTPException(status_code=428, detail={"message": "nonce_required"})
         if replay_nonce:
             replay_ttl = max(replay_ttl, 120)
-        if not _chat_replay_mark_once(redis, replay_key=replay_key, ttl_seconds=replay_ttl):
+        if not _skip_replay and not _chat_replay_mark_once(redis, replay_key=replay_key, ttl_seconds=replay_ttl):
             raise HTTPException(
                 status_code=409,
                 detail={"message": "chat_replay_detected", "retry_after_seconds": replay_ttl},
@@ -1123,6 +1968,10 @@ async def chat_query(
 
         from src.app.security.observer import analyze_payload
         _sec_payload: Dict[str, Any] = {"query": merged_text, "source": "chat_multimodal"}
+        if source_ip:
+            _sec_payload["ip"] = source_ip
+        if uid:
+            _sec_payload["uid"] = uid
         if image_cv_signals_in:
             _sec_payload["cv_signals"] = image_cv_signals_in
         sec_result = analyze_payload(_sec_payload)
@@ -1135,6 +1984,22 @@ async def chat_query(
                     target_type="chat", target_id=None,
                     payload={"severity": sev, "signals": sec_result.get("signals")},
                 )
+                # Warn-and-continue: when an image is involved, run a full breach
+                # assessment (IP/ASN/GeoIP + human escalation). Products still flow.
+                if (image_cv_signals_in and breach_assessment is None
+                        and bool(image_security_posture.get("security_risk"))):
+                    try:
+                        breach_assessment = _assess_image_compromise_breach(
+                            merged_text=merged_text,
+                            cv_signals=image_cv_signals_in,
+                            source_ip=source_ip,
+                            uid=uid,
+                            image_hash=image_hash_in,
+                            posture=image_security_posture,
+                            request=request,
+                        )
+                    except Exception:
+                        breach_assessment = None
     except Exception:
         pass
 
@@ -1189,8 +2054,28 @@ async def chat_query(
             "complexity": score_query_complexity(q, context={"has_image": True}),
         }
         try:
-            _store_chat_message(db, uid=uid, role="user", content=q, trace_id=None)
-            _store_chat_message(db, uid=uid, role="assistant", content=str(out.get("assistant_message") or ""), trace_id=None)
+            if not persist_conversation:
+                raise RuntimeError("temporary_chat")
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="user",
+                content=q,
+                trace_id=None,
+            )
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="assistant",
+                content=str(out.get("assistant_message") or ""),
+                trace_id=None,
+            )
             _persist_chat_structured_state(
                 redis=redis,
                 uid=uid,
@@ -1200,6 +2085,8 @@ async def chat_query(
                 assistant_message=str(out.get("assistant_message") or ""),
                 recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
                 confirmed_slots=_extract_confirmed_slots(query=q, response=None),
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
             )
         except Exception:
             pass
@@ -1213,40 +2100,41 @@ async def chat_query(
         "conversation_turn": int((payload or {}).get("conversation_turn") or 0),
     })
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         uid_for_cache = _resolve_uid(payload, request)
         if uid_for_cache and isinstance(image_hash_in, str) and image_hash_in.strip() and image_blob_bytes:
-            mem = Memory(redis)
+            mem = Memory(
+                redis,
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
+            )
             _stash_image_blob_for_recommend(mem, uid_for_cache, image_hash_in.strip()[:128], image_blob_bytes)
     except Exception:
         pass
 
-    policy_ok, policy_reason = enforce_model_theft_policy_gate(
-        query=q,
-        uid=uid,
-        source_ip=(request.client.host if request and request.client else None),
-        api_key_id=(request.headers.get("x-api-key") if request else None),
+    from src.app.services.recommendation_ingress import authorize_recommendation_ingress
+    _recommend_ingress = authorize_recommendation_ingress(
+        request=request, redis=redis, query=q, uid=uid,
+        tenant_id=_request_tenant_id(request),
+        benign_shopping_query=False,
     )
-    if not policy_ok:
-        raise HTTPException(status_code=429, detail={"message": "model_theft_policy_gate", "reason": policy_reason})
-    allowed_model_use, model_use_reason = enforce_model_theft_rate_limit(
-        redis_client=redis,
-        uid=uid,
-        source_ip=(request.client.host if request and request.client else None),
-        api_key_id=(request.headers.get("x-api-key") if request else None),
-        query=q,
-    )
-    if not allowed_model_use:
-        raise HTTPException(status_code=429, detail={"message": "model_theft_guard", "reason": model_use_reason})
 
     # -----------------------------------------------------------------------
     # Persist recent conversation messages so the recommend pipeline can
     # reference them for context continuity (avoids "context rot").
     # -----------------------------------------------------------------------
     try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         _uid_msg = uid
         _recent_msgs_raw = (payload or {}).get("recent_messages") or []
         if isinstance(_recent_msgs_raw, list) and _recent_msgs_raw:
-            _mem_state = Memory(redis)
+            _mem_state = Memory(
+                redis,
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
+            )
             _ss = _mem_state.get_structured_state(_uid_msg) or {}
             _ss["recent_messages"] = _normalize_recent_messages(_recent_msgs_raw, limit=12)
             _mem_state.set_structured_state(_uid_msg, _ss)
@@ -1279,7 +2167,11 @@ async def chat_query(
         except Exception:
             pass
 
-    if bool(image_security_posture.get("chat_lockdown")):
+    # Legacy hard-lock (deny products) is OFF by default. Policy is warn-and-continue:
+    # a compromised image must NOT deny the shopping result — see the fall-through block
+    # below. Set IMAGE_COMPROMISE_HARD_LOCK=1 only if you explicitly want the old deny.
+    _image_hard_lock_enabled = str(os.getenv("IMAGE_COMPROMISE_HARD_LOCK", "0")).strip().lower() in ("1", "true", "yes", "on")
+    if bool(image_security_posture.get("chat_lockdown")) and _image_hard_lock_enabled:
         decision_trace_id = str(uuid.uuid4())
         _sec_signals = {str(k): bool(v) for k, v in (image_cv_signals_in or {}).items() if isinstance(v, bool)}
         _qr = _derive_qr_details(image_cv_signals_in, image_security_posture)
@@ -1346,26 +2238,136 @@ async def chat_query(
             },
         }
         try:
-            _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
-            _store_chat_message(db, uid=uid, role="assistant", content=str(out.get("assistant_message") or ""), trace_id=decision_trace_id, session_id=session_id)
+            if not persist_conversation:
+                raise RuntimeError("temporary_chat")
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="user",
+                content=q,
+                trace_id=decision_trace_id,
+            )
+            _store_chat_message(
+                db,
+                tenant_id=tenant_id,
+                uid=uid,
+                session_id=session_id,
+                session_epoch=session_epoch,
+                role="assistant",
+                content=str(out.get("assistant_message") or ""),
+                trace_id=decision_trace_id,
+            )
         except Exception:
             pass
         return out
 
-    # Call internal recommend endpoint to leverage agentic pipeline
-    base = str(request.base_url).rstrip("/")
-    url = f"{base}/api/v1/recommend/suggest"
-    params = {"uid": uid, "query": q}
+    # ── Severe image threat → warn-and-continue (default policy) ──────────────
+    # A malicious-image posture must NOT deny the shopping result. We run a full
+    # breach assessment (IP/ASN/GeoIP + human escalation), strengthen the
+    # user-facing warning, and fall through to text-only recommendations. The
+    # downstream recommend call runs in text_only_fallback because the image is
+    # marked untrusted (image_security_posture.image_untrusted).
+    if bool(image_security_posture.get("chat_lockdown")) and not _image_hard_lock_enabled:
+        if breach_assessment is None:
+            try:
+                breach_assessment = _assess_image_compromise_breach(
+                    merged_text=str(q or ""),
+                    cv_signals=image_cv_signals_in,
+                    source_ip=source_ip,
+                    uid=uid,
+                    image_hash=image_hash_in,
+                    posture=image_security_posture,
+                    request=request,
+                )
+            except Exception:
+                breach_assessment = None
+        # Short, accurate badge summary for the right-panel (the detailed,
+        # mode-aware user message is built later in the response surface). Override
+        # the stale "Chat is temporarily locked…" copy from the posture since we
+        # are NOT locking — we continue with the safe channels.
+        image_security_posture["route"] = "escalate_continue"
+        image_security_posture["warning_message"] = (
+            "Suspicious image element detected and neutralised — recommendations "
+            "continue; flagged for security review."
+        )
+        image_security_posture["image_untrusted"] = True
+        try:
+            log_trace_event(
+                trace_id=None,
+                event_type="image_compromise_warn_and_continue",
+                source_type="agent",
+                source_id="Security_Observer_Agent",
+                target_type="chat",
+                target_id=uid,
+                payload={
+                    "severity": str(image_security_posture.get("severity") or "high"),
+                    "route": "escalate_continue",
+                    "human_notified": bool((breach_assessment or {}).get("human_notified")),
+                },
+            )
+        except Exception:
+            pass
+
+    # Delegate through the in-process compatibility boundary. The mature suggest
+    # contract remains authoritative until facade dispatch is fully hoisted.
+    params = {"uid": uid, "query": _query_for_retrieval,
+              "trace_id": _recommend_ingress.trace_id,
+              "session_epoch": session_epoch,
+              "memory_mode": memory_mode}
+    if _deficit_reorder:
+        params["reorder_consent_intent"] = "true"  # emphasize the backorder-consent answer downstream
     if turn_intent and turn_intent != "SEARCH":
         params["turn_intent"] = turn_intent
+    # N3 Mode-B consent passthrough: the chip's explicit per-turn opt-in rides to the evidence
+    # orchestrator's web leg. Absent/falsy -> the leg can never fire.
+    if bool((payload or {}).get("external_research_consent")):
+        params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
+    pending_clarification: Dict[str, Any] = {}
+    try:
+        pending_clarification = Memory(
+            redis,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        ).get_pending_clarification(uid)
+    except Exception:
+        pending_clarification = {}
+    q = _merge_material_nqe_answer(
+        query=str(q or ""),
+        nqe_selection=nqe_selection if isinstance(nqe_selection, dict) else {},
+        recent_messages=(payload or {}).get("recent_messages")
+        if isinstance((payload or {}).get("recent_messages"), list) else [],
+        pending_clarification=pending_clarification,
+    )
+    pending_clarification_consumed = bool(q != submitted_query and pending_clarification)
+    params["query"] = q
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
+    if not confirmed_slots:
+        try:
+            recent_for_slots = (payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else []
+            for msg in reversed(recent_for_slots or []):
+                if not isinstance(msg, dict) or str(msg.get("role") or "").lower() != "user":
+                    continue
+                slots = _extract_confirmed_slots(query=str(msg.get("content") or ""), response=None)
+                if slots:
+                    confirmed_slots = slots
+                    break
+        except Exception:
+            confirmed_slots = {}
+    if confirmed_slots:
+        params["confirmed_slots"] = dict(confirmed_slots)
     if isinstance(nqe_selection, dict):
         try:
             oval = str(nqe_selection.get("option_value") or "").strip().lower()
             if oval.startswith("expand_budget:+"):
                 delta = int(oval.split(":+", 1)[1])
-                base_budget = _budget_range_from_slots(confirmed_slots, q)
+                # The current query is usually the button label ("Widen more (+$400)").
+                # Do not re-parse that label as a real budget cap; widen from confirmed
+                # prior slots only, otherwise "$400" collapses a prior 1100-1400 range.
+                base_budget = _budget_range_from_slots(confirmed_slots, "")
                 widened = _compute_widened_budget(base_budget, delta)
                 q = (
                     f"{q}. budget between ${int(widened['budget_min'])} and ${int(widened['budget_max'])} "
@@ -1392,12 +2394,40 @@ async def chat_query(
                 params["nqe_option_value"] = oval[:120]
     try:
         security_risky_image = bool(image_security_posture.get("image_untrusted"))
+        # Channel-separated trust (A-10 resilience): the attack vector is usually
+        # in ONE channel (QR / OCR text / steg payload), independent of the visual
+        # product recognition. We quarantine the malicious channel but keep the
+        # safe visual signal so recommendations stay anchored to the real product.
+        # The visual channel itself is only suspect when the *pixels* are attacked
+        # (adversarial perturbation or manipulation/forgery).
+        _sig = image_cv_signals_in or {}
+        _qr_or_text_threat = bool(
+            _sig.get("qr_code_detected")
+            or _sig.get("qr_external_url_detected")
+            or _sig.get("qr_prompt_injection")
+            or _sig.get("ocr_prompt_injection")
+            or _sig.get("steg_suspicious")
+        )
+        _adversarial = float(_sig.get("adversarial_score") or 0.0)
+        _manip = bool(_sig.get("manipulation_detected"))
+        # The visual product recognition is only untrustworthy when the *pixels*
+        # are directly attacked: a strong adversarial perturbation (targets the
+        # classifier), or manipulation with NO QR/OCR/steg overlay to explain it
+        # (i.e. a likely forged photo). A QR pasted onto a real product photo does
+        # NOT invalidate "this is a gaming laptop" — we keep that and quarantine
+        # only the QR/OCR/steg channel.
+        _visual_attacked = bool(_adversarial >= 0.7 or (_manip and not _qr_or_text_threat))
+        _visual_trusted = not _visual_attacked
+
         labels_list: List[str] = []
+        if isinstance(image_labels_in, list):
+            labels_list = [str(x).strip() for x in image_labels_in if str(x).strip()]
+        elif isinstance(image_labels_in, str):
+            labels_list = [s.strip() for s in image_labels_in.split(",") if s.strip()]
+        recognized_image_label = _summarize_recognized_product(labels_list)
+
         if not security_risky_image:
-            if isinstance(image_labels_in, list):
-                labels_list = [str(x).strip() for x in image_labels_in if str(x).strip()]
-            elif isinstance(image_labels_in, str):
-                labels_list = [s.strip() for s in image_labels_in.split(",") if s.strip()]
+            # Full trust — pass every channel (unchanged behavior).
             if labels_list:
                 params["image_labels"] = ",".join(labels_list[:12])
             if isinstance(image_ocr_text_in, str) and image_ocr_text_in.strip():
@@ -1406,9 +2436,25 @@ async def chat_query(
                 params["image_hash"] = image_hash_in.strip()[:128]
             if isinstance(image_intent_in, str) and image_intent_in.strip():
                 params["image_intent"] = image_intent_in.strip()[:32]
+        elif _visual_trusted and labels_list:
+            # Untrusted upload BUT visual recognition is intact → keep the safe
+            # product labels (recommend's image_feature_gate will apply the
+            # "sanitized" verdict: anchor on category, strip brand/OCR). We
+            # deliberately DO NOT forward OCR text (injection vector) or intent.
+            params["image_labels"] = ",".join(labels_list[:12])
+            if isinstance(image_hash_in, str) and image_hash_in.strip():
+                params["image_hash"] = image_hash_in.strip()[:128]
+            params["image_security_mode"] = "sanitized_visual"
+            image_handling_mode = "sanitized_visual"
         else:
+            # Pixels themselves are suspect (adversarial/manipulated) or nothing
+            # was recognizable → text only, and we'll ask the user to clarify the
+            # product so we don't lose the shopping context.
             params["image_security_mode"] = "text_only_fallback"
-        if isinstance(image_product_identity_in, dict) and image_product_identity_in:
+            image_handling_mode = "text_only_fallback"
+        # Product identity is forwarded for both trusted and sanitized paths; the
+        # recommend-side gate strips brand/identity under the "sanitized" verdict.
+        if isinstance(image_product_identity_in, dict) and image_product_identity_in and image_handling_mode != "text_only_fallback":
             params["image_product_identity"] = json.dumps(image_product_identity_in, separators=(",", ":"))[:1000]
         if image_cv_signals_in:
             params["image_cv_signals"] = json.dumps(image_cv_signals_in, separators=(",", ":"))[:1000]
@@ -1422,14 +2468,37 @@ async def chat_query(
             headers["x-api-key"] = fwd_key
         except Exception:
             headers["x-api-key"] = "local-merchant-key"
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.get(url, params=params, headers=headers)
-            data = {}
-            try:
-                data = r.json()
-            except Exception:
-                data = {}
-            if r.status_code == 403 and isinstance(data, dict):
+        # Bound the storefront upstream wait. The V2 dispatch is now in-process, so configuring a timeout
+        # without applying it here does nothing and can strand an HTTP worker indefinitely. wait_for gives
+        # the buyer a real response deadline; downstream sync dependencies must still carry their own
+        # statement/model timeouts because cancelling this await cannot forcibly stop a running OS thread.
+        try:
+            _upstream_timeout = float(os.getenv("CHAT_UPSTREAM_TIMEOUT_SEC", "25") or 25)
+        except (TypeError, ValueError):
+            _upstream_timeout = 25.0
+        _upstream_timeout = max(0.05, min(_upstream_timeout, 120.0))
+        status_code, data = await asyncio.wait_for(
+            _call_recommend_in_process(
+                request, params, redis=redis, db=db, role=role),
+            timeout=_upstream_timeout,
+        )
+        if status_code is not None:
+            # CART-MUTATION short-circuit (V2 cart lane): see _cart_mutation_short_circuit.
+            if status_code == 200:
+                _cart_out = _cart_mutation_short_circuit(
+                    data,
+                    q=q,
+                    uid=_resolve_uid(payload, request),
+                    db=db,
+                    redis=redis,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    session_epoch=session_epoch,
+                    persist_conversation=persist_conversation,
+                )
+                if _cart_out is not None:
+                    return _cart_out
+            if status_code == 403 and isinstance(data, dict):
                 # Safety/policy blocks are a normal outcome; surface them as a friendly chat response.
                 blocked = data.get("detail") if isinstance(data.get("detail"), dict) else data
                 decision_trace_id = (
@@ -1474,11 +2543,25 @@ async def chat_query(
                         "security_route": str(image_security_posture.get("route") or "allow"),
                     }
                     try:
+                        if not persist_conversation:
+                            raise RuntimeError("temporary_chat")
                         uid = _resolve_uid(payload, request)
-                        _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id)
                         _store_chat_message(
                             db,
+                            tenant_id=tenant_id,
                             uid=uid,
+                            session_id=session_id,
+                            session_epoch=session_epoch,
+                            role="user",
+                            content=q,
+                            trace_id=decision_trace_id,
+                        )
+                        _store_chat_message(
+                            db,
+                            tenant_id=tenant_id,
+                            uid=uid,
+                            session_id=session_id,
+                            session_epoch=session_epoch,
                             role="assistant",
                             content=str(out.get("assistant_message") or ""),
                             trace_id=decision_trace_id,
@@ -1510,11 +2593,25 @@ async def chat_query(
                     "security_route": str(image_security_posture.get("route") or "review"),
                 }
                 try:
+                    if not persist_conversation:
+                        raise RuntimeError("temporary_chat")
                     uid = _resolve_uid(payload, request)
-                    _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id)
                     _store_chat_message(
                         db,
+                        tenant_id=tenant_id,
                         uid=uid,
+                        session_id=session_id,
+                        session_epoch=session_epoch,
+                        role="user",
+                        content=q,
+                        trace_id=decision_trace_id,
+                    )
+                    _store_chat_message(
+                        db,
+                        tenant_id=tenant_id,
+                        uid=uid,
+                        session_id=session_id,
+                        session_epoch=session_epoch,
                         role="assistant",
                         content=str(out.get("assistant_message") or ""),
                         trace_id=decision_trace_id,
@@ -1525,29 +2622,111 @@ async def chat_query(
                         query=q,
                         products=[],
                         trace_id=decision_trace_id,
+                        tenant_id=tenant_id,
+                        session_epoch=session_epoch,
                     )
                 except Exception:
                     pass
                 return out
-            r.raise_for_status()
+            if status_code == 429:
+                detail = data.get("detail") if isinstance(data.get("detail"), dict) else data
+                reason = str((detail or {}).get("reason") or "quota_exceeded")
+                decision_trace_id = (detail or {}).get("trace_id")
+                return {
+                    "products": [], "view_mode": "cards", "confidence": None,
+                    "decision_trace_id": decision_trace_id, "trace_id": decision_trace_id,
+                    "assistant_message": (
+                        "This account has reached its configured AI-assistance allowance for today. "
+                        "Your cart and prior work are unchanged; an operator can raise the allowance "
+                        "or you can continue after it resets."
+                    ),
+                    "next_questions": [], "blocked": True, "blocked_detail": detail,
+                    "degraded": False, "security_route": "allow", "quota_reason": reason,
+                }
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=data)
     except Exception as e:
         import traceback as _tb
+        _timed_out = isinstance(e, (asyncio.TimeoutError, TimeoutError))
+        _failure_reason = "recommend_timeout" if _timed_out else "recommend_error"
         _detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
         logger.warning("chat.recommend_call_failed detail=%s tb=%s", _detail, _tb.format_exc()[-500:])
-        raise HTTPException(status_code=502, detail=f"recommend_unavailable: {_detail}")
+        if _timed_out:
+            try:
+                from src.app.observability.metrics import record_recommendation_dispatch
+                record_recommendation_dispatch(
+                    outcome="timeout",
+                    lane=str(params.get("turn_intent") or "UNKNOWN"),
+                    reason="recommend_timeout",
+                )
+            except Exception as _metric_exc:
+                logger.debug("chat timeout metric skipped: %s", repr(_metric_exc)[:120])
+        # N7 (2026-07-07): a hiccup on the internal recommend hop used to surface to the BUYER as a
+        # raw HTTP 502 — a broken chat experience. Degrade GRACEFULLY instead: a friendly retry
+        # message + a traceable id, HTTP 200. The operator still sees the warning log above and the
+        # error trace below; the shopper sees a recoverable prompt, never a stack-status code.
+        _degraded_trace = f"chat-degraded-{uuid.uuid4().hex[:12]}"
+        try:
+            log_trace_event(
+                trace_id=_degraded_trace,
+                event_type=("system_timeout" if _timed_out else "system_error"),
+                source_type="agent",
+                source_id="Chat_Delegation", target_type="system", target_id=None,
+                payload={
+                    "stage": "recommend_hop",
+                    "error": _detail[:300],
+                    "reason": _failure_reason,
+                    "route": "graceful_degrade",
+                },
+            )
+        except Exception:
+            pass
+        return {
+            "products": [],
+            "view_mode": "cards",
+            "confidence": None,
+            "decision_trace_id": _degraded_trace,
+            "trace_id": _degraded_trace,
+            "assistant_message": (
+                "I hit a brief hiccup pulling that together — nothing's lost. Please send that once "
+                "more, or add the main use-case in one line (e.g. 'for gaming' or 'for my team')."
+            ),
+            "next_questions": [
+                {"id": "retry_last", "text": "Try that again", "goal": "retry_search"},
+                {"id": "add_use_case", "text": "Add the main use-case in one line", "goal": "clarify_details"},
+            ],
+            "blocked": False,
+            "degraded": True,
+            "degraded_reason": _failure_reason,
+            "needs_human_review": False,
+            "security_route": "allow",
+        }
+
+    # The pre-dispatch classifier is only an ingress hint. Once the typed facade returns a
+    # bounded lane, project that authoritative decision through chat and Decision Trace instead
+    # of retaining a contradictory heuristic label (for example POLICY_QUESTION -> SEARCH).
+    backend_turn_intent = _authoritative_backend_lane(data)
+    backend_lane_authoritative = backend_turn_intent is not None
+    if backend_lane_authoritative:
+        turn_intent = backend_turn_intent
 
     # Map results into canonical product shape
     results = data.get("results") or []
     products: List[Dict] = []
     for item in results:
         price = item.get("price")
+        price_cents = item.get("price_cents")
         if price is None:
             try:
-                price_cents = item.get("price_cents")
                 if price_cents is not None:
-                    price = float(price_cents) / 100.0
+                    price = cents_to_dollars(price_cents)
             except Exception:
                 price = None
+        if price_cents is None and price is not None:
+            try:
+                price_cents = dollars_to_cents(price)
+            except Exception:
+                price_cents = None
         specs = item.get("specs") or {}
         features: List[str] = []
         try:
@@ -1579,15 +2758,31 @@ async def chat_query(
                     why = [str(x) for x in pos if isinstance(x, (str, int, float))][:4]
         except Exception:
             why = []
-        products.append({
+        product_out = {
             "sku": item.get("sku"),
             "name": item.get("name"),
             "price": price,
+            "price_cents": price_cents,
+            "currency": item.get("currency") or "USD",
+            "specs": specs,
             "features": features or (item.get("features") or []),
             "image_url": item.get("image_url"),
             "why": why,
             "score_norm": item.get("score_norm"),
-        })
+            "score": item.get("score"),
+            "factors": item.get("factors") or {},
+            "why_not": item.get("why_not") or [],
+            "stock": item.get("stock"),
+            "stock_level": item.get("stock_level"),
+            "stock_status": item.get("stock_status"),
+            "stock_urgency": item.get("stock_urgency"),
+            "cart_eligible": item.get("cart_eligible"),
+            "confidence": item.get("confidence"),
+        }
+        for optional_key in ("id", "brand", "category", "reason_codes", "contrastive_why", "rank_delta", "rerank_delta"):
+            if optional_key in item:
+                product_out[optional_key] = item.get(optional_key)
+        products.append(product_out)
 
     # Auto view mode heuristic (simple client-like logic)
     ql = q.lower()
@@ -1600,6 +2795,26 @@ async def chat_query(
         view_mode = "cards"
 
     decision_trace_id = data.get("decision_trace_id") or data.get("decision_id") or data.get("trace_id")
+    if decision_trace_id and backend_lane_authoritative:
+        try:
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="intent_classify",
+                source_type="stage",
+                source_id="V2_Recommendation_Facade",
+                target_type="chat",
+                target_id=None,
+                payload={
+                    "intent_analysis": {
+                        "lane": turn_intent,
+                        "intent": turn_intent,
+                        "source": "typed_facade_result",
+                    },
+                    "intent_authority": "finalized_route",
+                },
+            )
+        except Exception:
+            pass
     assistant_message = data.get("assistant_message") or data.get("message")
     if bool(image_security_posture.get("image_untrusted")):
         warning = str(
@@ -1636,10 +2851,10 @@ async def chat_query(
                     "scores": intent_routing_result.get("scores", {}),
                 },
             )
-        if has_image:
+        if has_image or voice_transcript:
             log_trace_event(
                 trace_id=decision_trace_id, event_type="multimodal_fusion",
-                source_type="agent", source_id="Chat_Multimodal",
+                source_type="stage", source_id="Multimodal_Fusion",
                 target_type="chat", target_id=None,
                 payload={
                     "image_count": len(images_array) if images_array else (1 if has_image else 0),
@@ -1648,9 +2863,10 @@ async def chat_query(
                     "ocr_text": str(image_ocr_text_in or "")[:200],
                 },
             )
+        if has_image:
             log_trace_event(
                 trace_id=decision_trace_id, event_type="image_security_scan",
-                source_type="agent", source_id="Image_Security_Sidecar",
+                source_type="gate", source_id="Image_Security_Sidecar",
                 target_type="chat", target_id=None,
                 payload={
                     "qr_detected": bool(image_cv_signals_in.get("qr_code_detected")),
@@ -1718,9 +2934,29 @@ async def chat_query(
     except Exception:
         pass
     next_questions = data.get("next_questions") or []
+    # A completed policy answer is informational, not a failed product search. Legacy chat
+    # post-processing used to append budget/performance refinements solely because the slate
+    # was empty, contradicting the authoritative facade lane.
+    if turn_intent == "POLICY_QUESTION":
+        next_questions = []
+    # Grounding ladder: guarantee the SPECIFIC identity clarification ("Is this a
+    # Razer?") leads when the ladder couldn't confirm the product — robust against
+    # the NQE cap/transform ordering that can drop it on some paths.
+    try:
+        _gl_rq = (data.get("constraints_used") or {}).get("_identity_residual_question") if isinstance(data.get("constraints_used"), dict) else None
+        if isinstance(_gl_rq, dict) and str(_gl_rq.get("text") or "").strip():
+            _grid = str(_gl_rq.get("id") or "clarify_product_identity")
+            next_questions = [_gl_rq] + [
+                q for q in next_questions
+                if isinstance(q, dict) and str(q.get("id") or "") not in ("ask_image_model", _grid)
+            ]
+    except Exception:
+        pass
     if turn_intent in ("EXPLAIN", "SUPPORT_CLAIM"):
         next_questions = [x for x in next_questions if isinstance(x, dict) and not _is_budget_question(x)]
-    if not next_questions and not products and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM"):
+    if not next_questions and not products and turn_intent not in (
+        "EXPLAIN", "SUPPORT_CLAIM", "POLICY_QUESTION",
+    ):
         # Fallback follow-ups when no candidates are found but backend did not emit NQE prompts.
         next_questions = [
             {
@@ -1732,24 +2968,88 @@ async def chat_query(
                     {"id": "widen_medium", "label": "Widen more (+$400)", "value": "expand_budget:+400"},
                 ],
             },
-            {"id": "relax_brand", "text": "Are you open to brands beyond Apple/Windows-first picks?", "goal": "increase_match_space"},
-            {"id": "priority_tradeoff", "text": "Prioritize gaming FPS or rendering/export speed first?", "goal": "resolve_tradeoff"},
         ]
+        # Ask to relax only a positive hard brand filter. An explicit exclusion is already a
+        # resolved buyer constraint; asking them to consider the excluded brand contradicts the
+        # same response. Brand names and vertical policy stay in the bounded core payload.
+        _confirmed = data.get("confirmed_slots") if isinstance(data.get("confirmed_slots"), dict) else {}
+        _decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+        _hard_brand = _decision.get("brand_filter") or _confirmed.get("brand_filter")
+        _excluded = _decision.get("exclude_brand") or _confirmed.get("brand_excludes")
+        if _hard_brand and not _excluded:
+            next_questions.append({
+                "id": "relax_brand",
+                "text": "Should I relax the current brand constraint?",
+                "goal": "increase_match_space",
+            })
+        next_questions.append({
+            "id": "priority_tradeoff",
+            "text": "Prioritize interactive performance or rendering/export speed first?",
+            "goal": "resolve_tradeoff",
+        })
+    # Budget stated but NO in-budget match (nearest-above fallback shows OVER-budget products): still expose
+    # the WIDEN option. The old trigger only fired when products was empty, so a budget query that fell back
+    # to over-budget picks hid the widen chip (the brittle path GPT-5.5 flagged). Deterministic: budget set +
+    # every shown product over it → prepend widen (unless already present). Never clobbers other questions.
+    try:
+        if turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM") and products:
+            # budget from the QUERY (constraints_used is often empty in the chat response) → compare to the
+            # shown product prices. If a ceiling was stated and EVERY shown product exceeds it, the buyer got
+            # only over-budget picks → offer widen.
+            from src.app.services.query_decomposer import decompose as _decompose_budget
+            _bmax = _decompose_budget(str(q or "")).budget_max
+
+            def _pp(pr: Dict[str, Any]) -> float:
+                try:
+                    return float(pr.get("price") or 0) or (float(pr.get("price_cents") or 0) / 100.0)
+                except (TypeError, ValueError):
+                    return 0.0
+            _priced = [pr for pr in products if isinstance(pr, dict) and _pp(pr) > 0]
+            _all_over = bool(_bmax and _priced and all(_pp(pr) > float(_bmax) for pr in _priced))
+            _has_widen = any(isinstance(x, dict) and x.get("id") == "widen_budget" for x in next_questions)
+            if _all_over and not _has_widen:
+                next_questions = [{
+                    "id": "widen_budget",
+                    "text": "Nothing landed exactly in budget — widen it a little to see closer fits?",
+                    "goal": "increase_match_space",
+                    "options": [
+                        {"id": "widen_small", "label": "Widen a little (+$200)", "value": "expand_budget:+200"},
+                        {"id": "widen_medium", "label": "Widen more (+$400)", "value": "expand_budget:+400"},
+                    ],
+                }] + list(next_questions)
+    except Exception:
+        pass
     if not assistant_message and not products and next_questions:
         prompts = [f"- {q.get('text')}" for q in next_questions if isinstance(q, dict) and q.get("text")]
         assistant_message = "I could not find a confident in-catalog match yet. Try one of these refinements:\n" + "\n".join(prompts)
 
-    aq_out = apply_answer_quality(
-        query=q,
-        assistant_message=assistant_message,
-        turn_intent=turn_intent,
-        products=products,
-        image_cv_signals=image_cv_signals_in if isinstance(image_cv_signals_in, dict) else {},
-        has_image=has_image,
-        buyer_persona=data.get("buyer_persona"),
-        brand_name=None,
-    )
+    clarification_only = bool(data.get("needs_disambiguation") and not products and next_questions)
+    if clarification_only:
+        aq_out = {"assistant_message": assistant_message}
+    else:
+        aq_out = apply_answer_quality(
+            query=q,
+            assistant_message=assistant_message,
+            turn_intent=turn_intent,
+            products=products,
+            image_cv_signals=image_cv_signals_in if isinstance(image_cv_signals_in, dict) else {},
+            has_image=has_image,
+            buyer_persona=data.get("buyer_persona"),
+            brand_name=None,
+            bulk_budget=data.get("bulk_budget") if isinstance(data.get("bulk_budget"), dict) else None,
+        )
     assistant_message = aq_out.get("assistant_message")
+    # N6 prose citations, re-applied on the /chat path: recommend.suggest appends a "_Sources:_" line,
+    # but chat re-derives the message through apply_answer_quality (which drops it). Re-append here on
+    # the FINAL message so provenance reads in the chat text, matching the chips/Evidence tab.
+    try:
+        _ev = data.get("evidence") if isinstance(data, dict) else None
+        _cites = [str(c.get("source") or "").replace("_", " ")
+                  for c in ((_ev or {}).get("citations") or []) if c.get("source")]
+        if _cites and assistant_message and "_Sources:" not in assistant_message:
+            assistant_message = assistant_message.rstrip() + "\n\n_Sources: " + " / ".join(_cites[:4]) + "_"
+    except Exception:
+        pass
     aq_intent = aq_out.get("intent_decomposed") if isinstance(aq_out.get("intent_decomposed"), dict) else {}
     aq_template = aq_out.get("template_selected") if isinstance(aq_out.get("template_selected"), dict) else {}
     aq_coverage = aq_out.get("answer_coverage_scored") if isinstance(aq_out.get("answer_coverage_scored"), dict) else {}
@@ -1795,6 +3095,25 @@ async def chat_query(
         brand_name=brand_name,
     )
     assistant_message = copy_out.get("assistant_message")
+    # HONEST REFUSAL survives every compose path: suggest() may refuse an out-of-range quantity
+    # (99999/0/negative) — the note must reach the buyer even when chat rebuilds the message
+    # (answer-quality templates, copywriting, no-match compose all run after suggest's own narration).
+    _refusal = str(data.get("refusal_note") or "").strip()
+    if _refusal and _refusal not in str(assistant_message or ""):
+        assistant_message = f"{_refusal}\n\n{assistant_message}" if assistant_message else _refusal
+    # PRE-SALES policy answer (StoreProfile policy_faq slot — store-written content, never invented):
+    # a mixed ask ("gaming laptop… what warranty?") gets products PLUS the policy paragraph; a pure
+    # policy question replaces the useless "no match" with the actual answer.
+    try:
+        from src.app.services.answer_quality import policy_faq_answer
+        _pol = policy_faq_answer(q)
+        if _pol:
+            if products:
+                assistant_message = f"{assistant_message}\n\n📋 {_pol}" if assistant_message else f"📋 {_pol}"
+            else:
+                assistant_message = f"📋 {_pol}"
+    except Exception as _pol_exc:
+        logger.debug("policy_faq compose failed: %s", _pol_exc)
     copy_meta = copy_out.get("meta") if isinstance(copy_out.get("meta"), dict) else {}
     try:
         if decision_trace_id and (bool(copy_meta.get("applied")) or bool(copywriting_requested)):
@@ -1931,6 +3250,43 @@ async def chat_query(
             )
     except Exception:
         pass
+
+    # ── P0 multi-intent planner (flag-gated default-OFF) ─────────────────────────────────────────────
+    # A mixed buyer turn — "actually make it 15, and what headsets + hard drives for $1200 for those" —
+    # must (a) KEEP the chosen laptop, (b) change ITS quantity, and (c) source the new categories under the
+    # SCOPED budget only. plan_live decomposes the turn against the live cart, fans out per new category, and
+    # RE-CHECKS the assembled plan adversarially before we surface it. Additive: it attaches `multi_intent`
+    # (with needs_confirmation so money/qty is confirmed, never guessed); it never mutates products here.
+    multi_intent: Optional[Dict[str, Any]] = None
+    try:
+        _mi_on = str(os.getenv("MULTI_INTENT_PLANNER_ENABLED", "")).strip().lower() in ("1", "true", "yes", "on")
+        if not _mi_on:
+            try:
+                from src.app.feature_flags import get_flags as _get_flags
+                _mi_on = bool(_get_flags().get("MULTI_INTENT_PLANNER_ENABLED", False))
+            except Exception:
+                _mi_on = False
+        if _mi_on and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM"):
+            from src.app.services.multi_intent_live import plan_live
+            multi_intent = plan_live(str(q or ""), str(uid), fallback_prior_skus=_prior_turn_shortlist or None)
+    except Exception as _mi_exc:
+        # Non-silent: attach the failure to the response instead of crashing the turn or hiding it.
+        multi_intent = {"warnings": [f"multi_intent planner error: {str(_mi_exc)[:120]}"],
+                        "needs_confirmation": True}
+
+    # W3: off-catalog gate answers pass through UNTOUCHED — chat's budget-band prepends and
+    # message recomposition would bury the category honesty under laptop framing.
+    if isinstance(data, dict) and data.get("off_catalog"):
+        assistant_message = data.get("assistant_message") or assistant_message
+        products = []
+
+    response_confirmed_slots = dict(confirmed_slots or {})
+    response_confirmed_slots.update(
+        _extract_confirmed_slots(
+            query=q,
+            response=data if isinstance(data, dict) else {},
+        )
+    )
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -1939,36 +3295,262 @@ async def chat_query(
         "trace_id": decision_trace_id,
         "assistant_message": assistant_message,
         "next_questions": next_questions,
-        "needs_disambiguation": bool(data.get("needs_disambiguation") or (not products and next_questions)),
+        # P0 multi-intent plan (present only on a genuine mixed turn; None otherwise). Carries the scoped
+        # new-line picks + adversarial verdict + needs_confirmation so the UI confirms qty/budget, not guesses.
+        "multi_intent": multi_intent,
+        "needs_disambiguation": False if turn_intent == "POLICY_QUESTION" else bool(
+            data.get("needs_disambiguation") or (not products and next_questions)
+        ),
         "nqe_selection_applied": data.get("nqe_selection_applied") or {},
+        "confirmed_slots": response_confirmed_slots,
         "llm_model": data.get("llm_model"),
         "model_tier": data.get("model_tier"),
         "complexity": complexity_result,
         "intent_routing": intent_routing_result,
         "turn_intent": turn_intent,
+        # Preserve typed facade ownership at the HTTP/SSE edge. Without these fields the
+        # browser and trace cannot prove whether V2 served, legacy delegated, or the request
+        # failed boundedly in a V2-only pilot.
+        "execution_mode": data.get("execution_mode"),
+        "execution_lane": data.get("execution_lane") or turn_intent,
+        "delegation_reason": data.get("delegation_reason"),
+        "action_executed": bool(data.get("action_executed")),
+        # N1/N6 forward-through: the evidence orchestrator's block (legs/citations) is produced in
+        # recommend.suggest but was DROPPED here — so the frontend (which hits /chat/query, not
+        # /suggest) never saw it and the Evidence tab + Source chips stayed empty. Forward it.
+        "evidence": data.get("evidence"),
+        # Canonical V2 execution ontology.  Persisting this on the chat response lets the same
+        # immutable trace prove model proposal, deterministic authorization, and stage execution.
+        "execution_steps": data.get("execution_steps") or [],
+        # Preserve phase-level latency through the chat edge. The storefront and replay harness
+        # use this single payload to distinguish queue/load/prefill/decode from retrieval,
+        # evidence, fulfillment preview, and final response shaping.
+        "timing_breakdown": (
+            data.get("timing_breakdown")
+            if isinstance(data.get("timing_breakdown"), dict)
+            else {}
+        ),
+        # Async narration handoff: when recommend ran in async/skip mode it returns the deterministic
+        # grounded answer now + a job id for the richer LLM prose. Forward both so the storefront can
+        # poll /api/v1/recommend/narration/{job_id} and replace the message in place (no blocking wait).
+        "llm_summary_job_id": data.get("llm_summary_job_id"),
+        "summary_pending": bool(data.get("summary_pending") or data.get("llm_summary_job_id")),
+        # W3/W4 forward-through (2026-07-08): the off-catalog verdict and workload fit verdicts
+        # are computed in recommend.suggest — without forwarding, the frontend (which hits
+        # /chat/query, not /suggest) loses the comparison AGAIN.
+        "off_catalog": data.get("off_catalog"),
+        "workload_fit": data.get("workload_fit"),
+        # Canonical V2 presentation contract. These fields must survive the chat edge or the
+        # browser falls back to an unlabeled legacy-looking slate even when the core correctly
+        # separated best-fit, stretch, and noncompliant alternatives.
+        "shelf": data.get("shelf") if isinstance(data.get("shelf"), dict) else None,
+        "capability": (
+            data.get("capability") if isinstance(data.get("capability"), dict) else None
+        ),
+        "slate_disposition": str(data.get("slate_disposition") or "replace"),
+        "secondary_lanes": (
+            data.get("secondary_lanes") if isinstance(data.get("secondary_lanes"), list) else []
+        ),
+        "explanation": (
+            data.get("explanation") if isinstance(data.get("explanation"), dict) else None
+        ),
         "voice_used": bool(voice_transcript),
         "budget_viability": budget_viability,
         "use_case_analysis": use_case_analysis,
         "buyer_persona": data.get("buyer_persona"),
+        # Phase-3 adaptive-storefront observability: forward the market-driven ranking adaptations (the
+        # demand-aware sales-response nudge + experiment ranking nudge + storefront emphasis) so the frontend
+        # and the Decision Trace can SHOW the governed adaptation ("why these moved", gate allow/deny). Each
+        # is present only when its flag-gated lever ran; the products themselves are already re-ranked.
+        # bulk-order intent: the parsed unit count so Add buttons land the conversation's qty, not 1.
+        "requested_quantity": (
+            data.get("requested_quantity")
+            if data.get("requested_quantity") is not None
+            else response_confirmed_slots.get("order_quantity")
+        ),
+        # Whole-order sizing is consequential UI state too.  The storefront must be able to
+        # reject a stale/stretch product whose requested quantity would exceed the accepted
+        # total instead of blindly carrying requested_quantity into the cart.
+        "bulk_budget": data.get("bulk_budget") if isinstance(data.get("bulk_budget"), dict) else None,
+        # Buyer-safe procurement projection from /recommend/suggest. The recommend
+        # layer owns case creation/redaction; chat must preserve it so the storefront
+        # can render the commitment gate instead of hiding a real shortfall.
+        "availability": data.get("availability") if isinstance(data.get("availability"), dict) else None,
+        "fulfillment_case": (
+            data.get("fulfillment_case")
+            if isinstance(data.get("fulfillment_case"), dict) and data.get("fulfillment_case", {}).get("case_id")
+            else None
+        ),
+        # Buyer-facing bulk alternatives (partial/transfer/substitute/source/reduce) for an unmet bulk
+        # request — pre-commitment, no order placed. Preserve so the right panel can offer real choices.
+        "fulfillment_options": (
+            data.get("fulfillment_options") if isinstance(data.get("fulfillment_options"), list) else None
+        ),
+        # multi-line mixed order → grouped sourcing cases (buyer-safe summary; supplier identity stays server-side)
+        "order_group": (
+            data.get("order_group") if isinstance(data.get("order_group"), dict) else None
+        ),
+        # FLUID-procurement preview (FULFILLMENT_DEFER_TO_CART): the sourcing split is PREVIEWED here
+        # (no durable case); the durable case materializes at cart-confirmation. Buyer-safe (no supplier).
+        "sourcing_intent": (
+            data.get("sourcing_intent") if isinstance(data.get("sourcing_intent"), dict) else None
+        ),
         "right_panel": _right_panel_contract,
         "copywriting": copy_meta,
+        "security_risk": bool(image_security_posture.get("security_risk")),
+        "analysis_degraded": bool(image_security_posture.get("analysis_degraded")),
+        "analysis_pending": bool(image_security_posture.get("analysis_pending")),
         "image_untrusted": bool(image_security_posture.get("image_untrusted")),
         "image_degraded_mode": bool(image_security_posture.get("image_degraded_mode")),
         "chat_lockdown": bool(image_security_posture.get("chat_lockdown")),
         "needs_human_review": bool(image_security_posture.get("needs_human_review")),
         "security_route": str(image_security_posture.get("route") or "allow"),
     }
+    # Adaptive fields are evidence that a governed lever actually ran. Omitting them when
+    # disabled is part of the API contract; emitting null makes clients and audits infer an
+    # experiment surface exists even though no assignment or adaptation occurred.
+    _include_adaptive_metadata(out, data)
     if isinstance(out.get("assistant_message"), str):
         out["assistant_message"] = ResponseNormalizer.polish_llm_text(
             str(out.get("assistant_message") or ""),
             query=q,
         )
+    # ── Image-compromise warn-and-continue surface ───────────────────────────
+    # Products still flow; we prepend a clear warning and attach the breach
+    # assessment (IP/ASN/GeoIP + intent + repercussions + human-notified) so the
+    # user knows the upload is under review and the SOC has the evidence.
+    if bool(image_security_posture.get("security_risk")) or bool(image_security_posture.get("chat_lockdown")):
+        _ba = breach_assessment if isinstance(breach_assessment, dict) else None
+        # Only claim a product "in your photo" when one was actually recognised in-domain. An
+        # off-domain / unrecognised upload must be narrated as text + sanitized image context — never
+        # "based on the product in your photo" (the apple-image-on-gaming-query case exposed that as
+        # factually wrong).
+        if image_handling_mode == "sanitized_visual":
+            # We kept the legitimate product recognition; only the QR/OCR/steg
+            # channel was quarantined. Stay anchored on the recognised product.
+            if recognized_image_label:
+                _anchor = (
+                    f"I still recognised {recognized_image_label} in the photo, so these "
+                    f"recommendations are anchored to that. Let me know if I read the product wrong."
+                )
+            else:
+                _anchor = (
+                    "I couldn't confidently identify a product in the image, so these recommendations "
+                    "are based on your text plus the image's sanitized context."
+                )
+            _warn_msg = (
+                f"⚠️ Heads up: a suspicious element (e.g. QR code / hidden payload) in your image "
+                f"was detected and neutralised — I did not open or follow it, and it's been logged for "
+                f"security review. {_anchor}"
+            )
+        elif image_handling_mode == "text_only_fallback":
+            # Pixels themselves looked altered → ask the user to recover context.
+            _warn_msg = (
+                "⚠️ Your image looked altered or unreadable, so I couldn't safely identify the product "
+                "from it (this has been logged for security review). I've used your text for now — to get "
+                "you the right match, can you tell me the model or type you're after?"
+            )
+            _clarify_q = {
+                "id": "clarify_product_identity",
+                "text": "Which product is it? (model name or type, e.g. '17\" gaming laptop, RTX 4070')",
+                "goal": "clarify_product_identity",
+            }
+            _nq = out.get("next_questions")
+            if isinstance(_nq, list):
+                if not any(isinstance(x, dict) and x.get("id") == "clarify_product_identity" for x in _nq):
+                    out["next_questions"] = [_clarify_q] + _nq
+            else:
+                out["next_questions"] = [_clarify_q]
+            out["needs_disambiguation"] = True
+        else:
+            if recognized_image_label:
+                _basis = f"I've based these recommendations on {recognized_image_label} and your text."
+            else:
+                _basis = "I've based these recommendations on your text and the image's sanitized context."
+            # Only ALARM the buyer when there is a genuine threat indicator — a benign upload that merely
+            # tripped a soft posture check should not see "flagged by our security system" (the SOC breach
+            # assessment + WORM audit still fire regardless; this only tunes the buyer-facing tone).
+            _real_threat = (
+                bool(image_security_posture.get("needs_human_review"))
+                or bool(image_security_posture.get("chat_lockdown"))
+                or str(image_security_posture.get("route") or "allow").lower() not in ("allow", "")
+            )
+            _warn_msg = (
+                f"⚠️ Your uploaded image was flagged by our security system and logged for review. {_basis}"
+                if _real_threat else _basis
+            )
+        if _ba and (_ba.get("ip_assessment") or {}).get("known_bad_actor"):
+            _warn_msg = _warn_msg + " Note: this request originated from a network flagged as high-risk."
+        _am = str(out.get("assistant_message") or "")
+        if _warn_msg and "neutralised" not in _am.lower() and "flagged" not in _am.lower() and "[security]" not in _am.lower():
+            out["assistant_message"] = f"{_warn_msg}\n\n{_am}".strip()
+        out["platform_compromise"] = True
+        out["needs_human_review"] = True
+        out["security_warning"] = _warn_msg
+        out["image_handling_mode"] = image_handling_mode
+        out["recognized_product"] = recognized_image_label
+        if _ba is not None:
+            out["breach_assessment"] = _ba
     if isinstance(data.get("agent_steps"), list):
         out["agent_steps_readable"] = ResponseNormalizer.agent_steps_to_english(
             data.get("agent_steps") or []
         )
     try:
-        _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
+        material_question = next((item for item in (out.get("next_questions") or [])
+                                  if isinstance(item, dict) and item.get("id") == "budget_scope"), None)
+        if material_question and not nqe_selection:
+            option_ids = [str(item.get("id") or "").strip().lower()
+                          for item in (material_question.get("options") or []) if isinstance(item, dict)]
+            Memory(redis).set_pending_clarification(
+                uid,
+                {"version": 1, "question_id": "budget_scope",
+                 "reason": material_question.get("reason") or "missing_material_budget_scope",
+                 "original_query": submitted_query[:1000], "trace_id": decision_trace_id,
+                 "allowed_option_ids": (option_ids or ["total", "per_unit"])[:8]},
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
+                ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
+            )
+    except Exception:
+        if persist_conversation:
+            logger.warning("pending chat clarification persistence failed", exc_info=True)
+    try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
+        user_message_id = _store_chat_message(
+            db,
+            uid=uid,
+            role="user",
+            content=q,
+            trace_id=decision_trace_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        )
+        if user_message_id:
+            from src.app.deps import hash_uid
+            from src.app.services.conversation_fact_observations import (
+                record_conversation_fact_observations,
+            )
+
+            try:
+                record_conversation_fact_observations(
+                    tenant_id=tenant_id,
+                    subject_ref=hash_uid(uid),
+                    session_id=session_id,
+                    source_message_id=user_message_id,
+                    trace_id=decision_trace_id,
+                    message=q,
+                )
+            except Exception as observation_exc:
+                logger.warning(
+                    "conversation fact observation unavailable tenant=%s trace=%s: %s",
+                    tenant_id,
+                    decision_trace_id,
+                    observation_exc,
+                )
         _store_chat_message(
             db,
             uid=uid,
@@ -1976,7 +3558,19 @@ async def chat_query(
             content=str(out.get("assistant_message") or ""),
             trace_id=decision_trace_id,
             session_id=session_id,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
         )
+    except Exception:
+        if persist_conversation:
+            logger.warning("chat message persistence failed", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    try:
+        if not persist_conversation:
+            raise RuntimeError("temporary_chat")
         _persist_chat_structured_state(
             redis=redis,
             uid=uid,
@@ -1985,10 +3579,19 @@ async def chat_query(
             trace_id=decision_trace_id,
             assistant_message=str(out.get("assistant_message") or ""),
             recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
-            confirmed_slots=_extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else None),
+            confirmed_slots=response_confirmed_slots,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
         )
+        if pending_clarification_consumed:
+            Memory(
+                redis,
+                tenant_id=tenant_id,
+                session_epoch=session_epoch,
+            ).clear_pending_clarification(uid)
     except Exception:
-        pass
+        if persist_conversation:
+            logger.warning("chat structured-state persistence failed", exc_info=True)
     return out
 
 
@@ -1998,20 +3601,31 @@ def chat_history(
     uid: str,
     limit: int = Query(50, ge=1, le=500),
     before: Optional[str] = None,
+    session_epoch: Optional[str] = Query(None, max_length=128),
     db=Depends(get_db),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
-    _ensure_chat_messages_table(db)
-    params: Dict[str, Any] = {"uid": uid, "lim": int(limit)}
-    where = "WHERE uid = :uid"
+    tenant_id = _request_tenant_id(request)
+    epoch = str(session_epoch or uid)[:128]
+    params: Dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "uid": uid,
+        "session_epoch": epoch,
+        "lim": int(limit),
+    }
+    where = (
+        "WHERE tenant_id = :tenant_id AND uid = :uid "
+        "AND session_epoch = :session_epoch"
+    )
     if before:
         where += " AND created_at < :before"
         params["before"] = str(before)
     rows = db.execute(
         sql_text(
             f"""
-            SELECT id, uid, session_id, role, content, trace_id, created_at
+            SELECT id, tenant_id, uid, session_id, session_epoch,
+                   role, content, trace_id, created_at
             FROM chat_messages
             {where}
             ORDER BY created_at DESC
@@ -2022,7 +3636,13 @@ def chat_history(
     ).mappings().all()
     items = [dict(r) for r in rows]
     items.reverse()
-    return {"uid": uid, "count": len(items), "items": items}
+    return {
+        "tenant_id": tenant_id,
+        "uid": uid,
+        "session_epoch": epoch,
+        "count": len(items),
+        "items": items,
+    }
 
 
 @router.post("/ollama_test")

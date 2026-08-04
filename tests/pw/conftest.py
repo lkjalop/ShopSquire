@@ -9,9 +9,30 @@ import pytest
 import logging
 import asyncio
 
-# Skip the entire Playwright test suite unless explicitly enabled.
-if os.getenv("DISABLE_PLAYWRIGHT_TESTS", "1").strip().lower() in ("1", "true", "yes"):
-    pytest.skip("Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)", allow_module_level=True)
+_PLAYWRIGHT_DISABLED = os.getenv("DISABLE_PLAYWRIGHT_TESTS", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+
+def pytest_collection_modifyitems(items):
+    """Skip this subtree without aborting repository-wide collection.
+
+    Calling ``pytest.skip(..., allow_module_level=True)`` while importing a
+    nested conftest aborts collection of the parent ``tests`` directory. That
+    made hosted CI report zero collected tests even though the service shards
+    were healthy. Browser tests remain opt-in, but their skip is now attached
+    to each collected item.
+    """
+    if not _PLAYWRIGHT_DISABLED:
+        return
+    marker = pytest.mark.skip(
+        reason="Playwright tests disabled (set DISABLE_PLAYWRIGHT_TESTS=0 to enable)"
+    )
+    for item in items:
+        if "/tests/pw/" in f"/{str(item.path).replace(chr(92), '/')}":
+            item.add_marker(marker)
 
 # Ensure Playwright can spawn subprocesses on Windows
 try:
@@ -62,6 +83,11 @@ def test_server():
     os.environ.setdefault("TEST_BYPASS_POLICY_GATE", "1")
     os.environ.setdefault("TEST_TOLERANT_GET_ERRORS", "1")
     os.environ["TEST_FAST_HEALTH"] = "1"
+    os.environ["APP_ENV"] = "test"
+    os.environ["DECISION_LOG_PREWARM_ON_START"] = "0"
+    # This fixture owns its tiny deterministic catalog; startup seeders would be duplicate writers
+    # against the same SQLite file and are irrelevant to image-route assertions.
+    os.environ["AUTO_SEED_CATALOG_ON_START"] = "0"
     os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     os.environ["CV_PROVIDER"] = "basic"
     os.environ["CV_VISION_ENABLED"] = "0"
@@ -139,10 +165,6 @@ def test_server():
     config = uvicorn.Config(app=app, host=host, port=port, log_level="error")
     server = uvicorn.Server(config)
 
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    print("[pw.conftest] uvicorn thread started")
-
     # Seed demo data using direct SQLite access (most reliable under mixed test-suite engine resets).
     try:
         import sqlite3
@@ -160,6 +182,13 @@ def test_server():
         con.close()
     except Exception:
         pass
+
+    # Start application writers only after the direct SQLite seed transaction is closed. Starting
+    # uvicorn first allowed startup audit/baseline jobs to race this seed and lock the private DB,
+    # leaving the fixture alive but permanently unready.
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    print("[pw.conftest] uvicorn thread started")
 
     # Wait for readiness (extended timeout). Print attempts for debugging.
     base_url = f"http://{host}:{port}"

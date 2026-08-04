@@ -4,12 +4,13 @@ import json
 import logging
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from sqlalchemy import text
 
-from src.app.config import get_settings, load_feature_flags
+from src.app.feature_flags import get_flags as load_feature_flags
 from src.app.models.db import db_session
 from src.app.observability.metrics import record_ticket
 from src.app.services.decision_log import log_decision
@@ -91,7 +92,7 @@ class TicketingAgent:
         approval_required: bool = False,
     ) -> Ticket:
         try:
-            flags = load_feature_flags(get_settings().feature_flags_path)
+            flags = load_feature_flags()
             rl = (flags or {}).get("TICKET_RATE_LIMIT", {"enabled": False, "per_min": 5})
             if rl.get("enabled"):
                 tenant_key = tenant_id or "default"
@@ -136,7 +137,9 @@ class TicketingAgent:
         except Exception:
             pass
 
-        tid = f"TKT-{int(time.time() * 1000)}"
+        # Milliseconds collide under concurrent security fan-out. UUID identity
+        # keeps ticket creation append-only without retries or silent loss.
+        tid = f"TKT-{uuid.uuid4()}"
         status = "pending_approval" if approval_required else "open"
         ticket = Ticket(id=tid, external_id=None, title=title, description=description, severity=severity, status=status)
         strict_persistence = self._strict_persistence_required()
@@ -158,7 +161,9 @@ class TicketingAgent:
                         "description": description,
                         "severity": severity,
                         "status": status,
-                        "approval_required": bool(approval_required),
+                        # The portable migration intentionally uses INTEGER so
+                        # SQLite and PostgreSQL share one schema contract.
+                        "approval_required": int(bool(approval_required)),
                         "trace_id": trace_id,
                         "tenant_id": tenant_id,
                         "evidence": json.dumps(evidence_snapshot or {}),

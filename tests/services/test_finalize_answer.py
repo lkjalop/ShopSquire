@@ -1,0 +1,95 @@
+"""Phase 1 — single formatter: assistant_message is never empty at the choke point."""
+from __future__ import annotations
+
+from src.app.services.recommend_response_finalizer import _finalize_answer, _recovery_answer
+
+
+def test_existing_answer_unchanged():
+    p = {"assistant_message": "Yes, $1800 is plenty.", "message": "x"}
+    out = _finalize_answer(dict(p))
+    assert out["assistant_message"] == "Yes, $1800 is plenty."  # 95% path: untouched
+
+
+def test_message_promoted_when_assistant_blank():
+    out = _finalize_answer({"assistant_message": "", "message": "No matching products found."})
+    assert out["assistant_message"] == "No matching products found."
+
+
+def test_empty_gets_recovery_answer():
+    out = _finalize_answer({"constraints_used": {"budget_max": 400, "brands": ["asus"]}})
+    am = out["assistant_message"].lower()
+    assert am  # never empty
+    assert "asus" in am and "$400" in out["assistant_message"]
+    assert any(k in am for k in ("raise", "nearest", "other brand"))
+    # message kept consistent
+    assert out["message"] == out["assistant_message"]
+
+
+def test_whitespace_only_is_treated_as_empty():
+    out = _finalize_answer({"assistant_message": "   ", "constraints_used": {}})
+    assert out["assistant_message"].strip()
+
+
+def test_never_raises_on_bad_input():
+    assert isinstance(_finalize_answer({}), dict)
+    assert isinstance(_finalize_answer({"constraints_used": None}), dict)
+
+
+def test_recovery_answer_verdict_first_with_upgrade_path():
+    msg = _recovery_answer({"budget_max": 1200})
+    assert msg.lower().startswith("no")
+    assert "$1,200" in msg
+    assert "raise your budget" in msg.lower()
+
+
+def test_dereference_replaces_labels_with_product_names():
+    from src.app.services.recommend_response_finalizer import _dereference_product_labels
+    p = {"assistant_message": "The [1] is a solid pick; [2] is cheaper.",
+         "results": [{"name": "MSI Katana 15"}, {"name": "Dell G15"}]}
+    out = _dereference_product_labels(p)
+    assert out["assistant_message"] == "The MSI Katana 15 is a solid pick; Dell G15 is cheaper."
+    assert "[1]" not in out["assistant_message"] and "[2]" not in out["assistant_message"]
+
+
+def test_dereference_leaves_unknown_labels_and_no_results():
+    from src.app.services.recommend_response_finalizer import _dereference_product_labels
+    p = {"assistant_message": "See [5].", "results": [{"name": "X"}]}
+    assert _dereference_product_labels(p)["assistant_message"] == "See [5]."  # out of range -> unchanged
+    assert _dereference_product_labels({"assistant_message": "hi", "results": []})["assistant_message"] == "hi"
+
+
+def test_exclude_off_category_drops_router_for_laptop():
+    from src.app.services.recommend_response_finalizer import exclude_off_category_in_payload
+    p = {"results": [{"name": "ASUS Vivobook S16"}, {"name": "ASUS RT-AX54HP Wi-Fi 6 Router"}, {"name": "Dell XPS 13"}],
+         "products": [{"name": "ASUS Vivobook S16"}, {"name": "ASUS RT-AX54HP Wi-Fi 6 Router"}, {"name": "Dell XPS 13"}],
+         "constraints_used": {"query": "asus laptop for university under 1500"}}
+    out = exclude_off_category_in_payload(p)
+    names = [r["name"].lower() for r in out["results"]]
+    assert not any("router" in n for n in names), names
+    assert any("vivobook" in n for n in names)
+    assert len(out["products"]) == len(out["results"])  # products stays in sync
+
+
+def test_exclude_drops_peripheral_regardless_of_query():
+    # Query-INDEPENDENT contract (2026-06): for a laptop store a peripheral is dropped
+    # whenever a real product is also present — even on a vague query ("uni work").
+    from src.app.services.recommend_response_finalizer import exclude_off_category_in_payload
+    p = {"results": [{"name": "Dell XPS 13"}, {"name": "B Router"}], "constraints_used": {"query": "something vague"}}
+    out = exclude_off_category_in_payload(p)["results"]
+    assert [r["name"] for r in out] == ["Dell XPS 13"]
+
+
+def test_exclude_keeps_all_when_only_peripherals():
+    # If EVERY result is a peripheral (user actually searched "headset"), keep them all.
+    from src.app.services.recommend_response_finalizer import exclude_off_category_in_payload
+    p = {"results": [{"name": "HyperX Cloud Flight"}, {"name": "Logitech Keyboard"}], "constraints_used": {"query": "headset"}}
+    assert len(exclude_off_category_in_payload(p)["results"]) == 2
+
+
+def test_dereference_drops_redundant_label_after_name():
+    from src.app.services.recommend_response_finalizer import _dereference_product_labels
+    p = {"assistant_message": "The HP Victus 15-fa2364TX [1] is the top pick.",
+         "results": [{"name": "HP Victus 15-fa2364TX 15.6 Gaming Laptop"}]}
+    out = _dereference_product_labels(p)["assistant_message"]
+    assert "[1]" not in out
+    assert out.lower().count("hp victus") == 1, out  # not doubled

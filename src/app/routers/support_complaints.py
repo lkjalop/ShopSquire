@@ -506,9 +506,10 @@ def _qr_redirect_cache_set(url: str, result: Dict[str, Any]) -> None:
             _db.execute(
                 _text(
                     """
-                    INSERT OR REPLACE INTO qr_redirect_cache
+                    INSERT INTO qr_redirect_cache
                     (url_hash, url_prefix, result_json, updated_at, expires_at)
                     VALUES (:h, :p, :r, :u, :e)
+                    ON CONFLICT (url_hash) DO UPDATE SET url_prefix = EXCLUDED.url_prefix, result_json = EXCLUDED.result_json, updated_at = EXCLUDED.updated_at, expires_at = EXCLUDED.expires_at
                     """
                 ),
                 {
@@ -3980,25 +3981,10 @@ async def add_images(case_id: str, images: list[UploadFile] = File(...), db=Depe
 
 @router.get("/{case_id}/return-label")
 async def get_return_label(case_id: str) -> Dict:
-    from src.app.services.shipping_providers import get_default_shipping_provider
-    from src.app.models.db import db_session
-    from sqlalchemy import text
-    import uuid
-    from datetime import datetime, timedelta
-    provider = get_default_shipping_provider()
-    label_id = str(uuid.uuid4())
-    tracking = f"RR{uuid.uuid4().hex[:10].upper()}"
-    expires = (datetime.utcnow() + timedelta(days=14)).isoformat()
-    shipment_info = {"case_id": case_id, "tracking_number": tracking}
-    result = provider.create_label(shipment_info)
-    label_url = result.get("raw", {}).get("postage_label", {}).get("label_url") or result.get("label_url") or f"pending://{case_id}"
-    with db_session() as db:
-        try:
-            db.execute(
-                text("INSERT INTO return_labels (id, case_id, carrier, tracking_number, label_url, status, expires_at) VALUES (:id, :case_id, :carrier, :tracking, :url, 'generated', :expires)"),
-                {"id": label_id, "case_id": case_id, "carrier": provider.name, "tracking": tracking, "url": label_url, "expires": expires},
-            )
-            db.commit()
-        except Exception:
-            pass
-    return {"status": "ok", "case_id": case_id, "label": {"id": label_id, "carrier": provider.name, "tracking_number": tracking, "label_url": label_url, "expires_at": expires, "provider_result": result}}
+    # Delegate to the single honest label path. When no real carrier is configured the label is a
+    # stub (tracking_number=None, status='stub') — we surface that instead of fabricating a tracking
+    # number that looks like a real shipment.
+    from src.app.services.shipping_stub import ShippingService
+
+    label = await ShippingService().create_return_label(case_id)
+    return {"status": "ok" if label.get("ok") else "stub", "case_id": case_id, "label": label}

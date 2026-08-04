@@ -1,13 +1,230 @@
 from __future__ import annotations
 
 import os
+import logging
+import statistics
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+import math
 
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+
+logger = logging.getLogger(__name__)
+
+
+def _undefined_prediction_interval(
+    status: str,
+    *,
+    nominal: float = 0.9,
+    origins: int = 0,
+) -> Dict[str, Any]:
+    return {
+        "status": status,
+        "method": "split_conformal_absolute_residual",
+        "nominal_coverage": nominal,
+        "empirical_coverage": None,
+        "calibration_origins": 0,
+        "evaluation_origins": 0,
+        "calibration_error_units": None,
+        "mean_interval_width_units": None,
+        "origins": origins,
+    }
+
+
+def _calibrate_prediction_interval(
+    rows: list[tuple[float, float, float]],
+    *,
+    nominal: float = 0.9,
+) -> Dict[str, Any]:
+    """Calibrate a model-specific split-conformal interval.
+
+    The first origins calibrate an absolute-residual radius and the remaining
+    origins measure coverage. This is an evaluation artifact only: it does not
+    grant execution authority or assert coverage on live data.
+    """
+    minimum_calibration = 5
+    minimum_evaluation = 3
+    if len(rows) < minimum_calibration + minimum_evaluation:
+        return _undefined_prediction_interval(
+            "undefined_insufficient_calibration",
+            nominal=nominal,
+            origins=len(rows),
+        )
+    calibration_count = max(minimum_calibration, int(len(rows) * 0.6))
+    calibration_count = min(
+        calibration_count,
+        len(rows) - minimum_evaluation,
+    )
+    calibration = rows[:calibration_count]
+    evaluation = rows[calibration_count:]
+    residuals = sorted(
+        abs(actual - prediction)
+        for actual, prediction, _error in calibration
+    )
+    # Finite-sample conformal quantile: ceil((n + 1) * nominal), capped at n.
+    rank = min(
+        len(residuals),
+        max(1, math.ceil((len(residuals) + 1) * nominal)),
+    )
+    radius = float(residuals[rank - 1])
+    covered = 0
+    widths: list[float] = []
+    for actual, prediction, _error in evaluation:
+        lower = max(0.0, prediction - radius)
+        upper = prediction + radius
+        covered += int(lower <= actual <= upper)
+        widths.append(upper - lower)
+    return {
+        "status": "observed",
+        "method": "split_conformal_absolute_residual",
+        "nominal_coverage": nominal,
+        "empirical_coverage": round(covered / len(evaluation), 6),
+        "calibration_origins": len(calibration),
+        "evaluation_origins": len(evaluation),
+        "calibration_error_units": round(radius, 6),
+        "mean_interval_width_units": round(statistics.fmean(widths), 6),
+        "origins": len(rows),
+    }
+
+
+def rolling_origin_evaluation(
+    values: List[float], *, seasonal_period: int = 7, min_train_points: int = 14,
+    horizon_days: int = 1,
+) -> Dict[str, Any]:
+    """Walk-forward comparison over the decision horizon.
+
+    A supplier-lead-time decision consumes aggregate demand across the lead
+    time, not a one-day forecast multiplied after evaluation.
+    """
+    clean = [max(0.0, float(value)) for value in values if math.isfinite(float(value))]
+    minimum = max(3, int(min_train_points))
+    horizon = max(1, int(horizon_days))
+    if len(clean) < minimum + horizon:
+        return {
+            "status": "insufficient_history",
+            "history_points": len(clean),
+            "origins": 0,
+            "models": {},
+            "winner": None,
+            "kind": "rolling_origin_lead_time_demand",
+            "horizon_days": horizon,
+            "selected_prediction_interval": _undefined_prediction_interval(
+                "undefined_no_selected_model"
+            ),
+        }
+    errors: Dict[str, list[tuple[float, float, float]]] = {
+        "zero": [],
+        "naive": [],
+        "seasonal_naive": [],
+        "ewma": [],
+        "croston_sba": [],
+        "tsb": [],
+    }
+    for index in range(minimum, len(clean) - horizon + 1):
+        train = clean[:index]
+        actual = sum(clean[index:index + horizon])
+        seasonal_cycle = (
+            train[-seasonal_period:]
+            if len(train) >= seasonal_period
+            else [train[-1]]
+        )
+        predictions = {
+            "zero": 0.0,
+            "naive": train[-1] * horizon,
+            "seasonal_naive": sum(
+                seasonal_cycle[step % len(seasonal_cycle)]
+                for step in range(horizon)
+            ),
+            "ewma": _ewma_one(train) * horizon,
+            "croston_sba": _croston_sba_one(train) * horizon,
+            "tsb": _tsb_one(train) * horizon,
+        }
+        for name, prediction in predictions.items():
+            errors[name].append((actual, max(0.0, prediction), actual - prediction))
+    windows = [
+        sum(clean[index:index + horizon])
+        for index in range(0, len(clean) - horizon + 1)
+    ]
+    scale_errors = [
+        abs(windows[index] - windows[index - seasonal_period])
+        for index in range(seasonal_period, len(windows))
+    ]
+    mase_scale = sum(scale_errors) / len(scale_errors) if scale_errors else 0.0
+    models: Dict[str, Any] = {}
+    for name, rows in errors.items():
+        absolute = sum(abs(actual - prediction) for actual, prediction, _ in rows)
+        actual_total = sum(actual for actual, _, _ in rows)
+        signed = sum(error for _, _, error in rows)
+        models[name] = {
+            "status": "observed",
+            "origins": len(rows),
+            "wape": round(absolute / actual_total, 6) if actual_total > 0 else None,
+            "wape_status": "available" if actual_total > 0 else "undefined_zero_actual",
+            "mase": round((absolute / len(rows)) / mase_scale, 6) if mase_scale > 0 else None,
+            "mase_status": "available" if mase_scale > 0 else "undefined_zero_scale",
+            "bias": round(signed / actual_total, 6) if actual_total > 0 else None,
+            "prediction_interval": _calibrate_prediction_interval(rows),
+        }
+    candidates = [
+        (metrics["wape"], name)
+        for name, metrics in models.items()
+        if metrics["wape"] is not None
+    ]
+    winner = min(candidates)[1] if candidates else None
+    selected_interval = (
+        dict(models[winner]["prediction_interval"])
+        if winner
+        else _undefined_prediction_interval("undefined_no_selected_model")
+    )
+    return {
+        "status": "observed" if winner else "undefined",
+        "history_points": len(clean),
+        "origins": len(errors["zero"]),
+        "models": models,
+        "winner": winner,
+        "kind": "rolling_origin_lead_time_demand",
+        "horizon_days": horizon,
+        "selected_prediction_interval": selected_interval,
+        "authority": "shadow_evaluation_only",
+    }
+
+
+def _ewma_one(values: List[float], alpha: float = 0.28) -> float:
+    level = float(values[0]) if values else 0.0
+    for value in values[1:]:
+        level = alpha * float(value) + (1.0 - alpha) * level
+    return level
+
+
+def _croston_sba_one(values: List[float], alpha: float = 0.2) -> float:
+    nonzero = [(index, value) for index, value in enumerate(values) if value > 0]
+    if not nonzero:
+        return 0.0
+    demand = float(nonzero[0][1])
+    interval = float(nonzero[0][0] + 1)
+    previous_index = nonzero[0][0]
+    for index, value in nonzero[1:]:
+        demand += alpha * (float(value) - demand)
+        gap = float(index - previous_index)
+        interval += alpha * (gap - interval)
+        previous_index = index
+    return (1.0 - alpha / 2.0) * demand / max(interval, 1e-9)
+
+
+def _tsb_one(values: List[float], alpha: float = 0.2, beta: float = 0.2) -> float:
+    if not values:
+        return 0.0
+    probability = 1.0 if values[0] > 0 else 0.0
+    demand = float(values[0]) if values[0] > 0 else 0.0
+    for value in values[1:]:
+        occurred = 1.0 if value > 0 else 0.0
+        probability += beta * (occurred - probability)
+        if value > 0:
+            demand += alpha * (float(value) - demand)
+    return probability * demand
 
 
 @dataclass
@@ -32,36 +249,80 @@ class DemandForecaster:
     - anomaly flags
     """
 
-    def __init__(self):
+    def __init__(self, *, tenant_id: str = "default"):
         self._db_ok = True
+        self._last_history_error: str | None = None
+        self.tenant_id = str(tenant_id or "").strip()
+        if not self.tenant_id:
+            raise ValueError("tenant_id is required")
 
     def _read_history(self, sku: str, lookback_days: int = 120) -> List[Dict[str, Any]]:
         rows = []
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=max(7, int(lookback_days))
+        )
         try:
             with db_session() as db:
                 rows = db.execute(
                     text(
                         """
-                        SELECT substr(created_at, 1, 10) AS d,
-                               SUM(COALESCE(quantity, 1)) AS qty
-                        FROM order_items
-                        WHERE sku = :sku
-                          AND datetime(created_at) >= datetime('now', :window)
-                        GROUP BY substr(created_at, 1, 10)
-                        ORDER BY d ASC
+                        SELECT occurred_at, quantity, confidence, source_system
+                        FROM marketing_event_fact
+                        WHERE tenant_id = :tenant
+                          AND sku = :sku
+                          AND event_type = 'purchase'
+                          AND status = 'active'
+                          AND occurred_at >= :cutoff
+                        ORDER BY occurred_at ASC
                         """
                     ),
-                    {"sku": sku, "window": f"-{max(7, int(lookback_days))} days"},
+                    {
+                        "tenant": self.tenant_id,
+                        "sku": str(sku),
+                        # Canonical event time is stored as normalized ISO-8601
+                        # text by the cross-database fact contract. Binding a
+                        # datetime makes PostgreSQL attempt TEXT >= TIMESTAMPTZ
+                        # and aborts the transaction. ISO text preserves the
+                        # intended chronological comparison for normalized
+                        # UTC event values on both PostgreSQL and SQLite.
+                        "cutoff": cutoff.isoformat(),
+                    },
                 ).fetchall()
         except Exception:
+            self._last_history_error = "canonical_purchase_history_unavailable"
+            logger.warning(
+                "forecast history unavailable tenant=%s sku=%s",
+                self.tenant_id,
+                str(sku),
+                exc_info=True,
+            )
             rows = []
-        out: List[Dict[str, Any]] = []
+        daily: Dict[str, Dict[str, float]] = {}
         for r in rows or []:
             try:
-                out.append({"date": str(r[0]), "qty": float(r[1] or 0.0), "trust": 1.0, "source": "orders"})
+                day = str(r[0] or "")[:10]
+                if not day:
+                    continue
+                quantity = max(0.0, float(r[1] or 0.0))
+                confidence = max(0.0, min(1.0, float(r[2] or 0.0)))
+                bucket = daily.setdefault(
+                    day, {"qty": 0.0, "weighted_confidence": 0.0}
+                )
+                bucket["qty"] += quantity
+                bucket["weighted_confidence"] += quantity * confidence
             except Exception:
                 continue
-        return out
+        return [
+            {
+                "date": day,
+                "qty": round(values["qty"], 4),
+                "trust": round(
+                    values["weighted_confidence"] / values["qty"], 4
+                ) if values["qty"] > 0 else 0.0,
+                "source": "canonical_purchase",
+            }
+            for day, values in sorted(daily.items())
+        ]
 
     def _quarantine_and_weight(self, series: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not series:
@@ -164,6 +425,7 @@ class DemandForecaster:
             preds, method = self._forecast_ewma(clean, horizon_days)
 
         mape = self._mape(clean)
+        evaluation = rolling_origin_evaluation(clean)
         daily = []
         for i in range(horizon_days):
             d = today + timedelta(days=i)
@@ -180,6 +442,14 @@ class DemandForecaster:
                 "clean_points": len(clean),
                 "quarantined_points": len(quarantined),
                 "mape_proxy": round(float(mape), 4) if mape is not None else None,
+                "mape_proxy_status": "deprecated_in_sample_diagnostic",
+                "rolling_origin": evaluation,
+                "forecast_quality_status": evaluation.get("status"),
                 "poison_guard": {"enabled": True, "trust_weighted": True},
+                "evidence_status": (
+                    "degraded" if self._last_history_error else ("available" if history else "no_data")
+                ),
+                "evidence_error": self._last_history_error,
+                "tenant_id": self.tenant_id,
             },
         )

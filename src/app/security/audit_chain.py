@@ -8,8 +8,6 @@ Verification walks the chain and re-computes each hash.  Any mismatch proves
 tampering of the row *or* a preceding row.  An external anchor (daily digest)
 can be published to an immutable store (S3 Object Lock, blockchain, etc.)
 to detect bulk rewrite attacks.
-"""
-"""C01 — Cryptographic hash chain for audit log tamper-evidence (extended).
 
 IT-PREV-04 additions
 --------------------

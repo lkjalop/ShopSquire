@@ -18,6 +18,19 @@ from src.app.models.db import db_session
 def _uuid() -> str:
     return str(uuid.uuid4())
 
+
+def _catalog_currency() -> str:
+    configured = str(os.getenv("CATALOG_SEED_CURRENCY") or "").strip().upper()
+    if configured:
+        return configured if len(configured) == 3 else "USD"
+    try:
+        from src.app.platform.store_profile import profile_slot
+
+        value = str(profile_slot("currency", default="USD") or "USD").strip().upper()
+        return value if len(value) == 3 else "USD"
+    except Exception:
+        return "USD"
+
 _PRICE_RE = re.compile(r"price\s*:?\s*\$?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 _RAM_RE = re.compile(r"(\d+)\s*GB\s*RAM", re.IGNORECASE)
 _STORAGE_RE = re.compile(r"(\d+)\s*(TB|GB)\s*(?:SSD|storage|M\.2|HDD)", re.IGNORECASE)
@@ -26,14 +39,15 @@ _SCREEN_RE = re.compile(r"(\d{1,2}(?:\.\d)?)\"")
 
 
 def _default_product_source() -> str:
+    # laptop-products-new-short.txt is the canonical expanded inventory list.
     for candidate in (
-        "docs/laptop-products-new.txt",
         "docs/laptop-products-new-short.txt",
+        "docs/laptop-products-new.txt",
         "docs/laptop-products-exp.txt",
     ):
         if Path(candidate).exists():
             return candidate
-    return "docs/laptop-products-new.txt"
+    return "docs/laptop-products-new-short.txt"
 
 
 def _split_blocks(text: str) -> list[list[str]]:
@@ -174,6 +188,7 @@ def _svg_for_name(name: str) -> str:
 
 
 def _ensure_accessories(db, static_root: Path) -> None:
+    catalog_currency = _catalog_currency()
     accessories = [
         {"sku": "ACC-USB-HUB", "name": "USB-C Hub", "price_cents": 4900, "specs": {"category": "usb_hub", "tags": ["usb_hub", "student", "office", "creator"]}},
         {"sku": "BAG-SLEEVE-15", "name": "Laptop Sleeve 15 inch", "price_cents": 2900, "specs": {"category": "laptop_sleeve", "tags": ["laptop_sleeve", "student", "office", "travel"]}},
@@ -227,13 +242,14 @@ def _ensure_accessories(db, static_root: Path) -> None:
         db.execute(
             text(
                 "INSERT INTO products (id, sku, name, price_cents, currency, image_url, specs, active, updated_at) "
-                "VALUES (:id, :sku, :name, :price, 'USD', :image_url, :specs, true, :updated_at)"
+                "VALUES (:id, :sku, :name, :price, :currency, :image_url, :specs, true, :updated_at)"
             ),
             {
                 "id": pid,
                 "sku": acc["sku"],
                 "name": acc["name"],
                 "price": acc["price_cents"],
+                "currency": catalog_currency,
                 "image_url": image_url,
                 "specs": json.dumps({"rating": 4.6, "shipping_days": 2, **(acc.get("specs") or {})}),
                 "updated_at": datetime.utcnow(),
@@ -279,6 +295,7 @@ def seed_products(db):
     default_source = _default_product_source()
     source_path = os.getenv("PRODUCT_SOURCE_TXT", default_source)
     parsed = parse_laptop_products(source_path)
+    catalog_currency = _catalog_currency()
     # If products already seeded, ensure any missing image_url values are populated
     if existing > 0:
         try:
@@ -373,13 +390,14 @@ def seed_products(db):
         db.execute(
             text(
                 "INSERT INTO products (id, sku, name, price_cents, currency, image_url, specs, active, updated_at) "
-                "VALUES (:id, :sku, :name, :price, 'USD', :image_url, :specs, true, :updated_at)"
+                "VALUES (:id, :sku, :name, :price, :currency, :image_url, :specs, true, :updated_at)"
             ),
             {
                 "id": pid,
                 "sku": sku,
                 "name": name,
                 "price": price,
+                "currency": catalog_currency,
                 "image_url": image_url,
                 "specs": json.dumps(specs),
                 "updated_at": datetime.utcnow(),

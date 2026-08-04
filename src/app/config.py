@@ -256,16 +256,52 @@ def load_feature_flags(path: str) -> dict:
         return None
 
     def _apply_toggle_overrides(flags: dict) -> dict:
+        """ENV WINS for every flag (the 9th-mute-layer class fix, 2026-07-09): this loader used
+        to merge exactly ONE env override, so a gate reading the flags dict never saw env-set
+        toggles — HIPPOGRAPH_FEEDBACK_ENABLED=shadow via start_demo/harness/docker silently
+        never reached _mi_mode and market intelligence was OFF in every live run of the arc.
+        Rule: any TOP-LEVEL SCALAR key present in the flags file, plus the curated runtime
+        gates below (modes that ship env-only, absent from the file), is overridable by an
+        identically-named env var. Values stay strings — every consumer already parses via
+        str(v).lower()/_safe_int, and env is the ops override channel platform-wide."""
         out = dict(flags or {})
-        override_map = {
-            "DYNAMIC_CONTEXT_PROVIDER_ENABLED": "DYNAMIC_CONTEXT_PROVIDER_ENABLED",
-            "CAG_CONTEXT_ENABLED": "CAG_CONTEXT_ENABLED",
-            "GRAPH_RAG_ENABLED": "GRAPH_RAG_ENABLED",
-        }
-        for key, env_key in override_map.items():
-            v = _env_bool(env_key)
-            if v is not None:
-                out[key] = bool(v)
+        _RUNTIME_GATES = (
+            "HIPPOGRAPH_FEEDBACK_ENABLED", "HIPPOGRAPH_CATALOG_EDGES",
+            "MARKET_ANALYSIS_ENABLED", "MARKET_PIPELINE_ENABLED",
+            "MARKET_EVIDENCE_IN_NARRATION",
+            "STOREFRONT_EMPHASIS_EXPERIMENT_ENABLED", "STOREFRONT_EMPHASIS_CANARY_FRACTION",
+            "STOREFRONT_EMPHASIS_EXPERIMENT_ID",
+            "RANKING_NUDGE_EXPERIMENT_ENABLED", "RANKING_NUDGE_CANARY_FRACTION",
+            "SALES_RESPONSE_NUDGE_ENABLED", "SALES_RESPONSE_OVERSTOCK_UNITS",
+            "RECOMMEND_NARRATION_MODE", "RECOMMEND_NARRATION_FORCE",
+        )
+        candidates = {k for k in out if isinstance(out.get(k), (str, bool, int, float))}
+        candidates.update(_RUNTIME_GATES)
+        for key in candidates:
+            v = os.getenv(key)
+            if v is None or str(v).strip() == "":
+                continue
+            cur = out.get(key)
+            # TYPE-COERCE to the file value's type (live incident 2026-07-09: an ambient
+            # KILL_SWITCH='false' env string replaced the file's boolean False, and the autonomy
+            # governor's truthiness check read the non-empty string as ENGAGED — every recommend
+            # request 503'd. A bool flag must never become a string.)
+            if isinstance(cur, bool):
+                b = _env_bool(key)
+                if b is not None:
+                    out[key] = b
+            elif isinstance(cur, int) and not isinstance(cur, bool):
+                try:
+                    out[key] = int(str(v).strip())
+                except ValueError:
+                    pass
+            elif isinstance(cur, float):
+                try:
+                    out[key] = float(str(v).strip())
+                except ValueError:
+                    pass
+            else:  # string file values + runtime gates absent from the file (consumers parse)
+                out[key] = v
         return out
 
     def _defaults() -> dict:
@@ -331,9 +367,6 @@ def load_feature_flags(path: str) -> dict:
             },
             "RAGAS_EVAL_ENABLED": False,
             "TEST_FORCE_BAD_SKU": False,
-            "DYNAMIC_CONTEXT_PROVIDER_ENABLED": True,
-            "CAG_CONTEXT_ENABLED": True,
-            "GRAPH_RAG_ENABLED": True,
             "SECURITY_THRESHOLDS": {
                 "ML_DECISION_GATE": {
                     "enabled": True,
@@ -412,11 +445,20 @@ def load_feature_flags(path: str) -> dict:
             if not isinstance(loaded, dict):
                 return defaults
             merged = _deep_merge(defaults, loaded)
-            # In non-production, ensure decision logs are enabled unless explicitly overridden.
+            # DECISION-AUDIT DEFAULT (P1-1): the bitemporal decision log is the product differentiator,
+            # so it defaults ON in EVERY environment when the env var is unset — previously it was
+            # forced on only in NON-production, so a real prod deploy silently fell to the shipped
+            # flag (false) and the audit trail was dark exactly where it matters (dev could never
+            # catch it). Operators disable explicitly with DECISION_LOG_WRITES_ENABLED=0 (e.g. a
+            # compliance hold until the DPA is signed — see policy/data_residency.py / P1-2).
             try:
                 if os.getenv("DECISION_LOG_WRITES_ENABLED") is None:
-                    if get_settings().app_env.lower() not in ("production", "prod"):
-                        merged["DECISION_LOG_WRITES_ENABLED"] = True
+                    merged["DECISION_LOG_WRITES_ENABLED"] = True
+                    if get_settings().app_env.lower() in ("production", "prod"):
+                        import logging
+                        logging.getLogger("shopsquire.config").info(
+                            "DECISION_LOG_WRITES_ENABLED defaulted ON in production (audit differentiator); "
+                            "set DECISION_LOG_WRITES_ENABLED=0 to disable deliberately.")
             except Exception:
                 import logging
 

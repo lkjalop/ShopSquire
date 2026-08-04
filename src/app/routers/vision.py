@@ -1,9 +1,11 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from typing import Any, Dict, List, Optional
 import asyncio as _asyncio
+import concurrent.futures as _futures
 import functools as _functools
 import json
 import os
+import re
 import uuid
 import hashlib
 import inspect
@@ -12,7 +14,8 @@ from src.app.models.event_log import ensure_event_log_table
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.cv_triage_basic import BasicCVTriage
-from src.app.services.cv_provider import ManagedCVProvider
+from src.app.services.cv_provider import ManagedCVProvider, VisionProviderBusy
+from src.app.services.cv_ocr import extract_text as extract_text_stage_a
 from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.intake_gate import strict_image_ingest_gate
 from src.app.services.image_intake import sanitize_image
@@ -23,6 +26,28 @@ from src.app.security.threat_hunter_leads import build_threat_hunter_leads
 from src.app.services.faq_bank import match_faq
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
+
+_IMAGE_WORKERS = max(1, min(int(os.getenv("CV_IMAGE_WORKERS", "3") or 3), 8))
+_IMAGE_EXECUTOR = _futures.ThreadPoolExecutor(
+    max_workers=_IMAGE_WORKERS,
+    thread_name_prefix="vision-bounded",
+)
+
+
+async def _run_bounded_image_work(fn, *, timeout: float):
+    """Run blocking image work without growing the default executor queue.
+
+    Cancelling or timing out the await cancels work that has not started. Work already
+    executing must still obey its provider/subprocess deadline; Python cannot kill a
+    running native thread safely.
+    """
+    loop = _asyncio.get_running_loop()
+    future = loop.run_in_executor(_IMAGE_EXECUTOR, fn)
+    try:
+        return await _asyncio.wait_for(future, timeout=max(0.1, float(timeout)))
+    finally:
+        if not future.done():
+            future.cancel()
 
 # Product photo heuristic: labels that suggest a clean, undamaged product shot
 _PRODUCT_LABEL_KW = {
@@ -48,6 +73,15 @@ _BRAND_HINT_KW = {
 }
 
 _MIN_STAGE_B_OCR_BYTES = max(1024, int(os.getenv("CV_STAGE_B_OCR_MIN_BYTES", "4096") or 4096))
+
+
+def _needs_damage_reasoning(labels: List[str], text: str, filename: str) -> bool:
+    combined = " ".join([*(str(label).lower() for label in labels), str(text or "").lower(),
+                         str(filename or "").lower()])
+    return any(token in combined for token in (
+        *_DAMAGE_LABEL_KW, "failed", "failure", "dead", "black screen", "won't boot",
+        "wont boot", "error screen", "repair", "warranty", "return",
+    ))
 
 
 def _vision_payload_drilldown(
@@ -269,6 +303,33 @@ def _compute_image_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()[:32]
 
 
+def _mask_ssn(value: str) -> str:
+    digits = re.sub(r"\D", "", str(value or ""))
+    return f"***-**-{digits[-4:]}" if len(digits) >= 4 else "***-**-****"
+
+
+def _redact_linked_artifact_pii(linked: Dict[str, Any]) -> Dict[str, Any]:
+    """Mask the RAW PII the linked-artifact scan extracted so the detection SIGNAL survives
+    (ssn_detected / ssn_count / pii_type) but the cleartext values never propagate into the triage
+    response, logs, traces, or the persisted event — echoing them there turns the detector into a
+    second exposure surface (data-minimisation / Privacy Act). Masks in place; keeps last-4 for
+    correlation; idempotent; leaves all non-PII metadata (url, country, asn, summaries) intact."""
+    if not isinstance(linked, dict):
+        return linked
+    hits = linked.get("ssn_hits")
+    if isinstance(hits, list) and hits:
+        linked["ssn_hits"] = [_mask_ssn(v) for v in hits]
+    for key in ("card_hits", "pan_hits", "cc_hits", "card_numbers"):
+        vals = linked.get(key)
+        if isinstance(vals, list) and vals:
+            linked[key] = [
+                f"****-****-****-{re.sub(r'[^0-9]', '', str(v))[-4:]}"
+                if len(re.sub(r'[^0-9]', '', str(v))) >= 4 else "****"
+                for v in vals
+            ]
+    return linked
+
+
 def _labels_are_weak(labels: List[str]) -> bool:
     vals = [str(x).strip().lower() for x in (labels or []) if str(x).strip()]
     if not vals:
@@ -319,14 +380,14 @@ async def triage(
         mime = None
         name = None
 
-    content = await image.read()
-    if not content:
+    raw_content = await image.read()
+    if not raw_content:
         raise HTTPException(status_code=400, detail="empty_image")
     gate = strict_image_ingest_gate(
         filename=str(name or "image.jpg"),
         content_type=mime,
-        blob=content,
-        size_bytes=len(content),
+        blob=raw_content,
+        size_bytes=len(raw_content),
     )
     if bool(gate.get("blocked")):
         raise HTTPException(
@@ -338,28 +399,84 @@ async def triage(
             },
         )
     try:
-        sanitized = sanitize_image(content)
+        sanitized = sanitize_image(raw_content)
         if isinstance(sanitized, dict) and str(sanitized.get("status") or "") == "sanitized":
-            content = sanitized.get("bytes") or content
-    except Exception:
-        pass
+            sanitized_content = sanitized.get("bytes")
+        else:
+            sanitized_content = None
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="image_sanitization_failed") from exc
+    if not sanitized_content:
+        raise HTTPException(status_code=422, detail="image_sanitization_failed")
+
+    # Bound the VLM/OCR cost: reject decode-bombs and downscale a COPY for the model pass.
+    # `raw_content` is preserved only for steg/forensic analysis below, which is
+    # fast (numpy) and MUST see untouched pixels. Without this a 2-24 MP photo hangs the VLM
+    # for minutes — a trivial DoS and a functional gap on normal e-commerce image sizes.
+    analysis_content = sanitized_content
+    downscale_meta: Dict[str, Any] = {}
+    try:
+        from src.app.services.image_downscale import bound_image_for_vlm
+        _bound = bound_image_for_vlm(sanitized_content)
+        if bool(_bound.get("reject")):
+            _m = _bound.get("meta") or {}
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "error": "image_too_large",
+                    "reason": _bound.get("reason"),
+                    "message": (
+                        "This image is too large to process safely. Please upload a smaller "
+                        "product photo (under 30 MP / 25 MB)."
+                    ),
+                    "image": {"megapixels": _m.get("megapixels"), "bytes": _m.get("bytes")},
+                },
+            )
+        analysis_content = _bound.get("bytes")
+        downscale_meta = _bound.get("meta") or {}
+        downscale_meta["downscaled"] = bool(_bound.get("downscaled"))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="image_decode_or_resize_failed") from exc
+    if not analysis_content:
+        raise HTTPException(status_code=422, detail="image_decode_or_resize_failed")
 
     labels = []
     extracted_text = ""
     product_identity = None
     ocr_meta: Dict[str, Any] = {}
     provider_name = "fast_local" if fast else "none"
+    analysis_state: Dict[str, Any] = {
+        "analysis_pending": bool(fast),
+        "analysis_degraded": False,
+        "degraded_reasons": [],
+    }
     if not fast:
         try:
             provider = ManagedCVProvider()
             provider_name = provider.provider
-            labels, extracted_text, product_identity = await provider.get_labels_and_text(
-                content, mode="visual_search",
+            labels, extracted_text, product_identity = await _asyncio.wait_for(
+                provider.get_labels_and_text(analysis_content, mode="visual_search"),
+                timeout=float(os.getenv("CV_PROVIDER_TOTAL_TIMEOUT_S", "10.0") or 10.0),
             )
             ocr_meta = dict(getattr(provider, "last_ocr_meta", {}) or {})
+        except _asyncio.TimeoutError:
+            labels, extracted_text, product_identity = [], "", None
+            ocr_meta = {}
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("vision_provider_timeout")
+        except VisionProviderBusy:
+            labels, extracted_text, product_identity = [], "", None
+            ocr_meta = {}
+            analysis_state["analysis_pending"] = True
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("vision_provider_busy")
         except Exception:
             labels, extracted_text, product_identity = [], "", None
             ocr_meta = {}
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("vision_provider_error")
 
     # P3: Always append sanitized filename as a weak hint (not just when labels empty)
     if name:
@@ -368,11 +485,13 @@ async def triage(
             labels = (labels or []) + [fname_hint]
 
     triager = BasicCVTriage()
+    damage_bytes = (analysis_content if not fast and
+                    _needs_damage_reasoning(labels, extracted_text, str(name or "")) else None)
     try:
         triage_result = triager.analyze(
             labels,
             extracted_text or "",
-            image_bytes=None if fast else content,
+            image_bytes=damage_bytes,
             mime=mime or "image/jpeg",
         )
     except TypeError:
@@ -380,7 +499,15 @@ async def triage(
         # legacy two-argument signature.
         triage_result = triager.analyze(labels, extracted_text or "")
     if inspect.isawaitable(triage_result):
-        analysis = await triage_result
+        try:
+            analysis = await _asyncio.wait_for(
+                triage_result,
+                timeout=float(os.getenv("CV_DAMAGE_REASONING_TIMEOUT_S", "8.0") or 8.0),
+            )
+        except _asyncio.TimeoutError:
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("damage_reasoning_timeout")
+            analysis = await triager.analyze(labels, extracted_text or "")
     else:
         analysis = triage_result
 
@@ -403,8 +530,10 @@ async def triage(
         "analysis": analysis,
         "damage_score": _damage_score,
         "is_product_photo": _is_product_photo(labels, _damage_score),
-        "image_hash": _compute_image_hash(content),
+        "image_hash": _compute_image_hash(raw_content),
         "ingest_gate": gate,
+        "vlm_input": downscale_meta,  # {megapixels, bytes, downscaled, downscaled_to?} — the model saw this
+        "analysis_state": analysis_state,
     }
 
     # P4: Always surface product identity — decoupled from security flags.
@@ -456,33 +585,37 @@ async def triage(
     try:
         from src.app.rules.barcode_decode import decode_barcodes
         if fast:
-            _loop = _asyncio.get_event_loop()
             try:
-                qr = await _asyncio.wait_for(
-                    _loop.run_in_executor(
-                        None,
+                qr = await _run_bounded_image_work(
+                    _functools.partial(
                         decode_barcodes,
-                        [(str(name or "image.jpg"), content)],
+                        # SECURITY control: decode the QR on the FULL-RES upload (feeds the
+                        # qr_external_url_detected -> text_only wipe). A small malicious QR can be
+                        # lost after the ~1280px VLM downscale, so this must NOT use analysis_content.
+                        [(str(name or "image.jpg"), raw_content)],
                     ),
                     timeout=float(os.getenv("CV_FAST_QR_TIMEOUT_S", "1.5") or 1.5),
                 )
             except Exception:
                 qr = []
-                security_signals["qr_decode_deferred"] = True
+                analysis_state["analysis_pending"] = True
+                analysis_state["degraded_reasons"].append("qr_decode_deferred")
         else:
-            _loop = _asyncio.get_event_loop()
             try:
-                qr = await _asyncio.wait_for(
-                    _loop.run_in_executor(
-                        None,
+                qr = await _run_bounded_image_work(
+                    _functools.partial(
                         decode_barcodes,
-                        [(str(name or "image.jpg"), content)],
+                        # SECURITY control: decode the QR on the FULL-RES upload (feeds the
+                        # qr_external_url_detected -> text_only wipe). A small malicious QR can be
+                        # lost after the ~1280px VLM downscale, so this must NOT use analysis_content.
+                        [(str(name or "image.jpg"), raw_content)],
                     ),
                     timeout=float(os.getenv("CV_QR_TIMEOUT_S", "4.0") or 4.0),
                 )
             except Exception:
                 qr = []
-                security_signals["qr_decode_error"] = True
+                analysis_state["analysis_degraded"] = True
+                analysis_state["degraded_reasons"].append("qr_decode_error")
         qr_codes = qr.codes if hasattr(qr, "codes") else (qr if isinstance(qr, list) else [])
         if qr_codes:
             security_signals["qr_code_detected"] = True
@@ -556,18 +689,19 @@ async def triage(
                                 # Run in a thread executor so the synchronous HTTP calls inside
                                 # analyze_linked_artifact do not block the event loop.
                                 try:
-                                    _loop = _asyncio.get_event_loop()
-                                    linked = await _asyncio.wait_for(
-                                        _loop.run_in_executor(
-                                            None,
-                                            _functools.partial(
-                                                linked_artifact_analysis.analyze_linked_artifact,
-                                                url=data,
-                                                timeout=3.0,
-                                            ),
+                                    linked = await _run_bounded_image_work(
+                                        _functools.partial(
+                                            linked_artifact_analysis.analyze_linked_artifact,
+                                            url=data,
+                                            timeout=3.0,
                                         ),
                                         timeout=4.0,
                                     )
+                                    # Mask raw SSN/PAN in place BEFORE `linked` propagates into the
+                                    # response, findings, traces, and the persisted event. Detection
+                                    # signals (ssn_detected/ssn_count/pii_type) are set from it below.
+                                    if isinstance(linked, dict):
+                                        _redact_linked_artifact_pii(linked)
                                     linked_artifact_result = linked if isinstance(linked, dict) else None
                                     resp["linked_artifact"] = linked
                                     if linked_artifact_result:
@@ -651,9 +785,10 @@ async def triage(
     if not fast:
         try:
             from src.app.security.adversarial_image_detector import detect_adversarial
-            _loop = _asyncio.get_event_loop()
-            adv = await _asyncio.wait_for(
-                _loop.run_in_executor(None, detect_adversarial, content),
+            adv = await _run_bounded_image_work(
+                # SECURITY control on FULL-RES bytes: downscaling attenuates adversarial
+                # perturbations, so this must see raw_content (like steg), not analysis_content.
+                _functools.partial(detect_adversarial, raw_content),
                 timeout=8.0,
             )
             if hasattr(adv, "is_adversarial") and adv.is_adversarial:
@@ -668,9 +803,8 @@ async def triage(
     if not fast:
         try:
             from src.app.security.steg_detector import detect_steganography
-            _loop = _asyncio.get_event_loop()
-            steg = await _asyncio.wait_for(
-                _loop.run_in_executor(None, detect_steganography, content),
+            steg = await _run_bounded_image_work(
+                _functools.partial(detect_steganography, raw_content),
                 timeout=8.0,
             )
             steg_score = float(getattr(steg, "steg_score", 0.0) or 0.0)
@@ -711,10 +845,52 @@ async def triage(
             or (len(stage_a_text) < 12 and bool(security_signals.get("qr_code_detected")))
             or (not stage_a_text and any(tok in filename_hint_for_ocr for tok in ("ms texti", "ms-texti")))
         )
-        if deep_trigger and not fast and len(content) >= _MIN_STAGE_B_OCR_BYTES:
+        if deep_trigger and not fast:
+            # Run one cheap CPU OCR pass before the multi-contrast ladder. This preserves security
+            # coverage when the VLM is unavailable without paying for OCR on ordinary product photos.
+            try:
+                stage_a = await _run_bounded_image_work(
+                    _functools.partial(
+                        extract_text_stage_a,
+                        analysis_content,
+                        provider=os.getenv("CV_SELECTIVE_OCR_PROVIDER", "tesseract"),
+                        fallback=None,
+                    ),
+                    timeout=float(os.getenv("CV_SELECTIVE_OCR_TIMEOUT_S", "3.0") or 3.0),
+                )
+                stage_a_text = str(stage_a.get("text") or "").strip()
+                if stage_a_text:
+                    extracted_text = stage_a_text[:500]
+                    ocr_det = _normalize_ocr_and_detect(extracted_text)
+                    ocr_meta.update({
+                        "ocr_confidence": float(stage_a.get("confidence") or 0.0),
+                        "ocr_engine": str(stage_a.get("provider") or "tesseract"),
+                        "ocr_word_count": len(stage_a_text.split()),
+                        "cv_extraction_method": "selective_ocr_stage_a",
+                    })
+            except _asyncio.TimeoutError:
+                analysis_state["analysis_degraded"] = True
+                analysis_state["degraded_reasons"].append("selective_ocr_timeout")
+
+        if (deep_trigger and not fast and not stage_a_text
+                and len(analysis_content) >= _MIN_STAGE_B_OCR_BYTES):
             # Risk-triggered deep OCR for low-evidence or overlay-heavy images.
             from src.app.cv.cv_pipeline import run_risk_triggered_multicontrast_ocr
-            deep = run_risk_triggered_multicontrast_ocr(content, ocr_provider=None, enabled=True)
+            try:
+                deep = await _run_bounded_image_work(
+                    _functools.partial(
+                        run_risk_triggered_multicontrast_ocr,
+                        analysis_content,
+                        ocr_provider=None,
+                        enabled=True,
+                    ),
+                    timeout=float(os.getenv("CV_DEEP_OCR_TIMEOUT_S", "6.0") or 6.0),
+                )
+            except _asyncio.TimeoutError:
+                deep = {"best_text": "", "best_confidence": 0.0, "triggered": True,
+                        "error": "deep_ocr_timeout"}
+                analysis_state["analysis_degraded"] = True
+                analysis_state["degraded_reasons"].append("deep_ocr_timeout")
             deep_text = str(deep.get("best_text") or "").strip()
             deep_conf = float(deep.get("best_confidence") or 0.0)
             deep_min_conf = float(os.getenv("CV_STAGE_B_OCR_CONFIDENCE_MIN", "0.45") or 0.45)
@@ -726,12 +902,17 @@ async def triage(
                 security_clean = False
             # Stage-B still uncertain: keep visual flow available, but mark untrusted/degraded.
             if (not deep_text) or deep_conf < deep_min_conf:
-                security_signals["ocr_low_confidence_uncertain"] = True
-                security_clean = False
+                analysis_state["analysis_degraded"] = True
+                analysis_state["degraded_reasons"].append("ocr_low_confidence")
         elif deep_trigger and not fast:
             # Tiny synthetic or low-information images are not good candidates
             # for expensive OCR rescue. Skip the deep pass and let later
             # identity rescue / security logic operate on the lighter signals.
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("ocr_low_confidence")
+
+        if "ocr_low_confidence" in analysis_state["degraded_reasons"]:
+            # Backward-compatible observability signal. It does not make the image suspicious.
             security_signals["ocr_low_confidence_uncertain"] = True
 
         if bool(ocr_det.get("payment_social_engineering")):
@@ -798,12 +979,20 @@ async def triage(
                             "source": "filename_or_label_hint",
                         }
 
-                if not product_identity:
-                    stage_b = identify_product_from_image(
-                        content,
-                        user_query=filename_hint or None,
-                        trace_id=None,
-                        timeout_s=float(os.getenv("CV_IDENTITY_STAGE_B_TIMEOUT_S", "6.0") or 6.0),
+                stage_b_enabled = str(
+                    os.getenv("CV_IDENTITY_STAGE_B_ENABLED", "0") or "0"
+                ).strip().lower() in ("1", "true", "yes", "on")
+                if not product_identity and stage_b_enabled:
+                    identity_timeout = float(os.getenv("CV_IDENTITY_STAGE_B_TIMEOUT_S", "6.0") or 6.0)
+                    stage_b = await _run_bounded_image_work(
+                        _functools.partial(
+                            identify_product_from_image,
+                            analysis_content,
+                            user_query=filename_hint or None,
+                            trace_id=None,
+                            timeout_s=identity_timeout,
+                        ),
+                        timeout=identity_timeout + 0.5,
                     )
                     if isinstance(stage_b, dict):
                         brand = str(stage_b.get("brand") or "").strip()
@@ -815,8 +1004,15 @@ async def triage(
                                 "confidence": float(stage_b.get("confidence") or 0.0),
                                 "source": "vision_stage_b",
                             }
+                elif not product_identity:
+                    analysis_state["analysis_degraded"] = True
+                    analysis_state["degraded_reasons"].append("identity_unresolved_after_provider")
+        except _asyncio.TimeoutError:
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("identity_stage_b_timeout")
         except Exception:
-            pass
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("identity_stage_b_error")
 
     if product_identity:
         resp["product_identity"] = product_identity
@@ -950,6 +1146,8 @@ async def triage(
         import logging as _sqlog
         _sqlog.getLogger(__name__).debug("vision: sandbox_queue failed (non-fatal): %s", _sq_exc)
 
+    analysis_state["security_risk"] = not security_clean
+    analysis_state["degraded_reasons"] = sorted(set(analysis_state["degraded_reasons"]))
     resp["security"] = {
         "clean": security_clean,
         # Plain-English image authenticity verdict for merchant UI
@@ -1121,5 +1319,13 @@ async def triage(
         resp["event_id"] = ev_id
     except Exception:
         pass
+
+    if not fast and provider_name == "ollama":
+        try:
+            from src.app.services.model_residency import schedule_router_restore
+
+            resp["router_restore_scheduled"] = schedule_router_restore()
+        except Exception:
+            resp["router_restore_scheduled"] = False
 
     return resp

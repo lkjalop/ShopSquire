@@ -1,0 +1,95 @@
+name: Service tests sharded
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: service-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  services:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      APP_ENV: testing
+      PYTEST_SERVICE_SHARD_TOTAL: "8"
+      PYTEST_SERVICE_SHARD_INDEX: ${{ matrix.shard }}
+      PYTEST_PER_TEST_TIMEOUT_SEC: "120"
+      PYTEST_PROGRESS_LOG: "1"
+      PYTEST_FAIL_ON_THREAD_LEAK: "1"
+      PYTEST_LAST_RUNNING_FILE: test-results/last-running-${{ matrix.shard }}.txt
+      FEATURE_FLAGS_PATH: ${{ github.workspace }}/tmp/feature-flags-${{ matrix.shard }}.json
+      REDIS_TEST_URL: redis://localhost:6379/15
+      DATABASE_URL: sqlite+pysqlite:///${{ github.workspace }}/tmp/services-${{ matrix.shard }}.sqlite
+      DATABASE_URL_RO: sqlite+pysqlite:///${{ github.workspace }}/tmp/services-${{ matrix.shard }}.sqlite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install declared backend toolchain
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install --no-interaction --no-ansi --no-root
+      - name: Prepare isolated shard
+        run: |
+          mkdir -p tmp test-results
+          cp config/feature_flags.json "${FEATURE_FLAGS_PATH}"
+      - name: Run service shard with hard boundaries
+        run: |
+          timeout --signal=TERM --kill-after=30s 1200s \
+            poetry run pytest -vv --run-slow --timeout=120 --timeout-method=thread \
+              --junitxml=test-results/services-${{ matrix.shard }}.xml \
+              tests/services
+      - name: Static checks for stabilized service boundaries
+        if: matrix.shard == 0
+        run: |
+          poetry run ruff check \
+            src/app/services/authoritative_business_feed.py \
+            src/app/services/business_semantics.py \
+            src/app/services/forecast_intelligence.py \
+            src/app/services/inventory_reorder_execution.py \
+            src/app/services/market_evidence_policy.py \
+            src/app/services/market_source_registry.py \
+            src/app/services/product_lifecycle.py \
+            src/app/services/supply_impact_reasoner.py \
+            src/app/services/supply_risk_workbench.py \
+            src/app/services/synthetic_canonical_replay.py \
+            src/app/services/synthetic_replay_acceptance.py \
+            src/app/services/synthetic_replay_shadow.py \
+            src/app/services/synthetic_supply_history.py \
+            src/app/services/dependency_resilience.py \
+            src/app/routers/supply_risk.py \
+            tests/services/test_synthetic_canonical_replay.py \
+            tests/services/test_supply_risk_workbench.py \
+            tests/services/test_dependency_resilience_lifecycle.py \
+            tests/services/test_dependency_resilience_timeout.py
+      - name: Upload diagnostics and duration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-shard-${{ matrix.shard }}
+          path: |
+            test-results/**
+            tmp/*.sqlite*
+          retention-days: 14

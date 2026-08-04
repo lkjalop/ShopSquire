@@ -6,7 +6,8 @@ import threading
 import time
 from typing import Dict, Tuple, Optional, List
 
-from fastapi import HTTPException, Request
+from fastapi import Request
+from starlette.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.app.deps import get_redis
@@ -205,11 +206,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             ip_bucket = f"ip:{ip}"
 
             if enforce_key and not consume_fixed_window_limit(key=key_bucket, limit=self.per_min_key, window_sec=60):
-                raise HTTPException(status_code=429, detail=f"key_rate_limit_exceeded ({self.per_min_key}/min)")
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"key_rate_limit_exceeded ({self.per_min_key}/min)"},
+                )
             if enforce_ip and not consume_fixed_window_limit(key=ip_bucket, limit=self.per_min_ip, window_sec=60):
-                raise HTTPException(status_code=429, detail=f"ip_rate_limit_exceeded ({self.per_min_ip}/min)")
-        except HTTPException:
-            raise
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"ip_rate_limit_exceeded ({self.per_min_ip}/min)"},
+                )
         except (TypeError, ValueError, RuntimeError):
             # Fail-open by design for middleware stability; detailed limits are
             # still enforced by route-level backpressure middleware.

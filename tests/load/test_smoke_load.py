@@ -8,6 +8,10 @@ def _make_client(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///test.sqlite")
     monkeypatch.setenv("DISABLE_TRACING", "1")
     monkeypatch.setenv("SKIP_OBSERVER_ENDPOINTS", "/api/v1/recommend,/api/v1/admin")
+    # Throughput smoke: 50 IDENTICAL queries from one uid are (correctly) flagged as a
+    # structural-probe by the model-extraction guard -> 429. Disable that guard here; this test
+    # measures latency, not security.
+    monkeypatch.setenv("MODEL_THEFT_GUARD_ENABLED", "0")
     app = create_app()
     client = TestClient(app)
     headers = {

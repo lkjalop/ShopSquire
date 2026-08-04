@@ -1,16 +1,13 @@
 from typing import Dict, Optional
-from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import StreamingResponse
 from fastapi import WebSocket, WebSocketDisconnect
 import logging
 
-from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.models.db import db_session, get_engine, get_db
-from fastapi import Request, Depends
-from sqlalchemy import text, create_engine
+from fastapi import Request
+from sqlalchemy import inspect as sa_inspect, text, create_engine
 import asyncio
-from src.app.models.decision_audit import DecisionAudit
 from src.app.services.persistence import write_audit_and_event
 from src.app.utils.webhook import send_webhook
 from src.app.observability.metrics import decisions_events_counter
@@ -18,10 +15,9 @@ from src.app.observability.tracing import get_tracer
 from pathlib import Path
 import json
 import time
-from sqlalchemy import text
 import uuid
 import os
-from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER, _env_role_key
 from src.app.deps import hash_uid
 from src.app.services.ragas_eval import evaluate_and_persist
 from src.app.observability.metrics import record_ragas_eval
@@ -38,12 +34,28 @@ _EXPLAIN_CACHE: dict[str, tuple[float, Dict]] = {}
 _EXPLAIN_CACHE_TTL_SECONDS = 300.0
 
 
+def _default_model_decision(model_selection: Dict) -> Dict[str, str]:
+    if (
+        model_selection.get("authority") == "proposes"
+        or model_selection.get("source") == "model"
+    ):
+        return {"action": "model_directed"}
+    return {
+        "action": (
+            "escalate_to_big"
+            if bool(model_selection.get("complex"))
+            else "prefer_small"
+        ),
+    }
+
+
 def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict:
     """Reconstruct enough trace context from memory/durable events for fast paths."""
     events = events or []
     products_summary = None
     right_panel_contract = None
     shopper_intent = None
+    authoritative_intent = None
     multimodal_fusion = None
     image_security = None
     input_query = None
@@ -66,6 +78,19 @@ def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict
                 shopper_intent = payload.get("shopper_intent")
             elif isinstance(payload.get("intent_analysis"), dict):
                 shopper_intent = payload.get("intent_analysis")
+        # Early shopper-intent events are observations made before routing is
+        # complete.  The finalized V2 recommendation result owns the served
+        # lane and must supersede those hints in Decision Trace.
+        if (
+            (et == "recommendation_result" or original == "recommendation_result")
+            and isinstance(payload.get("intent_analysis"), dict)
+        ):
+            authoritative_intent = payload.get("intent_analysis")
+        if (
+            payload.get("intent_authority") == "finalized_route"
+            and isinstance(payload.get("intent_analysis"), dict)
+        ):
+            authoritative_intent = payload.get("intent_analysis")
         if multimodal_fusion is None and isinstance(payload.get("multimodal_fusion"), dict):
             multimodal_fusion = payload.get("multimodal_fusion")
         if image_security is None and isinstance(payload.get("image_security"), dict):
@@ -128,7 +153,8 @@ def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict
         "decision_id": trace_id,
         "timestamp": (events[0].get("created_at") if events and isinstance(events[0], dict) else None),
         "input_query": input_query,
-        "intent_analysis": shopper_intent or {},
+        "intent_analysis": authoritative_intent or shopper_intent or {},
+        "_intent_authoritative": bool(authoritative_intent),
         "agent_chain": agent_chain,
         "rag_context": {"products_retrieved": len(products_summary or [])},
         "evidence": {},
@@ -458,7 +484,7 @@ def query_decisions(
 ) -> Dict:
     with tracer.start_as_current_span("decisions.query") as span:
         span.set_attribute("decisions.agent_name", agent_name or "any")
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             # Avoid DB access during local/tests
             raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
@@ -577,7 +603,7 @@ def query_decisions(
 def latest_decision(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])), db=Depends(get_db)) -> Dict:
     with tracer.start_as_current_span("decisions.latest") as span:
         span.set_attribute("decisions.uid_hash", hash_uid(uid))
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             return _graceful_latest_disabled(uid)
         target = hash_uid(uid)
@@ -614,7 +640,7 @@ def latest_summary(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, RO
     """
     with tracer.start_as_current_span("decisions.summary") as span:
         span.set_attribute("decisions.uid_hash", hash_uid(uid))
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         logger.debug("latest_summary flags=%s uid=%s", flags.get("DECISION_LOG_WRITES_ENABLED"), uid)
         if not _decision_reads_enabled(flags):
             logger.debug("decision reads disabled by feature flags or env; returning unavailable for uid=%s", uid)
@@ -678,18 +704,20 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
     # Lightweight auth: accept header or query param
     try:
         provided = request.headers.get("x-api-key") or api_key
-        expected_keys = {
-            os.getenv("MERCHANT_API_KEY", "local-merchant-key"),
-            os.getenv("DEVELOPER_API_KEY", "local-developer-key"),
-            os.getenv("OWNER_API_KEY", "local-owner-key"),
-        }
+        # fail-closed in non-dev: _env_role_key returns "" for an unset key there; drop empties so an
+        # empty provided key can never match a "not configured" slot.
+        expected_keys = {k for k in (
+            _env_role_key("MERCHANT_API_KEY", "local-merchant-key"),
+            _env_role_key("DEVELOPER_API_KEY", "local-developer-key"),
+            _env_role_key("OWNER_API_KEY", "local-owner-key"),
+        ) if k}
         if not provided or provided not in expected_keys:
             from fastapi import Response
             return Response(content="unauthorized", status_code=401)
     except Exception:
         pass
 
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     if not _decision_reads_enabled(flags):
         from fastapi import Response
         return Response(content="event:meta\ndata: {\"available\": false}\n\n", media_type="text/event-stream")
@@ -699,7 +727,6 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
     async def event_gen():
         # Emit up to 60 seconds of updates
         deadline = asyncio.get_event_loop().time() + 60
-        last_id = None
         while asyncio.get_event_loop().time() < deadline:
             if await request.is_disconnected():
                 break
@@ -733,7 +760,6 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
                         "policy_version": r[4],
                         "execution_status": r[5],
                     }
-                    last_id = r[0]
                     break
             yield f"data: {json.dumps(payload)}\n\n"
             await asyncio.sleep(3)
@@ -928,8 +954,12 @@ async def decisions_sse_trace(trace_id: str, request: Request):
                     if await request.is_disconnected():
                         break
                     try:
-                        ev = await q.get()
+                        ev = await asyncio.wait_for(q.get(), timeout=15.0)
                         yield f"data: {json.dumps([ev], ensure_ascii=False, default=str)}\n\n"
+                    except asyncio.TimeoutError:
+                        # H fix: bound the wait so a silent stream + client disconnect can't park the
+                        # coroutine forever (is_disconnected only re-checks between events).
+                        yield ": keep-alive\n\n"
                     except asyncio.CancelledError:
                         break
                     except Exception:
@@ -1047,8 +1077,8 @@ async def websocket_stream_summary(websocket: WebSocket, uid: str | None = None,
     # Lightweight auth: accept header or query param via querystring
     try:
         provided = websocket.query_params.get("api_key") or api_key
-        expected = os.getenv("MERCHANT_API_KEY", "local-merchant-key")
-        if not provided or provided != expected:
+        expected = _env_role_key("MERCHANT_API_KEY", "local-merchant-key")  # "" in non-dev if unset → fail-closed
+        if not provided or not expected or provided != expected:
             await websocket.close(code=1008)
             return
     except Exception:
@@ -1128,7 +1158,7 @@ def approve_decision(
 ) -> Dict:
     with tracer.start_as_current_span("decisions.approve") as span:
         span.set_attribute("decisions.id", decision_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             raise HTTPException(status_code=501, detail="Decision lifecycle disabled in this environment")
         # `db` is injected via Depends(get_db) to ensure the session is bound to
@@ -1188,7 +1218,7 @@ def reject_decision(
 ) -> Dict:
     with tracer.start_as_current_span("decisions.reject") as span:
         span.set_attribute("decisions.id", decision_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             raise HTTPException(status_code=501, detail="Decision lifecycle disabled in this environment")
         # `db` is injected via Depends(get_db)
@@ -1231,7 +1261,7 @@ def reject_decision(
 def reopen_decision(decision_id: str, actor: str, comment: str | None = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))) -> Dict:
     with tracer.start_as_current_span("decisions.reopen") as span:
         span.set_attribute("decisions.id", decision_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             raise HTTPException(status_code=501, detail="Decision lifecycle disabled in this environment")
         # For SQLite compatibility, prefer setting sentinel 'infinity' rather than NULL
@@ -1246,7 +1276,7 @@ def reopen_decision(decision_id: str, actor: str, comment: str | None = None, ro
                     logger.debug("[decisions.reopen] db.bind.url=%s id=%s", getattr(db.bind, 'url', None), decision_id)
                 except Exception:
                     pass
-                res = db.execute(stmt, {"id": decision_id})
+                db.execute(stmt, {"id": decision_id})
                 # Always write audit regardless of rowcount quirks
                 write_audit_and_event(decision_id, "reopen", actor, {"comment": comment})
                 db.commit()
@@ -1309,7 +1339,7 @@ def reopen_decision(decision_id: str, actor: str, comment: str | None = None, ro
 def extend_decision(decision_id: str, actor: str, extend_seconds: int, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))) -> Dict:
     with tracer.start_as_current_span("decisions.extend") as span:
         span.set_attribute("decisions.id", decision_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             raise HTTPException(status_code=501, detail="Decision lifecycle disabled in this environment")
         # `db` is injected via Depends(get_db)
@@ -1563,7 +1593,10 @@ def query_decision_trace(
                     base[key] = event_context.get(key)
             if not base.get("agent_chain") and event_context.get("agent_chain"):
                 base["agent_chain"] = event_context.get("agent_chain")
-            if not base.get("intent_analysis") and event_context.get("intent_analysis"):
+            if (
+                event_context.get("_intent_authoritative")
+                or not base.get("intent_analysis")
+            ) and event_context.get("intent_analysis"):
                 base["intent_analysis"] = event_context.get("intent_analysis")
         except Exception:
             pass
@@ -1611,7 +1644,7 @@ def get_session_decisions(
     Falls back to scanning `input_data` JSON for a `session_id` key when the column is absent
     (schema not yet migrated), so the endpoint is safe against partial rollouts.
     """
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     if not _decision_reads_enabled(flags):
         raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
 
@@ -1720,7 +1753,7 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
     """
     with tracer.start_as_current_span("decisions.trace.get") as span:
         span.set_attribute("decisions.trace_id", trace_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         from sqlalchemy import text as _text
 
         # User-facing trace-read endpoint: graceful payload when disabled.
@@ -1857,10 +1890,7 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
                 ms["selected"] = ms.get("model")
             # Provide explicit escalate/degrade hint if missing
             if ms.get("decision") is None:
-                complex_bool = bool(ms.get("complex"))
-                ms["decision"] = {
-                    "action": "escalate_to_big" if complex_bool else "prefer_small",
-                }
+                ms["decision"] = _default_model_decision(ms)
             if ms.get("selected") is None:
                 action = ((ms.get("decision") or {}).get("action") if isinstance(ms.get("decision"), dict) else None) or "prefer_small"
                 ms["selected"] = f"rule-based ({action})"
@@ -1948,6 +1978,12 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
                 if security_matrix is None and isinstance(proposed_action.get("security_matrix"), dict):
                     security_matrix = proposed_action.get("security_matrix")
             events = _fetch_trace_events(str(trace_id))
+            event_context = _trace_context_from_events(str(trace_id), events)
+            if (
+                event_context.get("_intent_authoritative")
+                and event_context.get("intent_analysis")
+            ):
+                out["intent_analysis"] = event_context["intent_analysis"]
             for evt in reversed(events or []):
                 payload = evt.get("payload") if isinstance(evt, dict) else None
                 if not isinstance(payload, dict):
@@ -1983,7 +2019,7 @@ async def explain_decision(trace_id: str, role: str = Depends(require_role([ROLE
     Uses available `decision_logs` record and trace events to construct a prompt
     and calls the lightweight LLM provider to summarize reasoning, risks, and key steps.
     """
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     if not _decision_reads_enabled(flags):
         raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
     cached = _EXPLAIN_CACHE.get(trace_id)
@@ -2166,7 +2202,7 @@ def replay_decision(trace_id: str, role: str = Depends(require_role([ROLE_MERCHA
 
     Includes input data, model selection, and tool invocation events captured in the trace.
     """
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     if not _decision_reads_enabled(flags):
         raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
     try:
@@ -2331,6 +2367,31 @@ def decision_compliance(
 # Bitemporal Audit Trail
 # ---------------------------------------------------------------------------
 
+_DECISION_AUDIT_COLUMNS = (
+    "id", "agent_name", "valid_from", "valid_to", "system_from", "system_to",
+    "input_data", "retrieved_context", "proposed_action", "policy_version",
+    "approval_required", "execution_status", "tenant_id", "actor_id",
+    "actor_role", "event_type",
+)
+
+
+def _fetch_decision_audit_rows(db, trace_id: str):
+    """Read a decision across both current and pre-hardening demo schemas."""
+    bind = db.get_bind()
+    available = {
+        str(column.get("name") or "")
+        for column in sa_inspect(bind).get_columns("decision_logs")
+    }
+    projection = ", ".join(
+        column if column in available else f"NULL AS {column}"
+        for column in _DECISION_AUDIT_COLUMNS
+    )
+    return db.execute(
+        text(f"SELECT {projection} FROM decision_logs WHERE id = :tid"),
+        {"tid": trace_id},
+    ).fetchall()
+
+
 @router.get("/{trace_id}/audit-trail")
 def decision_audit_trail(
     trace_id: str,
@@ -2348,15 +2409,7 @@ def decision_audit_trail(
     # 1. Fetch decision_logs rows for this trace
     decisions: list[dict] = []
     try:
-        rows = db.execute(
-            text(
-                "SELECT id, agent_name, valid_from, valid_to, system_from, system_to, "
-                "input_data, retrieved_context, proposed_action, policy_version, "
-                "approval_required, execution_status, tenant_id, actor_id, actor_role, event_type "
-                "FROM decision_logs WHERE id = :tid"
-            ),
-            {"tid": trace_id},
-        ).fetchall()
+        rows = _fetch_decision_audit_rows(db, trace_id)
         for r in rows:
             decisions.append({
                 "id": r[0], "agent_name": r[1],
@@ -2372,7 +2425,7 @@ def decision_audit_trail(
                 "actor_role": r[14], "event_type": r[15],
             })
     except Exception:
-        pass
+        logger.exception("Decision audit read failed for trace %s", trace_id)
 
     # 2. Fetch trace events
     trace_events = _fetch_trace_events(trace_id)
@@ -2420,6 +2473,26 @@ def decision_audit_trail(
         "pii_fields_detected": _detect_pii_fields(decisions, trace_events),
     }
 
+    # Persisted WORM-chain verdict (the REAL tamper-evidence): audit_log_chain is an append-only,
+    # HMAC-anchored merkle chain (services/audit_chain.py). Surface its actual verification here so the tab
+    # reflects production truth — "verified" flips to True automatically once the chain is populated (every
+    # decision appended) AND the daily anchor is published. In dev the chain is usually empty/unanchored, so
+    # this reports the HONEST reason (e.g. anchor pending) rather than a bare, alarming "No".
+    try:
+        from src.app.services.audit_chain import verify_audit_chain
+        _pv = verify_audit_chain(limit=2000)
+    except Exception as _pv_exc:  # never let audit visualisation crash on the verifier
+        _pv = {"ok": None, "checked": 0, "error": str(_pv_exc)[:160]}
+    _anchor = _pv.get("anchor") or _pv.get("anchor_status") or {}
+    _chain_populated = int(_pv.get("checked") or 0) > 0
+    _persisted_verified = bool(_pv.get("ok") and _chain_populated)
+    if _persisted_verified:
+        _reason = "persisted chain intact + anchor verified"
+    elif not _chain_populated:
+        _reason = "persisted WORM chain not populated in this environment (dev) — append + daily anchor pending"
+    else:
+        _reason = f"persisted-chain check: {_pv.get('reason') or 'anchor pending'}"
+
     return {
         "trace_id": trace_id,
         "decision_count": len(decisions),
@@ -2428,11 +2501,26 @@ def decision_audit_trail(
         "events": trace_events[:200],
         "hash_chain": hash_chain,
         "immutability": {
-            "method": "sha256_chain",
+            # Two scopes: (1) a read-time replay chain (recomputed here for visualisation only) and (2) the
+            # PERSISTED, HMAC-anchored WORM chain in services/audit_chain.py — the real tamper-evidence.
+            "method": "sha256_chain_read_time",
             "chain_length": len(hash_chain),
             "genesis_hash": "genesis",
             "tip_hash": prev_hash,
-            "verified": True,
+            # `verified` now reflects the PERSISTED chain (not the read-time replay): True only when the WORM
+            # chain has entries AND its anchor verifies. Honest in dev (empty chain → not verified, with why).
+            "verified": _persisted_verified,
+            "verification_scope": "persisted_worm_chain",
+            "reason": _reason,
+            "read_time_replay_length": len(hash_chain),
+            "persisted_chain": {
+                "populated": _chain_populated,
+                "entries_checked": int(_pv.get("checked") or 0),
+                "anchor_present": bool(_anchor.get("present")),
+                "anchor_signature_ok": _anchor.get("signature_ok"),
+                "anchor_head_match": _anchor.get("head_match"),
+            },
+            "note": _reason,
         },
         "retention_policy": retention,
         "storage": {

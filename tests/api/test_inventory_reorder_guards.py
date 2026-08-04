@@ -9,7 +9,7 @@ def _client_with_env(monkeypatch) -> TestClient:
     return TestClient(create_app())
 
 
-def test_reorder_quarantines_low_supplier_trust(monkeypatch):
+def test_reorder_rejects_caller_selected_supplier_trust(monkeypatch):
     client = _client_with_env(monkeypatch)
     r = client.post(
         "/api/v1/inventory/reorder",
@@ -22,14 +22,10 @@ def test_reorder_quarantines_low_supplier_trust(monkeypatch):
             "supplier_trust_band": "low",
         },
     )
-    assert r.status_code == 200
-    body = r.json()
-    assert body.get("status") == "ok"
-    inner = body.get("result") or {}
-    assert inner.get("status") == "quarantined_supplier_update"
+    assert r.status_code == 422
 
 
-def test_reorder_requires_dual_source_on_critical(monkeypatch):
+def test_reorder_rejects_caller_selected_confirmation_evidence(monkeypatch):
     client = _client_with_env(monkeypatch)
     r = client.post(
         "/api/v1/inventory/reorder",
@@ -46,10 +42,4 @@ def test_reorder_requires_dual_source_on_critical(monkeypatch):
             "erp_ack": False,
         },
     )
-    assert r.status_code == 200
-    body = r.json()
-    assert body.get("status") == "ok"
-    result = body.get("result") or {}
-    assert result.get("status") in {"approval_required", "po_created", "challenge_required"}
-    if result.get("status") == "approval_required":
-        assert result.get("reason") == "auto_po_policy_escalate"
+    assert r.status_code == 422

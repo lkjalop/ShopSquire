@@ -1,8 +1,10 @@
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
+from src.app.erp.connectors.provider_sync import DeepProviderConnector
 
 
 class _Resp:
@@ -67,3 +69,35 @@ def test_generic_provider_delta_and_outbound(monkeypatch):
     assert int(rout.get("processed") or 0) >= 1
     assert int(rout.get("sent") or 0) >= 1
 
+
+def test_generic_provider_rejects_malformed_inventory_payload(monkeypatch):
+    monkeypatch.setenv("SAP_BASE_URL", "https://sap.example")
+    connector = DeepProviderConnector(
+        provider="sap",
+        env_prefix="SAP",
+        outbound_map={},
+    )
+    monkeypatch.setattr(
+        connector,
+        "_req",
+        lambda *args, **kwargs: _Resp(200, {"unexpected": []}),
+    )
+    with pytest.raises(RuntimeError, match="inventory_malformed_payload"):
+        connector.fetch_inventory_delta(tenant_id="tenant-a")
+
+
+def test_generic_provider_health_does_not_treat_404_as_healthy(monkeypatch):
+    monkeypatch.setenv("SAP_BASE_URL", "https://sap.example")
+    connector = DeepProviderConnector(
+        provider="sap",
+        env_prefix="SAP",
+        outbound_map={},
+    )
+    monkeypatch.setattr(
+        connector,
+        "_req",
+        lambda *args, **kwargs: _Resp(404, {"error": "not found"}),
+    )
+    health = connector.health()
+    assert health["ok"] is False
+    assert health["error"] == "provider_http_error"

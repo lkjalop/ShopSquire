@@ -1,8 +1,23 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import os
 import sys
+
+
+@contextmanager
+def _database_url_environment(db_url: str):
+    """Make Alembic's env.py see the explicit CLI database target."""
+    previous = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = db_url
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previous
 
 
 def main() -> int:
@@ -23,7 +38,12 @@ def main() -> int:
         cfg = Config("alembic.ini")
         cfg.set_main_option("sqlalchemy.url", db_url)
         print(f"[verify] alembic upgrade head (db_url={db_url})")
-        command.upgrade(cfg, "head")
+        # alembic/env.py intentionally prefers DATABASE_URL so normal CLI
+        # deployments can use application settings. Mirror the explicit
+        # --db-url into that environment for this programmatic invocation;
+        # setting only sqlalchemy.url is otherwise overwritten by .env.
+        with _database_url_environment(db_url):
+            command.upgrade(cfg, "head")
 
     # Shadow checks (fast invariants)
     try:
@@ -39,4 +59,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

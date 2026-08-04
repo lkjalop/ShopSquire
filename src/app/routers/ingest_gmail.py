@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hmac
 import json
+import logging
 import os
 from typing import Any, Dict, Optional
 
@@ -10,8 +11,14 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from src.app.observability.metrics import record_email_security_connector_event, record_email_security_connector_failure
 from src.app.security.email_security import evaluate_email_security
+from src.app.services.email_connector_identity import (
+    identity_mode,
+    resolve_subscription,
+    verify_gmail_push_jwt,
+)
 
 router = APIRouter(prefix="/api/v1/ingest/gmail", tags=["ingest-gmail"])
+logger = logging.getLogger("shopsquire.ingest_gmail")
 
 
 def _apply_supplier_domain_guard(email: dict) -> dict:
@@ -48,26 +55,100 @@ def _check_secret(secret: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid_secret")
 
 
+def _identity(
+    payload: Dict[str, Any],
+    request: Request,
+    *,
+    authorization: Optional[str],
+    secret: Optional[str],
+):
+    subscription_id = str(payload.get("subscription") or "").strip()
+    if identity_mode() == "strict":
+        try:
+            identity = resolve_subscription("gmail", subscription_id)
+            verify_gmail_push_jwt(
+                authorization,
+                audience=str(identity.config.get("audience") or ""),
+                allowed_email=identity.config.get("service_account_email"),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        claimed = str(payload.get("tenant_id") or request.headers.get("X-Tenant-Id") or "").strip()
+        if claimed and claimed != identity.tenant_id:
+            raise HTTPException(status_code=403, detail="tenant_subscription_mismatch")
+        return identity
+
+    _check_secret(secret)
+    tenant_id = str(payload.get("tenant_id") or request.headers.get("X-Tenant-Id") or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id_required")
+    from src.app.services.email_connector_identity import ConnectorIdentity
+
+    return ConnectorIdentity("gmail", subscription_id or "dev-direct", tenant_id, {})
+
+
+def _persist_or_evaluate(identity, email: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        from src.app.models.db import db_session
+        from src.app.services.inbound_email_inbox import ingest_email
+
+        with db_session() as db:
+            result = ingest_email(
+                db,
+                provider="gmail",
+                tenant_id=identity.tenant_id,
+                email=email,
+                subscription_id=identity.subscription_id,
+                fulfillment_case_id=email.get("fulfillment_case_id"),
+            )
+            if identity_mode() == "strict" and result.get("inbox_id"):
+                from src.app.services.supplier_observation_projection import (
+                    project_governed_supplier_inbox,
+                )
+
+                result["supply_projection"] = project_governed_supplier_inbox(
+                    db,
+                    inbox_id=result["inbox_id"],
+                    connector_identity=identity,
+                    transport_identity_verified=True,
+                )
+            db.commit()
+            return result
+    except Exception as exc:
+        if identity_mode() == "strict":
+            record_email_security_connector_failure(identity.tenant_id, "gmail", "inbox_unavailable")
+            raise HTTPException(status_code=503, detail="inbound_email_inbox_unavailable") from exc
+        logger.warning(
+            "gmail inbox persistence unavailable; evaluating without custody tenant=%s error=%s",
+            identity.tenant_id,
+            repr(exc)[:180],
+        )
+        verdict = evaluate_email_security(email, tenant_id=identity.tenant_id)
+        return {"status": "evaluated_not_persisted", "security_route": verdict.get("route")}
+
+
 @router.post("/pubsub")
 async def pubsub_push(
     request: Request,
     x_ingest_secret: Optional[str] = Header(default=None, alias="X-Ingest-Secret"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
     """Receive Gmail push notifications (typically via Google Pub/Sub push).
 
-    Production note: this endpoint validates a shared secret header. A full JWT
-    verification of Pub/Sub push identity can be added later.
+    Production uses Google OIDC push identity and an authoritative subscription
+    registry. Shared-secret direct payloads are restricted to dev/test mode.
     """
-    _check_secret(x_ingest_secret)
     try:
         payload = await request.json()
     except Exception:
         payload = {}
-    tenant_id = None
-    try:
-        tenant_id = (payload.get("tenant_id") or request.headers.get("X-Tenant-Id") or request.headers.get("x-tenant-id"))
-    except Exception:
-        tenant_id = None
+    identity = _identity(
+        payload if isinstance(payload, dict) else {},
+        request,
+        authorization=authorization,
+        secret=x_ingest_secret,
+    )
+    tenant_id = identity.tenant_id
 
     record_email_security_connector_event(tenant_id, "gmail")
 
@@ -77,8 +158,8 @@ async def pubsub_push(
         email = dict(email)
         email["provider"] = "gmail"
         _apply_supplier_domain_guard(email)
-        evaluate_email_security(email, tenant_id=tenant_id)
-        return {"ok": True}
+        result = _persist_or_evaluate(identity, email)
+        return {"ok": True, **result}
 
     # Pub/Sub push format: {message: {data: base64(...)}, subscription: "..."}
     try:
@@ -97,8 +178,8 @@ async def pubsub_push(
                 email2["provider"] = "gmail"
                 # Apply supplier domain guard to pub/sub decoded path too
                 _apply_supplier_domain_guard(email2)
-                evaluate_email_security(email2, tenant_id=tenant_id)
-                return {"ok": True}
+                result = _persist_or_evaluate(identity, email2)
+                return {"ok": True, **result}
             # Notification-only mode (real Gmail watch): enqueue for worker fetch.
             # Expected fields: { "emailAddress": "...", "historyId": "..." }
             try:
@@ -114,6 +195,7 @@ async def pubsub_push(
                         json.dumps(
                             {
                                 "tenant_id": tenant_id,
+                                "subscription_id": identity.subscription_id,
                                 "emailAddress": str(inner.get("emailAddress")),
                                 "historyId": str(inner.get("historyId")),
                             }

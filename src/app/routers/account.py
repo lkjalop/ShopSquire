@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import secrets
-from typing import Dict, List
+from typing import Dict
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
 
 from src.app.models.db import db_session
 from src.app.routers.auth import _ensure_auth_tables, _user_from_token
+from src.app.services.account_purchases import order_tracking, unified_purchases
+from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2 merge guard
 
 
 router = APIRouter(prefix="/api/v1/account", tags=["account"])
@@ -57,6 +59,33 @@ def orders(token: str, limit: int = 20, offset: int = 0) -> Dict:
         }
 
 
+@router.get("/purchases")
+def purchases(token: str, limit: int = 20) -> Dict:
+    """ONE newest-first timeline of the customer's consumer orders AND procurement/RFQ cases — the
+    unified view /orders can't give (it shows consumer orders only). Each entry carries status +
+    tracking. This is the customer-facing complement to the internal order→dispatch→ship spine."""
+    row = _require_user(token)
+    user_id = row[0]
+    with db_session() as db:
+        items = unified_purchases(db, uid=user_id, customer_id=user_id, limit=limit)
+    return {"orders": sum(1 for i in items if i.get("kind") == "order"),
+            "procurement_cases": sum(1 for i in items if i.get("kind") == "procurement"),
+            "items": items}
+
+
+@router.get("/orders/{order_id}/tracking")
+def order_tracking_view(token: str, order_id: str) -> Dict:
+    """Shipment tracking for ONE of the customer's orders (status + tracking number + carrier),
+    scoped to the requester — 404 if the order isn't theirs."""
+    row = _require_user(token)
+    user_id = row[0]
+    with db_session() as db:
+        rec = order_tracking(db, order_id, uid=user_id, customer_id=user_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="order_not_found_for_requester")
+    return rec
+
+
 @router.get("/payment-methods")
 def list_methods(token: str) -> Dict:
     row = _require_user(token)
@@ -103,8 +132,9 @@ def claim_order(token: str, payload: ClaimOrderPayload) -> Dict:
     email = payload.email.strip().lower()
     with db_session() as db:
         order = db.execute(
-            "SELECT id, customer_id, guest_email, draft_order_id FROM orders WHERE id = :oid",
-            {"oid": payload.order_id},
+            "SELECT id, customer_id, guest_email, draft_order_id "
+            "FROM orders WHERE id = :oid AND tenant_id = :tenant_id",
+            {"oid": payload.order_id, "tenant_id": _ct()},
         ).fetchone()
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -114,17 +144,25 @@ def claim_order(token: str, payload: ClaimOrderPayload) -> Dict:
         if guest_email != email:
             raise HTTPException(status_code=403, detail="Email mismatch")
         db.execute(
-            "UPDATE orders SET customer_id = :uid WHERE id = :oid",
-            {"uid": user_id, "oid": payload.order_id},
+            "UPDATE orders SET customer_id = :uid "
+            "WHERE id = :oid AND tenant_id = :tenant_id",
+            {"uid": user_id, "oid": payload.order_id, "tenant_id": _ct()},
         )
         if order[3]:
             db.execute(
-                "UPDATE draft_orders SET customer_id = :uid WHERE id = :did",
-                {"uid": user_id, "did": order[3]},
+                "UPDATE draft_orders SET customer_id = :uid WHERE id = :did AND tenant_id = :t",
+                {"uid": user_id, "did": order[3], "t": _ct()},
             )
         db.execute(
-            "INSERT INTO order_sessions (id, uid, order_id) VALUES (:id, :uid, :oid)",
-            {"id": secrets.token_hex(16), "uid": user_id, "oid": payload.order_id},
+            "INSERT INTO order_sessions "
+            "(id, uid, order_id, tenant_id, tenant_ownership_status) "
+            "VALUES (:id, :uid, :oid, :tenant_id, 'derived_from_tenant_order')",
+            {
+                "id": secrets.token_hex(16),
+                "uid": user_id,
+                "oid": payload.order_id,
+                "tenant_id": _ct(),
+            },
         )
         db.commit()
     return {"claimed": True, "order_id": payload.order_id}

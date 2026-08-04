@@ -1,4 +1,3 @@
-from typing import Optional
 import os
 import ipaddress
 from fastapi import APIRouter, Request
@@ -278,6 +277,48 @@ decision_trace_write_failures_total = Counter(
     labelnames=["stage"],
 )
 
+authz_decisions_total = Counter(
+    "shopsquire_authz_decisions_total",
+    "Authorization Engine verdicts emitted",
+    labelnames=["action", "decision", "mode"],
+)
+
+authz_write_failures_total = Counter(
+    "shopsquire_authz_write_failures_total",
+    "Authorization Engine control-plane side-effect failures (otherwise silent)",
+    labelnames=["stage"],
+)
+
+authz_parity_total = Counter(
+    "shopsquire_authz_parity_total",
+    "Engine-vs-legacy-matrix shadow agreement at the route_enforcement seam",
+    labelnames=["action", "agree"],
+)
+
+vision_cache_total = Counter(
+    "shopsquire_vision_cache_total",
+    "Image-hash vision cache outcomes (hit avoids a 50-86s vision-LLM call)",
+    labelnames=["outcome"],
+)
+
+vision_extract_failures_total = Counter(
+    "shopsquire_vision_extract_failures_total",
+    "Vision-LLM extraction failures (timeout/unreachable) — otherwise a silent empty identity",
+    labelnames=["stage"],
+)
+
+retrieval_source_total = Counter(
+    "shopsquire_retrieval_source_total",
+    "Candidate retrieval per source/outcome (surfaces silently-empty vector indexes)",
+    labelnames=["source", "outcome"],
+)
+
+pipeline_v2_shadow_total = Counter(
+    "shopsquire_pipeline_v2_shadow_total",
+    "RECOMMEND_PIPELINE_V2 shadow runs (non-blocking; not customer-affecting)",
+    labelnames=["outcome"],
+)
+
 alertmanager_test_last_ts = Gauge(
     "shopsquire_alertmanager_test_last_ts",
     "Unix timestamp of last AlertManager test alert sent",
@@ -460,6 +501,65 @@ def record_email_detonation_latency(provider: str | None, latency_seconds: float
 
 def record_decision_trace_write_failure(stage: str | None):
     decision_trace_write_failures_total.labels(stage=str(stage or "unknown")).inc()
+
+
+def record_authz_decision(action: str | None, decision: str | None, mode: str | None):
+    try:
+        authz_decisions_total.labels(
+            action=str(action or "unknown"),
+            decision=str(decision or "unknown"),
+            mode=str(mode or "unknown"),
+        ).inc()
+    except Exception:
+        pass
+
+
+def record_authz_write_failure(stage: str | None):
+    try:
+        authz_write_failures_total.labels(stage=str(stage or "unknown")).inc()
+    except Exception:
+        pass
+
+
+def record_authz_parity(action: str | None, agree: bool):
+    try:
+        authz_parity_total.labels(
+            action=str(action or "unknown"),
+            agree="true" if agree else "false",
+        ).inc()
+    except Exception:
+        pass
+
+
+def record_vision_cache(outcome: str | None):
+    try:
+        vision_cache_total.labels(outcome=str(outcome or "unknown")).inc()
+    except Exception:
+        pass
+
+
+def record_vision_extract_failure(stage: str | None):
+    try:
+        vision_extract_failures_total.labels(stage=str(stage or "unknown")).inc()
+    except Exception:
+        pass
+
+
+def record_retrieval_source(source: str | None, outcome: str | None):
+    try:
+        retrieval_source_total.labels(
+            source=str(source or "unknown"),
+            outcome=str(outcome or "unknown"),
+        ).inc()
+    except Exception:
+        pass
+
+
+def record_pipeline_v2_shadow(*, ms: int = 0, count: int = 0, error: bool = False):
+    try:
+        pipeline_v2_shadow_total.labels(outcome="error" if error else "ok").inc()
+    except Exception:
+        pass
 
 
 def record_alertmanager_test():
@@ -1455,5 +1555,136 @@ def record_query_cluster_drift(cluster: str, model: str | None, ratio: float, wi
         query_cluster_drift_ratio_histogram.labels(cluster=cluster or "unknown", model=(model or "unknown")).observe(float(ratio))
         if window_label:
             query_cluster_drift_window_gauge.labels(cluster=cluster or "unknown", model=(model or "unknown"), window=window_label).set(float(ratio))
+    except Exception:
+        pass
+
+
+# ── V2 recommendation_core canary observability (M1.4) ──────────────────────────
+# postflight.emit_telemetry calls record_event("recommend_core_turn", {...}); the facade
+# calls record_core_fallback(reason) when a core-eligible turn falls through to legacy.
+recommend_core_turns_total = Counter(
+    "shopsquire_recommend_core_turns_total",
+    "V2 core turns served, by lane / grounding / degraded",
+    labelnames=["lane", "grounding", "degraded"],
+)
+recommend_core_latency_seconds = Histogram(
+    "shopsquire_recommend_core_latency_seconds",
+    "V2 core turn latency in seconds",
+    labelnames=["lane"],
+)
+recommend_core_products = Histogram(
+    "shopsquire_recommend_core_products",
+    "V2 core product count per turn (empty-rate = bucket 0)",
+    labelnames=["lane"],
+    buckets=(0, 1, 3, 5, 8, 10, 20),
+)
+recommend_core_fallback_total = Counter(
+    "shopsquire_recommend_core_fallback_total",
+    "V2 core -> legacy fall-throughs, by reason (lane gate / grounding / failure)",
+    labelnames=["reason"],
+)
+recommendation_dispatch_total = Counter(
+    "shopsquire_recommendation_dispatch_total",
+    "Typed recommendation dispatch outcomes, including legacy rollback use",
+    labelnames=["outcome", "lane", "reason"],
+)
+recommend_compatibility_requests_total = Counter(
+    "shopsquire_recommend_compatibility_requests_total",
+    "Deprecated /recommend/suggest compatibility traffic served by V2",
+    labelnames=["outcome"],
+)
+
+
+def record_event(name: str, fields: dict) -> None:
+    """Generic metrics sink for the V2 core (postflight). `name` selects the metric family;
+    unknown names are ignored. Best-effort, matching this module's convention."""
+    try:
+        if name == "recommend_core_turn":
+            lane = str(fields.get("lane") or "unknown")
+            recommend_core_turns_total.labels(
+                lane=lane,
+                grounding=str(fields.get("grounding") or "unknown"),
+                degraded=str(bool(fields.get("degraded"))).lower(),
+            ).inc()
+            recommend_core_latency_seconds.labels(lane=lane).observe(
+                float(fields.get("latency_ms") or 0) / 1000.0)
+            recommend_core_products.labels(lane=lane).observe(
+                float(fields.get("product_count") or 0))
+    except Exception:
+        pass
+
+
+def record_core_fallback(reason: str) -> None:
+    """Count a core-eligible turn that could not be served by the primary lane."""
+    try:
+        recommend_core_fallback_total.labels(reason=str(reason or "unknown")).inc()
+    except Exception:
+        pass
+
+
+_DISPATCH_OUTCOMES = {
+    "v2_served", "v2_compatibility", "v2_unavailable", "blocked", "timeout", "error",
+}
+_DISPATCH_REASONS = {
+    "served", "mode_off", "search_mode_off", "shadow_only",
+    "outside_pilot_cohort", "outside_canary_bucket", "lane_not_enrolled",
+    "core_error", "core_degraded", "guard_blocked", "quota_blocked", "recommend_timeout",
+    "compatibility_cutover", "unknown",
+}
+_DISPATCH_LANES = {
+    "SEARCH", "FILTER", "COMPARE", "EXPLAIN", "OFF_CATALOG",
+    "PROCUREMENT", "POLICY_QUESTION", "SUPPORT_CLAIM", "INVENTORY",
+    "CART_MUTATE", "IMAGE", "UNKNOWN",
+}
+
+
+def record_recommendation_dispatch(*, outcome: str, lane: str | None,
+                                   reason: str | None) -> None:
+    """Record bounded rollback/dispatch evidence without high-cardinality labels."""
+    try:
+        bounded_outcome = str(outcome or "error")
+        if bounded_outcome not in _DISPATCH_OUTCOMES:
+            bounded_outcome = "error"
+        bounded_reason = str(reason or "unknown")
+        if bounded_reason.startswith("guard:"):
+            bounded_reason = "guard_blocked"
+        elif bounded_reason.startswith("quota:"):
+            bounded_reason = "quota_blocked"
+        elif bounded_reason not in _DISPATCH_REASONS:
+            bounded_reason = "unknown"
+        bounded_lane = str(lane or "unknown").upper()
+        if bounded_lane not in _DISPATCH_LANES:
+            bounded_lane = "UNKNOWN"
+        recommendation_dispatch_total.labels(
+            outcome=bounded_outcome,
+            lane=bounded_lane,
+            reason=bounded_reason,
+        ).inc()
+    except Exception:
+        pass
+
+
+def record_recommend_compatibility_request(outcome: str) -> None:
+    try:
+        bounded = outcome if outcome in {"served", "blocked", "unavailable", "error"} else "error"
+        recommend_compatibility_requests_total.labels(outcome=bounded).inc()
+    except Exception:
+        pass
+
+
+# ── V2 cart lane — resolve-only shadow (C0) ─────────────────────────────────────
+# The shadow worker resolves CartMutationPlans OFFLINE (never executes) and records the
+# outcome mix here: how often a turn with a cart is a cart edit at all (vs empty), how often
+# it's fully bound vs needs-clarification. This corpus gates the C1 serving decision.
+recommend_cart_shadow_total = Counter(
+    "shopsquire_recommend_cart_shadow_plans_total",
+    "Offline-resolved cart-mutation plans, by outcome (empty / ops / ambiguous)",
+    labelnames=["outcome"],
+)
+
+
+def record_cart_shadow(outcome: str) -> None:
+    try:
+        recommend_cart_shadow_total.labels(outcome=str(outcome or "unknown")).inc()
     except Exception:
         pass

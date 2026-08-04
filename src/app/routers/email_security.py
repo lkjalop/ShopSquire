@@ -206,6 +206,18 @@ def _parse_eml_to_email_dict(content: bytes) -> Dict[str, Any]:
     subject = str(msg.get("Subject") or "")
     message_id = str(msg.get("Message-ID") or "") or None
 
+    # Thread reconstruction: derive the reply-chain identity from the standard threading headers so
+    # thread-hijack + the conversation graph (which key on reply_chain_id) fire on a raw .eml WITHOUT
+    # the caller supplying it. reply_chain_id = the THREAD ROOT (first References id, else In-Reply-To)
+    # so every message in one thread shares a key and cross-message sender-domain drift is detectable.
+    import re as _re_thread
+    _references_raw = str(msg.get("References") or "")
+    _in_reply_to_raw = str(msg.get("In-Reply-To") or "")
+    _ref_ids = _re_thread.findall(r"<[^>]+>", _references_raw)
+    _irt_ids = _re_thread.findall(r"<[^>]+>", _in_reply_to_raw)
+    reply_chain_id = (_ref_ids[0] if _ref_ids else (_irt_ids[0] if _irt_ids else None))
+    in_reply_to = (_irt_ids[-1] if _irt_ids else (_ref_ids[-1] if _ref_ids else None))
+
     # Auth-Results extraction
     auth_results_raw = str(msg.get("Authentication-Results") or "").lower()
     spf_result = None
@@ -280,6 +292,8 @@ def _parse_eml_to_email_dict(content: bytes) -> Dict[str, Any]:
 
     return {
         "message_id": message_id,
+        "reply_chain_id": reply_chain_id,   # thread root from References/In-Reply-To
+        "in_reply_to": in_reply_to,
         "from_addr": from_addr,
         "reply_to": reply_to,
         "subject": subject,

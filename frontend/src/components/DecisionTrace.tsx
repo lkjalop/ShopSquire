@@ -1,7 +1,18 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
+import { evidenceRows } from '../lib/evidenceDisplay';
 import styles from './DecisionTrace.module.css';
-import { apiUrl, wsUrl, getApiBase, safeJson } from '../lib/api';
+import { procurementDraftPending, procurementGateDisplay } from '../lib/procurementGateDisplay';
+import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResult } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
+import FulfilmentTraceLink from './FulfilmentTraceLink';
+import { explainProcEvent } from '../lib/procEventExplain';
+import { dealEconomicsStatus, formatDealMoney } from '../lib/dealEconomicsDisplay';
+import { shouldShowMissingAnchorReasoning } from '../lib/tracePresentation';
+import ArtifactSecuritySummary from './security/ArtifactSecuritySummary';
+import ProcurementOperationalTrace, {
+  DisruptionEvidenceTrace,
+  TemporalCacheTechnicalTrace,
+} from './ProcurementOperationalTrace';
 
 type TraceEvent = {
   id?: string;
@@ -21,6 +32,7 @@ type Trace = {
   input_query?: string;
   intent_analysis?: any;
   agent_chain?: any[];
+  execution_steps?: any[];
   rag_context?: any;
   recommendation?: { product_id?: string; reasoning?: string; score?: number };
   policy_gates?: any;
@@ -39,6 +51,69 @@ type Trace = {
   right_panel?: { anchor_sections?: any[] } | null;
   timing_breakdown?: Record<string, any> | null;
 };
+
+export type TraceLeafTab =
+  | 'summary' | 'events' | 'execution'
+  | 'why' | 'intent' | 'memory' | 'complexity'
+  | 'evidence' | 'multimodal' | 'security'
+  | 'market' | 'procurement'
+  | 'audit' | 'raw';
+
+export const TRACE_SECTIONS = [
+  { id: 'decision', label: 'Decision', leaves: ['summary', 'events', 'execution'] },
+  { id: 'reasoning', label: 'Reasoning', leaves: ['why', 'intent', 'memory', 'complexity'] },
+  { id: 'evidence-risk', label: 'Evidence & Risk', leaves: ['evidence', 'multimodal', 'security'] },
+  { id: 'commercial', label: 'Commercial Journey', leaves: ['market', 'procurement'] },
+  { id: 'audit-technical', label: 'Audit & Technical', leaves: ['audit', 'raw'] },
+] as const satisfies ReadonlyArray<{
+  id: string;
+  label: string;
+  leaves: readonly TraceLeafTab[];
+}>;
+
+export const TRACE_LEAF_LABELS: Record<TraceLeafTab, string> = {
+  summary: 'Summary',
+  events: 'Events',
+  execution: 'Execution',
+  why: 'Why',
+  intent: 'Intent',
+  memory: 'Memory',
+  complexity: 'Complexity',
+  evidence: 'Evidence',
+  multimodal: 'Multimodal',
+  security: 'Security',
+  market: 'Market Intelligence',
+  procurement: 'Procurement',
+  audit: 'Audit Trail',
+  raw: 'Raw',
+};
+
+export function traceSectionForLeaf(leaf: TraceLeafTab) {
+  return TRACE_SECTIONS.find((section) => (
+    (section.leaves as readonly TraceLeafTab[]).includes(leaf)
+  )) || TRACE_SECTIONS[0];
+}
+
+export function normalizeTraceLeaf(value?: string): TraceLeafTab {
+  const candidate = String(value || '').trim() as TraceLeafTab;
+  return Object.prototype.hasOwnProperty.call(TRACE_LEAF_LABELS, candidate) ? candidate : 'events';
+}
+
+export async function fetchJsonWithDeadline(
+  url: string,
+  init: RequestInit = {},
+  deadlineMs = 8000,
+): Promise<any> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort('deadline_exceeded'), deadlineMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) throw new Error(`http_${response.status}`);
+    return await response.json();
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
 
 // Icons
 const CloseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><path d="M18 6L6 18M6 6l12 12"/></svg>;
@@ -85,6 +160,48 @@ function formatTime(ts: string | undefined): string {
   } catch {
     return ts.slice(11, 19) || '--:--:--';
   }
+}
+
+// Turn an internal rank token ("+ram_gb_min:8", "+use_case_match:office_general", "-oos") into a plain-English
+// "Why recommended" pill. The RAW token stays in the pill's title (hover) so an operator can still audit it —
+// this reads-out the reason instead of leaking rank internals to a buyer.
+const _UC_LABELS: Record<string, string> = {
+  office_general: 'office / work', business_professional: 'business use', office_finance: 'finance work',
+  office_executive: 'exec use', gaming: 'gaming', gaming_competitive: 'competitive gaming',
+  gaming_casual: 'casual gaming', university_general: 'study', note_taking_student: 'note-taking',
+  content_creator: 'creative work', content_creation: 'creative work', ai_ml_workstation: 'AI / ML',
+  data_science_student: 'data science', engineering_student: 'engineering', computer_science_student: 'coding',
+};
+const _SPEC_LABELS: Record<string, string> = {
+  ram_gb: 'RAM', storage_gb: 'storage', refresh_hz: 'refresh', display_inches: 'display',
+  gpu_vram_gb: 'GPU VRAM', battery_wh: 'battery', weight_kg: 'weight', price: 'price',
+};
+const _SPEC_UNITS: Record<string, string> = { ram_gb: 'GB', storage_gb: 'GB', refresh_hz: 'Hz', gpu_vram_gb: 'GB', display_inches: '"' };
+const _REASON_FLAGS: Record<string, string> = {
+  in_stock: 'In stock', within_budget: 'Within budget', over_budget: 'Over budget', oos: 'Out of stock',
+  out_of_stock: 'Out of stock', embedding_similarity: 'Close match to your query', semantic_match: 'Close match to your query',
+  supplier_available: 'Supplier available', preferred_brand: 'Preferred brand', price_value: 'Strong value',
+  discrete_gpu: 'Dedicated GPU', nvidia: 'NVIDIA GPU', portable: 'Portable',
+};
+function humanizeReason(token: string): string {
+  const raw = String(token || '').trim();
+  if (!raw) return '';
+  const neg = raw.startsWith('-');
+  const body = raw.replace(/^[+-]/, '');
+  // already a readable phrase (has spaces, not a key:value) → keep it
+  if (body.includes(' ') && !body.includes(':')) return body;
+  const [key, val] = body.split(':');
+  if (key === 'use_case_match') return `Fits ${_UC_LABELS[val] || String(val || '').replace(/_/g, ' ')}`;
+  if (key === 'use_case_tag' || key === 'use_case_tags') return `For ${String(val || '').replace(/_/g, ' ')}`;
+  const mMin = key.match(/^(.*)_min$/);
+  if (mMin && val) { const b = mMin[1]; return `${val}${_SPEC_UNITS[b] || ''}+ ${_SPEC_LABELS[b] || b.replace(/_/g, ' ')}`; }
+  const mMax = key.match(/^(.*)_max$/);
+  if (mMax && val) { const b = mMax[1]; return `≤${val}${_SPEC_UNITS[b] || ''} ${_SPEC_LABELS[b] || b.replace(/_/g, ' ')}`; }
+  const flagKey = key.replace(/_use_case_match$/, '');
+  if (key.endsWith('_use_case_match')) return `Fits ${_UC_LABELS[flagKey] || flagKey.replace(/_/g, ' ')}`;
+  if (_REASON_FLAGS[key]) return (neg && key === 'in_stock') ? 'Out of stock' : _REASON_FLAGS[key];
+  const pretty = key.replace(/_/g, ' ').replace(/\bgb\b/gi, 'GB').replace(/\bhz\b/gi, 'Hz');
+  return (neg ? 'Not ' : '') + pretty.charAt(0).toUpperCase() + pretty.slice(1) + (val ? ` ${val}` : '');
 }
 
 function inlineText(value: any): string | null {
@@ -145,7 +262,7 @@ function getSummary(evt: TraceEvent): string {
   if (tool) return `Tool: ${tool}`;
   const query = inlineText(evt.payload?.query);
   if (query) return `Query: ${query.slice(0, 50)}...`;
-  if (evt.source_id) return String(evt.source_id);
+  if (evt.source_id) return componentSource(evt);
   const original = evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type;
   return String(original || 'event').replace(/_/g, ' ');
 }
@@ -154,6 +271,269 @@ function humanizeKey(key: string): string {
   return key
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+type TrustTone = 'good' | 'warn' | 'neutral';
+type TrustCue = { label: string; detail: string; status: TrustTone };
+
+export type TraceTrustStrip = {
+  authority: TrustCue;
+  freshness: TrustCue;
+  completeness: TrustCue;
+  uncertainty: TrustCue;
+  simulation: TrustCue;
+};
+
+function containsFlag(value: any, names: Set<string>, depth = 0): boolean {
+  if (depth > 5 || value == null) return false;
+  if (Array.isArray(value)) return value.some((item) => containsFlag(item, names, depth + 1));
+  if (typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, child]) => (
+    (names.has(String(key).toLowerCase()) && child === true)
+    || containsFlag(child, names, depth + 1)
+  ));
+}
+
+export function deriveTraceTrustStrip({
+  nowMs = Date.now(),
+  events = [],
+  executionSteps = [],
+  evidence = null,
+  marketProjections = [],
+  hippographInsights = [],
+}: {
+  nowMs?: number;
+  events?: any[];
+  executionSteps?: any[];
+  evidence?: any;
+  marketProjections?: any[];
+  hippographInsights?: any[];
+}): TraceTrustStrip {
+  const authorities = executionSteps.map((step) => String(step?.authority || '').toLowerCase());
+  const eventText = JSON.stringify(events || []).toLowerCase();
+  const humanApproved = /human.{0,24}(approved|authorized)|approved.{0,24}human/.test(eventText);
+  const authorized = authorities.includes('authorizes') || /authorized|policy_gate/.test(eventText);
+  const proposed = authorities.includes('proposes');
+  const authority: TrustCue = humanApproved
+    ? { label: 'Human step recorded', detail: 'A human authorized at least one recorded step; supplier-send and payment authority remain separately gated.', status: 'good' }
+    : authorized
+      ? { label: 'Platform authorized', detail: 'Deterministic policy or authority gates were recorded.', status: 'good' }
+      : proposed
+        ? { label: 'Proposal only', detail: 'A model proposal exists without recorded execution authority.', status: 'warn' }
+        : { label: 'Authority unrecorded', detail: 'No typed authority path is available.', status: 'neutral' };
+
+  const observedTimes = (events || [])
+    .flatMap((event) => [
+      event?.timestamp,
+      event?.created_at,
+      event?.payload?.as_of,
+      event?.payload?.observed_at,
+    ])
+    .map((value) => Date.parse(String(value || '')))
+    .filter((value) => Number.isFinite(value));
+  const newest = observedTimes.length ? Math.max(...observedTimes) : NaN;
+  const ageHours = Number.isFinite(newest) ? Math.max(0, (nowMs - newest) / 3_600_000) : null;
+  const freshness: TrustCue = ageHours == null
+    ? { label: 'Freshness unknown', detail: 'No observation time was recorded.', status: 'neutral' }
+    : ageHours <= 24
+      ? { label: 'Current', detail: `Newest evidence is ${Math.max(0, Math.round(ageHours))}h old.`, status: 'good' }
+      : ageHours <= 168
+        ? { label: 'Ageing', detail: `Newest evidence is ${Math.round(ageHours / 24)}d old.`, status: 'warn' }
+        : { label: 'Stale', detail: `Newest evidence is ${Math.round(ageHours / 24)}d old.`, status: 'warn' };
+
+  const degradedSources = (hippographInsights || []).flatMap(
+    (insight) => insight?.source_health?.degraded_sources || [],
+  );
+  const sourceStatuses = (marketProjections || []).flatMap(
+    (projection) => Object.values(projection?.source_status || {}),
+  ).map((value) => String(value || '').toLowerCase());
+  const hasEvidence = Boolean(
+    (Array.isArray(evidence?.citations) && evidence.citations.length)
+    || marketProjections.length
+    || hippographInsights.length,
+  );
+  const sourceIncomplete = degradedSources.length > 0 || sourceStatuses.some(
+    (status) => !['complete', 'connected', 'authoritative', 'healthy'].includes(status),
+  );
+  const completeness: TrustCue = !hasEvidence
+    ? { label: 'Not recorded', detail: 'No evidence completeness claim is available.', status: 'neutral' }
+    : sourceIncomplete
+      ? { label: 'Partial', detail: 'At least one evidence source is degraded, missing, or incomparable.', status: 'warn' }
+      : { label: 'Complete', detail: 'Recorded evidence sources report complete coverage.', status: 'good' };
+
+  const undefinedMetrics = (marketProjections || []).flatMap(
+    (projection) => projection?.metrics || [],
+  ).filter((metric) => ['undefined', 'insufficient', 'unavailable'].includes(
+    String(metric?.status || '').toLowerCase(),
+  ));
+  const uncertaintyCount = degradedSources.length + undefinedMetrics.length;
+  const uncertainty: TrustCue = uncertaintyCount
+    ? {
+        label: `${uncertaintyCount} concern${uncertaintyCount === 1 ? '' : 's'}`,
+        detail: 'Review degraded sources or undefined measurements before acting.',
+        status: 'warn',
+      }
+    : hasEvidence
+      ? { label: 'No material concern', detail: 'No recorded evidence degradation was found.', status: 'good' }
+      : { label: 'Uncertainty unknown', detail: 'Uncertainty cannot be inferred without evidence.', status: 'neutral' };
+
+  const simulationOnly = containsFlag(
+    [...marketProjections, ...events, ...hippographInsights],
+    new Set(['simulation_only', 'synthetic', 'shadow_only']),
+  );
+  const simulation: TrustCue = simulationOnly
+    ? { label: 'Simulation only', detail: 'This evidence cannot increase autonomous authority.', status: 'warn' }
+    : { label: 'Operational trace', detail: 'No simulation-only flag was recorded.', status: 'good' };
+
+  return { authority, freshness, completeness, uncertainty, simulation };
+}
+
+export type CompactTimelineItem = {
+  id: string;
+  kind: 'changed' | 'prevented' | 'observed';
+  title: string;
+  detail: string;
+  timestamp?: string;
+  fromState?: string;
+  toState?: string;
+};
+
+export function compactStateTimeline(input: TraceEvent[]): CompactTimelineItem[] {
+  const milestones: CompactTimelineItem[] = [];
+  (input || []).forEach((event, index) => {
+    const type = String(event?.payload?._original_event_type || event?.event_type || 'event').toLowerCase();
+    if (type === 'pipeline_step') return;
+    const payload = event?.payload || {};
+    const fromState = String(payload.from_state || payload.previous_state || payload.from || '').trim();
+    const toState = String(payload.to_state || payload.next_state || payload.to || '').trim();
+    const reason = String(payload.reason || payload.block_reason || payload.summary || '').trim();
+    const prevented = payload.state_changed === false
+      || /(blocked|quarantined|rejected|denied|prevented|failed)/.test(type);
+    const changed = !prevented && Boolean(
+      fromState || toState || payload.state_changed === true
+      || /(applied|executed|committed|approved|completed|created|superseded)/.test(type)
+    );
+    const significantObservation = /(query|intent|policy|recommendation|result|evidence|market)/.test(type);
+    if (!prevented && !changed && !significantObservation) return;
+    const kind: CompactTimelineItem['kind'] = prevented ? 'prevented' : changed ? 'changed' : 'observed';
+    milestones.push({
+      id: String(event.id || event.seq || `${type}-${index}`),
+      kind,
+      title: String(payload.summary || humanizeKey(type)),
+      detail: prevented
+        ? `State change prevented${reason ? `: ${humanizeKey(reason)}` : '.'}`
+        : changed
+          ? `${fromState || 'Prior state'} → ${toState || humanizeKey(type)}`
+          : reason || 'Evidence or intent was observed; no state mutation is implied.',
+      timestamp: event.timestamp || event.created_at,
+      fromState: fromState || undefined,
+      toState: toState || undefined,
+    });
+  });
+  return milestones.slice(-12);
+}
+
+export function legacyComponentOntology(sourceId: string): {
+  label: string;
+  kind: 'model' | 'stage' | 'gate' | 'connector' | 'observer';
+  authority: string;
+} {
+  const raw = String(sourceId || '').trim();
+  const normalized = raw.toLowerCase();
+  const readable = humanizeKey(raw.replace(/_agent$/i, ''));
+
+  if (['recommendation_agent', 'research_agent', 'buyer_intent_agent'].includes(normalized)
+      || /(ollama|qwen|llm|model)/.test(normalized)) {
+    return { label: readable || 'Model', kind: 'model', authority: 'proposes' };
+  }
+  if (/(policy|guard|security|authoriz|approval|send_gate|clamp)/.test(normalized)) {
+    return { label: readable || 'Policy', kind: 'gate', authority: 'authorizes' };
+  }
+  if (/(inventory|market|supplier_channel|retrieval|connector|transport|api|edi|cxml|email|portal|webhook)/.test(normalized)) {
+    return { label: readable || 'Integration', kind: 'connector', authority: 'retrieves' };
+  }
+  if (/(trace|persist|audit|telemetry|metric|feedback)/.test(normalized)) {
+    return { label: readable || 'Observer', kind: 'observer', authority: 'observes' };
+  }
+  return { label: readable || 'Pipeline', kind: 'stage', authority: 'executes' };
+}
+
+export function resolveWhyAnchorSections(trace: any, events: TraceEvent[]): any[] {
+  const direct = trace?.right_panel?.anchor_sections;
+  if (Array.isArray(direct) && direct.length > 0) return direct;
+
+  const candidates = [...(events || [])].reverse();
+  for (const event of candidates) {
+    const payload = event?.payload || {};
+    const rightPanel = payload?.right_panel_contract || payload?.right_panel;
+    const anchors = rightPanel?.anchor_sections;
+    if (Array.isArray(anchors) && anchors.length > 0) return anchors;
+  }
+  return [];
+}
+
+export function compactAuthorityPath(steps: any[]): string {
+  const groups: Array<{ authority: string; count: number }> = [];
+  for (const step of steps || []) {
+    const authority = String(step?.authority || '').trim();
+    if (!authority) continue;
+    const prior = groups[groups.length - 1];
+    if (prior?.authority === authority) prior.count += 1;
+    else groups.push({ authority, count: 1 });
+  }
+  return groups.map(({ authority, count }) => (
+    authority === 'executes' && count > 1 ? `${authority} (${count} stages)` : authority
+  )).join(' -> ');
+}
+
+export function procurementQuarantineView(procCase: any, journey: any[]): {
+  active: boolean;
+  senderDomain: string;
+  reason: string;
+  severity: string;
+  route: string;
+  securityReasons: string[];
+  timestamp: string;
+} {
+  const quarantine = procCase?.state_json?.quarantine;
+  if (!quarantine || typeof quarantine !== 'object') {
+    return {
+      active: false,
+      senderDomain: '',
+      reason: '',
+      severity: '',
+      route: '',
+      securityReasons: [],
+      timestamp: '',
+    };
+  }
+  const security = quarantine.security && typeof quarantine.security === 'object'
+    ? quarantine.security
+    : {};
+  const transition = [...(Array.isArray(journey) ? journey : [])].reverse().find((item: any) => (
+    String(item?.event || '').toLowerCase() === 'supplier_response_quarantined'
+    || String(item?.state || '').toUpperCase() === 'SUPPLIER_RESPONSE_QUARANTINED'
+  ));
+  return {
+    active: true,
+    senderDomain: String(quarantine.sender_domain || 'not recorded'),
+    reason: String(quarantine.reason || transition?.reason_code || 'security review required'),
+    severity: String(security.severity || 'unknown'),
+    route: String(security.route || 'security_review'),
+    securityReasons: Array.isArray(security.reasons)
+      ? security.reasons.map((value: any) => String(value)).filter(Boolean)
+      : [],
+    timestamp: String(transition?.valid_from || transition?.created_at || ''),
+  };
+}
+
+function componentSource(evt: TraceEvent): string {
+  const label = inlineText(evt.payload?._component_label);
+  const kind = inlineText(evt.payload?._component_kind);
+  const authority = inlineText(evt.payload?._component_authority);
+  if (label) return `${label}${kind ? ` (${kind}${authority ? ` · ${authority}` : ''})` : ''}`;
+  const component = legacyComponentOntology(String(evt.source_id || ''));
+  return `${component.label} (${component.kind} - ${component.authority})`;
 }
 
 function renderValue(value: any) {
@@ -234,18 +614,111 @@ function getLinkedArtifactUrl(sigs: Record<string, any>): string | null {
   return /^https?:\/\//i.test(candidate) ? candidate : null;
 }
 
-export default function DecisionTrace({ traceId, onClose, imageTriage }: { traceId: string | null; onClose: () => void; imageTriage?: any[] }) {
+export function HippographEvidenceSurface({ insights }: { insights: any[] }) {
+  if (!Array.isArray(insights) || insights.length === 0) return null;
+  return (
+    <section data-testid="hippograph-evidence-surface" aria-label="Hippograph provenance paths" className={styles.anchorBlock}>
+      <div className={styles.sectionTitle}>Hippograph Evidence Paths</div>
+      <div className={styles.muted}>
+        Evidence-only retrieval. It can explain or prioritize review, but cannot authorize a commercial action.
+      </div>
+      {insights.map((insight: any, index: number) => {
+        const path = insight?.evidence_path || {};
+        const health = insight?.source_health || {};
+        return (
+          <details key={`${insight?.id || 'insight'}-${index}`} style={{ marginTop: 8 }} open={index === 0}>
+            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+              {insight?.label || insight?.id || 'Related evidence'} · score {insight?.score ?? 'undefined'}
+              {' · '}{health?.status || 'unknown source health'}
+            </summary>
+            <div className={styles.kvRow}><span>Authority</span><span>{insight?.authority || path?.authority || 'evidence_only'}</span></div>
+            <div className={styles.kvRow}><span>Path</span><span>{Array.isArray(path?.nodes) && path.nodes.length ? path.nodes.join(' → ') : 'No bounded path available'}</span></div>
+            <div className={styles.kvRow}><span>Hops</span><span>{path?.hops ?? 'undefined'}</span></div>
+            {Array.isArray(health?.degraded_sources) && health.degraded_sources.length > 0 && (
+              <div data-testid="hippograph-degraded-sources" style={{ color: '#b45309', marginTop: 6 }}>
+                Degraded sources: {health.degraded_sources.map((source: any) => (
+                  `${source?.source || 'unknown'} (${source?.reason || source?.health || 'degraded'})`
+                )).join(', ')}
+              </div>
+            )}
+            {(path?.edges || []).map((edge: any, edgeIndex: number) => (
+              <div key={`${edge?.source || 'edge'}-${edgeIndex}`} style={{ borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 8 }}>
+                <div className={styles.kvRow}><span>Edge</span><span>{edge?.source} → {edge?.target}</span></div>
+                {(edge?.evidence || []).map((item: any, evidenceIndex: number) => (
+                  <div key={`${item?.evidence_id || evidenceIndex}`} className={styles.muted}>
+                    evidence {item?.evidence_id || 'unidentified'} · edge {item?.edge_id || 'unidentified'}
+                    {' · '}observed {item?.observed_at || 'unknown'}
+                    {' · '}effective {item?.effective_at || 'unknown'}
+                    {' · '}authority {item?.source_authority || 'unknown'}
+                    {' · '}health {item?.source_health || 'unknown'}
+                    {' · '}freshness {item?.freshness_weight ?? 'undefined'}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </details>
+        );
+      })}
+    </section>
+  );
+}
+
+export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab, evidence }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
-  const effectiveApiKey = API_KEY || getOwnerApiKey() || 'local-merchant-key';
+  // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
+  // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
+  // An explicitly supplied operator key must outrank the storefront's build-time merchant key so the
+  // component can use the authenticated operator projection rather than the buyer-safe trace summary.
+  const effectiveApiKey = getOwnerApiKey() || API_KEY || '';
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'audit' | 'raw'>('events');
+  const [activeTab, setActiveTab] = useState<TraceLeafTab>(() => normalizeTraceLeaf(initialTab));
+  const initialLeaf = normalizeTraceLeaf(initialTab);
+  const [activeSectionId, setActiveSectionId] = useState(() => traceSectionForLeaf(initialLeaf).id);
+  const [showEmptyPanels, setShowEmptyPanels] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => traceSectionForLeaf(initialLeaf).id === 'audit-technical',
+  );
+  const activeSection = TRACE_SECTIONS.find((section) => section.id === activeSectionId)
+    || traceSectionForLeaf(activeTab);
+  // When this decision opened a procurement journey, badge the Procurement tab so the operator sees it
+  // exists instead of having to click through blind. FulfilmentTraceLink resolves the case; it reports up.
+  const [procurementCaseId, setProcurementCaseId] = useState<string | null>(null);
   const [auditTrail, setAuditTrail] = useState<any | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  // Procurement tab drill-downs — the DRAFTED supplier RFQ + the case's bitemporal journey (its own audit),
+  // fetched by trace so the whole procurement story lives on ONE tab (no jumping to the ops console). The
+  // drafted RFQ carries a supplier contact, so it's shown ONLY when an owner/operator key is configured
+  // (a normal shopper never sees it — blind-ship stays intact).
+  const [procCase, setProcCase] = useState<any | null>(null);
+  const [procCases, setProcCases] = useState<any[]>([]);  // ALL cases for the trace (multi-supplier → N RFQs)
+  const [procHistory, setProcHistory] = useState<any | null>(null);
+  const [allocationView, setAllocationView] = useState<any | null>(null);
+  // Procurement agent-row drill-down: row index → expanded (the payload is the evidence — one click deep).
+  const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
+  const [procJourney, setProcJourney] = useState<any[] | null>(null);
+  const [procDetailRetry, setProcDetailRetry] = useState(0);
+  // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
+  // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
+  // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
+  const [pendingSplit, setPendingSplit] = useState<SplitOfferResult | null>(null);
+  useEffect(() => {
+    if (activeTab !== 'procurement' || procCase) { return; }
+    let alive = true;
+    const uid = (() => { try { return sessionStorage.getItem('uid') || 'demo-user'; } catch { return 'demo-user'; } })();
+    getSplitOffer(uid)
+      .then((r) => { if (alive) setPendingSplit(r?.split && !r.split.fully_in_stock ? r : null); })
+      .catch(() => { if (alive) setPendingSplit(null); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, procCase]);
+  const [procLoading, setProcLoading] = useState(false);
+  const canSeeOperatorDraft = !!getOwnerApiKey();
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll'>('poll');
@@ -254,17 +727,71 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const noTraceTelemetrySentRef = useRef(false);
   const effectiveTraceId = (typeof traceId === 'string' && traceId.trim()) ? traceId.trim() : (fallbackTraceId || null);
   const traceIdText = effectiveTraceId || '';
+  const selectTraceLeaf = (leaf: TraceLeafTab) => {
+    setActiveTab(leaf);
+    setActiveSectionId(traceSectionForLeaf(leaf).id);
+    if (leaf === 'audit' && !auditTrail && traceIdText && !auditLoading) {
+      setAuditLoading(true);
+      setAuditError(null);
+      fetchJsonWithDeadline(
+        apiUrl(`/api/v1/decisions/${traceIdText}/audit-trail`),
+        { headers: authHeaders },
+      )
+        .then(d => setAuditTrail(d))
+        .catch((error) => setAuditError(
+          error?.name === 'AbortError'
+            ? 'Audit request exceeded the 8 second deadline.'
+            : 'Audit trail is currently unavailable.',
+        ))
+        .finally(() => setAuditLoading(false));
+    }
+  };
+  const focusTraceLeaf = (leaf: TraceLeafTab) => {
+    selectTraceLeaf(leaf);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`trace-leaf-${leaf}`)?.focus();
+    });
+  };
+  const handleLeafKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const leaves = ([...activeSection.leaves] as TraceLeafTab[]).filter((leaf) => (
+      !document.getElementById(`trace-leaf-${leaf}`)?.hidden
+    ));
+    if (!leaves.length) return;
+    const index = leaves.indexOf(activeTab);
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % leaves.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + leaves.length) % leaves.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = leaves.length - 1;
+    else return;
+    event.preventDefault();
+    focusTraceLeaf(leaves[next]);
+  };
+  const traceLeafProps = (leaf: TraceLeafTab) => ({
+    id: `trace-leaf-${leaf}`,
+    role: 'tab',
+    'aria-selected': activeTab === leaf,
+    'aria-controls': `trace-panel-${leaf}`,
+    tabIndex: activeTab === leaf ? 0 : -1,
+  });
+  const sectionHasLeaf = (leaf: TraceLeafTab) => (
+    (activeSection.leaves as readonly TraceLeafTab[]).includes(leaf)
+  );
   const [payloadActionStatus, setPayloadActionStatus] = useState<Record<string, string>>({});
   const [linkedArtifactResults, setLinkedArtifactResults] = useState<Record<string, any>>({});
   const [runtimeSecurityResults, setRuntimeSecurityResults] = useState<Record<string, any>>({});
-  const [posthocType, setPosthocType] = useState<string>('fraud_confirmed');
-  const [posthocValue, setPosthocValue] = useState<string>('true');
+  const [posthocType, setPosthocType] = useState<string>('');
+  const [posthocValue, setPosthocValue] = useState<string>('unknown');
   const [posthocNote, setPosthocNote] = useState<string>('');
   const [posthocStatus, setPosthocStatus] = useState<string | null>(null);
   const [eventFilter, setEventFilter] = useState<'all' | 'turn_envelope_diff'>('all');
   const [explainReplayLoading, setExplainReplayLoading] = useState(false);
   const apiBase = getApiBase();
   const explainReplayAbortRef = useRef<AbortController | null>(null);
+  // Optional explain/replay enrichment may exceed its deadline under load.
+  // Record one attempt per trace so a timeout cannot create a render-driven
+  // retry storm that starves the canonical snapshot and the rest of the API.
+  const explainReplayAttemptedTraceRef = useRef<string>('');
   const displayEventType = (evt: TraceEvent): string =>
     String(evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type || 'event');
 
@@ -395,7 +922,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
 
   const fetchExplainReplayLazy = useCallback(async () => {
     if (!effectiveTraceId) return;
-    const tabsAllowFetch = activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw';
+    const tabsAllowFetch = activeTab === 'execution' || activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw';
     if (!tabsAllowFetch) return;
 
     try {
@@ -432,6 +959,117 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       setExplainReplayLoading(false);
     }
   }, [effectiveTraceId, activeTab, effectiveApiKey]);
+
+  // Procurement drill-down: fetch the case (operator view → the drafted supplier RFQ) + its bitemporal
+  // journey (the case's own audit trail) when the Procurement tab is open. Keeps the whole procurement
+  // story — agent events, the human-gated draft, and the audit — on one tab. Re-runs when a case resolves.
+  const loadProcurementDetail = useCallback(async () => {
+    if (!effectiveTraceId) return;
+    setProcLoading(true);
+    try {
+      const headers = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
+      // Read-only: resolve EVERY case opened from this trace — a multi-supplier bulk order opens one case
+      // per supplier group (each with its own drafted RFQ), so the Procurement tab shows all N, not just the
+      // newest. Falls back gracefully to an empty list; the primary case (cases[0]) drives the audit journey.
+      const caseViewPath = canSeeOperatorDraft
+        ? `/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all/operator-view`
+        : `/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all`;
+      const allView: any = await fetch(
+        apiUrl(caseViewPath),
+        { credentials: 'include', headers },
+      ).then(safeJson).catch(() => null);
+      const cases: any[] = Array.isArray(allView?.cases) ? allView.cases : [];
+      // The projection may include prior superseded revisions so operators can
+      // audit an amendment. Those revisions are history, not additional
+      // suppliers. Rendering all of them as a "multi-supplier" fan-out mixed
+      // stale RFQ quantities into the current decision and made the first card
+      // nondeterministic. Prefer active cases; fall back to the superseded set
+      // only when the trace itself has no active revision.
+      const activeCases = cases.filter(
+        (item: any) => String(item?.state || '').toUpperCase() !== 'SUPERSEDED',
+      );
+      const visibleCases = activeCases.length ? activeCases : cases;
+      setProcCases(visibleCases);
+      const orderGroupId = String(allView?.order_group_id || '');
+      const embeddedHistory = allView?.amendment_history?.case_count
+        ? allView.amendment_history
+        : null;
+      if (canSeeOperatorDraft && orderGroupId.startsWith('order-')) {
+        const orderId = orderGroupId.slice('order-'.length);
+        const history: any = await fetch(
+          apiUrl(`/api/v1/fulfillment/cases/by-order/${encodeURIComponent(orderId)}`),
+          { credentials: 'include', headers },
+        ).then(safeJson).catch(() => null);
+        setProcHistory(history?.case_count ? history : embeddedHistory);
+      } else {
+        setProcHistory(embeddedHistory);
+      }
+      const primary = visibleCases[0] || null;
+      setProcCase(primary && (primary.case_id || primary.state) ? primary : null);
+      if (canSeeOperatorDraft && primary) {
+        const allocationSku = String(
+          primary?.state_json?.availability?.item_ref
+          || primary?.state_json?.draft?.commercial_scope?.item_ref || '',
+        ).trim();
+        const workbenchPath = `/api/v1/admin/allocation/workbench${allocationSku ? `?sku=${encodeURIComponent(allocationSku)}` : ''}`;
+        const allocation: any = await fetch(
+          apiUrl(workbenchPath), { credentials: 'include', headers },
+        ).then(safeJson).catch(() => null);
+        setAllocationView(allocation?.summary ? allocation : null);
+      } else {
+        setAllocationView(null);
+      }
+      const cid = (primary && primary.case_id) || procurementCaseId;
+      if (cid) {
+        const jr: any = await fetch(
+          apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(cid)}/journey`),
+          { credentials: 'include', headers },
+        ).then(safeJson).catch(() => null);
+        setProcJourney(Array.isArray(jr?.journey) ? jr.journey : null);
+      }
+    } finally {
+      setProcLoading(false);
+    }
+  }, [effectiveTraceId, effectiveApiKey, procurementCaseId, canSeeOperatorDraft]);
+
+  // A cart amendment keeps the original recommendation trace but supersedes and redrafts its
+  // fulfillment case. Refresh the read model when that lifecycle advances; otherwise the tab
+  // keeps the pre-amendment RFQ until the modal is closed and reopened.
+  const procurementRevision = events.reduce((revision, event) => {
+    if (!eventMatches(event, ['case_superseded', 'external_message_drafted', 'quote_drafted'])) {
+      return revision;
+    }
+    return String(event.id ?? event.seq ?? event.created_at ?? event.timestamp ?? revision);
+  }, '');
+
+  useEffect(() => {
+    if (activeTab !== 'procurement' || !effectiveTraceId) return;
+    loadProcurementDetail();
+  }, [activeTab, effectiveTraceId, procurementCaseId, procurementRevision, procDetailRetry, loadProcurementDetail]);
+
+  // Auto-drafting runs after buyer commitment. The first detail read can therefore observe COMMITTED
+  // before the persisted draft exists. Retry that narrow state a few times so opening Procurement
+  // directly does not require the operator to switch tabs to reveal an RFQ that materialized seconds later.
+  useEffect(() => {
+    if (activeTab !== 'procurement' || !procurementCaseId || !procurementDraftPending(procCase)) return;
+    if (procDetailRetry >= 4) return;
+    const timer = window.setTimeout(() => setProcDetailRetry((value) => value + 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, procurementCaseId, procCase, procDetailRetry]);
+
+  // Each trace resolves its own procurement case. Drop any prior turn's resolved case id when the trace
+  // changes so a normal (no-procurement) trace doesn't inherit a stale case id — which would keep the tab
+  // badged AND (via the guard below) re-fire the case lookup. FulfilmentTraceLink re-resolves when the new
+  // trace genuinely carries procurement signals.
+  useEffect(() => {
+    setProcurementCaseId(null);
+    setProcCase(null);
+    setProcCases([]);
+    setProcJourney(null);
+    setProcHistory(null);
+    setPendingSplit(null);
+    setProcDetailRetry(0);
+  }, [effectiveTraceId]);
 
   useEffect(() => {
     if (traceId && traceId.trim()) {
@@ -510,65 +1148,92 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       }
     };
 
-    // Try WS first; give it 5 s to connect before falling back to SSE
-    let wsConnectTimer: ReturnType<typeof setTimeout> | null = null;
-    try {
-      const url = wsUrl(`/api/v1/decisions/${currentTraceId}/events/ws`);
-      ws = new WebSocket(url);
-      wsConnectTimer = setTimeout(() => {
-        if (ws && ws.readyState !== WebSocket.OPEN) {
-          try { ws.close(); } catch {}
-          ws = null;
-        }
-      }, 5000);
-      ws.onopen = () => {
-        if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
-        if (mounted) setStreamMode('ws');
-      };
-      ws.onmessage = (ev: MessageEvent) => {
-        try {
-          const data = JSON.parse(ev.data);
-          const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
-          mergeEvents(incoming);
-        } catch {}
-      };
-      ws.onerror = () => {
-        if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
-        try { ws?.close(); } catch {} ws = null;
-      };
-    } catch {
-      ws = null;
-    }
-
-    // Fall back to SSE if WS unavailable
-    if (!ws) {
-      try {
-        if ((window as any).EventSource) {
-          const wire = (source: EventSource) => {
-            source.onmessage = (ev: MessageEvent) => {
-              try {
-                const data = JSON.parse(ev.data);
-                const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
-                mergeEvents(incoming);
-              } catch {}
-            };
-            source.onerror = () => { try { source.close(); } catch {} if (es === source) es = null; };
-            return source;
-          };
-          try {
-            es = wire(new EventSource(apiUrl(`/api/v1/decisions/${currentTraceId}/events/stream`)));
-          } catch { es = null; }
-          if (es && mounted) setStreamMode('sse');
-        }
-      } catch { es = null; }
-    }
-
-    // Always do an initial snapshot fetch; if neither WS nor SSE connected, also poll
-    fetchCanonicalTrace();
-    if (!ws && !es) {
+    // Streaming ladder: SSE → poll by DEFAULT; WS → SSE → poll only when explicitly opted in
+    // (localStorage 'ss_trace_ws' === '1'). The WS handshake 404s on most deployments and the
+    // browser logs an uncatchable console error on EVERY open before the fallback engages — the
+    // "WS 404 noise" the GPT-5.5 audit flagged — so WS must never be the default transport.
+    // When opted in, the fallback MUST engage on ASYNC failure (5 s timeout / onerror / a WS that
+    // 404s or closes after construction), not only when `new WebSocket()` throws synchronously —
+    // the old code set up SSE/poll while `ws` was still truthy, so an async WS failure left the
+    // trace with no live updates AND no fallback.
+    let fallbackStarted = false;
+    const startPoll = () => {
+      if (!mounted || pollIv !== null) return;
       setStreamMode('poll');
       pollIv = setInterval(fetchCanonicalTrace, 5000);
+    };
+    const startFallback = () => {
+      if (!mounted || fallbackStarted || es) return;
+      fallbackStarted = true;
+      try {
+        if ((window as any).EventSource) {
+          const source = new EventSource(apiUrl(`/api/v1/decisions/${currentTraceId}/events/stream`));
+          source.onmessage = (ev: MessageEvent) => {
+            try {
+              const data = JSON.parse(ev.data);
+              const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
+              mergeEvents(incoming);
+            } catch {}
+          };
+          source.onerror = () => { try { source.close(); } catch {} if (es === source) es = null; startPoll(); };
+          es = source;
+          if (mounted) setStreamMode('sse');
+          return;
+        }
+      } catch { es = null; }
+      startPoll();
+    };
+
+    // WS is OPT-IN only (it 404s + logs console noise on most deployments — see ladder comment above).
+    let wsOptIn = false;
+    try { wsOptIn = window.localStorage.getItem('ss_trace_ws') === '1'; } catch {}
+    let wsConnectTimer: ReturnType<typeof setTimeout> | null = null;
+    if (!wsOptIn) {
+      startFallback();     // default transport: SSE (poll when EventSource is unavailable)
+    } else {
+      // Opted-in WS path — preserved verbatim: give it 5 s to connect before degrading.
+      try {
+        const url = wsUrl(`/api/v1/decisions/${currentTraceId}/events/ws`);
+        ws = new WebSocket(url);
+        wsConnectTimer = setTimeout(() => {
+          if (ws && ws.readyState !== WebSocket.OPEN) {
+            try { ws.close(); } catch {}
+            ws = null;
+            startFallback();   // WS never opened → degrade
+          }
+        }, 5000);
+        ws.onopen = () => {
+          if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+          if (mounted) setStreamMode('ws');
+        };
+        ws.onmessage = (ev: MessageEvent) => {
+          try {
+            const data = JSON.parse(ev.data);
+            const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
+            mergeEvents(incoming);
+          } catch {}
+        };
+        ws.onerror = () => {
+          if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+          try { ws?.close(); } catch {} ws = null;
+          startFallback();   // WS errored (incl. 404/close) → degrade cleanly
+        };
+        ws.onclose = () => {
+          // A CLEAN server close (code 1000) fires onclose but NOT onerror, so without this the trace would
+          // silently stop with no fallback. startFallback is idempotent + guarded on `mounted`, so this is a
+          // no-op on intentional teardown (cleanup sets mounted=false first) and after an onerror already ran.
+          if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+          ws = null;
+          startFallback();
+        };
+      } catch {
+        ws = null;
+        startFallback();     // WS construction threw → degrade
+      }
     }
+
+    // Always load the initial snapshot immediately, independent of the streaming transport.
+    fetchCanonicalTrace();
 
     return () => {
       mounted = false;
@@ -585,8 +1250,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
 
   useEffect(() => {
     if (!effectiveTraceId) return;
-    if (!(activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw')) return;
+    if (!(activeTab === 'execution' || activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw')) return;
     if (explain || replay || explainReplayLoading) return;
+    if (explainReplayAttemptedTraceRef.current === effectiveTraceId) return;
+    explainReplayAttemptedTraceRef.current = effectiveTraceId;
     fetchExplainReplayLazy();
   }, [effectiveTraceId, activeTab, explain, replay, explainReplayLoading, fetchExplainReplayLazy]);
 
@@ -616,7 +1283,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const allDisplayEvents: TraceEvent[] = events.length > 0 ? events : (trace ? [
     { event_type: 'query_received', source_id: 'input', payload: { query: trace.input_query }, timestamp: trace.timestamp },
     ...(trace.intent_analysis ? [{ event_type: 'intent_analysis', source_id: 'nlp', payload: trace.intent_analysis, timestamp: trace.timestamp }] : []),
-    ...(trace.agent_chain || []).map((a: any, i: number) => ({ event_type: 'agent_step', source_id: a.agent || `agent-${i}`, payload: a, timestamp: trace.timestamp })),
+    // Typed execution_steps are the authority surface; fall back to the legacy agent_chain
+    // only when they are absent. Neither is labelled 'agent' — the component ontology
+    // (model/gate/connector/observer/stage) classifies each source_id, and an ordinary stage
+    // such as Recommendation_Core is a stage, not a model-directed agent.
+    ...((trace.execution_steps && trace.execution_steps.length > 0)
+      ? trace.execution_steps.map((s: any, i: number) => ({
+          event_type: 'pipeline_step', source_id: s.source_id || s.step || s.name || `step-${i}`,
+          payload: s, timestamp: trace.timestamp }))
+      : (trace.agent_chain || []).map((a: any, i: number) => ({
+          event_type: 'pipeline_step', source_id: a.source_id || a.agent || `step-${i}`,
+          payload: a, timestamp: trace.timestamp }))),
     ...(trace.model_selection ? [{ event_type: 'model_invoke', source_id: trace.model_selection.selected || 'llm', payload: trace.model_selection, latency_ms: trace.model_selection.latency_ms ?? undefined, timestamp: trace.timestamp }] : []),
     ...(trace.policy_gates ? [{ event_type: 'policy_gate', source_id: 'policy', payload: trace.policy_gates, timestamp: trace.timestamp }] : []),
     ...(trace.recommendation ? [{ event_type: 'success', source_id: 'output', payload: trace.recommendation, timestamp: trace.timestamp }] : []),
@@ -625,8 +1302,110 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     eventFilter === 'all'
       ? allDisplayEvents
       : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
+  const marketProjectionEvents = allDisplayEvents.filter((event) => eventMatches(event, 'market_projection'));
+  const hippographInsights = (() => {
+    const candidates: any[] = [];
+    const append = (value: any) => {
+      if (Array.isArray(value)) candidates.push(...value);
+    };
+    append((trace as any)?.hippograph_insights);
+    append((trace as any)?.hippograph_shadow_insights);
+    allDisplayEvents.forEach((event) => {
+      append(event?.payload?.hippograph_insights);
+      append(event?.payload?.hippograph_shadow_insights);
+      append(event?.payload?.evidence_paths);
+    });
+    const seen = new Set<string>();
+    return candidates.filter((insight, index) => {
+      if (!insight || typeof insight !== 'object') return false;
+      const key = String(insight.id || insight.evidence_path?.path_id || `${insight.label || 'insight'}-${index}`);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
 
   const ms = trace?.model_selection || {};
+  const persistedExecutionEvent = [...allDisplayEvents].reverse().find((evt: any) =>
+    Array.isArray(evt?.payload?.execution_steps));
+  const typedExecutionSteps = Array.isArray(trace?.execution_steps) && trace!.execution_steps!.length > 0
+    ? trace!.execution_steps!
+    : (persistedExecutionEvent?.payload?.execution_steps || []);
+  const proposalExecutionStep = typedExecutionSteps.find((step: any) =>
+    step?.kind === 'model' && step?.authority === 'proposes');
+
+  // Badge the Procurement tab when a case resolved OR the trace already carries procurement/split/supplier
+  // activity — so the operator sees there's a story to open even before FulfilmentTraceLink resolves a case.
+  const hasProcurementSignal = !!procurementCaseId || (events.length > 0 ? events : displayEvents).some((e) => {
+    const s = String((e as any).source_id || '').toLowerCase();
+    const t = String(e.event_type || '').toLowerCase();
+    return s.includes('procurement') || s.includes('split') || s.includes('supplier') || s.includes('sourcing')
+      || t.includes('procurement') || t.includes('split') || t.includes('sourc') || t.includes('availability') || t.includes('channel');
+  });
+  const eventCorpus = JSON.stringify(allDisplayEvents || []).toLowerCase();
+  const hasSecuritySignal = /(security|quarantin|blocked|threat|risk|review_required)/.test(eventCorpus);
+  const hasMemorySignal = /(memory|cache|session|shortlist|nqe)/.test(eventCorpus);
+  const hasMultimodalSignal = Boolean(
+    (Array.isArray(imageTriage) && imageTriage.length)
+    || /(image|multimodal|ocr|qr_|vision)/.test(eventCorpus),
+  );
+  const leafHasContent = (leaf: TraceLeafTab): boolean => {
+    switch (leaf) {
+      case 'summary':
+      case 'events':
+      case 'execution':
+      case 'why':
+      case 'intent':
+        return true;
+      case 'memory':
+        return hasMemorySignal;
+      case 'complexity':
+        return Boolean(trace?.model_selection || (trace as any)?.complexity);
+      case 'evidence':
+        return Boolean(evidence || hippographInsights.length);
+      case 'multimodal':
+        return hasMultimodalSignal;
+      case 'security':
+        return hasSecuritySignal;
+      case 'market':
+        return marketProjectionEvents.length > 0 || hippographInsights.length > 0;
+      case 'procurement':
+        return hasProcurementSignal;
+      case 'audit':
+      case 'raw':
+        return advancedOpen;
+      default:
+        return false;
+    }
+  };
+  const activeLeafInSection = (activeSection.leaves as readonly TraceLeafTab[]).includes(activeTab);
+  const visibleSectionLeaves = ([...activeSection.leaves] as TraceLeafTab[]).filter((leaf) => (
+    showEmptyPanels || leaf === activeTab || leafHasContent(leaf)
+  ));
+  const leafIsVisible = (leaf: TraceLeafTab) => (
+    sectionHasLeaf(leaf) && visibleSectionLeaves.includes(leaf)
+  );
+  const degradedSourceCount = hippographInsights.reduce(
+    (count, insight) => count + (insight?.source_health?.degraded_sources?.length || 0),
+    0,
+  );
+  const evidenceRiskConcernCount = degradedSourceCount
+    + (hasSecuritySignal ? 1 : 0)
+    + (hasMultimodalSignal ? 1 : 0);
+  const journeyConcernCount = (marketProjectionEvents.length > 0 ? 1 : 0)
+    + (hasProcurementSignal ? 1 : 0);
+  const sectionConcernCounts: Record<string, number> = {
+    'evidence-risk': evidenceRiskConcernCount,
+    commercial: journeyConcernCount,
+  };
+  const trustStrip = deriveTraceTrustStrip({
+    events: allDisplayEvents,
+    executionSteps: typedExecutionSteps,
+    evidence,
+    marketProjections: marketProjectionEvents.map((event) => event.payload || {}),
+    hippographInsights,
+  });
+  const stateTimeline = compactStateTimeline(displayEvents);
 
   // Prefer recommendation records emitted through normalized envelopes
   // (e.g. feedback_loop with _original_event_type=recommendation_result).
@@ -650,16 +1429,24 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     candidates.sort((a, b) => b.score - a.score);
     return candidates[0].payload || null;
   })();
-  const whyAnchorSections: any[] = Array.isArray(trace?.right_panel?.anchor_sections) && trace!.right_panel!.anchor_sections!.length > 0
-    ? (trace!.right_panel!.anchor_sections || [])
-    : (Array.isArray((recommendationEventPayload as any)?.right_panel_contract?.anchor_sections)
-      ? ((recommendationEventPayload as any)?.right_panel_contract?.anchor_sections || [])
-      : []);
+  const whyAnchorSections: any[] = resolveWhyAnchorSections(trace, allDisplayEvents);
   const whyProducts: any[] = Array.isArray(trace?.products) && trace!.products!.length > 0
     ? (trace!.products || [])
     : (Array.isArray((recommendationEventPayload as any)?.products_summary)
       ? ((recommendationEventPayload as any)?.products_summary || [])
       : []);
+  const canonicalIdentity: any = (recommendationEventPayload as any)?.canonical_identity
+    || (recommendationEventPayload as any)?.right_panel_contract?.canonical_identity
+    || null;
+  const visibleOrderedSkus = whyProducts.map((item: any) => String(item?.sku || '')).filter(Boolean);
+  const canonicalOrderedSkus = Array.isArray(canonicalIdentity?.ordered_skus)
+    ? canonicalIdentity.ordered_skus.map((sku: any) => String(sku || '')).filter(Boolean)
+    : [];
+  const canonicalIdentityVerified = Boolean(
+    canonicalIdentity
+    && String(canonicalIdentity.trace_id || '') === String(traceId || '')
+    && JSON.stringify(visibleOrderedSkus) === JSON.stringify(canonicalOrderedSkus),
+  );
 
   const normalizeSecurityPayload = (value: any) => {
     if (!value || typeof value !== 'object') return null;
@@ -799,6 +1586,28 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
 
   const security = extractSecurity() || fallbackSecurity;
 
+  // Did this turn actually carry an IMAGE? The Security Matrix's QR / steganography / OCR / adversarial
+  // checks only run on uploads — on a text-only turn `security` is still truthy (a security_matrix contract
+  // + default quarantine flags), which reads as if an image were scanned. Detect the real thing so the tab
+  // can label image-security as upload-only COVERAGE instead of implying this text query was scanned.
+  const hadImage = (() => {
+    const allEvts = events.length > 0 ? events : displayEvents;
+    const imageEvent = allEvts.some((event: any) => {
+      const eventType = String(event?.event_type || '').toLowerCase();
+      const payload = event?.payload || {};
+      if (payload?.has_image === true || Number(payload?.image_count || 0) > 0) return true;
+      return ['image_context_received', 'cv_analysis', 'image_analysis_completed', 'image_intent_routing']
+        .includes(eventType) && payload?.has_image !== false;
+    });
+    if (imageEvent) return true;
+    const s: any = security || {};
+    if (s.image_security && Object.keys(s.image_security).length > 0) return true;
+    if (Array.isArray(s.image_triage) && s.image_triage.length > 0) return true;
+    const sig: any = s.signals || {};
+    return !!(sig.qr_code_detected || sig.steg_suspicious || sig.steg_detected || sig.ocr_text
+      || sig.adversarial_detected || sig.image_relevance || sig.gan_detected);
+  })();
+
   // Collect MAESTRO agent_guardrail events from the trace event stream.
   // These are emitted by the orchestrator and recommend ingress with
   // maestro_checked, maestro_boundary, and maestro_violations.
@@ -895,8 +1704,20 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if ((sec.extracted_text || sec.ocr_text || (sec.signals && Object.keys(sec.signals || {}).length > 0)) && sec) return [sec];
     return [];
   })();
+  const blockedArtifactStates = triageItems
+    .map((item: any) => String(item?.artifact?.state || item?.security?.artifact_state || '').toLowerCase())
+    .filter((state: string) => state && state !== 'clean');
+  if (blockedArtifactStates.length > 0) {
+    trustStrip.authority = {
+      label: blockedArtifactStates.includes('pending')
+        ? 'Read-only while inspection is pending'
+        : 'Commercial actions blocked',
+      detail: `Artifact authority is incomplete or denied (${Array.from(new Set(blockedArtifactStates)).join(', ')}).`,
+      status: 'warn',
+    };
+  }
 
-  /** One-line "why this fired" for the analyst ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â driven by hypothesis first, signals as fallback. */
+  /** One-line "why this fired" for the analyst -- driven by hypothesis first, signals as fallback. */
   function buildWhyFiredLine(sigs: Record<string, any>, payloadAnalysis: any): string | null {
     const hyp = payloadAnalysis?.attack_hypothesis;
     const DETECTION_MAP: Record<string, string> = {
@@ -928,7 +1749,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if (sigs.qr_code_detected) {
       const payloads: any[] = sigs.qr_payloads || [];
       if (payloads.length > 0) {
-        parts.push(`QR code detected in ${filename}. Decoded payload: "${payloads.map((p: any) => p.data).join('" / "')}".`);
+        parts.push(`QR code detected in ${filename}. ${payloads.length} decoded payload${payloads.length > 1 ? 's' : ''} retained as defanged security evidence; content is collapsed by default.`);
       } else {
         parts.push(`QR code detected in ${filename} but payload could not be fully decoded.`);
       }
@@ -938,7 +1759,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if (sigs.adversarial_detected) parts.push('Adversarial perturbation signature found; image may be crafted to mislead the classifier.');
     if (sigs.ai_generated_suspected) parts.push('High diffusion-model score ? image may be AI-generated.');
     if (payloadAnalysis.attack_hypothesis === 'ransomware' || sigs.ransomware_indicator) {
-      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â sandbox detonation required before any further processing. Do NOT execute on a live host.');
+      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR -- sandbox detonation required before any further processing. Do NOT execute on a live host.');
     } else if (payloadAnalysis.attack_hypothesis && payloadAnalysis.attack_hypothesis !== 'unknown') {
       parts.push(`Passive triage suggests ${String(payloadAnalysis.attack_hypothesis).replace(/_/g, ' ')} behavior.`);
     } else if (sigs.steg_suspicious) {
@@ -1021,6 +1842,21 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   }
 
   function getSecurityIncidentBrief() {
+    if (!hadImage) {
+      return {
+        decision: 'Allowed - text-only controls completed',
+        triggers: ['This turn contained text only; no image-forensics finding was produced.'],
+        agentBriefs: [],
+        businessImpact: 'No image artifact was uploaded, so QR, OCR, steganography, and adversarial-image findings do not apply.',
+        actions: ['Continue under the text input, policy, rate-limit, and authorization controls recorded for this turn.'],
+        pushRecommendation: 'No image incident to push',
+        threatHunterLeads: [],
+        ownerScopeMeta: null,
+        ownerReason: '',
+        exposureScope: '',
+        humanVerificationRequired: false,
+      };
+    }
     const payloadFindings: any[] = triageItems.flatMap((item: any) => item?.security?.payload_findings || item?.payload_findings || []);
     const threatHunterLeads: any[] = triageItems.flatMap((item: any) => item?.security?.threat_hunter_leads || item?.threat_hunter_leads || []);
     const primaryFinding = payloadFindings[0] || {};
@@ -1149,7 +1985,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
         const _profileSummary = _profiles.length > 0
           ? ` ${_profiles.map((p: any) => `${p.full_name || p.binary} (${p.mitre_sub_technique || 'MITRE'})`).join(' | ')}.`
           : '';
-        const _ransomwareWarning = _ransomware ? ' ÃƒÂ¢Ã…Â¡Ã‚Â \ufe0f Ransomware indicator ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â do NOT execute outside sandbox.' : '';
+        const _ransomwareWarning = _ransomware ? ' \u26a0\ufe0f Ransomware indicator -- do NOT execute outside sandbox.' : '';
         const _hypothesis = String(payloadAnalysis?.attack_hypothesis || 'unknown').replace(/_/g, ' ');
         const _payloadType = String(payloadAnalysis?.payload_type || 'unknown').replace(/_/g, ' ');
         const _nextStep = String(payloadAnalysis?.suggested_next_step || 'allow').replace(/_/g, ' ');
@@ -1199,6 +2035,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       setPosthocStatus('No decision id available');
       return;
     }
+    if (!posthocType) {
+      setPosthocStatus('Select an outcome first');
+      return;
+    }
     try {
       const resp = await fetch(apiUrl('/api/v1/posthoc/record'), {
         method: 'POST',
@@ -1230,6 +2070,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
         aria-modal="true"
         aria-label="Decision Trace"
         data-testid="decision-trace-modal"
+        data-trace-id={effectiveTraceId || ''}
         className={`${styles.modal} ${minimized ? styles.minimized : ''}`}
         style={{ left: position.x, top: position.y }}
         onClick={e => e.stopPropagation()}
@@ -1274,36 +2115,146 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
 
         {!minimized && (
           <>
-            {/* Tabs */}
-            <div className={styles.tabs}>
-              <button className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => setActiveTab('events')}>Events</button>
-              <button className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => setActiveTab('summary')}>Summary</button>
-              <button className={activeTab === 'why' ? styles.activeTab : ''} onClick={() => setActiveTab('why')}>Why Recommended</button>
-              <button className={activeTab === 'intent' ? styles.activeTab : ''} onClick={() => setActiveTab('intent')}>Intent</button>
-              <button className={activeTab === 'multimodal' ? styles.activeTab : ''} onClick={() => setActiveTab('multimodal')}>Multimodal</button>
-              <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
-              <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
-              <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
-              <button className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => {
-                setActiveTab('audit');
-                if (!auditTrail && traceIdText && !auditLoading) {
-                  setAuditLoading(true);
-                  fetch(apiUrl(`/api/v1/decisions/${traceIdText}/audit-trail`), { headers: authHeaders })
-                    .then(r => r.json()).then(d => setAuditTrail(d)).catch(() => {}).finally(() => setAuditLoading(false));
-                }
-              }}>Audit Trail</button>
-              <button className={activeTab === 'raw' ? styles.activeTab : ''} onClick={() => setActiveTab('raw')}>Raw</button>
+            <div className={styles.trustStrip} data-testid="trace-trust-strip" aria-label="Decision trust status">
+              {(Object.entries(trustStrip) as Array<[string, TrustCue]>).map(([key, cue]) => (
+                <div
+                  key={key}
+                  className={`${styles.trustCue} ${styles[`trustCue${cue.status[0].toUpperCase()}${cue.status.slice(1)}`] || ''}`}
+                  title={cue.detail}
+                >
+                  <span className={styles.trustCueName}>{humanizeKey(key)}</span>
+                  <strong>{cue.label}</strong>
+                </div>
+              ))}
             </div>
+            {/* Tabs */}
+            <div className={styles.sectionTabs} aria-label="Decision Trace sections">
+              {TRACE_SECTIONS.filter((section) => section.id !== 'audit-technical').map((section) => (
+                <button
+                  key={section.id}
+                  className={activeSection.id === section.id ? styles.activeSectionTab : ''}
+                  onClick={() => {
+                    const currentIsInSection = (section.leaves as readonly TraceLeafTab[]).includes(activeTab);
+                    const firstRecorded = ([...section.leaves] as TraceLeafTab[]).find(leafHasContent);
+                    if (currentIsInSection && (showEmptyPanels || leafHasContent(activeTab))) {
+                      selectTraceLeaf(activeTab);
+                    } else if (firstRecorded) {
+                      selectTraceLeaf(firstRecorded);
+                    } else {
+                      setActiveSectionId(section.id);
+                    }
+                  }}
+                >
+                  {section.label}
+                  {sectionConcernCounts[section.id] > 0 && (
+                    <span className={styles.sectionBadge} aria-label={`${sectionConcernCounts[section.id]} active concerns`}>
+                      {sectionConcernCounts[section.id]}
+                    </span>
+                  )}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`${styles.advancedSectionButton} ${activeSection.id === 'audit-technical' ? styles.activeSectionTab : ''}`}
+                aria-expanded={advancedOpen}
+                onClick={() => {
+                  setAdvancedOpen(true);
+                  selectTraceLeaf('audit');
+                }}
+              >
+                Advanced technical details
+              </button>
+            </div>
+            <label className={styles.mobileSectionNav}>
+              <span>Trace section</span>
+              <select
+                aria-label="Decision Trace section"
+                value={activeSection.id}
+                onChange={(event) => {
+                  const section = TRACE_SECTIONS.find((item) => item.id === event.target.value);
+                  if (!section) return;
+                  if (section.id === 'audit-technical') setAdvancedOpen(true);
+                  const firstRecorded = ([...section.leaves] as TraceLeafTab[]).find(leafHasContent);
+                  if (firstRecorded) selectTraceLeaf(firstRecorded);
+                  else setActiveSectionId(section.id);
+                }}
+              >
+                {TRACE_SECTIONS.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.label}{sectionConcernCounts[section.id] ? ` (${sectionConcernCounts[section.id]})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className={styles.tabs} role="tablist" aria-label={`${activeSection.label} panels`} onKeyDown={handleLeafKeyDown}>
+              <button {...traceLeafProps('events')} hidden={!leafIsVisible('events')} data-testid="trace-leaf-events" className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('events')}>Events</button>
+              <button {...traceLeafProps('execution')} hidden={!leafIsVisible('execution')} data-testid="trace-leaf-execution" className={activeTab === 'execution' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('execution')}>Execution</button>
+              <button {...traceLeafProps('summary')} hidden={!leafIsVisible('summary')} data-testid="trace-leaf-summary" className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('summary')}>Summary</button>
+              <button {...traceLeafProps('why')} hidden={!leafIsVisible('why')} data-testid="trace-leaf-why" className={activeTab === 'why' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('why')}>Why</button>
+              <button {...traceLeafProps('intent')} hidden={!leafIsVisible('intent')} data-testid="trace-leaf-intent" className={activeTab === 'intent' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('intent')}>Intent</button>
+              <button {...traceLeafProps('multimodal')} hidden={!leafIsVisible('multimodal')} data-testid="trace-leaf-multimodal" className={activeTab === 'multimodal' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('multimodal')}>Multimodal</button>
+              <button {...traceLeafProps('complexity')} hidden={!leafIsVisible('complexity')} data-testid="trace-leaf-complexity" className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('complexity')}>Complexity</button>
+              <button {...traceLeafProps('memory')} hidden={!leafIsVisible('memory')} data-testid="trace-leaf-memory" className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('memory')}>Memory</button>
+              <button {...traceLeafProps('security')} hidden={!leafIsVisible('security')} data-testid="trace-leaf-security" className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('security')}>Security</button>
+              <button {...traceLeafProps('market')} hidden={!leafIsVisible('market')} data-testid="trace-leaf-market" className={activeTab === 'market' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('market')}>
+                Market Intelligence{marketProjectionEvents.length > 0 ? <span style={{ marginLeft: 5, color: '#2563eb', fontWeight: 700 }}>●</span> : null}
+              </button>
+              <button {...traceLeafProps('procurement')} hidden={!leafIsVisible('procurement')} data-testid="trace-leaf-procurement" className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('procurement')}>
+                Procurement{hasProcurementSignal ? <span title="Procurement activity is present in this decision (open to see the drafted RFQ + audit)" style={{ marginLeft: 5, color: '#059669', fontWeight: 700 }}>●</span> : null}
+              </button>
+              {(
+                <button {...traceLeafProps('evidence')} hidden={!leafIsVisible('evidence')} data-testid="trace-leaf-evidence" className={activeTab === 'evidence' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('evidence')}>
+                  Evidence {evidence ? <span style={{ marginLeft: 4, fontWeight: 700 }}>{(evidence?.citations || []).length}</span> : null}
+                </button>
+              )}
+              <button {...traceLeafProps('audit')} hidden={!leafIsVisible('audit')} data-testid="trace-leaf-audit" className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('audit')}>Audit Trail</button>
+              <button {...traceLeafProps('raw')} hidden={!leafIsVisible('raw')} data-testid="trace-leaf-raw" className={activeTab === 'raw' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('raw')}>Raw</button>
+            </div>
+            {!showEmptyPanels && visibleSectionLeaves.length < activeSection.leaves.length && (
+              <div className={styles.progressiveDisclosure}>
+                <span>{activeSection.leaves.length - visibleSectionLeaves.length} empty specialist panel{activeSection.leaves.length - visibleSectionLeaves.length === 1 ? '' : 's'} hidden</span>
+                <button type="button" onClick={() => setShowEmptyPanels(true)}>Show empty panels</button>
+              </div>
+            )}
 
             {/* Content */}
-            <div className={styles.body}>
+            <div className={styles.body} id={`trace-panel-${activeTab}`} role="tabpanel" aria-labelledby={`trace-leaf-${activeTab}`} tabIndex={0}>
+              {!activeLeafInSection && (
+                <div className={styles.empty}>
+                  No recorded specialist evidence is available in {activeSection.label}. Empty panels stay hidden to keep attention on actionable information.
+                </div>
+              )}
+              <div hidden={!activeLeafInSection}>
               {!traceId && (
                 <div className={styles.empty} style={{ marginBottom: 10 }}>
                   No decision trace yet. Run a query (chat) or submit/analyze a CV case to generate a trace id.
                 </div>
               )}
+              {/* Links this decision to the procurement journey it opened. Only mount it (and fire the case
+                  lookup) when this trace actually carries a procurement signal — a normal recommendation
+                  trace has no case, so an unconditional lookup just 404s in the console every turn. */}
+              {hasProcurementSignal && (
+                <FulfilmentTraceLink traceId={effectiveTraceId || undefined} onResolved={setProcurementCaseId} />
+              )}
               {activeTab === 'events' && (
                 <>
+                  <div className={styles.stateTimeline} data-testid="compact-state-timeline" aria-label="Decision state timeline">
+                    {stateTimeline.map((item) => (
+                      <article key={item.id} className={`${styles.stateTimelineItem} ${styles[`timeline${item.kind[0].toUpperCase()}${item.kind.slice(1)}`] || ''}`}>
+                        <div className={styles.stateTimelineHeader}>
+                          <span>{item.kind === 'changed' ? 'State changed' : item.kind === 'prevented' ? 'State prevented' : 'Observed'}</span>
+                          <time>{formatTime(item.timestamp)}</time>
+                        </div>
+                        <strong>{item.title}</strong>
+                        <p>{item.detail}</p>
+                      </article>
+                    ))}
+                    {stateTimeline.length === 0 && (
+                      <div className={styles.empty}>No material state change or prevented action was recorded.</div>
+                    )}
+                  </div>
+                  <details className={styles.rawEventDisclosure}>
+                    <summary>Show raw event stream ({displayEvents.length})</summary>
                   <div className={styles.eventFilterRow}>
                     <button
                       className={eventFilter === 'all' ? styles.eventFilterChipActive : styles.eventFilterChip}
@@ -1354,7 +2305,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                     <div className={styles.detailLabel}>Type</div>
                                     <div className={styles.detailValue}>{humanizeKey(displayEventType(evt))}</div>
                                     <div className={styles.detailLabel}>Source</div>
-                                    <div className={styles.detailValue}>{evt.source_id || '?'}</div>
+                                    <div className={styles.detailValue}>{componentSource(evt)}</div>
                                     <div className={styles.detailLabel}>Timestamp</div>
                                     <div className={styles.detailValue}>{evt.timestamp || evt.created_at || '?'}</div>
                                     <div className={styles.detailLabel}>Latency</div>
@@ -1397,7 +2348,44 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                     )}
                   </tbody>
                 </table>
+                  </details>
                 </>
+              )}
+
+              {activeTab === 'execution' && (
+                <div className={styles.summaryPane}>
+                  {(() => {
+                    const steps = typedExecutionSteps;
+                    if (!steps.length) {
+                      return <div className={styles.empty}>This trace predates the typed execution contract. It cannot prove proposal, authorization, and execution boundaries.</div>;
+                    }
+                    return (
+                      <>
+                        <div className={styles.sectionTitle}>Who decided what</div>
+                        <table className={styles.table}>
+                          <thead><tr><th>Kind</th><th>Authority</th><th>Step</th><th>Status</th><th>Latency</th></tr></thead>
+                          <tbody>
+                            {steps.map((step: any, index: number) => (
+                              <tr key={step.id || `execution-${index}`}>
+                                <td>{humanizeKey(String(step.kind || 'stage'))}</td>
+                                <td><strong>{humanizeKey(String(step.authority || 'observes'))}</strong></td>
+                                <td>
+                                  {formatDisplayText(step.label, 'Unnamed step')}
+                                  {Array.isArray(step.changes) && step.changes.length > 0 && (
+                                    <div className={styles.muted}>Corrected: {step.changes.join(', ')}</div>
+                                  )}
+                                </td>
+                                <td>{humanizeKey(String(step.status || 'unknown'))}</td>
+                                <td>{step.latency_ms != null ? `${Number(step.latency_ms).toFixed(1)}ms` : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div className={styles.muted}>Models propose. Platform gates authorize. Stages and connectors execute or observe. Human approval is shown only when an approval event exists.</div>
+                      </>
+                    );
+                  })()}
+                </div>
               )}
 
               {activeTab === 'summary' && trace && (
@@ -1405,14 +2393,22 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   <div className={styles.kvRow}><span>Decision ID</span><span>{trace.decision_id}</span></div>
                   <div className={styles.kvRow}><span>Timestamp</span><span>{trace.timestamp}</span></div>
                   <div className={styles.kvRow}><span>Query</span><span>{trace.input_query || '--'}</span></div>
-                  <div className={styles.kvRow}><span>Model</span><span>{ms.selected || '--'}</span></div>
-                  <div className={styles.kvRow}><span>Path</span><span>{Array.isArray(ms.path) ? ms.path.join(' -> ') : '--'}</span></div>
-                  <div className={styles.kvRow}><span>Latency</span><span>{ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--'}</span></div>
+                  <div className={styles.kvRow}><span>Model</span><span>{proposalExecutionStep ? 'Model-directed router' : (ms.selected || '--')}</span></div>
+                  <div className={styles.kvRow}><span>Path</span><span>{typedExecutionSteps.length > 0 ? compactAuthorityPath(typedExecutionSteps) : (Array.isArray(ms.path) ? ms.path.join(' -> ') : '--')}</span></div>
+                  <div className={styles.kvRow}><span>Latency</span><span>{proposalExecutionStep?.latency_ms != null ? `${Math.round(proposalExecutionStep.latency_ms)}ms` : (ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--')}</span></div>
                   <div className={styles.kvRow}><span>Intent</span><span>{ms.intent_summary || '--'}</span></div>
+                  <div className={styles.kvRow}>
+                    <span>Execution owner</span>
+                    <span>{humanizeKey(String((recommendationEventPayload as any)?.execution_mode || 'legacy_or_unrecorded'))}</span>
+                  </div>
+                  <div className={styles.kvRow}>
+                    <span>Canonical slate</span>
+                    <span>{canonicalIdentity ? (canonicalIdentityVerified ? 'Verified' : 'Mismatch - review required') : 'Not recorded'}</span>
+                  </div>
                   <div className={styles.kvRow}>
                     <span>Tier Decision</span>
                     <span>
-                      {ms?.decision?.action ? (
+                      {proposalExecutionStep ? 'Model proposal + platform authorization' : ms?.decision?.action ? (
                         <>
                           {ms.decision.action}
                           {(ms.decision.from || ms.decision.to) ? ` (${ms.decision.from || '-'} -> ${ms.decision.to || '-'})` : ''}
@@ -1429,9 +2425,24 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   )}
                   {explain && typeof explain.summary === 'object' && (
                     <div className={styles.explainBullets}>
-                      <div className={styles.kvRow}><span>Reasoning</span><span>{explain.summary.reasoning || '?'}</span></div>
-                      <div className={styles.kvRow}><span>Risks</span><span>{explain.summary.risks ? JSON.stringify(explain.summary.risks) : '?'}</span></div>
-                      <div className={styles.kvRow}><span>Next Steps</span><span>{explain.summary.next_steps ? JSON.stringify(explain.summary.next_steps) : '?'}</span></div>
+                      <div className={styles.kvRow}>
+                        <span>Reasoning</span>
+                        <span>{proposalExecutionStep
+                          ? 'The model interpreted the request; platform gates clamped it to authorized catalog, budget, and capability facts.'
+                          : (explain.summary.reasoning || 'Not recorded')}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Risks</span>
+                        <span>{Array.isArray(explain.summary.risks) && explain.summary.risks.length > 0
+                          ? explain.summary.risks.join(', ')
+                          : 'None recorded'}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Next Steps</span>
+                        <span>{Array.isArray(explain.summary.next_steps) && explain.summary.next_steps.length > 0
+                          ? explain.summary.next_steps.join(', ')
+                          : 'No consequential action proposed'}</span>
+                      </div>
                     </div>
                   )}
 
@@ -1458,7 +2469,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                     <>
                       <div className={styles.kvRow}><span>Decision</span><span>{qualityPayload.decision || '?'}</span></div>
                       <div className={styles.kvRow}><span>Reasons</span><span>{Array.isArray(qualityPayload.reasons) && qualityPayload.reasons.length ? qualityPayload.reasons.join(', ') : '?'}</span></div>
-                      <div className={styles.kvRow}><span>Risk?Adjusted Score</span><span>{qualityPayload.metrics?.risk_adjusted_score ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>Risk-adjusted Score</span><span>{qualityPayload.metrics?.risk_adjusted_score ?? 'Not recorded'}</span></div>
                       <div className={styles.kvRow}><span>Precision Target</span><span>{qualityPayload.metrics?.precision_target ?? '?'}</span></div>
                       <div className={styles.kvRow}><span>Recall Target</span><span>{qualityPayload.metrics?.recall_target ?? '?'}</span></div>
                       <div className={styles.kvRow}><span>Thresholds</span><span>{qualityPayload.thresholds ? JSON.stringify(qualityPayload.thresholds) : '?'}</span></div>
@@ -1503,9 +2514,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   {trace.recommendation && (
                     <>
                       <div className={styles.sectionTitle}>Recommendation</div>
-                      <div className={styles.kvRow}><span>Product</span><span>{trace.recommendation.product_id || '?'}</span></div>
-                      <div className={styles.kvRow}><span>Score</span><span>{trace.recommendation.score ?? '?'}</span></div>
-                      <div className={styles.kvRow}><span>Reasoning</span><span>{trace.recommendation.reasoning || '?'}</span></div>
+                      <div className={styles.kvRow}>
+                        <span>Product</span>
+                        <span>{whyProducts[0]?.title || whyProducts[0]?.name || whyProducts[0]?.sku
+                          || trace.recommendation.product_id || 'Not recorded'}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Score</span>
+                        <span>{whyProducts[0]?.score_norm ?? trace.recommendation.score ?? 'Not recorded'}</span>
+                      </div>
+                      <div className={styles.kvRow}><span>Reasoning</span><span>{trace.recommendation.reasoning || 'Not recorded'}</span></div>
                     </>
                   )}
                   <div className={styles.sectionTitle}>Turn Envelope Diff</div>
@@ -1563,9 +2581,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                       </table>
                     </>
                   )}
-                  <div className={styles.sectionTitle}>Post?hoc Outcome</div>
+                  <div className={styles.sectionTitle}>Post-hoc Outcome</div>
                   <div className={styles.posthocRow}>
                     <select value={posthocType} onChange={(e) => setPosthocType(e.target.value)}>
+                      <option value="">Select outcome...</option>
                       <option value="fraud_confirmed">Fraud Confirmed</option>
                       <option value="fraud_cleared">Fraud Cleared</option>
                       <option value="refund_reversed">Refund Reversed</option>
@@ -1585,21 +2604,68 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                     onChange={(e) => setPosthocNote(e.target.value)}
                   />
                   <div className={styles.posthocActions}>
-                    <button className={styles.copyBtn} onClick={submitPosthoc}>Record Outcome</button>
+                    <button className={styles.copyBtn} onClick={submitPosthoc} disabled={!posthocType}>Record Outcome</button>
                     {posthocStatus && <span className={styles.copyStatus}>{posthocStatus}</span>}
                   </div>
                 </div>
               )}
 
+              {activeTab === 'evidence' && (
+                <div style={{ padding: '12px 14px' }}>
+                  <DisruptionEvidenceTrace allocationView={allocationView} />
+                  <HippographEvidenceSurface insights={hippographInsights} />
+                  {/* N1 (2026-07-07): the trust hierarchy IS the layout — trusted store records first
+                      as flat rows; external evidence (web) rendered as bordered, badged quotes. */}
+                  {(() => {
+                    const rows = evidenceRows(evidence);
+                    if (rows.length === 0) return <div style={{ color: '#6b7280' }}>No evidence legs ran for this decision.</div>;
+                    const trusted = rows.filter(r => r.trusted);
+                    const external = rows.filter(r => !r.trusted);
+                    return (
+                      <div>
+                        <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                          Why this answer — {rows.length} source{rows.length !== 1 ? 's' : ''} consulted
+                          {typeof evidence?.ms === 'number' ? <span style={{ color: '#6b7280', fontWeight: 400 }}> · gathered in {evidence.ms}ms</span> : null}
+                        </div>
+                        {trusted.map(r => (
+                          <div key={r.key} style={{ padding: '8px 10px', marginBottom: 6, background: '#f8fafc', borderRadius: 8 }}>
+                            <div style={{ fontWeight: 600 }}>
+                              {r.icon} {r.label} <span style={{ fontSize: 11, color: '#059669', marginLeft: 6 }}>trusted store record</span>
+                              {!r.found && <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>— nothing found</span>}
+                            </div>
+                            {r.summary && <div style={{ fontSize: 13, marginTop: 3 }}>{r.summary}</div>}
+                            {r.error && <div style={{ fontSize: 12, color: '#b45309', marginTop: 3 }}>⚠ {r.error}</div>}
+                          </div>
+                        ))}
+                        {external.map(r => (
+                          <div key={r.key} style={{ padding: '10px 12px', marginBottom: 6, border: '1.5px solid #f59e0b', borderRadius: 8 }}>
+                            <div style={{ fontWeight: 600 }}>
+                              {r.icon} {r.label} <span style={{ fontSize: 11, color: '#b45309', marginLeft: 6 }}>external — verified evidence, never authority</span>
+                            </div>
+                            {r.summary && <div style={{ fontSize: 13, marginTop: 4, fontStyle: 'italic' }}>"{r.summary}"</div>}
+                            {r.error && <div style={{ fontSize: 12, color: '#b45309', marginTop: 3 }}>⚠ {r.error}</div>}
+                            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>⚖ used to inform wording only — never to rank, price or approve</div>
+                          </div>
+                        ))}
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ cursor: 'pointer', fontSize: 12, color: '#6b7280' }}>Raw recorded payload (evidence)</summary>
+                          <pre style={{ fontSize: 11, overflowX: 'auto' }}>{JSON.stringify(evidence, null, 2)}</pre>
+                        </details>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
               {activeTab === 'why' && (
                 <div className={styles.summaryPane}>
+                  <HippographEvidenceSurface insights={hippographInsights} />
                   {Array.isArray(whyAnchorSections) && whyAnchorSections.length > 0 ? (
                     (whyAnchorSections || []).map((sec: any, idx: number) => (
                       <div key={`anchor-${idx}`} className={styles.anchorBlock}>
                         <div className={styles.sectionTitle}>{sec?.title || `Image ${idx + 1}`}</div>
                         <div className={styles.kvRow}>
                           <span>Match basis</span>
-                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ') : '?'}</span>
+                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' · ') : '?'}</span>
                         </div>
                         {sec?.summary && <div className={styles.whyNarrative}>{sec.summary}</div>}
                         {Array.isArray(sec?.top_products) && sec.top_products.slice(0, 3).map((p: any, pIdx: number) => (
@@ -1613,7 +2679,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             {Array.isArray(p?.reasons) && p.reasons.length > 0 && (
                               <div className={styles.pillRow}>
                                 {p.reasons.slice(0, 3).map((r: string, i: number) => (
-                                  <span key={`${p?.sku || pIdx}-r-${i}`} className={styles.pill}>{r}</span>
+                                  <span key={`${p?.sku || pIdx}-r-${i}`} className={styles.pill} title={r}>{humanizeReason(r)}</span>
                                 ))}
                               </div>
                             )}
@@ -1621,9 +2687,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         ))}
                       </div>
                     ))
-                  ) : (
+                  ) : shouldShowMissingAnchorReasoning(whyAnchorSections, whyProducts) ? (
                     <div className={styles.muted}>No anchor-section reasoning recorded for this trace.</div>
-                  )}
+                  ) : null}
 
                   <div className={styles.sectionTitle}>All Ranked Products</div>
                   {Array.isArray(whyProducts) && whyProducts.length > 0 ? (
@@ -1639,8 +2705,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         {Array.isArray(p?.reason_codes) && p.reason_codes.length > 0 ? (
                           <div className={styles.pillRow}>
                             {p.reason_codes.slice(0, 3).map((rc: any, rcIdx: number) => (
-                              <span key={`${p?.sku || i}-rc-${rcIdx}`} className={styles.pill}>
-                                {String(rc?.code || 'reason')} ({Math.round((Number(rc?.confidence) || 0) * 100)}%)
+                              <span key={`${p?.sku || i}-rc-${rcIdx}`} className={styles.pill} title={String(rc?.code || '')}>
+                                {humanizeReason(String(rc?.code || 'reason'))} ({Math.round((Number(rc?.confidence) || 0) * 100)}%)
                               </span>
                             ))}
                           </div>
@@ -1648,7 +2714,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           Array.isArray(p?.reasons) && p.reasons.length > 0 && (
                             <div className={styles.pillRow}>
                               {p.reasons.slice(0, 3).map((r: string, rIdx: number) => (
-                                <span key={`${p?.sku || i}-r2-${rIdx}`} className={styles.pill}>{r}</span>
+                                <span key={`${p?.sku || i}-r2-${rIdx}`} className={styles.pill} title={r}>{humanizeReason(r)}</span>
                               ))}
                             </div>
                           )
@@ -1720,7 +2786,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           source: 'recommendation_result_fallback',
                         }
                       : null;
-                    const intent = si || constraintsSi || synthesizedIntent;
+                    // Event-level shopper profiling may record a broad audience label (for
+                    // example "student") before the recommendation pipeline resolves the
+                    // workload.  The persisted decision intent is authoritative for the final
+                    // use case and budget; merge it over the richer event profile instead of
+                    // presenting the early audience label as the workload.
+                    const decisionIntent: any = (trace as any)?.intent_analysis || {};
+                    const intentBase: any = si || constraintsSi || synthesizedIntent || {};
+                    const intent = (Object.keys(intentBase).length > 0 || Object.keys(decisionIntent).length > 0)
+                      ? { ...intentBase, ...decisionIntent }
+                      : null;
+                    const intentLane = intent?.lane || intent?.intent || null;
                     const hasAny = intent || abandonEvts.length > 0 || outcomeEvts.length > 0;
                     if (!hasAny) return (
                       <div className={styles.empty}>
@@ -1740,6 +2816,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           <>
                             <div className={styles.sectionTitle}>Shopper Intent Profile</div>
                             <div className={styles.intentBadgeRow}>
+                              {intentLane && (
+                                <span className={styles.intentBadge} style={{ background: '#334155' }}>
+                                  Lane: {String(intentLane).replace(/_/g, ' ').toLowerCase()}
+                                </span>
+                              )}
                               {intent.persona && (
                                 <span className={styles.intentBadge} style={{ background: personaColor }}>
                                   Persona: {intent.persona}
@@ -1770,12 +2851,56 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                   Price sensitivity: {intent.price_sensitivity}
                                 </span>
                               )}
-                              {(Number.isFinite(Number(intent.budget_min)) || Number.isFinite(Number(intent.budget_max))) && (
+                              {(Number(intent.budget_min) > 0 || Number(intent.budget_max) > 0) && (
                                 <span className={styles.intentBadge} style={{ background: '#1d4ed8' }}>
-                                  Budget band: {Number.isFinite(Number(intent.budget_min)) ? `$${Number(intent.budget_min).toLocaleString()}` : '$0'}-{Number.isFinite(Number(intent.budget_max)) ? `$${Number(intent.budget_max).toLocaleString()}` : '?'}
+                                  Budget band: {Number(intent.budget_min) > 0 ? `$${Number(intent.budget_min).toLocaleString()}` : '—'}-{Number(intent.budget_max) > 0 ? `$${Number(intent.budget_max).toLocaleString()}` : '—'}
                                 </span>
                               )}
                             </div>
+                            {Array.isArray(intent.workload_entities) && intent.workload_entities.length > 0 && (
+                              <>
+                                <div className={styles.sectionTitle}>Named Workloads</div>
+                                <div className={styles.pillRow}>
+                                  {intent.workload_entities.map((entry: any, i: number) => (
+                                    <span key={i} className={styles.pill}>
+                                      {Array.isArray(entry) ? `${entry[0]}: ${entry[1]}` : String(entry?.name || entry)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                            {Array.isArray(intent.workload_evidence?.items) && intent.workload_evidence.items.length > 0 && (
+                              <>
+                                <div className={styles.sectionTitle}>Governed Workload Evidence</div>
+                                <table className={styles.smallTable}>
+                                  <thead>
+                                    <tr><th>Workload</th><th>Status</th><th>Source</th><th>Minimum</th><th>Recommended</th><th>Retrieved</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {intent.workload_evidence.items.map((item: any, i: number) => (
+                                      <tr key={`${item?.resolved_name || item?.requested_name || 'workload'}-${i}`}>
+                                        <td>{item?.resolved_name || item?.requested_name || '?'}</td>
+                                        <td>{item?.status || '?'}</td>
+                                        <td>
+                                          {item?.source_url ? (
+                                            <a href={item.source_url} target="_blank" rel="noreferrer">
+                                              {item?.source || 'approved source'}
+                                            </a>
+                                          ) : (item?.source || 'not resolved')}
+                                        </td>
+                                        <td>{item?.minimum ? Object.entries(item.minimum).map(([k, v]) => `${k}=${v}`).join(' · ') : '—'}</td>
+                                        <td>{item?.recommended ? Object.entries(item.recommended).map(([k, v]) => `${k}=${v}`).join(' · ') : '—'}</td>
+                                        <td className={styles.mono}>{item?.retrieved_at || '—'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                <div className={styles.kvRow}>
+                                  <span>Live source authorized</span>
+                                  <span>{intent.workload_evidence.live_allowed ? 'Yes — consent + flag + allowlist' : 'No — fixture/store facts only'}</span>
+                                </div>
+                              </>
+                            )}
                             {Array.isArray(intent.priority_factors) && intent.priority_factors.length > 0 && (
                               <>
                                 <div className={styles.sectionTitle}>Priority Factors</div>
@@ -1871,7 +2996,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                 <div className={styles.summaryPane}>
                   {(() => {
                     const imgEvt = events.find(e => eventMatches(e, ['image_intent_routing', 'cv_analysis', 'intent_classify', 'image_context_received']));
-                    const fusionEvt = events.find(e => eventMatches(e, ['multimodal_fusion', 'synthesis_reasoning', 'proposal_build', 'right_panel_anchor_sections', 'recommendation_result']));
+                    const fusionEvt = events.find(e => eventMatches(e, 'multimodal_fusion'))
+                      || events.find(e => eventMatches(e, ['synthesis_reasoning', 'proposal_build', 'right_panel_anchor_sections', 'recommendation_result']));
                     const secEvt = events.find(e => eventMatches(e, ['image_security_scan', 'security_scan', 'image_security_posture']));
                     const hasTracePanel = Boolean(trace?.right_panel && (Array.isArray((trace as any)?.right_panel?.anchor_sections) || (trace as any)?.right_panel?.mode));
                     const hasData = imgEvt || fusionEvt || secEvt || hasTracePanel;
@@ -1922,7 +3048,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                     const timingEvt = events.find(e => eventMatches(e, 'timing_breakdown'));
                     const msTr = trace?.model_selection || {};
                     const timing = (timingEvt?.payload || (trace as any)?.timing_breakdown || {}) as Record<string, any>;
-                    const score = cxEvt?.payload?.score ?? cxEvt?.payload?.complexity_score ?? (msTr as any).tier;
+                    // Prefer the dedicated complexity-score event (the one whose payload the Events table
+                    // renders as the real score) so the header never shows a placeholder while the table has
+                    // a value — falling back to whatever cxEvt/model-selection carries.
+                    const scoreEvt = events.find(e => eventMatches(e, 'tier_complexity_score'));
+                    const score = scoreEvt?.payload?.score ?? scoreEvt?.payload?.complexity_score
+                      ?? cxEvt?.payload?.score ?? cxEvt?.payload?.complexity_score ?? (msTr as any).tier;
                     const hasModelFallback = Boolean(
                       (msTr as any)?.selected ||
                       (msTr as any)?.model ||
@@ -2025,8 +3156,23 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               </tbody>
                             </table>
                           </>
+                        ) : typedExecutionSteps.some((step: any) => step?.latency_ms != null) ? (
+                          <table className={styles.smallTable}>
+                            <thead><tr><th>Component</th><th>Kind</th><th>Latency</th></tr></thead>
+                            <tbody>
+                              {typedExecutionSteps
+                                .filter((step: any) => step?.latency_ms != null)
+                                .map((step: any, index: number) => (
+                                  <tr key={step.id || `timing-${index}`}>
+                                    <td>{formatDisplayText(step.label, 'Unnamed component')}</td>
+                                    <td>{humanizeKey(String(step.kind || 'stage'))}</td>
+                                    <td>{`${Number(step.latency_ms).toFixed(1)}ms`}</td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
                         ) : (
-                          <div className={styles.muted}>No stage timing data recorded for this trace.</div>
+                          <div className={styles.muted}>No component timing data recorded for this trace.</div>
                         )}
                       </>
                     );
@@ -2089,6 +3235,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                 <div className={styles.summaryPane}>
                   {!security && (
                     <div className={styles.empty}>No security analysis available for this trace.</div>
+                  )}
+                  {security && !hadImage && (
+                    <div style={{ margin: '0 0 10px', padding: '8px 10px', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff', fontSize: 13, color: '#1e3a8a' }}>
+                      <strong>Text-only turn — no image uploaded.</strong> The image checks below (QR decode,
+                      steganography, OCR, adversarial/GAN) describe the coverage that runs on <em>uploaded images</em>;
+                      they did not scan this text query. This turn's controls are input inspection, rate limiting, and
+                      the framework mappings shown — not image forensics.
+                    </div>
                   )}
                   {security && (
                     <>
@@ -2173,7 +3327,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           </div>
                         );
                       })()}
-                      {(() => {
+                      {hadImage && (() => {
                         const severityLabel = formatDisplayText(security.severity, 'review').toLowerCase();
                         const killChainPhase = formatDisplayText(
                           security.pasta?.current_stage || security.pasta?.stage || security.pasta_stage,
@@ -2255,11 +3409,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           <span className={trustChannels?.visual_embedding_trusted ? styles.booleanYes : styles.booleanNo}>
                             visual:{trustChannels?.visual_embedding_trusted ? 'trusted' : 'untrusted'}
                           </span>
-                          {' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· '}
+                          {' · '}
                           <span className={trustChannels?.ocr_trusted ? styles.booleanYes : styles.booleanNo}>
                             ocr:{trustChannels?.ocr_trusted ? 'trusted' : 'untrusted'}
                           </span>
-                          {' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· '}
+                          {' · '}
                           <span className={trustChannels?.qr_trusted ? styles.booleanYes : styles.booleanNo}>
                             qr:{trustChannels?.qr_trusted ? 'trusted' : 'untrusted'}
                           </span>
@@ -2520,7 +3674,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   )}
 
                   {/* Image Triage Signals */}
-                  {triageItems && triageItems.length > 0 && (
+                  {hadImage && triageItems && triageItems.length > 0 && (
                     <>
                       <div className={styles.sectionTitle}>Image Triage Signals</div>
                       {triageItems.map((t: any, idx: number) => {
@@ -2607,11 +3761,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         const clean = cleanFlag !== false && !sigs.qr_code_detected && !sigs.adversarial_detected && !sigs.steg_suspicious;
                         return (
                           <div key={idx} className={styles.triageBlock}>
+                            <ArtifactSecuritySummary
+                              item={t}
+                              batchItems={idx === 0 ? triageItems : []}
+                              monitoringDelivery={t?.security?.siem_handoff || (security as any)?.siem_handoff}
+                            />
                             <div className={styles.kvRow}>
                               <span>{filename}</span>
                               <span className={clean ? styles.tagGreen : styles.tagRed}>{clean ? 'Clean' : 'Flagged'}</span>
                             </div>
-                            {/* Why this fired ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â one-liner analyst detection reason */}
+                            {/* Why this fired -- one-line analyst detection reason */}
                             {!clean && (() => {
                               const _why = buildWhyFiredLine(sigs, payloadAnalysis);
                               return _why ? (
@@ -2744,7 +3903,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                     <div className={styles.sectionSubTitle}>Linked Artifact Provenance</div>
                                     <ul className={styles.playbookList}>
                                       {linkedArtifact.linked_artifact_provenance.map((row: any, pi: number) => (
-                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} Ã¢â‚¬Â¢ ${row?.extraction_method || 'extract'} Ã¢â‚¬Â¢ ${row?.match_ref || 'match'} Ã¢â‚¬Â¢ ${row?.confidence || 'unknown'}${row?.reason ? ` Ã¢â‚¬Â¢ ${row.reason}` : ''}`}</li>
+                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} · ${row?.extraction_method || 'extract'} · ${row?.match_ref || 'match'} · ${row?.confidence || 'unknown'}${row?.reason ? ` · ${row.reason}` : ''}`}</li>
                                       ))}
                                     </ul>
                                   </>
@@ -2841,22 +4000,27 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                 <div className={styles.sectionSubTitle}>Artifact Provenance</div>
                                 <ul className={styles.playbookList}>
                                   {artifactProvenance.map((row: any, pi: number) => (
-                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} Ã¢â‚¬Â¢ ${row?.extraction_method || 'extract'} Ã¢â‚¬Â¢ ${row?.match_ref || 'match'} Ã¢â‚¬Â¢ ${row?.confidence || 'unknown'}${row?.reason ? ` Ã¢â‚¬Â¢ ${row.reason}` : ''}`}</li>
+                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} · ${row?.extraction_method || 'extract'} · ${row?.match_ref || 'match'} · ${row?.confidence || 'unknown'}${row?.reason ? ` · ${row.reason}` : ''}`}</li>
                                   ))}
                                 </ul>
                               </>
                             )}
                             {/* Decoded QR payloads */}
                             {payloads.length > 0 && (
-                              <>
-                                <div className={styles.sectionSubTitle}>Decoded QR Payload{payloads.length > 1 ? 's' : ''}</div>
-                                {payloads.map((p: any, pi: number) => (
-                                  <div key={pi} className={styles.kvRow}>
+                              <details>
+                                <summary className={styles.sectionSubTitle}>Show {payloads.length} defanged decoded QR payload{payloads.length > 1 ? 's' : ''}</summary>
+                                {payloads.map((p: any, pi: number) => {
+                                  const defanged = String(p?.data || '')
+                                    .replace(/https?:\/\//ig, 'hxxps://')
+                                    .replace(/ignore\s+(?:all\s+)?previous/ig, '[instruction marker]')
+                                    .replace(/system\s*:/ig, '[role marker] ')
+                                    .slice(0, 240);
+                                  return <div key={pi} className={styles.kvRow}>
                                     <span>{p.type || 'QR'}</span>
-                                    <span className={styles.qrPayload} title={p.data}>{p.data}</span>
-                                  </div>
-                                ))}
-                              </>
+                                    <span className={styles.qrPayload}>{defanged}</span>
+                                  </div>;
+                                })}
+                              </details>
                             )}
                             {/* Active signal flags */}
                             <div className={styles.tagRow}>
@@ -2934,10 +4098,579 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                 </div>
               )}
 
+              {activeTab === 'market' && (
+                <div className={styles.summaryPane} data-testid="market-intelligence-tab">
+                  <h3 style={{ marginTop: 0 }}>Market Intelligence</h3>
+                  <p style={{ color: '#6b7280', marginTop: 0 }}>
+                    Transaction-derived demand and stock evidence scoped to products shown in this decision.
+                    Commercial economics and action controls are available only in the operator console.
+                  </p>
+                  {hippographInsights.length > 0 && (
+                    <>
+                      <div className={styles.sectionTitle}>Dependency paths supporting this finding</div>
+                      <HippographEvidenceSurface insights={hippographInsights} />
+                    </>
+                  )}
+                  {marketProjectionEvents.length === 0 ? (
+                    <div className={styles.empty}>No scoped market projection was recorded for this decision.</div>
+                  ) : marketProjectionEvents.map((event, index) => {
+                    const item: any = event.payload || {};
+                    return (
+                      <div key={`${item.sku || 'projection'}-${index}`} data-testid={`market-projection-${item.sku}`}
+                           style={{ border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontWeight: 700 }}>
+                          <span>{item.sku}</span><span>rank {item.rank ?? '—'}</span>
+                        </div>
+                        <div className={styles.kvRow}><span>Demand</span><span>{humanizeKey(item.demand_trend)} · {item.forecast_units_30d ?? 0} units / 30d</span></div>
+                        <div className={styles.kvRow}><span>Inventory</span><span>{item.stock_on_hand ?? '—'} on hand · DSI {item.velocity_dsi_days ?? '—'} days</span></div>
+                        <div className={styles.kvRow}><span>Bulk frequency</span><span>{item.bulk_frequency?.bulk_order_count ?? 0} cases / {item.bulk_frequency?.window_days ?? 90}d</span></div>
+                        <div className={styles.kvRow}><span>Evidence</span><span>{humanizeKey(item.status || item.confidence)} · as of {formatTime(item.as_of)}</span></div>
+                        <div className={styles.kvRow}><span>Sources</span><span>{humanizeKey(item.source_status?.sales)} sales · {humanizeKey(item.source_status?.inventory)} inventory</span></div>
+                        <div className={styles.kvRow}><span>Authority</span><span>Advisory evidence only · deterministic gates authorize actions</span></div>
+                        {Array.isArray(item.metrics) && item.metrics.length > 0 && (
+                          <details style={{ marginTop: 8 }}>
+                            <summary style={{ cursor: 'pointer', fontSize: 12, color: '#4b5563' }}>Metric provenance</summary>
+                            {item.metrics.map((metric: any, metricIndex: number) => (
+                              <div key={`${metric.metric || 'metric'}-${metricIndex}`} style={{ borderTop: '1px solid #dbeafe', paddingTop: 6, marginTop: 6 }}>
+                                <div className={styles.kvRow}><span>{humanizeKey(metric.metric)}</span><span>{metric.value ?? 'unavailable'} {metric.unit || ''}</span></div>
+                                <div className={styles.kvRow}><span>Status</span><span>{humanizeKey(metric.status)} · confidence {Math.round(Number(metric.confidence || 0) * 100)}%</span></div>
+                                <div className={styles.kvRow}><span>Lineage</span><span>{Array.isArray(metric.provenance_chain) && metric.provenance_chain.length ? metric.provenance_chain.join(' → ') : 'not supplied'}</span></div>
+                              </div>
+                            ))}
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {activeTab === 'procurement' && (
+                <div className={styles.summaryPane}>
+                  {(() => {
+                    const src = events.length > 0 ? events : displayEvents;
+                    const procEvents = (src || []).filter((e) => {
+                      const sid = String((e as any).source_id || '');
+                      const sidl = sid.toLowerCase();
+                      const et = String(e.event_type || '').toLowerCase();
+                      return ['Market_Intelligence_Agent', 'Procurement_Agent', 'Alternatives_Agent', 'Supplier_Selection_Agent'].includes(sid)
+                        // agents whose id carries the procurement/split/supplier/sourcing role (catches
+                        // Procurement_Split_Agent + Supplier_Channel_Agent the old allow-list missed)
+                        || sidl.includes('procurement') || sidl.includes('split') || sidl.includes('supplier') || sidl.includes('sourcing')
+                        || et.startsWith('bulk_') || et.startsWith('procurement_') || et.startsWith('alternatives_')
+                        || et.includes('availability') || et.includes('buyer_qualif') || et.includes('supplier')
+                        || et.includes('split') || et.includes('sourc') || et.includes('channel')
+                        || et.includes('integrity') || sidl.includes('integrity');  // outbound integrity guard
+                    });
+                    // Outbound integrity blocks — the platform quarantining its OWN drafted supplier mail
+                    // before send (poisoned payload / data leak). Surfaced prominently: bounded autonomy
+                    // contained ShopSquire's own potential blast radius.
+                    const integrityBlocks = (src || []).filter((e) =>
+                      String(e.event_type || '').toLowerCase().includes('outbound_integrity'));
+                    // The GENUINE market-intelligence step (real findings + a bounded, deterministic
+                    // recommendation) — surfaced as a card so the intelligence is seen, not just logged.
+                    const miEvent: any = [...(src || [])].reverse().find((e: any) =>
+                      String(e?.payload?._original_event_type || e.event_type) === 'market_intelligence_assessed'
+                      && e?.payload?.recommendation);
+                    const mi: any = miEvent?.payload || null;
+                    const draft: any = (procCase?.state_json?.draft) || null;
+                    const procurementTrace: any = (procCase?.state_json?.procurement_trace) || null;
+                    const dealProjection: any = procCase?.margin_advice?.deal_projection || null;
+                    const dealStatus = dealProjection ? dealEconomicsStatus(dealProjection) : null;
+                    const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
+                    const gateView = procurementGateDisplay(draft?.send_gate || draft?.gate);
+                    const quarantineView = procurementQuarantineView(procCase, procJourney || []);
+                    return (
+                      <>
+                        {/* RFQ-FIRST: the drafted supplier RFQ is the first-class object of this tab (GPT-5.5
+                            audit: "The RFQ/email card should be the first-class object") — the card(s) render
+                            first, the event table is demoted below, and raw JSON stays behind the per-event
+                            "Raw recorded payload" disclosure. */}
+                        {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
+
+                        {canSeeOperatorDraft && allocationView?.summary && (
+                          <ProcurementOperationalTrace allocationView={allocationView} />
+                        )}
+
+                        {canSeeOperatorDraft && !dealProjection && (
+                          <div data-testid="proc-deal-economics" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                              <strong>Deal economics unavailable</strong>
+                              <span style={{ color: '#92400e', fontWeight: 700 }}>Evidence incomplete</span>
+                            </div>
+                            <div style={{ color: '#4b5563', marginTop: 3 }}>
+                              Operator-only · supplier cost or comparable landed-cost evidence has not been validated
+                            </div>
+                            <div data-testid="proc-discount-authorization" style={{ marginTop: 7, padding: '6px 8px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontWeight: 600 }}>
+                              Discount authority locked until landed cost is validated
+                            </div>
+                          </div>
+                        )}
+
+                        {canSeeOperatorDraft && dealProjection && dealStatus && (
+                          <div data-testid="proc-deal-economics" style={{ border: '1px solid #86efac', background: '#f0fdf4', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                              <strong>{dealProjection.simulation_only ? 'Scenario deal economics' : 'Live deal economics'}</strong>
+                              <span style={{ color: dealProjection.verdict === 'below_floor' ? '#b91c1c' : '#166534', fontWeight: 700 }}>
+                                {dealProjection.simulation_only ? 'ESTIMATED · ' : ''}{dealStatus.verdict}
+                              </span>
+                            </div>
+                            <div style={{ color: '#4b5563', marginTop: 3 }}>
+                              Operator-only · {dealStatus.costLabel}
+                              {dealProjection.simulation_only ? ' · demo scenario' : ''}
+                            </div>
+                            <div className={styles.kvRow}><span>List / unit</span><span>{formatDealMoney(dealProjection.list_unit_cents, dealProjection.currency)}</span></div>
+                            <div className={styles.kvRow}><span>Supplier cost / unit</span><span>{formatDealMoney(dealProjection.wholesale_unit_cents, dealProjection.currency)}</span></div>
+                            <div className={styles.kvRow}><span>Gross / unit</span><span>{formatDealMoney(dealProjection.gross_per_unit_cents, dealProjection.currency)}</span></div>
+                            <div className={styles.kvRow}><span>List margin</span><span>{(Number(dealProjection.margin_pct || 0) * 100).toFixed(1)}%</span></div>
+                            <div className={styles.kvRow}><span>Projected gross ({Number(dealProjection.quantity || 0)} unit{Number(dealProjection.quantity || 0) === 1 ? '' : 's'})</span><span>{formatDealMoney(dealProjection.projected_profit_cents, dealProjection.currency)}</span></div>
+                            <div data-testid="proc-discount-authorization" style={{ marginTop: 7, padding: '6px 8px', borderRadius: 6, background: dealProjection.discount_authorized ? '#dcfce7' : '#fef3c7', color: dealProjection.discount_authorized ? '#166534' : '#92400e', fontWeight: 600 }}>
+                              {dealStatus.discountLabel}
+                            </div>
+                            {Array.isArray(dealProjection.bulk_breaks) && dealProjection.bulk_breaks.length > 0 && (
+                              <div style={{ marginTop: 8 }}>
+                                <div style={{ fontWeight: 700 }}>Supplier volume scenarios</div>
+                                {dealProjection.bulk_breaks.map((tier: any) => (
+                                  <div key={`${tier.min_qty}-${tier.discount_pct}`} className={styles.kvRow}>
+                                    <span>{tier.min_qty}+ units · {Number(tier.discount_pct || 0).toFixed(0)}% supplier break</span>
+                                    <span>{(Number(tier.margin_pct || 0) * 100).toFixed(1)}% estimated margin</span>
+                                  </div>
+                                ))}
+                                <div style={{ color: '#6b7280', fontSize: 12 }}>Scenario only · not an authorized buyer discount or supplier commitment.</div>
+                              </div>
+                            )}
+                            <div style={{ borderTop: '1px dashed #86efac', marginTop: 8, paddingTop: 7, color: '#166534' }}>
+                              Model proposes · policy authorizes · connector executes · human approves supplier send
+                            </div>
+                          </div>
+                        )}
+
+                        {canSeeOperatorDraft && procHistory?.case_count > 1 && (
+                          <div data-testid="proc-amendment-history" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '8px 10px', marginBottom: 12, fontSize: 13 }}>
+                            <div style={{ fontWeight: 700, color: '#92400e' }}>
+                              RFQ revision {procHistory.case_count} - prior draft superseded
+                            </div>
+                            <div style={{ marginTop: 4, color: '#4b5563' }}>
+                              {procHistory?.draft_diff?.fields?.subject
+                                ? <><span className={styles.mono}>{procHistory.draft_diff.fields.subject.from}</span><br /><span aria-hidden="true">→ </span><span className={styles.mono}>{procHistory.draft_diff.fields.subject.to}</span></>
+                                : 'The active supplier draft was regenerated from the amended cart.'}
+                            </div>
+                            <div style={{ marginTop: 4, color: '#6b7280', fontSize: 12 }}>
+                              {procHistory?.draft_diff?.body_changed ? 'Draft body changed.' : 'Draft metadata changed.'}
+                              {' '}The prior content hash remains in the bitemporal audit; nothing was sent.
+                            </div>
+                          </div>
+                        )}
+
+                        {/* MULTI-SUPPLIER: a bulk order that splits across suppliers opens one case per supplier,
+                            each with its OWN drafted RFQ. Show them all (read-only proof) so "3 suppliers → where
+                            are the emails?" is answered in-place. Single-supplier orders fall through to the rich
+                            single card below. */}
+                        {procCases.length > 1 && (
+                          <div data-testid="proc-multi-rfq" style={{ marginBottom: 12 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                              📧 {procCases.length} supplier RFQs drafted — one per supplier · human-gated · nothing sent
+                            </div>
+                            {procCases.map((c: any, idx: number) => {
+                              const d: any = c?.state_json?.draft || {};
+                              const cp: any = d.channel_plan || {};
+                              const tm: any = d.supplier_terms || {};
+                              const chLabel = cp.requires_human
+                                ? `${String(cp.channel || '').toUpperCase()} · human-only`
+                                : cp.integration_kind
+                                  ? `${String(cp.integration_kind).toUpperCase()} integration handoff`
+                                  : `${String(cp.channel || 'email')} · agent drafts · human sends (GATE 2)`;
+                              const terms = [
+                                tm.moq != null ? `MOQ ${tm.moq}` : null,
+                                tm.lead_time_days != null ? `${tm.lead_time_days}d lead` : null,
+                                tm.contract_status ? String(tm.contract_status) : null,
+                                (tm.price_breaks || []).length ? `breaks ${(tm.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(',')}` : null,
+                              ].filter(Boolean).join(' · ');
+                              return (
+                                <details key={c.case_id || idx} data-testid={`proc-rfq-${idx}`} style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px', marginBottom: 6 }} open={idx === 0}>
+                                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                                    Supplier {idx + 1} of {procCases.length} — {d.recipient_ref || '—'}
+                                    <span style={{ marginLeft: 8, fontSize: 12, color: '#6b7280' }}>{chLabel}</span>
+                                  </summary>
+                                  <div style={{ marginTop: 8, fontSize: 13 }}>
+                                    {d.recipient_domain && <div className={styles.kvRow}><span>Domain</span><span className={styles.mono}>{d.recipient_domain}</span></div>}
+                                    {terms && <div className={styles.kvRow}><span>Ordering terms</span><span>{terms}</span></div>}
+                                    {cp.rationale && <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{cp.rationale}</span></div>}
+                                    <div className={styles.kvRow}><span>Subject</span><span>{d.subject || '—'}</span></div>
+                                    {canSeeOperatorDraft ? (
+                                      <>
+                                        <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (quote request — no price is ever stated to the supplier)</div>
+                                        <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 220, overflow: 'auto' }}>{d.body || '(not drafted yet)'}</pre>
+                                      </>
+                                    ) : (
+                                      <div className={styles.empty} style={{ marginTop: 6 }}>Human-gated — sign in with an operator key to view the drafted email.</div>
+                                    )}
+                                  </div>
+                                </details>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Drafted supplier RFQ — the "how it's made" artefact, promoted to the tab's first-class
+                            card (always expanded). Human-gated: shown only with an owner/operator key; a normal
+                            shopper never sees a supplier contact (blind-ship stays intact). It is NOT sent. */}
+                        {procCases.length <= 1 && procCase && draft && canSeeOperatorDraft && (
+                          <div data-testid="proc-drafted-rfq" style={{ border: '1px solid #d1d5db', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
+                            <div style={{ fontWeight: 700 }}>
+                              📧 Drafted supplier RFQ — {String(procCase.state || '').replace(/_/g, ' ').toLowerCase()}
+                              <span style={{ marginLeft: 8, fontWeight: 600, color: '#b45309', fontSize: 12 }}>human-gated · not sent</span>
+                            </div>
+                            <div style={{ marginTop: 8, fontSize: 13 }}>
+                              <div className={styles.kvRow}><span>To (supplier)</span><span data-testid="proc-rfq-recipient">{draft.recipient_ref || '—'}{draft.recipient_domain ? ` · ${draft.recipient_domain}` : ''}</span></div>
+                              {draft.recipient_email && <div className={styles.kvRow}><span>Contact</span><span className={styles.mono}>{draft.recipient_email}</span></div>}
+                              {draft.channel_plan && (
+                                <div className={styles.kvRow} data-testid="proc-supplier-channel"><span>Preferred channel</span><span>
+                                  <strong>{String(draft.channel_plan.channel || 'email')}</strong>
+                                  {draft.channel_plan.requires_human
+                                    ? ' · human-only (no automated outreach)'
+                                    : draft.channel_plan.integration_kind
+                                      ? ` · ${String(draft.channel_plan.integration_kind).toUpperCase()} integration handoff`
+                                      : draft.channel_plan.agent_may_draft
+                                        ? ' · agent drafts · human sends (GATE 2)'
+                                        : ''}
+                                </span></div>
+                              )}
+                              {draft.channel_plan?.rationale && (
+                                <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{draft.channel_plan.rationale}</span></div>
+                              )}
+                              {draft.supplier_terms && (draft.supplier_terms.moq != null || draft.supplier_terms.lead_time_days != null || (draft.supplier_terms.price_breaks || []).length > 0 || draft.supplier_terms.contract_status) && (
+                                <div className={styles.kvRow} data-testid="proc-supplier-terms"><span>Ordering terms</span><span>
+                                  {[
+                                    draft.supplier_terms.moq != null ? `MOQ ${draft.supplier_terms.moq}` : null,
+                                    draft.supplier_terms.lead_time_days != null ? `${draft.supplier_terms.lead_time_days}d lead` : null,
+                                    draft.supplier_terms.min_order_value_cents ? `min $${Math.round(draft.supplier_terms.min_order_value_cents / 100)}` : null,
+                                    draft.supplier_terms.contract_status ? String(draft.supplier_terms.contract_status) : null,
+                                    (draft.supplier_terms.price_breaks || []).length
+                                      ? `breaks: ${(draft.supplier_terms.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(', ')}`
+                                      : null,
+                                  ].filter(Boolean).join(' · ')}
+                                </span></div>
+                              )}
+                              {draft.commercial_scope?.quantity != null && (
+                                <div className={styles.kvRow}><span>RFQ quantity</span><span>{draft.commercial_scope.quantity} supplier-shortfall unit(s)</span></div>
+                              )}
+                              {procCase?.state_json?.availability?.requested_qty != null && (
+                                <div className={styles.kvRow}><span>Cart demand</span><span>{procCase.state_json.availability.requested_qty} requested · {procCase.state_json.availability.in_stock ?? 0} in stock · {procCase.state_json.availability.shortfall ?? draft.commercial_scope?.quantity ?? 0} sourced</span></div>
+                              )}
+                              {Array.isArray(procCase?.state_json?.availability?.lines)
+                                && procCase.state_json.availability.lines.map((line: any) => (
+                                  <div key={`availability-${line.sku}`} data-testid={`proc-availability-${line.sku}`}
+                                       style={{ borderTop: '1px solid #e5e7eb', marginTop: 6, paddingTop: 6 }}>
+                                    <div className={styles.kvRow}>
+                                      <span>Combined availability</span>
+                                      <span>{line.local_now ?? 0} local · {line.network_transfer ?? 0} network transfer · {line.supplier_rfq_qty ?? 0} RFQ</span>
+                                    </div>
+                                    <div style={{ color: '#6b7280', fontSize: 12 }}>
+                                      Supplier availability is unconfirmed until the RFQ receives a response.
+                                    </div>
+                                  </div>
+                                ))}
+                              <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
+                              {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
+                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{gateView.label}</span></div>}
+                              {gateView.reasons.length > 0 && (
+                                <div data-testid="proc-send-gate-actions" style={{ margin: '6px 0', padding: '8px 10px', border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 6 }}>
+                                  <div style={{ fontWeight: 700, color: '#92400e' }}>Resolve before supplier approval</div>
+                                  {gateView.reasons.map((reason) => (
+                                    <div key={reason.code} style={{ marginTop: 5 }}>
+                                      <strong>{reason.label}</strong> {reason.action}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (a quote request — no price is ever stated to the supplier)</div>
+                              <pre data-testid="proc-rfq-body" style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
+                            </div>
+                          </div>
+                        )}
+                        {procCases.length <= 1 && procCase && procurementTrace && !canSeeOperatorDraft && (
+                          <div data-testid="proc-rfq-safe-summary" style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 11px', marginTop: 8, fontSize: 13 }}>
+                            <div style={{ fontWeight: 700 }}>Supplier RFQ drafted <span style={{ color: '#b45309', fontSize: 12 }}>human-gated · not sent</span></div>
+                            <div className={styles.kvRow}><span>RFQ quantity</span><span>{procurementTrace.quantity ?? '—'} supplier-shortfall unit(s)</span></div>
+                            {procurementTrace.channel && <div className={styles.kvRow}><span>Preferred channel</span><span>{String(procurementTrace.channel)}{procurementTrace.requires_human ? ' · human-only' : procurementTrace.integration_kind ? ` · ${String(procurementTrace.integration_kind).toUpperCase()} handoff` : ' · human sends'}</span></div>}
+                            {procurementTrace.gate_decision && <div className={styles.kvRow}><span>Send gate</span><span>{String(procurementTrace.gate_decision)}</span></div>}
+                            <div className={styles.empty} style={{ marginTop: 6 }}>Supplier contact, ordering terms, and message content are operator-only.</div>
+                          </div>
+                        )}
+                        {procCases.length <= 1 && procCase && !draft && !canSeeOperatorDraft
+                          && String(procCase.state || '').toUpperCase().includes('DRAFTED') && (
+                          <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order, but supplier contact and message content are operator-only. Sign in with an operator key to view the read-only audit copy.</div>
+                        )}
+                        {/* Read-only proof surface: any change to the supplier or the drafted email happens in the
+                            operator console (admin), where edits re-lock the send gate — never from this trace. */}
+                        {(procCases.length > 0 || (procCase && draft)) && (
+                          <div data-testid="proc-readonly-note" style={{ marginTop: 8, marginBottom: 12, fontSize: 12, color: '#6b7280', borderTop: '1px dashed #e5e7eb', paddingTop: 6 }}>
+                            🔒 Read-only trace — this is the audit view. To change the supplier or edit the RFQ, an
+                            authorised operator does that in the admin console; any edit voids the prior approval and
+                            re-locks the send gate (GATE 2). Nothing is ever sent from here.
+                          </div>
+                        )}
+
+                        {integrityBlocks.length > 0 && (
+                          <div data-testid="proc-integrity-guard" style={{ border: '1px solid #16a34a', background: '#f0fdf4', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4, color: '#166534' }}>
+                              🛡 Outbound integrity guard — {integrityBlocks.length} supplier message{integrityBlocks.length > 1 ? 's' : ''} quarantined before send
+                            </div>
+                            <div style={{ color: '#166534', marginBottom: 6 }}>
+                              ShopSquire scanned its OWN drafted supplier email and did NOT relay it — bounded autonomy contained the blast radius so the platform can't become a threat vector into a supplier's inbox.
+                            </div>
+                            {integrityBlocks.map((e, i) => {
+                              const p: any = (e as any).payload || {};
+                              const findings: string[] = Array.isArray(p.findings) ? p.findings : [];
+                              const action = String(p.action || 'block');
+                              return (
+                                <div key={i} style={{ paddingLeft: 6, borderLeft: `3px solid ${action === 'block' ? '#dc2626' : '#f59e0b'}`, marginBottom: 4 }}>
+                                  <span style={{ fontWeight: 600, color: action === 'block' ? '#b91c1c' : '#92400e' }}>{action === 'block' ? 'BLOCKED' : 'HELD FOR REVIEW'}</span>
+                                  {p.recipient_domain ? <span style={{ color: '#6b7280' }}> → {p.recipient_domain}</span> : null}
+                                  {findings.length ? <span style={{ color: '#374151' }}> · {findings.join(', ')}</span> : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {mi && (
+                          <div data-testid="proc-market-intel" style={{ border: '1px solid #6366f1', background: '#eef2ff', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
+                            <div style={{ fontWeight: 700, color: '#3730a3', marginBottom: 4 }}>
+                              📊 Market Intelligence — {String(mi.mode) === 'live'
+                                ? `${mi.scoped_signal_count ?? mi.signal_count} scoped signal${Number(mi.scoped_signal_count ?? mi.signal_count) === 1 ? '' : 's'}`
+                                : String(mi.mode) === 'context_only'
+                                  ? `${mi.signal_count} global context signal${Number(mi.signal_count) === 1 ? '' : 's'} (not line-authorizing)`
+                                  : 'internal-only (no external signal)'}
+                            </div>
+                            <div style={{ marginBottom: 6 }}>
+                              <span style={{ fontWeight: 700 }}>{String(mi.action_basis) === 'inventory_only' ? 'Inventory action:' : 'Recommended action:'}</span> {String(mi.recommendation || '—')}
+                              <div style={{ color: '#4b5563', marginTop: 2 }}>{String(mi.rationale || '')}</div>
+                            </div>
+                            {Array.isArray(mi.signals) && mi.signals.length > 0 && (
+                              <div>
+                                {mi.signals.map((s: any, i: number) => (
+                                  <div key={i} style={{ paddingLeft: 6, borderLeft: `3px solid ${String(s.severity) === 'critical' ? '#dc2626' : '#f59e0b'}`, marginBottom: 3, color: '#374151' }}>
+                                    {/* scope chip: this item / market / related — the tiered scoping made visible */}
+                                    {s.scope && (
+                                      <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 7, marginRight: 5,
+                                                     background: s.scope === 'this_item' ? '#dcfce7' : s.scope === 'market' ? '#e0e7ff' : '#f3f4f6',
+                                                     color: s.scope === 'this_item' ? '#166534' : s.scope === 'market' ? '#3730a3' : '#6b7280' }}>
+                                        {s.scope === 'this_item' ? 'THIS ITEM' : String(s.scope).toUpperCase()}
+                                      </span>
+                                    )}
+                                    <span className={styles.mono} style={{ fontSize: 11 }}>{String(s.type || '')}</span>
+                                    {s.summary ? <span> — {String(s.summary)}</span> : null}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ marginTop: 6, fontSize: 11, color: '#6b7280' }}>
+                              Deterministic finding→action synthesis (no LLM) over the market-analysis engine's persisted findings — advisory only; the human decides at the send gate.
+                            </div>
+                          </div>
+                        )}
+                        {procEvents.length === 0 && !procCase && hasProcurementSignal && pendingSplit?.split ? (
+                          <div data-testid="proc-pending-plan" style={{ border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ Pending sourcing plan — nothing confirmed, no supplier contacted</div>
+                            <div style={{ color: '#92400e', marginBottom: 8 }}>
+                              {pendingSplit.split.now.reduce((s, l) => s + l.qty, 0)} ship from stock · {pendingSplit.split.later.reduce((s, l) => s + l.qty, 0)} require supplier reorder
+                            </div>
+                            {Object.entries(
+                              pendingSplit.split.later.reduce((acc: Record<string, typeof pendingSplit.split.later>, l) => {
+                                const k = l.supplier_ref || 'unassigned'; (acc[k] = acc[k] || []).push(l); return acc;
+                              }, {})
+                            ).map(([ref, lines]) => {
+                              const sup: any = (pendingSplit as any).suppliers?.[ref] || {};
+                              const ch = String(sup.channel || 'email').toLowerCase();
+                              const chLabel = ch === 'email' ? '✉ EMAIL — agent drafts, human sends'
+                                : (ch === 'phone' || ch === 'portal') ? `${ch === 'phone' ? '📞 PHONE' : '🌐 PORTAL'} — HUMAN-ONLY`
+                                : `⚙ ${ch.toUpperCase()} — system integration`;
+                              const eta = Math.max(...lines.map((l) => l.eta_days ?? 0));
+                              return (
+                                <div key={ref} style={{ marginBottom: 8, paddingLeft: 6, borderLeft: '3px solid #f59e0b' }}>
+                                  <div style={{ fontWeight: 600 }}>
+                                    {sup.name || ref} <span style={{ fontWeight: 400, color: '#6b7280' }}>· {lines.reduce((s, l) => s + l.qty, 0)} unit(s){eta ? ` · ~${eta}d` : ''} · {chLabel}</span>
+                                  </div>
+                                  {lines.map((l) => (<div key={l.sku} style={{ color: '#374151' }}>{l.qty} × {l.sku}</div>))}
+                                </div>
+                              );
+                            })}
+                            <div style={{ color: '#6b7280' }}>RFQ drafts are created when the buyer confirms the delivery plan in the cart (GATE 1) — then this tab shows each drafted email + the audit trail.</div>
+                          </div>
+                        ) : procEvents.length === 0 ? (
+                          <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
+                        ) : (
+                          <table className={styles.table}>
+                            <thead><tr><th></th><th>Component</th><th>Event</th><th>Mode</th><th>Detail</th><th>When</th></tr></thead>
+                            <tbody>
+                              {procEvents.map((e, i) => {
+                                const p: any = (e as any).payload || {};
+                                const tp = Array.isArray(p.transfer_plan) ? p.transfer_plan : [];
+                                const detail = [
+                                  p.sku && `SKU ${p.sku}`,
+                                  p.order_qty != null && `qty ${p.order_qty}`,
+                                  p.in_stock != null && `in-stock ${p.in_stock}`,
+                                  p.shortfall != null && `shortfall ${p.shortfall}`,
+                                  p.now_qty != null && `ship-now ${p.now_qty}`,
+                                  p.later_qty != null && `follow ${p.later_qty}`,
+                                  p.eta_days != null && `ETA ~${p.eta_days}d`,
+                                  tp.length > 0 && `transfer ${tp.map((t: any) => `${t.qty}@${t.from_location}`).join(', ')}`,
+                                  p.status && `status ${p.status}`,
+                                  Array.isArray(p.types) && p.types.length > 0 && `options: ${p.types.join(', ')}`,
+                                  p.count != null && `${p.count} alternatives`,
+                                  p.channel && `channel: ${p.channel}`,
+                                  p.requires_human === true && '👤 HUMAN-only outreach',
+                                  p.integration_kind && `→ ${String(p.integration_kind).toUpperCase()} integration`,
+                                  p.channel && p.agent_may_draft === true && 'agent drafts · human sends',
+                                  p.case_id && `case ${String(p.case_id).slice(0, 8)}`,
+                                ].filter(Boolean).join(' · ');
+                                // deterministic-vs-LLM provenance chip: stamped by the backend emitters —
+                                // proves which steps are pure rules/scoring vs model-assisted.
+                                const exec = String(p.execution || '');
+                                const isLlm = exec.startsWith('llm');
+                                const when = String((e as any).created_at || '').replace('T', ' ').slice(11, 19);
+                                const isOpen = !!procExpanded[i];
+                                // payload for the drill-down, minus envelope/meta keys (the _-prefixed ones)
+                                const drill = Object.fromEntries(Object.entries(p).filter(([k]) => !k.startsWith('_')));
+                                return (
+                                  <Fragment key={i}>
+                                    <tr data-testid={`proc-event-row-${i}`} style={{ cursor: 'pointer' }}
+                                        onClick={() => setProcExpanded((prev) => ({ ...prev, [i]: !prev[i] }))}
+                                        title="Click to inspect this step's full recorded payload">
+                                      <td style={{ width: 18, color: '#9ca3af' }}>{isOpen ? '▾' : '▸'}</td>
+                                      <td title={`Recorded producer: ${(e as any).source_id || 'unknown'}`}>
+                                        {componentSource(e)}
+                                      </td>
+                                      <td>{displayEventType(e)}</td>
+                                      <td>{exec ? (
+                                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                                                       background: isLlm ? '#f3e8ff' : '#f3f4f6',
+                                                       color: isLlm ? '#7e22ce' : '#374151',
+                                                       border: `1px solid ${isLlm ? '#d8b4fe' : '#d1d5db'}` }}>
+                                          {isLlm ? exec : 'deterministic'}
+                                        </span>
+                                      ) : <span style={{ color: '#d1d5db' }}>—</span>}</td>
+                                      <td>{detail || getSummary(e)}</td>
+                                      <td className={styles.mono} style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{when || '—'}</td>
+                                    </tr>
+                                    {isOpen && (
+                                      <tr data-testid={`proc-event-drill-${i}`}>
+                                        <td></td>
+                                        <td colSpan={5}>
+                                          {(() => {
+                                            // human-readable first ("what happened / why", derived ONLY from
+                                            // recorded fields); the raw JSON evidence sits behind its own
+                                            // disclosure so the demo reads a sentence, not a wall of JSON.
+                                            const ex = explainProcEvent(displayEventType(e), p);
+                                            return ex ? (
+                                              <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6,
+                                                            padding: '6px 10px', margin: '4px 0', fontSize: 12 }}>
+                                                <div><span style={{ fontWeight: 700 }}>What happened:</span> {ex.what}</div>
+                                                {ex.why && <div style={{ marginTop: 2 }}><span style={{ fontWeight: 700 }}>Why:</span> {ex.why}</div>}
+                                              </div>
+                                            ) : null;
+                                          })()}
+                                          <details style={{ margin: '4px 0' }}>
+                                            <summary style={{ cursor: 'pointer', fontSize: 11, color: '#6b7280' }}>
+                                              Raw recorded payload (evidence)
+                                            </summary>
+                                            <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb',
+                                                          borderRadius: 6, padding: 8, margin: '4px 0', maxHeight: 220, overflow: 'auto',
+                                                          fontSize: 11 }}>{JSON.stringify(drill, null, 2)}</pre>
+                                          </details>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </Fragment>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+
+                        {/* Audit trail — the case's own bitemporal journey (state · actor · reason · time),
+                            inline so the operator proves provenance without switching tabs/windows. */}
+                        {canSeeOperatorDraft && quarantineView.active && (
+                          <section
+                            data-testid="proc-supplier-quarantine"
+                            style={{
+                              marginTop: 10,
+                              border: '1px solid #f59e0b',
+                              borderRadius: 8,
+                              padding: '10px 12px',
+                              background: '#fffbeb',
+                              color: '#78350f',
+                            }}
+                          >
+                            <div style={{ fontWeight: 700 }}>Supplier response quarantined</div>
+                            <div style={{ marginTop: 4 }}>
+                              No quote, price, inventory, economics, payment, or procurement state was applied.
+                            </div>
+                            <div className={styles.kvRow}><span>Supplier domain</span><span>{quarantineView.senderDomain}</span></div>
+                            <div className={styles.kvRow}><span>Containment reason</span><span>{humanizeKey(quarantineView.reason)}</span></div>
+                            <div className={styles.kvRow}><span>Security decision</span><span>{humanizeKey(quarantineView.severity)} - {humanizeKey(quarantineView.route)}</span></div>
+                            {quarantineView.securityReasons.length > 0 && (
+                              <div className={styles.kvRow}>
+                                <span>Recorded evidence</span>
+                                <span>{quarantineView.securityReasons.map(humanizeKey).join(', ')}</span>
+                              </div>
+                            )}
+                            <div className={styles.kvRow}>
+                              <span>When</span>
+                              <span className={styles.mono}>
+                                {quarantineView.timestamp
+                                  ? quarantineView.timestamp.replace('T', ' ').slice(0, 19)
+                                  : 'not recorded'}
+                              </span>
+                            </div>
+                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #fde68a' }}>
+                              <strong>Operator actions:</strong> verify the supplier out of band, inspect the Email Security evidence,
+                              and keep this response quarantined until an authorized review workflow records a resolution.
+                            </div>
+                          </section>
+                        )}
+
+                        {procCase && Array.isArray(procJourney) && procJourney.length > 0 && (
+                          <details data-testid="proc-audit-trail" style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
+                            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+                              🧾 Procurement audit trail <span style={{ fontWeight: 500, color: '#6b7280' }}>({procJourney.length} state transitions · bitemporal)</span>
+                            </summary>
+                            <table className={styles.table} style={{ marginTop: 8 }}>
+                              <thead><tr><th>State</th><th>Event</th><th>Actor</th><th>When</th></tr></thead>
+                              <tbody>
+                                {procJourney.map((s: any, i: number) => (
+                                  <tr key={i}>
+                                    <td>{String(s.state || '').replace(/_/g, ' ')}</td>
+                                    <td>{s.event}{s.reason_code ? ` · ${s.reason_code}` : ''}</td>
+                                    <td>{s.actor_type === 'human_operator' ? '👤 ' : ''}{s.actor_id || s.actor_type || '—'}</td>
+                                    <td className={styles.mono} style={{ fontSize: 11 }}>{String(s.valid_from || '').replace('T', ' ').slice(0, 19)}{s.valid_to == null ? ' · current' : ''}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {money(procCase?.state_json?.split?.subtotal_cents) && (
+                              <div className={styles.kvRow} style={{ marginTop: 6 }}><span>Order subtotal</span><span>{money(procCase.state_json.split.subtotal_cents)}</span></div>
+                            )}
+                          </details>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+
               {activeTab === 'audit' && (
                 <div className={styles.summaryPane}>
+                  <TemporalCacheTechnicalTrace allocationView={allocationView} />
                   {auditLoading && <div className={styles.empty}>Loading audit trail...</div>}
-                  {!auditLoading && !auditTrail && <div className={styles.empty}>No audit trail data. Click the tab to fetch.</div>}
+                  {!auditLoading && auditError && (
+                    <div className={styles.empty} role="alert">
+                      {auditError} No decision state was changed.
+                      <button onClick={() => selectTraceLeaf('audit')}>Retry</button>
+                    </div>
+                  )}
+                  {!auditLoading && !auditTrail && !auditError && <div className={styles.empty}>No audit trail data. Click the tab to fetch.</div>}
                   {auditTrail && (
                     <>
                       <div className={styles.sectionTitle}>Bitemporal Decision Audit</div>
@@ -2945,7 +4678,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                       <div className={styles.kvRow}><span>Events</span><span>{auditTrail.event_count}</span></div>
                       <div className={styles.kvRow}><span>Hash Chain Length</span><span>{auditTrail.immutability?.chain_length}</span></div>
                       <div className={styles.kvRow}><span>Tip Hash</span><span className={styles.mono}>{auditTrail.immutability?.tip_hash}</span></div>
-                      <div className={styles.kvRow}><span>Chain Verified</span><span>{auditTrail.immutability?.verified ? '\u2705 Yes' : '\u274c No'}</span></div>
+                      <div className={styles.kvRow}><span>Chain Verified</span><span>{auditTrail.immutability?.verified ? '\u2705 Yes' : '\u26a0\ufe0f Not in this environment'}</span></div>
+                      {auditTrail.immutability?.reason && (
+                        <div className={styles.kvRow}><span>Why</span><span style={{ fontSize: 12, color: '#6b7280' }}>{auditTrail.immutability.reason}</span></div>
+                      )}
+                      {auditTrail.immutability?.persisted_chain && (
+                        <div className={styles.kvRow}><span>Persisted WORM chain</span><span style={{ fontSize: 12 }}>
+                          {auditTrail.immutability.persisted_chain.entries_checked} entries {'\u00b7'} anchor {auditTrail.immutability.persisted_chain.anchor_present ? 'present' : 'pending'}
+                        </span></div>
+                      )}
 
                       <div className={styles.sectionTitle}>Storage & Immutability</div>
                       <div className={styles.kvRow}><span>Backend</span><span>{auditTrail.storage?.backend}</span></div>
@@ -2954,9 +4695,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
 
                       {(auditTrail.decisions || []).length > 0 && (
                         <>
-                          <div className={styles.sectionTitle}>Agent Decisions (Bitemporal)</div>
+                          <div className={styles.sectionTitle}>Component Decisions (Bitemporal)</div>
                           <table className={styles.smallTable}>
-                            <thead><tr><th>Agent</th><th>Valid From</th><th>Valid To</th><th>System From</th><th>Status</th><th>Approval</th></tr></thead>
+                            <thead><tr><th>Component</th><th>Valid From</th><th>Valid To</th><th>System From</th><th>Status</th><th>Approval</th></tr></thead>
                             <tbody>
                               {(auditTrail.decisions || []).map((d: any, i: number) => (
                                 <tr key={i}>
@@ -3034,11 +4775,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   <pre className={styles.rawJson}>{JSON.stringify(trace, null, 2)}</pre>
                 </>
               )}
+              </div>
 
               {!trace && (
                 <div className={styles.empty}>
                   {traceIdText
-                    ? `Trace snapshot is not available yet for ${traceIdText}.`
+                    ? `Waiting for the durable trace snapshot for ${traceIdText}. No state or evidence is inferred while it is unavailable.`
                     : 'No backend trace id is available yet. Showing local image triage only.'}
                 </div>
               )}
@@ -3049,7 +4791,3 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     </div>
   );
 }
-
-
-
-

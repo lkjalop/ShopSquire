@@ -1,0 +1,47 @@
+{
+  "_comment": "Store-specific vocabulary for the agnostic core. MECHANISMS live in services/ (product_claim_guard.py, product_classifier.py); this FLAVOUR (brands/specs/types/price-bands) is per-store config. Swap this file per ecommerce vertical. Defaults below are the laptop/computer demo.",
+  "known_brands": [
+    "msi", "asus", "lenovo", "dell", "hp", "acer", "razer", "apple", "macbook",
+    "gigabyte", "alienware", "samsung", "microsoft", "surface", "lg", "sony",
+    "intel", "amd", "nvidia"
+  ],
+  "spec_units": ["gb", "tb", "hz", "ghz"],
+  "gpu_prefixes": ["rtx", "gtx", "rx"],
+
+  "_product_types_comment": "Ordered classification rules — FIRST match wins. Accessory/specific types are listed BEFORE 'laptop' on purpose so 'Laptop Brief' classifies as a bag, not a laptop. 'primary' types are what this store sells as its headline product; everything else is an accessory that is excluded from primary results but eligible for cart upsell.",
+  "primary_types": ["laptop", "desktop"],
+  "product_type_rules": [
+    {"type": "networking", "pattern": "\\b(router|modem|range extender|wi-?fi extender|mesh|access point|nighthawk|powerline)\\b"},
+    {"type": "monitor",    "pattern": "\\b(monitor|display)\\b(?!.*\\blaptop\\b)"},
+    {"type": "audio",      "pattern": "\\b(head ?set|cloud flight|earbuds?|ear ?phones?|speakers?|microphone|mic\\b|soundbar)\\b"},
+    {"type": "storage",    "pattern": "\\b(ssd|hdd|hard drive|flash drive|usb drive|sd card|micro ?sd|memory card|portable ssd|external drive|nvme drive)\\b"},
+    {"type": "bag",        "pattern": "\\b(backpack|brief|attache|folio|sleeve|carry ?bag|carry case|laptop case|messenger|gauntlet|tote)\\b"},
+    {"type": "peripheral", "pattern": "\\b(mouse|keyboard|webcam|docking station|dock\\b|usb hub|hub\\b|laptop stand|stand\\b|cooling pad|charger|power adapter|adapter|hdmi|ethernet cable|cable|card reader)\\b"},
+    {"type": "printer",    "pattern": "\\b(printer|scanner|ink|toner)\\b"},
+    {"type": "tablet",     "pattern": "\\b(ipad|tablet|galaxy tab|surface go|surface pro\\b)\\b"},
+    {"type": "desktop",    "pattern": "\\b(desktop|tower pc|gaming pc|all-in-one|aio pc|mini pc|nuc)\\b"},
+    {"type": "laptop",     "pattern": "\\b(laptop|notebook|macbook|ultrabook|2-in-1|chromebook|thinkpad|ideapad|vivobook|zenbook|spectre|pavilion|victus|nitro|swift|tuf|rog|katana|stealth|omen|legion|aspire|inspiron|latitude|xps|copilot\\+? pc|copilot pc)\\b"}
+  ],
+
+  "_price_bands_comment": "Expected price band (whole currency units) per type — a data-integrity / poisoning guard. A price OUTSIDE its type band is a price_anomaly: too-low can be a poisoning attack (sell a $1800 laptop for $45 → direct margin loss at checkout); too-high can be denial-of-inventory or reputational. Bands are generous (5th–95th percentile-ish), not pricing rules.",
+  "price_bands": {
+    "laptop":     [350, 6000],
+    "desktop":    [400, 9000],
+    "tablet":     [150, 3000],
+    "monitor":    [80, 3000],
+    "networking": [25, 900],
+    "audio":      [10, 600],
+    "storage":    [10, 800],
+    "bag":        [15, 400],
+    "peripheral": [5, 500],
+    "printer":    [40, 1500],
+    "accessory":  [5, 1500]
+  },
+
+  "_upsell_comment": "Companion types to cross-sell in the cart once a primary item is added (laptop → carry it, protect it, expand it, hear it). Powers services/upsell_engine.py type-affinity.",
+  "upsell_companions": {
+    "laptop":  ["bag", "audio", "storage", "monitor", "peripheral", "networking"],
+    "desktop": ["monitor", "peripheral", "audio", "storage", "networking"],
+    "tablet":  ["bag", "audio", "storage", "peripheral"]
+  }
+}

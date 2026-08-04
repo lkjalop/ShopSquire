@@ -1,28 +1,34 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Overview } from './components/Overview';
-import { Decisions } from './components/Decisions';
-import { Security } from './components/Security';
-import { Approvals } from './components/Approvals';
-import { OwnerPanel } from './components/OwnerPanel';
-import { DeveloperPanel } from './components/DeveloperPanel';
-import { Incidents } from './components/Incidents';
-import { EmailIncidents } from './components/EmailIncidents';
-import { RulesAdmin } from './components/RulesAdmin';
-import { Orders } from './components/Orders';
-import { Analytics } from './components/Analytics';
-import { Compliance } from './components/Compliance';
-import { GRC } from './components/GRC';
-import { GrafanaDashboards } from './components/GrafanaDashboards';
-import { InventorySync } from './components/InventorySync';
-import { CVIncidents } from './components/CVIncidents';
-import { Playbooks } from './components/Playbooks';
-import { MerchantBIPro } from './components/MerchantBIPro';
-import { EscalationsConsole } from './components/EscalationsConsole';
-import { EmailXdr } from './components/EmailXdr';
-import { SupplyChainSim } from './components/SupplyChainSim';
-import { AgentIntelligence } from './components/AgentIntelligence';
-import { MaestroRegistry } from './components/MaestroRegistry';
 import { fetchMe, setApiKeyCookie, setClientApiKey } from './api';
+
+const Decisions = React.lazy(() => import('./components/Decisions').then((m) => ({ default: m.Decisions })));
+const Security = React.lazy(() => import('./components/Security').then((m) => ({ default: m.Security })));
+const Approvals = React.lazy(() => import('./components/Approvals').then((m) => ({ default: m.Approvals })));
+const OwnerPanel = React.lazy(() => import('./components/OwnerPanel').then((m) => ({ default: m.OwnerPanel })));
+const DeveloperPanel = React.lazy(() => import('./components/DeveloperPanel').then((m) => ({ default: m.DeveloperPanel })));
+const Incidents = React.lazy(() => import('./components/Incidents').then((m) => ({ default: m.Incidents })));
+const EmailIncidents = React.lazy(() => import('./components/EmailIncidents').then((m) => ({ default: m.EmailIncidents })));
+const RulesAdmin = React.lazy(() => import('./components/RulesAdmin').then((m) => ({ default: m.RulesAdmin })));
+const Orders = React.lazy(() => import('./components/Orders').then((m) => ({ default: m.Orders })));
+const Analytics = React.lazy(() => import('./components/Analytics').then((m) => ({ default: m.Analytics })));
+const Compliance = React.lazy(() => import('./components/Compliance').then((m) => ({ default: m.Compliance })));
+const GRC = React.lazy(() => import('./components/GRC').then((m) => ({ default: m.GRC })));
+const GrafanaDashboards = React.lazy(() => import('./components/GrafanaDashboards').then((m) => ({ default: m.GrafanaDashboards })));
+const InventorySync = React.lazy(() => import('./components/InventorySync').then((m) => ({ default: m.InventorySync })));
+const CVIncidents = React.lazy(() => import('./components/CVIncidents').then((m) => ({ default: m.CVIncidents })));
+const Playbooks = React.lazy(() => import('./components/Playbooks').then((m) => ({ default: m.Playbooks })));
+const MerchantBIPro = React.lazy(() => import('./components/MerchantBIPro').then((m) => ({ default: m.MerchantBIPro })));
+const EscalationsConsole = React.lazy(() => import('./components/EscalationsConsole').then((m) => ({ default: m.EscalationsConsole })));
+const ProcurementCases = React.lazy(() => import('./components/ProcurementCases').then((m) => ({ default: m.ProcurementCases })));
+const MarketIntelligence = React.lazy(() => import('./components/MarketIntelligence').then((m) => ({ default: m.MarketIntelligence })));
+const SupplyRiskWorkbench = React.lazy(() => import('./components/SupplyRiskWorkbench').then((m) => ({ default: m.SupplyRiskWorkbench })));
+const InvestorMetrics = React.lazy(() => import('./components/InvestorMetrics').then((m) => ({ default: m.InvestorMetrics })));
+const EmailXdr = React.lazy(() => import('./components/EmailXdr').then((m) => ({ default: m.EmailXdr })));
+const SupplyChainSim = React.lazy(() => import('./components/SupplyChainSim').then((m) => ({ default: m.SupplyChainSim })));
+const AgentIntelligence = React.lazy(() => import('./components/AgentIntelligence').then((m) => ({ default: m.AgentIntelligence })));
+const MaestroRegistry = React.lazy(() => import('./components/MaestroRegistry').then((m) => ({ default: m.MaestroRegistry })));
+const AccountIntelligence = React.lazy(() => import('./components/AccountIntelligence').then((m) => ({ default: m.AccountIntelligence })));
 
 type Role = 'merchant' | 'owner' | 'developer';
 
@@ -46,6 +52,7 @@ export default function App() {
     escalations: ['escalation', 'escalate', 'incident'],
     rules: ['rule', 'rules', 'policy'],
     approvals: ['approval', 'approvals', 'approve'],
+    accounts: ['account', 'accounts', 'party', 'customer', 'identity', 'timeline'],
     orders: ['order', 'orders'],
     analytics: ['analytics', 'ragas', 'eval'],
     compliance: ['compliance', 'gdpr', 'pci'],
@@ -125,7 +132,7 @@ export default function App() {
 
         <div className="nav-section">Merchant</div>
         <div className="nav">
-          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
+          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'accounts', 'procurement', 'market-intel', 'investor', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
             const locked = (key === 'compliance' && !canOwner) || (key === 'rules' && !(canOwner || canDeveloper)) || (key === 'grc' && !(canOwner || canDeveloper));
             return (
               <button
@@ -227,6 +234,10 @@ export default function App() {
             {active === 'rules' && 'Rules Admin'}
             {active === 'playbooks' && 'Playbook Editor'}
             {active === 'approvals' && 'Human Approvals'}
+            {active === 'accounts' && 'Account Intelligence'}
+            {active === 'procurement' && 'Procurement Control Room'}
+            {active === 'market-intel' && 'Market Intelligence (Synthetic Replay)'}
+            {active === 'investor' && 'Investor Metrics'}
             {active === 'grafana' && 'Grafana Observability'}
             {active === 'escalations' && 'Human Escalations Console'}
             {active === 'owner' && 'Owner Console'}
@@ -248,6 +259,10 @@ export default function App() {
             {active === 'rules' && 'Create, validate, and preview prioritized rules (tenant-scoped).'}
             {active === 'playbooks' && 'Validate, dry-run, publish, rollback, and audit playbook changes.'}
             {active === 'approvals' && 'Review and approve high-stakes proposals.'}
+            {active === 'accounts' && 'Tenant-scoped Party facts, expiring conversation observations, activity timeline, and governed identity review.'}
+            {active === 'procurement' && 'Auditable buyer→supplier procurement: draft, approve+send (GATE 2), supplier reply, validate, options — every step bitemporally traced.'}
+            {active === 'market-intel' && 'Advance a synthetic 7-day market replay through the REAL ingestion→analysis→finding path (isolated demo tenant).'}
+            {active === 'investor' && 'One screen: exec KPIs, bounded-autonomy proof, procurement cycle time, capability-gap ledger, governance pulse.'}
             {active === 'orders' && 'Manage order lifecycle for refunds, cancellations, and returns.'}
             {active === 'analytics' && 'Time-series performance across orders, decisions, and security.'}
             {active === 'grafana' && 'Full Grafana observability suite with drill-down dashboards.'}
@@ -267,6 +282,12 @@ export default function App() {
           )}
         </div>
 
+        {/* Gate ALL panels on auth: they mount + fetch on mount, so rendering them before fetchMe resolves
+            (authReady) fired a burst of 401s and drew empty cards; rendering them when auth FAILED (authError)
+            fired 401s against an invalid key. One gate here fixes it for every panel — cheaper and safer than
+            threading authReady into 23 components (only MarketIntelligence took that per-component route). */}
+        {authReady && !authError && (
+        <React.Suspense fallback={<div className="callout">Loading panel…</div>}>
         {active === 'merchant-bi' && <MerchantBIPro role={role} />}
         {active === 'overview' && <Overview role={role} />}
         {active === 'decisions' && <Decisions role={role} />}
@@ -279,6 +300,15 @@ export default function App() {
         {active === 'playbooks' && <Playbooks />}
         {active === 'rules' && <RulesAdmin role={role} />}
         {active === 'approvals' && <Approvals role={role} />}
+        {active === 'accounts' && <AccountIntelligence role={role} />}
+        {active === 'procurement' && <ProcurementCases />}
+        {active === 'market-intel' && (
+          <>
+            <MarketIntelligence authVersion={authVersion} authReady={authReady} />
+            <SupplyRiskWorkbench authReady={authReady} />
+          </>
+        )}
+        {active === 'investor' && <InvestorMetrics authVersion={authVersion} authReady={authReady} />}
         {active === 'orders' && <Orders role={role} />}
         {active === 'analytics' && <Analytics role={role} />}
         {active === 'grafana' && <GrafanaDashboards role={role} />}
@@ -290,6 +320,8 @@ export default function App() {
         {active === 'sc-sim' && <SupplyChainSim role={role} />}
         {active === 'agent-intelligence' && <AgentIntelligence role={role} />}
         {active === 'maestro' && <MaestroRegistry role={role} />}
+        </React.Suspense>
+        )}
 
         {!authReady && (
           <div className="callout" style={{ marginTop: 12 }}>

@@ -27,6 +27,65 @@ def _trim(q: Deque[Tuple[float, int]], now: float) -> None:
         q.popleft()
 
 
+def _shared_redis():
+    """The REAL Redis (shared across uvicorn workers), or None. The DummyRedis dev fallback is NOT
+    shared — it answers in-process — so it returns None here to force the per-worker deque path."""
+    try:
+        from src.app.deps import get_redis
+        r = get_redis()
+        return None if type(r).__name__ == "DummyRedis" else r
+    except Exception:
+        return None
+
+
+def _add_and_count(store: "dict[str, Deque[Tuple[float, int]]]", ns: str, key: str,
+                   amount_cents: int, now: float) -> Tuple[int, int]:
+    """Record this attempt and return (recent_count, tiny_count) over the sliding window. Redis-backed
+    (a ZSET per key, scored by timestamp, member '{ts}:{amount}') so velocity is SHARED across workers;
+    the in-process deque is the fallback ONLY when Redis is down (then it degrades to per-worker, as
+    before). Without this, multi-worker deployments count 1/N of a card-tester's attempts per worker
+    and the velocity/card-testing thresholds never trip."""
+    r = _shared_redis()
+    if r is not None:
+        try:
+            zkey = f"payvel:{ns}:{key}"
+            cutoff = now - _WINDOW_SECONDS
+            r.zadd(zkey, {f"{now:.6f}:{int(amount_cents or 0)}": now})
+            r.zremrangebyscore(zkey, 0, cutoff)
+            r.expire(zkey, _WINDOW_SECONDS + 60)
+            members = r.zrange(zkey, 0, -1) or []
+            tiny = 0
+            for m in members:
+                try:
+                    if int(str(m).rsplit(":", 1)[1]) <= 300:
+                        tiny += 1
+                except (ValueError, IndexError):
+                    pass
+            return len(members), tiny
+        except Exception:
+            pass  # fall through to the in-process window
+    q = store[key]
+    _trim(q, now)
+    q.append((now, int(amount_cents or 0)))
+    return len(q), sum(1 for _, v in q if v <= 300)
+
+
+def reset_counters() -> None:
+    """Clear the in-process velocity windows. For test isolation (these module-level counters
+    otherwise accumulate across tests in one process and shift a classification order-dependently)
+    and for an ops reset lever."""
+    _UID_ATTEMPTS.clear()
+    _IP_ATTEMPTS.clear()
+    r = _shared_redis()
+    if r is not None:
+        try:
+            keys = list(r.scan_iter("payvel:*")) if hasattr(r, "scan_iter") else []
+            if keys:
+                r.delete(*keys)
+        except Exception:
+            pass
+
+
 def evaluate_payment_threat(
     *,
     provider: str,
@@ -41,16 +100,9 @@ def evaluate_payment_threat(
     now = time.time()
     uid_key = str(uid or "unknown")
     ip_key = str(request_ip or "unknown")
-    uid_q = _UID_ATTEMPTS[uid_key]
-    ip_q = _IP_ATTEMPTS[ip_key]
-    _trim(uid_q, now)
-    _trim(ip_q, now)
-    uid_q.append((now, int(amount_cents or 0)))
-    ip_q.append((now, int(amount_cents or 0)))
-
-    recent_uid = len(uid_q)
-    recent_ip = len(ip_q)
-    tiny_uid = sum(1 for _, v in uid_q if v <= 300)
+    # Shared-across-workers velocity windows (Redis-backed; per-worker deque fallback when Redis down).
+    recent_uid, tiny_uid = _add_and_count(_UID_ATTEMPTS, "uid", uid_key, amount_cents, now)
+    recent_ip, _ = _add_and_count(_IP_ATTEMPTS, "ip", ip_key, amount_cents, now)
     huge_amount = int(amount_cents or 0) >= 500000
     suspicious_desc = bool(_SUSPICIOUS_DESC.search(description or ""))
 

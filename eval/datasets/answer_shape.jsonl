@@ -1,0 +1,14 @@
+{"id":"as01","metric":"relevancy","intent":"budget","query":"is $1800 enough for a gaming laptop?","must_match":"^(yes|no|it depends|\\$?1?,?800)"}
+{"id":"as02","metric":"relevancy","intent":"budget","query":"can i get a good gaming laptop for $1500?","must_match":"^(yes|no|it depends|\\$?1?,?500)"}
+{"id":"as03","metric":"relevancy","intent":"budget","query":"is $900 enough for a gaming laptop?","must_match":"^(yes|no|it depends|\\$?900|that)"}
+{"id":"as04","metric":"relevancy","intent":"comparison","query":"rtx 4060 vs 4070 for school and gaming?","must_contain_all":["4060","4070"],"must_contain_any":["pick","worth","unless","go with","better","value","stronger"]}
+{"id":"as05","metric":"relevancy","intent":"comparison","query":"what is the difference between the rtx 4060 and rtx 4070 gaming laptops?","must_contain_all":["4060","4070"]}
+{"id":"as06","metric":"relevancy","intent":"knowledge","query":"do i need 32gb ram for gaming?","must_contain_any":["32gb","32 gb","16gb","ram","need","enough"]}
+{"id":"as07","metric":"relevancy","intent":"knowledge","query":"how much vram do i need for 1440p gaming?","must_contain_any":["vram","gb","gpu","memory"]}
+{"id":"as08","metric":"faithfulness","query":"gaming laptop 1300 to 1800","budget_min":1300,"budget_max":1800}
+{"id":"as09","metric":"faithfulness","query":"laptop for university under 1200","budget_max":1200}
+{"id":"as10","metric":"faithfulness","query":"content creation laptop 1500 to 2500","budget_min":1500,"budget_max":2500}
+{"id":"as11","metric":"faithfulness","query":"msi gaming laptop 1300 to 1800","budget_min":1300,"budget_max":1800}
+{"id":"as12","metric":"recovery","query":"asus gaming laptop under 400","budget_max":400,"must_contain_any":["raise","increase","higher","above","nearest","other brand","comparable","couldn't find","could not find","no in-stock","not find","alternativ"]}
+{"id":"as13","metric":"recovery","query":"macbook under 300","budget_max":300,"must_contain_any":["raise","increase","higher","above","nearest","other brand","comparable","couldn't find","could not find","no in-stock","not find","alternativ"]}
+{"id":"as14","metric":"recovery","query":"gaming laptop under 200","budget_max":200,"must_contain_any":["raise","increase","higher","above","nearest","other brand","comparable","couldn't find","could not find","no in-stock","not find","alternativ"]}

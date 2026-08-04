@@ -1,0 +1,24 @@
+{"id": "iq01", "query": "what's good to get for gaming? 1500-1900? why?", "expected_intent": "product_search", "expect_constraints": {"must_have_dedicated_gpu": true}}
+{"id": "iq02", "query": "what is the difference between the RTX 4060 and RTX 4070 gaming laptops?", "expected_intent": "comparison", "expect_answer_without_products": true}
+{"id": "iq03", "query": "do i need 32gb ram for gaming?", "expected_intent": "knowledge", "expect_constraints": {"ram_gb_min": 32}, "expect_answer_without_products": true}
+{"id": "iq04", "query": "i need a laptop for gaming and video editing, portable, under 2000", "expected_intent": "recommendation_multi", "expect_constraints": {"weight_kg_max": 2.0, "must_have_dedicated_gpu": true}}
+{"id": "iq05", "query": "my laptop screen is cracked, can i return it?", "expected_intent": "support"}
+{"id": "iq06", "query": "show me something good", "expected_intent": "product_search"}
+{"id": "iq07", "query": "best for competitive esports valorant at 240fps under 1900?", "expected_intent": "product_search", "expect_constraints": {"refresh_hz_min": 240}}
+{"id": "iq08", "query": "compare the macbook air vs the dell xps", "expected_intent": "comparison"}
+{"id": "iq09", "query": "is $1500 enough for a good gaming laptop?", "expected_intent": "product_search"}
+{"id": "iq10", "query": "which is better for 1080p gaming, 16gb or 32gb ram?", "expected_intent": "comparison", "expect_answer_without_products": true}
+{"id": "iq11", "query": "lightweight ultrabook for university under 1200", "expected_intent": "product_search", "expect_constraints": {"weight_kg_max": 2.0}}
+{"id": "iq12", "query": "laptop for machine learning and 3d rendering", "expected_intent": "recommendation_multi", "expect_constraints": {"must_have_dedicated_gpu": true}}
+{"id": "iq13", "query": "what's the difference between an SSD and an HDD?", "expected_intent": "comparison", "expect_answer_without_products": true}
+{"id": "iq14", "query": "gaming desktop with rtx 4080 and 32gb ram", "expected_intent": "product_search", "expect_constraints": {"ram_gb_min": 32, "gpu_model_hint": "rtx 4080"}}
+{"id": "iq15", "query": "good office laptop for excel and email", "expected_intent": "product_search"}
+{"id": "iq16", "query": "warranty claim for a dead pixel on my monitor", "expected_intent": "support"}
+{"id": "iq17", "query": "laptop for coding and gaming, portable", "expected_intent": "recommendation_multi", "expect_constraints": {"weight_kg_max": 2.0, "must_have_dedicated_gpu": true}}
+{"id": "iq18", "query": "144hz gaming laptop under 1500", "expected_intent": "product_search", "expect_constraints": {"refresh_hz_min": 144}}
+{"id": "iq19", "query": "which gpu is better for ray tracing", "expected_intent": "knowledge", "expect_answer_without_products": true}
+{"id": "iq20", "query": "show me asus rog laptops", "expected_intent": "product_search"}
+{"id": "iq21", "query": "creator laptop for video editing and photoshop", "expected_intent": "recommendation_multi"}
+{"id": "iq22", "query": "vs between lenovo legion and hp omen", "expected_intent": "comparison"}
+{"id": "iq23", "query": "tablet with a stylus for note taking", "expected_intent": "product_search"}
+{"id": "iq24", "query": "16gb gaming laptop with a discrete gpu", "expected_intent": "product_search", "expect_constraints": {"ram_gb_min": 16, "must_have_dedicated_gpu": true}}

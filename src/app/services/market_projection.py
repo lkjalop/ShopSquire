@@ -1,0 +1,266 @@
+"""Portable assembly of SKU-scoped market projections from canonical facts."""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, Sequence
+
+from sqlalchemy import text
+
+from src.app.services.decision_log import log_trace_event
+from src.app.services.executive_metrics import gmroi_unavailable, inventory_productivity
+from src.app.services.market_analysis import detect_bulk_order_frequency, detect_velocity_dsi
+
+
+def _as_utc(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _recent(rows: Iterable[Dict[str, Any]], key: str, since: datetime) -> list[Dict[str, Any]]:
+    return [row for row in rows if (_as_utc(row.get(key)) or datetime.min.replace(tzinfo=timezone.utc)) >= since]
+
+
+def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict[str, Any]:
+    """Load facts without database-specific date arithmetic."""
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=max(1, int(window_days)))
+    sales_rows: list[Dict[str, Any]] = []
+    inventory_rows: list[Dict[str, Any]] = []
+    case_rows: list[Dict[str, Any]] = []
+    try:
+        rows = db.execute(text(
+            "SELECT sku, quantity, occurred_at, source_system, source_record_id "
+            "FROM marketing_event_fact "
+            "WHERE tenant_id=:tenant AND event_type='purchase' AND status='active'"),
+            {"tenant": tenant_id}).fetchall()
+        sales_rows = _recent([
+            {"sku": row[0], "quantity": row[1], "event_time": row[2],
+             "source_system": row[3], "source_record_id": row[4]} for row in rows
+        ], "event_time", since)
+    except Exception:
+        pass
+    # sales_metrics is a legacy, unscoped demo fixture. It may inform only the
+    # default demo tenant; it must never bleed into a real tenant projection.
+    if not sales_rows and tenant_id == "default":
+        try:
+            rows = db.execute(text(
+                "SELECT sku, quantity, event_time FROM sales_metrics")).fetchall()
+            sales_rows = _recent([
+                {"sku": row[0], "quantity": row[1], "event_time": row[2]} for row in rows
+            ], "event_time", since)
+        except Exception:
+            pass
+    inventory_status = "unavailable"
+    try:
+        rows = db.execute(text(
+            "SELECT sku, location_id, on_hand_quantity, committed_quantity, "
+            "confirmed_quantity, observed_at, source_system, confidence, source_record_id "
+            "FROM inventory_atp_fact WHERE tenant_id=:tenant AND status='active' "
+            "ORDER BY observed_at DESC"), {"tenant": tenant_id}).fetchall()
+        latest: Dict[tuple[str, str], Any] = {}
+        for row in rows:
+            key = (str(row[0] or ""), str(row[1] or "default"))
+            latest.setdefault(key, row)
+        inventory_rows = [
+            {
+                "sku": row[0], "location_id": row[1],
+                "on_hand": int(row[2] or 0), "reserved": int(row[3] or 0),
+                "available": int(
+                    row[4] if row[4] is not None else int(row[2] or 0) - int(row[3] or 0)),
+                "updated_at": row[5], "source_system": row[6],
+                "confidence": float(row[7] or 0.0), "source_record_id": row[8],
+            }
+            for row in latest.values()
+            if _as_utc(row[5]) and _as_utc(row[5]) >= now - timedelta(days=1)
+        ]
+        inventory_status = "observed" if inventory_rows else "insufficient_data"
+    except Exception:
+        inventory_status = "unavailable"
+    try:
+        rows = db.execute(text(
+            "SELECT f.id, v.state_json, v.valid_from FROM fulfillment_case f "
+            "JOIN fulfillment_case_version v ON v.case_id=f.id "
+            "AND v.valid_from=(SELECT MAX(v2.valid_from) FROM fulfillment_case_version v2 "
+            "                  WHERE v2.case_id=f.id) "
+            "WHERE COALESCE(f.tenant_id,'default')=:tenant"),
+            {"tenant": tenant_id}).fetchall()
+        for case_id, raw, occurred_at in rows:
+            try:
+                state = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+            except Exception:
+                state = {}
+            for line in state.get("order_lines") or []:
+                case_rows.append({
+                    "case_id": case_id, "sku": line.get("item_ref"),
+                    "quantity": line.get("quantity"), "occurred_at": occurred_at,
+                })
+        case_rows = _recent(case_rows, "occurred_at", now - timedelta(days=90))
+    except Exception:
+        pass
+    sales_status = (
+        "observed" if sales_rows and tenant_id != "default"
+        else "simulated" if sales_rows
+        else "insufficient_data"
+    )
+    return {
+        "sales": sales_rows, "inventory": inventory_rows, "cases": case_rows,
+        "as_of": now.isoformat(), "sales_status": sales_status,
+        "inventory_status": inventory_status,
+    }
+
+
+def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dict[str, Dict[str, Any]]:
+    inputs = load_projection_inputs(db, tenant_id=tenant_id, window_days=window_days)
+    velocity = detect_velocity_dsi(inputs["sales"], inputs["inventory"], window_days=window_days)
+    bulk = detect_bulk_order_frequency(inputs["cases"], window_days=90)
+    for sku, item in velocity.items():
+        item["bulk_frequency"] = bulk.get(sku, {
+            "subject_id": sku, "window_days": 90, "bulk_order_count": 0,
+            "bulk_units_requested": 0, "orders_per_30d": 0.0,
+        })
+        item["as_of"] = inputs["as_of"]
+        statuses = {inputs["sales_status"], inputs["inventory_status"]}
+        item["status"] = (
+            "observed" if statuses == {"observed"}
+            else "simulated" if "simulated" in statuses
+            else "insufficient_data"
+        )
+        item["confidence"] = (
+            "high" if item["status"] == "observed"
+            else "demo_only" if item["status"] == "simulated"
+            else "insufficient_data"
+        )
+        item["source_status"] = {
+            "sales": inputs["sales_status"], "inventory": inputs["inventory_status"]}
+        source_records = [
+            f"{row.get('source_system')}/{row.get('source_record_id')}"
+            for row in [*inputs["sales"], *inputs["inventory"]]
+            if str(row.get("sku") or "") == sku and row.get("source_record_id")
+        ]
+        item["metrics"] = [
+            metric.model_dump(mode="json")
+            for metric in inventory_productivity(
+                tenant_id=tenant_id, sku=sku,
+                units_sold=int(item.get("units_sold") or 0),
+                window_days=window_days,
+                available_units=(
+                    int(item["stock_on_hand"])
+                    if item.get("stock_on_hand") is not None else None),
+                source_records=source_records,
+            )
+        ]
+        item["metrics"].append(
+            gmroi_unavailable(tenant_id=tenant_id, subject_id=sku).model_dump(mode="json"))
+    return velocity
+
+
+def projection_evidence(
+    db, *, tenant_id: str, results: Sequence[Dict[str, Any]], window_days: int = 30,
+) -> list[Dict[str, Any]]:
+    """Build buyer-safe, tenant/SKU-scoped evidence for an ordered slate."""
+    by_sku = projections(db, tenant_id=tenant_id, window_days=window_days)
+    evidence: list[Dict[str, Any]] = []
+    for rank, row in enumerate(results[:10], start=1):
+        sku = str((row or {}).get("sku") or "").strip()
+        projection = by_sku.get(sku)
+        if not projection:
+            continue
+        units_per_day = float(projection.get("units_per_day") or 0.0)
+        evidence.append({
+            "tenant_id": tenant_id,
+            "sku": sku,
+            "rank": rank,
+            "demand_trend": (
+                "dead_stock" if projection.get("dead_stock")
+                else "observed_sales" if units_per_day > 0
+                else "insufficient_data"
+            ),
+            "forecast_units_30d": round(units_per_day * 30.0, 2),
+            "velocity_dsi_days": projection.get("dsi_days"),
+            "stock_position": (
+                "stockout" if projection.get("stockout")
+                else "surplus" if projection.get("dead_stock")
+                else "balanced"
+            ),
+            "stock_on_hand": projection.get("stock_on_hand"),
+            "bulk_frequency": projection.get("bulk_frequency"),
+            "metrics": projection.get("metrics", []),
+            "status": projection.get("status"),
+            "source_status": projection.get("source_status"),
+            "confidence": projection.get("confidence"),
+            "as_of": projection.get("as_of"),
+            "economics_included": False,
+        })
+    return evidence
+
+
+def emit_projection_events(
+    db, *, trace_id: str, tenant_id: str, results: Sequence[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    """Persist the same scoped evidence for legacy and V2 recommendation paths."""
+    evidence = projection_evidence(db, tenant_id=tenant_id, results=results)
+    for payload in evidence:
+        log_trace_event(
+            trace_id=trace_id, event_type="market_projection", source_type="stage",
+            source_id="MarketProjectionStage", target_type="sku",
+            target_id=str(payload["sku"]), payload=payload)
+    return evidence
+
+
+def operator_product_projection(db, *, sku: str, tenant_id: str = "default") -> Dict[str, Any]:
+    """Join the non-sensitive projection to operator-only catalog economics."""
+    from src.app.services.catalog_read_model import get_variant
+    from src.app.services.supplier_catalog import best_supplier_cost
+
+    key = str(sku or "").strip()
+    view = get_variant(db, key, tenant_id=tenant_id)
+    if view is None:
+        return {"available": False, "sku": key, "reason": "unknown_sku"}
+    projection = projections(db, tenant_id=tenant_id, window_days=30).get(key, {})
+    cost = best_supplier_cost(
+        db, key, tenant_id=tenant_id, currency=str(view.currency or "USD")) or {}
+    list_cents = int(view.price_cents) if view.price_cents is not None else None
+    wholesale_cents = (
+        int(cost["unit_cost_cents"]) if cost.get("unit_cost_cents") is not None else None)
+    gross = (
+        list_cents - wholesale_cents
+        if list_cents is not None and wholesale_cents is not None else None)
+    margin_pct = (
+        round(gross / float(list_cents), 4) if gross is not None and list_cents else None)
+    forecast_units = float(projection.get("units_per_day") or 0.0) * 30.0
+    authorized = bool(
+        cost.get("cost_kind") == "validated_landed_quote"
+        and not cost.get("simulation_only")
+        and cost.get("source_record_id"))
+    result = {
+        "available": True,
+        "tenant_id": tenant_id,
+        "sku": key,
+        "name": str(getattr(view, "title", "") or key),
+        "currency": str(view.currency or "USD"),
+        "list_cents": list_cents,
+        "wholesale_cents": wholesale_cents,
+        "gross_per_unit_cents": gross,
+        "gross_margin_pct": margin_pct,
+        "forecast_units_30d": round(forecast_units, 2),
+        "projected_profit_30d_cents": (
+            int(round(gross * forecast_units)) if gross is not None else None),
+        "discount_headroom_cents": None,
+        "discount_authorized": authorized,
+        "cost_basis": cost.get("cost_kind") or cost.get("cost_basis") or "unavailable",
+        "cost_source_system": cost.get("source_system"),
+        "cost_source_record_id": cost.get("source_record_id"),
+        "cost_provenance_chain": list(cost.get("provenance_chain") or []),
+        "simulation_only": bool(cost.get("simulation_only", not authorized)),
+        "projection": projection,
+    }
+    from src.app.services.commercial_action_proposals import product_action_proposals
+    result["action_proposals"] = product_action_proposals(
+        db, sku=key, tenant_id=tenant_id, operator_projection=result)
+    return result

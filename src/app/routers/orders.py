@@ -11,7 +11,6 @@ from sqlalchemy import text as sql_text
 from pydantic import BaseModel, EmailStr
 
 from src.app.models.db import db_session, get_engine, get_db
-from fastapi import Depends, Request
 from src.app.observability.tracing import get_tracer
 from src.app.repositories.catalog import CatalogRepository
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
@@ -33,6 +32,9 @@ class OrderCreate(BaseModel):
     items: List[OrderItem]
     customer_id: str | None = None
     guest_email: EmailStr | None = None
+    # E1 — attribution: the recommendation trace_id the cart carried, so the order can be
+    # linked back to the decision that produced it. Optional (direct orders leave it null).
+    trace_id: str | None = None
 
 class OrderStatusUpdate(BaseModel):
     status: str
@@ -44,7 +46,7 @@ class GuestLookupPayload(BaseModel):
 
 ALLOWED_TRANSITIONS = {
     "created": {"paid", "cancelled"},
-    "paid": {"shipped", "cancelled"},
+    "paid": {"shipped"},
     "shipped": {"delivered"},
     "delivered": {"return_requested"},
     "return_requested": {"returned"},
@@ -97,8 +99,21 @@ def _get_order_status(order_id: str, db=None) -> str:
         pass
     return str(row)
 
-@router.post("/create")
-def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])), db=Depends(get_db)) -> Dict:
+def create_order_core(db, *, uid: str, items: list, customer_id: str | None = None,
+                      guest_email: str | None = None, trace_id: str | None = None) -> Dict:
+    """Order creation shared by the merchant route and the public checkout bridge (P0-A:
+    checkout-initiate creates the order server-side so the customer path yields a REAL order row
+    and the webhook's created→paid transition is reachable). ``items`` accepts OrderItem models or
+    {sku, quantity} dicts. Prices are ALWAYS server-side catalog prices. Raises HTTPException."""
+    from types import SimpleNamespace
+    norm = []
+    for i in (items or []):
+        sku = getattr(i, "sku", None) or (i.get("sku") if isinstance(i, dict) else None)
+        qty = getattr(i, "quantity", None) or (i.get("quantity") if isinstance(i, dict) else 1) or 1
+        if sku:
+            norm.append(SimpleNamespace(sku=str(sku), quantity=int(qty)))
+    req = SimpleNamespace(uid=str(uid or ""), items=norm, customer_id=customer_id,
+                          guest_email=guest_email, trace_id=trace_id)
     with tracer.start_as_current_span("orders.create"):
         if not req.items:
             raise HTTPException(status_code=400, detail="Items required")
@@ -181,30 +196,42 @@ def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHA
         # db is a SQLAlchemy Session provided by Depends(get_db)
         # Insert draft, order and session atomically
         with tracer.start_as_current_span("orders.db_write"):
+            from src.app.platform.tenant_context import current_tenant_id
             db.execute(
-                sql_text("INSERT INTO draft_orders (id, customer_id, line_items, status) VALUES (:id, :customer_id, :line_items, :status)"),
-                {"id": draft_id, "customer_id": customer_id, "line_items": json.dumps(line_items), "status": "draft"},
+                sql_text("INSERT INTO draft_orders (id, customer_id, tenant_id, line_items, status) VALUES (:id, :customer_id, :t, :line_items, :status)"),
+                {"id": draft_id, "customer_id": customer_id, "t": current_tenant_id(), "line_items": json.dumps(line_items), "status": "draft"},
             )
             db.execute(
                 sql_text(
-                    "INSERT INTO orders (id, draft_order_id, customer_id, guest_email, guest_email_hash, guest_email_encrypted, total_cents, currency, status) "
-                    "VALUES (:id, :draft_id, :customer_id, :guest_email, :guest_email_hash, :guest_email_encrypted, :total_cents, :currency, :status)"
+                    "INSERT INTO orders (id, draft_order_id, customer_id, tenant_id, tenant_ownership_status, guest_email, guest_email_hash, guest_email_encrypted, total_cents, currency, status, trace_id) "
+                    "VALUES (:id, :draft_id, :customer_id, :tenant_id, 'authoritative_request_context', :guest_email, :guest_email_hash, :guest_email_encrypted, :total_cents, :currency, :status, :trace_id)"
                 ),
                 {
                     "id": order_id,
                     "draft_id": draft_id,
                     "customer_id": customer_id,
+                    "tenant_id": current_tenant_id(),
                     "guest_email": None,
                     "guest_email_hash": guest_email_hash,
                     "guest_email_encrypted": guest_email_encrypted,
                     "total_cents": total_cents,
                     "currency": "USD",
                     "status": "created",
+                    "trace_id": req.trace_id,  # E1
                 },
             )
             db.execute(
-                sql_text("INSERT INTO order_sessions (id, uid, order_id) VALUES (:id, :uid, :order_id)"),
-                {"id": str(uuid.uuid4()), "uid": session_uid, "order_id": order_id},
+                sql_text(
+                    "INSERT INTO order_sessions "
+                    "(id, uid, order_id, tenant_id, tenant_ownership_status) "
+                    "VALUES (:id, :uid, :order_id, :tenant_id, 'derived_from_tenant_order')"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "uid": session_uid,
+                    "order_id": order_id,
+                    "tenant_id": current_tenant_id(),
+                },
             )
             try:
                 db.commit()
@@ -214,8 +241,40 @@ def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHA
                 except Exception:
                     pass
 
+        # E2 — attribution: link this order back to the recommendation decision that produced it
+        # (trace_id match first, uid_hash fallback). Isolated session + observable-on-failure;
+        # never affects the order result. Flag-gated for parity with E0 capture.
+        try:
+            from src.app.feature_flags import get_flags as _get_flags
+            if (_get_flags() or {}).get("ATTRIBUTION_ENABLED", True):
+                from src.app.services.attribution import attribute_order as _attribute_order
+                from src.app.deps import hash_uid as _hash_uid
+                _attr_uid_hash = _hash_uid(session_uid) if session_uid else None
+                _attr_skus = [li.get("sku") for li in line_items if li.get("sku")]
+                with db_session() as _attr_db:
+                    _attribute_order(
+                        _attr_db,
+                        order_id=order_id,
+                        trace_id=req.trace_id,
+                        uid_hash=_attr_uid_hash,
+                        value_cents=total_cents,
+                        line_skus=_attr_skus,
+                        converted_at=datetime.utcnow().isoformat(),
+                    )
+                    _attr_db.commit()
+        except Exception as _e_attr:
+            from src.app.services.safe_stage import record_partial_failure as _rpf
+            _rpf("attribution_order", _e_attr, trace_id=req.trace_id)
+
         summary = {"order_id": order_id, "total_cents": total_cents, "created_at": datetime.utcnow().isoformat()}
         return {"created": True, "order_id": order_id, "total_cents": total_cents, "created_at": summary["created_at"], "status": "created", "customer_id": customer_id}
+
+
+@router.post("/create")
+def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])), db=Depends(get_db)) -> Dict:
+    return create_order_core(db, uid=req.uid, items=req.items, customer_id=req.customer_id,
+                             guest_email=(str(req.guest_email) if req.guest_email else None),
+                             trace_id=req.trace_id)
 
 
 @router.post("/guest/lookup")
@@ -355,23 +414,59 @@ def cancel_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
         status = _get_order_status(order_id, db)
         if "cancelled" not in ALLOWED_TRANSITIONS.get(status, set()):
             raise HTTPException(status_code=400, detail=f"Cannot cancel from status {status}")
-        res = db.execute(
-            "UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = :id",
-            {"id": order_id},
-        )
+
+        # ── Unified Authorization Engine gate (shadow) ──
+        # Human-authenticated route (require_role), so enforce_lane=False — there is
+        # no autonomous-agent lane to police; the engine provides the unified policy
+        # + audit trail. Inert in shadow mode; enforces once flipped to active.
         try:
-            release_inventory_for_order(db, order_id=order_id)
+            from src.app.security.authorization_engine import authorize_action
+            _conditions = [] if status is None else ([] if status not in ("shipped", "delivered") else ["order_shipped"])
+            if not status:
+                _conditions.append("order_not_found")
+            _authz = authorize_action(
+                "order_modification",
+                requester=str(role or "merchant"),
+                conditions=_conditions,
+                subject_id=order_id,
+                idempotency_key=f"cancel:{order_id}",
+                enforce_lane=False,
+            )
+            if _authz.should_block():  # inert in shadow
+                raise HTTPException(status_code=409, detail={
+                    "error": "authorization_engine_denied",
+                    "action": "order_modification",
+                    "reason": _authz.reason,
+                    "terminal_outcome": _authz.terminal_outcome,
+                    "residual": _authz.residual,
+                })
+        except HTTPException:
+            raise
         except Exception:
             pass
+        # CAS transition (P0-1c): guard the write on the status we validated so two concurrent
+        # transitions can't both win (last-writer-wins would let a `paid` order be silently
+        # cancelled). Same pattern as the Stripe webhook (`AND status='created'`). Inventory is
+        # released ONLY if we won the transition — never on a lost race (double-release guard).
+        res = db.execute(
+            sql_text("UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP "
+                     "WHERE id = :id AND status = :expected"),
+            {"id": order_id, "expected": status},
+        )
+        won = int(getattr(res, "rowcount", 0) or 0) > 0
         try:
+            if won:
+                release_inventory_for_order(db, order_id=order_id)
             db.commit()
-        except Exception:
+        except Exception as exc:
             try:
                 db.rollback()
             except Exception:
                 pass
-        if getattr(res, "rowcount", 0) == 0:
-            raise HTTPException(status_code=404, detail="Order not found")
+            raise HTTPException(status_code=503, detail="Order cancellation could not be committed") from exc
+        if not won:
+            # order existed at read (else _get_order_status 404'd) → status changed under us
+            raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
         return {"cancelled": True, "order_id": order_id}
 
 
@@ -382,18 +477,20 @@ def return_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
         if "return_requested" not in ALLOWED_TRANSITIONS.get(status, set()):
             raise HTTPException(status_code=400, detail=f"Cannot request return from status {status}")
         res = db.execute(
-            "UPDATE orders SET status = 'return_requested', updated_at = CURRENT_TIMESTAMP WHERE id = :id",
-            {"id": order_id},
+            sql_text("UPDATE orders SET status = 'return_requested', updated_at = CURRENT_TIMESTAMP "
+                     "WHERE id = :id AND status = :expected"),   # P0-1c CAS guard
+            {"id": order_id, "expected": status},
         )
         try:
             db.commit()
-        except Exception:
+        except Exception as exc:
             try:
                 db.rollback()
             except Exception:
                 pass
-        if getattr(res, "rowcount", 0) == 0:
-            raise HTTPException(status_code=404, detail="Order not found")
+            raise HTTPException(status_code=503, detail="Return request could not be committed") from exc
+        if int(getattr(res, "rowcount", 0) or 0) == 0:
+            raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
         return {"return_requested": True, "order_id": order_id}
 
 
@@ -414,16 +511,18 @@ def update_status(
         if target not in allowed:
             raise HTTPException(status_code=400, detail=f"Cannot move from {current} to {target}")
         res = db.execute(
-            _text("UPDATE orders SET status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
-            {"id": order_id, "status": target},
+            _text("UPDATE orders SET status = :status, updated_at = CURRENT_TIMESTAMP "
+                  "WHERE id = :id AND status = :expected"),   # P0-1c CAS guard
+            {"id": order_id, "status": target, "expected": current},
         )
         try:
             db.commit()
-        except Exception:
+        except Exception as exc:
             try:
                 db.rollback()
             except Exception:
                 pass
-        if getattr(res, "rowcount", 0) == 0:
-            raise HTTPException(status_code=404, detail="Order not found")
+            raise HTTPException(status_code=503, detail="Order status update could not be committed") from exc
+        if int(getattr(res, "rowcount", 0) or 0) == 0:
+            raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
         return {"updated": True, "order_id": order_id, "status": target}

@@ -12,6 +12,14 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
+# The installed ``alembic.exe`` starts with its Scripts directory on
+# ``sys.path``.  Add the repository root before importing application settings;
+# otherwise DATABASE_URL resolution silently falls through and the placeholder
+# in alembic.ini reaches ConfigParser unchanged.
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 # Interpret the config file for Python logging.
 fileConfig(config.config_file_name)
 
@@ -29,14 +37,6 @@ if db_url:
 
 # add your model's MetaData object here for 'autogenerate' support
 target_metadata = None
-
-# Ensure project root is on sys.path for imports like `src.app.models.orm`
-try:
-    project_root = Path(__file__).resolve().parent.parent
-    if project_root.as_posix() not in [Path(p).as_posix() for p in sys.path]:
-        sys.path.insert(0, str(project_root))
-except Exception:
-    pass
 
 # Try to import SQLAlchemy Base metadata for autogenerate
 for import_path in (
@@ -86,6 +86,23 @@ def run_migrations_online():
                 pre = os.path.join(os.path.dirname(__file__), "pre_migration_hook.sh")
                 if os.path.exists(pre) and os.access(pre, os.X_OK):
                     subprocess.run([pre], check=False)
+        except Exception:
+            pass
+        # Pin migrations to the public schema so all Alembic-managed tables land
+        # in a predictable location regardless of role search_path defaults.
+        # (Runtime engine sets search_path=oltp,audit,security,public via connect
+        # event; Alembic uses a separate NullPool connection and must be anchored
+        # explicitly. The oltp schema is used only for product_embeddings which
+        # are fully schema-qualified in their migration.)
+        try:
+            from sqlalchemy import text as _alembic_text
+            if connection.dialect.name != "sqlite":
+                connection.execute(_alembic_text("SET search_path TO public"))
+                # SQLAlchemy 2.x autobegins on SET. Commit that configuration
+                # transaction before Alembic opens its managed migration
+                # transaction; otherwise all migration DDL is rolled back when
+                # the connection closes even though `upgrade head` exits zero.
+                connection.commit()
         except Exception:
             pass
         context.configure(

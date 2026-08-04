@@ -1,0 +1,609 @@
+"""Step 3 — the supplier draft is an LLM-aid INSIDE A CAGE.
+
+The invariants: recipient comes from the allowlist not buyer text; the body never leaks a price and
+always carries the not-a-PO footer; evidence is scatter-gathered as discrete ids with provenance;
+the content_hash pins the message and changes on edit; a price-injecting LLM is rejected; and the
+whole thing flows through the workflow chokepoint (confidence-gated, bitemporal, traced).
+"""
+from __future__ import annotations
+
+import json
+import re
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from src.app.services.fulfillment import draft as D
+from src.app.services.fulfillment import workflow as wf
+from src.app.services.fulfillment.domain import Actor, ActorType as A, FulfillmentState as S
+
+
+@pytest.fixture()
+def db():
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    s = sessionmaker(bind=eng, future=True)()
+    try:
+        yield s
+    finally:
+        s.close()
+
+
+def AG(): return Actor(A.AGENT, "Procurement_Agent")
+def BU(): return Actor(A.BUYER, "u1")
+
+
+# deterministic injectable evidence sources (no network)
+def _rank_ok(db, item, t): return [{"id": "SUP-7", "domain": "approved-supplier.example", "reliability": 0.9}]
+def _rank_untrusted(db, item, t): return [{"id": "SUP-X", "domain": "evil.example", "reliability": 0.9}]
+def _allow(domain): return domain == "approved-supplier.example"
+def _hippo(db, item, t): return [{"summary": "3 prior on-time deliveries", "label": "SUP-7"}]
+def _market(db, item, t): return [{"finding_type": "demand_shift", "summary": "demand rising", "severity": "warn"}]
+def _benchmark(item): return {"summary": "street price ~ benchmark", "source": "allowlisted-index"}
+
+
+def _committed_case(db):
+    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
+                       now_iso="2026-06-26 09:00:00"); db.commit()
+    wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
+                  state_patch={"availability": {"shortfall": 6, "requested_qty": 10, "in_stock": 4}},
+                  now_iso="2026-06-26 09:00:01")
+    wf.transition(db, case_id=cid, event="request_buyer_commitment", actor=AG(), now_iso="2026-06-26 09:00:02")
+    wf.transition(db, case_id=cid, event="buyer_committed", actor=BU(), now_iso="2026-06-26 09:05:00")
+    return cid
+
+
+# ── the cage ─────────────────────────────────────────────────────────────────
+def test_recipient_from_allowlist_never_from_buyer_text(db):
+    # even though the "buyer query" names an attacker address, the recipient is the allowlisted supplier
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow, hippograph_fn=_hippo, market_fn=_market)
+    assert draft is not None
+    assert draft.recipient_domain == "approved-supplier.example"
+    assert "evil" not in draft.body.lower() and "attacker" not in draft.body.lower()
+
+
+def test_no_approved_supplier_when_domain_not_allowlisted(db):
+    assert D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                         rank_fn=_rank_untrusted, allowlist_fn=_allow) is None
+
+
+def test_body_is_claim_safe_no_price_and_has_po_disclaimer(db):
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "this request does not constitute a purchase order" in draft.body.lower()
+    import re
+    assert re.search(r"[$€£¥]\s?\d", draft.body) is None  # no price leak to the supplier
+
+
+def test_price_injecting_llm_is_rejected(db):
+    bad_llm = lambda *, subject, body, slots: {"subject": subject, "body": body + "\nWe will pay $900 each."}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow, llm_fn=bad_llm)
+    assert "$900" not in draft.body  # the unsafe LLM output was discarded, deterministic fill kept
+
+
+def test_evidence_scatter_gather_has_discrete_ids_and_provenance(db):
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          case_state={"availability": {"shortfall": 6, "requested_qty": 10}},
+                          rank_fn=_rank_ok, allowlist_fn=_allow, hippograph_fn=_hippo, market_fn=_market,
+                          benchmark_fn=_benchmark)
+    sources = {e["source"] for e in draft.evidence}
+    assert {"inventory", "hippograph", "market_intel", "external_benchmark"} <= sources
+    ext = next(e for e in draft.evidence if e["source"] == "external_benchmark")
+    assert ext["provenance"].startswith("external:")  # provenance-tagged
+    assert all(e["evidence_id"] for e in draft.evidence)
+    assert any("on-time" in r for r in draft.rationale)  # rationale explains the supplier choice
+
+
+def test_content_hash_changes_on_edit(db):
+    d1 = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1", rank_fn=_rank_ok, allowlist_fn=_allow)
+    d2 = D.build_draft(db, item_ref="SKU-1", quantity=99, case_ref="FC-1", rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert d1.content_hash != d2.content_hash  # an edit (qty change) → new hash → voids prior approval
+    assert D.content_hash("a", "b") == D.content_hash("a", "b")  # deterministic
+
+
+def test_supplier_urgency_requires_confident_exact_item_market_evidence():
+    broad = D.DraftEvidence("market_intel", "MKT-1", "global demand rising",
+                            payload={"scope": "global", "confidence": 0.99})
+    weak = D.DraftEvidence("market_intel", "MKT-2", "item demand rising",
+                           payload={"scope": "exact_item", "confidence": 0.4})
+    exact = D.DraftEvidence("market_intel", "MKT-3", "item demand rising",
+                            payload={"scope": "exact_item", "confidence": 0.9})
+    assert D._urgency_note([broad, weak]) == "A firm dispatch date would be appreciated."
+    assert D._urgency_note([exact]).startswith("We are seeing elevated demand")
+
+
+# ── flows through the workflow chokepoint ────────────────────────────────────
+def test_draft_and_record_advances_to_quote_drafted_with_evidence(db):
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    estimated_value_cents=669000, rank_fn=_rank_ok, allowlist_fn=_allow,
+                                    hippograph_fn=_hippo, market_fn=_market, now_iso="2026-06-26 09:05:10")
+    assert res.ok and wf.current_state(db, cid) == S.QUOTE_DRAFTED
+    cur = wf.repository.current_version(db, cid)
+    assert cur.state_json["draft"]["content_hash"] == draft.content_hash  # draft persisted on the case
+
+
+def test_draft_and_record_emits_supplier_selection_trace(db, monkeypatch):
+    events = []
+
+    def fake_log_trace_event(**kwargs):
+        events.append(kwargs)
+
+    monkeypatch.setattr("src.app.services.decision_log.log_trace_event", fake_log_trace_event)
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    estimated_value_cents=669000, rank_fn=_rank_ok, allowlist_fn=_allow,
+                                    hippograph_fn=_hippo, market_fn=_market, now_iso="2026-06-26 09:05:10")
+    assert res.ok and draft is not None
+    evt = next(e for e in events if e.get("source_id") == "Supplier_Selection_Agent")
+    assert evt["trace_id"] == "T1"
+    assert evt["event_type"] == "supplier_selected"
+    assert evt["target_id"] == cid
+    payload = evt["payload"]
+    assert payload["item_ref"] == "SKU-1"
+    assert payload["quantity"] == 6
+    assert payload["supplier_ref"] == "SUP-7"
+    assert payload["recipient_domain"] == "approved-supplier.example"
+    assert payload["content_hash"] == draft.content_hash
+
+
+def test_draft_and_record_fires_no_approved_supplier(db):
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    rank_fn=_rank_untrusted, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    assert draft is None and wf.current_state(db, cid) == S.NO_APPROVED_SUPPLIER
+
+
+def test_request_approval_advances_and_carries_hash(db):
+    cid = _committed_case(db)
+    D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6, rank_fn=_rank_ok,
+                       allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    # the AGENT submits the draft to the approval queue (the human later fires approval_granted)
+    res, _approval_id = D.request_supplier_approval(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:05:20")
+    assert res.ok and wf.current_state(db, cid) == S.AWAITING_APPROVAL
+    # the approval_requested trace evidence carries the content_hash (best-effort enqueue may be None in unit db)
+    cur = wf.repository.current_version(db, cid)
+    assert cur.state_json["draft"]["content_hash"]
+
+
+def HU(): return Actor(A.HUMAN_OPERATOR, "owner-01")
+
+
+def _to_awaiting_approval(db):
+    cid = _committed_case(db)
+    D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6, rank_fn=_rank_ok,
+                       allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    D.request_supplier_approval(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:05:20")
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL
+    return cid
+
+
+def test_edit_draft_rehashes_and_voids_approval(db):
+    cid = _to_awaiting_approval(db)
+    before = wf.repository.current_version(db, cid).state_json["draft"]["content_hash"]
+    res, draft = D.edit_draft(db, case_id=cid, actor=HU(),
+                              body="Hello, please confirm availability.\n\nThis request does not "
+                                   "constitute a purchase order.\n\nRegards", now_iso="2026-06-26 09:05:30")
+    assert res.ok and wf.current_state(db, cid) == S.QUOTE_DRAFTED  # edit → back to DRAFTED (approval void)
+    assert draft["content_hash"] != before                          # new hash → the stale approval can't send
+
+
+def test_edit_draft_rejects_unsafe_body(db):
+    cid = _to_awaiting_approval(db)
+    res, draft = D.edit_draft(db, case_id=cid, actor=HU(), body="We will pay $1200 per unit.",
+                              now_iso="2026-06-26 09:05:30")  # price leak + no PO footer
+    assert res.ok is False and res.reason == "unsafe_edit" and draft is None
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL       # unchanged — unsafe edit refused
+
+
+# ── supplier-expectation personalisation (deterministic, before any LLM polish) ──
+def test_supplier_context_personalises_when_prior_history(db):
+    # a supplier we've dealt with before gets a claim-safe relationship line; a new one does not.
+    with_hist = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                              rank_fn=_rank_ok, allowlist_fn=_allow,
+                              inbox_fn=lambda domain, t: {"observations": 3, "summary": "3 prior orders"})
+    assert "continued partnership" in with_hist.body.lower()
+    no_hist = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                            rank_fn=_rank_ok, allowlist_fn=_allow, inbox_fn=lambda domain, t: None)
+    assert "continued partnership" not in no_hist.body.lower()
+    # personalisation never breaks the cage
+    assert "this request does not constitute a purchase order" in with_hist.body.lower()
+
+
+# ── deterministic pre-send gate (governance, prior to the human GATE 2) ──
+def _gate_draft(**over):
+    base = {"recipient_email": "orders@approved-supplier.example", "recipient_domain": "approved-supplier.example",
+            "body": "Hello. This request does not constitute a purchase order.", "confidence": 0.8,
+            "commercial_scope": {"item_ref": "SKU-1", "quantity": 6}, "evidence": [{"evidence_id": "E1"}]}
+    base.update(over)
+    return base
+
+
+def test_send_gate_allows_complete_safe_draft():
+    g = D.draft_send_gate(_gate_draft())
+    assert g["decision"] == "allow" and not g["blocking"] and not g["reasons"]
+
+
+def test_send_gate_blocks_no_recipient_and_claim_leak():
+    assert D.draft_send_gate(_gate_draft(recipient_email="", recipient_domain=""))["decision"] == "block"
+    leak = D.draft_send_gate(_gate_draft(body="We will pay $900 each."))  # price leak + no PO footer
+    assert leak["decision"] == "block" and "claim_unsafe" in leak["blocking"]
+
+
+def test_send_gate_needs_info_when_incomplete():
+    assert "missing_commercial_scope" in D.draft_send_gate(
+        _gate_draft(commercial_scope={"item_ref": "", "quantity": 0}))["reasons"]
+    assert "low_confidence" in D.draft_send_gate(_gate_draft(confidence=0.2))["reasons"]
+    assert "no_evidence" in D.draft_send_gate(_gate_draft(evidence=[]))["reasons"]
+    # needs_info, not block — it's recoverable by getting more info (incl. a supplier RFI)
+    assert D.draft_send_gate(_gate_draft(confidence=0.2))["decision"] == "needs_info"
+
+
+def test_send_gate_needs_info_for_missing_deadline_or_below_moq():
+    missing = D.draft_send_gate(_gate_draft(
+        completeness={"complete": False, "reason": "missing_rfq_fields:deadline_date"},
+    ))
+    assert missing["decision"] == "needs_info"
+    assert "missing_rfq_fields:deadline_date" in missing["reasons"]
+
+    below_moq = D.draft_send_gate(_gate_draft(evidence=[
+        {"source": "moq_risk", "summary": "requested 2 below MOQ 5"},
+    ]))
+    assert below_moq["decision"] == "needs_info"
+    assert "below_supplier_moq" in below_moq["reasons"]
+
+
+def test_draft_and_record_attaches_advisory_send_gate(db):
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    rank_fn=_rank_ok, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    assert res.ok and draft is not None
+    cur = wf.repository.current_version(db, cid)
+    gate = (cur.state_json.get("draft") or {}).get("send_gate") or {}
+    assert gate.get("decision") in ("allow", "needs_info", "block")
+
+
+def test_draft_and_record_attaches_supplier_channel_and_ordering_terms(db):
+    # The persisted draft must carry the supplier's PREFERRED COMMUNICATION channel + ORDERING terms so the
+    # Decision Trace → Procurement tab shows them beside the drafted RFQ (the "how each supplier is reached +
+    # on what terms" demo showcase). SUP-7 is the recipient _rank_ok returns; give it a NON-default channel
+    # (phone → human-only) and real per-SKU terms, and assert both surface on the persisted draft.
+    from sqlalchemy import text
+    from src.app.services.supplier_catalog import ensure_tables as ensure_supplier_tables
+    ensure_supplier_tables(db)
+    db.execute(text("INSERT INTO suppliers (id, name, preferred_channel) VALUES ('SUP-7','TechData Procurement','phone')"))
+    db.execute(text("INSERT INTO supplier_products (supplier_id, sku, moq, min_order_value_cents, lead_time_days, "
+                    "region, contract_status, price_breaks, active) VALUES "
+                    "(:s,:k,:moq,:mov,:lt,:rg,:cs,:pb,1)"),
+               {"s": "SUP-7", "k": "SKU-1", "moq": 20, "mov": 150000, "lt": 4, "rg": "AU-metro",
+                "cs": "preferred", "pb": '[{"min_qty":50,"discount_pct":8}]'})
+    db.commit()
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    rank_fn=_rank_ok, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    assert res.ok and draft is not None
+    persisted = wf.repository.current_version(db, cid).state_json.get("draft") or {}
+    cp = persisted.get("channel_plan") or {}
+    assert cp.get("channel") == "phone" and cp.get("requires_human") is True   # supplier's preferred comms
+    assert "human" in (cp.get("rationale") or "").lower()
+    terms = persisted.get("supplier_terms") or {}
+    assert terms.get("moq") == 20 and terms.get("lead_time_days") == 4          # ordering preference
+    assert terms.get("contract_status") == "preferred"
+    assert terms.get("price_breaks")                                            # volume discount surfaced
+
+
+def test_draft_and_record_channel_defaults_to_email_when_supplier_row_absent(db):
+    # No suppliers row for the recipient → channel_plan defaults to email (agent drafts, human sends) and
+    # supplier_terms is an (empty) dict; the enrichment never blocks the draft on missing supplier data.
+    cid = _committed_case(db)
+    res, _ = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                rank_fn=_rank_ok, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    assert res.ok
+    persisted = wf.repository.current_version(db, cid).state_json.get("draft") or {}
+    assert (persisted.get("channel_plan") or {}).get("channel") == "email"
+    assert isinstance(persisted.get("supplier_terms"), dict)
+
+
+# ── way-1: buyer requirements cited in the RFQ (budget stays internal) ──
+def test_requirements_block_renders_buyer_constraints_excluding_budget(db):
+    cs = {"availability": {"shortfall": 6, "requested_qty": 10},
+          "requirements": {"use_case": "office", "specs": ["16gb ram", "512gb ssd"],
+                           "needed_within_days": 14, "budget": {"min": 1300, "max": 1500}}}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    body = draft.body.lower()
+    assert "key requirements" in body and "intended use: office" in body
+    assert "16gb ram" in body and "needed within: 14 days" in body
+    # budget is internal-only — it must never anchor supplier pricing
+    assert "1300" not in draft.body and "1500" not in draft.body and "budget" not in body
+    assert "this request does not constitute a purchase order" in body  # cage intact
+
+
+def test_no_requirements_block_when_case_has_none(db):
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "key requirements" not in draft.body.lower()
+
+
+def test_supplier_greeting_uses_legal_name_when_resolvable(db, monkeypatch):
+    monkeypatch.setattr("src.app.security.kyv_registry.lookup_vendor_by_domain",
+                        lambda *, tenant_id, domain: {"legal_name": "TechData Procurement"})
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "hello techdata procurement" in draft.body.lower()  # not "hello sup-7"
+
+
+# ── RFI: human-fired supplier clarification (consumes a needs_info send-gate) ──
+def _to_awaiting_approval_with_supplier(db):
+    cid = _committed_case(db)
+    D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                       rank_fn=_rank_ok, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    D.request_supplier_approval(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:05:20")
+    return cid
+
+
+def test_request_supplier_info_sends_claim_safe_rfi_and_advances(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    res, rfi = D.request_supplier_info(db, case_id=cid, actor=HU(),
+                                       question="What is your lead time and MOQ for this quantity?",
+                                       now_iso="2026-06-26 09:06:00")
+    assert res.ok and wf.current_state(db, cid) == S.AWAITING_SUPPLIER_INFO
+    assert "this request does not constitute a purchase order" in rfi["body"].lower()
+    assert rfi["recipient_domain"] == "approved-supplier.example" and rfi["content_hash"]
+
+
+def test_request_supplier_info_rejects_price_leak(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    res, rfi = D.request_supplier_info(db, case_id=cid, actor=HU(), question="We'll pay $900 each, ok?",
+                                       now_iso="2026-06-26 09:06:00")
+    assert res.ok is False and res.reason == "unsafe_rfi" and rfi is None
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL  # unchanged — unsafe RFI refused
+
+
+def test_record_supplier_info_returns_to_approval_gate(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time?", now_iso="2026-06-26 09:06:00")
+    res, resp = D.record_supplier_info(db, case_id=cid, actor=HU(), answer="7 days, MOQ 1.",
+                                       now_iso="2026-06-26 09:10:00")
+    assert res.ok and wf.current_state(db, cid) == S.AWAITING_APPROVAL
+    assert resp == {"answer": "7 days, MOQ 1."}
+
+
+# ── RFI actually transmits (transport seam) + inbound reply is EXTERNAL + trust-verified ──
+class _FailTransport:
+    def send(self, *, to, subject, body, idempotency_key=""):
+        class _R:
+            status = "failed"
+            provider_ref = ""
+            detail = "smtp_boom"
+        return _R()
+
+
+def test_request_supplier_info_records_transport_send(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    res, rfi = D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time and MOQ?",
+                                       now_iso="2026-06-26 09:06:00")
+    assert res.ok and rfi["status"] == "sent" and rfi["provider_ref"].startswith("DEMO-OUT-")
+    assert wf.current_state(db, cid) == S.AWAITING_SUPPLIER_INFO
+
+
+def test_request_supplier_info_send_failure_keeps_state(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    res, rfi = D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time?",
+                                       transport=_FailTransport(), now_iso="2026-06-26 09:06:00")
+    assert res.ok is False and res.reason == "rfi_send_failed" and rfi is None
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL  # no transmit → no transition
+
+
+def test_receive_supplier_info_external_trusted_advances(db):
+    from src.app.services.fulfillment import external_comms as EC
+    cid = _to_awaiting_approval_with_supplier(db)
+    D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time?", now_iso="2026-06-26 09:06:00")
+    res = EC.receive_supplier_info(db, case_id=cid, raw_body="Lead time 7 days, MOQ 1.",
+                                   sender_domain="approved-supplier.example", provider_ref="IN-1",
+                                   trusted_fn=lambda d: d == "approved-supplier.example",
+                                   now_iso="2026-06-26 09:10:00")
+    assert res.ok and wf.current_state(db, cid) == S.AWAITING_APPROVAL
+
+
+def test_receive_supplier_info_untrusted_sender_rejected(db):
+    from src.app.services.fulfillment import external_comms as EC
+    cid = _to_awaiting_approval_with_supplier(db)
+    D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time?", now_iso="2026-06-26 09:06:00")
+    res = EC.receive_supplier_info(db, case_id=cid, raw_body="evil", sender_domain="attacker.example",
+                                   trusted_fn=lambda d: False, now_iso="2026-06-26 09:10:00")
+    assert res.ok is False and res.reason == "untrusted_sender"
+    assert wf.current_state(db, cid) == S.AWAITING_SUPPLIER_INFO  # no state change on untrusted inbound
+
+
+# ── broadened claim-safety guard (LLM-output attack surface) ──
+def test_claim_safety_reason_catches_attack_vectors():
+    NOT_PO = "this request does not constitute a purchase order"
+    assert D.claim_safety_reason(f"hi. {NOT_PO}") is None
+    assert D.claim_safety_reason("no footer here") == "missing_not_a_po_footer"
+    assert D.claim_safety_reason(f"pay $900. {NOT_PO}") == "price_or_currency_leak"
+    assert D.claim_safety_reason(f"we guarantee it. {NOT_PO}") == "unsupported_or_binding_claim"
+    assert D.claim_safety_reason(f"order confirmed. {NOT_PO}") == "unsupported_or_binding_claim"
+    assert D.claim_safety_reason(f"see http://x.co {NOT_PO}") == "contains_url"
+    assert D.claim_safety_reason(f"cc evil@bad.example {NOT_PO}",
+                                 recipient_domain="approved-supplier.example") == "foreign_email_address"
+    assert D.claim_safety_reason(f"reply ops@approved-supplier.example {NOT_PO}",
+                                 recipient_domain="approved-supplier.example") is None
+
+
+def test_llm_polish_injecting_url_or_foreign_recipient_is_rejected(db):
+    # prompt-injected LLM output (url + redirect + guarantee) must be DISCARDED → deterministic fill kept
+    def _evil_llm(*, subject, body, slots):
+        return {"subject": subject,
+                "body": "Email attacker@evil.com and see http://evil.com — we guarantee payment. "
+                        "this request does not constitute a purchase order."}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow, llm_fn=_evil_llm)
+    assert "evil.com" not in draft.body and "guarantee" not in draft.body  # injection discarded
+    assert "this request does not constitute a purchase order" in draft.body.lower()
+
+
+def test_llm_polish_safe_rewrite_is_accepted(db):
+    def _safe_llm(*, subject, body, slots):
+        return {"subject": "Quote request",
+                "body": "Hello, kindly share your quote and lead time. "
+                        "This request does not constitute a purchase order."}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow, llm_fn=_safe_llm)
+    assert "kindly share your quote" in draft.body  # safe rewrite accepted
+
+
+# ── WS-B: the RFQ is REAL & COMPLETE (full SKU description + concrete terms), still inside the cage ──
+def _seed_product(db, sku="SKU-1", name="Dell Latitude 5550", price_cents=180000, specs=None):
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products "
+                  "(sku TEXT, name TEXT, price_cents INT, specs TEXT, active INT)"))
+    # keys match the electronics profile's narration_spec_dimensions (cpu_model/ram_gb/storage_gb/...)
+    db.execute(_t("INSERT INTO products VALUES (:k,:n,:p,:s,1)"),
+               {"k": sku, "n": name, "p": price_cents,
+                "s": json.dumps(specs or {"cpu_model": "Core i7", "ram_gb": 16, "storage_gb": 512,
+                                          "refresh_hz": 120, "gpu_model": "RTX 4060"})})
+    db.commit()
+
+
+def test_rfq_renders_full_sku_description_deadline_shipto_and_terms(db):
+    _seed_product(db)
+    cs = {"requirements": {"use_case": "office", "specs": ["16gb ram"], "needed_by": "2026-07-15",
+                           "ship_to": "Sydney NSW 2000", "needed_within_days": 14,
+                           "budget": {"min": 1300, "max": 1500}}}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=15, case_ref="FC-9", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow, hippograph_fn=_hippo)
+    body = draft.body.lower()
+    assert "dell latitude 5550" in body                    # the FULL product name, not a bare SKU code
+    assert "core i7" in body and "512gb" in body and "16gb" in body  # profile-driven specs id the exact unit
+    assert "2026-07-15" in draft.body                       # a concrete deadline DATE, not "the stated deadline"
+    assert "sydney nsw 2000" in body                        # ship-to present
+    assert "volume/tier pricing for 15 units" in body      # bulk discount ask (qty 15 >= threshold 5)
+    assert "next-business-day" in body                      # warranty preference line
+    assert "payment terms" in body                          # payment-terms ask
+    assert "quote is valid" in body and "14 days" in body   # quote-validity ask
+    # cage intact: no price/currency leak, budget stays internal, not-a-PO footer present
+    assert re.search(r"[$€£¥]\s?\d", draft.body) is None
+    assert "1300" not in draft.body and "1500" not in draft.body and "budget" not in body
+    assert "this request does not constitute a purchase order" in body
+    assert draft.completeness and draft.completeness["complete"] is True
+
+
+def test_rfq_volume_discount_only_at_or_above_bulk_threshold(db):
+    _seed_product(db)
+    cs = {"requirements": {"use_case": "office", "needed_by": "2026-07-15", "ship_to": "AU"}}
+    small = D.build_draft(db, item_ref="SKU-1", quantity=2, case_ref="FC-1", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    bulk = D.build_draft(db, item_ref="SKU-1", quantity=10, case_ref="FC-1", case_state=cs,
+                         rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "volume/tier pricing" not in small.body          # qty 2 < threshold → no bulk ask
+    assert "volume/tier pricing for 10 units" in bulk.body  # qty 10 >= threshold → bulk ask
+
+
+def test_rfq_completeness_flags_vague_deadline_but_passes_with_real_date(db):
+    _seed_product(db)
+    vague = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          case_state={"requirements": {"use_case": "office"}},
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert vague.completeness["complete"] is False
+    assert "deadline_date" in vague.completeness["reason"]
+    real = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                         case_state={"requirements": {"needed_by": "2026-08-01", "ship_to": "AU"}},
+                         rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert real.completeness["complete"] is True and real.completeness["reason"] is None
+
+
+def test_sku_description_falls_back_to_item_ref_when_not_in_catalog(db):
+    # no products row → the line item shows the bare ref (never crashes), and it's flagged complete-able
+    draft = D.build_draft(db, item_ref="SKU-NOPE", quantity=6, case_ref="FC-1",
+                          case_state={"requirements": {"needed_by": "2026-08-01", "ship_to": "AU"}},
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "sku-nope" in draft.body.lower() and "dell" not in draft.body.lower()
+
+
+def test_multi_location_evidence_surfaced_in_draft(db):
+    # Phase 4: per-location stock + transfer plan (gathered onto the case) appears as draft evidence so the
+    # operator sees "could we move stock instead?" before approving the RFQ.
+    cs = {"availability": {"shortfall": 38, "requested_qty": 50, "in_stock": 12,
+                           "network": {"total_in_network": 30, "by_location": {"sydney": 12, "melbourne": 18},
+                                       "transfer_plan": [{"from_location": "melbourne", "qty": 18}],
+                                       "shortfall": 20}},
+          "requirements": {"needed_by": "2026-08-01", "ship_to": "Sydney"}}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=50, case_ref="FC-1", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    loc = [e for e in draft.evidence if e["source"] == "multi_location"]
+    assert loc and "transfer 18" in loc[0]["summary"]
+    assert loc[0]["payload"]["transfer_plan"] == [{"from_location": "melbourne", "qty": 18}]
+
+
+def test_multi_line_draft_lists_every_line_item(db):
+    # a multi-line case (one supplier, several SKUs) → the RFQ body lists each line + qty, total quantity.
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products (sku TEXT, name TEXT, price_cents INT, specs TEXT, active INT)"))
+    db.execute(_t("INSERT INTO products VALUES ('MON-1','LG 34\" Monitor',60000,'{}',1)"))
+    db.execute(_t("INSERT INTO products VALUES ('HDS-1','Sony Headset',20000,'{}',1)")); db.commit()
+    draft = D.build_draft(db, item_ref="MON-1", quantity=15, case_ref="FC-ML",
+                          lines=[{"item_ref": "MON-1", "quantity": 10}, {"item_ref": "HDS-1", "quantity": 5}],
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert draft is not None
+    body = draft.body
+    assert "LG 34" in body and "Sony Headset" in body          # both line items rendered
+    assert "10 units" in body and "5 units" in body            # no shortfall given → source the full order
+    assert "this request does not constitute a purchase order" in body.lower()  # cage intact
+    assert [l["item_ref"] for l in draft.commercial_scope["lines"]] == ["MON-1", "HDS-1"]
+
+
+def test_multi_line_draft_quotes_shortfall_not_full_order(db):
+    # the demo bug: subject "2 items x 28" but body listed "30 units" each (the buyer's order, not the
+    # shortfall). The RFQ must ask the supplier for the SHORTFALL (units to source) and show the ordered
+    # qty only for context — so per-line quantities are unambiguous and sum to the subject total.
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products (sku TEXT, name TEXT, price_cents INT, specs TEXT, active INT)"))
+    db.execute(_t("INSERT INTO products VALUES ('MON-1','LG 34\" Monitor',60000,'{}',1)"))
+    db.execute(_t("INSERT INTO products VALUES ('HDS-1','Sony Headset',20000,'{}',1)")); db.commit()
+    draft = D.build_draft(db, item_ref="MON-1", quantity=28, case_ref="FC-ML2",
+                          lines=[{"item_ref": "MON-1", "quantity": 30, "shortfall": 14},
+                                 {"item_ref": "HDS-1", "quantity": 30, "shortfall": 14}],
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert draft is not None
+    body = draft.body
+    assert "14 units to source (of 30 ordered)" in body        # per-line shortfall, ordered qty for context
+    assert "30 units" not in body                              # never the ambiguous full-order qty as the ask
+
+
+def test_no_supplier_alternatives_offers_substitutes_not_dead_end(db):
+    # an item with NO approved supplier but a same-category substitute that does → offer the substitute
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products (sku TEXT, name TEXT, price_cents INT, specs TEXT, "
+                  "category TEXT, brand TEXT, active INT)"))
+    db.execute(_t("INSERT INTO products VALUES ('SKU-NO','No Supplier Item',150000,'{}','laptop','Dell',1)"))
+    db.execute(_t("INSERT INTO products VALUES ('SKU-ALT','Alt With Coverage',155000,'{}','laptop','HP',1)"))
+    db.commit()
+    alts = D.no_supplier_alternatives(db, item_ref="SKU-NO", quantity=10,
+                                      case_state={"availability": {"in_stock": 3}, "requirements": {}})
+    assert alts and any(o["type"] == "substitute" and o["sku"] == "SKU-ALT" for o in alts)
+    assert any(o["type"] == "reduce_to_available" for o in alts)  # 3 in stock < 10 → take-available
+    assert not any(o["type"] == "source_shortfall" for o in alts)  # no supplier → don't offer sourcing
+
+
+def test_moq_risk_flagged_when_shortfall_below_supplier_moq(db):
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS suppliers (id TEXT, name TEXT, moq INT)"))
+    db.execute(_t("INSERT INTO suppliers VALUES ('SUP-7','TechData',5)")); db.commit()
+    # qty 2 < MOQ 5 → moq_risk evidence; qty 10 → none
+    small = D.build_draft(db, item_ref="SKU-1", quantity=2, case_ref="FC-1", rank_fn=_rank_ok, allowlist_fn=_allow)
+    big = D.build_draft(db, item_ref="SKU-1", quantity=10, case_ref="FC-1", rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert any(e["source"] == "moq_risk" for e in small.evidence)
+    assert "minimum order quantity (5)" in next(e["summary"] for e in small.evidence if e["source"] == "moq_risk")
+    assert not any(e["source"] == "moq_risk" for e in big.evidence)
+
+
+def test_rfq_completeness_reason_unit():
+    ok = {"sku_description": "x", "deadline_date": "2026-01-01", "ship_to": "AU", "quantity": 5}
+    assert D.rfq_completeness_reason(ok) is None
+    vague = dict(ok, deadline_date="the stated deadline")
+    assert D.rfq_completeness_reason(vague) == "missing_rfq_fields:deadline_date"
+    assert D.rfq_completeness_reason({}).startswith("missing_rfq_fields:")

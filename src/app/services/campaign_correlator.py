@@ -124,16 +124,21 @@ def check_campaign(
         from src.app.models.db import db_session
         from sqlalchemy import text as sql_text
 
-        # Gather prior events within window
+        # Gather prior events within window. Compute the cutoff in PYTHON (portable) rather than
+        # datetime('now', :window) — the SQLite-only form silently returned nothing on Postgres.
+        # NAIVE utcnow ISO matches exactly how log_trace_event stamps created_at (no tz suffix),
+        # so the lexicographic string comparison is sound.
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(hours=int(window_hours))).isoformat()
         with db_session() as db:
             rows = db.execute(
                 sql_text(
                     "SELECT payload FROM decision_trace_events "
                     "WHERE event_type = 'security_scan' "
-                    "AND created_at >= datetime('now', :window) "
+                    "AND created_at >= :cutoff "
                     "ORDER BY created_at DESC LIMIT 200"
                 ),
-                {"window": f"-{window_hours} hours"},
+                {"cutoff": cutoff},
             ).fetchall()
 
         # Filter to events matching our entity key

@@ -1,0 +1,83 @@
+
+> shopsquire-frontend@0.1.0 dev
+> vite --config vite.config.ts
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m655[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+[2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
+[2m8:01:34 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/components/FulfilmentOptions.tsx, /src/components/SourcingIntentCard.tsx, /src/components/RightPanelExtras.tsx, /src/components/EscalationRoom.tsx, /src/components/AdminDashboard.tsx, /src/components/StorefrontEmphasisBanner.tsx, /src/components/LoginModal.tsx, /src/components/CartPanel.tsx, /src/components/DecisionTrace.tsx, /src/components/FulfilmentJourney.tsx, /src/components/FulfilmentTraceLink.tsx, /src/components/SplitFulfillmentCard.tsx, /src/components/ImageRecommendPanel.tsx[22m
+[2m8:01:35 pm[22m [36m[1m[vite][22m[39m [33mhmr invalidate [39m[2m/src/components/ImageRecommendPanel.tsx[22m Could not Fast Refresh ("computeTrustLevel" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m8:01:35 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/RightPanelExtras.tsx[22m
+[2m8:09:13 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m8:09:14 pm[22m [31m[1m[vite][22m[39m [31mInternal server error: C:\AI\ShopSquire\frontend\src\App.tsx: Missing catch or finally clause. (1710:10)
+
+[0m [90m 1708 |[31m           [36mlet[31m buffer [33m=[31m [32m''[31m[33m;[31m
+ [90m 1709 |[31m           [36mlet[31m answerPayload[33m:[31m any [33m=[31m [36mnull[31m[33m;[31m
+[31m[1m>[22m[31m[90m 1710 |[31m           [36mtry[31m {
+ [90m      |[31m           [31m[1m^[22m[31m
+ [90m 1711 |[31m           armIdle()[33m;[31m   [90m// start the idle watch now that we're reading the body[31m
+ [90m 1712 |[31m           [36mwhile[31m ([36mtrue[31m) {
+ [90m 1713 |[31m             [36mconst[31m { done[33m,[31m value } [33m=[31m [36mawait[31m reader[33m.[31mread()[33m;[31m[0m[39m
+  Plugin: [35mvite:react-babel[39m
+  File: [36mC:/AI/ShopSquire/frontend/src/App.tsx[39m:1710:10
+[33m  1708|            let buffer = '';
+  1709|            let answerPayload: any = null;
+  1710|            try {
+     |            ^
+  1711|            armIdle();   // start the idle watch now that we're reading the body
+  1712|            while (true) {[39m
+      at constructor (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+      at TypeScriptParserMixin.raise (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:6599:19)
+      at TypeScriptParserMixin.parseTryStatement (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13214:12)
+      at TypeScriptParserMixin.parseStatementContent (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12794:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9508:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12757:17)
+      at TypeScriptParserMixin.parseStatementListItem (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12737:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13306:61)
+      at TypeScriptParserMixin.parseBlockBody (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13299:10)
+      at TypeScriptParserMixin.parseBlock (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13287:10)
+      at TypeScriptParserMixin.parseFunctionBody (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12090:24)
+      at TypeScriptParserMixin.parseArrowExpression (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12065:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:11254:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9756:18)
+      at TypeScriptParserMixin.parseCoverCallAndAsyncArrowHead (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:11184:27)
+      at TypeScriptParserMixin.parseSubscript (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:11110:19)
+      at TypeScriptParserMixin.parseSubscript (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9272:18)
+      at TypeScriptParserMixin.parseSubscripts (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:11084:19)
+      at TypeScriptParserMixin.parseExprSubscripts (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:11075:17)
+      at TypeScriptParserMixin.parseUpdate (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:11056:21)
+      at TypeScriptParserMixin.parseMaybeUnary (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:11036:23)
+      at TypeScriptParserMixin.parseMaybeUnary (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9827:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:10889:61)
+      at TypeScriptParserMixin.parseExprOps (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:10894:23)
+      at TypeScriptParserMixin.parseMaybeConditional (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:10871:23)
+      at TypeScriptParserMixin.parseMaybeAssign (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:10821:21)
+      at TypeScriptParserMixin.parseMaybeAssign (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9776:20)
+      at C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:10790:39
+      at TypeScriptParserMixin.allowInAnd (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12411:16)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:10790:17)
+      at TypeScriptParserMixin.parseVar (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13374:91)
+      at TypeScriptParserMixin.parseVarStatement (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13220:10)
+      at TypeScriptParserMixin.parseVarStatement (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9408:31)
+      at TypeScriptParserMixin.parseStatementContent (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12841:23)
+      at TypeScriptParserMixin.parseStatementContent (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9508:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12757:17)
+      at TypeScriptParserMixin.parseStatementListItem (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12737:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13306:61)
+      at TypeScriptParserMixin.parseBlockBody (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13299:10)
+      at TypeScriptParserMixin.parseBlock (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13287:10)
+      at TypeScriptParserMixin.parseStatementContent (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12848:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9508:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12757:17)
+      at TypeScriptParserMixin.parseStatementOrSloppyAnnexBFunctionDeclaration (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12747:17)
+      at TypeScriptParserMixin.parseIfStatement (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13121:42)
+      at TypeScriptParserMixin.parseStatementContent (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12786:21)
+      at TypeScriptParserMixin.parseStatementContent (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:9508:18)
+      at TypeScriptParserMixin.parseStatementLike (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12757:17)
+      at TypeScriptParserMixin.parseStatementListItem (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:12737:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (C:\AI\ShopSquire\frontend\node_modules\@babel\parser\lib\index.js:13306:61)
+[2m8:09:26 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m8:09:40 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx[22m
+[2m8:29:40 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.tsx[22m

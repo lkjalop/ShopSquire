@@ -6,6 +6,7 @@ Create Date: 2026-03-25
 """
 
 from alembic import op
+import sqlalchemy as sa
 
 
 revision = "20260325_prod_tasks_and_vectors"
@@ -14,28 +15,18 @@ branch_labels = None
 depends_on = None
 
 
-def _create_vector_table(name: str) -> None:
-    try:
+def _create_vector_table(name: str, *, vector_enabled: bool, postgres: bool) -> None:
+    payload_type = "JSONB" if postgres else "TEXT"
+    if vector_enabled:
         op.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {name} (
                 id TEXT PRIMARY KEY,
                 embedding vector(1536),
-                payload JSONB
+                payload {payload_type}
             )
             """
         )
-    except Exception:
-        op.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {name} (
-                id TEXT PRIMARY KEY,
-                embedding TEXT,
-                payload JSONB
-            )
-            """
-        )
-    try:
         op.execute(
             f"""
             CREATE INDEX IF NOT EXISTS idx_{name}_hnsw
@@ -43,24 +34,42 @@ def _create_vector_table(name: str) -> None:
             USING hnsw (embedding vector_cosine_ops)
             """
         )
-    except Exception:
-        pass
+    else:
+        op.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {name} (
+                id TEXT PRIMARY KEY,
+                embedding TEXT,
+                payload {payload_type}
+            )
+            """
+        )
 
 
 def upgrade() -> None:
     bind = op.get_bind()
     dialect = str(getattr(getattr(bind, "dialect", None), "name", "") or "").lower()
 
-    if "postgres" in dialect:
+    postgres = "postgres" in dialect
+    vector_enabled = False
+    if postgres:
+        vector_enabled = bool(bind.execute(sa.text(
+            "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='vector')"
+        )).scalar())
+    if postgres and not vector_enabled:
         try:
-            op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            with bind.begin_nested():
+                bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
         except Exception:
             pass
+        vector_enabled = bool(bind.execute(sa.text(
+            "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='vector')"
+        )).scalar())
 
-    _create_vector_table("faq_embeddings")
-    _create_vector_table("session_embeddings")
+    _create_vector_table("faq_embeddings", vector_enabled=vector_enabled, postgres=postgres)
+    _create_vector_table("session_embeddings", vector_enabled=vector_enabled, postgres=postgres)
 
-    try:
+    if postgres:
         op.execute(
             """
             INSERT INTO faq_embeddings (id, embedding, payload)
@@ -69,8 +78,14 @@ def upgrade() -> None:
             ON CONFLICT (id) DO NOTHING
             """
         )
-    except Exception:
-        pass
+    else:
+        op.execute(
+            """
+            INSERT OR IGNORE INTO faq_embeddings (id, embedding, payload)
+            SELECT id, embedding, payload
+            FROM faq_vectors
+            """
+        )
 
     op.execute(
         """
@@ -82,15 +97,12 @@ def upgrade() -> None:
         )
         """
     )
-    try:
-        op.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_anomaly_metric_history_name_ts
-            ON anomaly_metric_history (metric_name, snapshot_ts DESC)
-            """
-        )
-    except Exception:
-        pass
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_anomaly_metric_history_name_ts
+        ON anomaly_metric_history (metric_name, snapshot_ts DESC)
+        """
+    )
 
     op.execute(
         """
@@ -108,15 +120,12 @@ def upgrade() -> None:
         )
         """
     )
-    try:
-        op.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_security_scan_scorecards_tenant_created
-            ON security_scan_scorecards (tenant_id, created_at DESC)
-            """
-        )
-    except Exception:
-        pass
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_security_scan_scorecards_tenant_created
+        ON security_scan_scorecards (tenant_id, created_at DESC)
+        """
+    )
 
 
 def downgrade() -> None:

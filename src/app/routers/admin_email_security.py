@@ -18,6 +18,7 @@ from sqlalchemy import text
 from src.app.models.db import db_session
 from src.app.deps import get_redis, DummyRedis
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
 from src.app.services.security_playbooks import get_cv_playbook_by_id
 from src.app.security.email_security import evaluate_email_security
@@ -84,7 +85,7 @@ def _json_load(s: str | None, default):
 
 def _ff() -> Dict[str, Any]:
     try:
-        return load_feature_flags(get_settings().feature_flags_path) or {}
+        return _ff_get_flags() or {}
     except Exception:
         return {}
 
@@ -236,9 +237,10 @@ def _upsert_forced_reauth_flags(*, user_ids: List[str], emails: List[str], reaso
                 db.execute(
                     text(
                         """
-                        INSERT OR REPLACE INTO security_forced_reauth_flags
+                        INSERT INTO security_forced_reauth_flags
                         (id, target_type, target_value, reason, created_at)
                         VALUES (:id, 'user_id', :target_value, :reason, CURRENT_TIMESTAMP)
+                        ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at
                         """
                     ),
                     {"id": f"fr-{uuid.uuid4().hex}", "target_value": uid, "reason": reason},
@@ -248,9 +250,10 @@ def _upsert_forced_reauth_flags(*, user_ids: List[str], emails: List[str], reaso
                 db.execute(
                     text(
                         """
-                        INSERT OR REPLACE INTO security_forced_reauth_flags
+                        INSERT INTO security_forced_reauth_flags
                         (id, target_type, target_value, reason, created_at)
                         VALUES (:id, 'email', :target_value, :reason, CURRENT_TIMESTAMP)
+                        ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at
                         """
                     ),
                     {"id": f"fr-{uuid.uuid4().hex}", "target_value": email, "reason": reason},

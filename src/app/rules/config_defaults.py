@@ -91,3 +91,13 @@ def serial_patterns_defaults(*, tenant_id: str | None = None) -> Dict[str, Any]:
     except Exception:
         override = None
     return _merge(base, override)
+
+
+def returns_policy_defaults(*, tenant_id: str | None = None) -> Dict[str, Any]:
+    p = Path(os.getenv("RETURNS_POLICY_PATH", "config/rules/returns_policy.json")).resolve()
+    base = _read_json(p) if p.exists() else {}
+    try:
+        override = _tenant_store().get_override("returns_policy", tenant_id=tenant_id)
+    except Exception:
+        override = None
+    return _merge(base, override)

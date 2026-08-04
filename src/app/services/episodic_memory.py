@@ -13,7 +13,6 @@ Provides:
 """
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
@@ -83,11 +82,6 @@ class SessionSummary:
 
 
 # ── Redis key templates ──
-_EPISODES_KEY = "episodic:{uid}:episodes"
-_PROFILE_KEY = "profile:{user_id}"
-_CHAT_HISTORY_KEY = "chat_history:{user_id}:sessions"
-_SESSION_SUMMARY_KEY = "session_summary:{uid}"
-
 # Long-term profile TTL (30 days)
 _PROFILE_TTL = 60 * 60 * 24 * 30
 # Chat history TTL (90 days)
@@ -97,39 +91,34 @@ _HISTORY_TTL = 60 * 60 * 24 * 90
 class EpisodicMemory:
     """Manages 3-tier episodic memory on top of the core Memory service."""
 
-    def __init__(self, memory: Memory):
+    def __init__(self, memory: Memory, uid: str | None = None):
         self.mem = memory
+        self.default_subject_id = uid
+
+    def _scope(self, uid: str, *, long_term: bool = False):
+        return self.mem.scope(
+            uid,
+            subject_id=self.default_subject_id or uid,
+            session_epoch="long_term" if long_term else None,
+        )
 
     # ── Tier 2: Session-scoped episodic storage ──
 
     def append_episode(self, uid: str, episode: Episode, ttl: int = 86400) -> None:
         """Append a Q&A episode to the session's episode list."""
-        key = _EPISODES_KEY.format(uid=uid)
-        try:
-            raw = self.mem.redis.get(key)
-            episodes = json.loads(raw) if raw else []
-        except Exception:
-            episodes = json.loads(self.mem._local_get(key) or "[]")
+        scope = self._scope(uid)
+        episodes = self.mem._get_json(scope, "episodic_episodes", [])
+        if not isinstance(episodes, list):
+            episodes = []
 
         episodes.append(asdict(episode))
 
-        payload = json.dumps(episodes)
-        try:
-            self.mem.redis.setex(key, ttl, payload)
-        except Exception:
-            self.mem._local_setex(key, ttl, payload)
+        self.mem._set_json(scope, "episodic_episodes", episodes, ttl)
 
     def get_episodes(self, uid: str) -> List[Dict[str, Any]]:
         """Retrieve all episodes for a session."""
-        key = _EPISODES_KEY.format(uid=uid)
-        try:
-            raw = self.mem.redis.get(key)
-            if raw:
-                return json.loads(raw)
-        except Exception:
-            pass
-        local = self.mem._local_get(key)
-        return json.loads(local) if local else []
+        value = self.mem._get_json(self._scope(uid), "episodic_episodes", [])
+        return value if isinstance(value, list) else []
 
     def get_session_context_summary(self, uid: str) -> str:
         """Build a text summary of the session so far from episodes."""
@@ -150,27 +139,23 @@ class EpisodicMemory:
     def save_user_profile(self, profile: UserProfile) -> None:
         """Persist a user profile for logged-in users."""
         profile.updated_at = time.time()
-        key = _PROFILE_KEY.format(user_id=profile.user_id)
-        payload = json.dumps(asdict(profile))
-        try:
-            self.mem.redis.setex(key, _PROFILE_TTL, payload)
-        except Exception:
-            self.mem._local_setex(key, _PROFILE_TTL, payload)
+        self.mem._set_json(
+            self._scope(profile.user_id, long_term=True),
+            "episodic_profile",
+            asdict(profile),
+            _PROFILE_TTL,
+        )
 
     def get_user_profile(self, user_id: str) -> Optional[UserProfile]:
         """Retrieve a persistent user profile."""
-        key = _PROFILE_KEY.format(user_id=user_id)
-        raw = None
-        try:
-            raw = self.mem.redis.get(key)
-        except Exception:
-            pass
-        if not raw:
-            raw = self.mem._local_get(key)
-        if not raw:
+        data = self.mem._get_json(
+            self._scope(user_id, long_term=True),
+            "episodic_profile",
+            None,
+        )
+        if not isinstance(data, dict):
             return None
         try:
-            data = json.loads(raw)
             return UserProfile(**data)
         except Exception:
             return None
@@ -318,16 +303,10 @@ class EpisodicMemory:
         summary: str = "",
     ) -> None:
         """Save a completed chat session to user's long-term history."""
-        key = _CHAT_HISTORY_KEY.format(user_id=user_id)
-        raw = None
-        try:
-            raw = self.mem.redis.get(key)
-        except Exception:
-            pass
-        if not raw:
-            raw = self.mem._local_get(key)
-
-        history = json.loads(raw) if raw else []
+        scope = self._scope(user_id, long_term=True)
+        history = self.mem._get_json(scope, "episodic_chat_history", [])
+        if not isinstance(history, list):
+            history = []
 
         entry = {
             "session_id": session_id,
@@ -342,25 +321,17 @@ class EpisodicMemory:
         if len(history) > 50:
             history = history[-50:]
 
-        payload = json.dumps(history)
-        try:
-            self.mem.redis.setex(key, _HISTORY_TTL, payload)
-        except Exception:
-            self.mem._local_setex(key, _HISTORY_TTL, payload)
+        self.mem._set_json(scope, "episodic_chat_history", history, _HISTORY_TTL)
 
     def get_chat_history(self, user_id: str, last_n: int = 5) -> List[Dict[str, Any]]:
         """Retrieve the last N chat sessions for a user."""
-        key = _CHAT_HISTORY_KEY.format(user_id=user_id)
-        raw = None
-        try:
-            raw = self.mem.redis.get(key)
-        except Exception:
-            pass
-        if not raw:
-            raw = self.mem._local_get(key)
-        if not raw:
+        history = self.mem._get_json(
+            self._scope(user_id, long_term=True),
+            "episodic_chat_history",
+            [],
+        )
+        if not isinstance(history, list):
             return []
-        history = json.loads(raw)
         return history[-last_n:]
 
     # ── RAPTOR-style session summarization ──
@@ -392,7 +363,6 @@ class EpisodicMemory:
             parts = []
             for ep in episodes:
                 q = ep.get("query", "")[:60]
-                slots = ep.get("slots_captured", {})
                 if q:
                     parts.append(q)
             summary.summary_text = " → ".join(parts[-8:])
@@ -400,12 +370,12 @@ class EpisodicMemory:
             summary.summary_text = "No conversation data"
 
         # Persist the summary
-        key = _SESSION_SUMMARY_KEY.format(uid=uid)
-        payload = json.dumps(asdict(summary))
-        try:
-            self.mem.redis.setex(key, 86400, payload)
-        except Exception:
-            self.mem._local_setex(key, 86400, payload)
+        self.mem._set_json(
+            self._scope(uid),
+            "episodic_session_summary",
+            asdict(summary),
+            86400,
+        )
 
         return summary
 

@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { apiUrl, safeJson } from '../lib/api';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 import styles from './ImageRecommendPanel.module.css';
 
@@ -33,6 +32,7 @@ interface ProductCard {
   use_case_fit?: string;
   image_url?: string;
   reasons?: string[];
+  why?: string[];
   reason_codes?: any[];
 }
 
@@ -43,6 +43,7 @@ interface ImageGroup {
   trustLevel: TrustLevel;
   friendlyBrand: string;
   securityNote: string;
+  analysisState?: 'complete' | 'pending' | 'degraded';
   products: ProductCard[];
   summary: string;
   /** Budget widen state */
@@ -62,6 +63,18 @@ interface ImageGroup {
   /** True when the image was classified as a damaged device — show repair card instead of products */
   isRepairIntent?: boolean;
   repairContext?: { brand: string; damage_score: number } | null;
+}
+
+/** Proof-of-purchase uploads (receipt / order / serial) belong ONLY in
+ * ownership-proof flows — warranty, repair, return, refund, fraud review — not
+ * during normal shopping / visual search, where they are irrelevant and add
+ * friction. Gate the CTAs on a proof-relevant intent or query. */
+const PROOF_INTENT_RE = /\b(warrant|repair|return|refund|exchange|rma|proof of purchase|receipt|serial|owner|ownership|stolen|fraud|claim|guarantee)\b/i;
+export function isProofRelevant(group: ImageGroup, userQuery: string): boolean {
+  if (group.isRepairIntent) return true;
+  const intent = String(group.context?.intent_routing?.intent || '').toLowerCase();
+  if (/(repair|warrant|return|refund|fraud|proof|ownership|claim)/.test(intent)) return true;
+  return PROOF_INTENT_RE.test(String(userQuery || ''));
 }
 
 type RecommendTracePayload = {
@@ -110,52 +123,17 @@ export interface Props {
   onTraceId?: (traceId: string | null) => void;
   /** Add-to-cart callback from App */
   onAdd?: (sku: string) => void;
+  /** Canonical products returned by the chat/recommendation turn. When supplied, this component
+   * is renderer-only and must not issue its historical independent /suggest request. null means
+   * the shared turn is still pending; [] is a completed honest no-match. */
+  canonicalProducts?: ProductCard[] | null;
+  canonicalSummary?: string;
+  /** Temporary rollback switch. Production callers must use the canonical shared turn. */
 }
 
 /* ---------- constants ---------- */
-const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
-const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
 const WIDEN_STEPS = [200, 400];
-const RECOMMEND_TIMEOUT_MS = 9000;
 
-const LOCAL_FAST_FALLBACK_PRODUCTS: ProductCard[] = [
-  {
-    sku: 'LOCAL-MSI-THIN-A15',
-    name: 'MSI Thin A15 15"',
-    price: 1799,
-    specs_summary: 'Ryzen 5 · RTX 3050 · 8GB RAM · 144Hz',
-    reasons: ['local_fast_path_timeout', 'gaming_use_case_match', 'safe_image_brand_hint'],
-    reason_codes: [
-      { code: 'local_fast_path_timeout', confidence: 0.7 },
-      { code: 'gaming_use_case_match', confidence: 0.82 },
-      { code: 'safe_image_brand_hint', confidence: 0.74 },
-    ],
-  },
-  {
-    sku: 'LOCAL-MSI-KATANA-15',
-    name: 'MSI Katana 15 B13VGK',
-    price: 1499,
-    specs_summary: 'RTX 4070 · 16GB RAM · 144Hz',
-    reasons: ['local_fast_path_timeout', 'discrete_gpu_match', 'in_budget'],
-    reason_codes: [
-      { code: 'local_fast_path_timeout', confidence: 0.7 },
-      { code: 'discrete_gpu_match', confidence: 0.86 },
-      { code: 'in_budget', confidence: 0.8 },
-    ],
-  },
-  {
-    sku: 'LOCAL-LENOVO-LOQ-15',
-    name: 'Lenovo LOQ 15',
-    price: 1399,
-    specs_summary: 'Ryzen 5 · RTX 4050 · 16GB RAM',
-    reasons: ['local_fast_path_timeout', 'nearest_safe_catalog_option', 'in_budget'],
-    reason_codes: [
-      { code: 'local_fast_path_timeout', confidence: 0.7 },
-      { code: 'nearest_safe_catalog_option', confidence: 0.78 },
-      { code: 'in_budget', confidence: 0.8 },
-    ],
-  },
-];
 
 function persistOperatorMetrics(timing: any, traceId: string | null, source = 'visual_search') {
   if (!timing || typeof timing !== 'object') return;
@@ -187,7 +165,6 @@ export function computeTrustLevel(signals: ImageAnalysisContext['cv_signals'], s
   // Explicit threat-hypothesis signals always warrant orange
   if (s.ransomware_indicator || s.c2_beacon_detected || s.payment_social_engineering) return 'orange';
   if (signals.qr_external_url_detected) return 'orange';
-  if (s.fast_triage_timeout) return 'orange';
   if (sessionSuspicious >= 2 || signals.manipulation_detected || signals.steg_suspicious) return 'orange';
   if (signals.qr_code_detected) return 'yellow';
   return 'green';
@@ -216,6 +193,12 @@ function buildLaneDetectionReason(signals: ImageAnalysisContext['cv_signals']): 
 
 function buildBuyerSecurityNotice(signals: ImageAnalysisContext['cv_signals']): string {
   const s = signals as Record<string, any>;
+  if (s.fast_triage_timeout || s.analysis_pending) {
+    return 'Image security enrichment is still running. Recommendations use bounded visual hints until analysis completes.';
+  }
+  if (s.analysis_degraded) {
+    return 'Image analysis is degraded. Recommendations use only the verified evidence available.';
+  }
   if (signals.qr_code_detected && s.qr_benign_detected) {
     return 'QR detected and decoded successfully. The visible content looks benign, so recommendations can continue.';
   }
@@ -249,6 +232,12 @@ const TRUST_LABELS: Record<TrustLevel, string> = {
   orange: 'Under Review',
   red: 'Escalated',
 };
+
+function groupStatusLabel(group: ImageGroup): string {
+  if (group.analysisState === 'pending') return 'Analysis pending';
+  if (group.analysisState === 'degraded') return 'Analysis degraded';
+  return TRUST_LABELS[group.trustLevel];
+}
 
 const TRUST_NOTES: Record<TrustLevel, string> = {
   green: 'Image scanned — no issues found.',
@@ -304,7 +293,7 @@ const USE_CASE_BUDGET: Record<string, number> = {
 };
 
 /** Derive a short pros note from product specs + price. */
-function buildProsNote(p: ProductCard, userQuery: string): string {
+export function buildProsNote(p: ProductCard, userQuery: string): string {
   const pros: string[] = [];
   const q = userQuery.toLowerCase();
   const specs = p.specs_summary || '';
@@ -314,7 +303,9 @@ function buildProsNote(p: ProductCard, userQuery: string): string {
   else if (/512/i.test(specs)) pros.push('512 GB SSD');
   if (/oled/i.test(p.name)) pros.push('OLED display');
   if (/touch/i.test(p.name)) pros.push('Touchscreen');
-  if (/rtx|gtx|radeon/i.test(specs)) pros.push('Discrete GPU');
+  if (/\b(?:rtx|gtx)\s*\d|\bradeon\s+(?:rx|pro)\b|\bintel\s+arc\s+[ab]\d/i.test(specs)) {
+    pros.push('Discrete GPU');
+  }
   if (/universit|student/i.test(q) && p.price < 1000) pros.push('Student-budget friendly');
   if (/gaming/i.test(q) && /rtx/i.test(specs)) pros.push('Gaming-ready GPU');
   return pros.slice(0, 3).join(' · ');
@@ -429,6 +420,21 @@ function assistantClaimsProducts(text: string | null | undefined): boolean {
   return /top picks|i['’]ve found \d+|found \d+ (?:matches|products|options)/i.test(String(text || ''));
 }
 
+export function normalizeUseCaseFit(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null;
+  if (!value || typeof value !== 'object') return null;
+  const fit = value as Record<string, unknown>;
+  const useCase = String(fit.use_case || '').trim().replace(/_/g, ' ');
+  const explicitVerdict = String(fit.verdict || '').trim().replace(/_/g, ' ');
+  const suitable = typeof fit.suitable === 'boolean' ? fit.suitable : null;
+  const prefix = explicitVerdict
+    || (suitable === true ? `Suitable${useCase ? ` for ${useCase}` : ''}` : '')
+    || (suitable === false ? `Not suitable${useCase ? ` for ${useCase}` : ''}` : '');
+  const details = suitable === false ? fit.gaps : fit.strengths;
+  const firstDetail = Array.isArray(details) ? String(details[0] || '').trim().replace(/_/g, ' ') : '';
+  return [prefix, firstDetail].filter(Boolean).join(' - ') || null;
+}
+
 function normalizeProductCard(raw: any): ProductCard | null {
   if (!raw || typeof raw !== 'object') return null;
   const sku = String(raw.sku || raw.id || '').trim();
@@ -454,7 +460,7 @@ function normalizeProductCard(raw: any): ProductCard | null {
     subtitle: raw.subtitle || raw.specs?.subtitle || undefined,
     price,
     specs_summary: specsSummary || undefined,
-    use_case_fit: raw.use_case_suitability || raw.use_case_fit || raw.reason || null,
+    use_case_fit: normalizeUseCaseFit(raw.use_case_suitability || raw.use_case_fit || raw.reason) || undefined,
     image_url: raw.image_url || null,
     reasons: Array.isArray(raw.reasons) ? raw.reasons.slice(0, 5).map(String) : undefined,
     reason_codes: Array.isArray(raw.reason_codes) ? raw.reason_codes.slice(0, 5) : undefined,
@@ -596,119 +602,8 @@ function conciseLaneReason(products: ProductCard[], query: string, brand: string
   return `${title}${subtitle ? ` • ${subtitle}` : ''} is the closest in-catalog match for this uploaded image.`;
 }
 
-async function fetchSuggest(
-  query: string,
-  ctx: ImageAnalysisContext | null,
-  budgetMax?: number,
-  budgetMin?: number,
-): Promise<SuggestResult> {
-  const params = new URLSearchParams({ uid: DEFAULT_UID, query: query || 'show me laptops' });
-  if (ctx) {
-    const labels = [...(ctx.labels || [])];
-    const srcName = String(ctx.source_name || '').toLowerCase();
-    const triageIntent = String(ctx.intent_routing?.intent || '').trim();
-    const damageScore = typeof ctx.damage_score === 'number' ? ctx.damage_score : 0;
-    if (srcName) labels.push(srcName.replace(/\.[a-z0-9]+$/i, ''));
-    params.set('image_labels', labels.join(','));
-    params.set('image_ocr_text', (ctx.ocr_text || '').slice(0, 500));
-    if (triageIntent) params.set('image_intent', triageIntent);
-    // Strip non-primitive signal values (e.g. steg_details.decoded_content) to avoid URL overflow (Bad Request)
-    const _rawSigs = ctx.cv_signals || {};
-    const _safeSigs: Record<string, any> = {};
-    for (const [k, v] of Object.entries(_rawSigs)) {
-      if (v !== null && v !== undefined && typeof v !== 'object' && typeof v !== 'function') {
-        _safeSigs[k] = v;
-      }
-    }
-    if (triageIntent === 'cv_triage') _safeSigs.intent_cv_triage = true;
-    if (damageScore > 0) _safeSigs.damage_score = damageScore;
-    params.set('image_cv_signals', JSON.stringify(_safeSigs));
-  }
-  if (budgetMax) params.set('budget_max', String(budgetMax));
-  if (budgetMin) params.set('budget_min', String(budgetMin));
-  params.set('copywriting_enabled', 'false');
-  params.set('fast_path', 'true');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), RECOMMEND_TIMEOUT_MS);
-
-  try {
-    const resp = await fetch(apiUrl(`/api/v1/recommend/suggest?${params.toString()}`), {
-      credentials: 'include',
-      headers: {
-        ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
-        'x-skip-observer': '1',
-      },
-      signal: controller.signal,
-    });
-    const data = await safeJson(resp);
-    if (!resp.ok || !data) throw new Error(data?.detail || `recommend_failed (${resp.status})`);
-    persistOperatorMetrics(
-      data?.timing_breakdown,
-      data.decision_trace_id || data.trace_id || data.decision_id || null,
-      ctx ? 'visual_search' : 'text_fallback',
-    );
-    return {
-      products: parseProducts(data),
-      summary: data.assistant_message || '',
-      nextQuestions: Array.isArray(data.next_questions) ? data.next_questions : [],
-      traceId: data.decision_trace_id || data.trace_id || data.decision_id || null,
-      rightPanel: data?.right_panel || null,
-      securityMatrix: data?.security_matrix || data?.right_panel?.security_matrix || null,
-      safeImageHints: data?.safe_image_hints || null,
-      rankedProducts: Array.isArray(data?.ranked_products) ? data.ranked_products : [],
-      imageSecurity: data?.image_security || null,
-      raw: data,
-      offDomain: Boolean(data?.catalog_relevance?.off_domain),
-      lowSupport: Boolean(data?.catalog_relevance?.low_support),
-      domainBadge: data?.catalog_relevance?.off_domain
-        ? (data?.catalog_relevance?.low_support ? 'Low catalog support' : 'Off-domain image')
-        : null,
-      fillBadge: data?.image_lane_fill?.applied
-        ? `Filled to 3 using in-catalog ${String(data?.image_lane_fill?.image_category || 'catalog')} alternatives`
-        : null,
-      linkedArtifactSummary: typeof data?.linked_artifact?.linked_reason_summary === 'string' ? data.linked_artifact.linked_reason_summary : null,
-      linkedArtifactPolicyAction: typeof data?.linked_artifact?.linked_policy_action === 'string' ? data.linked_artifact.linked_policy_action : null,
-      linkedArtifactVerdictLabel: typeof data?.linked_artifact?.linked_verdict_label === 'string' ? data.linked_artifact.linked_verdict_label : null,
-      linkedArtifactConfidenceBand: typeof data?.linked_artifact?.linked_confidence_band === 'string' ? data.linked_artifact.linked_confidence_band : null,
-    };
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      throw new Error(`recommend_timeout_${RECOMMEND_TIMEOUT_MS}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function buildLocalTimeoutFallback(
-  query: string,
-  brand: string,
-  budgetMax?: number,
-  budgetMin?: number,
-): ProductCard[] {
-  const q = String(query || '').toLowerCase();
-  let products = LOCAL_FAST_FALLBACK_PRODUCTS;
-  if (isAppleLikeBrand(brand) || /macbook|apple/.test(q)) {
-    products = [
-      {
-        sku: 'LOCAL-MACBOOK-AIR-M2',
-        name: 'MacBook Air 13"',
-        price: 1599,
-        specs_summary: 'Apple M2 · 8GB RAM · 256GB SSD',
-        reasons: ['local_fast_path_timeout', 'nearest_safe_macbook_option'],
-        reason_codes: [{ code: 'local_fast_path_timeout', confidence: 0.7 }, { code: 'nearest_safe_macbook_option', confidence: 0.76 }],
-      },
-      ...LOCAL_FAST_FALLBACK_PRODUCTS.slice(1, 3),
-    ];
-  }
-  return products
-    .filter((p) => (budgetMin == null || p.price >= budgetMin) && (budgetMax == null || p.price <= Math.max(budgetMax + 400, budgetMax)))
-    .slice(0, 3);
-}
-
 /* ---------- component ---------- */
-export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd }: Props) {
+export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd, canonicalProducts, canonicalSummary }: Props) {
   const [groups, setGroups] = useState<ImageGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -717,472 +612,76 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
   const buildSeqRef = useRef(0);
   const lastBuildKeyRef = useRef('');
 
-  const runBrandFallbackChain = useCallback(async (
-    baseQuery: string,
-    brandLabel: string,
-    ctx: ImageAnalysisContext | null,
-    budgetMax?: number,
-  ) => {
-    const cleanBase = stripBudgetHints(baseQuery);
-    const apple = isAppleLikeBrand(brandLabel);
-    const windows = isWindowsLikeBrand(brandLabel);
-    if (!apple && !windows) return null;
-    const profile = apple ? 'apple macbook' : 'windows laptop';
-    const useCase = inferSummaryUseCase(baseQuery);
-    const gamingProfile = useCase === 'gaming' ? 'gaming laptop' : profile;
-
-    const baseMax = Number.isFinite(Number(budgetMax)) ? Number(budgetMax) : 1200;
-    const steps = apple ? [400, 800] : [400, 800, 1400];
-    for (const step of steps) {
-      const raisedMax = baseMax + step;
-      const r2 = await fetchSuggest(`${cleanBase} ${profile} show nearest in-stock options above budget`.trim(), ctx, raisedMax);
-      if ((r2.products || []).length > 0) {
-        return {
-          ...r2,
-          summary: r2.summary || (
-            apple
-              ? `No in-budget MacBook found. Showing nearest MacBook options up to $${raisedMax.toLocaleString()}.`
-              : `No in-budget Windows option found. Showing nearest Windows options up to $${raisedMax.toLocaleString()}.`
-          ),
-        };
-      }
-    }
-
-    // Nothing found above budget — try below-budget sweep using up to 80% of the ceiling.
-    // This covers the common case where catalogue price points sit below the user's stated range.
-    const belowMax = Math.round(baseMax * 0.8);
-    if (belowMax > 200) {
-      const below = await fetchSuggest(
-        `${cleanBase} ${gamingProfile} show nearest in-stock options`.trim(),
-        ctx,
-        belowMax,
-      );
-      if ((below.products || []).length > 0) {
-        return {
-          ...below,
-          summary: below.summary || `No exact ${brandLabel} match found at $${baseMax.toLocaleString()}. Showing nearest ${gamingProfile} options.`,
-        };
-      }
-    }
-
-    return fetchSuggest(
-      `${cleanBase} show nearest in-stock alternatives`.trim(),
-      ctx,
-      baseMax + (apple ? 800 : 1600),
-    );
-  }, []);
-
   const buildGroups = useCallback(async () => {
-    if (imageContexts.length === 0) {
-      setGroups([]);
-      setLoading(false);
+    if (canonicalProducts !== undefined) {
+      const buildSeq = ++buildSeqRef.current;
+      setError(null);
+      setGlobalRedBlock(false);
+      if (canonicalProducts === null) {
+        setGroups([]);
+        setLoading(true);
+        return;
+      }
+      const ctx = imageContexts[0] || null;
+      const trust = computeTrustLevel(ctx?.cv_signals || {}, sessionSuspiciousCount);
+      const signals = (ctx?.cv_signals || {}) as Record<string, any>;
+      const analysisState: ImageGroup['analysisState'] = signals.fast_triage_timeout || signals.analysis_pending
+        ? 'pending'
+        : signals.analysis_degraded ? 'degraded' : 'complete';
+      const brand = ctx ? friendlyBrand(ctx.labels, ctx.ocr_text, ctx.source_name, userQuery) : 'Product';
+      const canonicalGroup: ImageGroup = {
+        source: ctx?.source_name || 'Uploaded image',
+        icon: '\uD83D\uDCF8',
+        trustLevel: trust,
+        friendlyBrand: brand,
+        securityNote: trust === 'green' ? TRUST_NOTES.green : buildBuyerSecurityNotice(signals),
+        analysisState,
+        products: canonicalProducts.slice(0, 10).map(product => ({
+          ...product,
+          reasons: product.reasons || product.why || [],
+        })),
+        summary: canonicalSummary || (canonicalProducts.length > 0
+          ? 'Matches from the shared recommendation turn.'
+          : 'No eligible catalog match was found for the current image, query, and constraints.'),
+        context: ctx,
+      };
+      if (buildSeq === buildSeqRef.current) {
+        setGroups([canonicalGroup]);
+        setLoading(false);
+        setClarifyQuestions(null);
+        if (traceId) onTraceId?.(traceId);
+      }
       return;
     }
-    const buildKey = JSON.stringify({
-      q: String(userQuery || ''),
-      s: sessionSuspiciousCount,
-      imgs: imageContexts.map((ctx) => ({
-        src: ctx.source_name || '',
-        labels: ctx.labels || [],
-        ocr: String(ctx.ocr_text || '').slice(0, 160),
-        signals: ctx.cv_signals || {},
-      })),
-    });
-    if (buildKey === lastBuildKeyRef.current) return;
-    lastBuildKeyRef.current = buildKey;
-    const buildSeq = ++buildSeqRef.current;
-    setLoading(true);
-    setError(null);
-    setGroups([]);
-    setGlobalRedBlock(false);
-
-    const built: ImageGroup[] = [];
-    const builtSlots: Array<ImageGroup | null> = new Array(imageContexts.length).fill(null);
-    let firstTraceId: string | null = null;
-    // Auto-budget: derive a sensible ceiling from the detected use-case when none explicit
-    const useCase = detectUseCase(userQuery);
-    const autoBudget = useCase ? USE_CASE_BUDGET[useCase] ?? 1200 : undefined;
-    const parsedBudgetMax = extractBudgetMax(userQuery, autoBudget);
-    const parsedBudgetMin = extractBudgetMin(userQuery);
-
-    // One group per image. Each lane commits as soon as it resolves so a slow or
-    // compromised image cannot hold the whole visual panel hostage.
-    const perImageSettled = await Promise.allSettled(
-      imageContexts.map((ctx, i) => (async () => {
-        const trust = computeTrustLevel(ctx.cv_signals || {}, sessionSuspiciousCount);
-        const brand = friendlyBrand(ctx.labels, ctx.ocr_text, ctx.source_name, userQuery);
-        const note = TRUST_NOTES[trust];
-        const forcedOffDomain = looksOffDomainContext(ctx, brand);
-
-        // ── Damage / Repair intent gate ──
-        // If vision triage classified this as a damaged device (cv_triage intent or damage_score > 0.4),
-        // skip product recommendations and return a repair/warranty card instead.
-        const triageIntent = ctx.intent_routing?.intent;
-        const damageScore = typeof ctx.damage_score === 'number' ? ctx.damage_score : 0;
-        if (triageIntent === 'cv_triage' || damageScore > 0.4) {
-          return {
-            group: {
-              source: ctx.source_name || `Image ${i + 1}`,
-              icon: '🔧',
-              trustLevel: 'green' as TrustLevel,
-              friendlyBrand: brand,
-              securityNote: '',
-              products: [],
-              summary: '',
-              isRepairIntent: true,
-              repairContext: { brand, damage_score: damageScore },
-            } as ImageGroup,
-            traceId: null as string | null,
-          };
-        }
-
-        if (trust === 'red') {
-          // ── Security-gate: still fetch products using sanitized signals.
-          // Quarantine the injection payload but keep visual identity (brand, labels).
-          // The backend hard_lock path now returns products + security findings.
-          const sanitizedSignals: Record<string, any> = {};
-          for (const [k, v] of Object.entries(ctx.cv_signals || {})) {
-            // Strip injection/payload signals — keep brand/visual signals
-            if (!['qr_prompt_injection', 'qr_external_url_detected', 'qr_payloads', 'qr_redirect_probe', 'ocr_prompt_injection'].includes(k)) {
-              sanitizedSignals[k] = v;
-            }
-          }
-          // Keep qr_code_detected so backend knows a QR was present but quarantined
-          sanitizedSignals['qr_code_detected'] = true;
-          sanitizedSignals['qr_quarantined'] = true;
-          const sanitizedCtx: ImageAnalysisContext = { ...ctx, cv_signals: sanitizedSignals };
-          const securityNote = buildBuyerSecurityNotice(ctx.cv_signals || {});
-          const detectionReason = buildLaneDetectionReason(ctx.cv_signals || {});
-          try {
-            const base = stripBudgetHints(userQuery);
-            const addLaptopToken = !/\blaptop|notebook|computer|pc|macbook|chromebook\b/i.test(base) && !/^product$/i.test(brand);
-            const imageQuery = `${base} ${addLaptopToken ? 'laptop' : ''} ${brand}`.trim();
-            const result = await fetchSuggest(imageQuery, sanitizedCtx, parsedBudgetMax, parsedBudgetMin);
-            let products = result.products.slice(0, 3);
-            if (products.length === 0) {
-              const chain = await runBrandFallbackChain(userQuery, brand, sanitizedCtx, parsedBudgetMax);
-              if (chain) products = (chain.products || []).slice(0, 3);
-            }
-            return {
-              group: {
-                source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-                icon: '\uD83D\uDCF8',
-                trustLevel: trust,
-                friendlyBrand: brand,
-                securityNote,
-                products,
-                summary: products.length > 0
-                  ? `\u26a0\ufe0f QR payload quarantined. Showing ${brand} products based on visual identity only.`
-                  : buildNoResultsText(brand),
-                context: ctx,
-                lowSupport: false,
-                domainBadge: null,
-                fillBadge: null,
-                detectionReason,
-                verdictLabel: 'QR Injection Blocked',
-                confidenceBand: 'high',
-              } as ImageGroup,
-              traceId: result.traceId || null,
-            };
-          } catch (_err) {
-            // Fallback to empty on error — at least show security note
-            return {
-              group: {
-                source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-                icon: '\uD83D\uDCF8',
-                trustLevel: trust,
-                friendlyBrand: brand,
-                securityNote,
-                products: [],
-                summary: `\u26a0\ufe0f QR payload blocked. Could not load ${brand} products right now.`,
-                context: ctx,
-                lowSupport: false,
-                domainBadge: null,
-                fillBadge: null,
-                detectionReason,
-              } as ImageGroup,
-              traceId: null,
-            };
-          }
-        }
-
-        if (forcedOffDomain) {
-          return {
-            group: {
-              source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-              icon: '\uD83D\uDCF8',
-              trustLevel: (trust as unknown as string) === 'red' ? ('red' as TrustLevel) : ('orange' as TrustLevel),
-              friendlyBrand: brand,
-              securityNote: 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.',
-              products: [],
-              summary: lockedOffDomainSummary(userQuery),
-              widenState: undefined,
-              context: ctx,
-              offDomain: true,
-              lowSupport: true,
-              domainBadge: 'Off-domain image',
-              fillBadge: null,
-            } as ImageGroup,
-            traceId: null as string | null,
-          };
-        }
-
-        try {
-          const base = stripBudgetHints(userQuery);
-          const addLaptopToken = !/\blaptop|notebook|computer|pc|macbook|chromebook\b/i.test(base) && !/^product$/i.test(brand);
-          const imageQuery = `${base} ${addLaptopToken ? 'laptop' : ''} ${brand}`.trim();
-          const shouldUseSafePrimary = trust !== 'green' || Boolean((ctx.cv_signals as Record<string, any>)?.fast_triage_timeout);
-          const result = await fetchSuggest(
-            shouldUseSafePrimary ? buildSafeFallbackQuery(userQuery, brand) : imageQuery,
-            ctx,
-            shouldUseSafePrimary && parsedBudgetMax ? parsedBudgetMax + 400 : parsedBudgetMax,
-            shouldUseSafePrimary ? undefined : parsedBudgetMin,
-          );
-          const shouldTreatAsOffDomain = forcedOffDomain || (result.offDomain && !looksLikelyDeviceContext(ctx, brand));
-          let pickedTraceId: string | null = result.traceId || null;
-          let products = result.products.slice(0, 3);
-          let safeSummary = sanitizeSummary(result.summary, products.length, `Top ${brand} picks matching your image.`);
-          let trustLevel: TrustLevel = trust as TrustLevel;
-          let securityNote = trust === 'green' ? note : buildBuyerSecurityNotice(ctx.cv_signals || {});
-          if (result.linkedArtifactSummary && result.linkedArtifactPolicyAction !== 'allow') {
-            securityNote = `${securityNote} ${result.linkedArtifactSummary}`.trim();
-          }
-          persistOperatorMetrics({
-            recommendation_latency_ms: result.traceId ? null : null,
-            qr_decode_success: Boolean(ctx.cv_signals?.qr_code_detected),
-            linked_artifact_fetch: Boolean(result.linkedArtifactSummary),
-            security_review_required: Boolean(ctx.cv_signals?.qr_external_url_detected || ctx.cv_signals?.qr_prompt_injection || result.linkedArtifactPolicyAction === 'review' || result.linkedArtifactPolicyAction === 'privacy_hold'),
-          }, pickedTraceId, 'visual_search');
-          if (products.length === 0 && !shouldTreatAsOffDomain) {
-            const chain = await runBrandFallbackChain(userQuery, brand, ctx, parsedBudgetMax);
-            if (chain) {
-              pickedTraceId = pickedTraceId || chain.traceId || null;
-              products = (chain.products || []).slice(0, 3);
-              safeSummary = sanitizeSummary(chain.summary, products.length, `Top ${brand} picks matching your image.`);
-            }
-          }
-          if (shouldTreatAsOffDomain) {
-            trustLevel = (trust as unknown as string) === 'red' ? ('red' as TrustLevel) : ('orange' as TrustLevel);
-            securityNote = 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.';
-            products = [];
-            safeSummary = lockedOffDomainSummary(userQuery);
-          }
-          if (products.length === 0 && assistantClaimsProducts(safeSummary)) {
-            safeSummary = 'No products found in your budget range.';
-          }
-          safeSummary = shouldTreatAsOffDomain
-            ? lockedOffDomainSummary(userQuery)
-            : conciseLaneReason(products, userQuery, brand);
-          return {
-            group: {
-              source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-              icon: '\uD83D\uDCF8',
-              trustLevel,
-              friendlyBrand: brand,
-              securityNote,
-              products,
-              summary: safeSummary,
-              widenState: products.length === 0 && !shouldTreatAsOffDomain ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
-              context: ctx,
-              offDomain: shouldTreatAsOffDomain,
-              lowSupport: result.lowSupport || forcedOffDomain,
-              domainBadge: shouldTreatAsOffDomain
-                ? 'Off-domain image'
-                : (result.lowSupport ? 'Needs catalog confirmation' : null),
-              fillBadge: result.fillBadge,
-              verdictLabel: result.linkedArtifactVerdictLabel || null,
-              confidenceBand: result.linkedArtifactConfidenceBand || null,
-              detectionReason: trust === 'green' ? null : buildLaneDetectionReason(ctx.cv_signals || {}),
-            } as ImageGroup,
-            traceId: pickedTraceId,
-          };
-        } catch (e: any) {
-          const isFastPathTimeout = String(e?.message || '').includes('recommend_timeout_');
-          const timeoutMsg = isFastPathTimeout
-            ? `Timed out loading ${brand} recommendations.`
-            : `Could not load ${brand} recommendations.`;
-          let fallbackProducts: ProductCard[] = [];
-          let fallbackSummary = timeoutMsg;
-          let fallbackTraceId: string | null = null;
-          if (isFastPathTimeout && !forcedOffDomain) {
-            fallbackProducts = buildLocalTimeoutFallback(userQuery, brand, parsedBudgetMax, parsedBudgetMin);
-            fallbackSummary = fallbackProducts.length > 0
-              ? `Recommendation service timed out, so I am showing deterministic safe ${inferSummaryUseCase(userQuery)} laptop fallbacks while backend analysis continues.`
-              : timeoutMsg;
-            persistOperatorMetrics({
-              recommendation_timeout: true,
-              recommendation_fallback_used: fallbackProducts.length > 0,
-              recommendation_fallback_source: 'local_deterministic_catalog',
-              qr_decode_success: Boolean(ctx.cv_signals?.qr_code_detected),
-              security_review_required: Boolean(ctx.cv_signals?.qr_external_url_detected || ctx.cv_signals?.qr_prompt_injection),
-            }, null, 'visual_search_local_timeout_fallback');
-          } else if (!forcedOffDomain) {
-            try {
-              const fallback = await fetchSuggest(buildSafeFallbackQuery(userQuery, brand), ctx, parsedBudgetMax ? parsedBudgetMax + 400 : undefined);
-              fallbackProducts = fallback.products.slice(0, 3);
-              fallbackTraceId = fallback.traceId || null;
-              if (fallbackProducts.length > 0) {
-                fallbackSummary = String(e?.message || '').includes('recommend_timeout_')
-                  ? `Brand-specific recommendations timed out, so I’m showing the nearest safe ${inferSummaryUseCase(userQuery)} laptops instead.`
-                  : 'Brand-specific recommendations were unavailable, so I’m showing the nearest safe in-stock laptops instead.';
-              }
-              persistOperatorMetrics({
-                recommendation_timeout: String(e?.message || '').includes('recommend_timeout_'),
-                recommendation_fallback_used: fallbackProducts.length > 0,
-                qr_decode_success: Boolean(ctx.cv_signals?.qr_code_detected),
-                linked_artifact_fetch: Boolean(fallback.linkedArtifactSummary),
-                security_review_required: Boolean(ctx.cv_signals?.qr_external_url_detected || ctx.cv_signals?.qr_prompt_injection),
-              }, fallbackTraceId, 'visual_search_fallback');
-            } catch {
-              // Preserve the original timeout path if the fallback also fails.
-            }
-          }
-          return {
-            group: {
-              source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-              icon: '\uD83D\uDCF8',
-              trustLevel: trust,
-              friendlyBrand: brand,
-              securityNote: forcedOffDomain
-                ? 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.'
-                : (trust === 'green' ? note : buildBuyerSecurityNotice(ctx.cv_signals || {})),
-              products: fallbackProducts,
-              summary: forcedOffDomain ? lockedOffDomainSummary(userQuery) : fallbackSummary,
-              widenState: forcedOffDomain || fallbackProducts.length > 0 ? undefined : { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true },
-              context: ctx,
-              offDomain: forcedOffDomain,
-              lowSupport: forcedOffDomain,
-              domainBadge: forcedOffDomain ? 'Off-domain image' : null,
-              fillBadge: fallbackProducts.length > 0 ? 'Fallback recommendations applied' : null,
-              verdictLabel: null,
-              confidenceBand: null,
-              detectionReason: forcedOffDomain ? null : (trust === 'green' ? null : buildLaneDetectionReason(ctx.cv_signals || {})),
-              fastPathTimeout: isFastPathTimeout,
-            } as ImageGroup,
-            traceId: fallbackTraceId,
-          };
-        }
-      })().then((item) => {
-        if (buildSeq !== buildSeqRef.current) return item;
-        builtSlots[i] = item.group;
-        setGroups(builtSlots.filter(Boolean) as ImageGroup[]);
-        if (!firstTraceId && item.traceId) {
-          firstTraceId = item.traceId;
-          onTraceId?.(item.traceId);
-        }
-        return item;
-      })),
-    );
-    const perImage = perImageSettled
-      .filter((item): item is PromiseFulfilledResult<{ group: ImageGroup; traceId: string | null }> => item.status === 'fulfilled')
-      .map((item) => item.value);
-    for (const item of perImage) {
-      built.push(item.group);
-      if (!firstTraceId && item.traceId) firstTraceId = item.traceId;
+    {
+      ++buildSeqRef.current;
+      setGroups([]);
+      setLoading(false);
+      setGlobalRedBlock(false);
+      setError('Image recommendation is unavailable for this turn.');
+      return;
     }
-
-    // Query-intent group (if query adds context beyond image brands)
-    if (userQuery && imageContexts.length === 0) {
-      try {
-        const result = await fetchSuggest(stripBudgetHints(userQuery), null, parsedBudgetMax, parsedBudgetMin);
-        if (!firstTraceId && result.traceId) { firstTraceId = result.traceId; onTraceId?.(result.traceId); }
-        let products = result.products.slice(0, 3);
-        let safeSummary = sanitizeSummary(
-          result.summary,
-          products.length,
-          products.length > 0 ? `Products matching "${userQuery}".` : 'No products found in your budget range.',
-        );
-        if (products.length === 0 && assistantClaimsProducts(safeSummary)) {
-          safeSummary = 'No products found in your budget range.';
-        }
-        built.push({
-          source: `From your query`,
-          icon: '\uD83D\uDD0D',
-          trustLevel: 'green',
-          friendlyBrand: '',
-          securityNote: '',
-          products,
-          summary: safeSummary,
-          widenState: products.length === 0 ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
-          context: null,
-          lowSupport: false,
-          domainBadge: null,
-          fillBadge: null,
-        });
-      } catch {
-        /* query fetch failed — still show image groups */
-      }
-    }
-
-    if (buildSeq !== buildSeqRef.current) return;
-    if (firstTraceId) onTraceId?.(firstTraceId);
-
-    // Check if ALL groups are red
-    if (built.length > 0 && built.every(g => g.trustLevel === 'red')) {
-      setGlobalRedBlock(true);
-    }
-
-    // Clarifying questions
-    if (useCase && CLARIFYING_QUESTIONS[useCase]) {
-      setClarifyQuestions(CLARIFYING_QUESTIONS[useCase]);
-    } else if (!useCase && imageContexts.length > 0) {
-      setClarifyQuestions(CLARIFYING_QUESTIONS.general);
-    }
-
-    setGroups(built);
-    setLoading(false);
-  }, [imageContexts, userQuery, sessionSuspiciousCount, onTraceId, runBrandFallbackChain]);
+  }, [canonicalProducts, canonicalSummary, imageContexts, userQuery, sessionSuspiciousCount,
+      onTraceId, traceId]);
 
   const handleWiden = useCallback(async (groupIdx: number, widenAmount: number) => {
     const group = groups[groupIdx];
     if (!group?.widenState || group.offDomain) return;
     const newMax = (group.widenState.budgetMax || 1500) + widenAmount;
-    try {
-      const widenedQuery = `${stripBudgetHints(userQuery)} ${group.friendlyBrand || ''}`.trim();
-      const result = await fetchSuggest(widenedQuery, group.context || null, newMax);
-      setGroups(prev => {
-        const updated = [...prev];
-        const nextProducts = result.products.slice(0, 3);
-        updated[groupIdx] = {
-          ...updated[groupIdx],
-          products: nextProducts,
-          summary: sanitizeSummary(result.summary, nextProducts.length, `Expanded budget to $${newMax.toLocaleString()}.`),
-          widenState: nextProducts.length > 0
-            ? undefined
-            : { ...updated[groupIdx].widenState!, budgetMax: newMax, noResults: true },
-        };
-        return updated;
-      });
-      if (result.traceId) onTraceId?.(result.traceId);
-    } catch { /* ignore */ }
-  }, [groups, userQuery, onTraceId]);
+    {
+      onClarify?.(`${stripBudgetHints(userQuery)} increase the maximum budget to $${newMax}`.trim());
+      return;
+    }
+  }, [groups, userQuery, onClarify, onTraceId]);
 
   const handleShowNearest = useCallback(async (groupIdx: number) => {
     const group = groups[groupIdx];
     if (!group || group.offDomain) return;
-    try {
-      const baseMax = group.widenState?.budgetMax || extractBudgetMax(userQuery, 1200) || 1200;
-      const nearestBudgetMax = Math.max(1800, baseMax + 1200);
-      const nearestQuery = buildNearestQuery(userQuery, group.friendlyBrand);
-      const result = await fetchSuggest(nearestQuery, group.context || null, nearestBudgetMax);
-      setGroups(prev => {
-        const updated = [...prev];
-        const nextProducts = result.products.slice(0, 3);
-        updated[groupIdx] = {
-          ...updated[groupIdx],
-          products: nextProducts,
-          summary: sanitizeSummary(
-            result.summary,
-            nextProducts.length,
-            `${buildNearestLabel(group.friendlyBrand).replace(/^Show /, 'Showing ')} up to $${nearestBudgetMax.toLocaleString()}.`,
-          ),
-          widenState: nextProducts.length > 0 ? undefined : { budgetMin: 0, budgetMax: 0, noResults: true },
-        };
-        return updated;
-      });
-      if (result.traceId) onTraceId?.(result.traceId);
-    } catch { /* ignore */ }
-  }, [groups, userQuery, onTraceId]);
+    {
+      onClarify?.(buildNearestQuery(userQuery, group.friendlyBrand));
+      return;
+    }
+  }, [groups, userQuery, onClarify, onTraceId]);
 
   useEffect(() => {
     if (imageContexts.length > 0 || userQuery) {
@@ -1230,7 +729,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             <div className={styles.anchorHeader}>
               <span className={styles.anchorIcon}>{group.icon}</span>
               <span>{group.source}</span>
-              <span className={`${styles.trustBadge} ${trustClass}`}>{TRUST_LABELS[group.trustLevel]}</span>
+              <span className={`${styles.trustBadge} ${trustClass}`}>{groupStatusLabel(group)}</span>
               {group.domainBadge && <span className={styles.domainBadge}>{group.domainBadge}</span>}
               {group.fillBadge && <span className={styles.fillBadge}>{group.fillBadge}</span>}
               {group.verdictLabel && <span className={styles.domainBadge}>{group.verdictLabel}{group.confidenceBand ? ` • ${group.confidenceBand}` : ''}</span>}
@@ -1240,17 +739,20 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             {group.securityNote && (
               <div className={group.trustLevel === 'green' ? styles.securityNoteBenign : styles.securityNote}>
                 {group.securityNote}
-                <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my receipt now')}>
-                    Upload receipt
-                  </button>
-                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my order confirmation screenshot now')}>
-                    Upload order confirmation
-                  </button>
-                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading a photo of the serial number label now')}>
-                    Upload serial label
-                  </button>
-                </div>
+                {/* Proof-of-purchase CTAs only in ownership-proof flows, never during normal shopping. */}
+                {isProofRelevant(group, userQuery) && (
+                  <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my receipt now')}>
+                      Upload receipt
+                    </button>
+                    <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my order confirmation screenshot now')}>
+                      Upload order confirmation
+                    </button>
+                    <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading a photo of the serial number label now')}>
+                      Upload serial label
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1309,7 +811,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
                         <div className={styles.cardName}>{title}</div>
                       </a>
                       <div className={styles.cardMeta}>{subtitle || p.specs_summary || '\u2014'}</div>
-                      {(() => { const pros = buildProsNote(p, userQuery); return pros ? <div className={styles.cardFit}>\u2713 {pros}</div> : null; })()}
+                      {(() => { const pros = buildProsNote(p, userQuery); return pros ? <div className={styles.cardFit}>{'✓ '}{pros}</div> : null; })()}
                       {p.use_case_fit && p.use_case_fit !== buildProsNote(p, userQuery) && <div className={styles.cardFit}>{p.use_case_fit}</div>}
                       {p.sku && <a className={styles.cardLink} href={`/ui/product/${encodeURIComponent(p.sku)}`}>View details</a>}
                     </div>

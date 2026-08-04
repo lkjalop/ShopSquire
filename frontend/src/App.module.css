@@ -110,6 +110,15 @@ body {
   font-weight: 700;
 }
 
+.catalogueNotice {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--muted);
+  text-align: center;
+}
+
 .filters { display: flex; gap: 8px; }
 
 .filterBtn {
@@ -361,6 +370,25 @@ body {
   border-bottom-left-radius: 4px;
 }
 
+/* paragraph-aware message body: render backend \n\n breaks as real spacing (was one dense block) */
+.msgPara {
+  margin: 0 0 8px 0;
+}
+.msgPara:last-child {
+  margin-bottom: 0;
+}
+/* security warning as its own callout block, not jammed into the recommendation prose */
+.msgSecurity {
+  display: block;
+  margin: 0 0 10px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 13px;
+}
+
 .thinkingBubble {
   display: inline-flex;
   align-items: center;
@@ -570,6 +598,10 @@ body {
   position: relative;
   z-index: 3; /* keep right-panel actions above chat-layer hitboxes */
   background: var(--card);
+}
+
+.procurementPanelSlot {
+  margin-bottom: 12px;
 }
 
 .rightHeader {

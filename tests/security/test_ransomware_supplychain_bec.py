@@ -1,6 +1,9 @@
 import time
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+
 from src.app.main import create_app
+from src.app.models.db import db_session
 
 
 def test_ransomware_markers_in_cv(monkeypatch):
@@ -39,6 +42,7 @@ def test_ransomware_markers_in_cv(monkeypatch):
 def test_supply_chain_tampering_detection(monkeypatch):
     monkeypatch.setenv("DECISION_LOG_WRITES_ENABLED", "1")
     monkeypatch.setenv("MERCHANT_API_KEY", "local-merchant-key")
+    monkeypatch.setenv("SECURITY_OBSERVER_SYNC", "1")
 
     app = create_app()
     client = TestClient(app)
@@ -52,24 +56,23 @@ def test_supply_chain_tampering_detection(monkeypatch):
 
     resp = client.get("/api/v1/recommend/suggest", params={"uid": "dev-1", "query": query}, headers=headers)
     assert resp.status_code == 200
-    data = resp.json()
-    trace_id = data.get("trace_id") or data.get("decision_trace_id")
-    assert trace_id
-
-    # Poll for security_scan or human_escalation events
+    # The passive observer is an evidence stream, not a commercial decision-trace
+    # writer. Prove the request was detected and persisted without coupling the
+    # security contract to retired V1 trace side effects.
     deadline = time.time() + 5.0
-    found = False
+    found = None
     while time.time() < deadline:
-        q = client.get(f"/api/v1/decisions/{trace_id}/query", params={"include_events": "true"}, headers=headers)
-        if q.status_code == 200:
-            body = q.json()
-            events = body.get("events") or []
-            for e in events:
-                if e.get("event_type") in ("security_scan", "human_escalation", "policy_gate"):
-                    found = True
-                    break
-            if found:
-                break
+        with db_session() as db:
+            found = db.execute(
+                text(
+                    "SELECT details FROM security_events "
+                    "WHERE path = '/api/v1/recommend/suggest' "
+                    "AND details LIKE :signal ORDER BY event_time DESC LIMIT 1"
+                ),
+                {"signal": '%\"supply_chain\": true%'},
+            ).scalar()
+        if found:
+            break
         time.sleep(0.25)
 
     assert found, "Expected security-related event for supply-chain tampering indicators"

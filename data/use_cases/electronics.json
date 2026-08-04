@@ -1,0 +1,153 @@
+{
+  "_schema": [
+    "UNIFIED use-case registry (Track E) — SMART, not hardcoded. A use-case maps intent to",
+    "CAPABILITY REQUIREMENTS (real attribute predicates from data/attributes/electronics.json), and",
+    "the PRICE FLOOR is DERIVED from the cheapest in-catalog product meeting them (never a stored",
+    "number — that drifts from reality the day prices change). budget_band_hint is ADVISORY ONLY",
+    "(expectation-setting / cold-start); the catalog-derived floor is authoritative.",
+    "HYBRID namespace: coarse use-case + baseline requirements + fine `variants` that ADD/OVERRIDE",
+    "requirements (DRY). Brand/form premiums (Surface, Mac +30-50%) are EMERGENT — a shopper's brand",
+    "preference is a filter, and the catalog prices it; nothing hardcodes the premium.",
+    "requirement predicate form: {attr: [op, value]} with op in >=,<=,>,<,==,in."
+  ],
+  "vertical": "electronics",
+  "version": "2.0",
+  "host_nodes": ["el-6"],
+  "use_cases": {
+    "gaming": {
+      "label": "Gaming",
+      "description": "Playing games as the primary workload; not building, designing, compiling or rendering games.",
+      "keywords": ["game", "gaming", "fps", "esports", "play"],
+      "host_nodes": ["el-6-11-2", "el-6-11-1"],
+      "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 4]},
+      "budget_band_hint": [800, 1500],
+      "variants": {
+        "light":       {"requirements": {"gpu_vram_gb": [">=", 2]}, "budget_band_hint": [700, 1100], "note": "Roblox/Minecraft-class"},
+        "casual":      {"requirements": {"gpu_vram_gb": [">=", 4], "refresh_hz": [">=", 60]}, "budget_band_hint": [800, 1300]},
+        "competitive": {"requirements": {"gpu_vram_gb": [">=", 6], "refresh_hz": [">=", 144]}, "budget_band_hint": [1200, 2000]},
+        "aaa_heavy":   {"requirements": {"gpu_vram_gb": [">=", 8], "ram_gb": [">=", 16]}, "budget_band_hint": [1500, 3000]}
+      }
+    },
+    "game_development": {
+      "label": "Game development",
+      "description": "Building, designing, compiling, rendering or testing games and game-engine projects; not merely playing games.",
+      "excludes": ["gaming"],
+      "keywords": ["game development", "game design", "game engine", "unity", "unreal", "godot"],
+      "host_nodes": ["el-6-11-2", "el-6-6"],
+      "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 6]},
+      "budget_band_hint": [1600, 3000],
+      "variants": {
+        "two_d_light": {
+          "keywords": ["2d", "godot", "pixel art", "lightweight"],
+          "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 0]},
+          "budget_band_hint": [900, 1600]
+        },
+        "unity_course": {
+          "keywords": ["short course", "bootcamp", "unity", "small 3d"],
+          "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 4]},
+          "budget_band_hint": [1200, 2200]
+        },
+        "unreal_realtime": {
+          "keywords": ["unreal", "ue5", "shader compilation", "commercial 3d"],
+          "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+          "budget_band_hint": [2200, 4000]
+        },
+        "offline_rendering": {
+          "keywords": ["blender render", "offline rendering", "ray tracing", "render scenes"],
+          "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+          "budget_band_hint": [2200, 4500]
+        },
+        "vr_development": {
+          "keywords": ["vr", "virtual reality", "headset testing"],
+          "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+          "budget_band_hint": [2500, 4500]
+        },
+        "local_ai_tools": {
+          "keywords": ["local ai", "texture generation", "npc prototypes", "generative ai"],
+          "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+          "budget_band_hint": [2500, 5000]
+        }
+      }
+    },
+    "drawing": {
+      "label": "Drawing / digital art",
+      "keywords": ["draw", "drawing", "digital art", "illustration", "sketch", "artist", "procreate", "wacom", "paint"],
+      "requirements": {"form_factor": ["in", ["convertible", "detachable", "tablet"]], "touchscreen": ["==", true], "ram_gb": [">=", 16]},
+      "budget_band_hint": [1200, 2200],
+      "note": "touchscreen 2-in-1/detachable for pen input; FLOOR derived from the cheapest such in-catalog product. Escalates naturally when the shopper prefers a Surface/Mac (brand filter + catalog price), no hardcoded premium.",
+      "complements": [
+        {"key": "graphics_tablet", "node": "el-7-9-12-7", "label": "graphics tablet",
+         "reason": "a pen tablet (e.g. Wacom Intuos) adds precise pen input — the drawing capability itself, without paying for a touchscreen laptop; often the better tool for serious illustration",
+         "tags": ["creative", "student", "hobby"]}
+      ],
+      "variants": {
+        "pen_precision": {"requirements": {"stylus_support": ["==", true], "gpu_vram_gb": [">=", 4]}, "budget_band_hint": [1500, 2500], "note": "active-pen + dGPU for heavier illustration/painting"}
+      }
+    },
+    "creative": {
+      "label": "Content creator / creative",
+      "keywords": ["content creator", "video editing", "rendering", "photo editing", "creative", "music production", "premiere", "davinci"],
+      "requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512], "gpu_vram_gb": [">=", 4]},
+      "budget_band_hint": [1000, 2500],
+      "complements": [
+        {"key": "graphics_tablet", "node": "el-7-9-12-7", "label": "graphics tablet",
+         "reason": "a pen tablet gives precise input for illustration, photo retouching and design work",
+         "tags": ["creative", "student", "hobby"]}
+      ],
+      "variants": {
+        "video_4k":       {"requirements": {"ram_gb": [">=", 32], "gpu_vram_gb": [">=", 6]}, "budget_band_hint": [1800, 3500]},
+        "music_production":{"requirements": {"ram_gb": [">=", 16]}, "budget_band_hint": [800, 1800]}
+      }
+    },
+    "student": {
+      "label": "Student",
+      "keywords": ["student", "study", "school", "notes", "essays", "university", "college"],
+      "requirements": {"ram_gb": [">=", 8], "storage_gb": [">=", 256]},
+      "budget_band_hint": [500, 1200],
+      "variants": {
+        "computer_science": {"requirements": {"ram_gb": [">=", 16], "storage_gb": [">=", 512]}, "budget_band_hint": [800, 1600]},
+        "engineering":      {"requirements": {"ram_gb": [">=", 16], "gpu_vram_gb": [">=", 4]}, "budget_band_hint": [1200, 2200], "note": "CAD/simulation"},
+        "data_science":     {"requirements": {"ram_gb": [">=", 16], "gpu_vram_gb": [">=", 4]}, "budget_band_hint": [1000, 2000]},
+        "design":           {"requirements": {"ram_gb": [">=", 16], "touchscreen": ["==", true]}, "budget_band_hint": [900, 1800]}
+      }
+    },
+    "high_school": {
+      "label": "High school student",
+      "keywords": ["high school", "highschool", "year 10", "year 11", "year 12", "teenager"],
+      "requirements": {"ram_gb": [">=", 8], "storage_gb": [">=", 256]},
+      "budget_band_hint": [700, 1100],
+      "note": "the floor depends on INTENT (pure schooling vs schooling+gaming) — pick the variant; the catalog derives the real number.",
+      "variants": {
+        "schooling":      {"requirements": {"ram_gb": [">=", 8]}, "budget_band_hint": [700, 1100], "note": "office/browser/notes"},
+        "light_gaming":   {"requirements": {"gpu_vram_gb": [">=", 2]}, "budget_band_hint": [800, 1300], "note": "Roblox/Minecraft alongside schoolwork"},
+        "serious_gaming": {"requirements": {"gpu_vram_gb": [">=", 6], "refresh_hz": [">=", 144]}, "budget_band_hint": [1200, 2100], "note": "GPU-intensive titles"}
+      },
+      "content_advisory": {
+        "persona": "minor",
+        "note": "A minor requesting specs for a mature-rated (M / 18+) title implies a GPU floor for that title, but SURFACE an age/content clarification ('this runs <game>; note it is rated <rating>') — ADVISORY ONLY, never a hard block; the store sells hardware, not game content."
+      }
+    },
+    "ai_ml_workstation": {
+      "label": "AI / ML workstation",
+      "keywords": ["ai", "ml", "machine learning", "fine-tune", "train models", "llm", "deep learning", "stable diffusion"],
+      "host_nodes": ["el-6-11-2"],
+      "requirements": {"ram_gb": [">=", 32], "storage_gb": [">=", 1024], "gpu_vram_gb": [">=", 8]},
+      "budget_band_hint": [1800, 4000]
+    },
+    "office": {
+      "label": "Office / business",
+      "keywords": ["office", "business", "corporate", "productivity", "spreadsheets", "email"],
+      "requirements": {"ram_gb": [">=", 8], "storage_gb": [">=", 256]},
+      "budget_band_hint": [500, 1200],
+      "variants": {
+        "executive": {"requirements": {"ram_gb": [">=", 16], "weight_g": ["<=", 1500]}, "budget_band_hint": [900, 2000], "note": "premium/portable"}
+      }
+    },
+    "general": {
+      "label": "General use",
+      "keywords": ["general", "everyday", "browsing", "basic"],
+      "requirements": {"ram_gb": [">=", 8], "storage_gb": [">=", 256]},
+      "budget_band_hint": [400, 900]
+    }
+  }
+}

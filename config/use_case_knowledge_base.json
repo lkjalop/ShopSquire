@@ -625,6 +625,24 @@
         "cooling"
       ]
     },
+    "game_development": {
+      "label": "Game Development / Real-time 3D",
+      "min_ram_gb": 16,
+      "recommended_ram_gb": 32,
+      "min_storage_gb": 512,
+      "recommended_storage_gb": 1000,
+      "recommended_cpu": "Modern 6-core or better CPU",
+      "gpu_needed": true,
+      "gpu_note": "Dedicated GPU with 6GB+ VRAM for real-time editor viewports, shaders, light baking, and local builds",
+      "min_gpu_vram_gb": 6,
+      "min_display_inches": 14,
+      "recommended_display_inches": 16,
+      "battery_hours_min": 3,
+      "form_factor_preference": ["workstation", "gaming", "standard"],
+      "apps": ["Unity", "Unreal Engine", "Godot", "Blender", "Visual Studio"],
+      "tags": ["software_development", "real_time_3d", "content_creation"],
+      "priority_factors": ["gpu", "vram", "cpu", "ram", "cooling", "storage_speed"]
+    },
     "content_creator": {
       "label": "Content Creation / Video Editing",
       "min_ram_gb": 32,

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Canonical query classification service (Sprint R1 extraction).
 
 All query intent classification belongs here. The recommend router should
@@ -13,6 +11,7 @@ Covers:
 - Stock query detection (delegates to inventory_query_service)
 - Budget question detection
 """
+from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional
@@ -47,14 +46,97 @@ def is_followup_explain_query(query: Optional[str]) -> bool:
     return bool(_FOLLOWUP_EXPLAIN_RE.search(q))
 
 
+def is_standalone_search(query: Optional[str]) -> bool:
+    """Return whether a turn contains its own product/budget search subject."""
+    value = str(query or "").strip().lower()
+    if not value:
+        return False
+    from src.app.services.recommend_budget_parsing import (
+        extract_explicit_budget_override,
+    )
+
+    if extract_explicit_budget_override(value):
+        return True
+    category_words = (
+        "laptop",
+        "notebook",
+        "ultrabook",
+        "macbook",
+        "chromebook",
+        "desktop",
+        "tower",
+        "workstation",
+        "tablet",
+        "ipad",
+        "phone",
+        "smartphone",
+        "monitor",
+        "pc",
+        "computer",
+        "headset",
+        "keyboard",
+        "mouse",
+    )
+    if any(re.search(rf"\b{re.escape(word)}\b", value) for word in category_words):
+        return True
+    try:
+        from src.app.services.query_decomposer import decompose
+
+        plan = decompose(value)
+        if getattr(plan, "answer_without_products", False):
+            return False
+        if (
+            getattr(plan, "category", None)
+            or str(getattr(plan, "intent", "")) == "recommendation_multi"
+        ):
+            return True
+        return any(
+            getattr(question, "use_cases", None)
+            or getattr(question, "hard_constraints", None)
+            for question in getattr(plan, "sub_questions", []) or []
+        )
+    except Exception:
+        return False
+
+
 # ── Off-domain / unsupported intent ──────────────────────────────────────────
 
+_FRESH_SEARCH_REQUEST_RE = re.compile(
+    r"\b(i|we)\s+(?:need|want|am looking for|are looking for|"
+    r"am thinking (?:to|of) (?:buying|getting)|are thinking (?:to|of) "
+    r"(?:buying|getting))\b|"
+    r"\b(?:recommend|find|show)\s+(?:me|us)\b",
+    re.IGNORECASE,
+)
+
+
+def is_fresh_search_request(query: Optional[str]) -> bool:
+    """Return whether a rationale-bearing turn supplies its own search subject."""
+    value = str(query or "").strip()
+    return bool(_FRESH_SEARCH_REQUEST_RE.search(value) and is_standalone_search(value))
+
+
 _OFF_DOMAIN_RE = re.compile(
-    r"\b(write.*code|write.*essay|write.*email|compose.*poem|"
+    r"\b(can i get your number|what(?:'s| is) your number|give me your number|"
+    r"date me|go out with me|sexy|hot|"
+    r"big\s*mac|burger|fries|mcdonalds|"
+    r"write.*code|write.*essay|write.*email|compose.*poem|"
     r"translate|what is the weather|stock.*price|stock.*market|"
-    r"recipe|cook|bake|medical.*advice|legal.*advice|"
+    r"weather|forecast|is\s+it\s+raining|going\s+to\s+rain|will\s+it\s+rain|"
+    r"recipe|cook|bake|pasta|pizza|lasagne|sandwich|"
+    r"who\s+won|the\s+score|match\s+last\s+night|football|cricket|"
+    r"nba|nfl|world\s+cup|tell\s+me\s+a\s+joke|knock\s+knock|sing\s+me|"
+    r"write\s+me\s+a\s+poem|"
+    r"capital\s+of|who\s+is\s+the\s+president|meaning\s+of\s+life|"
+    r"what\s+year\s+did|medical.*advice|legal.*advice|"
     r"diagnose|diagnosis|prescription|drug|medication|"
     r"political|election|vote|president|prime.minister)\b",
+    re.IGNORECASE,
+)
+
+_OFF_DOMAIN_CALCULATION_RE = re.compile(
+    r"^\s*(?:(?:what|whats|what's)\s+is|calculate)\s+\d+\s*"
+    r"(?:[-+*x/]|times|plus|minus|divided\s+by)\s*\d+",
     re.IGNORECASE,
 )
 
@@ -65,10 +147,26 @@ _UNSUPPORTED_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+_GREETING_RE = re.compile(
+    r"^\s*(?:hi+|hey+|hello+|helo|yo|sup|hiya|howdy|greetings|"
+    r"good\s+(?:morning|afternoon|evening)|help|menu|start|get\s+started|"
+    r"what\s+can\s+you\s+do|what\s+do\s+you\s+do|who\s+are\s+you|"
+    r"what\s+are\s+you|what\s+is\s+this|how\s+(?:do|does)\s+(?:you|this|it)\s+work|"
+    r"what\s+can\s+i\s+(?:do|ask)|can\s+you\s+help(?:\s+me)?)"
+    r"(?:\s+there|\s+friend)?\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
+
 
 def is_off_domain_query(query: Optional[str]) -> bool:
     """Return True when the query is clearly off-domain (not a shopping/support task)."""
-    return bool(_OFF_DOMAIN_RE.search(str(query or "")))
+    text = str(query or "")
+    return bool(_OFF_DOMAIN_RE.search(text) or _OFF_DOMAIN_CALCULATION_RE.search(text))
+
+
+def is_greeting_query(query: Optional[str]) -> bool:
+    """Return True only for a standalone greeting/capabilities request."""
+    return bool(_GREETING_RE.match(str(query or "").strip()))
 
 
 def has_unsupported_intent(query: Optional[str]) -> bool:
@@ -96,7 +194,7 @@ def is_requirements_query(query: Optional[str]) -> bool:
 _BUDGET_QUESTION_RE = re.compile(
     r"\b(is\s+\$|is\s+that\s+enough|is\s+my\s+budget|enough\s+for|"
     r"can\s+i\s+(afford|get)|will\s+\$|how\s+much\s+does|"
-    r"is\s+\d+\s+(dollars?|usd|aud|gbp|eur)?\s+(enough|ok|okay|sufficient)|"
+    r"is\s+\$?\d+\s+(?:(?:dollars?|usd|aud|gbp|eur|k)\s+)?(?:enough|ok|okay|sufficient)|"
     r"(good|decent|ok)\s+budget)\b",
     re.IGNORECASE,
 )
@@ -126,7 +224,10 @@ def classify_turn_intent(
     if re.search(
         r"\b(warranty|return|refund|broken|damaged|cracked|shattered|repair|"
         r"replacement|support|not working|faulty|dead pixel|screen damage|"
-        r"bsod|blue screen|stop code)\b",
+        r"bsod|blue screen|stop code|where is my order|order status|"
+        r"track(?:ing)? (?:my |the )?(?:order|shipment|delivery)|"
+        r"has not arrived|hasn't arrived|not arrived|not received|"
+        r"late delivery|missing (?:order|shipment|delivery))\b",
         q,
     ):
         return "SUPPORT_CLAIM"
@@ -145,7 +246,7 @@ def classify_turn_intent(
 # ── Coarse product category ───────────────────────────────────────────────────
 
 _CATEGORY_PATTERNS: List[tuple] = [
-    ("laptop", re.compile(r"\b(laptop|notebook|ultrabook|macbook|chromebook|thinkpad|spectre|legion|rog)\b", re.I)),
+    ("laptop", re.compile(r"\b(laptops?|notebooks?|ultrabooks?|macbooks?|chromebooks?|thinkpads?|spectres?|legions?|rog)\b", re.I)),
     ("desktop", re.compile(r"\b(desktop|tower|mini.pc|nuc|all.in.one)\b", re.I)),
     ("monitor", re.compile(r"\b(monitor|display|screen|4k|1440p|curved)\b", re.I)),
     ("keyboard", re.compile(r"\b(keyboard|mechanical|keycap|switch)\b", re.I)),
@@ -197,7 +298,7 @@ def classify_query(
     turn_intent = classify_turn_intent(
         query=query,
         nlp=nlp,
-        followup_explain=followup_explain,
+        followup_explain=followup_explain and not is_fresh_search_request(query),
         explicit_constraint_update=explicit_constraint,
     )
     category = coarse_product_category(query)

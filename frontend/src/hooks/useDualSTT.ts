@@ -5,8 +5,8 @@ interface DualSTTResult {
   transcript: string;
   /** Whether the mic is actively recording */
   isRecording: boolean;
-  /** Source of current transcript: 'browser' | 'whisper' | 'none' */
-  source: 'browser' | 'whisper' | 'none';
+  /** Source of current transcript, or null before voice is used */
+  source: 'browser' | 'whisper' | null;
   /** Whisper confidence score (0-1) if available */
   whisperConfidence: number | null;
   /** Whether Whisper is still processing */
@@ -30,6 +30,10 @@ interface UseDualSTTOptions {
   apiKey?: string;
   /** Language hint for Whisper (auto-detect if not set) */
   language?: string;
+  /** Authenticated tenant context; never accepted from transcript content */
+  tenantId?: string;
+  /** Hard recording bound for pilot push-to-talk */
+  maxDurationMs?: number;
   /** Callback when final transcript is ready */
   onFinalTranscript?: (text: string, source: 'browser' | 'whisper') => void;
 }
@@ -40,11 +44,14 @@ interface UseDualSTTOptions {
  * correction. Browser transcript appears instantly; Whisper replaces it if different.
  */
 export function useDualSTT(options: UseDualSTTOptions = {}): DualSTTResult {
-  const { apiUrl = '', apiKey = '', language, onFinalTranscript } = options;
+  const {
+    apiUrl = '', apiKey = '', language, tenantId = 'default',
+    maxDurationMs = 30_000, onFinalTranscript,
+  } = options;
 
   const [transcript, setTranscript] = useState('');
   const [isRecording, setIsRecording] = useState(false);
-  const [source, setSource] = useState<'browser' | 'whisper' | 'none'>('none');
+  const [source, setSource] = useState<'browser' | 'whisper' | null>(null);
   const [whisperConfidence, setWhisperConfidence] = useState<number | null>(null);
   const [whisperPending, setWhisperPending] = useState(false);
   const [corrected, setCorrected] = useState(false);
@@ -55,14 +62,16 @@ export function useDualSTT(options: UseDualSTTOptions = {}): DualSTTResult {
   const audioChunksRef = useRef<Blob[]>([]);
   const browserTranscriptRef = useRef('');
   const onFinalRef = useRef(onFinalTranscript);
+  const recordingTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     onFinalRef.current = onFinalTranscript;
   }, [onFinalTranscript]);
 
   const sendToWhisper = useCallback(async (audioBlob: Blob) => {
-    if (!apiUrl) return;
     setWhisperPending(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 12_000);
     try {
       const reader = new FileReader();
       const base64 = await new Promise<string>((resolve, reject) => {
@@ -82,7 +91,10 @@ export function useDualSTT(options: UseDualSTTOptions = {}): DualSTTResult {
         headers: {
           'Content-Type': 'application/json',
           ...(apiKey ? { 'x-api-key': apiKey } : {}),
+          'X-Tenant-Id': tenantId,
         },
+        credentials: 'include',
+        signal: controller.signal,
         body: JSON.stringify(body),
       });
 
@@ -102,15 +114,16 @@ export function useDualSTT(options: UseDualSTTOptions = {}): DualSTTResult {
     } catch {
       // Whisper unavailable — browser transcript stands
     } finally {
+      window.clearTimeout(timeoutId);
       setWhisperPending(false);
     }
-  }, [apiUrl, apiKey, language]);
+  }, [apiUrl, apiKey, language, tenantId]);
 
   const start = useCallback(async () => {
     setError(null);
     setCorrected(false);
     setTranscript('');
-    setSource('none');
+    setSource(null);
     setWhisperConfidence(null);
     browserTranscriptRef.current = '';
     audioChunksRef.current = [];
@@ -154,10 +167,12 @@ export function useDualSTT(options: UseDualSTTOptions = {}): DualSTTResult {
     }
 
     // --- Path 2: MediaRecorder for Whisper ---
-    if (apiUrl) {
-      try {
+    try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+        const preferredMime = 'audio/webm;codecs=opus';
+        const recorder = MediaRecorder.isTypeSupported?.(preferredMime)
+          ? new MediaRecorder(stream, { mimeType: preferredMime })
+          : new MediaRecorder(stream);
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0) audioChunksRef.current.push(e.data);
         };
@@ -170,15 +185,25 @@ export function useDualSTT(options: UseDualSTTOptions = {}): DualSTTResult {
         };
         recorder.start();
         mediaRecorderRef.current = recorder;
-      } catch {
-        // Microphone access denied — browser STT may still work
-      }
+        recordingTimeoutRef.current = window.setTimeout(() => {
+          try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+          if (mediaRecorderRef.current?.state !== 'inactive') {
+            try { mediaRecorderRef.current?.stop(); } catch { /* ignore */ }
+          }
+          setIsRecording(false);
+        }, Math.min(60_000, Math.max(1_000, maxDurationMs)));
+    } catch {
+      // Microphone access denied — browser STT may still work
     }
 
     setIsRecording(true);
-  }, [apiUrl, language, sendToWhisper]);
+  }, [language, maxDurationMs, sendToWhisper]);
 
   const stop = useCallback(() => {
+    if (recordingTimeoutRef.current !== null) {
+      window.clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch { /* ignore */ }
       recognitionRef.current = null;
@@ -201,6 +226,9 @@ export function useDualSTT(options: UseDualSTTOptions = {}): DualSTTResult {
       if (recognitionRef.current) try { recognitionRef.current.stop(); } catch { /* */ }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         try { mediaRecorderRef.current.stop(); } catch { /* */ }
+      }
+      if (recordingTimeoutRef.current !== null) {
+        window.clearTimeout(recordingTimeoutRef.current);
       }
     };
   }, []);

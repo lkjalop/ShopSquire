@@ -23,6 +23,23 @@ from src.app.security.provider_boundary import require_provider_transfer, saniti
 
 log = logging.getLogger(__name__)
 
+
+def _normalize_image_bytes(image_bytes: bytes, *, max_px: int = 1024) -> bytes:
+    """Transcode to PNG AND downscale to <=max_px so the vision model reliably decodes it. Ollama vision
+    returns an EMPTY response for oversized images (measured 2026-06-28: 2048x2048 .webp → empty; the same
+    image at 1024px → correct identification) and for some .webp inputs; PNG <=1024px works. Falls back to
+    the raw bytes if PIL can't open them (non-image payloads are handled upstream)."""
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img.thumbnail((max_px, max_px))  # in-place, preserves aspect ratio; no-op if already smaller
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return image_bytes
+
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
@@ -215,7 +232,7 @@ class VisionReasoningService:
 
         require_provider_transfer("openai", data_categories=["vision_image"])
         prompt, _, _ = sanitize_for_provider("openai", prompt, data_categories=["vision_prompt"])
-        b64 = base64.b64encode(image_bytes).decode()
+        b64 = base64.b64encode(_normalize_image_bytes(image_bytes)).decode()
         api_key = get_settings().openai_api_key
         client = openai.AsyncOpenAI(api_key=api_key)
         resp = await client.chat.completions.create(
@@ -282,7 +299,7 @@ class VisionReasoningService:
         except ImportError:
             return self._err("httpx not installed")
 
-        b64 = base64.b64encode(image_bytes).decode()
+        b64 = base64.b64encode(_normalize_image_bytes(image_bytes)).decode()
         vision_model = get_settings().ollama_vision_model or "llava:13b"
         ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -293,6 +310,8 @@ class VisionReasoningService:
                     "prompt": prompt,
                     "images": [b64],
                     "stream": False,
+                    # keep the VLM resident between damage-triage calls (cold reload = 2.8-6.1s each)
+                    "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                     "options": {"temperature": 0},
                 },
             )

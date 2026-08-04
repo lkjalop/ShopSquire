@@ -1,0 +1,244 @@
+"""Conversation battery — the PARITY HARNESS for recommend.py extractions (and the nightly eval net).
+
+Every probe encodes a behavior that BROKE in live demos and was fixed; each asserts the semantic
+INVARIANT (qty parsed, budget honored, refusal present, lane not hijacked) rather than exact JSON, so
+the battery survives cosmetic changes but fails on regressions. Rule: NO extraction pass on recommend.py
+lands unless this file is green before AND after.
+
+Single-turn probes only — multi-turn memory (floor-carry, cut-honored across turns) is covered by the
+browser E2E (e2e/context-retention.spec.ts) where real Redis session state exists.
+"""
+from __future__ import annotations
+
+import json
+import os
+from uuid import uuid4
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from tests.utils import default_headers, write_feature_flags
+from src.app.main import create_app
+from src.app.models.db import db_session
+from src.app.services.taxonomy_registry import add_sold_node, upsert_classification
+
+_FLAGS_PATH = os.path.join("config", "feature_flags.json")
+_PRODUCT_PATH_FLAGS = {
+    "USE_AGENT_CAPABILITIES": True,
+    "AGENT_ROLLOUT_PERCENT": 100,
+    "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+    "KILL_SWITCH": False,
+    "DECISION_LOG_WRITES_ENABLED": False,
+    "DEGRADATION": {"enabled": True},
+    "TEST_FORCE_BAD_SKU": False,
+}
+
+client = TestClient(create_app(), headers=default_headers())
+
+_CATALOG = [
+    ("BAT-A", "Aster Slim 14 Laptop", 119900, 1.2),
+    ("BAT-B", "Boreal Pro 15 Laptop", 129900, 1.6),
+    ("BAT-C", "Cinder Book 16 Laptop", 139900, 1.8),
+    ("BAT-D", "Dune Air 13 Laptop", 99900, 1.1),
+    ("BAT-E", "Ember Max 17 Laptop", 189900, 2.4),
+]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _seed():
+    _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
+    write_feature_flags(_PRODUCT_PATH_FLAGS)
+    with db_session() as db:
+        assert add_sold_node(db, node_handle="el-6-6", source="test")
+        for sku, name, cents, wkg in _CATALOG:
+            db.execute(text(
+                "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
+                "VALUES (:id,:sku,:name,:c,'AUD',:specs,1)"),
+                {"id": sku, "sku": sku, "name": name, "c": cents,
+                 "specs": f'{{"ram_gb": 16, "storage_gb": 512, "weight_kg": {wkg}}}'})
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
+                            "VALUES (:i,:p,9,'default')"), {"i": "inv-" + sku, "p": sku})
+            assert upsert_classification(
+                db,
+                sku=sku,
+                node_handle="el-6-6",
+                source="test",
+                status="approved",
+                confidence=1.0,
+            )
+        db.commit()
+    with Session(client.app.state.engine) as app_db:
+        visible = app_db.execute(
+            text(
+                "SELECT COUNT(*) FROM product_classification "
+                "WHERE tenant_id='default' AND sku LIKE 'BAT-%' AND status='approved'"
+            )
+        ).scalar()
+        assert int(visible or 0) == len(_CATALOG)
+        from src.app.services.catalog_read_model import get_variants
+
+        assert len(get_variants(app_db, [row[0] for row in _CATALOG])) == len(_CATALOG)
+        from src.app.services.recommendation_core.envelope import TurnEnvelope
+        from src.app.services.recommendation_core.evidence import gather_evidence
+
+        fixture_evidence = gather_evidence(
+            app_db,
+            TurnEnvelope(
+                query="work laptops",
+                uid="fixture-check",
+                trace_id="fixture-check",
+                tenant_id="default",
+                currency="AUD",
+                budget_max_cents=140_000,
+            ),
+            node_handle="el-6-6",
+        )
+        assert fixture_evidence.variants, fixture_evidence
+    yield
+    if _orig_flags is not None:
+        with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
+            f.write(_orig_flags)
+    with db_session() as db:
+        for sku, *_ in _CATALOG:
+            db.execute(text("DELETE FROM inventory WHERE product_id=:p"), {"p": sku})
+            db.execute(text("DELETE FROM products WHERE id=:p"), {"p": sku})
+        db.commit()
+
+
+def _suggest(query, **params):
+    r = client.get("/api/v1/recommend/suggest",
+                   params={"uid": f"bat-{uuid4().hex[:10]}", "query": query, **params})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _prices(body):
+    return [float(x.get("price") or 0) for x in (body.get("results") or []) if x.get("price")]
+
+
+# ── 1. bulk-qty phrasings: results MUST NOT zero out; the count lands in requested_quantity ────────
+@pytest.mark.parametrize("query,qty", [
+    ("can i get help with 15 work laptops at 1000 to 1400 each? which to get?", 15),
+    ("what laptops for work at 1000 to 1400 each? I need about 25", 25),
+    ("can i get help with 30 or so laptops for work at 1000 to 1400 each?", 30),
+    ("bulk office laptops priced 1000 to 1400 each, need 18", 18),
+])
+def test_bulk_qty_returns_products_and_qty(query, qty):
+    body = _suggest(query)
+    assert len(body.get("results") or []) > 0, json.dumps(
+        {
+            key: body.get(key)
+            for key in (
+                "message",
+                "assistant_message",
+                "constraints_used",
+                "decision",
+                "grounding_status",
+                "next_questions",
+                "source_statuses",
+                "currency",
+                "capability_conflict",
+                "timing_breakdown",
+            )
+        },
+        default=str,
+    )
+    assert body.get("requested_quantity") == qty
+
+
+# ── 2. qty guards: model numbers and spec sizes are NEVER a quantity ───────────────────────────────
+@pytest.mark.parametrize("query", ["dell 15 laptop under 1400", "15 inch laptops for work under 1400"])
+def test_model_and_spec_numbers_are_not_quantities(query):
+    body = _suggest(query)
+    assert body.get("requested_quantity") in (None, 0)
+
+
+# ── 3. budget grammar end-to-end (the five-parser class) ───────────────────────────────────────────
+def test_budget_cut_revision_parses_as_ceiling():
+    body = _suggest("cut it to 1300 max, work laptops")
+    ps = _prices(body)
+    assert ps, "cut phrasing must still return products"
+    assert all(p <= 1300 * 1.001 for p in ps), f"cut ceiling violated: {ps}"
+
+
+def test_grand_and_k_suffixes_parse():
+    b1 = _suggest("work laptops under 2 grand")
+    assert (b1.get("constraints_used") or {}).get("budget_max") == 2000
+    b2 = _suggest("work laptops up to 1.5k")
+    assert (b2.get("constraints_used") or {}).get("budget_max") == 1500
+
+
+def test_spec_units_never_become_money():
+    body = _suggest("work laptops under 2 kg")
+    assert (body.get("constraints_used") or {}).get("budget_max") != 2
+
+
+# ── 4. honest refusals (absurd qty + contradiction) ───────────────────────────────────────────────
+def test_absurd_quantity_gets_honest_refusal_not_silence():
+    body = _suggest("i need 99999 laptops tomorrow")
+    note = str(body.get("refusal_note") or "")
+    assert "1,000" in note or "1000" in note, f"refusal_note missing: {note!r}"
+
+
+def test_contradiction_total_cap_gets_plain_words():
+    body = _suggest("i want 50 laptops but keep the total under 5 grand")
+    note = str(body.get("refusal_note") or "")
+    assert "add up" in note.lower(), f"contradiction note missing: {note!r}"
+    assert (
+        str(body.get("assistant_message") or body.get("message") or "").strip()
+        or body.get("next_questions")
+    ), "V2 must explain the bounded no-action outcome"
+
+
+# ── 5. lane claim-checks (inventory + support hijacks) ─────────────────────────────────────────────
+def test_purchase_phrasing_not_hijacked_by_inventory_lane():
+    body = _suggest("can i get help with work laptops. budget is 1000 to 1400?")
+    # the inventory lane's response shape has 'answer'/'source' and no results
+    assert len(body.get("results") or []) > 0
+    assert body.get("source") != "inventory_no_sku_match"
+
+
+def test_presales_policy_question_is_not_a_support_claim():
+    body = _suggest("gaming laptop under 1400. also what warranty do you offer?")
+    cu = body.get("constraints_used") or {}
+    assert str(cu.get("turn_intent") or "").upper() != "SUPPORT_CLAIM"
+    assert body.get("status") != "support_claim"
+    assert str(body.get("assistant_message") or body.get("message") or "").strip()
+
+
+def test_broken_item_return_IS_a_support_claim():
+    body = _suggest("how do i return a broken laptop i bought?")
+    cu = body.get("constraints_used") or {}
+    assert str(cu.get("turn_intent") or "").upper() == "SUPPORT_CLAIM"
+
+
+# ── 6. split-fulfilment shape: qty > stock splits into now/later with correct arithmetic ──────────
+def test_split_offer_shape_and_arithmetic():
+    """The screenshots' delivery-plan class: cart qty exceeding stock must split into ship-now (stock)
+    + follow-later (shortfall), with the numbers adding up — never a silent block or a zero-out."""
+    r = client.put("/api/v1/cart/items/BAT-A",
+                   json={"uid": "bat-split-1", "sku": "BAT-A", "quantity": 25, "allow_sourcing": True})
+    assert r.status_code == 200, r.text
+    s = client.get("/api/v1/cart/split-offer", params={"uid": "bat-split-1"})
+    assert s.status_code == 200, s.text
+    body = s.json()
+    split = body.get("split") or {}
+    now_qty = sum(x["qty"] for x in (split.get("now") or []) if x.get("sku") == "BAT-A")
+    later_qty = sum(x["qty"] for x in (split.get("later") or []) if x.get("sku") == "BAT-A")
+    assert now_qty == 9, f"ship-now must equal stock (9), got {now_qty}"      # BAT-A seeded with stock 9
+    assert later_qty == 16, f"follow-later must equal shortfall (16), got {later_qty}"
+    assert split.get("fully_in_stock") is False
+    assert isinstance(body.get("suppliers"), dict)   # per-supplier name/channel directory (may be empty in test env)
+
+
+def test_bundle_approval_ttl_expires_stale_rows():
+    """The '-$17,627 discount I didn't select' class: an approval older than the TTL must stop binding."""
+    from src.app.services.bundle_approvals import _approval_expired
+    import datetime as dt
+    old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=48)).isoformat()
+    fresh = dt.datetime.now(dt.timezone.utc).isoformat()
+    assert _approval_expired({"approved_at": old}) is True
+    assert _approval_expired({"approved_at": fresh}) is False
+    assert _approval_expired({"approved_at": None, "created_at": None}) is False

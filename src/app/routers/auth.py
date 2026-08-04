@@ -4,9 +4,7 @@ import hashlib
 import os
 import secrets
 import time
-import base64
 import hmac
-import json
 
 import jwt as pyjwt
 from datetime import datetime, timedelta
@@ -19,19 +17,48 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.policy.action_authority_matrix import AuthDecision, evaluate as evaluate_action_authority
 from src.app.security.csrf_middleware import generate_csrf_token, set_csrf_cookie
 from src.app.security.iam import log_iam_event, check_bruteforce, check_impossible_travel, emit_iam_anomaly
 from src.app.observability.tracing import get_tracer
 from src.app.services.pii_crypto import encrypt_pii, pii_hash
 import httpx
+import logging
 
+logger = logging.getLogger("shopsquire.auth")
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+# ── Argon2id support (OWASP-recommended for new passwords) ──────────────────
+# Falls back to PBKDF2-HMAC-SHA256 when argon2-cffi is not installed.
+# Existing PBKDF2 hashes are detected by absence of the "$argon2" prefix and
+# verified against legacy iterations; successful login triggers a lazy upgrade.
+try:
+    from argon2 import PasswordHasher as _Argon2PH
+    from argon2.exceptions import VerifyMismatchError as _ArgonMismatch, InvalidHashError as _ArgonInvalid
+    _ARGON2_PH: "_Argon2PH | None" = _Argon2PH(
+        time_cost=int(os.getenv("ARGON2_TIME_COST", "3")),
+        memory_cost=int(os.getenv("ARGON2_MEMORY_COST_KB", "65536")),
+        parallelism=int(os.getenv("ARGON2_PARALLELISM", "4")),
+        hash_len=32,
+        salt_len=16,
+    )
+    _ARGON2_AVAILABLE = True
+except ImportError:
+    _ARGON2_PH = None
+    _ARGON2_AVAILABLE = False
+    _ArgonMismatch = Exception  # type: ignore[misc,assignment]
+    _ArgonInvalid = Exception  # type: ignore[misc,assignment]
 tracer = get_tracer("auth-router")
 
 SESSION_COOKIE_NAME = "shopsquire_session"
 API_KEY_COOKIE_NAME = "shopsquire_api_key"
+
+
+def _customer_email_tombstone(user_id: str) -> str:
+    """Non-PII legacy-column value that remains unique per customer row."""
+    return f"REDACTED:{user_id}"
 
 
 def _is_https_request(request: Request | None) -> bool:
@@ -42,8 +69,11 @@ def _is_https_request(request: Request | None) -> bool:
         if proto:
             return proto == "https"
         return str(request.url.scheme).lower() == "https"
-    except Exception:
-        return False
+    except Exception as exc:
+        # FAIL-SECURE (Track A A5): if we can't determine the scheme, assume HTTPS so the session
+        # cookie KEEPS its Secure flag — never downgrade a cookie to plaintext-eligible on error.
+        logger.warning("scheme detection failed — assuming https (keep Secure cookie): %s", repr(exc)[:80])
+        return True
 
 
 def _set_session_cookie(resp: Response, token: str, request: Request | None) -> None:
@@ -132,6 +162,15 @@ def _ensure_auth_tables():
                 )
                 """
             )
+            # email_verified safety-net on the migration-managed table (same runtime-compat pattern
+            # as the tables above). SAVEPOINT-isolated so a duplicate-column failure on Postgres
+            # doesn't abort this transaction. On a migrated DB user_accounts exists; this adds the
+            # column if the migration predates the feature.
+            try:
+                with db.begin_nested():
+                    db.execute("ALTER TABLE user_accounts ADD COLUMN email_verified INTEGER DEFAULT 0")
+            except Exception:
+                pass
             db.commit()
         return
 
@@ -148,6 +187,15 @@ def _ensure_auth_tables():
             )
             """
         )
+        # email_verified: native /register starts unverified until the emailed link is clicked
+        # (OAuth already sets it). Idempotent add for existing DBs. SAVEPOINT-wrapped: on Postgres a
+        # failed ALTER (column already exists) aborts the whole transaction — the nested savepoint
+        # isolates that failure so the CREATE TABLEs below still run. SQLite supports savepoints too.
+        try:
+            with db.begin_nested():
+                db.execute("ALTER TABLE user_accounts ADD COLUMN email_verified INTEGER DEFAULT 0")
+        except Exception:
+            pass
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS session_tokens (
@@ -259,8 +307,12 @@ def _is_forced_reauth(user_id: str | None = None, email: str | None = None) -> b
                 ).fetchone()
                 if row:
                     return True
-    except Exception:
-        return False
+    except Exception as exc:
+        # FAIL-CLOSED (Track A A1): if we can't read the forced-reauth flags, we CANNOT prove the
+        # user isn't flagged — require reauth rather than silently let a flagged user through. A DB
+        # outage costs friction (everyone reauths), never a security bypass. Loud so it's visible.
+        logger.error("forced-reauth check FAILED — failing closed (require reauth): %s", repr(exc)[:120])
+        return True
     return False
 
 
@@ -287,7 +339,48 @@ def _clear_forced_reauth(user_id: str | None = None, email: str | None = None) -
 
 
 def _hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+    """Hash a new password for storage.  Uses argon2id when available (salt embedded
+    in the returned hash string); falls back to PBKDF2-HMAC-SHA256 600k iterations."""
+    if _ARGON2_AVAILABLE and _ARGON2_PH is not None:
+        return _ARGON2_PH.hash(password)  # salt is embedded; `salt` param ignored
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), 600_000
+    ).hex()
+
+
+def _verify_password(password: str, stored_hash: str, salt: str) -> tuple[bool, str | None]:
+    """Verify *password* against *stored_hash*.
+
+    Returns ``(is_valid, upgraded_hash_or_None)``.  When ``upgraded_hash_or_None``
+    is not None the caller should persist it so the account migrates to argon2id.
+    Supports three hash formats (detected automatically):
+      1. ``$argon2id$…`` — argon2id (current default)
+      2. 64-char hex     — PBKDF2-HMAC-SHA256 with 100 000 iterations (legacy)
+      3. anything else   — treated as PBKDF2 100k (safest fallback)
+    """
+    if stored_hash.startswith("$argon2"):
+        if not _ARGON2_AVAILABLE or _ARGON2_PH is None:
+            return False, None
+        try:
+            _ARGON2_PH.verify(stored_hash, password)
+            new_hash = _ARGON2_PH.hash(password) if _ARGON2_PH.check_needs_rehash(stored_hash) else None
+            return True, new_hash
+        except (_ArgonMismatch, _ArgonInvalid, Exception):  # type: ignore[misc]
+            return False, None
+    # PBKDF2-HMAC-SHA256 path. The hex string doesn't embed the iteration count, so try the CURRENT
+    # default (600k, matching _hash_password) first, then the legacy 100k value. Without the 600k
+    # attempt, any password hashed via _hash_password when argon2 is unavailable could NEVER verify.
+    try:
+        for _iters in (600_000, 100_000):
+            expected = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"), salt.encode("utf-8"), _iters
+            ).hex()
+            if hmac.compare_digest(expected, stored_hash):
+                upgraded = _ARGON2_PH.hash(password) if (_ARGON2_AVAILABLE and _ARGON2_PH is not None) else None
+                return True, upgraded
+    except Exception:
+        pass
+    return False, None
 
 
 def _jwt_secret() -> str:
@@ -324,6 +417,39 @@ def _jwt_decode_hs256(token: str, secret: str, *, issuer: str, audience: str) ->
         )
     except (pyjwt.InvalidTokenError, pyjwt.ExpiredSignatureError, Exception):
         return None
+
+
+def _issue_email_verification_token(user_id: str, email: str) -> str:
+    """A stateless, signed email-verification token (no token table needed): a JWT with
+    purpose=email_verify + 24h expiry, over the standard issuer/audience so _jwt_decode_hs256
+    validates it. Empty string when the JWT secret isn't configured."""
+    secret = _jwt_secret()
+    if not secret:
+        return ""
+    now = int(time.time())
+    ttl = int(os.getenv("EMAIL_VERIFY_TTL_SECONDS", "86400") or 86400)
+    claims = {"sub": user_id, "email": email, "purpose": "email_verify",
+              "iss": _jwt_issuer(), "aud": _jwt_audience(), "iat": now, "exp": now + ttl}
+    return _jwt_encode_hs256(claims, secret)
+
+
+def _send_verification_email(email: str, token: str) -> None:
+    """Emit the verification link. Real SMTP at deploy (via the DLP-guarded outbound path); in dev
+    the link is logged so the flow is exercisable without SMTP secrets. Best-effort; never raises."""
+    base = str(os.getenv("PUBLIC_BASE_URL", "http://localhost:8080")).rstrip("/")
+    link = f"{base}/api/v1/auth/verify-email?token={token}"
+    try:
+        env = str(os.getenv("APP_ENV", "local") or "local").lower()
+        if env in ("local", "dev", "development", "test", "testing"):
+            logging.getLogger("shopsquire.auth").info("EMAIL VERIFY LINK for %s: %s", email, link)
+            return
+        from src.app.services.email_providers import get_default_email_provider
+        get_default_email_provider().send(
+            email, "Verify your ShopSquire account",
+            f"Welcome to ShopSquire. Confirm your email to activate your account:\n\n{link}\n",
+            agent_id="Auth_Verification")
+    except Exception as exc:
+        logging.getLogger("shopsquire.auth").warning("verification email send failed: %s", exc)
 
 
 def _issue_access_jwt(*, user_id: str, email: str | None, role: str) -> Dict:
@@ -580,10 +706,14 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
                 )
                 # Keep customers table in sync for account UI convenience
                 db.execute(
-                    "INSERT OR IGNORE INTO customers (id, email, email_hash, email_encrypted, name, created_at) VALUES (:id, :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP)",
+                    "INSERT INTO customers "
+                    "(id, tenant_id, tenant_ownership_status, email, email_hash, email_encrypted, name, created_at) "
+                    "VALUES (:id, :tenant_id, 'authenticated_request_context', :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (id) DO NOTHING",
                     {
                         "id": user_id,
-                        "email": "REDACTED",
+                        "tenant_id": current_tenant_id(),
+                        "email": _customer_email_tombstone(user_id),
                         "email_hash": pii_hash(email),
                         "email_encrypted": encrypt_pii(email),
                         "name": payload.name or email.split("@")[0],
@@ -601,7 +731,50 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
             set_csrf_cookie(response.headers, generate_csrf_token(), secure=_is_https_request(request))
         except Exception:
             pass
-        return {"user_id": user_id, "email": email, "name": payload.name, **token, **jwt_pair}
+        # Email verification: emit a signed link (native register starts unverified). Non-blocking.
+        try:
+            _send_verification_email(email, _issue_email_verification_token(user_id, email))
+        except Exception:
+            pass
+        return {"user_id": user_id, "email": email, "name": payload.name,
+                "email_verified": False, "verification_email_sent": True, **token, **jwt_pair}
+
+
+@router.get("/verify-email")
+@router.post("/verify-email")
+def verify_email(token: str) -> Dict:
+    """Validate the emailed verification token and mark the account verified. Also promotes any
+    GUEST orders placed with this email to the now-verified member (bulk guest->member merge by
+    email hash) — the complement to /account/claim-order's single-order path."""
+    secret = _jwt_secret()
+    claims = _jwt_decode_hs256(token, secret, issuer=_jwt_issuer(), audience=_jwt_audience()) if secret else None
+    if not claims or str(claims.get("purpose") or "") != "email_verify":
+        raise HTTPException(status_code=400, detail="invalid_or_expired_verification_token")
+    user_id = str(claims.get("sub") or "")
+    email = str(claims.get("email") or "").strip().lower()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="invalid_verification_token")
+    _ensure_auth_tables()
+    merged = 0
+    with db_session() as db:
+        db.execute(sql_text("UPDATE user_accounts SET email_verified = 1 WHERE id = :id"), {"id": user_id})
+        # bulk guest->member merge: claim any unclaimed guest orders that match this email hash.
+        try:
+            res = db.execute(sql_text(
+                "UPDATE orders SET customer_id = :cid "
+                "WHERE customer_id IS NULL AND guest_email_hash = :h "
+                "AND tenant_id = :tenant_id "
+                "AND tenant_ownership_status != 'unclassified'"),
+                {
+                    "cid": user_id,
+                    "h": pii_hash(email),
+                    "tenant_id": current_tenant_id(),
+                })
+            merged = int(getattr(res, "rowcount", 0) or 0)
+        except Exception:
+            merged = 0
+        db.commit()
+    return {"verified": True, "user_id": user_id, "email": email, "guest_orders_merged": merged}
 
 
 @router.post("/login")
@@ -625,7 +798,8 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
                     pass
                 raise HTTPException(status_code=401, detail="Invalid credentials")
             user_id, ph, salt, name = row[0], row[1], row[2], row[3]
-            if _hash_password(payload.password, salt) != ph:
+            _pw_valid, _pw_upgrade = _verify_password(payload.password, ph, salt)
+            if not _pw_valid:
                 try:
                     log_iam_event("login_failure", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), False, {"reason": "bad_password"})
                     reason = check_bruteforce(email)
@@ -634,6 +808,16 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
                 except Exception:
                     pass
                 raise HTTPException(status_code=401, detail="Invalid credentials")
+            # Lazy hash migration: PBKDF2 → argon2id (or argon2id param refresh)
+            if _pw_upgrade:
+                try:
+                    db.execute(
+                        sql_text("UPDATE user_accounts SET password_hash = :h, salt = '' WHERE id = :uid"),
+                        {"h": _pw_upgrade, "uid": str(user_id)},
+                    )
+                    db.commit()
+                except Exception:
+                    pass
         # Forced reauth policy requires explicit step-up token before issuing a new session.
         if _is_forced_reauth(user_id=str(user_id or ""), email=email):
             provided = str(payload.mfa_stepup_token or "").strip()
@@ -749,9 +933,10 @@ def request_account_recovery(payload: AccountRecoveryRequestPayload) -> Dict:
                 known_user_id = str(row[0]).strip()
                 db.execute(
                     """
-                    INSERT OR REPLACE INTO security_forced_reauth_flags
+                    INSERT INTO security_forced_reauth_flags
                     (id, target_type, target_value, reason, created_at)
                     VALUES (:id, 'email', :target_value, :reason, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at
                     """,
                     {
                         "id": f"fr-{secrets.token_hex(12)}",
@@ -761,9 +946,10 @@ def request_account_recovery(payload: AccountRecoveryRequestPayload) -> Dict:
                 )
                 db.execute(
                     """
-                    INSERT OR REPLACE INTO security_forced_reauth_flags
+                    INSERT INTO security_forced_reauth_flags
                     (id, target_type, target_value, reason, created_at)
                     VALUES (:id, 'user_id', :target_value, :reason, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at
                     """,
                     {
                         "id": f"fr-{secrets.token_hex(12)}",
@@ -981,10 +1167,14 @@ def google_callback(code: str | None = None, state: str | None = None):
                     },
                 )
             db.execute(
-                "INSERT OR IGNORE INTO customers (id, email, email_hash, email_encrypted, name, created_at) VALUES (:id, :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP)",
+                "INSERT INTO customers "
+                "(id, tenant_id, tenant_ownership_status, email, email_hash, email_encrypted, name, created_at) "
+                "VALUES (:id, :tenant_id, 'authenticated_request_context', :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP) "
+                "ON CONFLICT (id) DO NOTHING",
                 {
                     "id": user_id,
-                    "email": "REDACTED",
+                    "tenant_id": current_tenant_id(),
+                    "email": _customer_email_tombstone(user_id),
                     "email_hash": pii_hash(email),
                     "email_encrypted": encrypt_pii(email),
                     "name": name or email.split("@")[0],

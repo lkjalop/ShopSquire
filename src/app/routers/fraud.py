@@ -1,11 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any
+import logging
 import time
 from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER, ROLE_MERCHANT
 
+logger = logging.getLogger("shopsquire.fraud")
 router = APIRouter(prefix="/api/v1/fraud", tags=["fraud"])
 
 # Simple in-memory cache: key -> (ts, value)
@@ -50,6 +52,10 @@ def score(payload: Dict[str, Any], role: str = Depends(require_role([ROLE_DEVELO
 
     score = 0
     signals = []
+    # FAIL-CLOSED (Track A A3/A4): when a DB-backed fraud check can't run, we CANNOT prove the
+    # request is clean — surface `degraded` so the review layer routes to manual review instead of
+    # a silently-pristine score. Loud (logged), never a silent `except: pass`.
+    degraded = False
 
     # allowlist/denylist from env
     import os
@@ -90,8 +96,10 @@ def score(payload: Dict[str, Any], role: str = Depends(require_role([ROLE_DEVELO
                             cf = None
                     score += 80
                     signals.append({"signal": "image_phash_known", "times_seen": ts, "confirmed": cf})
-        except Exception:
-            pass
+        except Exception as exc:
+            degraded = True
+            signals.append({"signal": "image_phash_check_unavailable"})
+            logger.error("fraud phash check FAILED — degraded (routes to review): %s", repr(exc)[:120])
 
     # Device and IP heuristics
     if device:
@@ -124,24 +132,29 @@ def score(payload: Dict[str, Any], role: str = Depends(require_role([ROLE_DEVELO
                     if ts is not None and float(ts) < 0.5:
                         score += 30
                         signals.append({"signal": "low_trust_score", "trust_score": ts})
-        except Exception:
-            pass
+        except Exception as exc:
+            degraded = True
+            signals.append({"signal": "trust_score_check_unavailable"})
+            logger.error("fraud trust-score check FAILED — degraded (routes to review): %s", repr(exc)[:120])
 
     # Normalize score and compute confidence
     score = min(100, int(score))
     confidence = 0.5 + min(0.5, len(signals) * 0.1)
-    out = {"score": score, "top_signals": signals, "version": "v1", "confidence": round(confidence, 2)}
+    # `degraded` = a fraud check couldn't run; a degraded score is NOT a trustworthy 'clean',
+    # so it carries reduced confidence and the flag the review layer keys on (fail-closed).
+    if degraded:
+        confidence = min(confidence, 0.4)
+    out = {"score": score, "top_signals": signals, "version": "v1",
+           "confidence": round(confidence, 2), "degraded": degraded}
     if key:
         _cache_set(key, out)
-    # Audit: write an entry to security_events
+    # Audit: write an entry to security_events. Best-effort (the score is already computed) but
+    # LOUD on failure (Track A) — a vanished fraud-decision audit row must not be silent.
     try:
         with db_session() as db:
             db.execute(sql_text("INSERT INTO security_events (id, path, severity, details) VALUES (lower(hex(randomblob(16))), :p, :s, :d)"), {"p": "/api/v1/fraud/score", "s": "info", "d": str(out)})
-            try:
-                db.commit()
-            except Exception:
-                pass
-    except Exception:
-        pass
+            db.commit()
+    except Exception as exc:
+        logger.error("fraud audit write failed (score computed, audit lost): %s", repr(exc)[:120])
 
     return out

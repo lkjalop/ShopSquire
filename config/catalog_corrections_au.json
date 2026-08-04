@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "source_document": "docs/2026-07-13 laptop-products-new.txt",
+  "tenant_id": "default",
+  "currency": "AUD",
+  "corrections": [
+    {"sku": "WAC-INTUOS-S", "price_cents": 7900},
+    {"sku": "WAC-INTUOS-PRO-M", "price_cents": 59900},
+    {"sku": "WAC-INTUOS-PRO-L", "price_cents": 83900}
+  ]
+}

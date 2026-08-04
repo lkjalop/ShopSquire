@@ -6,10 +6,11 @@ from typing import Any, Dict
 
 import redis
 
+from src.app.services.redis_factory import create_redis_client
+
 
 def _redis_client():
-    url = os.getenv("REDIS_URL", "redis://redis:6379/0")
-    return redis.from_url(url, decode_responses=True)
+    return create_redis_client()
 
 
 def set_job(job_id: str, payload: Dict[str, Any]) -> None:

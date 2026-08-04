@@ -140,10 +140,11 @@ def create_policy_pack_release(*, changelog: List[str] | None = None, signer: st
         db.execute(
             text(
                 """
-                INSERT OR REPLACE INTO email_security_policy_pack_releases
+                INSERT INTO email_security_policy_pack_releases
                 (id, version, manifest_hash, manifest_json, release_notes_json, signature_json, signer, created_at)
                 VALUES
                 (:id, :version, :manifest_hash, :manifest_json, :release_notes_json, :signature_json, :signer, CURRENT_TIMESTAMP)
+                ON CONFLICT (id) DO UPDATE SET manifest_json = EXCLUDED.manifest_json, release_notes_json = EXCLUDED.release_notes_json, signature_json = EXCLUDED.signature_json
                 """
             ),
             {

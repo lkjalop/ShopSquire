@@ -19,8 +19,8 @@
       "name": "medium",
       "score_min": 5,
       "score_max": 6,
-      "model": "qwen3.6:27b",
-      "description": "High-capacity text reasoning. Gaming, budget reasoning, multi-constraint queries, use-case specific recommendations. qwen3.6:27b (Qwen3.5 27B Q4_K_M): strong reasoning, text-only."
+      "model": "qwen3:14b",
+      "description": "Mid-capacity text reasoning. Gaming, budget reasoning, multi-constraint queries, use-case specific recommendations. qwen3:14b: ~12s, strong quality, ~2x faster than 27B (de-collapsed from large tier 2026-06-11 for latency)."
     },
     {
       "name": "large",
@@ -62,7 +62,7 @@
   },
   "env_overrides": {
     "OLLAMA_SMALL_MODEL": "Model override for small tier (default: qwen3-vl:8b) — MUST be a VLM for image uploads",
-    "OLLAMA_MEDIUM_MODEL": "Model override for medium tier (default: qwen3.6:27b)",
+    "OLLAMA_MEDIUM_MODEL": "Model override for medium tier (default: qwen3:14b — de-collapsed from large for latency 2026-06-11; matches the medium tier model above)",
     "OLLAMA_BIG_MODEL": "Model override for large/expert tiers (default: qwen3.6:27b)",
     "OLLAMA_SECURITY_MODEL": "Model for security matrix analysis (default: qwen3-vl:8b)",
     "TIER_LADDER_PATH": "Path to custom tier ladder JSON"

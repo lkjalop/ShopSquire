@@ -8,6 +8,7 @@ from urllib.parse import urlparse, parse_qs
 from typing import Any, Dict, List, Tuple
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.rules.tenant_config_store import TenantConfigStore
 try:
     from src.app.security.lolbin_behavioral_catalog import enrich_lolbin_indicators as _enrich_lolbin
@@ -49,6 +50,18 @@ _CANARY_PAT = re.compile(r"(?i)(canarytoken|canary\\.tokens|x-canary-id|__canary
 _LOLBINS_PAT = re.compile(
     r"(?i)\b(certutil|mshta|rundll32|bitsadmin|regsvr32|powershell\s+-enc(?:odedcommand)?|powershell\s+/enc)\b"
 )
+# TOAD / callback phishing: a LINK-LESS lure that pushes the victim to phone a number the attacker
+# controls (fake "support/billing"). Two halves: (a) a callback directive, (b) a phone number.
+# Both must be present so a legitimate "call us on…" footer does not fire on its own.
+_TOAD_CALLBACK_PAT = re.compile(
+    r"(?i)(call\s+(?:us|now|immediately|this\s+number|our\s+(?:support|billing|fraud)\s+(?:team|line|department|desk))|"
+    r"(?:to\s+(?:cancel|dispute|confirm|verify|renew|stop|authori[sz]e)[^.\n]{0,40}\bcall\b)|"
+    r"contact\s+(?:our\s+)?(?:support|billing|fraud)\s+(?:team|line|desk)\s+(?:at|on)|"
+    r"phone\s+(?:our|the)\s+(?:support|billing)\b|do\s+not\s+reply[^.\n]{0,30}\bcall\b)"
+)
+_PHONE_PAT = re.compile(
+    r"(?:\+?\d[\d\-\.\s\(\)]{7,17}\d|\b1[\-\.\s]?8(?:00|33|44|55|66|77|88)[\-\.\s]?\d{3}[\-\.\s]?\d{4}\b)"
+)
 _RANSOMWARE_PAT = re.compile(
     r"(?i)(ransomware|your\s+files\s+(are|were)\s+encrypted|decrypt(?:ion)?\s+key|bitcoin\s+payment|"
     r"pay\s+within\s+\d+\s*(?:hours?|days?)|data\s+will\s+be\s+leaked)"
@@ -81,7 +94,7 @@ _ENCODING_ANOMALY_PAT = re.compile(r"(?:Ã.|â.|ðŸ|ï¸|�)")
 
 def _get_thresholds(*, tenant_id: str | None = None) -> Dict[str, Any]:
     try:
-        thr = (load_feature_flags(get_settings().feature_flags_path) or {}).get("SECURITY_THRESHOLDS", {})
+        thr = (_ff_get_flags() or {}).get("SECURITY_THRESHOLDS", {})
     except Exception:
         thr = {}
     # Optional tenant-scoped override for allow/deny lists via TenantConfigStore.
@@ -750,6 +763,22 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
                     "reason": "LOLBin command combined with external link/attachment",
                 }
             )
+    # TOAD / callback phishing: a callback directive + a phone number, with NO link and no risky
+    # attachment (the tell — the payload is the phone call, so URL/attachment detonation finds
+    # nothing). Urgency raises confidence but is not required. Body-focused (not attachment OCR)
+    # since these are plain-text lures.
+    _toad_callback = _TOAD_CALLBACK_PAT.search(text)
+    _toad_phone = _PHONE_PAT.search(text)
+    if _toad_callback and _toad_phone:
+        _toad_has_link = bool(re.search(r"https?://", text))
+        _toad_has_attach = bool(suspicious_attachments(attachments))
+        if not _toad_has_link and not _toad_has_attach:
+            indicators.append({
+                "type": "callback_phishing_toad",
+                "value": str(_toad_phone.group(0)).strip()[:32],
+                "reason": "Link-less callback-phishing lure (TOAD): urgency-to-call + phone number, no URL",
+                "urgency": bool(_URGENCY_PAT.search(text)),
+            })
     if _RANSOMWARE_PAT.search(analysis_text):
         indicators.append({"type": "ransomware_extortion_pattern", "value": True, "reason": "Ransomware/extortion language detected"})
     if _EXFIL_PAT.search(analysis_text):

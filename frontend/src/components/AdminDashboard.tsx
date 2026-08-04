@@ -728,14 +728,19 @@ function HealthDot({ status }: { status: string }) {
 
 function IntegrationHealthTab() {
   const [data, setData] = useState<any>(null);
+  const [sourceHealth, setSourceHealth] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const refresh = useCallback(async (force = false) => {
     setLoading(true);
     try {
-      const json = await adminGet(`/api/v1/admin/integration-health${force ? '?force=true' : ''}`);
+      const [json, sources] = await Promise.all([
+        adminGet(`/api/v1/admin/integration-health${force ? '?force=true' : ''}`),
+        adminGet('/api/v1/admin/bi/executive-metrics/source-health'),
+      ]);
       setData(json);
+      setSourceHealth(sources);
       setLastRefresh(new Date());
     } catch {
       setData(null);
@@ -832,6 +837,78 @@ function IntegrationHealthTab() {
             </div>
           );
         })}
+      </div>
+      <div style={{ marginTop: 22 }}>
+        <h3 style={{ fontSize: 15, margin: '0 0 10px' }}>Governed commerce feeds</h3>
+        <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>
+          Tenant-scoped active facts and quarantined records. This view is read-only.
+        </div>
+        {(sourceHealth?.sources || []).length === 0 ? (
+          <div style={{ color: '#f59e0b', fontSize: 13 }}>
+            No canonical ERP, WMS, supplier or consented marketing facts are available.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {(sourceHealth.sources || []).map((source: any) => (
+              <div key={`${source.family}:${source.source_system}`} style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(160px, 1fr) minmax(120px, 1fr) 90px 90px minmax(150px, 1fr)',
+                gap: 10,
+                alignItems: 'center',
+                border: '1px solid rgba(148,163,184,0.18)',
+                borderRadius: 8,
+                padding: '9px 11px',
+                background: 'rgba(15,23,42,0.45)',
+                fontSize: 12,
+              }}>
+                <strong>{source.family}</strong>
+                <span>{source.source_system}</span>
+                <span>{source.active_records} active</span>
+                <span style={{ color: source.quarantined_records ? '#f59e0b' : '#94a3b8' }}>
+                  {source.quarantined_records} held
+                </span>
+                <span style={{ color: source.status === 'healthy' ? '#22c55e' : '#f59e0b' }}>
+                  {source.status}{source.age_hours != null ? ` · ${source.age_hours}h old` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 22 }}>
+        <h3 style={{ fontSize: 15, margin: '0 0 10px' }}>Source onboarding</h3>
+        <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>
+          Evidence contracts required before business metrics or governed actions can become available.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+          {(sourceHealth?.onboarding || []).map((source: any) => (
+            <div key={source.family} style={{
+              border: '1px solid rgba(148,163,184,0.18)',
+              borderRadius: 8,
+              padding: '11px 12px',
+              background: 'rgba(15,23,42,0.45)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                <strong style={{ fontSize: 13 }}>{source.label}</strong>
+                <span style={{
+                  color: source.status === 'connected' ? '#22c55e' : '#f59e0b',
+                  fontSize: 11, whiteSpace: 'nowrap',
+                }}>
+                  {source.status === 'connected' ? 'Connected' : 'Not configured'}
+                </span>
+              </div>
+              <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 7 }}>
+                Enables: {(source.required_for || []).join(', ')}
+              </div>
+              <details style={{ marginTop: 7, fontSize: 11, color: '#cbd5e1' }}>
+                <summary style={{ cursor: 'pointer' }}>Required evidence</summary>
+                <div style={{ marginTop: 5, color: '#94a3b8' }}>
+                  {(source.required_fields || []).join(' · ')}
+                </div>
+              </details>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

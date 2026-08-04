@@ -86,6 +86,28 @@ def _get_escalation_level(client_key: str) -> str:
     return "green"
 
 
+_ESCALATION_ORDER = {"green": 0, "yellow": 1, "orange": 2, "red": 3}
+# Statistically-detected hidden-payload / manipulation signals. "Present but
+# undecodable" steganography is MORE suspicious, not less — these must never route
+# to the standard queue at green regardless of the per-client progressive counter.
+_THREAT_FLOOR_TAGS = (
+    "steganography_suspected",
+    "manipulation_detected",
+    "adversarial_perturbation_suspected",
+)
+
+
+def _apply_threat_class_floor(level: str, evidence_tags) -> str:
+    """Floor the escalation at yellow/review when a threat-class signal is present."""
+    try:
+        if any(t in (evidence_tags or []) for t in _THREAT_FLOOR_TAGS):
+            if _ESCALATION_ORDER.get(level, 0) < _ESCALATION_ORDER["yellow"]:
+                return "yellow"
+    except Exception:
+        pass
+    return level
+
+
 def _is_diagnostic_qr_payload(payload: str, *, context_text: str = "") -> bool:
     raw = str(payload or "").strip().lower()
     ctx = str(context_text or "").strip().lower()
@@ -404,29 +426,41 @@ async def analyze(
                     _log.warning("QR/barcode decode failed: %s", _exc, exc_info=True)
                 return _qr_hits, _qr_reasons, _qr_injection, _diag_count
 
-            # Run all three in parallel, bounded by a wall-clock timeout so the
-            # endpoint never hangs indefinitely (e.g. when Ollama / OCR / YOLO is
-            # unavailable in test environments).
-            # Default is 15s (was 8s) — images are pre-shrunk to CV_TIER2_MAX_DIM
-            # (default 1024px) so steg+adversarial+YOLO finish well within budget.
-            # Override with CV_ANALYZE_TIMEOUT_SEC env var.
-            _cv_analyze_timeout = float(
-                (os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "15").strip() or "15"
+            # Run the independent analyses CONCURRENTLY but each under its OWN
+            # timeout, so a slow/unavailable vision-LLM (tier2) or consistency task
+            # can NEVER cancel the fast, deterministic security detectors (QR/steg).
+            #
+            # Previously all three shared a single wait_for(gather(...)): a tier2 /
+            # Ollama hang cancelled the QR decode too, silently FAILING OPEN on QR /
+            # SSN-exfil detection (the <100ms pyzbar decode was killed alongside the
+            # slow model task). Per-task budgets keep the security-critical detector
+            # independent of the LLM's availability.
+            # Override with CV_ANALYZE_TIMEOUT_SEC (heavy tasks) / CV_QR_TIMEOUT_SEC.
+            _cv_analyze_timeout = float((os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "8").strip() or "15")
+            _cv_qr_timeout = float((os.getenv("CV_QR_TIMEOUT_SEC") or "6").strip() or "6")
+
+            async def _bounded(coro, timeout, default, name):
+                try:
+                    return await _asyncio.wait_for(coro, timeout=timeout)
+                except _asyncio.TimeoutError:
+                    _log.warning("cv.analyze %s task timed out after %.1fs (case_id=%s)", name, timeout, req.case_id)
+                except Exception as _be:
+                    _log.warning("cv.analyze %s task failed: %s", name, _be, exc_info=True)
+                return default
+
+            # SECURITY-CRITICAL deterministic QR/barcode decode runs FIRST and
+            # ALONE. It is fast (<1s) but CPU-bound in a worker thread; if it shared
+            # the executor with the heavy vision task (YOLO/steg) it gets starved and
+            # times out — silently failing OPEN on QR/SSN-exfil (observed 2026-06-15).
+            # Running it uncontended first guarantees the security signal surfaces;
+            # the heavy/LLM tasks then run concurrently afterward.
+            (_qr_hits, _qr_reasons, _qr_inj, _diag_cnt) = await _bounded(
+                _run_qr_task(), _cv_qr_timeout, ([], [], False, 0), "qr"
             )
-            try:
-                tier2_result, image_consistency, (_qr_hits, _qr_reasons, _qr_inj, _diag_cnt) = await _asyncio.wait_for(
-                    _asyncio.gather(
-                        _run_tier2_task(), _run_consistency_task(), _run_qr_task(),
-                    ),
-                    timeout=_cv_analyze_timeout,
-                )
-            except _asyncio.TimeoutError:
-                _log.warning(
-                    "cv.analyze parallel tasks timed out after %.1fs (case_id=%s)",
-                    _cv_analyze_timeout, req.case_id,
-                )
-                tier2_result, image_consistency = {}, None
-                _qr_hits, _qr_reasons, _qr_inj, _diag_cnt = [], [], False, 0
+            tier2_result, image_consistency = await _asyncio.gather(
+                _bounded(_run_tier2_task(), _cv_analyze_timeout, {}, "tier2"),
+                _bounded(_run_consistency_task(), _cv_analyze_timeout, None, "consistency"),
+            )
             tier2_evidence_tags = list((tier2_result or {}).get("evidence_tags") or [])
             tier2_security = ((tier2_result or {}).get("security_analysis") or {}) if isinstance((tier2_result or {}).get("security_analysis"), dict) else {}
             qr_decode_hits = _qr_hits
@@ -880,6 +914,8 @@ async def analyze(
             or bool("qr_url_present" in tier2_evidence_tags)
             or bool("qr_url_suspicious" in tier2_evidence_tags)
             or bool("manipulation_detected" in tier2_evidence_tags)
+            or bool("steganography_suspected" in tier2_evidence_tags)
+            or bool("adversarial_perturbation_suspected" in tier2_evidence_tags)
             or bool("prompt_injection_text_suspected" in tier2_evidence_tags)
             or (isinstance(image_consistency, dict) and image_consistency.get("status") in ("mismatch", "suspicious"))
         )
@@ -895,6 +931,8 @@ async def analyze(
             _has_suspicious_signal = bool(
                 qr_prompt_injection or qr_external_url_detected
                 or "manipulation_detected" in tier2_evidence_tags
+                or "steganography_suspected" in tier2_evidence_tags
+                or "adversarial_perturbation_suspected" in tier2_evidence_tags
                 or "prompt_injection_text_suspected" in tier2_evidence_tags
                 or (isinstance(image_consistency, dict) and image_consistency.get("status") in ("mismatch", "suspicious"))
             )
@@ -902,6 +940,10 @@ async def analyze(
                 _escalation_level = _record_suspicious_upload(_client_key)
             else:
                 _escalation_level = _get_escalation_level(_client_key)
+            # Threat-class FLOOR: floor at yellow/review so a C2-beacon or
+            # payment-fraud steg carrier can never route to the standard queue at
+            # green, regardless of the per-client progressive counter.
+            _escalation_level = _apply_threat_class_floor(_escalation_level, tier2_evidence_tags)
             # If red, emit escalation trace event
             if _escalation_level == "red":
                 try:
@@ -1204,6 +1246,10 @@ async def upload(
         # Tier 2 can fail when optional deps (OCR/vision/QR libs) are missing or the
         # Ollama endpoint/model is not available. Degrade gracefully instead of 400'ing.
         try:
+            try:
+                _upload_timeout = max(1.0, min(float(os.getenv("CV_UPLOAD_TIMEOUT_SEC", "15") or 15), 30.0))
+            except (TypeError, ValueError):
+                _upload_timeout = 15.0
             t2 = call_with_resilience(
                 "cv.tier2",
                 lambda: run_tier2(
@@ -1222,8 +1268,8 @@ async def upload(
                     },
                     pack_id=pack_id,
                 ),
-                timeout_s=90.0,
-                retries=1,
+                timeout_s=_upload_timeout,
+                retries=0,
             )
         except Exception as exc:
             t2 = {

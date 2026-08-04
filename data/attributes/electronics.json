@@ -1,0 +1,492 @@
+{
+  "vertical": "electronics",
+  "attributes": {
+    "ram_gb": {
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "GB",
+      "bounds": [
+        1,
+        256
+      ],
+      "key_aliases": [
+        "ram",
+        "memory",
+        "system_memory",
+        "ram_size"
+      ],
+      "unit_aliases": {
+        "gb": 1,
+        "gib": 1,
+        "tb": 1024,
+        "mb": 0.0009765625
+      },
+      "text_extract": true
+    },
+    "gpu_vram_gb": {
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "GB",
+      "bounds": [
+        0,
+        96
+      ],
+      "key_aliases": [
+        "vram",
+        "vram_gb",
+        "video_memory",
+        "video_ram"
+      ],
+      "unit_aliases": {
+        "gb": 1,
+        "tb": 1024,
+        "mb": 0.0009765625
+      },
+      "text_extract": true
+    },
+    "storage_gb": {
+      "role": "variant_axis",
+      "kind": "quantity",
+      "unit": "GB",
+      "bounds": [
+        8,
+        65536
+      ],
+      "key_aliases": [
+        "storage",
+        "capacity",
+        "ssd",
+        "ssd_gb",
+        "hdd_capacity",
+        "disk"
+      ],
+      "unit_aliases": {
+        "gb": 1,
+        "tb": 1024,
+        "mb": 0.0009765625
+      },
+      "text_extract": true
+    },
+    "storage_type": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": [
+        "storage_medium",
+        "drive_type",
+        "disk_type",
+        "storage_interface"
+      ],
+      "values": {
+        "nvme_ssd": ["nvme", "nvme ssd", "pcie ssd", "m.2 nvme"],
+        "sata_ssd": ["ssd", "sata ssd", "2.5 inch ssd"],
+        "sata_hdd": ["hdd", "hard disk", "sata hdd", "mechanical drive"],
+        "ide_hdd": ["ide", "pata", "ide hdd", "pata hdd"],
+        "emmc": ["emmc", "embedded multimedia card"],
+        "ufs": ["ufs", "universal flash storage"],
+        "other": ["other", "unknown storage"]
+      }
+    },
+    "memory_generation": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": [
+        "ram_generation",
+        "ram_type",
+        "memory_type"
+      ],
+      "values": {
+        "ddr3": ["ddr3", "ddr3l"],
+        "ddr4": ["ddr4"],
+        "ddr5": ["ddr5"],
+        "lpddr4x": ["lpddr4", "lpddr4x"],
+        "lpddr5": ["lpddr5"],
+        "lpddr5x": ["lpddr5x"],
+        "unified": ["unified memory", "apple unified memory"],
+        "other": ["other", "unknown memory"]
+      }
+    },
+    "refresh_hz": {
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "Hz",
+      "bounds": [
+        30,
+        600
+      ],
+      "key_aliases": [
+        "refresh",
+        "refresh_rate",
+        "refresh_rate_hz"
+      ],
+      "unit_aliases": {
+        "hz": 1,
+        "khz": 1000
+      },
+      "text_extract": true
+    },
+    "display_in": {
+      "role": "variant_axis",
+      "kind": "quantity",
+      "unit": "in",
+      "bounds": [
+        4,
+        100
+      ],
+      "key_aliases": [
+        "display_inches",
+        "screen_size",
+        "display_size",
+        "screen_inches"
+      ],
+      "unit_aliases": {
+        "in": 1,
+        "inch": 1,
+        "inches": 1,
+        "\"": 1,
+        "cm": 0.3937
+      },
+      "text_extract": true
+    },
+    "battery_hours": {
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "h",
+      "bounds": [
+        1,
+        72
+      ],
+      "key_aliases": [
+        "battery",
+        "battery_life",
+        "battery_life_hours"
+      ],
+      "unit_aliases": {
+        "h": 1,
+        "hr": 1,
+        "hrs": 1,
+        "hours": 1,
+        "hour": 1
+      },
+      "text_extract": false
+    },
+    "weight_g": {
+      "role": "descriptive",
+      "kind": "quantity",
+      "unit": "g",
+      "bounds": [
+        1,
+        100000
+      ],
+      "key_aliases": [
+        "grams",
+        "weight",
+        "weight_grams"
+      ],
+      "unit_aliases": {
+        "g": 1,
+        "kg": 1000,
+        "grams": 1
+      },
+      "text_extract": false
+    },
+    "weight_kg": {
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "kg",
+      "bounds": [
+        0.01,
+        100
+      ],
+      "key_aliases": [
+        "mass_kg",
+        "product_weight_kg"
+      ],
+      "unit_aliases": {
+        "kg": 1,
+        "g": 0.001,
+        "lb": 0.453592,
+        "lbs": 0.453592
+      },
+      "text_extract": false
+    },
+    "gpu_model": {
+      "role": "fit",
+      "kind": "text",
+      "key_aliases": [
+        "gpu",
+        "graphics",
+        "graphics_card",
+        "video_card"
+      ]
+    },
+    "cpu_model": {
+      "role": "fit",
+      "kind": "text",
+      "key_aliases": [
+        "cpu",
+        "processor"
+      ]
+    },
+    "cpu_tier": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": [
+        "processor_tier",
+        "cpu_capability_tier",
+        "processor_capability"
+      ],
+      "values": {
+        "entry": ["entry", "basic", "budget"],
+        "mainstream": ["mainstream", "midrange", "mid-range"],
+        "performance": ["performance", "high performance", "enthusiast"],
+        "workstation": ["workstation", "professional", "enterprise compute"],
+        "other": ["other", "unknown cpu"]
+      }
+    },
+    "gpu_discrete": {
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": [
+        "discrete_gpu",
+        "dedicated_gpu"
+      ]
+    },
+    "graphics_architecture": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": ["gpu_architecture", "graphics_type"],
+      "values": {
+        "dedicated_discrete": ["discrete", "dedicated", "dgpu"],
+        "integrated_shared": ["integrated", "igpu", "shared graphics"],
+        "unified": ["unified graphics", "apple silicon gpu"],
+        "external_discrete": ["external gpu", "egpu"]
+      }
+    },
+    "graphics_memory_model": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": ["gpu_memory_model"],
+      "values": {
+        "dedicated_vram": ["vram", "dedicated video memory"],
+        "shared_system": ["shared memory", "shared system memory"],
+        "unified_memory": ["unified", "unified memory"],
+        "external_vram": ["egpu vram", "external video memory"]
+      }
+    },
+    "unified_memory_gb": {
+      "role": "fit",
+      "kind": "quantity",
+      "unit": "GB",
+      "bounds": [1, 512],
+      "key_aliases": ["unified_memory", "unified_ram_gb"],
+      "unit_aliases": {"gb": 1, "gib": 1, "tb": 1024},
+      "text_extract": false
+    },
+    "native_metal": {
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": ["supports_metal", "metal_native"]
+    },
+    "native_cuda": {
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": ["supports_cuda", "cuda_native"]
+    },
+    "native_directx12": {
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": ["supports_directx12", "directx12_native", "dx12_native"]
+    },
+    "graphics_capability_source": {
+      "role": "descriptive",
+      "kind": "text",
+      "key_aliases": ["gpu_capability_source", "graphics_source"]
+    },
+    "os": {
+      "role": "descriptive",
+      "kind": "enum",
+      "key_aliases": [
+        "operating_system"
+      ],
+      "values": {
+        "Windows 11": [
+          "win11",
+          "windows11",
+          "windows 11 home",
+          "windows 11 pro"
+        ],
+        "macOS": [
+          "mac os",
+          "osx",
+          "mac"
+        ],
+        "ChromeOS": [
+          "chrome os"
+        ],
+        "Linux": [
+          "ubuntu"
+        ],
+        "Android": [],
+        "iPadOS": [
+          "ipados",
+          "ipad os"
+        ]
+      }
+    },
+    "wifi": {
+      "role": "descriptive",
+      "kind": "enum",
+      "key_aliases": [
+        "wi_fi",
+        "wireless"
+      ],
+      "values": {
+        "Wi-Fi 5": [
+          "wifi 5",
+          "wifi5",
+          "802.11ac"
+        ],
+        "Wi-Fi 6": [
+          "wifi 6",
+          "wifi6",
+          "802.11ax"
+        ],
+        "Wi-Fi 6E": [
+          "wifi 6e",
+          "wifi6e"
+        ],
+        "Wi-Fi 7": [
+          "wifi 7",
+          "wifi7",
+          "802.11be"
+        ]
+      }
+    },
+    "form_factor": {
+      "role": "fit",
+      "kind": "enum",
+      "key_aliases": [
+        "form",
+        "chassis",
+        "convertible",
+        "2in1"
+      ],
+      "text_extract": true,
+      "values": {
+        "convertible": [
+          "2-in-1",
+          "2 in 1",
+          "x360",
+          "yoga",
+          "flip",
+          "spin",
+          "convertible",
+          "360"
+        ],
+        "detachable": [
+          "detachable",
+          "surface pro",
+          "surface go",
+          "tablet pc"
+        ],
+        "tablet": [
+          "tablet",
+          "ipad"
+        ],
+        "clamshell": [
+          "clamshell",
+          "traditional laptop"
+        ]
+      }
+    },
+    "touchscreen": {
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": [
+        "touch",
+        "touch_screen",
+        "touch_display"
+      ],
+      "text_extract": true,
+      "true_markers": [
+        "touchscreen",
+        "touch screen",
+        "touch display",
+        "2-in-1",
+        "x360",
+        "yoga",
+        "surface pro",
+        "tablet",
+        "ipad",
+        "detachable"
+      ]
+    },
+    "stylus_support": {
+      "role": "fit",
+      "kind": "boolean",
+      "key_aliases": [
+        "stylus",
+        "pen",
+        "pen_support",
+        "active_pen"
+      ],
+      "text_extract": true,
+      "true_markers": [
+        "stylus",
+        "active pen",
+        "surface pen",
+        "s pen",
+        "wacom",
+        "pen support"
+      ]
+    }
+  },
+  "_derivations_comment": "review-8 #5: cross-key derivations run AFTER normalize+extract, fill ONLY missing target keys, and are clamped through the target's bounds. gpu_discrete=false ⇒ gpu_vram_gb=0 turns an integrated laptop from UNKNOWN into an honest FAIL on a game's VRAM floor (the 'why lenovo looks bad' screenshot).",
+  "derivations": [
+    {
+      "target": "graphics_architecture",
+      "when": {
+        "gpu_discrete": true
+      },
+      "set": "dedicated_discrete",
+      "only_if_missing": true,
+      "provenance": "gpu_discrete=true -> dedicated discrete graphics"
+    },
+    {
+      "target": "graphics_memory_model",
+      "when": {
+        "gpu_discrete": true
+      },
+      "set": "dedicated_vram",
+      "only_if_missing": true,
+      "provenance": "gpu_discrete=true -> dedicated VRAM memory model"
+    },
+    {
+      "target": "graphics_architecture",
+      "when": {
+        "gpu_discrete": false
+      },
+      "set": "integrated_shared",
+      "only_if_missing": true,
+      "provenance": "gpu_discrete=false -> integrated shared graphics"
+    },
+    {
+      "target": "graphics_memory_model",
+      "when": {
+        "gpu_discrete": false
+      },
+      "set": "shared_system",
+      "only_if_missing": true,
+      "provenance": "gpu_discrete=false -> shared system memory model"
+    },
+    {
+      "target": "gpu_vram_gb",
+      "set": 0,
+      "when": {
+        "gpu_discrete": false
+      },
+      "only_if_missing": true,
+      "provenance": "no discrete GPU (gpu_discrete=false) → 0 dedicated VRAM"
+    }
+  ]
+}

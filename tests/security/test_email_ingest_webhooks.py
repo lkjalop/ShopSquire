@@ -1,4 +1,5 @@
 import os
+import json
 
 from fastapi.testclient import TestClient
 
@@ -78,3 +79,91 @@ def test_m365_ingest_accepts_canonical_email_with_secret():
         },
     )
     assert r.status_code == 200
+
+
+def test_gmail_strict_identity_uses_subscription_tenant(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("EMAIL_CONNECTOR_IDENTITY_MODE", "strict")
+    monkeypatch.setenv(
+        "EMAIL_CONNECTOR_SUBSCRIPTIONS_JSON",
+        json.dumps(
+            {
+                "gmail": {
+                    "projects/p/subscriptions/sub-a": {
+                        "tenant_id": "tenant-authoritative",
+                        "audience": "https://shopsquire.example/ingest",
+                    }
+                }
+            }
+        ),
+    )
+    import src.app.routers.ingest_gmail as router
+
+    monkeypatch.setattr(router, "verify_gmail_push_jwt", lambda *args, **kwargs: {"sub": "push"})
+    seen = {}
+
+    def fake_persist(identity, email):
+        seen["tenant_id"] = identity.tenant_id
+        return {"status": "evaluated"}
+
+    monkeypatch.setattr(router, "_persist_or_evaluate", fake_persist)
+    from src.app.main import create_app
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/ingest/gmail/pubsub",
+        headers={"Authorization": "Bearer signed"},
+        json={
+            "subscription": "projects/p/subscriptions/sub-a",
+            "email": {
+                "message_id": "gmail-1",
+                "from_addr": "quotes@supplier.example",
+                "attachments": [],
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert seen["tenant_id"] == "tenant-authoritative"
+
+    mismatch = client.post(
+        "/api/v1/ingest/gmail/pubsub",
+        headers={"Authorization": "Bearer signed", "X-Tenant-Id": "attacker-tenant"},
+        json={
+            "subscription": "projects/p/subscriptions/sub-a",
+            "email": {
+                "message_id": "gmail-2",
+                "from_addr": "quotes@supplier.example",
+                "attachments": [],
+            },
+        },
+    )
+    assert mismatch.status_code == 403
+
+
+def test_m365_strict_identity_rejects_tenant_override(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("EMAIL_CONNECTOR_IDENTITY_MODE", "strict")
+    monkeypatch.setenv(
+        "EMAIL_CONNECTOR_SUBSCRIPTIONS_JSON",
+        json.dumps(
+            {
+                "m365": {
+                    "sub-a": {
+                        "tenant_id": "tenant-authoritative",
+                        "client_state": "state-a",
+                    }
+                }
+            }
+        ),
+    )
+    from src.app.main import create_app
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/ingest/m365/notifications",
+        headers={"X-Tenant-Id": "attacker-tenant"},
+        json={
+            "value": [{"subscriptionId": "sub-a", "clientState": "state-a"}],
+        },
+    )
+    assert response.status_code == 403

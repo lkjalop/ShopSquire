@@ -8,8 +8,89 @@ Upgrades the recommendation pipeline's reranking pass with:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+from src.app.services.price_conversion import cents_to_dollars
+
+
+def apply_stock_penalty(
+    scored: List[Dict[str, Any]],
+    *,
+    batch_stock_fn: Callable[[List[str]], Dict[str, Any]],
+    oos_penalty: float = 0.5,
+    unknown_penalty: float = 0.1,
+) -> List[Dict[str, Any]]:
+    """Penalize out-of-stock / unknown-stock candidates BEFORE results assembly so ranking reflects
+    live stock reality (OOS -0.5, unknown -0.1), then re-sort by score. Mutates item['score'] and
+    candidate['_stock_penalty'] in place; batch_stock_fn(skus)->{sku: level} is injected. No-op when
+    there are no SKUs; never raises (a stock-lookup failure leaves ranking untouched). Vertical-blind."""
+    if not scored:
+        return scored
+    skus = [
+        str((i or {}).get("candidate", {}).get("sku") or "")
+        for i in scored
+        if isinstance(i, dict) and isinstance(i.get("candidate"), dict)
+    ]
+    skus = [s for s in skus if s]
+    if not skus:
+        return scored
+    try:
+        stock = batch_stock_fn(skus) or {}
+    except Exception:
+        return scored
+    for item in scored:
+        if not isinstance(item, dict):
+            continue
+        cand = item.get("candidate") or {}
+        sku = str(cand.get("sku") or "")
+        if not sku:
+            continue
+        lvl = stock.get(sku)
+        if lvl is None:
+            item["score"] = float(item.get("score") or 0.0) - unknown_penalty
+            cand["_stock_penalty"] = "unknown"
+        elif lvl == 0:
+            item["score"] = float(item.get("score") or 0.0) - oos_penalty
+            cand["_stock_penalty"] = "out_of_stock"
+    scored.sort(key=lambda x: float((x or {}).get("score") or 0.0), reverse=True)
+    return scored
+
+
+def identity_anchor_boost(
+    scored: List[Dict[str, Any]],
+    *,
+    identity_model: Optional[str] = None,
+    boost: float = 0.6,
+) -> List[Dict[str, Any]]:
+    """Multimodal anchoring — float candidates that MATCH an image-identified product line to the top.
+
+    `scored` is the in-pipeline list of {"score": float, "candidate": {...}} items. When an uploaded
+    image identified a specific model (e.g. "ThinkPad X1"), candidates whose name/model/title contain
+    those tokens get a score bump proportional to how many tokens match, then the list is re-sorted in
+    place. No-op when there is no identity_model. Pure (no I/O); vertical-blind."""
+    model = str(identity_model or "").strip().lower()
+    if not model or not scored:
+        return scored
+    tokens = [t for t in re.split(r"[^a-z0-9]+", model) if len(t) >= 2]
+    if not tokens:
+        return scored
+    changed = False
+    for item in scored:
+        if not isinstance(item, dict):
+            continue
+        cand = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
+        hay = f"{cand.get('name', '')} {cand.get('model', '')} {cand.get('title', '')}".lower()
+        hits = sum(1 for t in tokens if t in hay)
+        if hits:
+            frac = hits / len(tokens)
+            item["score"] = float(item.get("score") or 0.0) + boost * frac
+            cand["_identity_anchor"] = round(frac, 3)
+            changed = True
+    if changed:
+        scored.sort(key=lambda x: float((x or {}).get("score") or 0.0), reverse=True)
+    return scored
 
 
 @dataclass
@@ -319,9 +400,15 @@ def listwise_rerank(
             for i, rp in enumerate(final):
                 rp.rank = i + 1
 
-    # ── Contrastive WHY generation ──
-    if len(final) >= 1:
-        # Compute average scores of rejected candidates
+    # ── Contrastive WHY + delta explanations (deterministic, spec-specific) ──
+    # The #1 pick is the anchor; runners-up are explained by their ACTUAL spec deltas vs #1
+    # ("why this one, not the top pick") rather than a generic phrase. No LLM call — the deltas
+    # are already computed, so this is zero-latency and deterministic.
+    if final:
+        anchor = final[0]
+        for rp in final[1:]:
+            rp.delta_vs_anchor = compute_product_delta(anchor.raw, rp.raw)
+
         rejected = [r for r in scored if r not in final]
         if rejected:
             avg_rejected = {
@@ -332,27 +419,44 @@ def listwise_rerank(
             avg_rejected = {"spec_match": 0.5, "budget_fit": 0.5, "brand_pref": 0.5}
 
         for rp in final:
-            reasons = []
-            cs = rp.component_scores
-            if cs.get("spec_match", 0) > avg_rejected.get("spec_match", 0) + 0.1:
-                reasons.append("better spec match for your needs")
-            if cs.get("budget_fit", 0) > avg_rejected.get("budget_fit", 0) + 0.1:
-                reasons.append("fits your budget well")
-            if cs.get("brand_pref", 0) > avg_rejected.get("brand_pref", 0) + 0.1:
-                reasons.append("matches your brand preference")
-            if not reasons:
-                reasons.append("strong overall score across all criteria")
             brand = (rp.raw.get("brand") or "").strip()
             name = (rp.raw.get("name") or rp.raw.get("title") or rp.product_id).strip()
-            rp.contrastive_why = f"{brand} {name}: selected because it has {', '.join(reasons)}.".strip()
-
-    # ── Product delta explanations (vs anchor or vs #1) ──
-    if len(final) >= 2:
-        anchor = final[0]  # #1 ranked product is the anchor
-        for rp in final[1:]:
-            rp.delta_vs_anchor = compute_product_delta(anchor.raw, rp.raw)
+            label = f"{brand} {name}".strip()
+            if rp.rank == 1:
+                cs = rp.component_scores
+                adv: List[str] = []
+                if cs.get("spec_match", 0) > avg_rejected.get("spec_match", 0) + 0.1:
+                    adv.append("the strongest spec match for your needs")
+                if cs.get("budget_fit", 0) > avg_rejected.get("budget_fit", 0) + 0.1:
+                    adv.append("the best value within your budget")
+                if cs.get("brand_pref", 0) > avg_rejected.get("brand_pref", 0) + 0.1:
+                    adv.append("your preferred brand")
+                reason = "; ".join(adv[:2]) if adv else "the strongest overall score across your criteria"
+                rp.contrastive_why = f"{label}: top pick — {reason}."
+            else:
+                salient = _salient_deltas(rp.delta_vs_anchor, k=2)
+                if salient:
+                    rp.contrastive_why = f"{label}: vs the top pick — {'; '.join(salient)}."
+                else:
+                    rp.contrastive_why = f"{label}: closely matches the top pick on the specs that matter."
 
     return final
+
+
+# Decision-relevant delta dimensions, most→least salient for a one-line "why not #1" explanation.
+_DELTA_SALIENCE = ("price", "gpu", "cpu", "ram", "refresh_rate", "storage", "display")
+
+
+def _salient_deltas(deltas: Dict[str, str], k: int = 2) -> List[str]:
+    """Pick the k most decision-relevant deltas, skipping 'Same'/'Similar' (no signal)."""
+    out: List[str] = []
+    for key in _DELTA_SALIENCE:
+        d = (deltas or {}).get(key)
+        if d and not d.lower().startswith(("same", "similar")):
+            out.append(d)
+        if len(out) >= k:
+            break
+    return out
 
 
 def compute_product_delta(
@@ -482,3 +586,51 @@ def _parse_price(val: Any) -> Optional[float]:
         return float(str(val).replace(",", "").replace("$", "").replace("£", "").replace("€", ""))
     except (ValueError, TypeError):
         return None
+
+
+def build_contrastive_explanations(
+    scored: List[Dict[str, Any]],
+    *,
+    required_specs: Optional[Dict[str, Any]] = None,
+    budget_min: Any = None,
+    budget_max: Any = None,
+    brands_positive: Optional[List[str]] = None,
+    brands_negative: Optional[List[str]] = None,
+    top_n: int = 12,
+) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
+    """Build {sku: contrastive_why} + {sku: delta_vs_anchor} for the top-N via listwise_rerank.
+
+    Normalizes each scored candidate into a rank input (product_id + dollar price), runs the listwise
+    reranker for its human-facing explanations, and maps them by SKU. Returns ({}, {}) on any failure
+    so the route degrades to no-explanations rather than erroring. Pure (no I/O)."""
+    why_by_sku: Dict[str, str] = {}
+    delta_by_sku: Dict[str, Dict[str, str]] = {}
+    try:
+        rank_inputs: List[Dict[str, Any]] = []
+        for it in (scored or []):
+            cand = dict((it or {}).get("candidate") or {})
+            cand["product_id"] = cand.get("sku") or cand.get("product_id") or cand.get("id")
+            if cand.get("price") is None and cand.get("price_cents") is not None:
+                try:
+                    cand["price"] = cents_to_dollars(cand.get("price_cents"))
+                except Exception:
+                    pass
+            rank_inputs.append(cand)
+        ranked = listwise_rerank(
+            rank_inputs,
+            required_specs=required_specs or {},
+            budget_min=budget_min,
+            budget_max=budget_max,
+            brands_positive=brands_positive or [],
+            brands_negative=brands_negative or [],
+            top_n=min(int(top_n), len(rank_inputs) or int(top_n)),
+        )
+        for rp in (ranked or []):
+            sku = str((rp.raw or {}).get("sku") or rp.product_id or "")
+            if not sku:
+                continue
+            why_by_sku[sku] = str(rp.contrastive_why or "")
+            delta_by_sku[sku] = dict(rp.delta_vs_anchor or {})
+    except Exception:
+        return {}, {}
+    return why_by_sku, delta_by_sku

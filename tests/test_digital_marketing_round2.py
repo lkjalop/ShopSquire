@@ -13,21 +13,22 @@ from types import SimpleNamespace
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # 1. update_profile_from_intent
 # ---------------------------------------------------------------------------
-from src.app.services.episodic_memory import EpisodicMemory, UserProfile
+from src.app.services.episodic_memory import EpisodicMemory
+from src.app.services.memory import Memory
+from src.app.services.use_case_advisor import extract_shopper_intent
 
 
-def _make_mem() -> MagicMock:
-    """Return a MagicMock standing in for the Memory (Redis) class."""
-    mem = MagicMock()
-    mem.redis = MagicMock()
-    mem.redis.get.return_value = None
-    mem._local_get.return_value = None
+def _make_mem() -> Memory:
+    """Return the real scoped-memory contract over a mocked Redis transport."""
+    redis = MagicMock()
+    redis.get.return_value = None
+    Memory._LOCAL_STORE.clear()
+    Memory._LOCAL_INDEX.clear()
+    mem = Memory(redis)
     return mem
 
 
@@ -190,9 +191,6 @@ class TestRefineProfileFromOutcome:
 # ---------------------------------------------------------------------------
 # 3. ShopperIntent → constraints injection (unit-level)
 # ---------------------------------------------------------------------------
-from src.app.services.use_case_advisor import extract_shopper_intent, ShopperIntentResult
-
-
 class TestShopperIntentConstraintsInjection:
     """Verify that extract_shopper_intent produces correct output from a
     constraints-like SimpleNamespace, mirroring how recommend.py calls it."""

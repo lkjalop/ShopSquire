@@ -1,6 +1,7 @@
 
 import os
 import json
+import secrets
 import sqlite3
 from pathlib import Path
 
@@ -11,6 +12,26 @@ from sqlalchemy import text
 from src.app.security.guardrails import guardrail_profile_for_user
 
 router = APIRouter(prefix="/ui", tags=["ui"])
+
+
+def _store_currency() -> str:
+    from src.app.platform.store_profile import profile_slot
+
+    value = str(profile_slot("currency", default="USD") or "USD").strip().upper()
+    return value if len(value) == 3 and value.isalpha() else "USD"
+
+
+def _currency_eligible(products: list[dict]) -> list[dict]:
+    """Hide unconverted rows at the storefront boundary.
+
+    Cross-currency products may be admitted later with a bounded FX quote. Until then, exposing
+    them beside settlement-currency products invites invalid numeric comparisons and cart totals.
+    """
+    expected = _store_currency()
+    return [
+        product for product in products
+        if str(product.get("currency") or "").strip().upper() == expected
+    ]
 
 def _coerce_specs(raw: object) -> dict:
     if isinstance(raw, dict):
@@ -128,7 +149,7 @@ def _load_products_from_db() -> list[dict]:
 
 def _get_products() -> list[dict]:
     # Production path only: catalog must come from the database.
-    return _load_products_from_db()
+    return _currency_eligible(_load_products_from_db())
 
 
 def _load_product_by_sku_from_db(sku: str) -> dict | None:
@@ -211,7 +232,7 @@ def _load_product_by_sku_from_db(sku: str) -> dict | None:
 
 def _find_product_by_sku(sku: str) -> dict | None:
     db_hit = _load_product_by_sku_from_db(sku)
-    if db_hit:
+    if db_hit and _currency_eligible([db_hit]):
         return db_hit
     for p in _get_products():
         if str(p.get("sku")) == str(sku):
@@ -320,10 +341,13 @@ def storefront() -> HTMLResponse:
 
 @router.get("/checkout")
 def checkout() -> HTMLResponse:
-    import os, re as _re
+    import os, re as _re, secrets as _secrets
+    from src.app.security.headers import payment_page_csp as _payment_csp
     raw_pk = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
     # Only inject pk_test_ / pk_live_ keys — never secret keys
     stripe_pk = raw_pk if _re.match(r"^pk_(test|live)_[A-Za-z0-9]+$", raw_pk) else ""
+    # PCI 6.4.3/11.6.1 — per-response nonce + strict payment-page CSP (self + Stripe only).
+    _csp_nonce = _secrets.token_urlsafe(16)
     html = f"""<!doctype html>
 <html lang='en'>
 <head>
@@ -413,7 +437,7 @@ def checkout() -> HTMLResponse:
     <a href="/ui" class="back-link" id="back-link-form">&#x2190; Back to Shopping</a>
   </div>
 
-  <script>
+  <script nonce='{_csp_nonce}'>
     var STRIPE_PK = '{stripe_pk}';
     var stripe = null;
 
@@ -532,7 +556,11 @@ def checkout() -> HTMLResponse:
             customer_name: name,
             customer_email: email,
             shipping_address: addr,
-            cart_id: (cartSummary && cartSummary.cart_id) || null
+            cart_id: (cartSummary && cartSummary.cart_id) || null,
+            uid: (cartSummary && cartSummary.uid) || null,
+            items: ((cartSummary && cartSummary.items) || []).map(function(i) {{
+              return {{sku: i.sku, quantity: i.quantity || 1}};
+            }})
           }})
         }})
         .then(function(r) {{ return r.json().then(function(d) {{ return {{ok: r.ok, data: d}}; }}); }})
@@ -554,7 +582,9 @@ def checkout() -> HTMLResponse:
   </script>
 </body>
 </html>"""
-    return HTMLResponse(content=html)
+    # Per-route strict payment CSP (the global SecurityHeadersMiddleware only sets CSP when absent,
+    # so this stricter Stripe-scoped policy wins for the checkout page).
+    return HTMLResponse(content=html, headers={"Content-Security-Policy": _payment_csp(_csp_nonce)})
 
 
 @router.get("/forensics")
@@ -630,6 +660,7 @@ def product_detail(sku: str) -> HTMLResponse:
 
     price_display = ("$" + str(price)) if price is not None else ""
     api_key = os.getenv("MERCHANT_API_KEY", "")
+    csp_nonce = secrets.token_urlsafe(16)
     decision_modal_test_open = str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on")
     html = """
     <!doctype html>
@@ -675,7 +706,7 @@ def product_detail(sku: str) -> HTMLResponse:
       </div>
       <shopsquire-widget data-api-base='' data-api-key='__API_KEY__' data-uid='detail-user' data-signed-in='false'></shopsquire-widget>
       <script src='/ui/widget.js'></script>
-      <script>
+      <script nonce='__CSP_NONCE__'>
         const cartCount = document.querySelector('.cart-count');
         const addBtn = document.querySelector('.add-to-cart');
         function setCount(v){ if (cartCount) cartCount.textContent = String(v); }
@@ -726,6 +757,15 @@ def product_detail(sku: str) -> HTMLResponse:
         .replace("__PRICE__", price_display)
         .replace("__SPEC_ROWS__", spec_rows)
         .replace("__API_KEY__", api_key)
+        .replace("__CSP_NONCE__", csp_nonce)
         .replace("__DECISION_MODAL_DISPLAY__", "block" if decision_modal_test_open else "none")
     )
-    return HTMLResponse(content=html)
+    csp = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{csp_nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob: https:; "
+        "connect-src 'self' ws: wss:; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    )
+    return HTMLResponse(content=html, headers={"Content-Security-Policy": csp})

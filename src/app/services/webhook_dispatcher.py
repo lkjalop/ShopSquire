@@ -74,13 +74,15 @@ def enqueue_webhook(id: str, url: str, payload: dict, secret: Optional[str] = No
             except Exception:
                 pass
     except Exception:
-        # Best-effort fallback: immediate send if DB enqueue fails
+        # Best-effort fallback: immediate send if DB enqueue fails (bounded 2s timeout — not a hang).
         try:
             if requests and payload is not None:
                 ensure_safe_outbound_url(url)
                 requests.post(url, json=payload, timeout=2)
-        except Exception:
-            pass
+        except Exception as exc:
+            # observable, not a silent swallow — a dropped webhook should leave a trail.
+            import logging
+            logging.getLogger(__name__).warning("webhook immediate-send fallback failed for %s: %s", url, exc)
 
 
 def _deliver_row(row):

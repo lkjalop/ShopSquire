@@ -141,7 +141,7 @@ def _append_external_anchor_s3(payload: Dict[str, Any]) -> None:
     if not bucket:
         return
     try:
-        import boto3  # type: ignore
+        from src.app.providers.aws import get_client
     except Exception:
         return
     region = str(os.getenv("AUDIT_CHAIN_S3_REGION", "us-east-1") or "us-east-1")
@@ -151,7 +151,7 @@ def _append_external_anchor_s3(payload: Dict[str, Any]) -> None:
     retain_iso = datetime.fromtimestamp(retain_until, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     date_part = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     key = f"{prefix.rstrip('/')}/{date_part}/{str(payload.get('anchor_id') or uuid.uuid4().hex)}.json"
-    client = boto3.client("s3", region_name=region)
+    client = get_client("s3", region_name=region)
     client.put_object(
         Bucket=bucket,
         Key=key,

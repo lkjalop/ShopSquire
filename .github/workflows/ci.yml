@@ -9,6 +9,7 @@ jobs:
   security-focused:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       APP_ENV: test
       DATABASE_URL: sqlite+pysqlite:///./tmp/ci-security.sqlite
@@ -26,7 +27,7 @@ jobs:
           if [ -f pyproject.toml ]; then
             python -m pip install poetry
             poetry config virtualenvs.create false
-            poetry install --no-interaction --no-ansi
+            poetry install --no-interaction --no-ansi --no-root
           elif [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
@@ -43,12 +44,16 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       matrix:
-        python-version: [3.10, 3.11]
+        # YAML parses an unquoted 3.10 as the number 3.1.
+        python-version: ["3.10", "3.11"]
     services:
       postgres:
-        image: postgres:14
+        # Match the production-shaped migration/browser workflow and include
+        # the vector extension required by the canonical embedding schema.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -64,6 +69,10 @@ jobs:
       PGDATABASE: shopsquire_test
       PGPORT: 5432
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shopsquire_test
+      # Activates tests/chaos/test_money_concurrency_postgres.py — the threaded money-race suite that
+      # SQLite cannot model (it skips without this). Uses its own throwaway schemas on the same PG.
+      TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/shopsquire_test
+      ENABLE_DB_MATRIX: "1"
       SPLUNK_HEC_URL: ${{ secrets.SPLUNK_HEC_URL }}
       SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
     steps:
@@ -78,7 +87,7 @@ jobs:
           if [ -f pyproject.toml ]; then
             python -m pip install poetry
             poetry config virtualenvs.create false
-            poetry install --no-interaction --no-ansi
+            poetry install --no-interaction --no-ansi --no-root
           elif [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
@@ -107,16 +116,27 @@ jobs:
         run: |
           python -m pip install playwright
           python -m playwright install --with-deps
-      - name: Run tests
+      - name: Run PostgreSQL-owned contracts
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
         run: |
-          python -m pytest -q --cov=src --cov-report=xml --cov-report=term-missing
-      - name: Upload coverage report
+          mkdir -p test-results
+          timeout --signal=TERM --kill-after=30s 1200s \
+            python -m pytest -vv --timeout=120 --timeout-method=thread \
+              --junitxml=test-results/postgres-${{ matrix.python-version }}.xml \
+              tests/chaos/test_money_concurrency_postgres.py \
+              tests/chaos/test_money_concurrency_http.py \
+              tests/chaos/test_demand_allocation_concurrency_postgres.py \
+              tests/architecture/test_postgres_security_boundaries.py \
+              tests/integration/test_db_postgres_timescale_matrix.py \
+              tests/test_verify_db_migrations.py
+      - name: Upload PostgreSQL diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report-${{ matrix.python-version }}
-          path: coverage.xml
+          name: postgres-contracts-${{ matrix.python-version }}
+          path: test-results/**
+          retention-days: 14
       - name: Emit Splunk test event (optional)
         if: env.SPLUNK_HEC_URL != '' && env.SPLUNK_HEC_TOKEN != ''
         run: |

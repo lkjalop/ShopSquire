@@ -128,6 +128,20 @@ def test_security_event_replay_deterministic():
 
 def test_security_event_ingest_load_and_dashboard_latency():
     client = TestClient(create_app())
+    # Hermetic baseline: this is a throughput + dashboard-LATENCY test. The trend-pack query
+    # aggregates security_event_ingest by DATE RANGE (not tenant), so without clearing it would
+    # aggregate every OTHER test's ingested events in the shared dev DB — turning a ~10s test into
+    # a ~50min one (and measuring the wrong thing). Clear the table so we measure clean throughput on
+    # this test's own 150 events. (Real concern flagged separately: the trend-pack aggregation should
+    # be index-/range-bounded so it doesn't degrade with table size in production.)
+    try:
+        from sqlalchemy import text as _sql
+        from src.app.models.db import db_session
+        with db_session() as _db:
+            _db.execute(_sql("DELETE FROM security_event_ingest"))
+            _db.commit()
+    except Exception:
+        pass
     run = uuid.uuid4().hex[:10]
     tenant_id = f"tenant-load-{run}"
     start = time.perf_counter()

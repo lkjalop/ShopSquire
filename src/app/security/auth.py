@@ -8,6 +8,7 @@ import ipaddress
 import base64
 import hmac
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -121,6 +122,72 @@ def _bearer_subject(auth_header: Optional[str]) -> Optional[str]:
     return None
 
 
+def _bearer_email(auth_header: Optional[str]) -> Optional[str]:
+    """The email claim from a bearer (local JWT, else introspection), or None. Best-effort, never raises."""
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    try:
+        parts = token.split(".")
+        if len(parts) == 3:
+            p = parts[1]
+            pad = "=" * ((4 - len(p) % 4) % 4)
+            claims = json.loads(base64.urlsafe_b64decode((p + pad).encode("ascii")).decode("utf-8"))
+            if claims.get("email"):
+                return str(claims["email"])
+    except Exception:
+        pass
+    try:
+        data = _introspect_token(auth_header)
+        if isinstance(data, dict) and data.get("email"):
+            return str(data["email"])
+    except Exception:
+        pass
+    return None
+
+
+@dataclass
+class OperatorSubject:
+    """Best-effort per-user identity for AUDIT attribution (not authorization). user_id='' when only a shared
+    API key is used — the caller stamps a 'key:<role>' sentinel so the trail still shows 'shared key, no user'."""
+    user_id: str = ""
+    email: str = ""
+
+
+def operator_subject(authorization: Optional[str] = Header(default=None, alias="Authorization")) -> OperatorSubject:
+    """FastAPI dependency: extract the JWT subject + email for per-user audit attribution. Does NOT enforce
+    auth — pair it with require_role, which does. Ready to capture a real operator the moment an IdP issues
+    JWTs; until then it returns empty and the caller falls back to a role sentinel."""
+    return OperatorSubject(user_id=_bearer_subject(authorization) or "", email=_bearer_email(authorization) or "")
+
+
+def _authorize_operator_tenant(
+    *,
+    request: Optional[Request],
+    role: str,
+    effective_key: Optional[str],
+    authorization: Optional[str],
+) -> None:
+    """Bind the authenticated credential to a persisted tenant membership.
+
+    The request header selects a tenant context; it never grants that context.
+    Production/staging fail closed when membership storage or membership is absent.
+    """
+    if request is None:
+        return
+    from src.app.services.operator_tenant_membership import (
+        authorize_request_membership,
+    )
+
+    authorize_request_membership(
+        request=request,
+        role=role,
+        effective_key=effective_key,
+        authorization=authorization,
+        bearer_subject=_bearer_subject(authorization),
+    )
+
+
 def _assert_privileged_role_server_side(*, role: str, authorization: Optional[str], effective_key: Optional[str]) -> bool:
     """§10 hardening: never trust privileged role solely from JWT claims.
 
@@ -219,7 +286,10 @@ def _abac_tenant_allow(role: str, tenant_id: str | None) -> bool:
             return True
         return str(tenant_id or "") in [str(x) for x in allowed]
     except Exception:
-        return True
+        # P0-2: a CONFIGURED but malformed allowlist must not silently become allow-all — that
+        # disables the tenant restriction the operator set. Fail CLOSED (deny) so a broken config is
+        # a loud denial, never a silent cross-tenant hole. (Empty/unset allowlist above allows all.)
+        return False
 
 
 def _parse_mfa_verified_at(value: str | None) -> float | None:
@@ -659,6 +729,12 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                 except Exception:
                     pass
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"ABAC deny: {reason}")
+        _authorize_operator_tenant(
+            request=request,
+            role=role,
+            effective_key=effective_key,
+            authorization=authorization,
+        )
         try:
             if _emit_iam:
                 _emit_iam(
@@ -715,11 +791,31 @@ ROLE_OWNER = "owner"
 ROLE_DEVELOPER = "developer"
 
 
+def _non_dev_env() -> bool:
+    """Non-dev = staging/prod/anything that isn't a local/dev/test run (mirrors config._is_non_dev_env)."""
+    return str(os.getenv("APP_ENV", "local") or "local").strip().lower() not in (
+        "local", "dev", "development", "test", "testing",
+    )
+
+
+def _env_role_key(name: str, dev_default: str) -> str:
+    """Resolve a role's env key with a FAIL-CLOSED default in non-dev.
+
+    Dev/local/test: an unset key falls back to the well-known 'local-*' value (ergonomics). In a non-dev
+    env an UNSET key resolves to "" instead of the guessable default — get_role_from_key() skips empty
+    keys, so a forgotten key config is fail-CLOSED (no backdoor), while an explicitly-set env key and any
+    vault/file keys still authenticate. Closes the "auth defaults to a known key" fail-open."""
+    v = os.getenv(name)
+    if v not in (None, ""):
+        return str(v)
+    return "" if _non_dev_env() else dev_default
+
+
 def _role_keys() -> dict[str, str]:
     return {
-        ROLE_MERCHANT: os.getenv("MERCHANT_API_KEY", "local-merchant-key"),
-        ROLE_OWNER: os.getenv("OWNER_API_KEY", "local-owner-key"),
-        ROLE_DEVELOPER: os.getenv("DEVELOPER_API_KEY", "local-developer-key"),
+        ROLE_MERCHANT: _env_role_key("MERCHANT_API_KEY", "local-merchant-key"),
+        ROLE_OWNER: _env_role_key("OWNER_API_KEY", "local-owner-key"),
+        ROLE_DEVELOPER: _env_role_key("DEVELOPER_API_KEY", "local-developer-key"),
     }
 
 
@@ -874,6 +970,12 @@ def require_role(allowed_roles: Iterable[str]):
                 except Exception:
                     pass
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"ABAC deny: {reason}")
+        _authorize_operator_tenant(
+            request=request,
+            role=role,
+            effective_key=effective_key,
+            authorization=authorization,
+        )
         try:
             if _emit_iam:
                 _emit_iam(

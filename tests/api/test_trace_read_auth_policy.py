@@ -25,6 +25,8 @@ def _seed_trace_event(client: TestClient, trace_id: str) -> None:
 
 def test_trace_read_requires_auth_in_non_dev(monkeypatch):
     monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("MERCHANT_API_KEY", "test-trace-merchant-key")
+    monkeypatch.setenv("OPERATOR_TENANT_MEMBERSHIP_MODE", "audit")
     monkeypatch.delenv("TRACE_READ_REQUIRE_AUTH", raising=False)
     app = create_app()
     client = TestClient(app)
@@ -41,6 +43,8 @@ def test_trace_read_requires_auth_in_non_dev(monkeypatch):
 
 def test_trace_ws_requires_auth_in_non_dev(monkeypatch):
     monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("MERCHANT_API_KEY", "test-trace-merchant-key")
+    monkeypatch.setenv("OPERATOR_TENANT_MEMBERSHIP_MODE", "audit")
     monkeypatch.delenv("TRACE_READ_REQUIRE_AUTH", raising=False)
     app = create_app()
     client = TestClient(app)

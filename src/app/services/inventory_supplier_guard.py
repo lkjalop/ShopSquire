@@ -31,6 +31,8 @@ def compute_supplier_trust_score(
             "lead_time_variance": round(variance, 4),
             "invoice_mismatch_rate": round(mismatch, 4),
         },
+        "authority": "shadow_only",
+        "execution_authority": False,
     }
 
 
@@ -62,4 +64,3 @@ def evaluate_auto_po_policy(*, amount: float, supplier_risk: float, anomaly_scor
     if risk >= 0.45:
         return {"decision": "challenge", "risk_score": round(risk, 4), "reason_codes": ["secondary_approval_required"]}
     return {"decision": "allow", "risk_score": round(risk, 4), "reason_codes": ["within_policy"]}
-

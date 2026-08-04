@@ -2,7 +2,6 @@ import json
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from src.app.main import create_app
 from src.app.models.db import db_session, set_engine
@@ -17,11 +16,15 @@ def test_admin_inventory_csv_sync_writes_sync_run_and_snapshot(monkeypatch, tmp_
     monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_path}")
     eng = create_engine(f"sqlite+pysqlite:///{db_path}", connect_args={"check_same_thread": False}, future=True)
     set_engine(eng)
-    try:
-        import src.app.models.db as dbmod
-        dbmod.SessionLocal = sessionmaker(bind=eng, future=True)
-    except Exception:
-        pass
+    with db_session() as db:
+        db.execute(text(
+            "CREATE TABLE IF NOT EXISTS supplier_feed_quarantine ("
+            "id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source TEXT NOT NULL, "
+            "sku TEXT NOT NULL, warehouse TEXT, stock INTEGER, risk_score REAL NOT NULL, "
+            "reasons_json TEXT NOT NULL, raw_json TEXT NOT NULL, "
+            "created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+        ))
+        db.commit()
 
     client = TestClient(create_app())
     r = client.post(

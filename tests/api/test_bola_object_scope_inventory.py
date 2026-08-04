@@ -9,7 +9,7 @@ def _client_with_env(monkeypatch) -> TestClient:
     return TestClient(create_app())
 
 
-def test_inventory_reorder_bola_tenant_owner_scope_enforced(monkeypatch):
+def test_inventory_reorder_rejects_client_selected_scope_and_economics(monkeypatch):
     client = _client_with_env(monkeypatch)
     body = {
         "sku": "SKU-BOLA-1",
@@ -20,16 +20,13 @@ def test_inventory_reorder_bola_tenant_owner_scope_enforced(monkeypatch):
         "supplier_trust_score": 0.8,
         "supplier_trust_band": "high",
     }
-    bad_tenant = client.post(
+    response = client.post(
         "/api/v1/inventory/reorder",
         headers={"x-api-key": "local-merchant-key", "x-tenant-id": "tenant-b", "x-user-id": "user-a"},
         json=body,
     )
-    assert bad_tenant.status_code == 403
-
-    bad_owner = client.post(
-        "/api/v1/inventory/reorder",
-        headers={"x-api-key": "local-merchant-key", "x-tenant-id": "tenant-a", "x-user-id": "user-b"},
-        json=body,
+    assert response.status_code == 422
+    assert any(
+        error.get("loc") == ["body", "proposal_id"]
+        for error in response.json().get("detail", [])
     )
-    assert bad_owner.status_code == 403

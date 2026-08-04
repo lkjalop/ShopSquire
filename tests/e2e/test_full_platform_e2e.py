@@ -211,6 +211,7 @@ def test_full_recommend_and_decision_trace_tabs():
 
         # Only mock chat on page load; defer decision trace mocks until after chat.
         # Mocking decisions/latest on load can confuse the SPA on mount.
+        page.route("**/api/v1/chat/stream**", lambda route: route.fulfill(status=503))
         page.route("**/api/v1/chat/query**", lambda route: route.fulfill(
             status=200, content_type="application/json", body=chat_payload))
 
@@ -585,6 +586,7 @@ def test_browser_recommend_to_cart_upsell():
         """)
 
         # Mock chat for speed
+        page.route("**/api/v1/chat/stream**", lambda route: route.fulfill(status=503))
         page.route("**/api/v1/chat/query**", lambda route: route.fulfill(
             status=200, content_type="application/json", body=chat_payload))
 

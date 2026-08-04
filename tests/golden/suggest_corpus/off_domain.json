@@ -1,0 +1,262 @@
+{
+ "id": "off_domain",
+ "lane": "off_domain",
+ "notes": "fully off-domain — expect graceful honesty, not a laptop grid",
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:45:59.429129+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-off_domain-0710234255"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "recommend a good pizza place near me",
+     "uid": "corpus-off_domain-0710234255"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 3532,
+   "response": {
+    "status": "off_domain_request",
+    "results": [],
+    "proposal": {
+     "decision_mode": "rules",
+     "ranked_skus": []
+    },
+    "constraints_used": {
+     "uid_hash": "8ee89acae9616839",
+     "budget_max": null,
+     "budget_min": null,
+     "brands": [],
+     "specs": [],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "product_search",
+     "use_case": null,
+     "use_case_tags": [],
+     "locale": null,
+     "query": "recommend a good pizza place near me",
+     "slots": {
+      "price_min": null,
+      "price_max": null,
+      "budget": null,
+      "specs": {},
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "SEARCH",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "unknown",
+     "budget_tier_tags": [],
+     "warranty_candidate": "warranty_candidate_neutral",
+     "accessory_affinities": [
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "unknown",
+      "primary_intent": "product_search",
+      "secondary_needs": [],
+      "budget_min": null,
+      "budget_max": null,
+      "budget_tier": "unknown",
+      "price_sensitivity": "medium",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": null,
+      "accessory_affinities": [
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [],
+      "confidence": 1.0,
+      "warranty_tag": "warranty_candidate_neutral"
+     }
+    },
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 1
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": false,
+     "steps": [
+      {
+       "step": 1,
+       "intent": "product_search",
+       "confidence": 1.0,
+       "route": "recommendation",
+       "status": "planned"
+      }
+     ]
+    },
+    "policy_version": "v1",
+    "assistant_message": "I can help with electronics shopping and support only. Try a product query like 'gaming laptop under $1900' or ask for warranty/returns help.",
+    "next_questions": [
+     {
+      "id": "ask_laptop_budget",
+      "text": "What laptop budget should I use?",
+      "goal": "clarify_details"
+     },
+     {
+      "id": "ask_use_case",
+      "text": "What is your use case (gaming, work, study, creator)?",
+      "goal": "clarify_details"
+     }
+    ],
+    "view_mode": "grid",
+    "view_reason": "Default product layout",
+    "agent_chain": [
+     {
+      "agent": "Intent_Guard_Agent",
+      "confidence": 0.98,
+      "duration_ms": null,
+      "decision_mode": "rules"
+     }
+    ],
+    "trace_tags": [
+     "nlu:intent_present",
+     "nlu:intent_conf_high",
+     "lifecycle:new_user",
+     "payments:single_provider",
+     "i18n:english_path",
+     "slsa:level_unknown",
+     "platform:caching_partial",
+     "platform:async_partial",
+     "platform:zero_trust_not_done",
+     "platform:advanced_anomaly_partial",
+     "platform:chaos_partial",
+     "platform:observability_slo_partial",
+     "platform:ai_act_partial"
+    ],
+    "drilldown_hidden_tags": {
+     "domains": {
+      "nlu": {
+       "intent": "product_search",
+       "intent_confidence": 1.0,
+       "entity_count": 0,
+       "slot_keys": [
+        "availability",
+        "brand_excludes",
+        "brand_includes",
+        "budget",
+        "condition",
+        "price_max",
+        "price_min",
+        "quantity",
+        "shipping_deadline",
+        "specs"
+       ]
+      },
+      "lifecycle": {
+       "segment": "new_user",
+       "total_orders": 0,
+       "lifetime_value_cents": 0
+      },
+      "payments": {
+       "enabled_providers": [],
+       "enabled_count": 0,
+       "provider_concentration_risk": "high"
+      },
+      "i18n": {
+       "locale": null,
+       "non_english_detected": false,
+       "query_len": 36
+      },
+      "slsa": {
+       "slsa_level": null,
+       "sbom_ready_signal": false
+      },
+      "platform_readiness": {
+       "caching": "partial",
+       "async_processing": "partial",
+       "zero_trust": "not_done",
+       "advanced_anomaly_detection": "partial",
+       "chaos_engineering": "partial",
+       "observability_slo": "partial",
+       "ai_act": "partial"
+      }
+     },
+     "reasoning": {
+      "summary": "Tags correlate NLU extraction quality, lifecycle segment, payment diversity, i18n signals, supply-chain integrity posture, and platform-readiness gaps for decision-trace drilldown."
+     }
+    },
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [],
+     "conjunction_count": 0,
+     "score": 0
+    },
+    "trace_id": "de87933c-cf33-4343-a2c5-aa9e7086ade3",
+    "decision_trace_id": "de87933c-cf33-4343-a2c5-aa9e7086ade3",
+    "evidence_items": [],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 0.0,
+    "question_plan": {
+     "mode": "clarify",
+     "missing_fields": [
+      "budget",
+      "use_case"
+     ],
+     "confidence_band": "low",
+     "ambiguity_reason": "insufficient_context"
+    },
+    "confidence_band": "low",
+    "ambiguity_reason": "insufficient_context",
+    "needs_disambiguation": true,
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "turn_type": "unknown_turn",
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.5,
+    "buyer_persona": null,
+    "buyer_persona_candidate": null,
+    "buyer_persona_confidence": null,
+    "decision_id": "de87933c-cf33-4343-a2c5-aa9e7086ade3",
+    "_trace_recommendation_persisted": true
+   },
+   "narration": null,
+   "contract_violations": [
+    "missing core field: degraded",
+    "missing core field: eligible",
+    "missing core field: products",
+    "unknown field (contract addition?): status"
+   ]
+  }
+ ]
+}

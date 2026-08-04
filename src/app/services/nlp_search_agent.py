@@ -82,6 +82,19 @@ def _parse_number(s: str) -> int:
     return int(s.replace(",", ""))
 
 
+# A trailing spec/measurement unit means the number is a SPEC, not a budget — "under 2 kg",
+# "16 gb", "240 hz" must never be read as "$2"/"$16"/"$240". Guards the under/over/around parsers.
+_NOT_BUDGET_UNIT = (
+    r"(?!\s*(?:kg|kgs|lb|lbs|gb|tb|mb|kb|hz|ghz|mhz|khz|fps|inch|inches|in|cm|mm|nits|"
+    r"ppi|dpi|wh|mah|mp|cores?|w|watts|k)\b)"
+)
+
+
+def _sane_budget(v: Optional[int]) -> Optional[int]:
+    """Reject nonsensical budgets (e.g. a "$2" misread from "2 kg"). Matches the decomposer's band."""
+    return v if (v is not None and 50 <= v <= 1_000_000) else None
+
+
 def parse_query(query: str) -> ParsedQuery:
     """Parse a free-text shopping query into structured constraints."""
     result = ParsedQuery(raw_query=query)
@@ -104,33 +117,65 @@ def parse_query(query: str) -> ParsedQuery:
 
     # ── Budget extraction ──
     ql = q.lower()
+    # Canonical grammar FIRST (budget_grammar — one place to add a phrasing for every lane); the local
+    # patterns below remain as legacy fallback only.
+    from src.app.services.budget_grammar import parse_budget as _canon
+    _bp = _canon(q)
+    if _bp is not None and _bp.found:
+        result.budget_min = _sane_budget(_bp.budget_min)
+        result.budget_max = _sane_budget(_bp.budget_max)
+        signals += 1
     # Explicit numeric patterns first
     # Range: $500-$1000
-    range_m = re.search(r"[\$£€]\s*(\d[\d,]*)\s*[-–to]+\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
+    range_m = None if (_bp is not None and _bp.found) else re.search(r"[\$£€]\s*(\d[\d,]*)\s*[-–to]+\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
     if not range_m:
         range_m = re.search(r"(\d[\d,]*)\s*[-–to]+\s*(\d[\d,]*)\s*(?:dollar|buck|pound|euro|£|\$|€)", q, re.I)
+    if not range_m:
+        # cue-anchored bare range: "budget 1200 to 1500", "price range 1100-1400" (no currency symbol).
+        # Without this, the fuzzy _BUDGET_PHRASES fallback mangled these to a generic cap (the "600" bug).
+        range_m = re.search(r"\b(?:budget|price(?:\s+range)?)\s*(?:is|of|:)?\s*(\d[\d,]*)\s*(?:-|–|to)\s*(\d[\d,]*)", q, re.I)
     if range_m:
-        result.budget_min = _parse_number(range_m.group(1))
-        result.budget_max = _parse_number(range_m.group(2))
-        signals += 1
-    else:
-        # Under/below X
-        under_m = re.search(r"\b(?:under|below|less than|max|up to)\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
+        _bmin = _sane_budget(_parse_number(range_m.group(1)))
+        _bmax = _sane_budget(_parse_number(range_m.group(2)))
+        if _bmin is not None or _bmax is not None:
+            result.budget_min, result.budget_max = _bmin, _bmax
+            signals += 1
+    elif _bp is None or not _bp.found:  # legacy single-value patterns only when the canonical grammar saw nothing
+        # Under/below X (not a spec unit — "under 2 kg" is weight, not $2)
+        under_m = re.search(r"\b(?:under|below|less than|max|up to)\s*[\$£€]?\s*(\d[\d,]*)" + _NOT_BUDGET_UNIT, q, re.I)
         if under_m:
-            result.budget_max = _parse_number(under_m.group(1))
-            signals += 1
+            _bmax = _sane_budget(_parse_number(under_m.group(1)))
+            if _bmax is not None:
+                result.budget_max = _bmax
+                signals += 1
+        # Budget REVISION down: "cut it to 1000 max", "drop the budget to 800". A budget cue (max/budget/
+        # spend/price/$) is REQUIRED and the value must be >= 100 — "reduce to 10" is a quantity amendment,
+        # never a $10 budget. A cut sets a new CEILING (the old floor no longer applies).
+        if result.budget_max is None:
+            cut_m = re.search(
+                r"\b(?:cut|drop|lower|bring|reduce)\s+(?:it|that|this|the\s+(?:budget|price|spend))?\s*"
+                r"(?:down\s+)?to\s*[\$£€]?\s*(\d[\d,]*)\b", q, re.I)
+            if cut_m and re.search(r"\bmax\b|\bbudget\b|\bspend\b|\bprice\b|[\$£€]", q, re.I):
+                _bmax = _sane_budget(_parse_number(cut_m.group(1)))
+                if _bmax is not None and _bmax >= 100:
+                    result.budget_max = _bmax
+                    result.budget_min = None
+                    signals += 1
         # Above/over X
-        above_m = re.search(r"\b(?:above|over|more than|at least|minimum)\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
+        above_m = re.search(r"\b(?:above|over|more than|at least|minimum)\s*[\$£€]?\s*(\d[\d,]*)" + _NOT_BUDGET_UNIT, q, re.I)
         if above_m:
-            result.budget_min = _parse_number(above_m.group(1))
-            signals += 1
+            _bmin = _sane_budget(_parse_number(above_m.group(1)))
+            if _bmin is not None:
+                result.budget_min = _bmin
+                signals += 1
         # Around X
-        around_m = re.search(r"\b(?:around|about|roughly|approximately|~)\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
+        around_m = re.search(r"\b(?:around|about|roughly|approximately|~)\s*[\$£€]?\s*(\d[\d,]*)" + _NOT_BUDGET_UNIT, q, re.I)
         if around_m:
-            val = _parse_number(around_m.group(1))
-            result.budget_min = int(val * 0.8)
-            result.budget_max = int(val * 1.2)
-            signals += 1
+            val = _sane_budget(_parse_number(around_m.group(1)))
+            if val is not None:
+                result.budget_min = int(val * 0.8)
+                result.budget_max = int(val * 1.2)
+                signals += 1
         # Fuzzy phrases
         if result.budget_min is None and result.budget_max is None:
             for pat, fmin, fmax in _BUDGET_PHRASES[:3]:

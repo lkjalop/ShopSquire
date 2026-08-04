@@ -44,6 +44,26 @@ def upsert_product_embedding(session, product_id: str, embedding: Sequence[float
         dialect = ""
     if "postgres" not in dialect:
         return False
+    # Enforce the vector(1536) contract: a wrong-length vector would fail the
+    # pgvector insert (and historically aborted a whole batch). Skip + log loudly
+    # instead of silently corrupting / crashing the index.
+    try:
+        from src.app.services.embeddings import embedding_dim
+        _exp = embedding_dim()
+    except Exception:
+        _exp = 1536
+    if len(embedding) != _exp:
+        import logging
+        logging.getLogger("shopsquire.embeddings").warning(
+            "product_embedding dim mismatch for %s: got %d, expected %d — skipped",
+            product_id, len(embedding), _exp,
+        )
+        try:
+            from src.app.observability.metrics import record_retrieval_source
+            record_retrieval_source("product_embedding", "dim_mismatch")
+        except Exception:
+            pass
+        return False
     vec = "[" + ",".join(f"{x:.8f}" for x in embedding) + "]"
     session.execute(_UPSERT_EMBED_SQL, {"pid": product_id, "vec": vec})
     session.commit()

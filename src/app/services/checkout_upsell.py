@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import os
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any
 
 from sqlalchemy import text
+from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2
+
 from src.app.services.product_taxonomy import (
     ACCESSORY_FAMILIES,
     infer_accessory_slug,
@@ -16,10 +19,51 @@ from src.app.services.product_taxonomy import (
     product_tags,
 )
 
+logger = logging.getLogger("shopsquire.checkout_upsell")
+
 
 _SUSPICIOUS_NAME_PAT = re.compile(
     r"(?i)(ignore\s+previous|jailbreak|system\s+prompt|developer\s+mode|override|drop\s+table|<script)"
 )
+
+# Adaptive price-guard crossover. cart_price and candidate price are BOTH in CENTS.
+# Above this, the cart is "substantial" → only show upsells priced <= 70% of cart total.
+# At/below this, the cart is "low-value" → allow upsells up to 1.9x the cart (an accessory
+# cart can be grown). The literal 1200 here was a cents/dollars bug ($12, not $1200): every
+# real cart exceeded it, so the strict branch ALWAYS fired and the relaxed branch was dead.
+# $200 keeps laptop carts in the strict branch (unchanged) while reviving the relaxed branch
+# for genuine accessory carts. This is the ELECTRONICS fallback; the live value is the active
+# StoreProfile `cart_crossover_cents` slot (see _cart_crossover_cents) so a low-AOV vertical
+# (e.g. pharmacy) or high-AOV vertical tunes the strict/relaxed boundary without code changes.
+_ADAPTIVE_CART_CROSSOVER_CENTS = 20000  # $200.00
+
+
+def _cart_crossover_cents(profile_id: str | None = None) -> int:
+    """Adaptive price-guard crossover (cents) for the ACTIVE vertical. Prefers the StoreProfile
+    `cart_crossover_cents` slot; falls back to the electronics default. profile_slot is defensive
+    (never raises) so no try/except is needed (keeps this off the silent-except ratchet)."""
+    from src.app.platform.store_profile import profile_slot
+    val = profile_slot("cart_crossover_cents", profile_id=profile_id, default=None)
+    if isinstance(val, (int, float)) and val > 0:
+        return int(val)
+    return _ADAPTIVE_CART_CROSSOVER_CENTS
+
+
+def _passes_price_guard(price_cents: int, cart_price_cents: int) -> bool:
+    """Adaptive upsell price guard. All values in CENTS.
+
+    - Substantial cart (> crossover): accept only upsells priced <= 70% of cart total
+      (don't upsell something nearly as expensive as the whole cart).
+    - Low-value cart (0 < cart <= crossover): accept upsells up to 1.9x the cart
+      (an accessory cart can reasonably be grown).
+    - Unknown/zero cart: no guard.
+    """
+    crossover = _cart_crossover_cents()
+    if cart_price_cents > crossover:
+        return price_cents <= int(cart_price_cents * 0.7)
+    if 0 < cart_price_cents <= crossover:
+        return price_cents <= int(cart_price_cents * 1.9)
+    return True
 
 
 @dataclass
@@ -39,6 +83,9 @@ class UpsellCandidate:
 
 _SKU_FAMILY_PAT = re.compile(r"^SYN-([A-Z]+)-", re.IGNORECASE)
 
+# ELECTRONICS fallback for persona → preferred accessory slugs. Live source is the active
+# StoreProfile `persona_accessory_slugs` slot (see _persona_accessory_slugs), so a fashion or
+# pharmacy vertical supplies its own persona→accessory affinities instead of inheriting laptops.
 _PERSONA_ACCESSORY_SLUGS: dict[str, set[str]] = {
     "student": {"laptop_sleeve", "mouse", "power_bank", "usb_hub", "dock"},
     "gamer": {"gaming_mouse", "headset", "cooling_pad", "laptop_stand", "monitor"},
@@ -49,6 +96,22 @@ _PERSONA_ACCESSORY_SLUGS: dict[str, set[str]] = {
 }
 
 
+def _persona_accessory_slugs(profile_id: str | None = None) -> dict[str, set[str]]:
+    """Persona → preferred accessory slugs for the ACTIVE vertical. Prefers the StoreProfile
+    `persona_accessory_slugs` slot (values may be lists in JSON → normalized to sets); falls back
+    to the electronics table. profile_slot is defensive, so no try/except (off the ratchet)."""
+    from src.app.platform.store_profile import profile_slot
+    prof = profile_slot("persona_accessory_slugs", profile_id=profile_id, default=None)
+    if isinstance(prof, dict) and prof:
+        out: dict[str, set[str]] = {}
+        for k, v in prof.items():
+            if isinstance(v, (list, set, tuple)):
+                out[str(k).strip().lower()] = {str(s).strip().lower() for s in v if str(s).strip()}
+        if out:
+            return out
+    return _PERSONA_ACCESSORY_SLUGS
+
+
 def _sku_family(sku: str | None) -> str:
     s = str(sku or "").strip().upper()
     m = _SKU_FAMILY_PAT.match(s)
@@ -57,34 +120,80 @@ def _sku_family(sku: str | None) -> str:
     return infer_product_family(sku=s)
 
 
+# ELECTRONICS-centric fallback: intent family_code -> trigger keywords. Live source is the active
+# StoreProfile `intent_family_keywords` slot. Insertion order IS precedence: the first family whose
+# keyword appears in the (query+persona+use_case) text wins (LAP before FSH before HMW).
+_INTENT_FAMILY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "LAP": ("laptop", "macbook", "notebook", "gaming", "student", "university", "office pc", "windows"),
+    "FSH": ("shirt", "dress", "fashion", "sneaker", "hoodie", "clothes", "apparel"),
+    "HMW": ("kitchen", "home", "bedroom", "lamp", "basket", "decor", "furniture"),
+}
+
+
+def _intent_family_keywords(profile_id: str | None = None) -> dict[str, tuple[str, ...]]:
+    """family_code -> trigger keywords for the ACTIVE vertical. Prefers the StoreProfile
+    `intent_family_keywords` slot; falls back to the electronics map. profile_slot is defensive."""
+    from src.app.platform.store_profile import profile_slot
+    prof = profile_slot("intent_family_keywords", profile_id=profile_id, default=None)
+    if isinstance(prof, dict) and prof:
+        out: dict[str, tuple[str, ...]] = {}
+        for fam, kws in prof.items():
+            if isinstance(kws, (list, tuple)):
+                tok = tuple(str(k).strip().lower() for k in kws if str(k).strip())
+                if tok:
+                    out[str(fam).strip().upper()] = tok
+        if out:
+            return out
+    return _INTENT_FAMILY_KEYWORDS
+
+
 def _infer_intent_family(query: str | None, persona: str | None, use_case: str | None) -> str | None:
-    q = str(query or "").strip().lower()
-    p = str(persona or "").strip().lower()
-    u = str(use_case or "").strip().lower()
-    text = " ".join([q, p, u]).strip()
+    text = " ".join([
+        str(query or "").strip().lower(),
+        str(persona or "").strip().lower(),
+        str(use_case or "").strip().lower(),
+    ]).strip()
     if not text:
         return None
-    if any(t in text for t in ("laptop", "macbook", "notebook", "gaming", "student", "university", "office pc", "windows")):
-        return "LAP"
-    if any(t in text for t in ("shirt", "dress", "fashion", "sneaker", "hoodie", "clothes", "apparel")):
-        return "FSH"
-    if any(t in text for t in ("kitchen", "home", "bedroom", "lamp", "basket", "decor", "furniture")):
-        return "HMW"
+    for fam, kws in _intent_family_keywords().items():
+        if any(t in text for t in kws):
+            return fam
     return None
+
+
+# ELECTRONICS-centric fallback complement matrix (cart_family -> {candidate_family: weight}).
+# Live source is the active StoreProfile `family_complement_matrix` slot. Same-family gets the
+# highest weight; accessory/peripheral families complement LAP strongly (a shopper with a laptop
+# needs a mouse/headset/bag, not another laptop).
+_FAMILY_COMPLEMENT_MATRIX: dict[str, dict[str, float]] = {
+    "LAP": {"LAP": 1.0, "PERIPH": 0.95, "ACC": 0.90, "MON": 0.90, "HEAD": 0.85, "COOL": 0.80, "BAG": 0.75, "HMW": 0.35, "FSH": 0.05},
+    "FSH": {"FSH": 1.0, "HMW": 0.25, "LAP": 0.10},
+    "HMW": {"HMW": 1.0, "FSH": 0.30, "LAP": 0.20},
+    "PERIPH": {"PERIPH": 0.80, "LAP": 0.60, "ACC": 0.70, "HEAD": 0.65, "MON": 0.55, "HMW": 0.20, "FSH": 0.05},
+    "MON": {"MON": 0.80, "LAP": 0.65, "PERIPH": 0.70, "ACC": 0.60, "HMW": 0.20, "FSH": 0.05},
+}
+
+
+def _family_complement_matrix(profile_id: str | None = None) -> dict[str, dict[str, float]]:
+    """cart_family -> {candidate_family: weight} for the ACTIVE vertical. Prefers the StoreProfile
+    `family_complement_matrix` slot; falls back to the electronics matrix. profile_slot is defensive."""
+    from src.app.platform.store_profile import profile_slot
+    prof = profile_slot("family_complement_matrix", profile_id=profile_id, default=None)
+    if isinstance(prof, dict) and prof:
+        out: dict[str, dict[str, float]] = {}
+        for cart_fam, row in prof.items():
+            if isinstance(row, dict):
+                norm = {str(k).strip().upper(): float(v) for k, v in row.items() if isinstance(v, (int, float))}
+                if norm:
+                    out[str(cart_fam).strip().upper()] = norm
+        if out:
+            return out
+    return _FAMILY_COMPLEMENT_MATRIX
 
 
 def _family_complement_weight(cart_family: str, candidate_family: str) -> float:
     # Keep relevance deterministic and transparent: same-family gets highest weight.
-    # Peripheral/accessory families complement LAP strongly — a shopper who already
-    # has a laptop needs a mouse, headset or bag, not another laptop.
-    matrix: dict[str, dict[str, float]] = {
-        "LAP": {"LAP": 1.0, "PERIPH": 0.95, "ACC": 0.90, "MON": 0.90, "HEAD": 0.85, "COOL": 0.80, "BAG": 0.75, "HMW": 0.35, "FSH": 0.05},
-        "FSH": {"FSH": 1.0, "HMW": 0.25, "LAP": 0.10},
-        "HMW": {"HMW": 1.0, "FSH": 0.30, "LAP": 0.20},
-        "PERIPH": {"PERIPH": 0.80, "LAP": 0.60, "ACC": 0.70, "HEAD": 0.65, "MON": 0.55, "HMW": 0.20, "FSH": 0.05},
-        "MON": {"MON": 0.80, "LAP": 0.65, "PERIPH": 0.70, "ACC": 0.60, "HMW": 0.20, "FSH": 0.05},
-    }
-    row = matrix.get(str(cart_family or "UNK").upper(), {})
+    row = _family_complement_matrix().get(str(cart_family or "UNK").upper(), {})
     if not row:
         return 0.0
     return float(row.get(str(candidate_family or "UNK").upper(), 0.0))
@@ -95,7 +204,7 @@ def _persona_accessory_boost(persona: str | None, accessory_slug: str | None) ->
     slug = str(accessory_slug or "").strip().lower()
     if not persona_key or not slug:
         return 0.0
-    wanted = _PERSONA_ACCESSORY_SLUGS.get(persona_key) or set()
+    wanted = _persona_accessory_slugs().get(persona_key) or set()
     if slug in wanted:
         return 1.0
     return 0.0
@@ -110,22 +219,28 @@ def _user_family_history(db, uid: str | None, lookback_days: int = 180) -> dict[
     if not user:
         return {}
     rows = []
+    cutoff = (datetime.utcnow() - timedelta(
+        days=max(1, int(lookback_days))
+    )).isoformat(sep=" ")
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT line_items
-                FROM draft_orders
-                WHERE customer_id = :uid
-                  AND datetime(created_at) >= datetime('now', :window_expr)
-                ORDER BY created_at DESC
-                LIMIT 150
-                """
-            ),
-            {"uid": user, "window_expr": f"-{max(1, int(lookback_days))} days"},
-        ).fetchall()
-    except Exception:
-        rows = []
+        with db.begin_nested():
+            rows = db.execute(
+                text(
+                    """
+                    SELECT line_items
+                    FROM draft_orders
+                    WHERE customer_id = :uid
+                      AND tenant_id = :tenant
+                      AND created_at >= :cutoff
+                    ORDER BY created_at DESC
+                    LIMIT 150
+                    """
+                ),
+                {"uid": user, "tenant": _ct(), "cutoff": cutoff},
+            ).fetchall()
+    except Exception as exc:   # observable, not silent (review-9 #7): a dead DB must not read
+        logger.warning("upsell affinity history unavailable: %s", repr(exc)[:100])
+        rows = []              # as 'no purchase history'
     fam_counts: dict[str, float] = {}
     for r in rows or []:
         raw = r[0] if isinstance(r, (list, tuple)) else None
@@ -159,6 +274,8 @@ def ensure_recommend_interactions_table(db) -> None:
                 CREATE TABLE IF NOT EXISTS recommend_interactions (
                     id TEXT PRIMARY KEY,
                     event_time TEXT DEFAULT CURRENT_TIMESTAMP,
+                    tenant_id TEXT NOT NULL DEFAULT 'default',
+                    consent_state TEXT NOT NULL DEFAULT 'unknown',
                     uid_hash TEXT,
                     sku TEXT,
                     action TEXT,
@@ -188,18 +305,24 @@ def _safe_json(raw: Any) -> dict:
 
 def _draft_order_lines(db, since_days: int = 90) -> list[list[dict]]:
     rows = []
+    cutoff = (datetime.utcnow() - timedelta(
+        days=max(1, int(since_days))
+    )).isoformat(sep=" ")
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT line_items
-                FROM draft_orders
-                WHERE datetime(created_at) >= datetime('now', :window_expr)
-                """
-            ),
-            {"window_expr": f"-{max(1, int(since_days))} days"},
-        ).fetchall()
-    except Exception:
+        with db.begin_nested():
+            rows = db.execute(
+                text(
+                    """
+                    SELECT line_items
+                    FROM draft_orders
+                    WHERE tenant_id = :tenant
+                      AND created_at >= :cutoff
+                    """
+                ),
+                {"tenant": _ct(), "cutoff": cutoff},
+            ).fetchall()
+    except Exception as exc:   # observable, not silent (review-9 #7)
+        logger.warning("upsell co-occurrence window unavailable: %s", repr(exc)[:100])
         return []
     out: list[list[dict]] = []
     for r in rows or []:
@@ -235,27 +358,29 @@ def _draft_order_lines(db, since_days: int = 90) -> list[list[dict]]:
 def _product_catalog(db) -> list[dict]:
     rows = []
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT p.sku, p.name, p.price_cents, p.specs, COALESCE(i.stock, 0) AS stock
-                FROM products p
-                LEFT JOIN inventory i ON i.product_id = p.id
-                WHERE COALESCE(p.active, 1) = 1
-                """
-            )
-        ).fetchall()
-    except Exception:
-        try:
+        with db.begin_nested():
             rows = db.execute(
                 text(
                     """
                     SELECT p.sku, p.name, p.price_cents, p.specs, COALESCE(i.stock, 0) AS stock
                     FROM products p
                     LEFT JOIN inventory i ON i.product_id = p.id
+                    WHERE COALESCE(p.active, 1) = 1
                     """
                 )
             ).fetchall()
+    except Exception:
+        try:
+            with db.begin_nested():
+                rows = db.execute(
+                    text(
+                        """
+                        SELECT p.sku, p.name, p.price_cents, p.specs, COALESCE(i.stock, 0) AS stock
+                        FROM products p
+                        LEFT JOIN inventory i ON i.product_id = p.id
+                        """
+                    )
+                ).fetchall()
         except Exception:
             rows = []
     out = []
@@ -313,18 +438,22 @@ def _product_catalog(db) -> list[dict]:
 
 def _interaction_stats(db, lookback_days: int = 30) -> dict[str, dict[str, int]]:
     rows = []
+    cutoff = (datetime.utcnow() - timedelta(
+        days=max(1, int(lookback_days))
+    )).isoformat(sep=" ")
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT sku, action, COUNT(*) as n
-                FROM recommend_interactions
-                WHERE datetime(event_time) >= datetime('now', :window_expr)
-                GROUP BY sku, action
-                """
-            ),
-            {"window_expr": f"-{max(1, int(lookback_days))} days"},
-        ).fetchall()
+        with db.begin_nested():
+            rows = db.execute(
+                text(
+                    """
+                    SELECT sku, action, COUNT(*) as n
+                    FROM recommend_interactions
+                    WHERE event_time >= :cutoff
+                    GROUP BY sku, action
+                    """
+                ),
+                {"cutoff": cutoff},
+            ).fetchall()
     except Exception:
         return {}
     out: dict[str, dict[str, int]] = {}
@@ -615,6 +744,7 @@ def recommend_checkout_upsell(
     use_case: str | None = None,
     query: str | None = None,
     persona: str | None = None,
+    trace_id: str | None = None,
 ) -> list[dict]:
     clean_cart = [str(s).strip() for s in (cart_skus or []) if str(s).strip()]
     cart_set = set(clean_cart)
@@ -658,6 +788,7 @@ def recommend_checkout_upsell(
     cart_price = sum(int((by_sku.get(s) or {}).get("price_cents") or 0) for s in cart_set)
     feature_rows: list[dict[str, Any]] = []
     candidates: list[UpsellCandidate] = []
+    poison_hits: list[dict[str, Any]] = []  # B3: surfaced to the SOC after the loop
     for p in products:
         sku = p["sku"]
         if sku in cart_set:
@@ -665,10 +796,8 @@ def recommend_checkout_upsell(
         if int(p.get("stock") or 0) <= 0:
             continue
         price = int(p.get("price_cents") or 0)
-        # Keep price guard adaptive: strict for expensive carts, relaxed for low-value carts.
-        if cart_price > 1200 and price > int(cart_price * 0.7):
-            continue
-        if cart_price > 0 and cart_price <= 1200 and price > int(cart_price * 1.9):
+        # Adaptive price guard (cents): strict for substantial carts, relaxed for low-value ones.
+        if not _passes_price_guard(price, cart_price):
             continue
         name = str(p.get("name") or sku)
         specs_dict = p.get("specs") or {}
@@ -770,6 +899,7 @@ def recommend_checkout_upsell(
         }
         poisoned, poison_reason = _looks_poisoned(name, sku, factors, ints, recent)
         if poisoned:
+            poison_hits.append({"sku": sku, "reason": poison_reason or "unknown"})
             continue
         feature_rows.append(
             {
@@ -864,6 +994,24 @@ def recommend_checkout_upsell(
                 model_source="rules_heuristic",
             )
         )
+
+    # B3: surface poisoned upsell signals to the SOC. Per-call guards EMIT; the observer
+    # correlates aggregate velocity. external_analytical evidence (co-purchase/interactions)
+    # filtered here must be visible, not silently dropped.
+    if poison_hits and trace_id:
+        try:
+            from src.app.services.decision_log import log_trace_event
+            log_trace_event(
+                trace_id, "commerce_integrity", "agent", "Upsell_Poison_Guard", "sku", None,
+                {
+                    "signal": "upsell_signal_poisoning",
+                    "blocked": len(poison_hits),
+                    "detections": poison_hits[:20],
+                    "surface": "checkout_upsell",
+                },
+            )
+        except Exception:
+            pass
 
     conversion_scores, model_source = _train_and_score_conversion_model(candidates=feature_rows, interactions=interactions)
     rescored: list[UpsellCandidate] = []

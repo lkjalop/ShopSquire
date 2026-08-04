@@ -1,0 +1,1943 @@
+{
+ "id": "offcatalog_paraphrase",
+ "lane": "off_catalog",
+ "notes": "paraphrase that bypassed the tail-only override before the finalizer fix",
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:43:40.861216+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-offcatalog_paraphrase-0710234255"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "quote me a couple of rackmount GPU nodes for our datacenter",
+     "uid": "corpus-offcatalog_paraphrase-0710234255"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 4547,
+   "response": {
+    "results": [],
+    "products": [],
+    "price_filter": {},
+    "price_buckets": {
+     "within_budget": [],
+     "closest_above_budget": [],
+     "closest_below_budget": []
+    },
+    "proposal": {
+     "decision_mode": "agent_rerank",
+     "ranked_skus": [
+      "LAP-69763798",
+      "LAP-647D08E6",
+      "LAP-127DE00E",
+      "LAP-788760E4",
+      "LAP-BCBAFE20",
+      "LAP-858DC749",
+      "LAP-343A37BC",
+      "LAP-0A1191AB",
+      "LAP-8F144F60"
+     ],
+     "rationale": "Intent=multi_intent_query; focus=use_case=gaming, specs; query=quote me a couple of rackmount GPU nodes for our datacenter",
+     "per_sku_rationale": {
+      "LAP-69763798": [
+       "16GB RAM"
+      ],
+      "LAP-647D08E6": [
+       "16GB RAM"
+      ],
+      "LAP-127DE00E": [
+       "8GB RAM"
+      ],
+      "LAP-788760E4": [
+       "16GB RAM"
+      ],
+      "LAP-BCBAFE20": [
+       "32GB RAM"
+      ],
+      "LAP-858DC749": [
+       "64GB RAM"
+      ]
+     },
+     "factor_telemetry": {
+      "decision_mode": "agent_rerank",
+      "window_precision": "na",
+      "context_multipliers": "default",
+      "factor_rankings": []
+     },
+     "nlp": {
+      "intent": "multi_intent_query",
+      "intent_confidence": 0.75,
+      "intent_chain": [
+       {
+        "intent": "multi_intent_query",
+        "confidence": 0.75
+       },
+       {
+        "intent": "procurement_intent",
+        "confidence": 0.778
+       },
+       {
+        "intent": "product_search",
+        "confidence": 0.222
+       }
+      ],
+      "intent_evidence": {
+       "rules": {
+        "procurement_intent": [
+         "procurement_intent"
+        ]
+       },
+       "semantic": {}
+      },
+      "entities": {
+       "brands": [],
+       "specs": [
+        "gpu:discrete"
+       ],
+       "use_case": "gaming",
+       "buyer_type": "consumer",
+       "compliance_requested": true
+      },
+      "use_case_tags": [],
+      "preferences": {
+       "brands": [],
+       "specs": [
+        "gpu:discrete"
+       ],
+       "budget_max": null,
+       "budget_min": null,
+       "use_case": "gaming",
+       "use_case_tags": [],
+       "intent": "multi_intent_query",
+       "brand_excludes": [],
+       "availability": null,
+       "condition": null,
+       "buyer_type": "consumer",
+       "compliance_requested": true,
+       "quantity": null,
+       "locale": "en",
+       "lifecycle_signal": null
+      },
+      "context_pack": {
+       "intent": "multi_intent_query",
+       "use_case": "gaming",
+       "use_case_tags": [],
+       "quantity": null,
+       "constraints": {
+        "price_min": null,
+        "price_max": null,
+        "budget": null,
+        "specs": {
+         "gpu_class": "discrete"
+        },
+        "availability": null,
+        "condition": null
+       },
+       "state": null,
+       "risk_band": null,
+       "buyer_type": "consumer",
+       "locale": "en",
+       "lifecycle_signal": null
+      },
+      "locale": "en",
+      "followups": [
+       "What is your budget range?"
+      ],
+      "slots": {
+       "price_min": null,
+       "price_max": null,
+       "budget": null,
+       "specs": {
+        "gpu_class": "discrete"
+       },
+       "brand_includes": [],
+       "brand_excludes": [],
+       "condition": null,
+       "availability": null,
+       "shipping_deadline": null,
+       "quantity": null
+      },
+      "llm_fallback": false,
+      "trace_tags": [
+       "nlu:intent_present",
+       "nlu:intent_conf_high",
+       "nlu:entity_specs",
+       "nlu:entity_use_case",
+       "lifecycle:new_user",
+       "payments:single_provider",
+       "i18n:english_path",
+       "slsa:level_unknown",
+       "platform:caching_partial",
+       "platform:async_partial",
+       "platform:zero_trust_not_done",
+       "platform:advanced_anomaly_partial",
+       "platform:chaos_partial",
+       "platform:observability_slo_partial",
+       "platform:ai_act_partial"
+      ],
+      "trace_hidden": {
+       "domains": {
+        "nlu": {
+         "intent": "multi_intent_query",
+         "intent_confidence": 0.75,
+         "entity_count": 1,
+         "slot_keys": [
+          "availability",
+          "brand_excludes",
+          "brand_includes",
+          "budget",
+          "condition",
+          "price_max",
+          "price_min",
+          "quantity",
+          "shipping_deadline",
+          "specs"
+         ]
+        },
+        "lifecycle": {
+         "segment": "new_user",
+         "total_orders": 0,
+         "lifetime_value_cents": 0
+        },
+        "payments": {
+         "enabled_providers": [],
+         "enabled_count": 0,
+         "provider_concentration_risk": "high"
+        },
+        "i18n": {
+         "locale": null,
+         "non_english_detected": false,
+         "query_len": 59
+        },
+        "slsa": {
+         "slsa_level": null,
+         "sbom_ready_signal": false
+        },
+        "platform_readiness": {
+         "caching": "partial",
+         "async_processing": "partial",
+         "zero_trust": "not_done",
+         "advanced_anomaly_detection": "partial",
+         "chaos_engineering": "partial",
+         "observability_slo": "partial",
+         "ai_act": "partial"
+        }
+       },
+       "reasoning": {
+        "summary": "Tags correlate NLU extraction quality, lifecycle segment, payment diversity, i18n signals, supply-chain integrity posture, and platform-readiness gaps for decision-trace drilldown."
+       }
+      },
+      "followup_contract": {
+       "deictic_reference_detected": false,
+       "comparative_followup_detected": false,
+       "memory_carry_forward_required": false,
+       "coreference_mode": "none",
+       "intent_chain_size": 3
+      },
+      "intent_execution_plan": {
+       "plan_version": "intent_split_v1",
+       "is_multi_intent": true,
+       "steps": [
+        {
+         "step": 1,
+         "intent": "procurement_intent",
+         "confidence": 0.778,
+         "route": "sales_ops",
+         "status": "planned"
+        },
+        {
+         "step": 2,
+         "intent": "product_search",
+         "confidence": 0.222,
+         "route": "recommendation",
+         "status": "planned"
+        }
+       ]
+      }
+     },
+     "evidence": [
+      {
+       "sku": "LAP-69763798",
+       "name": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]",
+       "price_cents": 191900
+      },
+      {
+       "sku": "LAP-647D08E6",
+       "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+       "price_cents": 289900
+      },
+      {
+       "sku": "LAP-127DE00E",
+       "name": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]",
+       "price_cents": 179900
+      },
+      {
+       "sku": "LAP-788760E4",
+       "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+       "price_cents": 389900
+      },
+      {
+       "sku": "LAP-BCBAFE20",
+       "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+       "price_cents": 449900
+      }
+     ]
+    },
+    "constraints_used": {
+     "uid_hash": "446e9afa9e082794",
+     "budget_max": null,
+     "budget_min": null,
+     "brands": [],
+     "specs": [
+      "gpu:discrete",
+      "ram_gb_min:8",
+      "refresh_hz_min:60"
+     ],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "multi_intent_query",
+     "use_case": "gaming",
+     "use_case_tags": [],
+     "locale": null,
+     "query": "quote me a couple of rackmount GPU nodes for our datacenter",
+     "slots": {
+      "price_min": null,
+      "price_max": null,
+      "budget": null,
+      "specs": {
+       "gpu_class": "discrete"
+      },
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "FILTER",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "unknown",
+     "budget_tier_tags": [],
+     "warranty_candidate": "warranty_candidate_neutral",
+     "accessory_affinities": [
+      "gaming_mouse",
+      "headset",
+      "cooling_pad",
+      "laptop_stand",
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "unknown",
+      "primary_intent": "multi_intent_query",
+      "secondary_needs": [],
+      "budget_min": null,
+      "budget_max": null,
+      "budget_tier": "unknown",
+      "price_sensitivity": "medium",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": "gaming",
+      "accessory_affinities": [
+       "gaming_mouse",
+       "headset",
+       "cooling_pad",
+       "laptop_stand",
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [],
+      "confidence": 0.75,
+      "warranty_tag": "warranty_candidate_neutral"
+     },
+     "gpu_preference": "with_discrete",
+     "must_have_gpu": false,
+     "_image_os_hint": "windows",
+     "_off_catalog": {
+      "class": "datacenter_gpu_server",
+      "label": "rack-mount or datacenter GPU servers (A100/H100-class)"
+     },
+     "constraint_status": {
+      "exact_match": true
+     },
+     "use_case_fit_status": {
+      "exact_fit": true,
+      "conflicts": []
+     }
+    },
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 3
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": true,
+     "steps": [
+      {
+       "step": 1,
+       "intent": "procurement_intent",
+       "confidence": 0.778,
+       "route": "sales_ops",
+       "status": "planned"
+      },
+      {
+       "step": 2,
+       "intent": "product_search",
+       "confidence": 0.222,
+       "route": "recommendation",
+       "status": "planned"
+      }
+     ]
+    },
+    "policy_version": "v1",
+    "decision_id": "9fdd5377-2baa-4498-847a-5a47d1a99fac",
+    "risk_score": 4.320000000000001,
+    "why_not": [
+     {
+      "sku": "LAP-788760E4",
+      "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+      "reasons": [
+       "-embedding_similarity"
+      ],
+      "score": 19.075
+     },
+     {
+      "sku": "LAP-BCBAFE20",
+      "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+      "reasons": [
+       "-embedding_similarity"
+      ],
+      "score": 19.075
+     },
+     {
+      "sku": "LAP-858DC749",
+      "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+      "reasons": [
+       "-embedding_similarity"
+      ],
+      "score": 19.075
+     }
+    ],
+    "degraded": false,
+    "eligible": true,
+    "notice": null,
+    "approval_id": null,
+    "trace_id": "9fdd5377-2baa-4498-847a-5a47d1a99fac",
+    "persona_tone": "neutral",
+    "buyer_persona": null,
+    "buyer_persona_confidence": null,
+    "buyer_persona_candidate": null,
+    "budget_fitness": {
+     "status": "unknown"
+    },
+    "requested_quantity": null,
+    "refusal_note": null,
+    "learn_more_url": "/ui/status",
+    "agent_chain": [
+     {
+      "agent": "Security_Observer_Agent",
+      "confidence": null,
+      "duration_ms": null,
+      "severity": "info"
+     },
+     {
+      "agent": "NLP_Search_Agent",
+      "confidence": 0.75,
+      "duration_ms": 1
+     },
+     {
+      "agent": "Candidate_Retrieval_Agent",
+      "candidates": 9,
+      "duration_ms": 8
+     },
+     {
+      "agent": "Spec_Filter_Agent",
+      "candidates": 9,
+      "constraints": {
+       "specs": [
+        "gpu:discrete",
+        "ram_gb_min:8",
+        "refresh_hz_min:60"
+       ],
+       "candidates_before": 9,
+       "candidates_after": 9
+      }
+     },
+     {
+      "agent": "Product_Ranking_Agent",
+      "candidates": 9,
+      "duration_ms": 19,
+      "decision_mode": "agent_rerank"
+     }
+    ],
+    "trace_tags": [
+     "nlu:intent_present",
+     "nlu:intent_conf_high",
+     "nlu:entity_specs",
+     "nlu:entity_use_case",
+     "lifecycle:new_user",
+     "payments:single_provider",
+     "i18n:english_path",
+     "slsa:level_unknown",
+     "platform:caching_partial",
+     "platform:async_partial",
+     "platform:zero_trust_not_done",
+     "platform:advanced_anomaly_partial",
+     "platform:chaos_partial",
+     "platform:observability_slo_partial",
+     "platform:ai_act_partial"
+    ],
+    "drilldown_hidden_tags": {
+     "domains": {
+      "nlu": {
+       "intent": "multi_intent_query",
+       "intent_confidence": 0.75,
+       "entity_count": 1,
+       "slot_keys": [
+        "availability",
+        "brand_excludes",
+        "brand_includes",
+        "budget",
+        "condition",
+        "price_max",
+        "price_min",
+        "quantity",
+        "shipping_deadline",
+        "specs"
+       ]
+      },
+      "lifecycle": {
+       "segment": "new_user",
+       "total_orders": 0,
+       "lifetime_value_cents": 0
+      },
+      "payments": {
+       "enabled_providers": [],
+       "enabled_count": 0,
+       "provider_concentration_risk": "high"
+      },
+      "i18n": {
+       "locale": null,
+       "non_english_detected": false,
+       "query_len": 59
+      },
+      "slsa": {
+       "slsa_level": null,
+       "sbom_ready_signal": false
+      },
+      "platform_readiness": {
+       "caching": "partial",
+       "async_processing": "partial",
+       "zero_trust": "not_done",
+       "advanced_anomaly_detection": "partial",
+       "chaos_engineering": "partial",
+       "observability_slo": "partial",
+       "ai_act": "partial"
+      }
+     },
+     "reasoning": {
+      "summary": "Tags correlate NLU extraction quality, lifecycle segment, payment diversity, i18n signals, supply-chain integrity posture, and platform-readiness gaps for decision-trace drilldown."
+     }
+    },
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [
+      "gpu"
+     ],
+     "conjunction_count": 0,
+     "score": 1
+    },
+    "timing_breakdown": {
+     "ollama_summary_ms": null,
+     "guard_ms": 0,
+     "catalog_profile_ms": 0,
+     "catalog_profile_cache_hit": true,
+     "security_analysis_ms": 15,
+     "seg_security_join_ms": 15.1,
+     "seg_policy_gate_and_session_ms": 12.9,
+     "seg_fraud_scoring_ms": 3.2,
+     "seg_budget_and_rollout_gates_ms": 1.7,
+     "nlp_ms": 1,
+     "seg_session_memory_loads_ms": 8.1,
+     "seg_intent_routing_ms": 0.4,
+     "seg_nlp_and_setup_ms": 0.0,
+     "budget_resolution_ms": 0.01,
+     "retrieve_ms": 8,
+     "seg_retrieve_ms": 15.9,
+     "seg_filter_cascades_ms": 1.1,
+     "seg_inventory_handoff_ms": 1.0,
+     "retrieval_mode": "shadow",
+     "rerank_ms": 19,
+     "seg_rerank_ms": 26.8,
+     "seg_decision_log_and_annotation_ms": 72.8,
+     "route_total_ms": 4533,
+     "accounted_ms": 197,
+     "unaccounted_ms": 3970,
+     "seg_intelligence_stage_ms": 277.8,
+     "narration_mode": "async",
+     "summary_ms": 0,
+     "narration_pending": true,
+     "seg_narration_ms": 22.3,
+     "copywriting_ms": 0,
+     "seg_post_policy_ms": 1.4,
+     "seg_post_redaction_ms": 4.7,
+     "seg_post_watermark_theft_probe_ms": 0.1,
+     "seg_post_output_security_ms": 25.7,
+     "seg_post_incident_review_ms": 0.0,
+     "seg_post_final_transforms_ms": 0.0,
+     "compound_needed": false,
+     "compound_ms": 0
+    },
+    "source_statuses": [
+     {
+      "source": "catalog_db",
+      "status": "full",
+      "hit_count": 9,
+      "latency_ms": 8,
+      "error": null
+     }
+    ],
+    "fraud": {
+     "score": 0.0,
+     "level": "minimal",
+     "signals": {
+      "image_hash_match_fraud_db": false
+     },
+     "ja3_hash": null,
+     "ja4_hash": null,
+     "source_ip": "[REDACTED_IP]",
+     "ip_country": "ZZ",
+     "asn": null,
+     "gnn_score": 0.1,
+     "gnn_method": "heuristic",
+     "gnn_ring_detected": false
+    },
+    "turn_type": "zero_result_turn",
+    "turn_intent": "FILTER",
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.75,
+    "view_mode": "grid",
+    "view_reason": "Default product layout",
+    "security": {
+     "severity": "info",
+     "mitre": [],
+     "owasp": [],
+     "stride": [],
+     "signals": {
+      "jailbreak": false,
+      "embedding_jailbreak": false,
+      "unicode_obfuscation": false,
+      "pii": false,
+      "api_key": false,
+      "pci": false,
+      "prompt_injection": false,
+      "agentic_tool_abuse": false,
+      "data_exfiltration": false,
+      "supply_chain": false,
+      "training_poisoning": false,
+      "poisoning_attempt": false,
+      "model_drift": false,
+      "model_dos": false,
+      "plugin_insecure": false,
+      "overreliance": false,
+      "embedding_weakness": false,
+      "identity_abuse": false,
+      "unexpected_code_exec": false,
+      "cascading_failure": false,
+      "rogue_agent": false,
+      "pcap_dns_tunnel": false,
+      "pcap_high_entropy_dns": false,
+      "cv_prompt_injection": false,
+      "deception": false,
+      "authority_impersonation": false,
+      "social_engineering": false
+     },
+     "risk_adj": 4.320000000000001,
+     "cvss": {
+      "score": 0.2
+     },
+     "dread": {
+      "damage": 2.0,
+      "reproducibility": 3.0,
+      "exploitability": 3.0,
+      "affected_users": 3.0,
+      "discoverability": 5.0,
+      "avg": 3.2,
+      "weighted_avg": 3.56,
+      "kill_chain_stage": "Reconnaissance",
+      "kill_chain_stage_index": 0,
+      "stage_weights": {
+       "damage": 1,
+       "reproducibility": 2,
+       "exploitability": 2,
+       "affected_users": 1,
+       "discoverability": 3
+      },
+      "evidence": [
+       {
+        "signal": "severity:info",
+        "component": "damage",
+        "contribution": 2.0,
+        "mitre": "",
+        "owasp": "",
+        "kill_chain": "",
+        "source": "severity",
+        "signal_quality": "heuristic"
+       },
+       {
+        "signal": "signal_count:0",
+        "component": "reproducibility",
+        "contribution": 3.0,
+        "mitre": "",
+        "owasp": "",
+        "kill_chain": "",
+        "source": "heuristic",
+        "signal_quality": "heuristic"
+       }
+      ]
+     },
+     "pasta": {
+      "current_stage": "Stage1",
+      "stages": [
+       {
+        "id": "Stage1",
+        "name": "DefineObjectives",
+        "status": "current"
+       },
+       {
+        "id": "Stage2",
+        "name": "DefineTechnicalScope",
+        "status": "pending"
+       },
+       {
+        "id": "Stage3",
+        "name": "ApplicationDecomposition",
+        "status": "pending"
+       },
+       {
+        "id": "Stage4",
+        "name": "ThreatAnalysis",
+        "status": "pending"
+       },
+       {
+        "id": "Stage5",
+        "name": "VulnerabilityAnalysis",
+        "status": "pending"
+       },
+       {
+        "id": "Stage6",
+        "name": "ModellingAndSimulation",
+        "status": "pending"
+       },
+       {
+        "id": "Stage7",
+        "name": "RiskAndImpactAnalysis",
+        "status": "pending"
+       }
+      ],
+      "evidence_tags": []
+     },
+     "kev": [],
+     "maestro": [],
+     "cyber_risk_quantification": {
+      "model": "crq_v1",
+      "likelihood": 0.17,
+      "impact": 0.15,
+      "risk_score": 2.55,
+      "risk_band": "low",
+      "inputs": {
+       "security_risk": 0.04320000000000001,
+       "cv_risk": 0.3,
+       "fraud_risk": 0.2,
+       "history_risk": 0.2,
+       "monetary_exposure": null,
+       "policy_impact": 0.3,
+       "data_impact": 0.3
+      },
+      "weights": {
+       "likelihood": {
+        "security": 0.35,
+        "cv": 0.25,
+        "fraud": 0.25,
+        "history": 0.15
+       },
+       "impact": {
+        "monetary": 0.5,
+        "policy": 0.3,
+        "data": 0.2
+       }
+      }
+     },
+     "tls_fingerprint": null,
+     "gnn_fraud": {
+      "score": 0.1,
+      "method": "heuristic",
+      "ring_detected": false
+     },
+     "policy_route": "allow",
+     "route": "allow",
+     "image_untrusted": false,
+     "image_trust_channels": {
+      "visual_embedding_trusted": true,
+      "ocr_trusted": true,
+      "qr_trusted": true
+     },
+     "qr": {
+      "destination_url": null,
+      "final_url": null,
+      "redirect_hops": 0,
+      "reputation_verdict": "benign",
+      "confidence": 0.35,
+      "intel_pending": false,
+      "intel_risk": null,
+      "intel_sources": []
+     }
+    },
+    "policy_notes": {
+     "no_training_on_pii": true,
+     "retention_policy": {
+      "chat_ttl_hours": 2,
+      "cv_evidence_days": 30,
+      "audit_days": 90,
+      "consent_extended": false
+     },
+     "opt_out_automated_decisions": false,
+     "compliance_tags": []
+    },
+    "image_lane_fill": {
+     "applied": false,
+     "added": 0,
+     "reason": "not_image_flow"
+    },
+    "escalation": null,
+    "decision_trace_id": "9fdd5377-2baa-4498-847a-5a47d1a99fac",
+    "_trace_recommendation_persisted": true,
+    "hippograph_insights_shadow": [
+     {
+      "id": "asus",
+      "kind": "brand",
+      "label": "asus",
+      "score": 0.5,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "dell",
+      "kind": "brand",
+      "label": "dell",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "hp",
+      "kind": "brand",
+      "label": "hp",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "msi",
+      "kind": "brand",
+      "label": "msi",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-01B48B57",
+      "kind": "product",
+      "label": "LAP-01B48B57",
+      "score": 0.0312,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-343A37BC",
+      "kind": "product",
+      "label": "ASUS ProArt 16 16\" 3K 120Hz OLED Copilot+ AI PC Laptop (Ryzen AI 9)[GeForce RTX 5070]",
+      "score": 0.0312,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-4A0017C0",
+      "kind": "product",
+      "label": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]",
+      "score": 0.0312,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-AF295B6E",
+      "kind": "product",
+      "label": "Asus Zenbook Duo EVO 14\" 3K OLED AI PC Laptop (1TB)[Intel Core Ultra X7-358H]",
+      "score": 0.0312,
+      "reward_weight": 0.0
+     }
+    ],
+    "hippograph_shadow_counterfactual": {
+     "would_boost": [
+      "LAP-343A37BC"
+     ],
+     "would_move_positions": 0,
+     "top_result_would_change": false,
+     "recall_products": 4,
+     "in_result_set": 1
+    },
+    "sales_response_nudge": {
+     "applied": 2,
+     "demand_trend": "falling",
+     "boosted": 2,
+     "suppressed": 0,
+     "gate": "allow"
+    },
+    "evidence_items": [
+     {
+      "type": "candidate",
+      "id": "LAP-69763798",
+      "score": 19.1647
+     },
+     {
+      "type": "candidate",
+      "id": "LAP-647D08E6",
+      "score": 19.1647
+     },
+     {
+      "type": "candidate",
+      "id": "LAP-127DE00E",
+      "score": 19.075
+     }
+    ],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 0.96046,
+    "price_range": {
+     "min": 1799.0,
+     "max": 5999.0,
+     "median": 3499.0,
+     "count": 9
+    },
+    "question_plan": {
+     "mode": "assume",
+     "missing_fields": [
+      "budget",
+      "brand_preference"
+     ],
+     "confidence_band": "high",
+     "ambiguity_reason": "missing_budget"
+    },
+    "confidence_band": "high",
+    "ambiguity_reason": "missing_budget",
+    "assumptions_applied": [
+     "retain_spec_preference"
+    ],
+    "next_questions": [
+     {
+      "id": "ask_budget_tier",
+      "text": "Do you have a price tier in mind (Under $1000, $1000–$1500, $1500+)?",
+      "goal": "clarify_details",
+      "evidence_needed": [
+       "none"
+      ],
+      "stop_condition": null,
+      "source": "template",
+      "options": [],
+      "question_slot": "budget"
+     },
+     {
+      "id": "ask_brand_pref",
+      "text": "Any brand preference (Apple, Dell, Lenovo, ASUS, etc.)?",
+      "goal": "clarify_details",
+      "evidence_needed": [
+       "none"
+      ],
+      "stop_condition": null,
+      "source": "template",
+      "options": [],
+      "question_slot": "brand_preference"
+     }
+    ],
+    "needs_disambiguation": true,
+    "budget_viability": {
+     "status": "unknown"
+    },
+    "explicit_spec_blocks": {
+     "minimum": {},
+     "recommended": {},
+     "has_explicit_blocks": false
+    },
+    "recommendation_tiers": {
+     "minimum": [
+      {
+       "id": "e39d29bf-c39e-4eab-a3dc-6de2dad6df04",
+       "sku": "LAP-69763798",
+       "name": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]",
+       "price_cents": 191900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-69763798.svg",
+       "stock": 15,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "refresh_hz": 144,
+        "display_inches": 16.0,
+        "gpu": "GeForce RTX 4050",
+        "gpu_discrete": true,
+        "gaming_style": true,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6",
+        "webcam": "HD webcam",
+        "docking": "Thunderbolt 4",
+        "use_case": "gaming",
+        "gpu_vram_gb": 6
+       },
+       "confidence": 1.0,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+gpu:discrete",
+         "+ram_gb_min:8",
+         "+refresh_hz_min:60",
+         "+use_case_match:gaming",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-embedding_similarity"
+        ],
+        "checks": [
+         "use_case:gaming",
+         "use_case_gpu",
+         "use_case_rtx",
+         "use_case_144hz"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "gpu:discrete": 1.5,
+         "ram_gb_min:8": 1.5,
+         "refresh_hz_min:60": 1.5,
+         "use_case:gaming": 0.5,
+         "use_case_gpu": 4.5,
+         "use_case_rtx": 4.5,
+         "use_case_144hz": 4.5,
+         "embedding_similarity": 0.0,
+         "supplier_performance": 0.09,
+         "cross_encoder": 0.075
+        },
+        "use_case_bonus": 0.0
+       },
+       "why": [
+        "+in_stock",
+        "+gpu:discrete",
+        "+ram_gb_min:8"
+       ],
+       "score": 19.1647,
+       "score_norm": 100.0,
+       "rank_delta": 0.0,
+       "why_not": [
+        "-embedding_similarity"
+       ],
+       "contrastive_why": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]: top pick — the strongest overall score across your criteria.",
+       "delta_vs_anchor": {},
+       "baseline_rank": 0,
+       "rerank_delta": 0,
+       "price": 1919.0,
+       "stock_level": 15,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$1,919 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "15 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "512GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "embedding_similarity"
+        }
+       }
+      },
+      {
+       "id": "c8b25450-5a14-45ca-93c2-bdbaedea8a15",
+       "sku": "LAP-647D08E6",
+       "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+       "price_cents": 289900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-647D08E6.svg",
+       "stock": 18,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "refresh_hz": 165,
+        "display_inches": 16.0,
+        "gpu": "GeForce RTX 5060",
+        "gpu_discrete": true,
+        "gaming_style": true,
+        "gpu_vram_gb": 8,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "HD webcam",
+        "docking": "Thunderbolt 4",
+        "use_case": "gaming"
+       },
+       "confidence": 1.0,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+gpu:discrete",
+         "+ram_gb_min:8",
+         "+refresh_hz_min:60",
+         "+use_case_match:gaming",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-embedding_similarity"
+        ],
+        "checks": [
+         "use_case:gaming",
+         "use_case_gpu",
+         "use_case_rtx",
+         "use_case_144hz"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "gpu:discrete": 1.5,
+         "ram_gb_min:8": 1.5,
+         "refresh_hz_min:60": 1.5,
+         "use_case:gaming": 0.5,
+         "use_case_gpu": 4.5,
+         "use_case_rtx": 4.5,
+         "use_case_144hz": 4.5,
+         "embedding_similarity": 0.0,
+         "supplier_performance": 0.09,
+         "cross_encoder": 0.075
+        },
+        "use_case_bonus": 0.0
+       },
+       "why": [
+        "+in_stock",
+        "+gpu:discrete",
+        "+ram_gb_min:8"
+       ],
+       "score": 19.1647,
+       "score_norm": 100.0,
+       "rank_delta": 0.0,
+       "why_not": [
+        "-embedding_similarity"
+       ],
+       "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 51% more expensive ($2,899 vs $1,919).",
+       "delta_vs_anchor": {
+        "price": "51% more expensive ($2,899 vs $1,919)"
+       },
+       "baseline_rank": 1,
+       "rerank_delta": 0,
+       "price": 2899.0,
+       "stock_level": 18,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$2,899 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "18 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "embedding_similarity"
+        }
+       }
+      },
+      {
+       "id": "450ca740-5db3-4028-9624-ccf6a1ed8cdb",
+       "sku": "LAP-127DE00E",
+       "name": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]",
+       "price_cents": 179900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-127DE00E.svg",
+       "stock": 13,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 8,
+        "storage_gb": 512,
+        "refresh_hz": 144,
+        "display_inches": 15.0,
+        "gpu": "GeForce RTX 3050",
+        "gpu_discrete": true,
+        "gaming_style": true,
+        "gpu_vram_gb": 4,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "1080p webcam",
+        "use_case": "gaming"
+       },
+       "confidence": 0.995,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+gpu:discrete",
+         "+ram_gb_min:8",
+         "+refresh_hz_min:60",
+         "+use_case_match:gaming",
+         "+cross_encoder"
+        ],
+        "negative": [
+         "-embedding_similarity"
+        ],
+        "checks": [
+         "use_case:gaming",
+         "use_case_gpu",
+         "use_case_rtx",
+         "use_case_144hz"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "gpu:discrete": 1.5,
+         "ram_gb_min:8": 1.5,
+         "refresh_hz_min:60": 1.5,
+         "use_case:gaming": 0.5,
+         "use_case_gpu": 4.5,
+         "use_case_rtx": 4.5,
+         "use_case_144hz": 4.5,
+         "embedding_similarity": 0.0,
+         "cross_encoder": 0.075
+        },
+        "use_case_bonus": 0.0
+       },
+       "why": [
+        "+in_stock",
+        "+gpu:discrete",
+        "+ram_gb_min:8"
+       ],
+       "score": 19.075,
+       "score_norm": 96.54,
+       "rank_delta": 0.09,
+       "why_not": [
+        "-embedding_similarity"
+       ],
+       "contrastive_why": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]: vs the top pick — 6% cheaper ($1,799 vs $1,919).",
+       "delta_vs_anchor": {
+        "price": "6% cheaper ($1,799 vs $1,919)"
+       },
+       "baseline_rank": 2,
+       "rerank_delta": 0,
+       "price": 1799.0,
+       "stock_level": 13,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$1,799 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "13 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "no",
+         "detail": "none stated"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "512GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "embedding_similarity"
+        }
+       }
+      }
+     ],
+     "recommended": [
+      {
+       "id": "e39d29bf-c39e-4eab-a3dc-6de2dad6df04",
+       "sku": "LAP-69763798",
+       "name": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]",
+       "price_cents": 191900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-69763798.svg",
+       "stock": 15,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "refresh_hz": 144,
+        "display_inches": 16.0,
+        "gpu": "GeForce RTX 4050",
+        "gpu_discrete": true,
+        "gaming_style": true,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6",
+        "webcam": "HD webcam",
+        "docking": "Thunderbolt 4",
+        "use_case": "gaming",
+        "gpu_vram_gb": 6
+       },
+       "confidence": 1.0,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+gpu:discrete",
+         "+ram_gb_min:8",
+         "+refresh_hz_min:60",
+         "+use_case_match:gaming",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-embedding_similarity"
+        ],
+        "checks": [
+         "use_case:gaming",
+         "use_case_gpu",
+         "use_case_rtx",
+         "use_case_144hz"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "gpu:discrete": 1.5,
+         "ram_gb_min:8": 1.5,
+         "refresh_hz_min:60": 1.5,
+         "use_case:gaming": 0.5,
+         "use_case_gpu": 4.5,
+         "use_case_rtx": 4.5,
+         "use_case_144hz": 4.5,
+         "embedding_similarity": 0.0,
+         "supplier_performance": 0.09,
+         "cross_encoder": 0.075
+        },
+        "use_case_bonus": 0.0
+       },
+       "why": [
+        "+in_stock",
+        "+gpu:discrete",
+        "+ram_gb_min:8"
+       ],
+       "score": 19.1647,
+       "score_norm": 100.0,
+       "rank_delta": 0.0,
+       "why_not": [
+        "-embedding_similarity"
+       ],
+       "contrastive_why": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]: top pick — the strongest overall score across your criteria.",
+       "delta_vs_anchor": {},
+       "baseline_rank": 0,
+       "rerank_delta": 0,
+       "price": 1919.0,
+       "stock_level": 15,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$1,919 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "15 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "512GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "embedding_similarity"
+        }
+       }
+      },
+      {
+       "id": "c8b25450-5a14-45ca-93c2-bdbaedea8a15",
+       "sku": "LAP-647D08E6",
+       "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+       "price_cents": 289900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-647D08E6.svg",
+       "stock": 18,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "refresh_hz": 165,
+        "display_inches": 16.0,
+        "gpu": "GeForce RTX 5060",
+        "gpu_discrete": true,
+        "gaming_style": true,
+        "gpu_vram_gb": 8,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "HD webcam",
+        "docking": "Thunderbolt 4",
+        "use_case": "gaming"
+       },
+       "confidence": 1.0,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+gpu:discrete",
+         "+ram_gb_min:8",
+         "+refresh_hz_min:60",
+         "+use_case_match:gaming",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-embedding_similarity"
+        ],
+        "checks": [
+         "use_case:gaming",
+         "use_case_gpu",
+         "use_case_rtx",
+         "use_case_144hz"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "gpu:discrete": 1.5,
+         "ram_gb_min:8": 1.5,
+         "refresh_hz_min:60": 1.5,
+         "use_case:gaming": 0.5,
+         "use_case_gpu": 4.5,
+         "use_case_rtx": 4.5,
+         "use_case_144hz": 4.5,
+         "embedding_similarity": 0.0,
+         "supplier_performance": 0.09,
+         "cross_encoder": 0.075
+        },
+        "use_case_bonus": 0.0
+       },
+       "why": [
+        "+in_stock",
+        "+gpu:discrete",
+        "+ram_gb_min:8"
+       ],
+       "score": 19.1647,
+       "score_norm": 100.0,
+       "rank_delta": 0.0,
+       "why_not": [
+        "-embedding_similarity"
+       ],
+       "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 51% more expensive ($2,899 vs $1,919).",
+       "delta_vs_anchor": {
+        "price": "51% more expensive ($2,899 vs $1,919)"
+       },
+       "baseline_rank": 1,
+       "rerank_delta": 0,
+       "price": 2899.0,
+       "stock_level": 18,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$2,899 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "18 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "embedding_similarity"
+        }
+       }
+      },
+      {
+       "id": "450ca740-5db3-4028-9624-ccf6a1ed8cdb",
+       "sku": "LAP-127DE00E",
+       "name": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]",
+       "price_cents": 179900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-127DE00E.svg",
+       "stock": 13,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 8,
+        "storage_gb": 512,
+        "refresh_hz": 144,
+        "display_inches": 15.0,
+        "gpu": "GeForce RTX 3050",
+        "gpu_discrete": true,
+        "gaming_style": true,
+        "gpu_vram_gb": 4,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "1080p webcam",
+        "use_case": "gaming"
+       },
+       "confidence": 0.995,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+gpu:discrete",
+         "+ram_gb_min:8",
+         "+refresh_hz_min:60",
+         "+use_case_match:gaming",
+         "+cross_encoder"
+        ],
+        "negative": [
+         "-embedding_similarity"
+        ],
+        "checks": [
+         "use_case:gaming",
+         "use_case_gpu",
+         "use_case_rtx",
+         "use_case_144hz"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "gpu:discrete": 1.5,
+         "ram_gb_min:8": 1.5,
+         "refresh_hz_min:60": 1.5,
+         "use_case:gaming": 0.5,
+         "use_case_gpu": 4.5,
+         "use_case_rtx": 4.5,
+         "use_case_144hz": 4.5,
+         "embedding_similarity": 0.0,
+         "cross_encoder": 0.075
+        },
+        "use_case_bonus": 0.0
+       },
+       "why": [
+        "+in_stock",
+        "+gpu:discrete",
+        "+ram_gb_min:8"
+       ],
+       "score": 19.075,
+       "score_norm": 96.54,
+       "rank_delta": 0.09,
+       "why_not": [
+        "-embedding_similarity"
+       ],
+       "contrastive_why": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]: vs the top pick — 6% cheaper ($1,799 vs $1,919).",
+       "delta_vs_anchor": {
+        "price": "6% cheaper ($1,799 vs $1,919)"
+       },
+       "baseline_rank": 2,
+       "rerank_delta": 0,
+       "price": 1799.0,
+       "stock_level": 13,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$1,799 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "13 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "no",
+         "detail": "none stated"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "512GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "embedding_similarity"
+        }
+       }
+      }
+     ],
+     "show_split": true,
+     "minimum_explanation": "Meets practical baseline with better value and battery/cost balance.",
+     "recommended_explanation": "Adds performance headroom for heavier tasks and longer-term use."
+    },
+    "intent_router_model": "rule-based (prefer_small)",
+    "narration_model": "qwen3:14b",
+    "narration_mode": "async",
+    "claim_guard_result": "skipped",
+    "b2b_assessment": {
+     "verdict": "consumer",
+     "quantity": 1,
+     "is_bulk": false,
+     "business_signal": false,
+     "discount_eligible": false,
+     "escalate": false,
+     "reasons": [
+      "consumer-scale purchase"
+     ]
+    },
+    "escalation_assessment": {
+     "escalate": false,
+     "band": "auto",
+     "score": 0.1552,
+     "reasons": [],
+     "factors": {
+      "fraud": 0.0,
+      "uncertainty": 0.6799999999999999,
+      "constraint_conflict": 0.0,
+      "claim_guard_rejected": 0.0,
+      "bulk_exposure": 0.1919,
+      "irreversibility": 0.0
+     },
+     "talk_to_client": false
+    },
+    "image_reupload_reasons": [],
+    "storefront_emphasis": {
+     "experiment_id": "storefront_emphasis_v1",
+     "variant": "control",
+     "live": true,
+     "applied": false
+    },
+    "autonomy_tier": "caution",
+    "autonomy_badge": "CAUTION",
+    "intent_confidence": 0.75,
+    "assistant_message": "Honest answer: we don't stock rack-mount or datacenter GPU servers (A100/H100-class) in our catalog, and I won't pretend a laptop is a substitute. What I CAN do: send a request-for-quote to our suppliers for exactly what you described — you review the draft before anything is sent, and nothing is ordered without your confirmation.",
+    "catalog_profile": {
+     "primary_category": "laptop",
+     "dominant_categories": [
+      "laptop",
+      "general",
+      "accessory"
+     ],
+     "is_mixed_catalog": true,
+     "category_counts": {
+      "laptop": 45,
+      "fresh_produce": 10,
+      "monitor": 8,
+      "phone": 4,
+      "tablet": 1,
+      "general": 25,
+      "accessory": 13,
+      "desktop": 2,
+      "clothing": 6
+     },
+     "total_products": 114
+    },
+    "catalog_relevance": {
+     "off_domain": false,
+     "image_category": "general",
+     "catalog_primary": "laptop",
+     "catalog_category_count": 25,
+     "catalog_category_share": 0.2193
+    },
+    "off_catalog": {
+     "class": "datacenter_gpu_server",
+     "label": "rack-mount or datacenter GPU servers (A100/H100-class)",
+     "supplier_rfq_offer": true
+    },
+    "turn_envelope_diff": {
+     "changed_fields": [
+      "brands",
+      "specs",
+      "shortlist_locked",
+      "shortlist_size"
+     ],
+     "expanded": true,
+     "narrowed": false,
+     "reason": "candidate_or_result_envelope_expanded",
+     "previous": {},
+     "current": {
+      "budget_min": null,
+      "budget_max": null,
+      "brands": [],
+      "specs": [
+       "gpu:discrete",
+       "ram_gb_min:8",
+       "refresh_hz_min:60"
+      ],
+      "candidates_count": 9,
+      "results_count": 0,
+      "shortlist_locked": false,
+      "shortlist_size": 0
+     }
+    },
+    "memory_health": {
+     "memory_confidence": 0.75,
+     "summary_age_sec": null,
+     "stale_slots": [],
+     "shortlist_lock_active": false,
+     "turn_type": "constraint_update_turn"
+    },
+    "session_summary": {
+     "ts": 1783727020,
+     "turn_type": "constraint_update_turn",
+     "goals": [
+      "gaming"
+     ],
+     "hard_constraints": {
+      "budget_min": null,
+      "budget_max": null,
+      "brands": [],
+      "gpu_preference": "with_discrete"
+     },
+     "soft_preferences": {
+      "specs": [
+       "gpu:discrete",
+       "ram_gb_min:8",
+       "refresh_hz_min:60"
+      ],
+      "use_case_tags": []
+     },
+     "current_shortlist": [],
+     "pinned_context": {
+      "budget": {
+       "value": {
+        "min": null,
+        "max": null
+       },
+       "ts": 1783727020,
+       "source_turn_type": "constraint_update_turn"
+      },
+      "use_case": {
+       "value": "gaming",
+       "ts": 1783727020,
+       "source_turn_type": "constraint_update_turn"
+      },
+      "gpu_preference": {
+       "value": "with_discrete",
+       "ts": 1783727020,
+       "source_turn_type": "constraint_update_turn"
+      }
+     },
+     "referents": {
+      "has_reference": false,
+      "source": "none",
+      "skus": []
+     },
+     "unresolved_questions": [
+      "Do you have a price tier in mind (Under $1000, $1000–$1500, $1500+)?",
+      "Any brand preference (Apple, Dell, Lenovo, ASUS, etc.)?"
+     ]
+    },
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "model_watermark": "sqwm_02788c7db5e66671",
+    "model_output_fingerprint": "sqfp_59d73e4f4143dd365d753943"
+   },
+   "narration": null,
+   "contract_violations": []
+  }
+ ]
+}

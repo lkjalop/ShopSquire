@@ -7,7 +7,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text as sql_text
 from sqlalchemy.sql.elements import TextClause
 from fastapi import Request
-from typing import Any
 import contextvars
 
 from src.app.config import get_settings
@@ -35,7 +34,13 @@ def _register_sqlite_now(engine):
     @event.listens_for(engine, "before_cursor_execute", retval=True)
     def _rewrite_insert(conn, cursor, statement, parameters, context, executemany):
         try:
-            if isinstance(statement, str) and re.search(r"\bINSERT\s+INTO\b", statement, flags=re.IGNORECASE):
+            if (
+                isinstance(statement, str)
+                and re.search(r"\bINSERT\s+INTO\b", statement, flags=re.IGNORECASE)
+                # Skip statements that already use standard ON CONFLICT — SQLite 3.24+
+                # handles those natively; rewriting would produce invalid syntax.
+                and not re.search(r"\bON\s+CONFLICT\b", statement, flags=re.IGNORECASE)
+            ):
                 statement = re.sub(r"\bINSERT\s+INTO\b", "INSERT OR REPLACE INTO", statement, flags=re.IGNORECASE)
         except Exception:
             pass
@@ -56,7 +61,7 @@ def _create_engine_with_fallback(url: str):
         # Enable WAL journal mode and a generous busy_timeout so concurrent
         # background agents don't deadlock on the same SQLite file.
         try:
-            from sqlalchemy import event as _sa_event, text as _text
+            from sqlalchemy import event as _sa_event
             @_sa_event.listens_for(eng, "connect")
             def _sqlite_wal(dbapi_conn, _rec):
                 dbapi_conn.execute("PRAGMA journal_mode=WAL")
@@ -68,7 +73,28 @@ def _create_engine_with_fallback(url: str):
     # Do not fallback silently to SQLite; always honor configured URL.
     # create_engine does not connect immediately, so this is safe even if the
     # database is not yet ready. Test bootstrap ensures readiness and schema.
-    eng = create_engine(url, pool_pre_ping=True, future=True)
+    eng = create_engine(
+        url,
+        pool_pre_ping=True,
+        future=True,
+        # Production pool sizing: 10 base + 20 overflow = 30 max connections.
+        # Recycle after 30 minutes to prevent stale connections across PG restarts.
+        # statement_timeout kills runaway queries so they don't hold pool slots.
+        pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
+        max_overflow=int(os.getenv("DB_POOL_MAX_OVERFLOW", "20")),
+        pool_recycle=int(os.getenv("DB_POOL_RECYCLE_SEC", "1800")),
+        pool_timeout=int(os.getenv("DB_POOL_TIMEOUT_SEC", "30")),
+        connect_args={
+            # P0-3: bound the CONNECT phase too — statement_timeout only caps query EXECUTION, so a
+            # down/wedged Postgres would otherwise stall every new connection (and pool_pre_ping
+            # reconnect) on the OS TCP timeout (~tens of seconds), fail-slow on every request.
+            "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT_SEC", "5")),
+            "options": (
+                f"-c statement_timeout={os.getenv('DB_STATEMENT_TIMEOUT_MS', '30000')}"
+                f" -c idle_in_transaction_session_timeout={os.getenv('DB_IDLE_TX_TIMEOUT_MS', '60000')}"
+            )
+        },
+    )
     # For Postgres, set a default search_path so unqualified table names
     # resolve to our logical schemas in order: oltp, audit, security, public.
     try:
@@ -79,12 +105,21 @@ def _create_engine_with_fallback(url: str):
                 try:
                     cursor = dbapi_connection.cursor()
                     cursor.execute("SET search_path TO oltp, audit, security, public")
+                    # Clear tenant GUC on every new connection from the pool so
+                    # pooled connections never carry a previous request's tenant
+                    # context into the next request (RLS safety net).
+                    cursor.execute("SET app.current_tenant TO ''")
                     cursor.close()
                 except Exception:
                     pass
     except Exception:
         pass
     return eng
+
+
+def create_runtime_engine(url: str):
+    """Create an engine with ShopSquire's canonical bounded runtime policy."""
+    return _create_engine_with_fallback(url)
 
 
 engine = _create_engine_with_fallback(db_url)
@@ -135,6 +170,8 @@ def _ensure_minimal_sqlite_tables(bind):
                     "  id TEXT PRIMARY KEY,\n"
                     "  draft_order_id TEXT,\n"
                     "  customer_id TEXT,\n"
+                    "  tenant_id TEXT,\n"
+                    "  tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified',\n"
                     "  guest_email TEXT,\n"
                     "  total_cents INT NOT NULL,\n"
                     "  currency TEXT NOT NULL DEFAULT 'USD',\n"
@@ -151,6 +188,8 @@ def _ensure_minimal_sqlite_tables(bind):
                     "  id TEXT PRIMARY KEY,\n"
                     "  uid TEXT NOT NULL,\n"
                     "  order_id TEXT NOT NULL,\n"
+                    "  tenant_id TEXT,\n"
+                    "  tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified',\n"
                     "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                     ")"
                 ))
@@ -158,14 +197,36 @@ def _ensure_minimal_sqlite_tables(bind):
                     "CREATE TABLE IF NOT EXISTS draft_orders (\n"
                     "  id TEXT PRIMARY KEY,\n"
                     "  customer_id TEXT,\n"
+                    "  tenant_id TEXT NOT NULL DEFAULT 'default',\n"
                     "  line_items TEXT NOT NULL,\n"
                     "  status TEXT NOT NULL DEFAULT 'draft',\n"
+                    "  version INTEGER NOT NULL DEFAULT 0,\n"
                     "  created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                     "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                     ")"
                 ))
                 try:
                     conn.execute(sql_text("ALTER TABLE orders ADD COLUMN guest_email TEXT"))
+                except Exception:
+                    pass
+                # R10.2 STEP 1 (additive, zero behavior change): cart identity becomes
+                # (tenant_id, customer_id). DEFAULT 'default' backfills every existing row =
+                # exactly today's single-tenant truth; reads/writes get tenant-scoped in the
+                # follow-up threading step (docs/SHOPSQUIRE_V2_TENANT_CART_SPEC), never here.
+                try:
+                    conn.execute(sql_text("ALTER TABLE draft_orders ADD COLUMN tenant_id TEXT "
+                                          "NOT NULL DEFAULT 'default'"))
+                except Exception:
+                    pass   # column already exists (fresh CREATE above includes it)
+                try:
+                    conn.execute(sql_text("ALTER TABLE draft_orders ADD COLUMN version INTEGER "
+                                          "NOT NULL DEFAULT 0"))
+                except Exception:
+                    pass   # column already exists (fresh CREATE above includes it)
+                try:
+                    conn.execute(sql_text(
+                        "CREATE INDEX IF NOT EXISTS ix_draft_orders_tenant_customer_status "
+                        "ON draft_orders (tenant_id, customer_id, status)"))
                 except Exception:
                     pass
                 conn.execute(sql_text(
@@ -212,8 +273,10 @@ def _ensure_minimal_sqlite_tables(bind):
                 conn.execute(sql_text(
                     "CREATE TABLE IF NOT EXISTS chat_messages (\n"
                     "  id TEXT PRIMARY KEY,\n"
+                    "  tenant_id TEXT NOT NULL DEFAULT 'default',\n"
                     "  uid TEXT NOT NULL,\n"
                     "  session_id TEXT,\n"
+                    "  session_epoch TEXT NOT NULL DEFAULT 'legacy',\n"
                     "  role TEXT NOT NULL,\n"
                     "  content TEXT NOT NULL,\n"
                     "  trace_id TEXT,\n"
@@ -258,6 +321,44 @@ def _ensure_minimal_sqlite_tables(bind):
                     ))
                 except Exception:
                     pass
+                # ── Autonomy-support tables (P2) ──────────────────────────────
+                # The moat's data foundation: bounded autonomy needs a full policy/
+                # exception/retry/AI-interaction trace + price/inventory history for
+                # replay and forecasting. decision_logs (above) is the WHY; these are
+                # the policy trace, resilience layer, and forecasting substrate.
+                for _ddl in (
+                    "CREATE TABLE IF NOT EXISTS policy_evaluation_log (\n"
+                    "  id TEXT PRIMARY KEY, decision_id TEXT, tenant_id TEXT, action TEXT,\n"
+                    "  value_cents INT, decision TEXT, rule_id TEXT, reason TEXT,\n"
+                    "  authority TEXT, context TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    # Canonical schema shared by the authz engine, the resolver, and domain enqueues
+                    # (market-intel/procurement). MUST carry terminal_outcome + resolved_outcome — the
+                    # prior schema (domain/kind/payload/outcome) silently broke the authz enqueue.
+                    "CREATE TABLE IF NOT EXISTS exception_queue (\n"
+                    "  id TEXT PRIMARY KEY, tenant_id TEXT, domain TEXT, ref_id TEXT,\n"
+                    "  trace_id TEXT, action TEXT, requester TEXT, terminal_outcome TEXT,\n"
+                    "  reason TEXT, subject_id TEXT, value_usd REAL, residual TEXT, payload TEXT,\n"
+                    "  status TEXT DEFAULT 'open', resolved_outcome TEXT,\n"
+                    "  created_at TEXT DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)",
+                    "CREATE TABLE IF NOT EXISTS retry_tracking (\n"
+                    "  id TEXT PRIMARY KEY, ref_id TEXT, operation TEXT, attempts INT DEFAULT 0,\n"
+                    "  max_attempts INT DEFAULT 3, last_error TEXT, next_attempt TEXT,\n"
+                    "  status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    "CREATE TABLE IF NOT EXISTS ai_interaction_log (\n"
+                    "  id TEXT PRIMARY KEY, tenant_id TEXT, surface TEXT, model TEXT,\n"
+                    "  request TEXT, response TEXT, outcome TEXT, latency_ms INT,\n"
+                    "  created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    "CREATE TABLE IF NOT EXISTS price_history (\n"
+                    "  id TEXT PRIMARY KEY, sku TEXT, price_cents INT, currency TEXT,\n"
+                    "  source TEXT, recorded_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    "CREATE TABLE IF NOT EXISTS inventory_level_history (\n"
+                    "  id TEXT PRIMARY KEY, sku TEXT, warehouse TEXT, stock INT,\n"
+                    "  recorded_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                ):
+                    try:
+                        conn.execute(sql_text(_ddl))
+                    except Exception:
+                        pass
                 # Rules definitions (used by RuleStore / RuleEngine)
                 try:
                     conn.execute(
@@ -520,6 +621,7 @@ def _ensure_minimal_sqlite_tables(bind):
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS security_observer_timeseries (\n"
+                        "  id TEXT PRIMARY KEY,\n"
                         "  time TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                         "  event_id TEXT,\n"
                         "  severity TEXT,\n"
@@ -657,6 +759,7 @@ def _ensure_minimal_sqlite_tables(bind):
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS decision_trace_events (\n"
                         "  id TEXT PRIMARY KEY,\n"
+                        "  tenant_id TEXT NOT NULL DEFAULT 'default',\n"
                         "  trace_id TEXT,\n"
                         "  event_type TEXT NOT NULL,\n"
                         "  source_type TEXT,\n"
@@ -669,6 +772,10 @@ def _ensure_minimal_sqlite_tables(bind):
                     ))
                 except Exception:
                     pass
+                try:
+                    conn.execute(sql_text("ALTER TABLE decision_trace_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"))
+                except Exception:
+                    pass
                 # PII encrypted fields (compat; plaintext columns retained for fallback)
                 try:
                     conn.execute(sql_text("ALTER TABLE orders ADD COLUMN guest_email_hash TEXT"))
@@ -679,9 +786,18 @@ def _ensure_minimal_sqlite_tables(bind):
                 except Exception:
                     pass
                 for _stmt in (
+                    "ALTER TABLE orders ADD COLUMN tenant_id TEXT",
+                    "ALTER TABLE orders ADD COLUMN tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified'",
+                    "ALTER TABLE order_sessions ADD COLUMN tenant_id TEXT",
+                    "ALTER TABLE order_sessions ADD COLUMN tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified'",
+                    "ALTER TABLE customers ADD COLUMN tenant_id TEXT",
+                    "ALTER TABLE customers ADD COLUMN tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified'",
                     "ALTER TABLE orders ADD COLUMN stripe_intent_id TEXT",
                     "ALTER TABLE orders ADD COLUMN tracking_number TEXT",
                     "ALTER TABLE orders ADD COLUMN carrier TEXT",
+                    # attribution (E1): link an order back to the recommendation decision.
+                    "ALTER TABLE orders ADD COLUMN trace_id TEXT",
+                    "ALTER TABLE orders ADD COLUMN decision_id TEXT",
                 ):
                     try:
                         conn.execute(sql_text(_stmt))
@@ -816,17 +932,27 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  currency TEXT NOT NULL DEFAULT 'USD',\n"
                         "  image_url TEXT,\n"
                         "  specs TEXT,\n"
+                        "  product_type TEXT,\n"
+                        "  brand TEXT,\n"
+                        "  category TEXT,\n"
+                        "  attributes TEXT,\n"
                         "  active INTEGER DEFAULT 1,\n"
                         "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
                 except Exception:
                     pass
-                # Backfill columns on existing tables if created before schema update
-                try:
-                    conn.execute(sql_text("ALTER TABLE products ADD COLUMN image_url TEXT"))
-                except Exception:
-                    pass
+                # Backfill columns on existing tables if created before schema update.
+                # product_type/brand/category/attributes are the agnostic-core keystone
+                # (the brand/category cols candidate_retriever + upsell already SELECT).
+                for _col, _type in (
+                    ("image_url", "TEXT"), ("product_type", "TEXT"), ("brand", "TEXT"),
+                    ("category", "TEXT"), ("attributes", "TEXT"),
+                ):
+                    try:
+                        conn.execute(sql_text(f"ALTER TABLE products ADD COLUMN {_col} {_type}"))
+                    except Exception:
+                        pass
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS inventory (\n"
@@ -849,6 +975,9 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  status TEXT NOT NULL DEFAULT 'started',\n"
                         "  started_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                         "  finished_at TEXT,\n"
+                        "  heartbeat_at TEXT,\n"
+                        "  budget_deadline_at TEXT,\n"
+                        "  outcome_type TEXT,\n"
                         "  records_seen INT DEFAULT 0,\n"
                         "  records_applied INT DEFAULT 0,\n"
                         "  error TEXT\n"
@@ -856,6 +985,20 @@ def _ensure_minimal_sqlite_tables(bind):
                     ))
                 except Exception:
                     pass
+                for _sync_col, _sync_type in (
+                    ("heartbeat_at", "TEXT"),
+                    ("budget_deadline_at", "TEXT"),
+                    ("outcome_type", "TEXT"),
+                ):
+                    try:
+                        conn.execute(
+                            sql_text(
+                                f"ALTER TABLE inventory_sync_runs "
+                                f"ADD COLUMN {_sync_col} {_sync_type}"
+                            )
+                        )
+                    except Exception:
+                        pass
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS inventory_external_stock (\n"
@@ -876,6 +1019,8 @@ def _ensure_minimal_sqlite_tables(bind):
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS customers (\n"
                         "  id TEXT PRIMARY KEY,\n"
+                        "  tenant_id TEXT,\n"
+                        "  tenant_ownership_status TEXT NOT NULL DEFAULT 'unclassified',\n"
                         "  email TEXT,\n"
                         "  name TEXT,\n"
                         "  phone TEXT,\n"
@@ -905,6 +1050,19 @@ def _ensure_minimal_sqlite_tables(bind):
                     ))
                 except Exception:
                     pass
+                for statement in (
+                    "ALTER TABLE idempotency_keys ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''",
+                    "ALTER TABLE idempotency_keys ADD COLUMN response_status INT",
+                    "ALTER TABLE idempotency_keys ADD COLUMN response_body TEXT",
+                    # M2 lease/reclaim columns
+                    "ALTER TABLE idempotency_keys ADD COLUMN owner_token TEXT",
+                    "ALTER TABLE idempotency_keys ADD COLUMN lease_expires_at REAL",
+                    "ALTER TABLE idempotency_keys ADD COLUMN updated_at TEXT",
+                ):
+                    try:
+                        conn.execute(sql_text(statement))
+                    except Exception:
+                        pass
                 # Per-tenant retention policy configuration
                 try:
                     conn.execute(sql_text(
@@ -1021,7 +1179,10 @@ def db_session():
             # INSERTs into INSERT OR REPLACE to avoid UNIQUE constraint
             # failures while preserving semantics for the test harness.
             try:
-                if "sqlite" in str(session.bind.dialect.name).lower():
+                if (
+                    "sqlite" in str(session.bind.dialect.name).lower()
+                    and not re.search(r"\bON\s+CONFLICT\b", s, flags=re.IGNORECASE)
+                ):
                     s = re.sub(r"\bINSERT\s+INTO\b", "INSERT OR REPLACE INTO", s, flags=re.IGNORECASE)
             except Exception:
                 pass

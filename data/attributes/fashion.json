@@ -1,0 +1,34 @@
+{
+  "vertical": "fashion",
+  "attributes": {
+    "size": {
+      "role": "variant_axis", "kind": "enum",
+      "key_aliases": ["clothing_size"],
+      "values": {
+        "XS": ["extra small"], "S": ["small"], "M": ["medium"], "L": ["large"],
+        "XL": ["extra large"], "XXL": ["2xl", "xx large"]
+      }
+    },
+    "material": {
+      "role": "descriptive", "kind": "enum",
+      "key_aliases": ["fabric"],
+      "values": {
+        "linen": [], "denim": [], "leather": ["genuine leather"],
+        "vegan leather": ["faux leather", "pu leather"], "cotton": ["100% cotton"],
+        "wool": ["merino"], "polyester": [], "silk": []
+      }
+    },
+    "fit": {
+      "role": "variant_axis", "kind": "enum",
+      "key_aliases": ["style_fit"],
+      "values": {
+        "wrap": [], "pleated": [], "maxi": [], "straight": [], "slim": ["slim fit"],
+        "relaxed": ["loose"], "high rise": ["high-rise", "high waisted"]
+      }
+    },
+    "color": {
+      "role": "variant_axis", "kind": "text",
+      "key_aliases": ["colour"]
+    }
+  }
+}

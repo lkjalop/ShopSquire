@@ -15,7 +15,28 @@ class CircuitState:
 
 _CIRCUITS: Dict[str, CircuitState] = {}
 _LOCK = Lock()
-_EXECUTOR = ThreadPoolExecutor(max_workers=8)
+_EXECUTOR: ThreadPoolExecutor | None = None
+_EXECUTOR_LOCK = Lock()
+
+
+def _executor() -> ThreadPoolExecutor:
+    global _EXECUTOR
+    with _EXECUTOR_LOCK:
+        if _EXECUTOR is None:
+            _EXECUTOR = ThreadPoolExecutor(
+                max_workers=8,
+                thread_name_prefix="dependency_resilience",
+            )
+        return _EXECUTOR
+
+
+def shutdown_resilience_executor(*, wait: bool = False) -> None:
+    """Release bounded dependency workers; the next request recreates the pool."""
+    global _EXECUTOR
+    with _EXECUTOR_LOCK:
+        executor, _EXECUTOR = _EXECUTOR, None
+    if executor is not None:
+        executor.shutdown(wait=wait, cancel_futures=True)
 
 
 def _state(dep: str) -> CircuitState:
@@ -42,13 +63,14 @@ def call_with_resilience(
 
     last_exc: Exception | None = None
     for i in range(max(1, retries + 1)):
-        fut = _EXECUTOR.submit(fn)
+        fut = _executor().submit(fn)
         try:
             out = fut.result(timeout=timeout_s)
             st.failures = 0
             st.open_until = 0.0
             return out
-        except FuturesTimeout as e:
+        except FuturesTimeout:
+            fut.cancel()
             last_exc = TimeoutError(f"timeout:{dep}")
         except Exception as e:
             last_exc = e

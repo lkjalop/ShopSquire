@@ -87,6 +87,22 @@ def main():
     required_tables: dict[str, set[str]] = {
         "evidence_bundles": {"id", "case_id", "bundle_json", "created_at"},
         "human_review_tasks": {"id", "case_id", "decision_id", "ticket_id", "status", "reviewer_id", "rationale", "created_at", "updated_at"},
+        "inventory_atp_fact": {
+            "id", "tenant_id", "deduplication_id", "sku", "location_id",
+            "confirmed_quantity", "source_system", "observed_at", "status",
+        },
+        "marketing_event_fact": {
+            "id", "tenant_id", "deduplication_id", "event_type", "sku",
+            "consent_state", "source_system", "occurred_at", "status",
+        },
+        "forecast_actual_pair": {
+            "id", "tenant_id", "pair_key", "subject_id", "forecast_value",
+            "actual_value", "model_id", "model_version", "sealed_by", "status",
+        },
+        "executive_metric_snapshot": {
+            "id", "tenant_id", "metric_name", "subject_type", "subject_id",
+            "status", "definition_version", "visibility",
+        },
     }
 
     failures: list[str] = []

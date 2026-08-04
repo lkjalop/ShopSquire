@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "Returns/warranty claim-policy windows + score deltas (tenant-overridable via TenantConfigStore",
+    "key 'returns_policy'). Consumed by services/claim_policy.py.",
+    "ACL NOTE (Australian Consumer Law): these signals NEVER auto-deny a claim. Consumer guarantees",
+    "outlast warranty windows ('reasonable durability'), so an out-of-window claim is ROUTED TO A HUMAN",
+    "(score bump -> require_human), not rejected. Do not add an auto-deny rule here."
+  ],
+  "return_window_days": 30,
+  "warranty_window_days": 365,
+  "outside_return_window_delta": 25,
+  "outside_warranty_window_delta": 40,
+  "claimed_value_exceeds_order_delta": 20,
+  "off_topic_evidence_delta": 30,
+  "serial_returner_window_days": 30,
+  "serial_returner_threshold": 3,
+  "serial_returner_delta": 25,
+  "claim_contradicted_delta": 25,
+  "safety_terms": [
+    "smoke",
+    "fire",
+    "burning",
+    "burnt",
+    "swollen",
+    "swelling",
+    "sparks",
+    "electric shock",
+    "overheat",
+    "melted"
+  ],
+  "major_failure_terms": [
+    "wont turn on",
+    "won't turn on",
+    "not turning on",
+    "won't boot",
+    "wont boot",
+    "no power",
+    "dead on arrival",
+    "completely dead",
+    "bricked",
+    "unusable",
+    "doesn't work at all",
+    "doesnt work at all",
+    "stopped working",
+    "total failure"
+  ],
+  "minor_failure_terms": [
+    "scratch",
+    "scuff",
+    "cosmetic",
+    "small dent",
+    "loose",
+    "sticky key",
+    "rattle",
+    "squeak",
+    "minor mark"
+  ],
+  "claim_too_soon_hours": 1,
+  "claim_too_soon_delta": 15,
+  "photo_predates_purchase_delta": 40
+}

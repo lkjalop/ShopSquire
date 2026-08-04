@@ -4,12 +4,13 @@ import hashlib
 from typing import Any, Dict, List
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.services.ml_decision_gate import gate_decision, score_with_learned_model
 
 
 def _ff() -> Dict[str, Any]:
     try:
-        return load_feature_flags(get_settings().feature_flags_path) or {}
+        return _ff_get_flags() or {}
     except Exception:
         return {}
 
@@ -93,6 +94,10 @@ def verdict(
                 tags.append("anomaly")
             elif t in ("lolbin_command", "lolbin_delivery_combo"):
                 tags.append("lolbin")
+            elif t in ("obfuscation_bidi_override", "obfuscation_zero_width"):
+                tags.extend(["unicode_obfuscation", "evasion"])
+            elif t == "callback_phishing_toad":
+                tags.extend(["toad", "callback_phishing", "social_engineering", "mitre:T1598"])
     except Exception:
         pass
     # IoC tags
@@ -157,6 +162,12 @@ def verdict(
         severity = "warning"
         reasons.append("denylisted IoC found")
 
+    # TOAD / callback phishing warrants human review on its own — the payload is a phone call, so
+    # URL/attachment detonation finds nothing and the multi-signal count under-counts it.
+    if "callback_phishing_toad" in ind_types and severity == "info":
+        severity = "warning"
+        reasons.append("callback_phishing_toad")
+
     # Deterministic rule-first routing/actions.
     # 1) Hard security routes for policy/auth failures and malicious IoCs.
     if dmarc_fail:
@@ -199,6 +210,9 @@ def verdict(
         or "attachment_static_triage_high_risk" in ind_types
         or "attachment_steganography_suspected" in ind_types
         or "canary_token_triggered" in ind_types
+        # A bidi override in an email field hides the real address behind a rendered one — a
+        # spoof technique with essentially no legitimate use in commercial mail.
+        or "obfuscation_bidi_override" in ind_types
         or thread_hijack_combo
         or len(deny_iocs) >= max(ioc_err, 1)
     )

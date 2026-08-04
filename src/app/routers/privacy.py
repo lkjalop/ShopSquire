@@ -18,6 +18,8 @@ from src.app.services.memory import Memory
 from src.app.services.decision_log import log_trace_event
 
 
+from src.app.platform.tenant_context import current_tenant_id as _ct  # R10.2: erasure/export per tenant-controller
+
 router = APIRouter(prefix="/api/v1/privacy", tags=["privacy"])
 _PRIVACY_FALLBACK: Dict[str, str] = {}
 
@@ -240,6 +242,11 @@ def create_privacy_request(
 def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_OWNER]))) -> Dict:
     """GDPR Article 17: Right to Erasure."""
     uid_hash = hash_uid(uid)
+    tenant_id = _ct()
+    from src.app.services.privacy_deletion_orchestrator import finish_job, start_job
+
+    job_id = start_job(tenant_id=tenant_id, subject_hash=uid_hash)
+    action_required: List[str] = []
     deleted = {
         "decision_logs": 0,
         "decision_audits": 0,
@@ -249,11 +256,19 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
         "draft_orders": 0,
         "customers": 0,
         "session_memory": False,
+        "conversation_fact_observations": 0,
     }
     try:
         with db_session() as db:
             _where, params = _uid_patterns(uid, uid_hash)
-            ids = db.execute(text(f"SELECT id FROM decision_logs WHERE {_UID_WHERE_SQL}"), params).fetchall()
+            params["tenant_id"] = tenant_id
+            ids = db.execute(
+                text(
+                    f"SELECT id FROM decision_logs WHERE tenant_id=:tenant_id "
+                    f"AND {_UID_WHERE_SQL}"
+                ),
+                params,
+            ).fetchall()
             decision_ids = [r[0] for r in ids if r and r[0]]
             if decision_ids:
                 in_params = {"decision_ids": decision_ids}
@@ -272,40 +287,106 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                 )
                 deleted["decision_logs"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute(text("DELETE FROM order_sessions WHERE uid = :uid"), {"uid": uid})
-            deleted["order_sessions"] = getattr(res, "rowcount", 0) or 0
-
-            try:
-                res = db.execute(text("DELETE FROM chat_messages WHERE uid = :uid"), {"uid": uid})
-                deleted["chat_messages"] = getattr(res, "rowcount", 0) or 0
-            except Exception:
-                deleted["chat_messages"] = 0
+            res = db.execute(
+                text("DELETE FROM chat_messages WHERE tenant_id = :tenant_id AND uid = :uid"),
+                {"tenant_id": tenant_id, "uid": uid},
+            )
+            deleted["chat_messages"] = getattr(res, "rowcount", 0) or 0
 
             res = db.execute(
-                "UPDATE orders SET customer_id = 'DELETED' WHERE customer_id = :uid",
-                {"uid": uid},
+                text(
+                    "DELETE FROM conversation_fact_observation "
+                    "WHERE tenant_id=:tenant_id AND subject_ref=:subject_ref"
+                ),
+                {"tenant_id": tenant_id, "subject_ref": uid_hash},
             )
-            deleted["orders"] = getattr(res, "rowcount", 0) or 0
+            deleted["conversation_fact_observations"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute(text("DELETE FROM draft_orders WHERE customer_id = :uid"), {"uid": uid})
+            res = db.execute(text("DELETE FROM draft_orders WHERE customer_id = :uid AND tenant_id = :t"),
+                             {"uid": uid, "t": tenant_id})
             deleted["draft_orders"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute(text("DELETE FROM customers WHERE id = :uid"), {"uid": uid})
-            deleted["customers"] = getattr(res, "rowcount", 0) or 0
+            from src.app.services.legacy_commerce_tenant_ownership import (
+                erase_authoritatively_owned_subject_rows,
+            )
+
+            legacy_result = erase_authoritatively_owned_subject_rows(
+                db, tenant_id=tenant_id, uid=uid
+            )
+            for table_name, count in legacy_result["unclassified"].items():
+                if count:
+                    action_required.append(
+                        f"authoritative_tenant_ownership_required:{table_name}:{count}"
+                    )
+            deleted.update(legacy_result["deleted"])
 
             db.commit()
 
         try:
-            redis.delete(f"session:{uid}:summary")
-            redis.delete(f"session:{uid}:kv_state")
-            redis.delete(f"session:{uid}:recent_retrieval")
-            deleted["session_memory"] = True
+            # DSR erasure across ALL user-linked Redis keys (8 memory + typed
+            # artifacts) via the single inventory — not just the 3 keys cleared
+            # historically (GDPR/APP right-to-erasure).
+            from src.app.services.user_data_inventory import erase_redis
+            deleted["session_memory"] = erase_redis(redis, uid)
         except Exception:
             deleted["session_memory"] = False
-
-        return {"status": "deleted", "uid": uid, "uid_hash": uid_hash, "deleted_records": deleted}
+        memory_result = deleted["session_memory"]
+        if not isinstance(memory_result, dict) or not memory_result.get("complete"):
+            action_required.append("redis_or_cache_erasure_incomplete")
+        outcome = finish_job(
+            job_id,
+            tenant_id=tenant_id,
+            stages={
+                "tenant_scoped_database": {
+                    "status": "completed",
+                    "deleted_records": {
+                        key: value for key, value in deleted.items() if key != "session_memory"
+                    },
+                },
+                "memory_and_cache": {
+                    "status": (
+                        "completed"
+                        if isinstance(memory_result, dict) and memory_result.get("complete")
+                        else "action_required"
+                    ),
+                    "result": memory_result,
+                },
+            },
+            action_required=action_required,
+        )
+        return {
+            "status": outcome["status"],
+            "job_id": job_id,
+            "uid_hash": uid_hash,
+            "deleted_records": deleted,
+            "action_required": action_required,
+        }
     except Exception as exc:
+        try:
+            finish_job(
+                job_id,
+                tenant_id=tenant_id,
+                stages={"tenant_scoped_database": {"status": "failed", "error": str(exc)[:240]}},
+                action_required=["operator_retry_required"],
+                failed=True,
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/deletion-jobs/{job_id}")
+def get_deletion_job(
+    job_id: str,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    _ = role
+    from src.app.services.privacy_deletion_orchestrator import get_job
+
+    job = get_job(job_id, tenant_id=_ct())
+    if job is None:
+        raise HTTPException(status_code=404, detail="privacy_deletion_job_not_found")
+    return job
 
 
 @router.get("/export/{uid}")
@@ -331,41 +412,50 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
     }
     try:
         with db_session() as db:
-            rows = db.execute(text("SELECT * FROM customers WHERE id = :uid"), {"uid": uid}).mappings().all()
+            rows = db.execute(
+                text("SELECT * FROM customers WHERE id=:uid AND tenant_id=:tenant_id"),
+                {"uid": uid, "tenant_id": _ct()},
+            ).mappings().all()
             export["customers"] = [dict(r) for r in rows]
 
-            rows = db.execute(text("SELECT * FROM order_sessions WHERE uid = :uid"), {"uid": uid}).mappings().all()
+            rows = db.execute(
+                text("SELECT * FROM order_sessions WHERE uid=:uid AND tenant_id=:tenant_id"),
+                {"uid": uid, "tenant_id": _ct()},
+            ).mappings().all()
             export["order_sessions"] = [dict(r) for r in rows]
             order_ids = [r.get("order_id") for r in export["order_sessions"] if r.get("order_id")]
 
-            try:
-                rows = db.execute(
-                    text(
-                        "SELECT id, uid, session_id, role, content, trace_id, created_at "
-                        "FROM chat_messages WHERE uid = :uid ORDER BY created_at DESC LIMIT 1000"
-                    ),
-                    {"uid": uid},
-                ).mappings().all()
-                export["chat_messages"] = [dict(r) for r in rows]
-            except Exception:
-                export["chat_messages"] = []
+            rows = db.execute(
+                text(
+                    "SELECT id, tenant_id, uid, session_id, session_epoch, role, "
+                    "content, trace_id, created_at FROM chat_messages "
+                    "WHERE tenant_id = :tenant_id AND uid = :uid "
+                    "ORDER BY created_at DESC LIMIT 1000"
+                ),
+                {"tenant_id": _ct(), "uid": uid},
+            ).mappings().all()
+            export["chat_messages"] = [dict(r) for r in rows]
 
             if order_ids:
                 rows = db.execute(
-                    text("SELECT * FROM orders WHERE id IN :order_ids").bindparams(
+                    text(
+                        "SELECT * FROM orders WHERE tenant_id=:tenant_id "
+                        "AND id IN :order_ids"
+                    ).bindparams(
                         bindparam("order_ids", expanding=True)
                     ),
-                    {"order_ids": order_ids},
+                    {"order_ids": order_ids, "tenant_id": _ct()},
                 ).mappings().all()
                 export["orders"] = [dict(r) for r in rows]
             else:
                 rows = db.execute(
-                    "SELECT * FROM orders WHERE customer_id = :uid",
-                    {"uid": uid},
+                    "SELECT * FROM orders WHERE customer_id=:uid AND tenant_id=:tenant_id",
+                    {"uid": uid, "tenant_id": _ct()},
                 ).mappings().all()
                 export["orders"] = [dict(r) for r in rows]
 
-            rows = db.execute(text("SELECT * FROM draft_orders WHERE customer_id = :uid"), {"uid": uid}).mappings().all()
+            rows = db.execute(text("SELECT * FROM draft_orders WHERE customer_id = :uid AND tenant_id = :t"),
+                              {"uid": uid, "t": _ct()}).mappings().all()
             export["draft_orders"] = [dict(r) for r in rows]
 
             _where, params = _uid_patterns(uid, uid_hash)
@@ -373,9 +463,10 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                 text(
                     "SELECT id, agent_name, valid_from, input_data, retrieved_context, agent_reasoning, "
                     "proposed_action, policy_version, approval_required, execution_status "
-                    f"FROM decision_logs WHERE {_UID_WHERE_SQL} ORDER BY valid_from DESC"
+                    f"FROM decision_logs WHERE tenant_id=:tenant_id "
+                    f"AND {_UID_WHERE_SQL} ORDER BY valid_from DESC"
                 ),
-                params,
+                {**params, "tenant_id": _ct()},
             ).mappings().all()
             decisions = []
             decision_ids = []
@@ -409,13 +500,15 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                         item["metadata"] = _redact_json(item["metadata"]) if isinstance(item["metadata"], (dict, list)) else item["metadata"]
                     audits.append(item)
                 export["decision_audits"] = audits
-        summary = redis.get(f"session:{uid}:summary")
-        kv = redis.get(f"session:{uid}:kv_state")
-        if summary or kv:
-            export["session_memory"] = {
-                "summary": _safe_json(summary) if summary else None,
-                "kv_state": _safe_json(kv) if kv else None,
-            }
+        # Export ALL user-linked Redis keys (8 memory families + typed artifacts)
+        # via the single inventory, not just summary/kv_state.
+        try:
+            from src.app.services.user_data_inventory import export_redis
+            _session_mem = export_redis(redis, uid)
+            if _session_mem:
+                export["session_memory"] = _session_mem
+        except Exception:
+            pass
         sanitized, _hits = dlp_sanitize_export_value(export)
         return sanitized if isinstance(sanitized, dict) else {"export": sanitized}
     except Exception as exc:
@@ -470,6 +563,30 @@ def purge_retention(days: int = 90, role: str = Depends(require_role([ROLE_OWNER
                 deleted["incidents"] = 0
             db.commit()
         return {"purged": True, "days": days, "deleted": deleted}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/retention/sweep")
+def sweep_retention(
+    dry_run: bool = False,
+    redis=Depends(get_redis),
+    role: str = Depends(require_role([ROLE_OWNER])),
+) -> Dict:
+    """Uniform data-retention sweep (storage limitation, GDPR Art. 5(1)(e)): soft-expire then hard-purge
+    idle draft carts, age out conversation, and set TTLs on Redis session keys. Complements
+    /retention/purge (which ages security logs) — different surfaces, no overlap.
+
+    UNIFORM by design — NOT gated on IP / GeoIP / ASN (see config/retention_policy.json). This is the
+    storage-limitation half; on-request erasure (right to be forgotten) is DELETE /data/{uid}.
+
+    dry_run=1 reports what WOULD be swept without mutating anything.
+    """
+    from src.app.services.retention_sweeper import run_sweep
+    try:
+        with db_session() as db:
+            report = run_sweep(db, redis, dry_run=bool(dry_run))
+        return {"status": "swept", **report}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -562,14 +679,22 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                 redacted["decision_audits"] = cnt
             # pseudonymize customers row for strict minimization
             try:
-                res = db.execute(text("UPDATE customers SET email = 'REDACTED', phone = NULL, first_name = 'REDACTED', last_name = NULL WHERE id = :uid"), {"uid": uid})
+                res = db.execute(
+                    text(
+                        "UPDATE customers "
+                        "SET email = 'REDACTED:' || id, phone = NULL, "
+                        "first_name = 'REDACTED', last_name = NULL "
+                        "WHERE id = :uid"
+                    ),
+                    {"uid": uid},
+                )
                 redacted["customers"] = getattr(res, "rowcount", 0) or 0
             except Exception:
                 redacted["customers"] = 0
             db.commit()
         try:
-            redis.delete(f"session:{uid}:summary")
-            redis.delete(f"session:{uid}:kv_state")
+            from src.app.services.user_data_inventory import redact_redis
+            redacted["session_memory"] = redact_redis(redis, uid)
         except Exception:
             pass
         return {"status": "redacted", "uid": uid, "uid_hash": uid_hash, "redacted_counts": redacted}

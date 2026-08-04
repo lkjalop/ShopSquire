@@ -572,14 +572,20 @@ class TestDeterministicAssistantMessagePersona:
     """_deterministic_assistant_message should produce persona-aware, human-like text."""
 
     def _fn(self):
-        from src.app.routers.recommend import _deterministic_assistant_message
+        from src.app.services.recommend_budget_advisor import _deterministic_assistant_message
         return _deterministic_assistant_message
 
     def _make_results(self, n: int = 3) -> list:
         return [{"name": f"Product {i}", "sku": f"sku-{i}", "price_cents": 100000, "factors": {"positive": []}} for i in range(n)]
 
-    def test_no_results_returns_none(self):
-        assert self._fn()("any query", [], {}) is None
+    def test_no_results_returns_recovery_message(self):
+        # CRAG never-dead-end contract: zero results yields a non-empty recovery
+        # message (NOT None) with an explicit upgrade path, never a blank reply.
+        # This matches the authoritative test_deterministic_message_recovery_on_empty
+        # in tests/services/test_recommend_budget_advisor.py and the documented
+        # "never-empty safety net" branch in recommend_budget_advisor.
+        msg = self._fn()("any query", [], {})
+        assert msg and "couldn't find" in msg.lower()
 
     def test_basic_message_uses_i_ve_found(self):
         msg = self._fn()("laptop", self._make_results(), {})
@@ -654,6 +660,11 @@ class TestDeterministicAssistantMessagePersona:
 class TestCheckoutInitiateEndpoint:
     """POST /api/v1/payments/checkout-initiate — fail-closed outside explicit demo mode."""
 
+    def setup_method(self):
+        from src.app.security.payment_threats import reset_counters
+
+        reset_counters()
+
     def _get_app(self):
         """Import and return a minimal FastAPI test client for the payments router."""
         from fastapi import FastAPI
@@ -683,7 +694,15 @@ class TestCheckoutInitiateEndpoint:
                         "id": "pi_live_123",
                         "client_secret": "cs_live_123",
                     }
-                    resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 5000, "currency": "AUD"})
+                    with patch(
+                        "src.app.routers.payments.evaluate_transaction_firewall",
+                        return_value={"action": "allow"},
+                    ):
+                        resp = client.post(
+                            "/api/v1/payments/checkout-initiate",
+                            headers={"Idempotency-Key": f"configured-provider-checkout-{time.time_ns()}"},
+                            json={"amount_cents": 5000, "currency": "AUD"},
+                        )
         assert resp.status_code == 200
         body = resp.json()
         assert body["currency"] == "AUD"

@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin/supply_chain", tags=["admin", "supply_chain"])
 
-_DUAL_CONTROL_ENABLED = os.getenv("SUPPLY_CHAIN_DUAL_CONTROL", "1").lower() not in ("0", "false", "no")
+# Shared dual-control primitive (extracted to src.app.security.dual_control so the KYV control plane
+# reuses the exact same two-person enforcement). Kept a thin local alias for the call sites below.
+from src.app.security.dual_control import require_dual_control as _shared_require_dual_control
 
 
 def _require_dual_control(
@@ -21,57 +23,8 @@ def _require_dual_control(
     x_api_key: Optional[str],
     x_approver_token: Optional[str],
 ) -> None:
-    """IT-PREV-01 — Supply chain writes require a second approver with a distinct key.
-
-    The approver must hold owner or developer role, and their key must differ
-    from the primary requestor's key so a single compromised credential cannot
-    approve its own changes.
-    """
-    if not _DUAL_CONTROL_ENABLED:
-        return
-
-    env = str(os.getenv("APP_ENV", "local") or "local").lower()
-    if env in ("local", "dev", "development", "test", "testing"):
-        return
-
-    if not x_approver_token:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="dual_control_required: supply-chain writes need X-Approver-Token from a second owner/developer",
-        )
-
-    # Keys must differ — one person cannot approve their own change.
-    if x_approver_token.strip() == (x_api_key or "").strip():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="dual_control_violation: approver token must differ from requestor token",
-        )
-
-    approver_role = get_role_from_key(x_approver_token.strip())
-    if approver_role not in (ROLE_OWNER, ROLE_DEVELOPER):
-        try:
-            from src.app.security.insider_threat_detector import InsiderThreatSignal, _emit as _it_emit
-            _it_emit(InsiderThreatSignal(
-                signal_type="supply_chain_dual_control_bypass_attempt",
-                actor=x_api_key or "unknown",
-                resource=getattr(request.url, "path", "/admin/supply_chain"),
-                severity="critical",
-                context={
-                    "approver_role": approver_role,
-                    "required_roles": [ROLE_OWNER, ROLE_DEVELOPER],
-                },
-            ))
-        except Exception:
-            pass
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="dual_control_violation: approver must hold owner or developer role",
-        )
-
-    logger.info(
-        "supply_chain dual_control_approved primary_role=%s approver_role=%s path=%s",
-        primary_role, approver_role, getattr(request.url, "path", ""),
-    )
+    _shared_require_dual_control(request, primary_role, x_api_key, x_approver_token,
+                                 action_label="supply_chain_write")
 
 
 @router.post("/ingest")

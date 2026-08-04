@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -39,7 +40,15 @@ from src.app.routers.cv import router as cv_router
 from src.app.routers.recruiting import router as recruiting_router
 from src.app.routers.scoring import router as scoring_router
 from src.app.routers.approvals import router as approvals_router
-from src.app.routers.recommend import router as recommend_router
+from src.app.routers.fulfillment_cases import router as fulfillment_cases_router
+from src.app.routers.supply_risk import router as supply_risk_router
+from src.app.routers.kyv_admin import router as kyv_admin_router
+from src.app.routers.recommend_compat import router as recommend_router
+from src.app.routers.recommend_aux import router as recommend_aux_router
+from src.app.routers.recommendation_checkout import router as recommendation_checkout_router
+from src.app.routers.recommendation_explain import router as recommendation_explain_router
+from src.app.routers.recommendation_nqe import router as recommendation_nqe_router
+from src.app.routers.recommendation_feedback import router as recommendation_feedback_router
 from src.app.routers.products_compare import router as products_router
 from src.app.routers.orchestrator_api import router as orchestrator_router
 from src.app.routers.orders import router as orders_router
@@ -75,7 +84,6 @@ from src.app.observability.logging import init_logging, bind_request_id, new_req
 from src.app.observability.metrics import router as metrics_router
 from src.app.observability.init import instrument_app
 from src.app.routers.sla import router as sla_router
-from src.app.observability.metrics import router as metrics_router
 from src.app.security.observer import emit_security_event
 from src.app.security.webhook_security import WebhookSecurityMiddleware
 from src.app.security.idempotency import IdempotencyMiddleware
@@ -90,7 +98,6 @@ from src.app.security.rate_limit import (
     acquire_concurrency_slot,
     release_concurrency_slot,
 )
-from src.app.config import get_settings
 from src.app.security.internal_mtls import InternalMTLSMiddleware
 from src.app.security.tls_fingerprint_middleware import TLSFingerprintMiddleware
 from src.app.security.request_shape import GlobalRequestShapeMiddleware
@@ -102,15 +109,34 @@ def _is_non_dev_env() -> bool:
 
 
 def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
-    """Return CV OCR runtime readiness, including OS-level binary checks."""
+    """Return CV OCR runtime readiness, including OS-level binary checks.
+
+    Probes ONLY the packages the selected provider can use: importing paddleocr
+    loads the full Paddle framework (whose model-source check stalls ~10-15s when
+    its source is blocked), so the boot-path probe must never pay that cost for a
+    provider that doesn't need it (glm-ocr/embedded run via Ollama — no local OCR).
+    An unprobed package is ABSENT from deps ("not probed"), never reported False
+    ("probed and missing"). The exhaustive all-dependency introspection lives in
+    the role-gated cv_readiness diagnostic, not on the boot path."""
     selected = (provider or os.getenv("CV_OCR_PROVIDER", "auto") or "auto").strip().lower()
+    no_local_ocr = selected in ("disabled", "none", "off", "embedded", "glm-ocr", "glm_ocr", "ollama-ocr")
+
+    def _probe(*pkgs: str) -> None:
+        for pkg in pkgs:
+            try:
+                __import__(pkg)
+                deps[pkg] = True
+            except Exception:
+                deps[pkg] = False
+
     deps: dict[str, bool] = {}
-    for pkg in ("pytesseract", "cv2", "paddleocr", "pyzbar"):
-        try:
-            __import__(pkg)
-            deps[pkg] = True
-        except Exception:
-            deps[pkg] = False
+    _probe("pyzbar")  # QR-decode runtime is provider-independent and cheap
+    if selected == "tesseract":
+        _probe("pytesseract")
+    elif selected == "paddle":
+        _probe("paddleocr", "cv2")
+    elif not no_local_ocr:  # auto: probe the cheap leg now; paddle only if it's needed (below)
+        _probe("pytesseract")
 
     runtime: dict[str, Any] = {}
     reasons: list[str] = []
@@ -143,7 +169,7 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
     else:
         runtime["pyzbar_runtime"] = False
 
-    if selected in ("disabled", "none", "off", "embedded", "glm-ocr", "glm_ocr", "ollama-ocr"):
+    if no_local_ocr:
         ready = True  # glm-ocr uses Ollama — no local binary required
     elif selected == "tesseract":
         ready = bool(deps.get("pytesseract") and runtime.get("tesseract_bin"))
@@ -154,10 +180,12 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
         if not ready:
             reasons.append("paddle_provider_not_ready")
     else:
-        ready = bool(
-            (deps.get("paddleocr") and deps.get("cv2"))
-            or (deps.get("pytesseract") and runtime.get("tesseract_bin"))
-        )
+        # auto: the cheap tesseract leg was probed above; pay the paddle import
+        # only when that leg cannot serve.
+        ready = bool(deps.get("pytesseract") and runtime.get("tesseract_bin"))
+        if not ready:
+            _probe("paddleocr", "cv2")
+            ready = bool(deps.get("paddleocr") and deps.get("cv2"))
         if not ready:
             reasons.append("no_available_ocr_provider")
 
@@ -168,6 +196,64 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
         "runtime": runtime,
         "reasons": list(dict.fromkeys([str(r) for r in reasons if str(r)])),
     }
+
+
+def _prewarm_router_models(app: FastAPI) -> dict[str, Any]:
+    """Load the bounded router and taxonomy models and publish truthful readiness."""
+    result: dict[str, Any] = {"ready": False, "status": "warming"}
+    app.state.router_prewarm = result
+    try:
+        import httpx
+
+        from src.app.services.recommendation_core.turn_router import _router_model
+        from src.app.services.taxonomy_embedding_index import EMBED_MODEL
+
+        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        model = _router_model()
+        # Warm the optional taxonomy embedder first and the latency-critical router last. When
+        # Ollama is configured for one resident model, the inverse order evicts the router just
+        # before the first buyer turn and turns readiness into a misleading cold-start claim.
+        embed = httpx.post(
+            f"{url}/api/embed",
+            json={
+                "model": EMBED_MODEL,
+                "input": ["product taxonomy warmup"],
+                "keep_alive": os.getenv("OLLAMA_EMBED_KEEP_ALIVE", "60m"),
+            },
+            timeout=120.0,
+        )
+        embed.raise_for_status()
+        generate = httpx.post(
+            f"{url}/api/generate",
+            json={
+                "model": model,
+                "prompt": "ok",
+                "stream": False,
+                "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+                "options": {"num_predict": 1, "temperature": 0},
+            },
+            timeout=120.0,
+        )
+        generate.raise_for_status()
+        result = {
+            "ready": True,
+            "status": "ready",
+            "router_model": model,
+            "embedding_model": EMBED_MODEL,
+        }
+    except Exception as exc:
+        result = {"ready": False, "status": "failed", "error": str(exc)[:300]}
+    app.state.router_prewarm = result
+    return result
+
+
+def _vlm_warmup_enabled() -> bool:
+    """Resolve startup VLM warming without evicting the demo text router."""
+    raw = os.getenv("VLM_WARMUP_ON_START")
+    if raw is not None:
+        return str(raw).strip().lower() in ("1", "true", "yes", "on")
+    profile = str(os.getenv("SHOPSQUIRE_RUNTIME_PROFILE", "") or "").strip().lower()
+    return profile != "demo_v2"
 
 
 def create_app() -> FastAPI:
@@ -242,8 +328,116 @@ def create_app() -> FastAPI:
             init_logging()
         except Exception:
             pass
+        # LOUD memory-store guard (must run AFTER init_logging or the OK line is dropped by the
+        # last-resort handler): a dead Redis does not stop the app — it silently degrades into
+        # per-call connection timeouts and LITERAL context loss (session memory gone). That failure
+        # mode cost days of confused latency numbers and would cost a live demo its memory. Scream
+        # at startup; the /health checker screams ONCE on every up/down transition at runtime.
+        try:
+            import logging as _rl
+            _redis_log = _rl.getLogger("shopsquire.startup")
+            try:
+                from src.app.deps import get_redis as _gr
+                _rc = _gr()
+                if type(_rc).__name__ == "DummyRedis":  # the dev fallback answers in-process — a lie
+                    raise ConnectionError("DummyRedis fallback active (Redis was down at first use)")
+                if hasattr(_rc, "ping"):
+                    _rc.ping()
+                _redis_log.info("memory store (Redis) reachable — session memory ACTIVE")
+            except Exception as _rerr:
+                _redis_log.critical(
+                    "\n" + "!" * 78 +
+                    "\n!! MEMORY STORE (Redis) UNREACHABLE: %s"
+                    "\n!! The app will RUN but with NO session memory (context loss every turn) and"
+                    "\n!! multi-second connection timeouts inflating EVERY request's latency."
+                    "\n!! Fix: start Docker Desktop, then `docker compose up -d redis`."
+                    "\n" + "!" * 78, str(_rerr)[:120],
+                )
+        except Exception:
+            pass
         try:
             init_tracer("shopsquire-api", app=app)
+        except Exception:
+            pass
+        # Pre-warm the decision-log/audit path OFF-THREAD: the first request otherwise pays a
+        # ~2.7s cold spike in decision_log_and_annotation (metadata create + column introspection
+        # + trace-table init + first hash-chain write, in aggregate). One synthetic-but-honest
+        # 'service_started' decision row absorbs all of it before any buyer arrives.
+        try:
+            import threading as _th
+
+            def _prewarm_decision_log() -> None:
+                try:
+                    from src.app.models.decision_trace_events import ensure_decision_trace_events_table
+                    from src.app.models.init_db import ensure_metadata
+                    from src.app.services.decision_log import log_decision
+                    ensure_metadata()
+                    ensure_decision_trace_events_table()
+                    log_decision(
+                        agent_name="system_startup",
+                        input_data={"event": "service_started"},
+                        retrieved_context={},
+                        proposed_action={"action": "prewarm_decision_log"},
+                        agent_reasoning="startup pre-warm: absorb first-write init cost before user traffic",
+                        policy_version="v1",
+                        approval_required=False,
+                        execution_status="executed",
+                    )
+                    import logging as _pl
+                    _pl.getLogger("shopsquire.startup").info("decision-log pre-warm complete")
+                except Exception as _pw_exc:
+                    import logging as _pl
+                    _pl.getLogger("shopsquire.startup").warning("decision-log pre-warm failed: %s", _pw_exc)
+
+            _app_env_for_audit = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+            _audit_prewarm_on = str(os.getenv(
+                "DECISION_LOG_PREWARM_ON_START",
+                "0" if _app_env_for_audit in ("test", "testing") else "1",
+            )).strip().lower() in ("1", "true", "yes", "on")
+            if _audit_prewarm_on:
+                _th.Thread(
+                    target=_prewarm_decision_log,
+                    name="decision-log-prewarm",
+                    daemon=True,
+                ).start()
+        except Exception:
+            pass
+        # Router-model preload OFF-THREAD: absorb the cold-load spike AND keep the router model
+        # resident so a concurrent vision request (glm-ocr) can't evict it mid-session. Measured:
+        # warm+pinned the router routes in ~5-6s (PASS the 8s gate); cold-or-evicted it spikes to
+        # 11-13s — the "latency blocker" was VRAM eviction, not model speed. Pair with
+        # OLLAMA_MAX_LOADED_MODELS>=2 so the router and the VLM coexist instead of thrashing.
+        # Off by default under test envs (no Ollama on CI); best-effort everywhere.
+        try:
+            _app_env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+            _prewarm_on = str(
+                os.getenv("ROUTER_PREWARM_ON_START", "0" if _app_env in ("test", "testing") else "1")
+            ).strip().lower() in ("1", "true", "yes", "on")
+            if _prewarm_on:
+                import threading as _th2
+
+                def _prewarm_router_model() -> None:
+                    result = _prewarm_router_models(app)
+                    import logging as _rl2
+                    if result.get("ready"):
+                        _rl2.getLogger("shopsquire.startup").info(
+                            "router/taxonomy-model pre-warm complete: %s + %s",
+                            result.get("router_model"), result.get("embedding_model"),
+                        )
+                    else:
+                        _rl2.getLogger("shopsquire.startup").warning(
+                            "router-model pre-warm failed: %s", result.get("error"),
+                        )
+
+                _blocking = str(os.getenv("ROUTER_PREWARM_BLOCKING", "0")).strip().lower() in (
+                    "1", "true", "yes", "on",
+                )
+                if _blocking:
+                    _prewarm_router_model()
+                else:
+                    _th2.Thread(
+                        target=_prewarm_router_model, name="router-model-prewarm", daemon=True,
+                    ).start()
         except Exception:
             pass
         try:
@@ -254,11 +448,55 @@ def create_app() -> FastAPI:
             if str(os.getenv("AUTO_SEED_CATALOG_ON_START", "1")).lower() in ("1", "true", "yes"):
                 with db_session() as db:
                     active_products = db.execute(
-                        _sql_text("SELECT COUNT(*) FROM products WHERE COALESCE(active, 1) = 1")
+                        _sql_text("SELECT COUNT(*) FROM products WHERE active IS TRUE")
                     ).scalar() or 0
                     if int(active_products) <= 0:
+                        # Cold/empty catalog bootstrap.
                         seed_products(db)
-                        db.commit()
+                    try:
+                        from src.app.platform.store_profile import active_profile_id
+                        profile_id = str(active_profile_id() or "").strip().lower()
+                        raw_gaming_seed = os.getenv("AUTO_SEED_GAMING_CATALOG_ON_START")
+                        app_env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+                        local_default = app_env in ("local", "dev", "development", "test", "testing")
+                        gaming_seed_enabled = (
+                            str(raw_gaming_seed).strip().lower() in ("1", "true", "yes", "on")
+                            if raw_gaming_seed is not None else local_default
+                        )
+                        if profile_id == "electronics" and gaming_seed_enabled:
+                            # Idempotent and self-healing: adds missing GAM-* rows and aligned inventory
+                            # for stale local demo DBs without putting vertical logic in core scoring.
+                            from scripts.seed_gaming_laptops import ensure_gaming_catalog
+                            ensure_gaming_catalog(db)
+                        elif profile_id and profile_id != "electronics" and local_default:
+                            # Non-electronics vertical (fashion/pharmacy/…): seed its OWN profile catalog
+                            # into products+inventory so the switched store runs real DB retrieval, not
+                            # just the zero-result fallback. Agnostic: the seeder reads the profile slot.
+                            from scripts.seed_profile_catalog import seed_profile_catalog
+                            seed_profile_catalog(db, profile_id)
+                        # Supplier coverage tracks the catalog (profile-agnostic) so a recommended SKU
+                        # resolves an approved supplier instead of dead-ending at NO_APPROVED_SUPPLIER.
+                        raw_suppliers_seed = os.getenv("AUTO_SEED_SUPPLIERS_ON_START")
+                        suppliers_seed_enabled = (
+                            str(raw_suppliers_seed).strip().lower() in ("1", "true", "yes", "on")
+                            if raw_suppliers_seed is not None else local_default
+                        )
+                        if suppliers_seed_enabled:
+                            from src.app.services.supplier_catalog import (
+                                ensure_supplier_coverage,
+                                seed_demo_supplier_history,
+                                seed_demo_vendor_contacts,
+                            )
+                            ensure_supplier_coverage(db, commit=False)
+                            # The vendor and history seeders own independent sessions.
+                            # Publish this transaction first so a second SQLite writer
+                            # cannot wait behind startup's still-open catalog write.
+                            db.commit()
+                            seed_demo_vendor_contacts()  # kyv_vendors manage their own session
+                            seed_demo_supplier_history()  # supplier_baseline_events — prior-dealings context
+                    except Exception:
+                        pass
+                    db.commit()
         except Exception:
             pass
         # Load plugin registry
@@ -417,7 +655,7 @@ def create_app() -> FastAPI:
         # VLM cold-start warming: fire a tiny generate request so the first real user request
         # doesn't pay the full model-load latency (typically 4-8 s for qwen3-vl:8b on RTX 5070 Ti).
         try:
-            if str(os.getenv("VLM_WARMUP_ON_START", "1")).lower() not in ("0", "false", "no"):
+            if _vlm_warmup_enabled():
                 import asyncio as _asyncio
                 import logging as _wlog
 
@@ -425,7 +663,11 @@ def create_app() -> FastAPI:
                     import httpx
                     _log = _wlog.getLogger("shopsquire.startup")
                     base = (os.getenv("OLLAMA_URL") or "http://127.0.0.1:11434").rstrip("/")
-                    model = (os.getenv("OLLAMA_SMALL_MODEL") or os.getenv("CV_VISION_MODEL") or "qwen3-vl:8b").strip()
+                    model = (
+                        os.getenv("CV_VISION_MODEL")
+                        or os.getenv("OLLAMA_VISION_MODEL")
+                        or "qwen3-vl:8b"
+                    ).strip()
                     try:
                         async with httpx.AsyncClient(timeout=30.0) as _client:
                             await _client.post(
@@ -452,13 +694,18 @@ def create_app() -> FastAPI:
             await stop_stream_consumer()
         except Exception:
             pass
-
+        try:
+            from src.app.services.dependency_resilience import (
+                shutdown_resilience_executor,
+            )
+            shutdown_resilience_executor(wait=False)
+        except Exception:
+            pass
     app = FastAPI(title="ShopSquire API", default_response_class=ORJSONResponse, lifespan=lifespan)
     # Bind a fresh engine using current settings to the app state so
     # tests that mutate DATABASE_URL get an engine scoped to the app.
     try:
         from src.app.config import get_settings
-        from sqlalchemy import create_engine
         from src.app.models import db as dbmod
 
         # Prefer live env var to avoid cached settings bleeding across tests.
@@ -499,9 +746,8 @@ def create_app() -> FastAPI:
             # If the env requests SQLite but the current engine is non-SQLite,
             # honor the env override (common in tests).
             else:
-                default_sqlite = "sqlite:///test.sqlite"
                 if target_is_sqlite and not existing_is_sqlite:
-                    eng = create_engine(url, pool_pre_ping=True, future=True)
+                    eng = dbmod.create_runtime_engine(url)
                     try:
                         setattr(eng, "_shopsquire_managed", True)
                     except Exception:
@@ -516,7 +762,7 @@ def create_app() -> FastAPI:
                     # test.sqlite). This preserves per-URL DB isolation so tests that
                     # monkeypatch DATABASE_URL don't share the session engine and
                     # contaminate unrelated test data.
-                    eng = create_engine(url, pool_pre_ping=True, future=True)
+                    eng = dbmod.create_runtime_engine(url)
                     try:
                         setattr(eng, "_shopsquire_managed", True)
                     except Exception:
@@ -526,7 +772,7 @@ def create_app() -> FastAPI:
                     except Exception:
                         pass
                 elif managed and url and existing_url and existing_url != url:
-                    eng = create_engine(url, pool_pre_ping=True, future=True)
+                    eng = dbmod.create_runtime_engine(url)
                     try:
                         setattr(eng, "_shopsquire_managed", True)
                     except Exception:
@@ -543,7 +789,7 @@ def create_app() -> FastAPI:
                     except Exception:
                         pass
         else:
-            eng = create_engine(url, pool_pre_ping=True, future=True)
+            eng = dbmod.create_runtime_engine(url)
             try:
                 setattr(eng, "_shopsquire_managed", True)
             except Exception:
@@ -568,17 +814,16 @@ def create_app() -> FastAPI:
     # only included when APP_ENV is local/dev or CORS_ORIGINS explicitly lists them.
     try:
         origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+        origin_regex = None
         if not origins:
             _app_env = os.getenv("APP_ENV", "local").strip().lower()
-            if _app_env in ("local", "dev", "development", "test"):
-                origins = [
-                    "http://localhost:5173",
-                    "http://127.0.0.1:5173",
-                    "http://localhost:5174",
-                    "http://127.0.0.1:5174",
-                    "http://localhost:8080",
-                    "http://127.0.0.1:8080",
-                ]
+            if _app_env in ("local", "dev", "development", "test", "testing"):
+                # DEV: allow ANY localhost/127.0.0.1 port so a demo on an alternate frontend port (5178, …)
+                # or backend port just works — no per-port CORS edit. allow_origin_regex echoes the specific
+                # origin, so it's compatible with allow_credentials (a wildcard '*' would not be). PROD still
+                # requires explicit CORS_ORIGINS below.
+                origin_regex = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+                origins = []
             else:
                 # Production: no wildcard fallback — require explicit CORS_ORIGINS
                 import logging as _logging
@@ -591,6 +836,7 @@ def create_app() -> FastAPI:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
+            allow_origin_regex=origin_regex,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -640,7 +886,7 @@ def create_app() -> FastAPI:
     # PCI boundary header enforcement for payment endpoints
     try:
         # Skip PCI boundary middleware in test/dev when explicitly disabled
-        if not os.getenv("DISABLE_SECURITY_MIDDLEWARE", "0").lower() in ("1", "true", "yes"):
+        if os.getenv("DISABLE_SECURITY_MIDDLEWARE", "0").lower() not in ("1", "true", "yes"):
             app.add_middleware(PciBoundaryMiddleware)
     except Exception:
         pass
@@ -688,6 +934,24 @@ def create_app() -> FastAPI:
     # Added last so it runs first — fingerprint data is available to all downstream middleware and handlers.
     try:
         app.add_middleware(TLSFingerprintMiddleware)
+    except Exception:
+        pass
+
+    # Scope the active StoreProfile (vertical) per request: X-Store-Profile header → STORE_PROFILE_ID
+    # env → electronics. Pure-ASGI so the ContextVar reaches the (threadpool-run) sync routes — turns
+    # the agnostic core from env-level into per-tenant runtime selection.
+    try:
+        from src.app.platform.store_profile_middleware import StoreProfileMiddleware
+        app.add_middleware(StoreProfileMiddleware)
+    except Exception:
+        pass
+
+    # Batch the recommend route's durable trace writes into one bulk insert (latency): begins a
+    # trace batch on entry, flushes after the response. Pure-ASGI so the batch ContextVar reaches
+    # the threadpool-run sync route. Scoped to /api/v1/recommend.
+    try:
+        from src.app.platform.trace_batch_middleware import TraceBatchMiddleware
+        app.add_middleware(TraceBatchMiddleware)
     except Exception:
         pass
 
@@ -746,7 +1010,7 @@ def create_app() -> FastAPI:
                 if m == "PUT":
                     return {"keys": {"uid", "items"}, "nested": {"items": {"sku", "quantity"}}}
             if p == "/api/v1/orders/create":
-                return {"keys": {"uid", "items", "customer_id", "guest_email"}, "nested": {"items": {"sku", "quantity"}}}
+                return {"keys": {"uid", "items", "customer_id", "guest_email", "trace_id"}, "nested": {"items": {"sku", "quantity"}}}
             if p == "/api/v1/orders/guest/lookup":
                 return {"keys": {"order_id", "email"}}
             if p.startswith("/api/v1/admin/") and m in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -825,7 +1089,6 @@ def create_app() -> FastAPI:
                         return ORJSONResponse({"detail": "server busy"}, status_code=503)
                     # Mark a short busy window to increase determinism for concurrent requests
                     try:
-                        import time as _t
                         delay = float(os.getenv("BACKPRESSURE_TEST_DELAY_SEC", "0.03") or 0)
                         app.state.busy_until = now + delay
                     except Exception:
@@ -999,7 +1262,7 @@ def create_app() -> FastAPI:
                     pass
                 # record full traceback for triage
                 try:
-                    import traceback, sys
+                    import traceback
                     tb = traceback.format_exc()
                     with open("runs/request_exceptions.log", "a", encoding="utf-8") as ef:
                         ef.write(f"{datetime.utcnow().isoformat()} path={request.url.path} error={tb}\n")
@@ -1052,7 +1315,8 @@ def create_app() -> FastAPI:
             pass
         # Log full traceback to stderr to help triage intermittent 500s
         try:
-            import sys, traceback
+            import sys
+            import traceback
             tb = traceback.format_exc()
             sys.stderr.write(f"[unhandled_exception] path={request.url.path} error={exc}\n{tb}\n")
             sys.stderr.flush()
@@ -1071,7 +1335,7 @@ def create_app() -> FastAPI:
         # Skip noisy or low-value endpoints
         if request.method == "OPTIONS" or path in ("/health", "/healthz", "/metrics"):
             return await call_next(request)
-        if path.startswith("/api/v1/vision/triage") or path.startswith("/api/v1/recommend/suggest"):
+        if path.startswith("/api/v1/vision/triage"):
             return await call_next(request)
         # Allow per-request skip via header (for performance tests)
         try:
@@ -1151,32 +1415,59 @@ def create_app() -> FastAPI:
             sess = None
 
         try:
-            try:
-                emit_security_event(path, payload, request=request)
-            except Exception:
-                pass
-            # Anomaly detection hook (model-poison / DDOS signals) - non-blocking.
-            # Runs unconditionally on every request, not only when emit_security_event fails.
-            try:
-                from src.app.security.anomaly_detector import detect_anomaly
-                from src.app.observability.metrics import record_security_event
-                an = detect_anomaly(payload)
-                if isinstance(an, dict) and an.get("anomaly"):
-                    try:
-                        if an.get("severity") in ("high", "critical"):
-                            from src.app.services.ticketing import TicketingAgent
-                            t = TicketingAgent()
-                            title = f"Anomaly detected: {an.get('reason')}"
-                            desc = str({"path": path, "reason": an.get("reason"), "payload_summary": payload.get("body") if isinstance(payload, dict) else None})
-                            t.create_ticket(title=title, description=desc, severity=(an.get("severity") or "high"))
-                    except Exception:
-                        pass
-                    try:
-                        record_security_event("anomaly_detected", an.get("severity") or "medium", an.get("reason") or "anomaly")
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # NEW-3: bound the observer so a cold-start blocking detector / GeoIP / DB call can't hang
+            # the request hot path. The bounded path runs emit + anomaly in a worker thread under a hard
+            # timeout. CONCURRENCY-GATED DEFAULT-OFF (OBSERVER_THREADED): the threaded path uses a
+            # SEPARATE db_session, which is correct on Postgres (per-thread connections) but unsafe on a
+            # shared single-connection pool (SQLite/tests → "cannot start a transaction within a
+            # transaction", and on timeout the un-cancellable thread keeps writing on that connection).
+            # With the flag off (default) the observer runs INLINE on the request-scoped session — the
+            # proven, race-free path. Enable OBSERVER_THREADED in prod (Postgres) for the hard time-bound.
+            import asyncio as _aio
+            import logging as _logging
+
+            def _run_observer_sync(_obs_request):
+                try:
+                    emit_security_event(path, payload, request=_obs_request)
+                except Exception:
+                    pass
+                # Anomaly detection hook (model-poison / DDOS signals).
+                try:
+                    from src.app.security.anomaly_detector import detect_anomaly
+                    from src.app.observability.metrics import record_security_event
+                    an = detect_anomaly(payload)
+                    if isinstance(an, dict) and an.get("anomaly"):
+                        try:
+                            if an.get("severity") in ("high", "critical"):
+                                from src.app.services.ticketing import TicketingAgent
+                                t = TicketingAgent()
+                                title = f"Anomaly detected: {an.get('reason')}"
+                                desc = str({"path": path, "reason": an.get("reason"), "payload_summary": payload.get("body") if isinstance(payload, dict) else None})
+                                t.create_ticket(title=title, description=desc, severity=(an.get("severity") or "high"))
+                        except Exception:
+                            pass
+                        try:
+                            record_security_event("anomaly_detected", an.get("severity") or "medium", an.get("reason") or "anomaly")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            _obs_threaded = str(os.getenv("OBSERVER_THREADED", "0")).strip().lower() in ("1", "true", "yes", "on")
+            if _obs_threaded:
+                # Bounded best-effort: own db_session (thread-safe on Postgres), hard timeout.
+                _obs_budget = float(os.getenv("OBSERVER_TIMEOUT_SEC", "2.0") or 2.0)
+                try:
+                    await _aio.wait_for(_aio.to_thread(lambda: _run_observer_sync(None)), timeout=_obs_budget)
+                except _aio.TimeoutError:
+                    _logging.getLogger("shopsquire.observer").warning(
+                        "security observer timed out (%.1fs) on %s — skipped; request continues", _obs_budget, path
+                    )
+                except Exception:
+                    pass
+            else:
+                # Default: inline on the request-scoped session — no cross-connection race.
+                _run_observer_sync(request)
             response = await call_next(request)
             return response
         finally:
@@ -1230,10 +1521,14 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health():
+        from src.app.services.runtime_modes import runtime_mode_snapshot
+
+        runtime_modes = runtime_mode_snapshot()
         if str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on"):
             return {
                 "status": "ok",
                 "mode": "fast_test_health",
+                "runtime_modes": runtime_modes,
                 "dependencies": {
                     "backend": {"status": "healthy", "mode": "fast_test_health"},
                 },
@@ -1246,7 +1541,12 @@ def create_app() -> FastAPI:
         status = "ok"
         if any(v.get("status") == "unhealthy" for v in deps.values() if isinstance(v, dict)):
             status = "degraded"
-        return {"status": status, "dependencies": deps, "timestamp": snapshot.get("timestamp")}
+        return {
+            "status": status,
+            "runtime_modes": runtime_modes,
+            "dependencies": deps,
+            "timestamp": snapshot.get("timestamp"),
+        }
 
     @app.get("/healthz")
     def healthz():
@@ -1265,11 +1565,13 @@ def create_app() -> FastAPI:
         config_report = {"ok": True, "missing": [], "warnings": [], "contract": {}}
         components: dict[str, dict[str, Any]] = {
             "backend": {"status": "ready", "details": {"liveness": "ok"}},
+            "runtime_profile": {"status": "unknown", "details": {}},
             "frontend": {"status": "skipped", "details": {"mode": "deep_only"}},
             "ollama": {"status": "skipped", "details": {"mode": "deep_only"}},
             "cv_ocr": {"status": "skipped", "details": {"mode": "deep_only"}},
             "redis": {"status": "skipped", "details": {"mode": "deep_only"}},
             "db": {"status": "unknown", "details": {}},
+            "router_model": {"status": "unknown", "details": {}},
         }
 
         def _set_component(name: str, ready: bool, details: dict[str, Any] | None = None) -> None:
@@ -1287,6 +1589,19 @@ def create_app() -> FastAPI:
         except Exception:
             ok = False
             reasons.append("config_contract_check_failed")
+
+        try:
+            from src.app.services.runtime_modes import runtime_mode_snapshot
+
+            runtime_modes = runtime_mode_snapshot()
+            _set_component("runtime_profile", bool(runtime_modes["ready"]), runtime_modes)
+            if not bool(runtime_modes["ready"]):
+                ok = False
+                reasons.append("runtime_profile_mismatch")
+        except Exception:
+            ok = False
+            reasons.append("runtime_profile_check_failed")
+            _set_component("runtime_profile", False, {"error": "runtime_profile_check_failed"})
 
         try:
             eng = getattr(app.state, "engine", None)
@@ -1307,6 +1622,18 @@ def create_app() -> FastAPI:
             ok = False
             reasons.append("ready_check_failed")
             _set_component("db", False, {"error": "ready_check_failed"})
+
+        router_prewarm = getattr(app.state, "router_prewarm", None)
+        if isinstance(router_prewarm, dict):
+            router_ready = bool(router_prewarm.get("ready"))
+            _set_component("router_model", router_ready, router_prewarm)
+            if not router_ready and str(os.getenv("ROUTER_PREWARM_REQUIRED", "0")).strip().lower() in (
+                "1", "true", "yes", "on",
+            ):
+                ok = False
+                reasons.append("router_model_not_ready")
+        else:
+            _set_component("router_model", False, {"status": "not_started"})
 
         if deep:
             try:
@@ -1558,6 +1885,11 @@ def create_app() -> FastAPI:
 
     app.include_router(admin.router)
     try:
+        from src.app.routers.admin_mfa_routes import router as admin_mfa_router
+        app.include_router(admin_mfa_router)
+    except Exception:
+        pass
+    try:
         from src.app.routers.admin_api_keys import router as admin_api_keys_router
         app.include_router(admin_api_keys_router)
     except Exception:
@@ -1573,11 +1905,28 @@ def create_app() -> FastAPI:
         app.include_router(connectors_admin_router)
     except Exception:
         pass
+    # P2: two fully-built admin routers were never included → their endpoints 404'd. Register them
+    # (case cockpit: /api/v1/admin/cases/{id}/cockpit+/tags; decision time-travel: /admin/decisions/asof).
+    try:
+        from src.app.routers.case_cockpit import router as case_cockpit_router
+        app.include_router(case_cockpit_router)
+    except Exception as e:
+        logging.getLogger("shopsquire.startup").exception("failed to include case_cockpit router: %s", e)
+    try:
+        from src.app.routers.decision_time_travel import router as decision_time_travel_router
+        app.include_router(decision_time_travel_router)
+    except Exception as e:
+        logging.getLogger("shopsquire.startup").exception("failed to include decision_time_travel router: %s", e)
     app.include_router(incident_router)
     app.include_router(metrics_router)
     app.include_router(sla_router)
     app.include_router(session_memory_router)
     app.include_router(decisions_router)
+    try:
+        from src.app.routers.authz_audit import router as authz_audit_router
+        app.include_router(authz_audit_router)
+    except Exception as e:
+        logging.getLogger("shopsquire.startup").exception("failed to include authz_audit router: %s", e)
     app.include_router(voice_router)
     app.include_router(vision_router)
     app.include_router(image_sidecar_router)
@@ -1621,6 +1970,9 @@ def create_app() -> FastAPI:
         except Exception:
             pass
     app.include_router(approvals_router)
+    app.include_router(fulfillment_cases_router)
+    app.include_router(supply_risk_router)
+    app.include_router(kyv_admin_router)  # KYV vendor onboarding/lifecycle (autonomous-send trust source)
     # Tickets router for approval workflow
     try:
         app.include_router(tickets_module.router)
@@ -1633,6 +1985,11 @@ def create_app() -> FastAPI:
     except Exception:
         pass
     app.include_router(recommend_router)
+    app.include_router(recommend_aux_router)
+    app.include_router(recommendation_checkout_router)
+    app.include_router(recommendation_explain_router)
+    app.include_router(recommendation_nqe_router)
+    app.include_router(recommendation_feedback_router)
     # Product catalog and detail endpoints
     try:
         app.include_router(products_router)
@@ -1782,6 +2139,13 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include admin_email router: %s", e)
+    # Outbound-DLP quarantine (owner human-release queue)
+    try:
+        from src.app.routers.outbound_email_quarantine import router as outbound_quarantine_router
+        app.include_router(outbound_quarantine_router)
+    except Exception as e:
+        import logging
+        logging.getLogger("shopsquire.startup").exception("failed to include outbound_email_quarantine router: %s", e)
     # Inventory sync/admin endpoints (Phase 5 MVP)
     try:
         from src.app.routers.admin_inventory import router as admin_inventory_router
@@ -1793,6 +2157,16 @@ def create_app() -> FastAPI:
             logging.getLogger("shopsquire.startup").exception("failed_to_include_admin_inventory_router: %s", e)
         except Exception:
             pass
+
+    try:
+        from src.app.routers.allocation import buyer_router as buyer_allocation_router
+        from src.app.routers.allocation import router as allocation_router
+        app.include_router(allocation_router)
+        app.include_router(buyer_allocation_router)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed_to_include_allocation_router: %s", e)
     try:
         from src.app.routers.merchant_dashboard import router as merchant_dashboard_router
         app.include_router(merchant_dashboard_router)
@@ -1895,6 +2269,15 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include admin_bi router: %s", e)
+    # Tenant-scoped Party/account intelligence and human-governed identity proposals.
+    try:
+        from src.app.routers.admin_accounts import router as admin_accounts_router
+
+        app.include_router(admin_accounts_router)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_accounts router: %s", e)
     # Escalation room (admin ↔ shopper chat stream per incident)
     try:
         app.include_router(escalation_room_router)
@@ -1925,6 +2308,13 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include decision_trace_events router: %s", e)
+    try:
+        from src.app.routers.hippograph import router as hippograph_router
+        app.include_router(hippograph_router)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include hippograph router: %s", e)
     try:
         from src.app.routers.decision_replay import router as decision_replay_router
         app.include_router(decision_replay_router)
@@ -2011,6 +2401,8 @@ def create_app() -> FastAPI:
     except Exception:
         pass
     app.include_router(cart_router)
+    from src.app.routers.cart_mutations import router as cart_mutations_router
+    app.include_router(cart_mutations_router)   # C1: confirm-tier plan apply (V2 cart lane)
     app.include_router(privacy_router)
     app.include_router(auth_router)
     app.include_router(account_router)
@@ -2052,7 +2444,7 @@ def create_app() -> FastAPI:
                 try:
                     alerts = agent.monitor_stock_levels()
                     if alerts:
-                        recs = agent.generate_reorder_recommendations(alerts)
+                        agent.generate_reorder_recommendations(alerts)
                         try:
                             decisions_events_counter.inc()
                         except Exception:
@@ -2182,6 +2574,16 @@ def create_app() -> FastAPI:
 
         app.add_event_handler("startup", lambda: start_incident_sla_scheduler(app))
         app.add_event_handler("shutdown", lambda: stop_incident_sla_scheduler(app))
+    except Exception:
+        pass
+
+    # Money-P0 M1: payment-attempt reconciliation (transactional-outbox reader) — heals a lost
+    # order↔intent association so a provider charge never orphans.
+    try:
+        from src.app.services.payment_reconcile_scheduler import (
+            start_payment_reconcile_scheduler, stop_payment_reconcile_scheduler)
+        app.add_event_handler("startup", lambda: start_payment_reconcile_scheduler(app))
+        app.add_event_handler("shutdown", lambda: stop_payment_reconcile_scheduler(app))
     except Exception:
         pass
 

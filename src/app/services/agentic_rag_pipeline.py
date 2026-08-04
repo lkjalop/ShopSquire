@@ -1,14 +1,33 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
 import uuid
-from typing import Any, Dict, List
+from dataclasses import asdict
+from typing import Any, Callable, Dict, List
 
 from pydantic import BaseModel, Field
 
 from src.app.services.decision_log import log_trace_event
 from src.app.services.faq_bank import FAQ_BANK
 from src.app.services.semantic_search import semantic_retrieve_text_chunks
+from src.app.services.semantic_cache import (
+    CacheContract,
+    SemanticCache,
+    stable_citation_id,
+)
+
+
+RAG_CONTRACT_VERSION = "2"
+_FAQ_CORPUS_VERSION = hashlib.sha256(
+    json.dumps(FAQ_BANK, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+).hexdigest()[:16]
+_RAG_CACHE = SemanticCache(
+    redis_url=os.getenv("REDIS_URL"),
+    default_ttl=int(os.getenv("RAG_CACHE_TTL_SECONDS", "600")),
+)
 
 
 class PlanInput(BaseModel):
@@ -82,13 +101,19 @@ def _retrieve(plan: PlanOutput) -> RetrieveOutput:
         q = str(item.get("q") or "")
         a = str(item.get("a") or "")
         tags = [str(t) for t in (item.get("tags") or [])]
+        document_id = hashlib.sha256(q.encode("utf-8")).hexdigest()[:24]
         docs.append(
             {
                 "q": q,
                 "a": a,
                 "tags": tags,
                 "text": f"{q}\n{a}\n{' '.join(tags)}",
-                "context_id": f"faq:{abs(hash(q)) % 100000}",
+                "context_id": stable_citation_id(
+                    source_id="faq_bank",
+                    document_id=document_id,
+                    revision=_FAQ_CORPUS_VERSION,
+                    content_hash=hashlib.sha256(f"{q}\n{a}".encode("utf-8")).hexdigest(),
+                ),
             }
         )
 
@@ -135,7 +160,13 @@ def _retrieve(plan: PlanOutput) -> RetrieveOutput:
                 score = max(score, float(overlap) / float(max(1, len(tk))))
             if score <= 0:
                 continue
-            cid = f"faq:{abs(hash(q)) % 100000}"
+            document_id = hashlib.sha256(q.encode("utf-8")).hexdigest()[:24]
+            cid = stable_citation_id(
+                source_id="faq_bank",
+                document_id=document_id,
+                revision=_FAQ_CORPUS_VERSION,
+                content_hash=hashlib.sha256(f"{q}\n{a}".encode("utf-8")).hexdigest(),
+            )
             out.append(
                 RetrievedChunk(
                     context_id=cid,
@@ -205,8 +236,26 @@ def run_agentic_rag_pipeline(
     trace_id: str | None = None,
     context_budget_chars: int = 1400,
     max_chunks: int = 5,
+    tenant_id: str | None = None,
+    subject_id: str = "",
+    session_epoch: str = "",
+    corpus_version: str | None = None,
+    policy_version: str = "rag-injection-policy-v1",
+    model_version: str = "deterministic-faq-decider-v1",
+    evidence_cutoff: str = "bundled",
+    cache_dependency_recorder: Callable[[dict[str, Any]], None] | None = None,
+    cache_lifecycle_resolver: Callable[[dict[str, str]], dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     tid = trace_id or f"rag-{uuid.uuid4()}"
+    contract = CacheContract.resolve(
+        tenant_id=tenant_id,
+        corpus_version=corpus_version or f"faq-bank-{_FAQ_CORPUS_VERSION}",
+        policy_version=policy_version,
+        model_version=model_version,
+        evidence_cutoff=evidence_cutoff,
+        subject_id=subject_id,
+        session_epoch=session_epoch,
+    )
     plan_in = PlanInput(question=question)
     plan = _plan(plan_in)
     log_trace_event(
@@ -218,7 +267,76 @@ def run_agentic_rag_pipeline(
         target_id="agentic_rag",
         payload=plan.model_dump(),
     )
-    ret = _retrieve(plan)
+    retrieval_request = {"queries": plan.queries, "intent": plan.intent}
+    cache_key = contract.cache_key("agentic_rag_retrieval", retrieval_request)
+    lifecycle_before_read = None
+    cache_read_permitted = True
+    if cache_lifecycle_resolver is not None:
+        try:
+            lifecycle_before_read = cache_lifecycle_resolver({
+                "tenant_id": contract.tenant_id, "cache_key": cache_key,
+            })
+            cache_read_permitted = bool(lifecycle_before_read.get("servable"))
+        except Exception:
+            # A registry outage cannot make an unverified cached generation safe.
+            cache_read_permitted = False
+            lifecycle_before_read = {"status": "degraded_dependency_unavailable", "servable": False}
+    cached = None
+    if cache_read_permitted:
+        cached = _RAG_CACHE.get_versioned(
+            namespace="agentic_rag_retrieval",
+            request=retrieval_request,
+            contract=contract,
+            min_trust=0.7,
+        )
+    cache_hit = isinstance(cached, dict)
+    if cache_hit:
+        try:
+            ret = RetrieveOutput.model_validate(cached)
+        except Exception:
+            cache_hit = False
+            ret = _retrieve(plan)
+    else:
+        ret = _retrieve(plan)
+    if not cache_hit:
+        cache_key = _RAG_CACHE.set_versioned(
+            namespace="agentic_rag_retrieval",
+            request=retrieval_request,
+            contract=contract,
+            value=ret.model_dump(),
+            source_id="faq_bank",
+            trust_score=0.78,
+        )
+    cache_dependency_registered = False
+    cache_temporal_status = str((lifecycle_before_read or {}).get("status") or "unregistered")
+    if cache_dependency_recorder is not None:
+        try:
+            cache_dependency_recorder({
+                "tenant_id": contract.tenant_id,
+                "cache_key": cache_key,
+                "namespace": "agentic_rag_retrieval",
+                "source_type": "faq_corpus",
+                "source_id": "faq_bank",
+                "source_version": contract.corpus_version,
+                "subject_type": "case" if contract.subject_id else "shared",
+                "subject_id": contract.subject_id,
+                "session_epoch": contract.session_epoch,
+                "rebuild_payload": {
+                    "schema_version": "shopsquire.cache-rebuild.v1",
+                    "namespace": "agentic_rag_retrieval",
+                    "request": retrieval_request,
+                    "contract": asdict(contract),
+                },
+            })
+            cache_dependency_registered = True
+            cache_temporal_status = "registered"
+        except Exception:
+            # A value without a durable dependency cannot remain reusable. The
+            # current deterministic retrieval may still answer read-only, but
+            # subsequent turns must rebuild rather than serve an untracked hit.
+            _RAG_CACHE.delete(cache_key)
+            cache_hit = False
+            cache_temporal_status = "degraded_dependency_unavailable"
     log_trace_event(
         trace_id=tid,
         event_type="rag_retrieve",
@@ -226,7 +344,12 @@ def run_agentic_rag_pipeline(
         source_id="RAG_Retriever_Agent",
         target_type="pipeline",
         target_id="agentic_rag",
-        payload={"retrieved": len(ret.chunks), "context_ids": [c.context_id for c in ret.chunks[:10]]},
+        payload={
+            "retrieved": len(ret.chunks),
+            "context_ids": [c.context_id for c in ret.chunks[:10]],
+            "cache_hit": cache_hit,
+            "cache_contract_version": contract.schema_version,
+        },
     )
     rank = _rank(ret, max_chunks=max_chunks)
     log_trace_event(
@@ -272,6 +395,21 @@ def run_agentic_rag_pipeline(
         "status": "ok",
         "trace_id": tid,
         "pipeline": "agentic_rag",
+        "contract_version": RAG_CONTRACT_VERSION,
+        "cache_contract": {
+            "schema_version": contract.schema_version,
+            "corpus_version": contract.corpus_version,
+            "policy_version": contract.policy_version,
+            "model_version": contract.model_version,
+            "evidence_cutoff": contract.evidence_cutoff,
+        },
+        "cache_hit": cache_hit,
+        "cache_key": cache_key,
+        "cache_dependency_registered": cache_dependency_registered,
+        "cache_temporal_status": cache_temporal_status,
+        "cache_temporal_read_status": str(
+            (lifecycle_before_read or {}).get("status") or "unregistered"
+        ),
         "answer": dec.answer,
         "confidence": dec.confidence,
         "citations": dec.citations,

@@ -1,10 +1,26 @@
 ﻿import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
+import { formatMoney, formatProductPrice, normalizeCurrency } from './lib/money';
+import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
+import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
+import SourcingIntentCard from './components/SourcingIntentCard';
+import MultiIntentCard from './components/MultiIntentCard';
+import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
+import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
-import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, clearCart } from './lib/api';
+import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
+import AffordabilityResolutionCard, {
+  type AffordabilityResolution,
+} from './components/AffordabilityResolutionCard';
+import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
+import { nextSourcingTraceId, procurementAwareTraceId } from './lib/trace';
+import { normalizePendingBulkBudget } from './lib/bulkBudget';
+import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
+import { citationChips } from './lib/evidenceDisplay';
+import { sourcingIntentAfterSelection } from './lib/sourcing';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -13,12 +29,32 @@ import LoginModal from './components/LoginModal';
 import AdminDashboard from './components/AdminDashboard';
 import { productShortLabel } from './lib/productDisplay';
 import { csrfHeaders } from './lib/csrf';
+import { detectPII } from './lib/pii';
+import StorefrontTrustBanner, {
+  trustEvidenceFromPayload,
+  type CatalogueLoadState,
+  type TrustEvidence,
+} from './components/StorefrontTrustBanner';
+import ProductWhyEvidence, { type ProductWhyExplanation } from './components/ProductWhyEvidence';
+import {
+  detectCVIssueType,
+  detectPanelMode,
+  hasDamageSignal,
+  isCartUpsellIntentQuery,
+  isComplaintIntent,
+  isShoppingIntentQuery,
+  requiresExternalResearchConsent,
+  shouldRouteToComplaint,
+  type RightPanelMode,
+} from './lib/queryIntent';
 import {
   clearStoredAuthIdentity,
   clearStoredRole,
   clearStoredUid,
   getStoredAuthIdentity,
-  getStoredUid,
+  getOrCreateStoredUid,
+  getOrCreateConversationEpoch,
+  rotateConversationEpoch,
   setStoredAuthIdentity,
 } from './lib/browserSession';
 
@@ -28,6 +64,7 @@ export type Product = {
   display_name?: string;
   subtitle?: string;
   price: number;
+  currency?: string;
   features?: string[];
   image_url?: string;
   specs?: Record<string, any>;
@@ -36,8 +73,12 @@ export type Product = {
   why_codes?: { code: string; label: string; confidence: number; weight?: number; weighted_score?: number }[];
   why_confidence?: number;
   model_source?: string;
+  // Stock honesty — surfaced from the backend finalizer (stock_status/stock_level/stock_urgency/cart_eligible).
+  stock_status?: 'in_stock' | 'low_stock' | 'very_low_stock' | 'out_of_stock' | string;
+  stock_level?: number;
+  stock_urgency?: string;
+  cart_eligible?: boolean;
 };
-type RightPanelMode = 'none' | 'grid' | 'list' | 'compare' | 'cv' | 'cart' | 'faq' | 'security' | 'visual_search' | 'image_context';
 type NqeInteraction = {
   questionId: string;
   questionText: string;
@@ -60,6 +101,15 @@ type ChatMessage = {
   nqeSelection?: NqeInteraction;         // set on user msgs triggered by NQE option click
   nqeSelectionApplied?: Record<string, any>;  // echoed back from backend on assistant msgs
   agentStepsReadable?: string[];         // human-readable agent step summaries from ResponseNormalizer
+  narrationJobId?: string;               // async-narration handoff: poll /narration/{id} → replace content
+  undoClear?: { items: { sku: string; quantity: number; name?: string }[] };  // "Undo" chip after a clear → re-add these
+  undoServer?: boolean;                  // V2 cart lane: undo via the server-side snapshot (POST /cart/undo)
+  // V2 cart lane (C2): a CONFIRM-tier mutation plan — nothing has touched the cart yet; the
+  // Confirm button applies it via POST /cart/mutations/{plan_id}/apply (idempotent, stale-guarded).
+  cartConfirm?: { planId: string; ops: { action: string; target_skus?: string[]; quantity?: number; replacement_sku?: string; replacement_name?: string; budget_max_cents?: number; unit_price_cents?: number; previous_quantity?: number; allow_sourcing?: boolean }[]; expiresAt?: string };
+  affordabilityResolution?: AffordabilityResolution;
+  evidence?: any;                        // N1: evidence block from the orchestrator → source chips + Evidence tab
+  webConsentPrompt?: { query: string };  // N3 Mode-B: consent chip — never auto-search on an imperative
 };
 type PendingImageContext = {
   labels: string[];
@@ -92,10 +142,39 @@ type RightPanelContract = {
   lower_tier?: PanelTier;
   higher_tier?: PanelTier;
   anchor_sections?: AnchorSection[];
+  // Phase-3 storefront-emphasis lever: a gated, profile-sourced messaging line for treatment users.
+  // Present only when the experiment is live + the subject is treatment + the action gate allowed.
+  emphasis?: { text?: string; variant?: string; key?: string; applied?: boolean; experiment_id?: string };
+  // Backend-driven choice lanes (recommend_choice_lanes): evidence-grouped options. When present the UI
+  // renders THESE instead of the frontend heuristic. A work query marks office lanes primary and a gaming
+  // chassis non_primary, so gaming never appears as a primary work pick.
+  device_lanes?: BackendDeviceLane[];
+  // Procurement-truth advisory: when a work query has no primary-fit options (only specialty/gaming),
+  // the backend advises sourcing rather than presenting gaming as the answer.
+  fleet_advisory?: { coverage?: string; message?: string; suggest_procurement?: boolean; non_primary_lanes?: string[] };
+};
+type BackendDeviceLane = {
+  key: string;
+  title: string;
+  explanation?: string;
+  metrics?: string[];
+  primary?: boolean;
+  non_primary?: boolean;
+  count?: number;
+  price_min?: number | null;
+  price_max?: number | null;
+  skus?: string[];
+  products?: { sku: string; name: string; price?: number | null; why?: string[] }[];
 };
 
 const IMAGE_FAST_TRIAGE_TIMEOUT_MS = 3000;
 const IMAGE_DEEP_TRIAGE_DELAY_MS = 30000;
+
+// Async-narration poll registry: a job id is live while its poll chain is allowed to run.
+// tick() bails when its id is gone, so deleting from this Set is the cancellation mechanism
+// — without it every message spawned an un-cancellable setTimeout→fetch chain (zombie fetches
+// kept hitting /narration/{id} long after the message was replaced).
+const activeNarrationJobs = new Set<string>();
 
 type BackendStatus = {
   ok: boolean;
@@ -130,15 +209,6 @@ type OperatorMetricSnapshot = {
   recordedAt?: string | null;
 };
 
-type ProductWhyExplanation = {
-  sku?: string;
-  reason_summary?: string;
-  matched_constraints?: string[];
-  rank_factors?: any[];
-  disqualifiers?: string[];
-  alternatives_not_selected?: any[];
-};
-
 type DeviceLane = 'windows' | 'macbook' | 'tablet_chromebook';
 
 function normalizeTraceId(value: any): string | null {
@@ -163,14 +233,13 @@ function productPrice(p: any): number {
   return 0;
 }
 
-function formatAUD(n: number): string {
-  return n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
+// Render a product price honestly: a real amount when we have one (from price OR price_cents), and an
+// em-dash when the object carries no price — never a misleading "$0" (demo-truth, same class as the
+// $0 budget-band fix).
+function formatPrice(p: any): string {
+  return formatProductPrice(p);
 }
 
-function isShoppingIntentQuery(query: string): boolean {
-  const q = String(query || '').toLowerCase();
-  return /laptop|computer|price|under|below|above|budget|cheap|affordable|\$|show|find|search|gaming|macbook|dell|hp|asus|lenovo|msi|university|student|study/.test(q);
-}
 
 function laneForProduct(p: Product): DeviceLane {
   const name = String(p.name || '').toLowerCase();
@@ -224,6 +293,10 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, 
   const prices = items.map((p) => productPrice(p)).filter((v) => v > 0);
   const minPrice = prices.length ? Math.min(...prices) : 0;
   const maxPrice = prices.length ? Math.max(...prices) : 0;
+  const currencies = Array.from(new Set(items.map((p) => normalizeCurrency((p as any)?.currency))));
+  const priceRange = currencies.length === 1
+    ? `${formatMoney(minPrice, currencies[0])} to ${formatMoney(maxPrice, currencies[0])}`
+    : 'multiple currencies (conversion required before comparison)';
   const useCase = _shortUseCase(String(query || ''));
   const top = items.slice(0, 2).map((p) => {
     const reason = Array.isArray(p.why) && p.why.length > 0 ? _prettyReason(String(p.why[0])) : '';
@@ -236,142 +309,43 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, 
       ? 'Budget allows performance-oriented options.'
       : 'Recommendations balance value and use-case fit.';
   if (lane === 'windows') {
-    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks range from ${formatAUD(minPrice)} to ${formatAUD(maxPrice)}.`;
+    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks span ${priceRange}.`;
   }
   if (lane === 'macbook') {
-    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, from ${formatAUD(minPrice)} to ${formatAUD(maxPrice)}.`;
+    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, spanning ${priceRange}.`;
   }
-  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, ${formatAUD(minPrice)}–${formatAUD(maxPrice)}).`;
+  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, ${priceRange}).`;
 }
 
 
 function useProducts() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [catalogueState, setCatalogueState] = useState<CatalogueLoadState>('loading');
+  const [catalogueEvidence, setCatalogueEvidence] = useState<TrustEvidence>(() => trustEvidenceFromPayload(null));
   useEffect(() => {
     const ctl = new AbortController();
     fetch('/ui/products.json', { signal: ctl.signal })
-      .then((r) => r.json())
-      .then((d) => setProducts(Array.isArray(d) ? d : Array.isArray(d?.products) ? d.products : []))
-      .catch(() => setProducts([]))
-      .finally(() => setLoading(false));
+      .then((r) => {
+        if (!r.ok) throw new Error(`catalogue_failed (${r.status})`);
+        return r.json();
+      })
+      .then((d) => {
+        const nextProducts = Array.isArray(d) ? d : Array.isArray(d?.products) ? d.products : [];
+        setProducts(nextProducts);
+        setCatalogueEvidence(trustEvidenceFromPayload(Array.isArray(d) ? null : d));
+        setCatalogueState(nextProducts.length > 0 ? 'ready' : 'empty');
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError') return;
+        setProducts([]);
+        setCatalogueState('unavailable');
+      });
     return () => ctl.abort();
   }, []);
-  return { products, loading };
+  return { products, catalogueState, catalogueEvidence };
 }
 
 // PII Detection - Luhn algorithm for credit card validation
-function luhnCheck(num: string): boolean {
-  let sum = 0;
-  let alt = false;
-  for (let i = num.length - 1; i >= 0; i--) {
-    let n = parseInt(num[i], 10);
-    if (alt) {
-      n *= 2;
-      if (n > 9) n -= 9;
-    }
-    sum += n;
-    alt = !alt;
-  }
-  return sum % 10 === 0;
-}
-
-type PIIMatch = { type: string; advice: string } | null;
-
-function detectPII(text: string): PIIMatch {
-  // Credit card pattern (13-19 digits with optional spaces/dashes)
-  const cardMatch = text.match(/\b(?:\d[ -]*?){13,19}\b/);
-  if (cardMatch) {
-    const digits = cardMatch[0].replace(/\D/g, '');
-    if (digits.length >= 13 && digits.length <= 19) {
-      // If it's a real-looking PAN (passes Luhn), block immediately.
-      if (luhnCheck(digits)) {
-        return {
-          type: 'credit card number',
-          advice: 'Never share payment card details in chat. Use our secure checkout instead.'
-        };
-      }
-
-      // Demo/real-world: users often paste fake/test numbers that fail Luhn.
-      // If strong card context is present (keywords or expiry), treat as PCI anyway.
-      const hasCardHint = /\b(card|credit|debit|visa|mastercard|amex|american\s+express|discover)\b/i.test(text);
-      const hasCvvHint = /\b(cvv|cvc|security\s*code|card\s*verification)\b/i.test(text);
-      const hasExpiry = /\b(0[1-9]|1[0-2])\s*[/\-]\s*(\d{2}|\d{4})\b/.test(text);
-      if (hasCardHint || hasCvvHint || hasExpiry) {
-        return {
-          type: 'payment card details',
-          advice: 'Never share card numbers, expiry dates, or CVV in chat. Use secure checkout instead.'
-        };
-      }
-    }
-  }
-
-  // SSN pattern
-  if (/\b\d{3}-\d{2}-\d{4}\b/.test(text)) {
-    return {
-      type: 'Social Security Number',
-      advice: 'SSNs should never be shared online. We will never ask for this information.'
-    };
-  }
-
-  // Email in certain contexts (offering personal email)
-  if (/\b(my email is|email me at|contact me at)\b/i.test(text) && /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/.test(text)) {
-    return {
-      type: 'email address',
-      advice: 'For account inquiries, please use the Account section. We protect your privacy.'
-    };
-  }
-
-  // Bank account numbers (8-17 digits preceded by keywords)
-  if (/\b(account|routing|bank).{0,20}\d{8,17}\b/i.test(text)) {
-    return {
-      type: 'bank account information',
-      advice: 'Never share banking details in chat. Contact our support team securely if needed.'
-    };
-  }
-
-  return null;
-}
-
-function detectPanelMode(query: string): RightPanelMode {
-  const q = query.toLowerCase();
-  const shoppingIntent = isShoppingIntentQuery(q);
-  // Compare triggers
-  if (/compare|vs|versus|difference|which is better|pros.?cons|side.?by.?side|head.?to.?head/.test(q)) return 'compare';
-  // Detailed/specs triggers
-  if (/specs|specification|details|detailed|features|info|information|describe|tell me about|breakdown/.test(q)) return 'list';
-  // CV/return triggers (when images attached - handled separately)
-  if (/return|complaint|damaged|broken|defective|refund|issue|problem/.test(q)) return 'cv';
-  // FAQ triggers
-  if (/faq|how do i|what is|shipping|warranty|policy|support/.test(q) && !shoppingIntent) return 'faq';
-  // Product search (default when products mentioned)
-  if (shoppingIntent) return 'grid';
-  return 'none';
-}
-
-function isCartUpsellIntentQuery(query: string): boolean {
-  const q = query.toLowerCase();
-  return /add[\s-]?on|accessor(y|ies)|what else should i buy|what else should i get|compatible|bundle|extra \$?\d+|spend .* extra|upsell/i.test(q);
-}
-
-function detectCVIssueType(query: string): string {
-  const q = query.toLowerCase();
-  if (/warranty|under warranty|warranty claim|warranty repair|warranty coverage/.test(q)) return 'warranty';
-  if (/return|send back|ship back/.test(q)) return 'return';
-  return 'refund';
-}
-
-function isComplaintIntent(query: string): boolean {
-  const q = query.toLowerCase();
-  const action = /return|refund|complaint/.test(q);
-  const damage = /damaged|broken|defective|issue|problem/.test(q);
-  const evidence = /photo|picture|image|upload|evidence/.test(q);
-  const policyOnly = /policy|eligibility|warranty|how do i|steps|process/.test(q);
-  if (damage && (action || evidence)) return true;
-  if (action && !policyOnly) return true;
-  return false;
-}
-
 // SVG Icons
 const ChatIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.fabIcon}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
 const CloseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>;
@@ -383,10 +357,32 @@ const GridIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 const ListIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>;
 
 export default function App() {
-  const { products, loading } = useProducts();
+  const { products, catalogueState, catalogueEvidence } = useProducts();
+  const [trustEvidence, setTrustEvidence] = useState<TrustEvidence>(() => trustEvidenceFromPayload(null));
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [headerSearchValue, setHeaderSearchValue] = useState('');
+  const localEnvironment = Boolean(
+    (import.meta as any).env?.DEV
+    || (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)),
+  );
+  useEffect(() => {
+    setTrustEvidence((current) => ({
+      synthetic: catalogueEvidence.synthetic ?? current.synthetic,
+      shadow: catalogueEvidence.shadow ?? current.shadow,
+      humanApprovalRequired: catalogueEvidence.humanApprovalRequired ?? current.humanApprovalRequired,
+      provenance: catalogueEvidence.provenance ?? current.provenance,
+    }));
+  }, [catalogueEvidence]);
+  const mergeTrustEvidence = (payload: any) => {
+    const observed = trustEvidenceFromPayload(payload);
+    setTrustEvidence((current) => ({
+      synthetic: observed.synthetic ?? current.synthetic,
+      shadow: observed.shadow ?? current.shadow,
+      humanApprovalRequired: observed.humanApprovalRequired ?? current.humanApprovalRequired,
+      provenance: observed.provenance ?? current.provenance,
+    }));
+  };
 
   const handleHeaderSearch = () => {
     const q = headerSearchValue.trim();
@@ -400,10 +396,49 @@ export default function App() {
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
   const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
+  const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
+  // Safe-internet-search results (separate labeled source; never owned catalog items).
+  const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
+  const [fulfilmentCase, setFulfilmentCase] = useState<FulfilmentCaseSummary | null>(null);
+  const [sourcingIntent, setSourcingIntent] = useState<SourcingIntent | null>(null);
+  // The decision trace of the TURN that produced the sourcing preview — pinned so a later turn's trace
+  // doesn't advance past it. confirm-cart links the case to THIS trace, so the Decision-Trace procurement
+  // badge resolves against the decision that actually opened the journey (not whatever turn is latest).
+  const [sourcingTraceId, setSourcingTraceId] = useState<string | null>(null);
+  // Keep the first confirmed procurement request identity above CartPanel.
+  // Conversational turns temporarily unmount that panel; amendments must still
+  // supersede the original order group instead of creating a parallel RFQ.
+  const [confirmedSourcingOrderId, setConfirmedSourcingOrderId] = useState<string | null>(null);
+  // P0 multi-intent plan (amend chosen qty + scoped new lines) surfaced for buyer confirmation.
+  const [multiIntent, setMultiIntent] = useState<MultiIntentPlan | null>(null);
+  const [bulkAlternatives, setBulkAlternatives] = useState<BulkAlternativeOption[]>([]);
   const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
+  const [traceInitialTab, setTraceInitialTab] = useState<string | undefined>(undefined);
+  const [traceEvidence, setTraceEvidence] = useState<any | null>(null);  // N1: evidence block for the trace popup's Evidence tab
+  // Bulk-order carry-through: the conversation's parsed unit count ("15 work laptops" → 15). Add buttons
+  // land THIS qty (sourcing-aware) instead of a silent 1. Cleared/updated on every chat turn.
+  const [pendingBulkQty, setPendingBulkQty] = useState<number | null>(null);
+  const [pendingBulkBudget, setPendingBulkBudget] = useState<Record<string, any> | null>(null);
+  // Session hygiene: a PRIOR session's cart must never silently shape this conversation (stale items were
+  // inflating totals in the demo). On first chat open with a non-empty cart, disclose it + how to clear.
+  const staleCartNoticeShown = useRef(false);
+  // Deep-link: /?trace=<id>&tracetab=procurement opens the Decision Trace straight onto a tab. Lets an
+  // operator/demo jump to a specific decision (e.g. the procurement drafted-RFQ + audit) without replaying
+  // the whole turn — also what makes the Procurement-tab recording deterministic.
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const t = (p.get('trace') || '').trim();
+      if (t) {
+        setTraceId(t);
+        setTraceInitialTab((p.get('tracetab') || '').trim() || undefined);
+        setTraceOpen(true);
+      }
+    } catch { /* no query params available — ignore */ }
+  }, []);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>({ ok: false, latencyMs: null, checkedAt: null, error: null });
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [readyz, setReadyz] = useState<ReadyzResponse | null>(null);
@@ -428,6 +463,8 @@ export default function App() {
   const [cvAutoIssueType, setCvAutoIssueType] = useState<string | undefined>(undefined);
   const [imageTriageContexts, setImageTriageContexts] = useState<any[]>([]);
   const [imageTriageRaw, setImageTriageRaw] = useState<any[]>([]);
+  const [canonicalImageProducts, setCanonicalImageProducts] = useState<Product[] | null>(null);
+  const [canonicalImageSummary, setCanonicalImageSummary] = useState('');
   const [visualSearchQuery, setVisualSearchQuery] = useState('');
   const [pendingImageContext, setPendingImageContext] = useState<PendingImageContext | null>(null);
   const [imageRoutingInFlight, setImageRoutingInFlight] = useState(false);
@@ -436,7 +473,24 @@ export default function App() {
   const [whyDrawerData, setWhyDrawerData] = useState<ProductWhyExplanation | null>(null);
   const [whyDrawerLoading, setWhyDrawerLoading] = useState(false);
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
-  const uid = (getStoredUid() || 'demo-user');
+  const uid = getOrCreateStoredUid();
+  const [conversationEpoch, setConversationEpoch] = useState(() => getOrCreateConversationEpoch());
+  const [temporaryChat, setTemporaryChat] = useState(false);
+  // Dev-only debug metadata (LLM tier·model badge) is noise for a pilot buyer OR a live demo (the demo runs
+  // the Vite dev server, so a DEV auto-enable leaks the badge on camera). Show it ONLY on an explicit opt-in
+  // (localStorage 'shopsquire_debug'='1') — never to a normal shopper and never by default in a dev build.
+  const showDebugBadges = ((): boolean => {
+    // `localStorage` (even `typeof localStorage`) can THROW SecurityError in a sandboxed iframe / locked-down
+    // privacy context — a bare check here would blank the whole app, so guard the access.
+    try {
+      return typeof localStorage !== 'undefined' && localStorage.getItem('shopsquire_debug') === '1';
+    } catch { return false; }
+  })();
+
+  // Track 2b — real clickstream: emit a first-touch page_view (with any ?utm_* channel) so the marketing-BI
+  // channel / verified-human / network panels populate from an ACTUAL visit, not just the synthetic seed.
+  // Best-effort + privacy-first (server hashes ids, drops raw IP); emitPageView de-dupes to once per load.
+  useEffect(() => { emitPageView(uid); }, [uid]);
 
   const persistOperatorMetrics = useCallback((timing: any, nextTraceId?: string | null, source = 'chat') => {
     if (!timing || typeof timing !== 'object') return;
@@ -614,6 +668,28 @@ export default function App() {
     setRightPanelPrevMode(current);
   }, [rightPanelMode, rightPanelPrevMode]);
   const [cart, setCart] = useState<any | null>(null);
+  // Session hygiene: a PRIOR session's cart must never silently shape this conversation (stale items were
+  // inflating totals in the demo). On first chat open, disclose a CARRIED cart + how to clear — but only
+  // when the backend age says it's genuinely carried (idle > 1h). The old code called ANY non-empty cart
+  // "from a previous session", so a cart built moments ago got mislabeled and, on "clear previous", wiped.
+  // Now the label is the truth (backend `cart.age` = now − updated_at), and a fresh working cart is left
+  // alone. Unknown age (no timestamp) → stay silent rather than guess.
+  useEffect(() => {
+    if (!chatOpen || staleCartNoticeShown.current) return;
+    const items: any[] = cart?.items || [];
+    if (items.length === 0) return;
+    const age = cart?.age || null;
+    if (!age || !age.is_carried) return;   // fresh this-session cart → not "previous", do not nag
+    staleCartNoticeShown.current = true;
+    const units = items.reduce((s: number, i: any) => s + (Number(i.quantity) || 1), 0);
+    const countStr = `**${items.length} item${items.length !== 1 ? 's' : ''} (${units} unit${units !== 1 ? 's' : ''})**`;
+    const when = age.label ? ` (last touched ${age.label})` : '';
+    const content = age.suggest_clear
+      ? `🛒 Heads up — your cart has ${countStr} carried over from an earlier session${when}. Say **"clear my cart"** to start fresh, or **"clear the old items but keep the latest"** to keep only what you just added — otherwise I'll factor it in.`
+      : `🛒 Heads up — your cart has ${countStr}${when}. If some of that is stale, say **"clear my cart"** or **"clear the old items but keep the latest"**; otherwise I'll factor it in.`;
+    setMessages(prev => [...prev, { role: 'assistant' as const, content, timestamp: new Date() }]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatOpen, cart]);
   const [showLogin, setShowLogin] = useState(false);
   const [showAdminDash, setShowAdminDash] = useState(false);
   const [expandedLane, setExpandedLane] = useState<DeviceLane | null>(null);
@@ -621,6 +697,7 @@ export default function App() {
 
   // NQE history: tracks every question-option interaction for backend context
   const [nqeHistory, setNqeHistory] = useState<NqeInteraction[]>([]);
+  const [confirmedSlots, setConfirmedSlots] = useState<Record<string, any>>({});
 
   // Multimodal: attached images queued for Send
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -664,7 +741,10 @@ export default function App() {
   }, [displayProducts]);
 
   // Dual STT (browser + Whisper)
-  const stt = useDualSTT();
+  const stt = useDualSTT({
+    apiUrl: getApiBase(),
+    apiKey: String((import.meta as any).env?.VITE_API_KEY || ''),
+  });
 
   // Sync STT transcript into input
   useEffect(() => {
@@ -738,26 +818,103 @@ export default function App() {
     }
   };
 
-  const addToCart = async (sku: string) => {
+  const addToCart = async (sku: string, qty: number = 1) => {
     if (!sku) return;
+    // Bulk-order carry-through: if the CONVERSATION asked for N units ("15 work laptops") and this Add
+    // came from a pick button (qty 1), land the conversation's quantity — via the sourcing-aware qty PUT
+    // (allow_sourcing) so exceeding stock sources the shortfall instead of a silent 409. Fixes the demo's
+    // "asked for 30, cart got 1".
+    const bulkQty = qty <= 1 && pendingBulkQty && pendingBulkQty > 1 ? pendingBulkQty : null;
+    if (bulkQty) {
+      const picked = displayProducts.find((p) => p.sku === sku) || products.find((p) => p.sku === sku);
+      const unitCents = Number((picked as any)?.price_cents)
+        || Math.round(Number((picked as any)?.price || 0) * 100);
+      const totalCents = Number((pendingBulkBudget as any)?.total_cents)
+        || Math.round(Number((pendingBulkBudget as any)?.total || 0) * 100);
+      const totalScope = String((pendingBulkBudget as any)?.scope || '').toLowerCase() === 'total';
+      if (totalScope && totalCents > 0 && unitCents > 0 && bulkQty * unitCents > totalCents) {
+        const affordable = Math.floor(totalCents / unitCents);
+        const productName = picked?.name || sku;
+        setChatOpen(true);
+        setMessages((prev) => [...prev, {
+          role: 'assistant' as const,
+          content: 'That selection exceeds the preserved total budget. Nothing was added.',
+          affordabilityResolution: {
+            kind: 'total_budget_exceeded',
+            sku,
+            product_name: productName,
+            currency: String((picked as any)?.currency || 'AUD'),
+            requested_quantity: bulkQty,
+            max_affordable_quantity: affordable,
+            current_unit_price_cents: unitCents,
+            cheaper_unit_price_max_cents: Math.floor(totalCents / bulkQty),
+            budget_max_cents: totalCents,
+            proposed_total_cents: bulkQty * unitCents,
+            other_lines_total_cents: 0,
+            choices: ['reduce_quantity', 'increase_budget', 'choose_cheaper_product'],
+            requires_confirmation: true,
+          },
+          timestamp: new Date(),
+        }]);
+        return;
+      }
+      // Stale-cart preflight: disclose pre-existing lines (other SKUs) AT the moment of the bulk add,
+      // so accumulated items from an earlier turn/session never surprise the buyer in the total.
+      const priorOther = (cart?.items || []).filter((i: any) => i.sku && i.sku !== sku);
+      const priorUnits = priorOther.reduce((s: number, i: any) => s + (Number(i.quantity) || 1), 0);
+      await setCartQty(sku, bulkQty, true);
+      setSourcingIntent((intent) => sourcingIntentAfterSelection(intent, sku));
+      switchRightPanelMode('cart');
+      setChatOpen(true);
+      const addedProduct = products.find((p) => p.sku === sku);
+      const staleNote = priorOther.length > 0
+        ? ` Your cart already had **${priorOther.length} other item${priorOther.length !== 1 ? 's' : ''} (${priorUnits} unit${priorUnits !== 1 ? 's' : ''})** from earlier — say **"clear my cart"** if you want just this.`
+        : '';
+      const bulkMsg = `Added **${bulkQty} × ${addedProduct?.name || sku}** to your cart (from your request). The delivery plan will show what ships locally, transfers from the network, or needs supplier sourcing.${staleNote}`;
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === bulkMsg) return prev;
+        return [...prev, { role: 'assistant' as const, content: bulkMsg, timestamp: new Date() }];
+      });
+      emitConsumerSignal(uid, 'checkout', {});
+      return;
+    }
     try {
-      const j = await addCartItem(uid, sku, 1);
+      const j = await addCartItem(uid, sku, Math.max(1, Math.floor(qty)));
       setCart(j);
+      setSourcingIntent((intent) => sourcingIntentAfterSelection(intent, sku));
+      // Track 2b — real conversion: add-to-cart is the demo storefront's terminal buy-intent action (no
+      // separate checkout page), so it registers as a conversion for the session (de-duped per session →
+      // one conversion regardless of how many items are added). Feeds the channel conversion-rate panel.
+      emitConsumerSignal(uid, 'checkout', {});
       switchRightPanelMode('cart');
       // Proactive post-add message in the chat
       const addedProduct = products.find((p) => p.sku === sku);
       const productName = addedProduct?.name || sku;
       setChatOpen(true);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant' as const,
-          content: `Nice choice! **${productName}** has been added to your cart. Want to see compatible accessories, or are you ready to checkout?`,
-          timestamp: new Date(),
-        },
-      ]);
-    } catch {
-      // ignore for MVP
+      const addMsg = `Nice choice! **${productName}** has been added to your cart. Want to see compatible accessories, or are you ready to checkout?`;
+      setMessages((prev) => {
+        // dedupe: a double-invoke (StrictMode / double-click) must not append the same line twice
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === addMsg) return prev;
+        return [...prev, { role: 'assistant' as const, content: addMsg, timestamp: new Date() }];
+      });
+    } catch (e: any) {
+      // Never fail silently: a stock-gate 409 previously showed nothing, so the buyer clicked Add and
+      // got no feedback (and the planner then had no prior cart item). Surface WHY it was blocked.
+      const addedProduct = products.find((p) => p.sku === sku);
+      const productName = addedProduct?.name || sku;
+      const m = String(e?.message || '');
+      const outOfStock = /stock|409|insufficient|out_of_stock|available/i.test(m);
+      const failMsg = outOfStock
+        ? `I couldn't add **${productName}** — it's out of stock or the quantity exceeds what's available. Want me to find an in-stock alternative?`
+        : `Sorry, I couldn't add **${productName}** to your cart just now. Please try again.`;
+      setChatOpen(true);
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === failMsg) return prev;
+        return [...prev, { role: 'assistant' as const, content: failMsg, timestamp: new Date() }];
+      });
     }
   };
 
@@ -778,12 +935,207 @@ export default function App() {
     }
   };
 
+  /** Cart stepper / multi-intent amendment — SET a line's absolute quantity. qty<=0 removes it.
+   *  allowSourcing=true (from the multi-intent Confirm-qty) lets the line exceed stock; the shortfall is
+   *  sourced at confirm-cart, so "15 instead" no longer 409s on a low-stock item. */
+  const setCartQty = async (sku: string, qty: number, allowSourcing = false) => {
+    if (!sku) return;
+    try {
+      const j = await setCartItemQty(uid, sku, qty, allowSourcing);
+      setCart(j);
+      // The cart write reports preferred-location stock, while the delivery planner also considers
+      // network transfers. Do not claim supplier sourcing until that allocation has been computed.
+      const sf = (j as any)?.sourcing_shortfall;
+      if ((j as any)?.sourcing_required && sf && Number(sf.shortfall) > 0) {
+        const nm = products.find((p) => p.sku === sku)?.name || sku;
+        setChatOpen(true);
+        setMessages((prev) => [...prev, { role: 'assistant' as const, timestamp: new Date(),
+          content: `Set **${nm}** to ${sf.requested}. ${sf.available_now} are available at the preferred location; check the delivery plan for network-transfer or supplier allocation of the remaining ${sf.shortfall}.` }]);
+      }
+    } catch (e: any) {
+      // Never fail silently — surface WHY (out of stock / qty exceeds available), mirroring add-to-cart.
+      const nm = products.find((p) => p.sku === sku)?.name || sku;
+      const m = String(e?.message || '');
+      const stockish = /stock|409|insufficient|out_of_stock|available/i.test(m);
+      setChatOpen(true);
+      setMessages((prev) => {
+        const content = stockish
+          ? `I couldn't set **${nm}** to that quantity — it's out of stock or exceeds what's available.`
+          : `Sorry, I couldn't update **${nm}** just now. Please try again.`;
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === content) return prev;
+        return [...prev, { role: 'assistant' as const, content, timestamp: new Date() }];
+      });
+    }
+  };
+
   const clearCartAll = async () => {
     try {
       const j = await clearCart(uid);
       setCart(j);
+      // Once the buyer explicitly clears, they own the cart — suppress the "previous session" stale
+      // notice for the rest of the session so items they add next are never mislabeled as carried over.
+      staleCartNoticeShown.current = true;
+      initialCartSkus.current = [];   // nothing "previous" remains after a full clear
+      // A cleared cart has no procurement story — release the sticky sourcing-trace pin so the Decision
+      // Trace no longer resolves the (now-abandoned) bulk order's Procurement tab.
+      setSourcingTraceId(null);
+      setConfirmedSourcingOrderId(null);
     } catch {
       // ignore
+    }
+  };
+
+  // UNDO a clear: re-add the items that were just removed — the reversible "put them back" for a buyer who
+  // changed their mind. Sequential re-adds (the backend cart write is lock-free); the removal freed the
+  // stock so they normally succeed. A since-sold-out line is skipped and reported, never silently dropped.
+  const restoreClearedItems = async (items: { sku: string; quantity: number; name?: string }[]) => {
+    let restored = 0;
+    for (const it of items) {
+      try {
+        await addCartItem(uid, String(it.sku), Math.max(1, Math.floor(Number(it.quantity) || 1)));
+        restored += 1;
+      } catch {
+        // keep going; partial restore is surfaced below
+      }
+    }
+    const refreshed = await getCart(uid).catch(() => null);
+    setCart(refreshed);
+    staleCartNoticeShown.current = true;   // buyer is actively managing the cart — don't re-nag
+    setMessages(prev => [...prev, { role: 'assistant' as const,
+      content: restored === items.length
+        ? `↩️ Restored ${restored} item(s) to your cart.`
+        : `↩️ Restored ${restored} of ${items.length} item(s). The rest couldn't be re-added (likely now out of stock) — tell me what you need and I'll re-source them.`,
+      timestamp: new Date() }]);
+  };
+
+  // V2 cart lane (C2): CONFIRM a proposed mutation plan → the transactional apply endpoint.
+  // Every backend outcome is honest and rendered as such: applied (refresh + undo chip),
+  // already_applied (a double-click / SSE retry — no second mutation happened), stale_cart
+  // (the cart changed since the proposal — never applied), expired / rejected.
+  const confirmCartPlan = async (msg: ChatMessage) => {
+    const plan = msg.cartConfirm;
+    if (!plan) return;
+    // consume the card first so a double-click can't fire twice from the UI side either
+    setMessages(prev => prev.map(m => m === msg ? { ...m, cartConfirm: undefined } : m));
+    try {
+      const out = await applyCartMutation(plan.planId, uid);
+      const status = String(out.status || '');
+      if (status === 'applied' || status === 'already_applied') {
+        const destructive = (out.applied || []).some((a) =>
+          ['clear_all', 'keep_only', 'remove_items', 'clear_previous'].includes(String(a.action)));
+        // The previous recommendation's fulfilment alternatives are quantity-specific. Once a
+        // confirmed mutation changes the cart, only the refreshed delivery plan is authoritative.
+        setBulkAlternatives([]);
+        const refreshed = await getCart(uid).catch(() => null);
+        setCart(refreshed);
+        switchRightPanelMode('cart');
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: status === 'applied'
+            ? '🧹 Done — applied the change to your cart.'
+            : 'That change was already applied — your cart is up to date.',
+          ...(status === 'applied' && destructive ? { undoServer: true } : {}),
+          timestamp: new Date() }]);
+      } else if (status === 'stale_cart') {
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: 'Your cart changed since I proposed that, so I didn\'t apply it (safety first). Tell me again what you\'d like and I\'ll redo it against the current cart.',
+          timestamp: new Date() }]);
+      } else if (status === 'expired') {
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: 'That confirmation window expired, so nothing was changed. Ask again and I\'ll set it up fresh.',
+          timestamp: new Date() }]);
+      } else {
+        const error = (out as any)?.error;
+        const err = error?.error || status || 'not applied';
+        const resolution = error?.resolution?.kind === 'total_budget_exceeded'
+          ? error.resolution as AffordabilityResolution
+          : undefined;
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: resolution
+            ? 'That quantity exceeds the preserved total budget. Nothing in your cart was changed.'
+            : `I couldn't apply that (${err}) — nothing in your cart was changed.`,
+          ...(resolution ? { affordabilityResolution: resolution } : {}),
+          timestamp: new Date() }]);
+      }
+    } catch (e: any) {
+      setMessages(prev => [...prev, { role: 'assistant' as const,
+        content: `I couldn't apply that change (${String(e?.message || e)}) — nothing in your cart was changed.`,
+        timestamp: new Date() }]);
+    }
+  };
+
+  const chooseAffordabilityResolution = (
+    msg: ChatMessage,
+    choice: AffordabilityResolution['choices'][number],
+  ) => {
+    const resolution = msg.affordabilityResolution;
+    if (!resolution) return;
+    setMessages(prev => prev.map(item => item === msg
+      ? { ...item, affordabilityResolution: undefined }
+      : item));
+    const name = JSON.stringify(resolution.product_name);
+    const budget = Math.round(resolution.budget_max_cents / 100);
+    const proposed = Math.round(resolution.proposed_total_cents / 100);
+    const query = choice === 'reduce_quantity'
+      ? `Set ${name} to ${resolution.max_affordable_quantity} units and keep the total budget at $${budget}.`
+      : choice === 'increase_budget'
+        ? `Increase the total budget to $${proposed} and set ${name} to ${resolution.requested_quantity} units.`
+        : `Show cheaper alternatives to ${name} that can supply ${resolution.requested_quantity} units within a total budget of $${budget}.`;
+    void handleSend({ queryOverride: query });
+  };
+
+  // V2 cart lane: undo via the SERVER-side snapshot the transactional apply stashed
+  // (survives reload; the same /cart/undo the clear button uses).
+  const undoServerSnapshot = async (msg: ChatMessage) => {
+    setMessages(prev => prev.map(m => m === msg ? { ...m, undoServer: undefined } : m));
+    try {
+      await undoCartClear(uid);
+      const refreshed = await getCart(uid).catch(() => null);
+      setCart(refreshed);
+      setMessages(prev => [...prev, { role: 'assistant' as const,
+        content: '↩️ Restored your cart from before that change.', timestamp: new Date() }]);
+    } catch (e: any) {
+      setMessages(prev => [...prev, { role: 'assistant' as const,
+        content: `I couldn't restore the snapshot (${String(e?.message || e)}).`, timestamp: new Date() }]);
+    }
+  };
+
+  // Snapshot the cart's SKUs on the FIRST cart read of the session: those are the "previous session"
+  // items. Lets the cart offer "Clear previous (N)" — drop the carried-over items WITHOUT losing what
+  // the buyer just added (the two-choice clear from the demo review). Empty first read → nothing is
+  // ever labelled previous.
+  const initialCartSkus = useRef<string[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    getCart(uid).then((j) => {
+      if (!active) return;
+      if (initialCartSkus.current === null) {
+        initialCartSkus.current = (j?.items || []).map((i: any) => String(i.sku));
+      }
+      setCart(j);
+    }).catch(() => {
+      if (active && initialCartSkus.current === null) initialCartSkus.current = [];
+    });
+    return () => { active = false; };
+  }, [uid]);
+  useEffect(() => {
+    if (initialCartSkus.current === null && cart) {
+      initialCartSkus.current = (cart.items || []).map((i: any) => String(i.sku));
+    }
+  }, [cart]);
+  const priorCartSkus = previousSessionSkus(
+    (cart?.items || []).map((i: any) => String(i.sku)), initialCartSkus.current);
+  const clearPriorCartItems = async () => {
+    try {
+      for (const sku of priorCartSkus) {
+        await removeFromCart(sku);
+      }
+      const refreshed = await getCart(uid).catch(() => null);
+      if (refreshed) setCart(refreshed);
+      initialCartSkus.current = [];          // the carried-over set is gone; the rest is this session's
+      staleCartNoticeShown.current = true;   // and no longer worth nagging about
+    } catch {
+      // best-effort — whatever was removed stays removed; Refresh shows the truth
     }
   };
 
@@ -807,7 +1159,10 @@ export default function App() {
     stt.toggle();
   };
 
-  const hasRightPanel = rightPanelMode !== 'none';
+  const hasProcurementPanel = Boolean(fulfilmentCase);
+  const hasRightPanel = rightPanelMode !== 'none' || hasProcurementPanel;
+  // latest assistant turn's questions — used to detect a receipt/verification ask (not rendered as a
+  // separate bottom bar anymore; NQE questions render inline in the message).
   const latestAssistantQuestions = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -990,7 +1345,7 @@ export default function App() {
     }
   };
 
-  const handleSend = async (opts?: { queryOverride?: string; nqeSelection?: { question_id: string; option_id: string; option_label: string; option_value?: string } }) => {
+  const handleSend = async (opts?: { queryOverride?: string; nqeSelection?: { question_id: string; option_id: string; option_label: string; option_value?: string }; externalResearchConsent?: boolean }) => {
     const q = String(opts?.queryOverride ?? inputValue).trim();
     if (!q) return;
     try {
@@ -1007,6 +1362,164 @@ export default function App() {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, userMsg, warningMsg]);
+      setInputValue('');
+      return;
+    }
+
+    // N3 Mode-B: an explicit web-search imperative is a CONSENT REQUEST, not a command — the fetch
+    // only happens if the buyer clicks the chip (which re-sends WITH external_research_consent).
+    // This is simultaneously the UX and the trigger-forcing mitigation: prompt-crafted imperatives
+    // cannot make the platform touch the network.
+    if (opts?.externalResearchConsent === undefined   // chip answers (true OR false) bypass — no loop
+        && requiresExternalResearchConsent(q)) {
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant',
+          content: 'I can check an APPROVED external source for that (curated allowlist, nothing about you or your order is sent). Want me to?',
+          webConsentPrompt: { query: q },
+          timestamp: new Date() }]);
+      setInputValue('');
+      return;
+    }
+    // CART ACTIONS the assistant can genuinely do — executed client-side against the real cart API, with
+    // an honest confirmation ("clear my cart" used to silently do nothing; the demo's top complaint).
+    // SCOPED clear first: "clear the old items from the previous session" — drop ONLY the carried-over
+    // items, keep what was added this session. Checked before the full clear (phrases like "clear the old
+    // items in my cart" match both) and does NOT require the word "cart" (the live miss: this phrasing
+    // fell through to product search).
+    // KEEP-scoped clear: "clear the cart but keep the latest / this one / the ThinkPad" → remove everything
+    // EXCEPT the item to keep. Distinct from "clear the OLD items", and MUST be caught before BOTH the
+    // old-items scoped clear and the full clear below — otherwise "clear cart but keep the latest" falls
+    // through to clearCartAll() and wipes the very item the buyer asked to keep (the live recording bug).
+    // When the keep intent is clear but WHICH item is ambiguous, we ASK rather than clear anything — the
+    // one thing we must never do is guess-then-wipe.
+    {
+      const keepRes = keepAfterClear(q, (cart?.items as any[]) || [], initialCartSkus.current);
+      if (keepRes.isKeepClear) {
+        const items = (cart?.items as any[]) || [];
+        if (items.length === 0) {
+          setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+            { role: 'assistant', content: 'Your cart is already empty — nothing to keep or clear.', timestamp: new Date() }]);
+          setInputValue(''); switchRightPanelMode('cart'); return;
+        }
+        if (keepRes.keepSkus.length === 0) {
+          setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+            { role: 'assistant', content: 'I can clear the cart but keep one item — which should I keep? Name it (or say "keep the latest") and I\'ll remove the rest.', timestamp: new Date() }]);
+          setInputValue(''); switchRightPanelMode('cart'); return;
+        }
+        const keepSet = new Set(keepRes.keepSkus.map(String));
+        const toRemove = items.filter((i) => !keepSet.has(String(i.sku)));
+        // SEQUENTIAL, not Promise.all — the backend cart remove is a lock-free read-modify-write
+        // (cart.py remove_item); parallel deletes race and silently leave an item behind.
+        for (const it of toRemove) {
+          await removeCartItem(uid, String(it.sku)).catch(() => null);
+        }
+        const refreshed = await getCart(uid).catch(() => null);
+        setCart(refreshed);
+        const keptItem = items.find((i) => keepSet.has(String(i.sku)));
+        const keptName = (keptItem && productShortLabel(keptItem as any)) || keepRes.keepSkus[0];
+        setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+          { role: 'assistant', content: `🧹 Done — removed ${toRemove.length} item(s) and kept **${keptName}**. That's what's left in your cart.`,
+            undoClear: { items: toRemove.map((i) => ({ sku: String(i.sku), quantity: Number(i.quantity) || 1, name: i.name })) },
+            timestamp: new Date() }]);
+        setInputValue(''); switchRightPanelMode('cart'); return;
+      }
+    }
+    if (/\b(?:clear|remove|delete|drop|get\s+rid\s+of)\b.{0,40}\b(?:old|previous|prior|earlier)\b.{0,40}\b(?:items?|units?|session|cart|stuff)\b/i.test(q)) {
+      // The buyer can ask this before the first cart refresh has populated `initialCartSkus`.
+      // In that case, read the backend cart now and treat those already-present lines as the
+      // carried-over set; otherwise the phrase falsely replies "nothing carried" and leaves
+      // stale items in place.
+      const latestCart = cart || await getCart(uid).catch(() => null);
+      const currentSkus = (latestCart?.items || []).map((i: any) => String(i.sku)).filter(Boolean);
+      if (initialCartSkus.current === null) initialCartSkus.current = currentSkus;
+      const carriedSkus = priorCartSkus.length > 0 ? priorCartSkus : previousSessionSkus(currentSkus, initialCartSkus.current);
+      const n = carriedSkus.length;
+      // Capture the removed lines BEFORE deleting, so the Undo chip can put them back.
+      const carriedSet = new Set(carriedSkus.map(String));
+      const removedItems = (latestCart?.items || []).filter((i: any) => carriedSet.has(String(i.sku)))
+        .map((i: any) => ({ sku: String(i.sku), quantity: Number(i.quantity) || 1, name: i.name }));
+      if (n > 0) {
+        if (carriedSkus.length === currentSkus.length) {
+          await clearCart(uid).catch(() => null);
+        } else {
+          // SEQUENTIAL, not Promise.all: the backend cart remove is a read-modify-write with no lock
+          // (cart.py remove_item), so parallel deletes race — two concurrent removes both read the same
+          // cart and the second save clobbers the first, silently leaving one item behind. Awaiting each
+          // in turn is correct; a few extra round-trips on a handful of items is negligible.
+          for (const sku of carriedSkus) {
+            await removeCartItem(uid, sku).catch(() => null);
+          }
+        }
+        const refreshed = await getCart(uid).catch(() => null);
+        setCart(refreshed);
+        initialCartSkus.current = [];
+        staleCartNoticeShown.current = true;
+      }
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant', content: n > 0
+            ? `🧹 Done — removed the ${n} item(s) carried over from your previous session. Everything you added this session is still in the cart.`
+            : 'There are no items carried over from a previous session — everything in the cart was added this session. Say "clear my cart" if you want to start completely fresh.',
+          ...(n > 0 && removedItems.length ? { undoClear: { items: removedItems } } : {}),
+          timestamp: new Date() }]);
+      setInputValue('');
+      switchRightPanelMode('cart');
+      return;
+    }
+    if (/\b(?:clear|empty|wipe|reset)\b.{0,20}\bcart\b|\bcart\b.{0,12}\b(?:clear|empty)\b/i.test(q)) {
+      // Capture the whole cart BEFORE the wipe so the Undo chip can restore it.
+      const removedItems = ((cart?.items as any[]) || []).map((i) => ({ sku: String(i.sku), quantity: Number(i.quantity) || 1, name: i.name }));
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant', content: '🧹 Done — your cart is now empty. Tell me what you need and I\'ll help you rebuild it.',
+          ...(removedItems.length ? { undoClear: { items: removedItems } } : {}),
+          timestamp: new Date() }]);
+      setInputValue('');
+      await clearCartAll();
+      switchRightPanelMode('cart');
+      return;
+    }
+    // HONEST REFUSAL + capability-gap ledger: actions the assistant genuinely can't execute yet get a
+    // truthful "not yet" (never silence), and the ask is RECORDED so QA can mine the ledger for the
+    // roadmap — a bounded platform getting smarter without getting looser.
+    const unsupported = (
+      // cancel / refund / return (with or without the literal "order": "I want a refund", "refund me",
+      // "money back", "cancel it/my purchase/subscription", "return this")
+      /\b(?:cancel|refund|return)\b.{0,24}\b(?:order|purchase|subscription|it|this)\b|\b(?:refund|money\s+back)\b|\bcancel\s+(?:it|this|that|my)\b/i.exec(q)
+      // order status / tracking ("where is my order", "order status", "has it shipped", "when will it arrive")
+      || /\b(?:track|where('?s| is)|status of)\b.{0,24}\b(?:order|package|delivery|shipment|parcel)\b|\border\s+status\b|\b(?:has|have)\b.{0,20}\b(?:shipped|arrived|delivered|dispatched)\b|\bwhen\b.{0,24}\b(?:arrive|delivered|ship|get\s+here)\b/i.exec(q)
+      // change/update address, payment, or contact info
+      || /\b(?:change|update|edit)\b.{0,24}\b(?:address|shipping|delivery\s+address|payment|card|email|phone)\b/i.exec(q)
+      // vouchers / promo / gift cards ("apply/use/redeem/enter my coupon", "promo code", "gift card")
+      || /\b(?:apply|use|redeem|enter|add|have)\b.{0,20}\b(?:coupon|voucher|discount\s+code|promo(?:\s+code)?|gift\s+card)\b|\bpromo\s+code\b|\bgift\s+card\b/i.exec(q)
+    );
+    if (unsupported) {
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant', content: `I can't do that from chat yet ("${unsupported[0]}") — a human teammate can via the admin console. I've logged your request so we prioritize building it. Meanwhile I can help you find products, manage cart quantities, or plan a bulk order.`, timestamp: new Date() }]);
+      setInputValue('');
+      try {
+        fetch(apiUrl('/api/v1/consumer/capability-gap'), {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+          body: JSON.stringify({ utterance: q, category: 'unsupported_action', refusal_reason: 'chat_action_not_implemented', surface: 'chat', uid }),
+        }).catch(() => {});
+      } catch { /* ledger is best-effort */ }
+      return;
+    }
+
+    // BARE price objection ("too expensive", "over my budget") with no search/budget cue → a governed,
+    // margin-SAFE value reframe (never an invented discount): value-first, offer lower-priced in-budget
+    // options, and the honest escalation path (a human-approved volume discount that stays within pricing
+    // policy — never below the margin floor). "too expensive, show cheaper / under $1500" is NOT caught —
+    // that carries a search cue and routes to a normal (cheaper) search.
+    if (/\b(?:too\s+(?:expensive|much|pricey|dear|costly)|over\s+(?:my\s+)?budget|can'?t\s+afford|out\s+of\s+(?:my\s+)?budget|way\s+too\s+much|bit\s+(?:pricey|steep))\b/i.test(q)
+        && !/\b(?:show|find|cheaper|lower|under|below|instead|options?|alternatives?|else|other|what\s+about)\b|\$\s?\d|\b\d{3,}\b/i.test(q)) {
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant', content:
+          "I hear you — price matters. These picks lead on value: warranty, longevity, and total cost of "
+          + "ownership, not just the sticker. If your budget's firm, tell me your cap and I'll show lower-priced "
+          + "options that still cover what you need. For a larger or bulk order I can also flag a volume discount "
+          + "for a teammate to approve — I keep any pricing within policy and never below our margin floor. "
+          + "Want me to show cheaper options, or set a budget?",
+          timestamp: new Date() }]);
       setInputValue('');
       return;
     }
@@ -1033,6 +1546,11 @@ export default function App() {
     const explicitVisualIntent = visualSearchHint(q);
     const explicitComplaintIntent = complaintTextHint(q);
     const requestImageContext = (Boolean(pendingImageContext) && !explicitComplaintIntent) ? pendingImageContext : null;
+    const imageRecommendationTurn = hasImages || Boolean(requestImageContext);
+    if (imageRecommendationTurn) {
+      setCanonicalImageProducts(null);
+      setCanonicalImageSummary('');
+    }
 
     if (hasPendingImage && explicitComplaintIntent && !hasImages) {
       setPendingImageContext(null);
@@ -1136,19 +1654,16 @@ export default function App() {
             }
           })(), IMAGE_DEEP_TRIAGE_DELAY_MS);
 
-          // Give the user a feedback message and short-circuit — the right panel handles recs
-          const imageNames = currentAttachedFiles.map(f => f.name).join(', ');
-          setMessages(prev => [...prev, {
-            role: 'assistant' as const,
-            content: `I checked your images (${imageNames}). Open **Visual Search** on the right to see per-image matches, nearest alternatives, and why each pick fits.`,
-            timestamp: new Date(),
-          }]);
-          setIsThinking(false);
-          return;
+          // Product selection always continues through /chat/query. The visual panel is a
+          // renderer for that canonical slate; it no longer owns an independent /suggest call.
         }
       }
 
-      const routeToComplaint = (mode === 'cv' || complaintIntent || explicitComplaintIntent) && !explicitVisualIntent && !requestImageContext && !hasImages;
+      const routeToComplaint = shouldRouteToComplaint({
+        mode, complaintIntent, explicitComplaintIntent, shoppingIntent,
+        damageSignal: hasDamageSignal(q), hasImages,
+        explicitVisualIntent, hasImageContext: Boolean(requestImageContext),
+      });
       if (routeToComplaint) {
         const r = await fetch(apiUrl('/api/v1/orchestrate'), {
           method: 'POST',
@@ -1159,7 +1674,7 @@ export default function App() {
             'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
           },
           body: JSON.stringify({
-            uid: getStoredUid() || 'demo-user',
+            uid: getOrCreateStoredUid(),
             cart_total_cents: 0,
             query: q,
             complaint_intent: true,
@@ -1169,6 +1684,7 @@ export default function App() {
         if (!r.ok || !data) {
           throw new Error((data && data.detail) ? data.detail : `orchestrate_failed (${r.status})`);
         }
+        mergeTrustEvidence(data);
         const proposal = data.proposal || {};
         const results = (proposal.results || []) as any[];
         const prods = results.map((item) => {
@@ -1187,6 +1703,13 @@ export default function App() {
             price: price ?? 0,
             features,
             image_url: item.image_url,
+            // Preserve backend signals this field-by-field map used to drop (stock honesty + why).
+            why: item.why,
+            score_norm: item.score_norm,
+            stock_status: item.stock_status,
+            stock_level: item.stock_level,
+            stock_urgency: item.stock_urgency,
+            cart_eligible: item.cart_eligible,
           } as Product;
         });
         setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || proposal.trace_id || null));
@@ -1212,7 +1735,12 @@ export default function App() {
         }
       } else {
         // Build multimodal chat payload
-        const chatPayload: any = { uid, query: q };
+        const chatPayload: any = {
+          uid,
+          query: q,
+          session_id: conversationEpoch,
+          memory_mode: temporaryChat ? 'temporary' : 'standard',
+        };
         const copyProfileId = String(localStorage.getItem('shopsquire_copy_profile_id') || (import.meta as any).env?.VITE_COPY_PROFILE_ID || '').trim();
         const copyBrandName = String(localStorage.getItem('shopsquire_brand_name') || (import.meta as any).env?.VITE_BRAND_NAME || '').trim();
         const copyEnabled =
@@ -1223,6 +1751,7 @@ export default function App() {
         if (copyProfileId) chatPayload.copy_profile_id = copyProfileId;
         if (copyBrandName) chatPayload.brand_name = copyBrandName;
         chatPayload.copy_surface = 'storefront';
+        if (opts?.externalResearchConsent) chatPayload.external_research_consent = true;
         if (opts?.nqeSelection) {
           chatPayload.nqe_selection = opts.nqeSelection;
         }
@@ -1232,16 +1761,22 @@ export default function App() {
         }
         // Attach image triage data
         if (imageTriageResults.length > 0) {
-          chatPayload.images = imageTriageResults.map((t: any) => ({
-            labels: t?.labels || [],
-            ocr_text: t?.extracted_text || '',
-            image_hash: t?.image_hash || null,
-            product_identity: t?.product_identity || null,
-            damage_score: t?.damage_score ?? 0,
-            is_product_photo: t?.is_product_photo ?? false,
-            intent_routing: t?.intent_routing || null,
-            security: t?.security || null,
-          }));
+          chatPayload.images = imageTriageResults.map((t: any) => {
+            const productIdentity = t?.product_identity || null;
+            const trustedImageEvidence = t?.provider !== 'client_fast_boundary' && (t?.is_product_photo === true || Boolean(productIdentity));
+            return {
+              // Do not pass filename-derived fast labels into /chat/query; names like
+              // apple-red.jpg can otherwise look like product intent and bias ranking.
+              labels: trustedImageEvidence && Array.isArray(t?.labels) ? t.labels : [],
+              ocr_text: trustedImageEvidence ? (t?.extracted_text || '') : '',
+              image_hash: t?.image_hash || null,
+              product_identity: productIdentity,
+              damage_score: t?.damage_score ?? 0,
+              is_product_photo: trustedImageEvidence,
+              intent_routing: t?.intent_routing || null,
+              security: t?.security || null,
+            };
+          });
         } else if (requestImageContext) {
           chatPayload.image_labels = requestImageContext.labels || [];
           chatPayload.image_ocr_text = requestImageContext.ocrText || '';
@@ -1263,15 +1798,38 @@ export default function App() {
         if (nqeHistory.length > 0) {
           chatPayload.nqe_history = nqeHistory.slice(-10);
         }
+        if (confirmedSlots && Object.keys(confirmedSlots).length > 0) {
+          chatPayload.confirmed_slots = confirmedSlots;
+        }
 
+        // ONE idempotency key per send, shared by BOTH the stream and the /chat/query fallback
+        // (review-6 #11): a slow first turn + the fallback must not double-serve/double-resolve.
+        const idempotencyKey = ((globalThis as any).crypto?.randomUUID?.())
+          || `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const apiHeaders = {
           'Content-Type': 'application/json',
           ...csrfHeaders(),
           'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          // canonical header the backend single-flight reads (review-7 P0 — name now matches)
+          'Idempotency-Key': idempotencyKey,
         };
+        // SSE deadlines (review-6 #11): the connect timeout only aborts if headers are slow; the
+        // body read loop needs its OWN idle + total deadlines or a hung server stalls forever
+        // (the `thinking` event arrives instantly, resolving fetch and clearing the old timer).
+        // Local/browser CORS setup can spend ~3s in middleware + preflight before streaming
+        // headers arrive. A 3.5s cutoff raced healthy streams and started a duplicate fallback
+        // that merely waited on the same idempotent producer. Heartbeat/idle/total limits below
+        // still bound execution; this deadline only allows the connection to become established.
+        const _SSE_CONNECT_MS = 10000;
+        const _SSE_IDLE_MS = 20000;     // no chunk for 20s → server hung, abort → fallback
+        const _SSE_TOTAL_MS = 90000;    // whole-turn ceiling
         const tryStreamChat = async (): Promise<any | null> => {
           const ctl = new AbortController();
-          const t = setTimeout(() => ctl.abort(), 3500);
+          const connectTimer = setTimeout(() => ctl.abort(), _SSE_CONNECT_MS);
+          const totalTimer = setTimeout(() => ctl.abort(), _SSE_TOTAL_MS);
+          let idleTimer: ReturnType<typeof setTimeout> | null = null;
+          const armIdle = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = setTimeout(() => ctl.abort(), _SSE_IDLE_MS); };
+          const clearAll = () => { clearTimeout(connectTimer); clearTimeout(totalTimer); if (idleTimer) clearTimeout(idleTimer); };
           let resp: Response;
           try {
             resp = await fetch(apiUrl('/api/v1/chat/stream'), {
@@ -1282,16 +1840,19 @@ export default function App() {
               signal: ctl.signal,
             });
           } finally {
-            clearTimeout(t);
+            clearTimeout(connectTimer);   // headers arrived (or aborted) — idle/total now govern
           }
-          if (!resp.ok || !resp.body) return null;
+          if (!resp.ok || !resp.body) { clearAll(); return null; }
           const reader = resp.body.getReader();
           const decoder = new TextDecoder();
           let buffer = '';
           let answerPayload: any = null;
+          try {
+          armIdle();   // start the idle watch now that we're reading the body
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
+            armIdle();   // a chunk arrived — reset the idle deadline
             buffer += decoder.decode(value, { stream: true });
             buffer = buffer.replace(/\r\n/g, '\n');
             let splitIdx = buffer.indexOf('\n\n');
@@ -1325,34 +1886,158 @@ export default function App() {
             }
           }
           return answerPayload;
+          } finally {
+            clearAll();   // release idle + total deadlines whether we finished, threw, or aborted
+          }
         };
 
         let data: any = null;
-        try {
-          data = await tryStreamChat();
-        } catch {
-          data = null;
-        }
-        if (!data) {
-          const r = await fetch(apiUrl('/api/v1/chat/query'), {
-            method: 'POST',
-            credentials: 'include',
-            headers: apiHeaders,
-            body: JSON.stringify(chatPayload),
-          });
-          data = await safeJson(r);
-          if (!r.ok || !data) {
-            throw new Error((data && data.detail) ? data.detail : `chat_query_failed (${r.status})`);
+        const hasChatImages = Array.isArray(chatPayload.images) && chatPayload.images.length > 0;
+        if (!hasChatImages) {
+          try {
+            data = await tryStreamChat();
+          } catch {
+            data = null;
           }
         }
+        if (!data) {
+          // the fallback needs its own deadline too (review-6 #11) + the SAME idempotency key so
+          // the backend can dedupe a stream-then-fallback double submit.
+          const qctl = new AbortController();
+          const qTimer = setTimeout(() => qctl.abort(), _SSE_TOTAL_MS);
+          let r: Response;
+          try {
+            r = await fetch(apiUrl('/api/v1/chat/query'), {
+              method: 'POST',
+              credentials: 'include',
+              headers: apiHeaders,
+              body: JSON.stringify(chatPayload),
+              signal: qctl.signal,
+            });
+          } finally {
+            clearTimeout(qTimer);
+          }
+          data = await safeJson(r);
+          // Replay protection (409): a duplicate of the previous turn was held back. Show a calm retry
+          // hint instead of the generic "Backend unavailable" panel (the detail is an object, not a string).
+          const replayDetail = data && (data.detail?.message ?? data.detail);
+          if (r.status === 409 && replayDetail === 'chat_replay_detected') {
+            const waitS = Number(data?.detail?.retry_after_seconds) || 5;
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: `That looked like a duplicate of your previous message, so I held off to avoid sending it twice. Please try again in about ${waitS}s.`,
+              timestamp: new Date(),
+            }]);
+            return;
+          }
+          if (!r.ok || !data) {
+            const detailStr = (data && typeof data.detail === 'string') ? data.detail
+              : (data && data.detail?.message) ? data.detail.message : `chat_query_failed (${r.status})`;
+            throw new Error(detailStr);
+          }
+        }
+        mergeTrustEvidence(data);
+        // ── V2 CART LANE (C2): the backend resolved this turn as a CART MUTATION ──
+        // Covers both transports (chat_stream forwards chat_query's result verbatim). Three
+        // shapes: applied → refresh the cart panel (the stale-panel bug) + server-undo chip on
+        // destructive ops; needs_confirmation → render the confirm card (NOTHING has touched the
+        // cart; Confirm applies via POST /cart/mutations/{plan_id}/apply, idempotent + stale-
+        // guarded); needs_clarification → the ask IS the answer. Product machinery is skipped.
+        if (data && (data as any).cart_mutation) {
+          const cm = (data as any).cart_mutation;
+          const nextMultiIntent =
+            data.multi_intent
+            && Array.isArray((data.multi_intent as any).plan)
+            && (data.multi_intent as any).plan.length > 0
+              ? (data.multi_intent as MultiIntentPlan)
+              : null;
+          const cartConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
+            ? data.confirmed_slots
+            : null;
+          const destructive = Array.isArray(cm.applied) && cm.applied.some((a: any) =>
+            ['clear_all', 'keep_only', 'remove_items', 'clear_previous'].includes(String(a.action)));
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: String(data.assistant_message || 'Cart update processed.'),
+            timestamp: new Date(),
+            ...(cm.needs_confirmation && cm.plan_id && !nextMultiIntent
+              ? { cartConfirm: { planId: String(cm.plan_id), ops: Array.isArray(cm.ops) ? cm.ops : [], expiresAt: cm.expires_at } }
+              : {}),
+            ...(data.cart_updated && destructive ? { undoServer: true } : {}),
+          }]);
+          setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || null));
+          setMultiIntent(nextMultiIntent);
+          if (cartConfirmedSlots && Object.keys(cartConfirmedSlots).length > 0) {
+            setConfirmedSlots(prev => ({ ...prev, ...cartConfirmedSlots }));
+          }
+          if (data.cart_updated) {
+            // Quantity-specific alternatives came from the recommendation turn before this
+            // mutation. Keeping them would show the old requested quantity above the new cart.
+            setBulkAlternatives([]);
+            await refreshCart();
+            switchRightPanelMode('cart');
+          }
+          if (nextMultiIntent) switchRightPanelMode('cart');
+          return;
+        }
+
         const prods = (data.products || []) as Product[];
+        const shelf = data.shelf && Array.isArray(data.shelf.bands)
+          ? data.shelf as RecommendationShelfContract
+          : null;
+        setRecommendationShelf(shelf);
+        const shelfProducts = (shelf?.bands || []).flatMap((band) => Array.isArray(band.cards) ? band.cards : []);
+        const allVisibleProducts = Array.from(
+          new Map([...prods, ...shelfProducts].map((product) => [String(product.sku), product])).values(),
+        );
+        if (imageRecommendationTurn) {
+          setCanonicalImageProducts(prods.slice(0, 10));
+          setCanonicalImageSummary(String(data.assistant_message || data.summary || ''));
+        }
+        // bulk-order carry-through: remember the conversation's requested unit count for the Add buttons
+        {
+          const _rq = Number((data as any).requested_quantity);
+          setPendingBulkQty(Number.isFinite(_rq) && _rq > 1 ? Math.min(1000, Math.floor(_rq)) : null);
+          setPendingBulkBudget(normalizePendingBulkBudget(
+            (data as any).bulk_budget,
+            (data as any).confirmed_slots,
+          ));
+        }
+        setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
+        setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);
+        // FLUID-procurement preview (FULFILLMENT_DEFER_TO_CART): a buyer-safe sourcing split with no durable
+        // case — the buyer confirms it (GATE 1) via SourcingIntentCard to materialize the cases.
+        setSourcingIntent(
+          data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines)
+            ? (data.sourcing_intent as SourcingIntent) : null);
+        // P0 multi-intent: present only on a genuine mixed turn (amend + scoped new lines). Surface it so
+        // the buyer confirms the qty change and adds the scoped picks — never silently applied.
+        const nextMultiIntent =
+          data.multi_intent
+          && Array.isArray((data.multi_intent as any).plan)
+          && (data.multi_intent as any).plan.length > 0
+            ? (data.multi_intent as MultiIntentPlan)
+            : null;
+        setMultiIntent(nextMultiIntent);
+        // A mixed-intent response can intentionally contain no recommendation
+        // products: its actionable output is the governed confirmation plan.
+        // Open the cart/procurement panel explicitly so that plan is visible.
+        if (nextMultiIntent) switchRightPanelMode('cart');
+        setBulkAlternatives(Array.isArray(data.fulfillment_options) ? (data.fulfillment_options as BulkAlternativeOption[]) : []);
         const respAssistant = data.assistant_message || '';
+        // Async-narration handoff: recommend returned the deterministic answer now + a job id for the
+        // richer LLM prose. We tag the assistant message and poll it in to replace the text in place.
+        const narrationJobId = (typeof data.llm_summary_job_id === 'string' && data.llm_summary_job_id)
+          ? data.llm_summary_job_id : null;
         const nextQuestions = Array.isArray(data.next_questions) ? data.next_questions : [];
         const normalizedNextQuestions = normalizeNextQuestions(nextQuestions);
         const isDisambiguation = data.disambiguation === true;
         const disambiguationOpts = Array.isArray(data.next_questions) ? data.next_questions.map((nq: any) => typeof nq === 'string' ? nq : nq?.text || '') : [];
         const complexity = data.complexity || null;
         const backendApplied = data.nqe_selection_applied || null;
+        const backendConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
+          ? data.confirmed_slots
+          : null;
         const agentStepsReadable: string[] | undefined = (() => {
           const steps = data?.proposal?.agent_steps_readable || data?.agent_steps_readable;
           return Array.isArray(steps) && steps.length > 0 ? steps : undefined;
@@ -1361,7 +2046,28 @@ export default function App() {
         const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
+        setTraceEvidence(data.evidence || null);
         const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
+        // Pin the sourcing trace to THIS turn when it produced a sourcing preview. If the turn carries NO
+        // procurement context at all (no sourcing preview, no open case, no bulk options/quantity), RELEASE
+        // the sticky pin — otherwise a later single-unit query would still resolve the prior bulk turn's
+        // Procurement tab and show its stale split. A turn that still carries procurement context (an open
+        // case or bulk options) keeps the pin so an active plan isn't unlinked.
+        const turnHasSourcingPreview = Boolean(
+          data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines) && (data.sourcing_intent as any).lines.length > 0);
+        const turnHasFulfillmentOptions = Array.isArray(data.fulfillment_options)
+          && data.fulfillment_options.length > 0;
+        const turnHasProcurementContext = turnHasSourcingPreview
+          || Boolean(data.fulfillment_case && (data.fulfillment_case as any).case_id)
+          || turnHasFulfillmentOptions
+          || (Number((data as any).requested_quantity) > 1);
+        setSourcingTraceId((current) => nextSourcingTraceId(
+          current,
+          nextTraceId,
+          turnHasSourcingPreview,
+          turnHasFulfillmentOptions,
+          turnHasProcurementContext,
+        ));
         persistOperatorMetrics(data.timing_breakdown, nextTraceId, Array.isArray(chatPayload.images) && chatPayload.images.length > 0 ? 'chat+image' : 'chat');
         try {
           const persona = String(data.buyer_persona || data.buyer_persona_candidate || '').trim();
@@ -1373,6 +2079,9 @@ export default function App() {
           ).trim();
           if (useCase) localStorage.setItem('shopsquire_last_use_case', useCase);
         } catch {}
+        if (backendConfirmedSlots && Object.keys(backendConfirmedSlots).length > 0) {
+          setConfirmedSlots(prev => ({ ...prev, ...backendConfirmedSlots }));
+        }
         // Update NQE history with backend-confirmed applied constraints
         if (backendApplied && Object.keys(backendApplied).length > 0 && nqeHistory.length > 0) {
           setNqeHistory(prev => {
@@ -1406,13 +2115,15 @@ export default function App() {
             complexity,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
+            ...(data.evidence ? { evidence: data.evidence } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else if (prods.length > 0) {
-          const visibleProducts = prods.slice(0, 12);
+          const visibleProducts = allVisibleProducts.slice(0, 12);
           setDisplayProducts(visibleProducts);
           if (panelContract?.mode === 'support') switchRightPanelMode('faq');
           else if (cartUpsellIntent) switchRightPanelMode('cart');
+          else if (hasImages && !complaintIntent && !explicitComplaintIntent) switchRightPanelMode('visual_search');
           else switchRightPanelMode(mode === 'none' ? 'grid' : mode);
           const whySummary = _stripTechnicalTokens(summarizeWhy(prods));
           const hasAssistantBody = typeof respAssistant === 'string' && respAssistant.trim().length > 0;
@@ -1430,16 +2141,29 @@ export default function App() {
             nextQuestions: normalizedNextQuestions,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
+            ...(data.evidence ? { evidence: data.evidence } : {}),
+            ...(narrationJobId ? { narrationJobId } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
-          // Zero results: only override panel for explicit support/cart flows.
-          // Do NOT switch to 'grid' on zero results — that causes a flicker
-          // on follow-up refine queries where the panel was already in a useful state.
+          const slateDisposition = String((data as any).slate_disposition || 'retain');
+          if (slateDisposition === 'clear') {
+            setDisplayProducts([]);
+            setRecommendationShelf(null);
+            if (['grid', 'list', 'visual_search'].includes(rightPanelMode)) {
+              switchRightPanelMode('none');
+            }
+          }
+          // A material clarification may retain the prior slate as context. An authoritative
+          // zero-result response clears it above so old products cannot appear to satisfy new
+          // constraints.
           if (panelContract?.mode === 'support') switchRightPanelMode('faq');
           else if (cartUpsellIntent) switchRightPanelMode('cart');
           // else: keep current panel mode unchanged
-          const nqePrompt = formatNextQuestions(nextQuestions);
+          const nqePrompt = nextQuestions.some((item: any) => {
+            const questionText = String(item?.text || item?.question || '').trim();
+            return Boolean(questionText) && String(respAssistant || '').includes(questionText);
+          }) ? '' : formatNextQuestions(nextQuestions);
           const noProdsBase = respAssistant || 'I could not find products matching that query.';
           const budgetNote = budgetAdvice ? `\n\n⚠️ Budget note: ${budgetAdvice}` : '';
           const assistantMsg: ChatMessage = {
@@ -1450,8 +2174,65 @@ export default function App() {
             nextQuestions: normalizedNextQuestions,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
+            ...(data.evidence ? { evidence: data.evidence } : {}),
+            ...(narrationJobId ? { narrationJobId } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
+        }
+        // Async narration: poll the richer LLM prose and replace the tagged message in place. Best-effort
+        // — on timeout/error we keep the deterministic grounded answer already shown.
+        if (narrationJobId) {
+          const _poll = (() => {
+            activeNarrationJobs.add(narrationJobId);
+            let tries = 0;
+            // Exponential backoff 1250 → 2500 → 5000ms (capped): ~12 ticks keeps roughly the
+            // old ~45s budget (matches model-descriptor narration timeouts) with a third of
+            // the fetches. Sibling jobs from earlier messages stay live — only this job's
+            // removal from activeNarrationJobs stops this chain.
+            const maxTries = 12;
+            const nextDelayMs = () => Math.min(1250 * Math.pow(2, tries), 5000);
+            const tick = async () => {
+              // Cancelled (message content replaced / job cleared): stop the chain, no fetch.
+              if (!activeNarrationJobs.has(narrationJobId)) {
+                activeNarrationJobs.delete(narrationJobId);
+                return;
+              }
+              tries += 1;
+              try {
+                const nr = await fetch(apiUrl(`/api/v1/recommend/narration/${encodeURIComponent(narrationJobId)}`), {
+                  credentials: 'include', headers: apiHeaders,
+                });
+                const nd = await safeJson(nr);
+                const status = nd && nd.status;
+                const prose = (nd && typeof nd.assistant_message === 'string') ? nd.assistant_message.trim() : '';
+                if (status === 'done' && prose) {
+                  const polished = _stripTechnicalTokens(prose);
+                  // The mapper below clears narrationJobId from the message, so drop the job
+                  // from the registry with it — the id is dead once the content is swapped in.
+                  setMessages(prev => prev.map(m =>
+                    m.narrationJobId === narrationJobId
+                      ? { ...m, content: polished, narrationJobId: undefined }
+                      : m));
+                  activeNarrationJobs.delete(narrationJobId);
+                  return;
+                }
+                // done-with-no-prose = claim guard rejected the LLM draft: the deterministic
+                // grounded answer already shown IS the final answer — stop polling now.
+                if (status === 'done' || status === 'error' || tries >= maxTries) {
+                  activeNarrationJobs.delete(narrationJobId);
+                  return;
+                }
+              } catch {
+                if (tries >= maxTries) {
+                  activeNarrationJobs.delete(narrationJobId);
+                  return;
+                }
+              }
+              setTimeout(tick, nextDelayMs());
+            };
+            setTimeout(tick, nextDelayMs());
+          });
+          _poll();
         }
       }
     } catch (e: any) {
@@ -1554,6 +2335,7 @@ export default function App() {
             <input
               type="text"
               placeholder="Search products..."
+              aria-label="Search the product catalogue"
               className={styles.searchInput}
               value={headerSearchValue}
               onChange={(e) => setHeaderSearchValue(e.target.value)}
@@ -1562,7 +2344,7 @@ export default function App() {
             <button className={styles.searchBtn} onClick={handleHeaderSearch}>Search</button>
           </div>
           <div className={styles.headerActions}>
-            <button className={styles.headerBtn} onClick={() => { refreshCart(); switchRightPanelMode('cart'); }}>
+            <button className={styles.headerBtn} onClick={() => { refreshCart(); switchRightPanelMode('cart'); setChatOpen(true); }}>
               Cart ({(cart?.items || []).length || 0})
             </button>
             {authUser ? (
@@ -1590,8 +2372,14 @@ export default function App() {
 
       {/* Homepage Product Grid */}
       <main className={styles.main} {...backgroundInertProps}>
+        <StorefrontTrustBanner
+          localEnvironment={localEnvironment}
+          catalogueState={catalogueState}
+          evidence={trustEvidence}
+        />
+        <StorefrontEmphasisBanner />
         <div className={styles.categoryBar}>
-          <span className={styles.categoryTitle}>Laptops</span>
+          <h1 className={styles.categoryTitle}>Laptops</h1>
           <div className={styles.filters}>
             <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me the best value laptops sorted by price')}>Price</button>
             <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me laptops with 16GB RAM or more')}>RAM</button>
@@ -1599,7 +2387,24 @@ export default function App() {
             <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me laptops with a dedicated GPU or RTX graphics card')}>GPU</button>
           </div>
         </div>
-        <ProductGrid products={displayProducts.length > 0 ? filteredDisplayProducts : products} onAdd={addToCart} viewMode="grid" />
+        {catalogueState === 'loading' && (
+          <div className={styles.catalogueNotice} role="status">Loading catalogue…</div>
+        )}
+        {catalogueState === 'unavailable' && (
+          <div className={styles.catalogueNotice} role="alert">
+            The catalogue is unavailable. Product facts could not be loaded, so no catalogue recommendations are shown.
+          </div>
+        )}
+        {catalogueState === 'empty' && (
+          <div className={styles.catalogueNotice} role="status">
+            The catalogue loaded successfully but contains no products.
+          </div>
+        )}
+        {catalogueState === 'ready' && (
+          <ProductGrid products={displayProducts.length > 0 ? filteredDisplayProducts : products} onAdd={addToCart} viewMode="grid" />
+        )}
+        {!chatOpen && fulfilmentCase && <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />}
+        <ExternalResearchPanel items={externalResearch} />
       </main>
 
       {/* Floating Chat Button */}
@@ -1618,7 +2423,7 @@ export default function App() {
             <div className={styles.chatPanel}>
               <div className={styles.chatHeader}>
                 <div className={styles.chatHeaderLeft}>
-                  <span className={styles.chatTitle}>ShopSquire Assistant</span>
+                  <h2 className={styles.chatTitle}>ShopSquire Assistant</h2>
                   <span
                     className={`${styles.backendPill} ${backendStatus.ok ? styles.backendUp : styles.backendDown}`}
                     title={
@@ -1677,11 +2482,20 @@ export default function App() {
                           ))}
                         </div>
                       )}
-                      {msg.content}
+                      {msg.role === 'assistant'
+                        ? String(msg.content || '').split(/\n\n+/).filter(Boolean).map((para, pi) => {
+                            const isWarn = /^\s*(⚠️|\[security\])/i.test(para);
+                            return (
+                              <div key={pi} className={isWarn ? styles.msgSecurity : styles.msgPara}>
+                                {para.trim()}
+                              </div>
+                            );
+                          })
+                        : msg.content}
                       {/* Voice badge */}
                       {msg.voiceUsed && <span className={styles.voiceBadge} title="Sent via voice">🎤</span>}
-                      {/* Complexity badge — dev-only hint, shown below message as dim metadata */}
-                      {msg.complexity && (
+                      {/* Complexity badge — dev-only hint; hidden from pilot buyers (showDebugBadges gate) */}
+                      {showDebugBadges && msg.complexity && (
                         <span
                           className={styles.complexityBadge}
                           title={`Complexity ${msg.complexity.score}/10 · Tier: ${msg.complexity.tier} · Model: ${msg.complexity.model}`}
@@ -1701,24 +2515,39 @@ export default function App() {
                         </details>
                       )}
                       {msg.nextQuestions && msg.nextQuestions.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                          {msg.nextQuestions.map((nq) => (
-                            <div key={nq.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%' }}>
-                              {nq.why_hint && (
-                                <button type="button" className={styles.hintBtn} title={nq.why_hint}>
-                                  Why this question?
+                        /* ONE framed "narrow this down" card instead of a loose chip wall (demo
+                           feedback: "looks clunky — maybe a separate output box"). Question text is a
+                           heading, its options are compact chips beneath; capped at 2 questions. */
+                        <div data-testid="nqe-card" style={{
+                          marginTop: 10, border: '1px solid #e5e7eb', background: '#f9fafb',
+                          borderRadius: 10, padding: '10px 12px',
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
+                            Help me narrow this down
+                          </div>
+                          {msg.nextQuestions.slice(0, 2).map((nq, qi) => (
+                            <div key={nq.id} style={{ marginTop: qi > 0 ? 8 : 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickAction(nq.text)}
+                                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                           font: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f2937', textAlign: 'left' }}
+                                >
+                                  {nq.text}
                                 </button>
-                              )}
-                              <button
-                                type="button"
-                                className={styles.filterBtn}
-                                onClick={() => handleQuickAction(nq.text)}
-                              >
-                                {nq.text}
-                              </button>
+                                {nq.why_hint && (
+                                  <button type="button" className={styles.hintBtn} title={nq.why_hint}
+                                          style={{ fontSize: 11 }}>
+                                    why?
+                                  </button>
+                                )}
+                              </div>
                               {Array.isArray(nq.options) && nq.options.length > 0 && (
-                                <>
-                                  {nq.options.map((opt) => (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
+                                  {/* cap at 3 option chips per question — the full list was a clunky wall
+                                      (a business question surfaced 5-6). Top 3 keeps the card scannable. */}
+                                  {nq.options.slice(0, 3).map((opt) => (
                                     <button
                                       key={`${nq.id}:${opt.id}`}
                                       type="button"
@@ -1728,7 +2557,7 @@ export default function App() {
                                       {opt.label}
                                     </button>
                                   ))}
-                                </>
+                                </div>
                               )}
                             </div>
                           ))}
@@ -1738,6 +2567,108 @@ export default function App() {
                     {/* Disambiguation buttons for assistant */}
                     {msg.disambiguation && msg.disambiguationOptions && msg.disambiguationOptions.length > 0 && (
                       <DisambiguationButtons options={msg.disambiguationOptions} onSelect={handleDisambiguationSelect} />
+                    )}
+                    {msg.webConsentPrompt && (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <button type="button" className={styles.filterBtn} style={{ border: '1.5px solid #f59e0b' }}
+                          onClick={() => {
+                            const wq = msg.webConsentPrompt!.query;
+                            setMessages(prev => prev.map(m => m === msg ? { ...m, webConsentPrompt: undefined } : m));
+                            void handleSend({ queryOverride: wq, externalResearchConsent: true });
+                          }}>
+                          🌐 Check approved sources
+                        </button>
+                        <button type="button" className={styles.filterBtn}
+                          onClick={() => {
+                            const wq = msg.webConsentPrompt!.query;
+                            setMessages(prev => prev.map(m => m === msg ? { ...m, webConsentPrompt: undefined } : m));
+                            void handleSend({ queryOverride: wq, externalResearchConsent: false });
+                          }}>
+                          Use store data only
+                        </button>
+                      </div>
+                    )}
+                    {msg.evidence && Array.isArray(msg.evidence.citations) && msg.evidence.citations.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: '#6b7280' }}>Sources:</span>
+                        {citationChips(msg.evidence).map((chip) => (
+                          <button
+                            key={chip.key}
+                            type="button"
+                            className={styles.filterBtn}
+                            style={chip.trusted ? undefined : { border: '1.5px solid #f59e0b' }}
+                            title={chip.trusted ? 'Trusted store record — open the Evidence tab' : 'External evidence (verified, never authority) — open the Evidence tab'}
+                            onClick={() => { setTraceEvidence(msg.evidence); setTraceInitialTab('evidence'); setTraceOpen(true); }}
+                          >
+                            {chip.icon} {chip.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {msg.undoClear && msg.undoClear.items.length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.filterBtn}
+                          onClick={() => {
+                            const items = msg.undoClear!.items;
+                            // consume: drop the chip so it can't be double-applied, then restore
+                            setMessages(prev => prev.map(m => m === msg ? { ...m, undoClear: undefined } : m));
+                            void restoreClearedItems(items);
+                          }}
+                          title="Put the cleared items back"
+                        >
+                          ↩️ Undo — restore {msg.undoClear.items.length} item(s)
+                        </button>
+                      </div>
+                    )}
+                    {msg.undoServer && (
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.filterBtn}
+                          onClick={() => { void undoServerSnapshot(msg); }}
+                          title="Restore the cart from before that change (server snapshot)"
+                        >
+                          ↩️ Undo that cart change
+                        </button>
+                      </div>
+                    )}
+                    {msg.cartConfirm && (
+                      /* V2 cart lane: CONFIRM-tier plan — nothing has touched the cart yet.
+                         Confirm applies via the idempotent, stale-guarded endpoint; Not now
+                         simply drops the card (the plan expires server-side on its own). */
+                      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className={styles.filterBtn}
+                          style={{ fontWeight: 600 }}
+                          onClick={() => { void confirmCartPlan(msg); }}
+                          title="Apply this cart change"
+                        >
+                          ✅ Confirm — apply to cart
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.filterBtn}
+                          onClick={() => {
+                            setMessages(prev => prev.map(m => m === msg
+                              ? { ...m, cartConfirm: undefined }
+                              : m));
+                            setMessages(prev => [...prev, { role: 'assistant' as const,
+                              content: 'Okay — I left your cart exactly as it was.', timestamp: new Date() }]);
+                          }}
+                          title="Don't apply — leave the cart unchanged"
+                        >
+                          ✋ Not now
+                        </button>
+                      </div>
+                    )}
+                    {msg.affordabilityResolution && (
+                      <AffordabilityResolutionCard
+                        resolution={msg.affordabilityResolution}
+                        onChoose={(choice) => chooseAffordabilityResolution(msg, choice)}
+                      />
                     )}
                   </div>
                 ))}
@@ -1755,6 +2686,24 @@ export default function App() {
 
               {/* Composer Card */}
               <div className={styles.chatFooter}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+                  <button
+                    type="button"
+                    className={styles.filterBtn}
+                    aria-pressed={temporaryChat}
+                    data-testid="temporary-chat-toggle"
+                    title="Temporary chat is not written to conversation history or memory"
+                    onClick={() => {
+                      const next = !temporaryChat;
+                      setTemporaryChat(next);
+                      setConversationEpoch(rotateConversationEpoch());
+                      setMessages([]);
+                      setConfirmedSlots({});
+                    }}
+                  >
+                    {temporaryChat ? 'Temporary chat: on' : 'Temporary chat: off'}
+                  </button>
+                </div>
                 {/* Thumbnail strip for attached images */}
                 {attachedThumbs.length > 0 && (
                   <div className={styles.thumbStrip}>
@@ -1771,6 +2720,7 @@ export default function App() {
                   <textarea
                     ref={textareaRef}
                     className={styles.chatInput}
+                    aria-label="Message ShopSquire Assistant"
                     placeholder={imageRoutingInFlight ? "Analyzing image..." : (stt.isRecording ? "Listening..." : "Type your message...")}
                     value={inputValue}
                     onChange={(e) => { setInputValue(e.target.value); handleTextareaInput(); }}
@@ -1781,26 +2731,20 @@ export default function App() {
                     className={`${styles.inputIconBtn} ${stt.isRecording ? styles.recording : ''}`}
                     onClick={handleMicClick}
                     title={stt.isRecording ? 'Click to stop recording' : 'Voice input'}
+                    aria-label={stt.isRecording ? 'Stop voice input' : 'Start voice input'}
                   >
                     <MicIcon />
                     {stt.whisperPending && <span className={styles.whisperDot} />}
                   </button>
-                  <button className={styles.sendBtn} onClick={() => handleSend()} disabled={isThinking || imageRoutingInFlight}><SendIcon /></button>
+                  <button
+                    className={styles.sendBtn}
+                    onClick={() => handleSend()}
+                    disabled={isThinking || imageRoutingInFlight}
+                    aria-label="Send message"
+                  ><SendIcon /></button>
                 </div>
-                {latestAssistantQuestions.length > 0 && (
-                  <div className={styles.quickChipsRow}>
-                    {latestAssistantQuestions.map((nq) => (
-                      <button
-                        key={`footer-${nq.id}`}
-                        type="button"
-                        className={styles.quickChip}
-                        onClick={() => handleQuickAction(nq.text)}
-                      >
-                        {nq.text}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {/* NQE questions render inline in the assistant message (with option chips) — the old
+                    sticky bottom bar duplicated them ("looks messy"), so it was removed. */}
                 {receiptRequested && (
                   <div style={{ marginTop: 8, fontSize: 12, color: '#9a3412' }}>
                     Proof requested: use the paperclip to upload a receipt, order confirmation, or a photo of the serial number label.
@@ -1820,7 +2764,9 @@ export default function App() {
                       </button>
                     )}
                     <span>
-                      {rightPanelMode === 'compare'
+                      {rightPanelMode === 'none' && fulfilmentCase
+                        ? 'Procurement'
+                        : rightPanelMode === 'compare'
                         ? 'Comparison'
                         : rightPanelMode === 'list'
                           ? 'Detailed Specs'
@@ -1837,10 +2783,12 @@ export default function App() {
                                 : `Found ${filteredDisplayProducts.length} products`}
                     </span>
                   </div>
-                  <div className={styles.viewToggle}>
-                    <button className={viewMode === 'grid' ? styles.active : ''} onClick={() => setViewMode('grid')}><GridIcon /></button>
-                    <button className={viewMode === 'list' ? styles.active : ''} onClick={() => setViewMode('list')}><ListIcon /></button>
-                  </div>
+                  {rightPanelMode !== 'none' && (
+                    <div className={styles.viewToggle}>
+                      <button className={viewMode === 'grid' ? styles.active : ''} onClick={() => setViewMode('grid')}><GridIcon /></button>
+                      <button className={viewMode === 'list' ? styles.active : ''} onClick={() => setViewMode('list')}><ListIcon /></button>
+                    </div>
+                  )}
                 </div>
                 {readinessOpen && (
                   <div className={styles.readinessPanel}>
@@ -1894,6 +2842,56 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {rightPanelContract?.emphasis?.applied && rightPanelContract.emphasis.text && (
+                    <div
+                      data-testid="right-panel-emphasis"
+                      data-variant={rightPanelContract.emphasis.key || rightPanelContract.emphasis.variant}
+                      style={{
+                        margin: '0 0 10px', padding: '8px 12px', borderRadius: 8,
+                        border: '1px solid rgba(37,99,235,0.25)', background: 'rgba(37,99,235,0.06)',
+                        color: '#1d4ed8', fontSize: 13, fontWeight: 600,
+                      }}
+                    >
+                      {rightPanelContract.emphasis.text}
+                    </div>
+                  )}
+                  {multiIntent && (multiIntent.plan?.length ?? 0) > 0 && (
+                    <div className={styles.procurementPanelSlot}>
+                      <MultiIntentCard
+                        plan={multiIntent}
+                        onAmendQty={async (sku, qty) => {
+                          await setCartQty(sku, qty, true);
+                          // Amendment applied → dismiss the card and show the updated cart, so the
+                          // stale plan/prose (e.g. "…25") isn't left hanging beside the new quantity.
+                          setMultiIntent(null);
+                          switchRightPanelMode('cart');
+                        }}
+                        onAddItem={(sku, qty) => addToCart(sku, qty)}
+                        onDismiss={() => setMultiIntent(null)}
+                      />
+                    </div>
+                  )}
+                  {bulkAlternatives.length > 0 && !(sourcingIntent && (sourcingIntent.lines?.length ?? 0) > 0 && !fulfilmentCase) && (
+                    <div className={styles.procurementPanelSlot}>
+                      <BulkAlternatives options={bulkAlternatives} />
+                    </div>
+                  )}
+                  {fulfilmentCase && (
+                    <div className={styles.procurementPanelSlot}>
+                      <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />
+                    </div>
+                  )}
+                  {!fulfilmentCase && sourcingIntent && (sourcingIntent.lines?.length ?? 0) > 0 && (
+                    <div className={styles.procurementPanelSlot}>
+                      {/* order_id = the server-minted Procurement Request (PR) id — STABLE across amendments
+                          (re-confirm supersedes the SAME order group, no duplicate cases) and DISTINCT for a
+                          genuinely new cart (closes cross-order contamination). Falls back to a session id only
+                          if the backend didn't mint one. traceId stays separate for the decision-trace link. */}
+                      <SourcingIntentCard intent={sourcingIntent} uid={uid}
+                                          orderId={sourcingIntent.pr_id || `cart-${uid}`}
+                                          traceId={sourcingTraceId || traceId || undefined} />
+                    </div>
+                  )}
                   {rightPanelContract?.image_untrusted && (
                     <div className={styles.tierBlock}>
                       <div className={styles.tierTitle}>
@@ -1913,7 +2911,7 @@ export default function App() {
                             {(section?.top_products || []).slice(0, 3).map((p) => (
                               <article key={`anchor-${idx}-${p.sku}`} className={styles.tierCard}>
                                 <div className={styles.tierName}>{p.name}</div>
-                                <div className={styles.tierPrice}>{formatAUD(productPrice(p))}</div>
+                                <div className={styles.tierPrice}>{formatPrice(p)}</div>
                                 <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
                               </article>
                             ))}
@@ -1924,7 +2922,68 @@ export default function App() {
                     </div>
                   )}
 
-                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode) && filteredDisplayProducts.length > 0 && (
+                  {/* Procurement-truth advisory: a work query with no clean fleet match → recommend sourcing. */}
+                  {rightPanelContract?.fleet_advisory?.suggest_procurement && rightPanelContract.fleet_advisory.message && (
+                    <div data-testid="fleet-advisory" role="alert"
+                         style={{ margin: '8px 0', padding: '8px 12px', borderRadius: 8,
+                                  border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 13 }}>
+                      <strong>Closest matches shown.</strong> {rightPanelContract.fleet_advisory.message}
+                    </div>
+                  )}
+
+                  {/* BACKEND choice-lanes (evidence-driven) — render these when present; map each lane's
+                      skus to the full product cards. Falls back to the frontend heuristic lanes below. */}
+                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode)
+                    && !recommendationShelf
+                    && filteredDisplayProducts.length > 0
+                    && Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0 && (
+                    <div className={styles.deviceLanePanel} data-testid="backend-device-lanes">
+                      {rightPanelContract!.device_lanes!.map((lane) => {
+                        const bySku = new Map(filteredDisplayProducts.map((p) => [p.sku, p]));
+                        const items = (lane.skus || []).map((s) => bySku.get(s)).filter(Boolean) as Product[];
+                        if (!items.length) return null;
+                        return (
+                          <section key={`blane-${lane.key}`} className={styles.deviceLaneBlock}
+                                   data-testid="device-lane" data-lane={lane.key} data-primary={lane.primary ? '1' : '0'}>
+                            <div className={styles.deviceLaneHeader}>
+                              <div className={styles.deviceLaneTitle}
+                                   style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                <span>{lane.title}</span>
+                                {lane.non_primary && (
+                                  <span data-testid="lane-non-primary"
+                                        style={{ fontSize: 11, fontWeight: 700, padding: '1px 6px',
+                                                 borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>
+                                    not a primary pick
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className={styles.deviceLaneCarousel}>
+                              {items.slice(0, 3).map((p) => (
+                                <article key={`blane-card-${lane.key}-${p.sku}`} className={styles.deviceLaneCard}>
+                                  {p.image_url ? (
+                                    <img src={p.image_url} alt={p.name} className={styles.deviceLaneImg} />
+                                  ) : (
+                                    <div className={styles.deviceLaneImgPlaceholder}>No image</div>
+                                  )}
+                                  <div className={styles.deviceLaneName}>{p.name}</div>
+                                  <div className={styles.deviceLanePrice}>{formatPrice(p)}</div>
+                                  <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                </article>
+                              ))}
+                            </div>
+                            {lane.explanation && <div className={styles.deviceLaneSummary}>{lane.explanation}</div>}
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Heuristic lane fallback — only when the backend provided no device_lanes. */}
+                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode)
+                    && !recommendationShelf
+                    && filteredDisplayProducts.length > 0
+                    && !(Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0) && (
                     <div className={styles.deviceLanePanel}>
                       {(['windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
                         const items = laneBuckets[lane] || [];
@@ -1950,7 +3009,7 @@ export default function App() {
                                     <div className={styles.deviceLaneImgPlaceholder}>No image</div>
                                   )}
                                   <div className={styles.deviceLaneName}>{p.name}</div>
-                                  <div className={styles.deviceLanePrice}>{formatAUD(productPrice(p))}</div>
+                                  <div className={styles.deviceLanePrice}>{formatPrice(p)}</div>
                                   <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
                                 </article>
                               ))}
@@ -2089,9 +3148,9 @@ export default function App() {
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (
-                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
+                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} canonicalProducts={canonicalImageProducts} canonicalSummary={canonicalImageSummary} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
                   ) : rightPanelMode === 'image_context' ? (
-                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
+                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} canonicalProducts={canonicalImageProducts} canonicalSummary={canonicalImageSummary} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"
@@ -2128,7 +3187,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          <tr><td>Price</td>{filteredDisplayProducts.slice(0, 3).map(p => <td key={p.sku}>{formatAUD(productPrice(p))}</td>)}</tr>
+                          <tr><td>Price</td>{filteredDisplayProducts.slice(0, 3).map(p => <td key={p.sku}>{formatPrice(p)}</td>)}</tr>
                           {['Display', 'Processor', 'RAM', 'Storage', 'Graphics'].map((feat, i) => (
                             <tr key={feat}>
                               <td>{feat}</td>
@@ -2139,7 +3198,22 @@ export default function App() {
                       </table>
                     </div>
                   ) : (
-                    rightPanelMode === 'cart' ? (
+                    rightPanelMode === 'cart' ? (<>
+                      {cart?.undo?.available && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                                      background: '#fef3c7', borderRadius: 8, margin: '0 0 8px 0', fontSize: 13 }}>
+                          <span>Undo available for your last cart change ({cart.undo.count} prior line item(s)).</span>
+                          <button type="button" className={styles.filterBtn}
+                            onClick={async () => {
+                              try {
+                                const j = await undoCartClear(uid);
+                                setCart(j);
+                              } catch { /* snapshot expired — banner disappears on next refresh */ }
+                            }}>
+                            ↩️ Restore
+                          </button>
+                        </div>
+                      )}
                       <CartPanel
                         uid={uid}
                         cart={cart}
@@ -2147,7 +3221,22 @@ export default function App() {
                         onRemove={removeFromCart}
                         onClear={clearCartAll}
                         onAdd={addToCart}
+                        onSetQty={setCartQty}
+                        traceId={traceId || sourcingTraceId}
                         onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
+                        onSourcingTraceId={(tid) => setSourcingTraceId(normalizeTraceId(tid))}
+                        priorSkus={priorCartSkus}
+                        onClearPrior={clearPriorCartItems}
+                        sourcingRequirements={sourcingIntent?.requirements}
+                        sourcingOrderId={sourcingIntent?.pr_id}
+                        confirmedSourcingOrderId={confirmedSourcingOrderId}
+                        onConfirmedSourcingOrderId={setConfirmedSourcingOrderId}
+                      />
+                    </>) : recommendationShelf && ['grid', 'list'].includes(rightPanelMode) ? (
+                      <RecommendationShelf
+                        shelf={recommendationShelf}
+                        onAdd={addToCart}
+                        onWhy={handleWhyProduct}
                       />
                     ) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
                       <div className={styles.emptyProductState}>
@@ -2168,17 +3257,17 @@ export default function App() {
                     <div className={styles.whyDrawer}>
                       <div className={styles.whyDrawerHeader}>
                         <span>Why this product: {whyDrawerSku}</span>
-                        <button className={styles.iconBtn} onClick={() => { setWhyDrawerSku(null); setWhyDrawerData(null); setWhyDrawerError(null); }}>×</button>
+                        <button
+                          className={styles.iconBtn}
+                          aria-label="Close product explanation"
+                          onClick={() => { setWhyDrawerSku(null); setWhyDrawerData(null); setWhyDrawerError(null); }}
+                        >×</button>
                       </div>
                       {whyDrawerLoading && <div className={styles.muted}>Loading explanation...</div>}
                       {whyDrawerError && <div className={styles.muted}>{whyDrawerError}</div>}
                       {!whyDrawerLoading && whyDrawerData && (
                         <div className={styles.whyBody}>
-                          <div><strong>Matched constraints:</strong> {(whyDrawerData.matched_constraints || []).join(', ') || '--'}</div>
-                          <div><strong>Rank factors:</strong> {Array.isArray(whyDrawerData.rank_factors) ? whyDrawerData.rank_factors.length : 0}</div>
-                          <div><strong>Disqualifiers:</strong> {(whyDrawerData.disqualifiers || []).join(', ') || '--'}</div>
-                          <div><strong>Alternatives not selected:</strong> {Array.isArray(whyDrawerData.alternatives_not_selected) ? whyDrawerData.alternatives_not_selected.length : 0}</div>
-                          <div><strong>Summary:</strong> {whyDrawerData.reason_summary || '--'}</div>
+                          <ProductWhyEvidence explanation={whyDrawerData} />
                         </div>
                       )}
                     </div>
@@ -2191,7 +3280,11 @@ export default function App() {
       )}
 
       {/* Decision Trace Modal */}
-      {traceOpen && <DecisionTrace traceId={traceId} onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} />}
+      {/* Open the trace on the SOURCING turn's trace when a procurement context exists, so the Procurement
+          tab/badge resolves — otherwise a later upsell turn's trace would show no journey. (See lib/trace.) */}
+      {traceOpen && <DecisionTrace
+        traceId={procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
+        onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} />}
 
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (

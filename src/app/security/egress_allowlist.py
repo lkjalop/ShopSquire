@@ -70,6 +70,8 @@ _BUILTIN_ALLOWED_DOMAINS: FrozenSet[str] = frozenset(
         "urlhaus.abuse.ch",
         "urlhaus-api.abuse.ch",
         "mb-api.abuse.ch",
+        # Governed public market data (path/item pinning is enforced by adapter)
+        "www.sciencebase.gov",
         # Demo QR/document provider used by linked-artifact analysis fixtures
         "scanned.page",
         "www.scanned.page",
@@ -173,7 +175,11 @@ class EgressDomainGuard:
             return True
         hostname = self._extract_hostname(url)
         if not hostname:
-            return True  # can't resolve — let the request proceed
+            # FAIL CLOSED: an unparseable hostname on an ENABLED allowlist must be
+            # denied, not allowed. (Was `return True` — a fail-open hole: a malformed
+            # or obfuscated URL bypassed the SSRF/exfil allowlist entirely.)
+            _log.warning("egress_allowlist deny: unparseable hostname for url=%r", url)
+            return False
         # Dead-drop check overrides allowlist
         if self._is_dead_drop(hostname):
             return False
@@ -314,7 +320,7 @@ def patch_requests_egress_guard(guard: EgressDomainGuard | None = None) -> None:
         requests.sessions.Session.send = _patched_send  # type: ignore[method-assign]
         _patched_requests = True
         _log.info(
-            "Egress allowlist active for requests â€” %d approved domains (strict=%s, log_only=%s)",
+            "Egress allowlist active for requests - %d approved domains (strict=%s, log_only=%s)",
             len(g._allowed),
             g._strict,
             g._log_only,

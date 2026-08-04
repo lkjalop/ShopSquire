@@ -3,54 +3,37 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 
 
-class _FakeResp:
-    def __init__(self, body: dict, status_code: int = 200):
-        self._body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self._body
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"http_{self.status_code}")
-
-
-class _FakeAsyncClient:
-    def __init__(self, timeout: float = 8.0):
-        self.timeout = timeout
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def get(self, url, params=None, headers=None):
-        return _FakeResp(
-            {
+def _compatibility_image_response(**_kwargs):
+    return {
                 "results": [
                     {
                         "sku": "IMG-1",
                         "name": "Visual Match Laptop",
                         "price_cents": 149900,
-                        "specs": {"ram_gb": 16},
+                        "currency": "USD",
+                        "specs": {"ram_gb": 16, "gpu": "RTX 4060"},
                         "factors": {"positive": ["+embedding_similarity", "+within_budget"]},
                         "score_norm": 88.0,
+                        "stock_status": "in_stock",
+                        "cart_eligible": True,
                     }
                 ],
                 "assistant_message": "Found 1 visual match.",
                 "decision_trace_id": "trace-chat-mm-1",
                 "next_questions": [],
-            },
-            status_code=200,
-        )
+            }
 
 
 def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch):
     from src.app.routers import chat as chat_router
+    from src.app.services import recommendation_compatibility
 
-    monkeypatch.setattr(chat_router.httpx, "AsyncClient", _FakeAsyncClient)
+    # Chat dispatches through the typed facade and V2-only compatibility cutover.
+    monkeypatch.setattr(
+        recommendation_compatibility,
+        "serve_v2_compatibility",
+        _compatibility_image_response,
+    )
     monkeypatch.setattr(
         chat_router,
         "classify_image_intent",
@@ -87,10 +70,63 @@ def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch)
     body = resp.json()
     trace_id = body.get("decision_trace_id") or body.get("trace_id")
     assert trace_id == "trace-chat-mm-1"
+    product = (body.get("products") or [])[0]
+    assert product["price"] == 1499.0
+    assert product["price_cents"] == 149900
+    assert product["specs"]["gpu"] == "RTX 4060"
+    assert product["stock_status"] == "in_stock"
+    assert product["cart_eligible"] is True
+    assert "+embedding_similarity" in product["why"]
 
     ev = client.get(f"/api/v1/trace/{trace_id}/events", headers=headers)
     assert ev.status_code == 200
     events = ev.json().get("events") or []
     sources = {str(e.get("source_id") or "") for e in events}
     assert "ImageIntentRouter" in sources
-    assert "Chat_Multimodal" in sources
+    assert "Multimodal_Fusion" in sources
+
+
+def test_chat_with_voice_emits_multimodal_provenance_without_image(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    async def fake_recommend(*_args, **_kwargs):
+        return 200, {
+            "results": [{"sku": "VOICE-1", "name": "Voice Match", "price": 999}],
+            "assistant_message": "Found one voice match.",
+            "decision_trace_id": "trace-chat-voice-1",
+            "next_questions": [],
+            "execution_mode": "v2_served",
+        }
+
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process", fake_recommend)
+
+    client = TestClient(create_app())
+    headers = {"x-api-key": "local-merchant-key"}
+    response = client.post(
+        "/api/v1/chat/query",
+        json={
+            "uid": "u-chat-voice-1",
+            "voice_transcript": "gaming laptop under 2000",
+            "voice_confidence": 0.95,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["voice_used"] is True
+    trace_id = body.get("decision_trace_id") or body.get("trace_id")
+    events_response = client.get(
+        f"/api/v1/trace/{trace_id}/events",
+        headers=headers,
+    )
+    assert events_response.status_code == 200
+    fusion = [
+        event for event in (events_response.json().get("events") or [])
+        if (event.get("payload") or {}).get("_original_event_type") == "multimodal_fusion"
+    ]
+    assert len(fusion) == 1
+    assert fusion[0]["source_id"] == "Multimodal_Fusion"
+    assert fusion[0]["source_type"] == "stage"
+    assert fusion[0]["payload"]["voice_used"] is True
+    assert fusion[0]["payload"]["image_count"] == 0

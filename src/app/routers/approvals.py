@@ -31,7 +31,7 @@ def enqueue_approval(capability: str, payload: Dict, reason: str | None = None, 
     try:
         with db_session() as db:
             db.execute(
-                sql_text("INSERT OR REPLACE INTO approvals (id, capability, payload, reason, status, created_by) VALUES (:id, :capability, :payload, :reason, :status, :created_by)"),
+                sql_text("INSERT INTO approvals (id, capability, payload, reason, status, created_by) VALUES (:id, :capability, :payload, :reason, :status, :created_by) ON CONFLICT (id) DO UPDATE SET capability = EXCLUDED.capability, payload = EXCLUDED.payload, reason = EXCLUDED.reason, status = EXCLUDED.status"),
                 {
                     "id": approval_id,
                     "capability": capability,
@@ -112,6 +112,15 @@ def approve(approval_id: str, role: str = Depends(require_role([ROLE_MERCHANT, R
             db.commit()
             if getattr(res, "rowcount", 0) == 0:
                 raise HTTPException(status_code=404, detail="Approval not found")
+            # S3 human-correction learning: a human approval is a positive signal on the proposal
+            # (gated by HUMAN_FEEDBACK_CAPTURE_ENABLED; inert + best-effort by default).
+            try:
+                from src.app.services.human_feedback import capture_feedback
+                capture_feedback(db, "approval", subject_hash=str(role), entity_ref=str(approval_id),
+                                 entity_type="decision", source="approvals.approve",
+                                 dedup_fields={"approval_id": approval_id})
+            except Exception:
+                pass
         # Update in-memory cache
         if approval_id in _PENDING:
             _PENDING[approval_id]["status"] = "approved"
@@ -135,6 +144,14 @@ def reject(approval_id: str, role: str = Depends(require_role([ROLE_MERCHANT, RO
             db.commit()
             if getattr(res, "rowcount", 0) == 0:
                 raise HTTPException(status_code=404, detail="Approval not found")
+            # S3: a human rejection is a negative signal on the proposal (gated; best-effort).
+            try:
+                from src.app.services.human_feedback import capture_feedback
+                capture_feedback(db, "rejection", subject_hash=str(role), entity_ref=str(approval_id),
+                                 entity_type="decision", source="approvals.reject",
+                                 dedup_fields={"approval_id": approval_id})
+            except Exception:
+                pass
         if approval_id in _PENDING:
             _PENDING[approval_id]["status"] = "rejected"
         return {"rejected": True, "id": approval_id}

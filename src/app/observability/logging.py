@@ -7,6 +7,13 @@ from contextvars import ContextVar
 
 from opentelemetry import trace
 
+try:
+    from pythonjsonlogger import jsonlogger as _jsonlogger
+    _HAS_JSON_LOGGER = True
+except ImportError:
+    _jsonlogger = None  # type: ignore[assignment]
+    _HAS_JSON_LOGGER = False
+
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="-")
 
@@ -63,27 +70,55 @@ class RedactionFilter(logging.Filter):
 
 class SafeFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        # Ensure expected attributes exist to avoid KeyError during formatting
         for attr in ("request_id", "trace_id", "span_id"):
             if not hasattr(record, attr):
                 setattr(record, attr, "-")
         return super().format(record)
 
 
+class _SafeJsonFormatter(_jsonlogger.JsonFormatter if _HAS_JSON_LOGGER else logging.Formatter):  # type: ignore[misc]
+    """JsonFormatter that guarantees trace context fields are present and applies redaction."""
+
+    def add_fields(self, log_record: dict, record: logging.LogRecord, message_dict: dict) -> None:  # type: ignore[override]
+        super().add_fields(log_record, record, message_dict)  # type: ignore[arg-type]
+        log_record["timestamp"] = log_record.pop("asctime", None) or record.asctime if hasattr(record, "asctime") else None
+        log_record["level"] = record.levelname
+        log_record["logger"] = record.name
+        for field in ("request_id", "trace_id", "span_id"):
+            log_record.setdefault(field, getattr(record, field, "-"))
+
+    def format(self, record: logging.LogRecord) -> str:
+        for attr in ("request_id", "trace_id", "span_id"):
+            if not hasattr(record, attr):
+                setattr(record, attr, "-")
+        return super().format(record)
+
+
+def _build_formatter(level: int, json_mode: bool) -> logging.Formatter:
+    if json_mode and _HAS_JSON_LOGGER:
+        return _SafeJsonFormatter(
+            "%(asctime)s %(levelname)s %(name)s %(request_id)s %(trace_id)s %(span_id)s %(message)s"
+        )
+    fmt = "%(asctime)s %(levelname)s %(name)s request_id=%(request_id)s trace_id=%(trace_id)s span_id=%(span_id)s %(message)s"
+    return SafeFormatter(fmt)
+
+
 def init_logging() -> None:
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
-    fmt = "%(asctime)s %(levelname)s %(name)s request_id=%(request_id)s trace_id=%(trace_id)s span_id=%(span_id)s %(message)s"
-    logging.basicConfig(level=level, format=fmt)
+    # LOG_FORMAT=json → structured JSON output for container log shippers.
+    # LOG_JSON=1 is an alias for backward compatibility.
+    json_mode = os.getenv("LOG_FORMAT", "").lower() == "json" or os.getenv("LOG_JSON", "0") in ("1", "true")
+    formatter = _build_formatter(level, json_mode)
+    logging.basicConfig(level=level)
     log_file = os.getenv("LOG_FILE")
     if log_file:
         try:
             import os as _os
-
             _os.makedirs(_os.path.dirname(log_file), exist_ok=True)
             fh = logging.FileHandler(log_file)
             fh.setLevel(level)
-            fh.setFormatter(SafeFormatter(fmt))
+            fh.setFormatter(formatter)
             logging.getLogger().addHandler(fh)
             logging.getLogger("shopsquire.http").addHandler(fh)
         except Exception:
@@ -91,15 +126,11 @@ def init_logging() -> None:
     root = logging.getLogger()
     root.addFilter(TraceContextFilter())
     root.addFilter(RedactionFilter())
-    # Replace default handlers' formatters with SafeFormatter to avoid missing-field errors
-    try:
-        for h in root.handlers:
-            try:
-                h.setFormatter(SafeFormatter(fmt))
-            except Exception:
-                pass
-    except Exception:
-        pass
+    for h in root.handlers:
+        try:
+            h.setFormatter(formatter)
+        except Exception:
+            pass
 
 
 def new_request_id(header_val: str | None = None) -> str:

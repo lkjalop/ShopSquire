@@ -1,0 +1,35 @@
+{
+  "_README": [
+    "SEALED relevance labels for the M2-B2 quality gate (recommendation_core/quality.py).",
+    "Grades: 2 = highly relevant, 1 = acceptable, 0 = explicitly irrelevant.",
+    "These labels are an independent-judge draft produced outside the evaluated Qwen model.",
+    "A human second pass is required before production promotion; do not describe this draft as human-sealed.",
+    "Label against the demo catalog by running each case's query and grading the CANDIDATE",
+    "SLATE (not just what v2 showed — unlabeled shown SKUs count as NOT relevant).",
+    "split.dev cases may be inspected while tuning; split.test cases are the gate — the eval",
+    "must never train on the gate (classification_labels.json discipline).",
+    "The quality gate HONESTLY FAILS below labeled_coverage_min until this set is filled in.",
+    "KEYS (R9.6): cases are keyed '<case_id>:<turn>' (e.g. 'budget_band:0',",
+    "'explain_followup:1') — the stateful replay measures each TURN, and a follow-up turn's",
+    "relevant set differs from turn 0's. Split entries use the same keyed form."
+  ],
+  "version": 1,
+  "labeled_by": "codex-independent-review-2026-07-21",
+  "independent_reviewed_by": "codex-aud-catalog-review-2026-07-21",
+  "review_status": "independent_draft_requires_human_second_pass",
+  "human_reviewed_by": null,
+  "split": {
+    "dev": ["brand_negation:0", "persona_creator:0", "workload_ai_finetune:0"],
+    "test": ["budget_band:0", "search_budget:0", "search_university:0", "workload_cyberpunk:0", "workload_valorant_fps:0"]
+  },
+  "cases": {
+    "brand_negation:0": {"labels": {"LAP-ADFE01CA": 0, "LAP-031E526F": 2, "LAP-04C4955F": 2, "LAP-10BFA3F6": 2, "LAP-1886C355": 2, "LAP-234E845E": 1, "LAP-29EA2785": 1, "LAP-343A37BC": 1, "LAP-37144522": 1, "LAP-38C5278D": 1}},
+    "budget_band:0": {"labels": {"LAP-031E526F": 2, "LAP-1886C355": 2, "LAP-433AB371": 2, "LAP-4743EFFF": 2, "LAP-4A0017C0": 1, "LAP-5DEB73EF": 1, "LAP-75988087": 2, "LAP-89863C58": 1, "LAP-B8D8576C": 2}},
+    "persona_creator:0": {"labels": {"LAP-343A37BC": 2, "LAP-647D08E6": 1, "LAP-69763798": 1, "LAP-788760E4": 1, "LAP-858DC749": 1, "LAP-BCBAFE20": 2}},
+    "search_budget:0": {"labels": {"LAP-69763798": 2}},
+    "search_university:0": {"labels": {"LAP-22527D92": 1, "LAP-2A0308CA": 1, "LAP-4743EFFF": 2}},
+    "workload_ai_finetune:0": {"labels": {"LAP-0A1191AB": 1, "LAP-343A37BC": 2, "LAP-858DC749": 2, "LAP-BCBAFE20": 2}},
+    "workload_cyberpunk:0": {"labels": {"LAP-647D08E6": 2, "LAP-69763798": 1, "LAP-788760E4": 2, "LAP-858DC749": 1, "LAP-BCBAFE20": 1}},
+    "workload_valorant_fps:0": {"labels": {"LAP-647D08E6": 2, "LAP-69763798": 2, "LAP-788760E4": 1, "LAP-858DC749": 1, "LAP-BCBAFE20": 1}}
+  }
+}

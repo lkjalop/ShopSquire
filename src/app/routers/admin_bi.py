@@ -5,17 +5,26 @@ import json
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta
+import logging
 from typing import Dict, Any, List
+
+logger = logging.getLogger("shopsquire.admin_bi")
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text as sql_text
+from sqlalchemy.exc import SQLAlchemyError
 from prometheus_client import generate_latest
+from pydantic import BaseModel, Field
 
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.config import get_settings, load_feature_flags
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.schemas.ui_contracts import TransactionTimeseriesResponse
+from src.app.schemas.metric_evidence import (
+    AuditorMetricProjection, MetricEvidence, OperatorMetricProjection,
+)
 from src.app.services.bi_intelligence import (
     margin_intelligence,
     supplier_scorecard,
@@ -27,6 +36,175 @@ from src.app.services.bi_query_agent import run_query_agent
 
 
 router = APIRouter(prefix="/api/v1/admin/bi", tags=["admin", "bi"])
+
+
+def _executive_metric_projection(tenant_id: str) -> OperatorMetricProjection:
+    from src.app.services.market_metrics import summarize_marketing_facts
+    from src.app.services.market_projection import projections
+
+    with db_session() as db:
+        product_metrics = projections(db, tenant_id=tenant_id, window_days=30)
+        try:
+            marketing = summarize_marketing_facts(db, tenant_id=tenant_id)
+        except Exception as exc:
+            logger.warning("marketing metric projection unavailable for %s: %s", tenant_id, exc)
+            marketing = {"data_quality": {}, "event_count": 0}
+    metrics = []
+    for projection in product_metrics.values():
+        for payload in projection.get("metrics") or []:
+            metrics.append(MetricEvidence.model_validate(payload))
+    rfm = clv_prediction(window_days=365, tenant_id=tenant_id)
+    churn = churn_prediction(window_days=180, tenant_id=tenant_id)
+    return OperatorMetricProjection(
+        tenant_id=tenant_id,
+        metrics=metrics,
+        data_quality={
+            **dict(marketing.get("data_quality") or {}),
+            "event_count": int(marketing.get("event_count") or 0),
+        },
+        estimates={
+            "rfm_method": rfm.get("method"),
+            "rfm_status": rfm.get("status"),
+            "customer_estimate_count": len(rfm.get("users") or []),
+            "churn_method": churn.get("method"),
+            "churn_status": churn.get("status"),
+            "high_churn_estimate_count": sum(
+                float(row.get("churn_risk") or 0.0) >= 0.7
+                for row in churn.get("users") or []),
+        },
+        actions=[],
+    )
+
+
+@router.get("/executive-metrics", response_model=OperatorMetricProjection)
+def executive_metrics_api(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> OperatorMetricProjection:
+    """Operator projection only; buyer traces never fetch this endpoint."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    return _executive_metric_projection(str(current_tenant_id() or "default"))
+
+
+@router.get("/executive-metrics/audit", response_model=AuditorMetricProjection)
+def executive_metrics_audit_api(
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> AuditorMetricProjection:
+    """Auditor projection adds rejected evidence; it remains read-only."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    tenant_id = str(current_tenant_id() or "default")
+    operator = _executive_metric_projection(tenant_id)
+    with db_session() as db:
+        try:
+            quarantined = int(db.execute(sql_text(
+                "SELECT COUNT(*) FROM market_fact_quarantine WHERE tenant_id=:tenant"
+            ), {"tenant": tenant_id}).scalar_one() or 0)
+        except Exception:
+            quarantined = 0
+    return AuditorMetricProjection(
+        **operator.model_dump(),
+        quarantined_evidence_count=quarantined,
+        policy_decisions=[],
+    )
+
+
+@router.get("/executive-metrics/source-health")
+def executive_metric_source_health(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Read-only reconciliation and quarantine status; never executes source actions."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.canonical_fact_adapters import canonical_source_health
+
+    tenant_id = str(current_tenant_id() or "default")
+    with db_session() as db:
+        return canonical_source_health(db, tenant_id=tenant_id)
+
+
+@router.get("/executive-metrics/forecast-comparison")
+def executive_metric_forecast_comparison(
+    sku: str = Query(..., min_length=1, max_length=192),
+    baseline_model_id: str = Query(..., min_length=1, max_length=128),
+    baseline_model_version: str = Query(..., min_length=1, max_length=128),
+    challenger_model_id: str = Query(..., min_length=1, max_length=128),
+    challenger_model_version: str = Query(..., min_length=1, max_length=128),
+    unit_value_cents: int | None = Query(default=None, ge=0),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Compare named forecast candidates from sealed evidence; never promotes a model."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.executive_metrics import (
+        compare_forecast_candidates_from_sealed,
+    )
+
+    tenant_id = str(current_tenant_id() or "default")
+    try:
+        with db_session() as db:
+            return compare_forecast_candidates_from_sealed(
+                db,
+                tenant_id=tenant_id,
+                subject_id=sku,
+                baseline_model_id=baseline_model_id,
+                baseline_model_version=baseline_model_version,
+                challenger_model_id=challenger_model_id,
+                challenger_model_version=challenger_model_version,
+                unit_value_cents=unit_value_cents,
+            )
+    except SQLAlchemyError as exc:
+        logger.error("forecast comparison schema unavailable for %s: %s", tenant_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="forecast_evidence_schema_unavailable_apply_alembic_head",
+        ) from exc
+
+
+@router.get("/inventory-intelligence/{sku}/forecast")
+def inventory_forecast_intelligence(
+    sku: str,
+    lead_time_days: float = Query(default=14.0, gt=0, le=365),
+    lookback_days: int = Query(default=180, ge=28, le=730),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Preview a shadow forecast comparison from reconciled purchase facts."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.forecast_intelligence import evaluate_inventory_forecast
+
+    return evaluate_inventory_forecast(
+        tenant_id=str(current_tenant_id() or "default"),
+        sku=sku,
+        lead_time_days=lead_time_days,
+        lookback_days=lookback_days,
+        materialize=False,
+    )
+
+
+@router.post("/inventory-intelligence/{sku}/forecast")
+def materialize_inventory_forecast_intelligence(
+    sku: str,
+    lead_time_days: float = Query(default=14.0, gt=0, le=365),
+    lookback_days: int = Query(default=180, ge=28, le=730),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Seal a reproducible shadow evaluation; it cannot increase autonomy."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.forecast_intelligence import evaluate_inventory_forecast
+
+    return evaluate_inventory_forecast(
+        tenant_id=str(current_tenant_id() or "default"),
+        sku=sku,
+        lead_time_days=lead_time_days,
+        lookback_days=lookback_days,
+        materialize=True,
+    )
+
+
+class NewsletterDraftRequest(BaseModel):
+    skus: List[str] = Field(default_factory=list, max_length=10)
 
 
 def _parse_prometheus_samples(metric_name: str) -> List[tuple[Dict[str, str], float]]:
@@ -133,7 +311,7 @@ def _is_sqlite(dialect: str) -> bool:
 
 def _timescale_flags() -> Dict[str, Any]:
     try:
-        ff = load_feature_flags(get_settings().feature_flags_path) or {}
+        ff = _ff_get_flags() or {}
     except Exception:
         ff = {}
     cfg = ff.get("TIMESCALE", {}) if isinstance(ff.get("TIMESCALE"), dict) else {}
@@ -433,10 +611,149 @@ def margin_intelligence_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        return margin_intelligence(window_days=window_days)
+        return margin_intelligence(
+            window_days=window_days, tenant_id=str(current_tenant_id() or "default"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"margin_intelligence_failed: {exc}")
+
+
+@router.get("/product-projection")
+def product_projection_api(
+    sku: str = Query(..., min_length=1, max_length=160),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Operator-only projection; wholesale and margin never enter the public trace."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.market_projection import operator_product_projection
+    with db_session() as db:
+        result = operator_product_projection(
+            db, sku=sku, tenant_id=str(current_tenant_id() or "default"))
+    if not result.get("available"):
+        raise HTTPException(status_code=404, detail=result.get("reason") or "projection_unavailable")
+    return result
+
+
+@router.post("/product-projection/{sku}/proposals/{action_type}")
+def submit_product_action_proposal(
+    sku: str,
+    action_type: str,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Queue an eligible commercial proposal for human review.
+
+    Approval records authorization only. This endpoint never applies a discount,
+    sends a supplier message, or creates a purchase order.
+    """
+    action = str(action_type or "").strip().lower()
+    if action not in {"discount", "replenishment"}:
+        raise HTTPException(status_code=404, detail="unknown_commercial_action")
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.routers.approvals import enqueue_approval
+    from src.app.services.market_projection import operator_product_projection
+
+    tenant_id = str(current_tenant_id() or "default")
+    with db_session() as db:
+        projection = operator_product_projection(db, sku=sku, tenant_id=tenant_id)
+    if not projection.get("available"):
+        raise HTTPException(status_code=404, detail=projection.get("reason") or "projection_unavailable")
+    proposal = (projection.get("action_proposals") or {}).get(action) or {}
+    eligible = (
+        bool(proposal.get("eligible"))
+        if action == "discount" else bool(proposal.get("authorized"))
+    )
+    if not eligible:
+        raise HTTPException(status_code=409, detail={
+            "reason": "proposal_not_authorized",
+            "action_type": action,
+            "reasons": proposal.get("reasons") or [],
+        })
+    if action == "replenishment":
+        from src.app.services.inventory_reorder_execution import (
+            ReorderBoundaryError,
+            bind_approval,
+            create_reorder_proposal,
+        )
+        try:
+            with db_session() as db:
+                durable = create_reorder_proposal(
+                    db,
+                    tenant_id=tenant_id,
+                    sku=sku,
+                    actor_id=role,
+                )
+            approval_id = enqueue_approval(
+                "commercial_replenishment",
+                {
+                    "tenant_id": tenant_id,
+                    "proposal_id": durable["proposal_id"],
+                    "proposal_hash": durable["proposal_hash"],
+                },
+                reason="human_review_required",
+                created_by=role,
+            )
+            with db_session() as db:
+                bind_approval(
+                    db,
+                    tenant_id=tenant_id,
+                    proposal_id=durable["proposal_id"],
+                    approval_id=approval_id,
+                )
+        except ReorderBoundaryError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={"reason": exc.code, **exc.detail},
+            )
+    else:
+        durable = {}
+        approval_id = enqueue_approval(
+            f"commercial_{action}",
+            {
+                "tenant_id": tenant_id,
+                "sku": str(sku),
+                "proposal": proposal,
+                "execution": "not_implemented_by_approval",
+            },
+            reason="human_review_required",
+            created_by=role,
+        )
+    response = {
+        "queued": True,
+        "approval_id": approval_id,
+        "action_type": action,
+        "human_gate": "required",
+        "executed": False,
+    }
+    if durable:
+        response.update({
+            "proposal_id": durable.get("proposal_id"),
+            "proposal_hash": durable.get("proposal_hash"),
+        })
+    return response
+
+
+@router.post("/newsletter-draft")
+def newsletter_draft_api(
+    request: NewsletterDraftRequest,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Create an editable evidence-bounded draft; never publish or send it."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.market_projection import operator_product_projection
+    from src.app.services.newsletter_draft import build_newsletter_draft
+
+    tenant_id = str(current_tenant_id() or "default")
+    projections = []
+    with db_session() as db:
+        for sku in dict.fromkeys(str(value).strip() for value in request.skus if str(value).strip()):
+            item = operator_product_projection(db, sku=sku, tenant_id=tenant_id)
+            if item.get("available"):
+                projections.append(item)
+    draft = build_newsletter_draft(projections)
+    return {"tenant_id": tenant_id, **draft}
 
 
 @router.get("/supplier-scorecard")
@@ -445,8 +762,10 @@ def supplier_scorecard_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        return supplier_scorecard(window_days=window_days)
+        return supplier_scorecard(
+            window_days=window_days, tenant_id=str(current_tenant_id() or "default"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"supplier_scorecard_failed: {exc}")
 
@@ -457,8 +776,10 @@ def clv_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        return clv_prediction(window_days=window_days)
+        return clv_prediction(
+            window_days=window_days, tenant_id=str(current_tenant_id() or "default"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"clv_prediction_failed: {exc}")
 
@@ -469,8 +790,10 @@ def churn_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     _ = role
+    from src.app.platform.tenant_context import current_tenant_id
     try:
-        return churn_prediction(window_days=window_days)
+        return churn_prediction(
+            window_days=window_days, tenant_id=str(current_tenant_id() or "default"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"churn_prediction_failed: {exc}")
 
@@ -536,11 +859,21 @@ def executive_pulse_api(
             out["kpis"]["refund_pct"] = round((100.0 * refunded / max(1, orders)), 2)
             out["kpis"]["chargeback_pct"] = round((100.0 * chargeback / max(1, orders)), 2)
 
-            margin = margin_intelligence(window_days=max(7, (dt_end - dt_start).days))
+            from src.app.platform.tenant_context import current_tenant_id
+            margin = margin_intelligence(
+                window_days=max(7, (dt_end - dt_start).days),
+                tenant_id=str(current_tenant_id() or "default"),
+            )
             top = margin.get("top") or []
             total_rev_c = sum(int(x.get("revenue_cents") or 0) for x in top)
-            total_margin_c = sum(int(x.get("margin_cents") or 0) for x in top)
-            out["kpis"]["gross_margin_pct"] = round((100.0 * total_margin_c / max(1, total_rev_c)), 2)
+            known_margin = [x for x in top if x.get("margin_cents") is not None]
+            if known_margin and total_rev_c > 0:
+                total_margin_c = sum(int(x["margin_cents"]) for x in known_margin)
+                out["kpis"]["gross_margin_pct"] = round(
+                    (100.0 * total_margin_c / total_rev_c), 2)
+            else:
+                out["kpis"]["gross_margin_pct"] = None
+                out["kpis"]["gross_margin_status"] = "unavailable"
 
             dec_rows = db.execute(
                 sql_text(
@@ -1665,3 +1998,125 @@ async def security_events_stream(
             await asyncio.sleep(3)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
+@router.get("/recommend-latency")
+def recommend_latency_api(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Return p50/p95/p99 latency percentiles for the recommend pipeline (warm vs cold)."""
+    _ = role
+    from src.app.observability.latency_tracker import get_recommend_tracker
+    return get_recommend_tracker().summary()
+
+
+
+# ── Investor metrics (B1) — ONE screen composing the aggregates that already exist ─────────────────────
+# "Show me the numbers": exec KPIs + bounded-autonomy proof + governance pulse + procurement cycle time +
+# the capability-gap ledger. Mostly REUSE: each block delegates to an existing service/route function and
+# degrades independently (a failed block returns its error note, never a 500 for the whole screen).
+
+@router.get("/investor-metrics")
+def investor_metrics(
+    days: int = Query(30, ge=1, le=365),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    from datetime import datetime, timedelta, timezone
+    out: Dict[str, Any] = {"window_days": int(days), "sections": {}}
+    _end = datetime.now(timezone.utc).date()
+    _start = _end - timedelta(days=int(days))
+
+    # 1) Executive KPIs (revenue, margin%, refund/chargeback, autonomy%, MTTD/MTTR)
+    try:
+        out["sections"]["executive"] = executive_pulse_api(start=_start.isoformat(), end=_end.isoformat(), role=role)
+    except Exception as exc:
+        logger.debug("investor-metrics executive block failed: %s", exc)
+        out["sections"]["executive"] = {"error": "unavailable"}
+
+    # 2) Bounded autonomy — the RFQ decision trail + the market-adaptation gate (allow vs governed-deny)
+    try:
+        from src.app.services.adaptive_action_gate import load_recent_audit
+        with db_session() as db:
+            rfq = load_recent_audit(db, limit=500, action_type="supplier_rfq_send")
+            mkt = load_recent_audit(db, limit=500, action_type="adjust_ranking")
+        out["sections"]["autonomy"] = {
+            "rfq": {"sent": sum(1 for r in rfq if r["decision"] == "allow"),
+                    "escalated": sum(1 for r in rfq if r["decision"] != "allow")},
+            "market_adaptation": {"allowed": sum(1 for r in mkt if r["decision"] == "allow"),
+                                  "denied_governed": sum(1 for r in mkt if r["decision"] == "deny")},
+        }
+        # M6 close-the-loop: outcomes attributed BACK to each adaptation (conversion value per
+        # exposure segment) + the terminal keep/revert verdicts — "the adaptations are measured".
+        try:
+            from src.app.services.market_outcome import load_attribution_rollup, load_recent_outcomes
+            with db_session() as db:
+                out["sections"]["autonomy"]["adaptation_outcomes"] = {
+                    "attributed": load_attribution_rollup(db, limit=12),
+                    "verdicts": load_recent_outcomes(db, limit=6),
+                }
+        except Exception as exc:
+            logger.debug("investor-metrics adaptation-outcomes block failed: %s", exc)
+    except Exception as exc:
+        logger.debug("investor-metrics autonomy block failed: %s", exc)
+        out["sections"]["autonomy"] = {"error": "unavailable"}
+
+    # 3) Market-intelligence governance pulse (signals → findings → shadow decisions → experiments)
+    try:
+        from src.app.services.governance_pulse import governance_pulse
+        from src.app.platform.tenant_context import current_tenant_id
+        with db_session() as db:
+            out["sections"]["governance"] = governance_pulse(
+                db, tenant_id=str(current_tenant_id() or "").strip()
+            )
+    except Exception as exc:
+        logger.debug("investor-metrics governance block failed: %s", exc)
+        out["sections"]["governance"] = {"error": "unavailable"}
+
+    # 4) Procurement cycle time — median/p90 hours from first to last bitemporal transition per case
+    try:
+        with db_session() as db:
+            rows = db.execute(sql_text(
+                "SELECT case_id, MIN(valid_from) AS a, MAX(valid_from) AS b "
+                "FROM fulfillment_case_version GROUP BY case_id HAVING COUNT(*) >= 2"
+            )).fetchall()
+        durs: List[float] = []
+        for _cid, a, b in rows:
+            try:
+                ta = datetime.fromisoformat(str(a).replace("Z", "+00:00"))
+                tb = datetime.fromisoformat(str(b).replace("Z", "+00:00"))
+                durs.append(max(0.0, (tb - ta).total_seconds() / 3600.0))
+            except (TypeError, ValueError):
+                continue
+        durs.sort()
+        n = len(durs)
+        out["sections"]["procurement"] = {
+            "cases_measured": n,
+            "cycle_hours_median": round(durs[n // 2], 2) if n else None,
+            "cycle_hours_p90": round(durs[min(n - 1, int(n * 0.9))], 2) if n else None,
+        }
+    except Exception as exc:
+        logger.debug("investor-metrics procurement block failed: %s", exc)
+        out["sections"]["procurement"] = {"error": "unavailable"}
+
+    # 5) Capability-gap ledger — what buyers asked for that we couldn't/wouldn't do (the QA roadmap feed)
+    try:
+        from src.app.services.capability_gap import gap_rollup
+        with db_session() as db:
+            out["sections"]["capability_gaps"] = gap_rollup(db, limit=10)
+    except Exception as exc:
+        logger.debug("investor-metrics capability block failed: %s", exc)
+        out["sections"]["capability_gaps"] = {"error": "unavailable"}
+
+    # 6) Fraud screening volume — per-order fraud_score decision events (blocked = level high)
+    try:
+        with db_session() as db:
+            frow = db.execute(sql_text(
+                "SELECT COUNT(*), SUM(CASE WHEN payload LIKE '%\"level\": \"high\"%' "
+                "OR payload LIKE '%\"level\":\"high\"%' THEN 1 ELSE 0 END) "
+                "FROM decision_trace_events WHERE event_type='fraud_score'")).fetchone()
+        out["sections"]["fraud"] = {"scored": int(frow[0] or 0), "high_risk": int(frow[1] or 0)}
+    except Exception as exc:
+        logger.debug("investor-metrics fraud block failed: %s", exc)
+        out["sections"]["fraud"] = {"error": "unavailable"}
+
+    return out

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Supplier domain allowlist guard.
 
 Protects inventory write paths against BEC (Business Email Compromise) attacks
@@ -15,9 +13,9 @@ Security model:
   transport layer. This guard validates the *business* identity.
 """
 
-import hashlib
+from __future__ import annotations
+
 import logging
-import os
 import re
 import uuid
 from typing import Any, Dict, Optional
@@ -43,8 +41,9 @@ CREATE TABLE IF NOT EXISTS trusted_supplier_domains (
 """
 
 _INSERT_DEFAULT = """
-INSERT OR IGNORE INTO trusted_supplier_domains (id, domain, supplier_id, added_by, notes)
+INSERT INTO trusted_supplier_domains (id, domain, supplier_id, added_by, notes)
 VALUES (:id, :domain, :supplier_id, :added_by, :notes)
+ON CONFLICT (domain) DO NOTHING
 """
 
 
@@ -86,7 +85,11 @@ def is_trusted_supplier_domain(domain: str) -> bool:
             row = db.execute(
                 _text(
                     "SELECT COUNT(*) FROM trusted_supplier_domains "
-                    "WHERE active = 1 AND ("
+                    # The migration intentionally keeps this legacy flag as
+                    # INTEGER for SQLite/PostgreSQL parity. ``IS TRUE`` is
+                    # invalid for a PostgreSQL integer and previously caused
+                    # every approved supplier to fail closed in hosted runs.
+                    "WHERE COALESCE(active, 1) = 1 AND ("
                     "  domain = :d "
                     "  OR :d LIKE '%.' || domain"  # subdomain match
                     ")"
@@ -257,7 +260,7 @@ def list_trusted_domains() -> list:
             rows = db.execute(
                 _text(
                     "SELECT id, domain, supplier_id, added_by, added_at, notes "
-                    "FROM trusted_supplier_domains WHERE active = 1 ORDER BY added_at DESC"
+                    "FROM trusted_supplier_domains WHERE active IS TRUE ORDER BY added_at DESC"
                 )
             ).fetchall()
         return [

@@ -57,8 +57,10 @@ def _persist_metric_snapshot(metrics: Dict[str, Any]) -> None:
                     continue
                 db.execute(
                     _sql(
-                        "INSERT OR REPLACE INTO anomaly_metric_history (metric_name, metric_value, snapshot_ts) "
-                        "VALUES (:metric_name, :metric_value, :snapshot_ts)"
+                        "INSERT INTO anomaly_metric_history (metric_name, metric_value, snapshot_ts) "
+                        "VALUES (:metric_name, :metric_value, :snapshot_ts) "
+                        "ON CONFLICT (metric_name, snapshot_ts) DO UPDATE "
+                        "SET metric_value = EXCLUDED.metric_value"
                     ),
                     {
                         "metric_name": str(metric_name),

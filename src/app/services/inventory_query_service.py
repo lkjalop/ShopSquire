@@ -43,7 +43,11 @@ STOCK_QUERY_RE = re.compile(
     r"in\s+stock|out\s+of\s+stock|how\s+many(\s+are|\s+left|\s+remaining|\s+available)?|"
     r"available(\s+now|\s+today)?|units?\s+(left|remaining|available)|"
     r"when\s+(will|is)\s+.{1,30}(back|available|in\s+stock)|"
-    r"stock\s+level|inventory|can\s+i\s+(get|buy|order|purchase)|"
+    # NOTE: a bare "can i get/buy/order X" is PURCHASE intent, not a stock question — it used to live here
+    # and hijacked shopping asks ("can i get help with 15 work laptops…") into the inventory lane, which
+    # then answered "name the specific product" with zero results. Stock-flavoured phrasings are still
+    # caught by the explicit alternatives around it.
+    r"stock\s+level|inventory|"
     r"(do\s+you\s+have|have\s+you\s+got|is\s+there)\s+.{1,30}(in\s+stock|available)"
     r")\b",
     re.IGNORECASE,

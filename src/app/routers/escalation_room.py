@@ -101,6 +101,12 @@ def _parse_ts(ts: str | None) -> datetime | None:
 def _ensure_incident_runtime_tables() -> None:
     try:
         eng = get_engine()
+        # PostgreSQL and every deployed database are migration-owned. A failed
+        # duplicate-column ALTER aborts the whole PostgreSQL transaction even
+        # when Python catches the statement exception. Runtime DDL is retained
+        # only for legacy, unmigrated SQLite demo files.
+        if eng.dialect.name != "sqlite":
+            return
         with eng.begin() as conn:
             for stmt in [
                 "ALTER TABLE incidents ADD COLUMN assigned_to TEXT",
@@ -279,6 +285,152 @@ def _extract_public_incident_token(
 def _log_path(incident_id: str) -> Path:
     p = _CHAT_DIR / f"{incident_id}.ndjson"
     return p
+
+
+def _inject_security_context(incident_id: str, trace_id: str | None) -> None:
+    """Post a system message with security trace findings so staff can triage
+    without leaving the escalation room.  Best-effort — all errors are swallowed."""
+    if not trace_id:
+        return
+    try:
+        eng = _current_incident_engine()
+        with eng.begin() as conn:
+            row = conn.execute(
+                sql_text(
+                    "SELECT payload FROM decision_trace_events "
+                    "WHERE trace_id = :tid AND event_type = 'security_scan' "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"tid": trace_id},
+            ).fetchone()
+        if not row or not row[0]:
+            return
+        payload = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        severity = str(payload.get("severity") or "")
+        dread = payload.get("dread") or {}
+        signals = {k: v for k, v in (payload.get("signals") or {}).items() if v}
+        mitre_atlas = [str(m) for m in (payload.get("mitre_atlas") or [])[:4]]
+        mitre_attack = [str(m) for m in (payload.get("mitre_attack") or [])[:4]]
+        owasp = [str(m) for m in (payload.get("owasp_llm_top10") or [])[:3]]
+        if not (severity or signals):
+            return
+        lines = ["[Automated Security Analysis]"]
+        if severity:
+            lines.append(f"Severity: {severity.upper()}")
+        dread_total = dread.get("total") or dread.get("score")
+        if dread_total is not None:
+            lines.append(f"DREAD: {dread_total}/50")
+        if signals:
+            top = list(signals.keys())[:6]
+            lines.append(f"Signals: {', '.join(top)}")
+        if mitre_atlas:
+            lines.append(f"MITRE ATLAS: {', '.join(mitre_atlas)}")
+        if mitre_attack:
+            lines.append(f"MITRE ATT&CK: {', '.join(mitre_attack)}")
+        if owasp:
+            lines.append(f"OWASP LLM: {', '.join(owasp)}")
+        _append_chat(
+            incident_id,
+            role="system",
+            message="\n".join(lines),
+            meta={"source": "security_trace", "trace_id": trace_id, "severity": severity},
+            event_type="security_context",
+        )
+    except Exception:
+        logging.getLogger(__name__).debug("_inject_security_context failed for %s", incident_id)
+
+
+def _notify_staff_new_buyer_message(incident_id: str, msg_snippet: str) -> None:
+    """Dispatch a staff notification when a buyer posts in an escalation room.
+
+    Rate-limited to one alert per incident per 5 minutes via Redis SETNX so
+    rapid buyer typing does not produce an alert storm.
+    """
+    try:
+        from src.app.deps import get_redis, DummyRedis as _DummyRedis
+        r = get_redis()
+        rate_key = f"irt:staff_notify:{incident_id}"
+        if isinstance(r, _DummyRedis):
+            # No Redis — fire unconditionally (local demo mode)
+            pass
+        else:
+            if not r.set(rate_key, "1", nx=True, ex=300):
+                return  # already notified within 5 min
+        dispatch_incident_alert(
+            "new_buyer_message",
+            {
+                "id": incident_id,
+                "severity": "info",
+                "title": "New buyer message — escalation room awaiting staff",
+                "description": msg_snippet[:200],
+                "status": "open",
+            },
+        )
+    except Exception:
+        pass
+
+
+def _create_incident_review_task(incident_id: str, reviewer_id: str | None, team: str | None) -> None:
+    """Insert an incident_review_task record on assignment. Idempotent."""
+    try:
+        eng = _current_incident_engine()
+        with eng.begin() as conn:
+            existing = conn.execute(
+                sql_text(
+                    "SELECT id FROM incident_review_tasks "
+                    "WHERE incident_id = :iid AND status NOT IN ('completed','cancelled') LIMIT 1"
+                ),
+                {"iid": incident_id},
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    sql_text(
+                        "UPDATE incident_review_tasks "
+                        "SET reviewer_id = :rev, team = :team, status = 'in_progress', updated_at = :ts "
+                        "WHERE id = :id"
+                    ),
+                    {
+                        "id": str(existing[0]),
+                        "rev": reviewer_id,
+                        "team": team,
+                        "ts": _utc_now().isoformat(),
+                    },
+                )
+            else:
+                conn.execute(
+                    sql_text(
+                        "INSERT INTO incident_review_tasks "
+                        "(id, incident_id, status, reviewer_id, team, created_at) "
+                        "VALUES (:id, :iid, 'in_progress', :rev, :team, :ts)"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "iid": incident_id,
+                        "rev": reviewer_id,
+                        "team": team,
+                        "ts": _utc_now().isoformat(),
+                    },
+                )
+    except Exception:
+        logging.getLogger(__name__).debug("_create_incident_review_task failed for %s", incident_id)
+
+
+def _resolve_incident_review_task(incident_id: str, rationale: str | None) -> None:
+    """Mark open incident_review_tasks as completed on incident resolution."""
+    try:
+        eng = _current_incident_engine()
+        now = _utc_now().isoformat()
+        with eng.begin() as conn:
+            conn.execute(
+                sql_text(
+                    "UPDATE incident_review_tasks "
+                    "SET status = 'completed', rationale = :rat, updated_at = :ts "
+                    "WHERE incident_id = :iid AND status NOT IN ('completed','cancelled')"
+                ),
+                {"iid": incident_id, "rat": rationale or "Resolved by staff", "ts": now},
+            )
+    except Exception:
+        logging.getLogger(__name__).debug("_resolve_incident_review_task failed for %s", incident_id)
 
 
 def _append_chat(
@@ -571,6 +723,20 @@ def update_incident_status(
                 )
             except Exception:
                 pass
+        if status in ("resolved", "closed"):
+            # Request CSAT from buyer — appears in the room chat
+            _append_chat(
+                incident_id,
+                role="system",
+                message=(
+                    "This incident has been resolved. "
+                    "Please rate your experience (1 = poor, 5 = excellent) and "
+                    "share any feedback to help us improve."
+                ),
+                meta={"source": "system", "csat_prompt": True},
+                event_type="csat_request",
+            )
+            _resolve_incident_review_task(incident_id, rationale=f"Status set to {status}")
         return {"ok": True, "incident_id": incident_id, "status": status, "sla": _apply_sla_if_missing(incident_id)}
     except Exception:
         raise HTTPException(status_code=500, detail="db_error")
@@ -716,8 +882,10 @@ async def ws_room(incident_id: str, websocket: WebSocket):
             if websocket.client_state.name != "CONNECTED":
                 break
             try:
-                rec = await q.get()
+                rec = await asyncio.wait_for(q.get(), timeout=15.0)
                 await websocket.send_text(json.dumps([rec], ensure_ascii=False))
+            except asyncio.TimeoutError:
+                continue   # H fix: bounded wait → loop re-checks client_state, never parks forever
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -750,8 +918,10 @@ async def sse_room(incident_id: str):
         try:
             while True:
                 try:
-                    rec = await q.get()
+                    rec = await asyncio.wait_for(q.get(), timeout=15.0)
                     yield "data: " + json.dumps([rec], ensure_ascii=False) + "\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"   # H fix: heartbeat, never parks forever on a silent stream
                 except asyncio.CancelledError:
                     break
                 except Exception:
@@ -977,6 +1147,7 @@ def assign_incident(
             {"id": incident_id, "assigned_to": body.assigned_to, "team": body.team},
         )
     _append_chat(incident_id, "system", "Incident assignment updated.", meta={"assigned_to": body.assigned_to, "team": body.team})
+    _create_incident_review_task(incident_id, reviewer_id=body.assigned_to, team=body.team)
     return {"ok": True, "incident_id": incident_id, "assigned_to": body.assigned_to, "team": body.team}
 
 
@@ -1377,6 +1548,10 @@ def _seed_incident_chat_context(
                 "trace_context": trace_ctx,
             },
         )
+
+        # Inject security trace findings as a staff-facing system message so
+        # agents don't have to navigate to Decision Trace separately.
+        _inject_security_context(incident_id, trace_id=trace_id)
     except Exception:
         pass
 
@@ -1493,6 +1668,20 @@ def create_incident_record(
                 created = True
         except Exception:
             logging.getLogger(__name__).exception("incident_auto_create_failed")
+    # S3 human-correction learning: an escalation means the autonomous flow under-served — a negative
+    # signal against the user + decision (gated by HUMAN_FEEDBACK_CAPTURE_ENABLED; inert + best-effort).
+    # Uses the main app DB (where human_feedback lives), not the incident engine.
+    if created:
+        try:
+            from src.app.models.db import db_session as _hf_db
+            from src.app.services.human_feedback import capture_feedback
+            _uidh = str((context or {}).get("uid_hash") or (context or {}).get("uid") or "") or None
+            with _hf_db() as _hfdb:
+                capture_feedback(_hfdb, "escalation", subject_hash=_uidh,
+                                 entity_ref=str(trace_id or incident_id), entity_type="incident",
+                                 source="escalation_room", dedup_fields={"incident_id": incident_id})
+        except Exception:
+            pass
     toks = _issue_tokens(incident_id)
     _seed_incident_chat_context(
         incident_id,
@@ -1666,8 +1855,10 @@ async def public_sse_room(
         try:
             while True:
                 try:
-                    rec = await q.get()
+                    rec = await asyncio.wait_for(q.get(), timeout=15.0)
                     yield "data: " + json.dumps([rec], ensure_ascii=False) + "\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"   # H fix: heartbeat, never parks forever on a silent stream
                 except asyncio.CancelledError:
                     break
                 except Exception:
@@ -1713,6 +1904,27 @@ def public_send_message(
             )
             return {"sent": True, "role": role}
         _append_chat(incident_id, role, msg.strip(), meta={"actor": role, "channel": "public"})
+        # Staff notification (rate-limited to 1 per 5 min) when buyer posts
+        if role == "buyer":
+            _notify_staff_new_buyer_message(incident_id, msg.strip())
+        # Buyer intent detection — enrich chat with structured intent when confident
+        if role == "buyer":
+            try:
+                from src.app.services.nlp_complaints import ComplaintNLP
+                intent_result = ComplaintNLP().classify(msg.strip())
+                if intent_result and intent_result.get("confidence", 0) >= 0.4:
+                    _append_chat(
+                        incident_id,
+                        role="system",
+                        message=(
+                            f"[Intent detected: {intent_result['intent']} "
+                            f"(confidence {intent_result['confidence']:.0%})]"
+                        ),
+                        meta={"source": "nlp_complaints", "intent": intent_result},
+                        event_type="intent_detected",
+                    )
+            except Exception:
+                pass
     except HTTPException:
         raise
     except Exception:

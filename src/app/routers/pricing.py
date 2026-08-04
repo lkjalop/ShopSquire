@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from typing import Dict
 import hashlib
 
-from src.app.deps import get_redis
+from src.app.deps import get_redis, hash_uid
 from src.app.security.firewall import TransactionFirewall
 from src.app.services.memory import Memory
 from src.app.services.orchestrator import Orchestrator
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 import time
 from src.app.observability.metrics import record_pricing_latency, record_cb_state, record_rate_limit_exceeded, record_token_budget_usage
 from src.app.observability.tracing import get_tracer
@@ -28,15 +29,15 @@ tracer = get_tracer("pricing-router")
 @router.get("/suggest")
 def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency_key: str | None = None, response: Response = None, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("pricing.suggest") as span:
-        span.set_attribute("pricing.uid_hash", hashlib.sha256(uid.encode("utf-8")).hexdigest()[:12])
+        span.set_attribute("pricing.uid_hash", hash_uid(uid))
         span.set_attribute("pricing.cart_total_cents", int(cart_total_cents or 0))
         span.set_attribute("pricing.has_sku", bool(sku))
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed(
             "pricing",
             flags=flags,
             source_id="Pricing_Autonomy_Governance_Agent",
-            context={"uid_hash": hashlib.sha256(uid.encode("utf-8")).hexdigest()[:12]},
+            context={"uid_hash": hash_uid(uid)},
         )
 
         # Chaos latency injection for tests/load simulations

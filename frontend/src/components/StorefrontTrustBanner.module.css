@@ -1,0 +1,40 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a5f;
+  font-size: 12px;
+}
+
+.items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.items span {
+  padding-left: 12px;
+  border-left: 1px solid #bfdbfe;
+}
+
+.local {
+  color: #9a3412;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .items {
+    flex-direction: column;
+  }
+}
+

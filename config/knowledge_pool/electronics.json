@@ -1,0 +1,518 @@
+{
+  "id": "electronics",
+  "version": "2026-07-08",
+  "description": "Platform-curated domain knowledge for the electronics vertical. Each statement is a self-contained, vendor-neutral sentence with explicit numbers+units so the narration claim guard can verify numeric claims against this text. No brand recommendations, no dollar prices.",
+  "entries": [
+    {
+      "id": "kp-vram-training-floor",
+      "topic": "ai_training",
+      "keywords": [
+        "train",
+        "training",
+        "fine-tune",
+        "fine tune",
+        "llm",
+        "large model"
+      ],
+      "statement": "Sustained local training or full fine-tuning of LLMs generally needs 16GB+ of GPU VRAM; 8GB cards suit small quantized models and LoRA-style fine-tuning of 7B-class models.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-vram-inference-7b",
+      "topic": "ai_inference",
+      "keywords": [
+        "inference",
+        "run",
+        "7b",
+        "quantized",
+        "quantization",
+        "local model",
+        "chatbot"
+      ],
+      "statement": "Local inference of a 7B-parameter LLM quantized to 4-bit typically fits in 6-8GB of GPU VRAM.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-vram-inference-13b",
+      "topic": "ai_inference",
+      "keywords": [
+        "13b",
+        "inference",
+        "mid-size model",
+        "medium model"
+      ],
+      "statement": "Local inference of a 13B-parameter LLM generally needs 10-16GB of GPU VRAM depending on quantization level.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-vram-inference-70b",
+      "topic": "ai_inference",
+      "keywords": [
+        "70b",
+        "frontier",
+        "big model",
+        "largest model"
+      ],
+      "statement": "Running a 70B-parameter LLM locally requires roughly 40GB+ of GPU VRAM even at 4-bit quantization, which puts it in multi-GPU or cloud territory rather than on a single laptop.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-vram-full-finetune-multiplier",
+      "topic": "ai_training",
+      "keywords": [
+        "full fine-tune",
+        "fine-tune",
+        "training memory",
+        "optimizer",
+        "gradients"
+      ],
+      "statement": "Full fine-tuning of an LLM typically needs 2-4x the GPU VRAM of inference on the same model, because gradients and optimizer states must fit in memory alongside the weights.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-vram-lora",
+      "topic": "ai_training",
+      "keywords": [
+        "lora",
+        "qlora",
+        "adapter",
+        "peft",
+        "parameter efficient"
+      ],
+      "statement": "LoRA and QLoRA-style parameter-efficient fine-tuning can adapt a 7B-class model on a single 8-12GB GPU, versus 16GB+ for full fine-tuning of the same model.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-distillation-budget",
+      "topic": "ai_distillation",
+      "keywords": [
+        "distill",
+        "distillation",
+        "teacher",
+        "student model"
+      ],
+      "statement": "Knowledge distillation runs a larger teacher model alongside a smaller student, so the GPU budget must hold both at once - a 13B teacher plus a 7B student wants roughly 24GB of combined VRAM.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-vram-context-length",
+      "topic": "ai_inference",
+      "keywords": [
+        "context",
+        "context window",
+        "long context",
+        "kv cache"
+      ],
+      "statement": "Long context windows inflate LLM memory use - the KV cache can add several GB of VRAM at 32k-token contexts on 7B-13B models - so budget VRAM headroom beyond the base model footprint.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-workstation-gpu-class",
+      "topic": "ai_hardware",
+      "keywords": [
+        "workstation",
+        "desktop gpu",
+        "professional card",
+        "step up",
+        "tower"
+      ],
+      "statement": "Workstation-class desktop GPUs commonly carry 24-48GB of VRAM, a full tier above the 8-16GB typical of laptop GPUs.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-datacenter-gpu-class",
+      "topic": "ai_hardware",
+      "keywords": [
+        "datacenter",
+        "data center",
+        "a100",
+        "h100",
+        "cloud gpu",
+        "server gpu",
+        "accelerator"
+      ],
+      "statement": "Datacenter-class accelerator cards commonly carry 40-80GB of VRAM and are reached through cloud instances or servers rather than anything in a laptop chassis.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-cloud-when-laptop-tops-out",
+      "topic": "ai_hardware",
+      "keywords": [
+        "cloud",
+        "rent gpu",
+        "colab",
+        "cluster",
+        "not enough vram"
+      ],
+      "statement": "When a workload exceeds 16GB of laptop VRAM, the standard step-up path is a desktop workstation GPU or a cloud GPU instance rather than a bigger laptop.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-laptop-vram-ceiling",
+      "topic": "ai_hardware",
+      "keywords": [
+        "laptop gpu",
+        "mobile gpu",
+        "max vram",
+        "vram ceiling"
+      ],
+      "statement": "Laptop GPUs top out around 16GB of VRAM in current generations, so workloads needing more must move to desktop or cloud hardware.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-ai-system-ram-offload",
+      "topic": "ai_hardware",
+      "keywords": [
+        "offload",
+        "cpu inference",
+        "system memory",
+        "llm",
+        "swap"
+      ],
+      "statement": "When a model exceeds GPU VRAM, layers can offload to system RAM at a large speed penalty, so 32-64GB of system RAM is a useful safety net for local AI work.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-gaming-esports",
+      "topic": "gaming",
+      "keywords": [
+        "esports",
+        "competitive",
+        "1080p",
+        "high fps",
+        "fps",
+        "valorant",
+        "counter-strike"
+      ],
+      "statement": "Competitive esports titles at 1080p run well past 144 FPS on an entry-level discrete GPU, and pair naturally with a 144Hz or faster display.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-gaming-aaa-1440p",
+      "topic": "gaming",
+      "keywords": [
+        "aaa",
+        "1440p",
+        "modern games",
+        "gaming",
+        "high settings"
+      ],
+      "statement": "AAA gaming at 1440p and high settings is comfortable on a mid-range discrete GPU with 8GB of VRAM.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-gaming-4k-rt",
+      "topic": "gaming",
+      "keywords": [
+        "4k",
+        "ray tracing",
+        "ultra",
+        "max settings"
+      ],
+      "statement": "4K gaming or heavy ray tracing generally calls for a high-end GPU with 12-16GB of VRAM.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-gaming-vram-floor",
+      "topic": "gaming",
+      "keywords": [
+        "gaming",
+        "vram",
+        "textures"
+      ],
+      "statement": "Modern AAA titles increasingly expect 8GB of GPU VRAM at 1080p-1440p, and 6GB cards may need reduced texture settings to stay smooth.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-gaming-ram",
+      "topic": "gaming",
+      "keywords": [
+        "gaming",
+        "ram",
+        "memory",
+        "background apps"
+      ],
+      "statement": "16GB of system RAM is the practical baseline for modern gaming, and 32GB helps when streaming or running heavy background apps alongside a game.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-gaming-cpu-highrefresh",
+      "topic": "gaming",
+      "keywords": [
+        "cpu",
+        "processor",
+        "bottleneck",
+        "gaming"
+      ],
+      "statement": "High-refresh 1080p gaming is often CPU-bound, so a recent 6-8 core processor matters as much as the GPU for sustaining 144+ FPS.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-content-4k-editing-ram",
+      "topic": "content_creation",
+      "keywords": [
+        "video editing",
+        "4k video",
+        "editing",
+        "content creation",
+        "creator",
+        "timeline"
+      ],
+      "statement": "Smooth 4K video editing wants 32GB of system RAM as a floor, with 64GB preferred for multi-layer timelines and motion graphics.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-content-4k-editing-gpu",
+      "topic": "content_creation",
+      "keywords": [
+        "video editing",
+        "4k video",
+        "render",
+        "export",
+        "color grading"
+      ],
+      "statement": "GPU-accelerated 4K video editing and export benefit from a discrete GPU with at least 8GB of VRAM.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-content-photo",
+      "topic": "content_creation",
+      "keywords": [
+        "photo editing",
+        "raw photo",
+        "photography",
+        "retouching"
+      ],
+      "statement": "Photo editing on large RAW files is comfortable with 16GB of RAM and a color-accurate display, while heavy panorama or focus-stacking work prefers 32GB.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-content-3d",
+      "topic": "content_creation",
+      "keywords": [
+        "3d",
+        "animation",
+        "modeling",
+        "rendering",
+        "scene"
+      ],
+      "statement": "3D modeling and animation workloads want a discrete GPU with 8-12GB of VRAM and at least 32GB of system RAM for complex scenes.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-cad-workstation",
+      "topic": "engineering_cad",
+      "keywords": [
+        "cad",
+        "engineering",
+        "drafting",
+        "assemblies",
+        "parametric"
+      ],
+      "statement": "Professional CAD work with large assemblies runs best on a discrete GPU with 6-8GB of VRAM paired with 32GB of system RAM.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-cad-simulation",
+      "topic": "engineering_cad",
+      "keywords": [
+        "simulation",
+        "finite element",
+        "fea",
+        "cfd",
+        "engineering"
+      ],
+      "statement": "Finite-element and CFD simulation is primarily CPU- and RAM-bound, where 32-64GB of RAM matters more than GPU class.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-battery-gaming-tradeoff",
+      "topic": "portability",
+      "keywords": [
+        "battery",
+        "battery life",
+        "portable",
+        "carry",
+        "travel",
+        "unplugged"
+      ],
+      "statement": "Gaming chassis with high-wattage discrete GPUs typically deliver 3-6 hours of light-use battery life, versus 8-15 hours for thin-and-light integrated-graphics laptops.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-weight-gaming-chassis",
+      "topic": "portability",
+      "keywords": [
+        "weight",
+        "heavy",
+        "lightweight",
+        "commute",
+        "backpack"
+      ],
+      "statement": "Performance gaming laptops usually weigh 2.2-3.5kg plus a large power brick, while ultraportables sit near 1-1.5kg.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-thermals-sustained",
+      "topic": "portability",
+      "keywords": [
+        "thermal",
+        "throttle",
+        "sustained",
+        "fan noise",
+        "cooling"
+      ],
+      "statement": "Thin chassis throttle sustained GPU workloads, so the same GPU part can run 15-30% slower in an ultraportable than in a thick gaming chassis with robust cooling.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-monitor-refresh-gpu",
+      "topic": "monitor",
+      "keywords": [
+        "monitor",
+        "display",
+        "refresh rate",
+        "144hz",
+        "240hz",
+        "smooth"
+      ],
+      "statement": "A high-refresh monitor only pays off when the GPU can sustain matching frame rates - a 240Hz panel needs the GPU to hold near 240 FPS in your titles to show its benefit.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-monitor-resolution-gpu",
+      "topic": "monitor",
+      "keywords": [
+        "monitor",
+        "4k monitor",
+        "1440p monitor",
+        "resolution",
+        "external display"
+      ],
+      "statement": "Driving a 4K monitor for gaming demands roughly twice the GPU power of 1440p at the same settings, while desktop and video playback at 4K 60Hz is easy for any modern GPU.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-monitor-esports-pairing",
+      "topic": "monitor",
+      "keywords": [
+        "monitor",
+        "esports",
+        "competitive",
+        "pairing",
+        "second screen"
+      ],
+      "statement": "For competitive play, a 1080p or 1440p monitor at 144-240Hz is a better pairing with a mid-range GPU than a 4K panel at 60Hz.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-ram-baseline",
+      "topic": "memory",
+      "keywords": [
+        "ram",
+        "memory",
+        "multitask",
+        "8gb",
+        "16gb",
+        "student"
+      ],
+      "statement": "16GB of RAM is the recommended baseline for general, student, and office use, while 8GB constrains browser-heavy multitasking.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-ram-heavy",
+      "topic": "memory",
+      "keywords": [
+        "ram",
+        "32gb",
+        "data science",
+        "virtual machine",
+        "containers",
+        "heavy multitask"
+      ],
+      "statement": "32GB of RAM is the comfortable tier for heavy multitasking, data work, virtual machines, and container-based development.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-storage-nvme-vs-sata",
+      "topic": "storage",
+      "keywords": [
+        "ssd",
+        "nvme",
+        "storage",
+        "sata",
+        "load times",
+        "boot"
+      ],
+      "statement": "NVMe SSDs read several times faster than SATA SSDs - roughly 3,500-7,000MB/s versus about 550MB/s - which shortens boot, game-load, and project-open times.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-storage-game-library",
+      "topic": "storage",
+      "keywords": [
+        "storage",
+        "1tb",
+        "game library",
+        "install size",
+        "disk space"
+      ],
+      "statement": "A 1TB SSD is the practical floor for a game library, since modern AAA installs commonly run 100-150GB each.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-storage-datasets",
+      "topic": "storage",
+      "keywords": [
+        "storage",
+        "dataset",
+        "datasets",
+        "model weights",
+        "checkpoints"
+      ],
+      "statement": "AI datasets and model checkpoints consume storage quickly - a 7B-parameter checkpoint alone is roughly 14GB at 16-bit precision - so 1TB+ of NVMe storage is advisable for local AI work.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-vram-tier-ladder",
+      "topic": "ai_training",
+      "keywords": [
+        "train",
+        "training",
+        "fine-tune",
+        "fine tune",
+        "llm",
+        "go higher",
+        "step up",
+        "upgrade",
+        "more vram",
+        "higher",
+        "budget",
+        "what then",
+        "gpu vram",
+        "ai"
+      ],
+      "statement": "GPU VRAM tiers for AI work: an 8GB GPU handles inference and small/quantized fine-tuning, a 12GB GPU adds headroom for mid-size fine-tuning, 16GB is the practical floor for sustained training, and 24GB or more (desktop workstation class) is needed for larger models.",
+      "confidence": "curated"
+    },
+    {
+      "id": "kp-ai-desktop-stepup",
+      "topic": "ai_training",
+      "keywords": [
+        "go higher",
+        "step up",
+        "upgrade",
+        "more power",
+        "desktop",
+        "workstation",
+        "what then",
+        "training",
+        "fine-tune",
+        "budget",
+        "higher"
+      ],
+      "statement": "When a laptop tops out for AI training, the standard step-up is a desktop workstation GPU with 24GB of VRAM or a cloud GPU instance, rather than a higher-priced laptop, since laptop GPUs cap around 16GB.",
+      "confidence": "curated"
+    }
+  ]
+}

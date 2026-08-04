@@ -6,10 +6,13 @@ intermediate updates (thinking, retrieval, reranking, final answer).
 """
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 import json
+import os
 import time
 import uuid
-from typing import Any, Dict
+from typing import Any, AsyncIterator, Dict, Tuple
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -26,6 +29,37 @@ def _sse_event(event: str, data: Any) -> str:
     """Format a single SSE frame."""
     payload = json.dumps(data, default=str)
     return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _heartbeat_seconds() -> float:
+    try:
+        value = float(os.getenv("CHAT_STREAM_HEARTBEAT_SECONDS", "5") or 5)
+    except (TypeError, ValueError):
+        value = 5.0
+    return max(1.0, min(value, 15.0))
+
+
+async def _run_with_heartbeats(awaitable, *, interval_s: float) -> AsyncIterator[Tuple[str, Any]]:
+    """Keep the SSE connection active while one recommendation producer runs.
+
+    The browser's idle deadline is intentionally shorter than the cold model deadline. Without
+    progress frames, a healthy cold request is aborted and its idempotent fallback merely waits for
+    the same producer. This helper never starts a second producer.
+    """
+    task = asyncio.create_task(awaitable)
+    started = time.monotonic()
+    try:
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=max(0.001, interval_s))
+            if task in done:
+                break
+            yield "heartbeat", {"elapsed_ms": int((time.monotonic() - started) * 1000)}
+        yield "result", await task
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 @router.post("/stream")
@@ -52,9 +86,23 @@ async def chat_stream(
         yield _sse_event("thinking", {"trace_id": trace_id, "ts": time.time()})
 
         try:
-            # Delegate to the normal chat query handler
+            # Delegate to the normal chat query handler. Flag the call so it does NOT consume the replay
+            # token — otherwise the frontend's stream→/chat/query fallback 409s (chat_replay_detected).
             from src.app.routers.chat import chat_query
-            result = await chat_query(request, payload, redis, db, role)
+            result = None
+            async for state, value in _run_with_heartbeats(
+                chat_query(request, {**payload, "_internal_skip_replay": True}, redis, db, role),
+                interval_s=_heartbeat_seconds(),
+            ):
+                if state == "heartbeat":
+                    yield _sse_event("progress", {
+                        "phase": "recommendation",
+                        "trace_id": trace_id,
+                        "ts": time.time(),
+                        **value,
+                    })
+                else:
+                    result = value
 
             # Emit intermediate signals from the result
             if isinstance(result, dict):

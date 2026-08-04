@@ -99,10 +99,11 @@ def queue_sandbox_detonation(
 
     # Path 3: Redis direct XADD (best-effort persistence)
     try:
-        import redis as _redis
+        from src.app.services.redis_factory import create_redis_client
 
-        _redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        _r = _redis.from_url(_redis_url, socket_timeout=2.0)
+        _r = create_redis_client(decode_responses=False)
+        if _r is None:
+            raise RuntimeError("redis_factory_returned_none")
         _r.xadd(_SANDBOX_STREAM_KEY, {"data": json.dumps(job, ensure_ascii=False, default=str)}, maxlen=5000)
         _log.info("sandbox_queue: redis stream entry added hypothesis=%s trace=%s", hypothesis, trace_id)
         return {"queued": True, "path": "redis_stream", "hypothesis": hypothesis, "trace_id": trace_id}

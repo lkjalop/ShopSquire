@@ -85,4 +85,3 @@ def test_netsuite_delta_and_outbound_jobs(monkeypatch):
     rout = run.json()
     assert int(rout.get("processed") or 0) >= 1
     assert int(rout.get("sent") or 0) >= 1
-

@@ -1,0 +1,5462 @@
+{
+ "id": "budget_band",
+ "lane": "budget",
+ "notes": null,
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:43:35.992088+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-budget_band-0710234255"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "laptop between $1200 and $1800",
+     "uid": "corpus-budget_band-0710234255"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 3312,
+   "response": {
+    "results": [
+     {
+      "id": "d47bb9f2-50e0-4836-8668-01abb059ab1e",
+      "sku": "LAP-031E526F",
+      "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+      "price_cents": 139900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-031E526F.svg",
+      "stock": 8,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "display_inches": 16.0,
+       "gpu": "Radeon Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "1080p webcam",
+       "use_case": "business"
+      },
+      "confidence": 0.999172,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.153,
+        "supplier_performance": 0.146,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.419317997769474,
+      "score_norm": 100.0,
+      "rank_delta": 0.0,
+      "why_not": [],
+      "contrastive_why": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]: top pick — the strongest overall score across your criteria.",
+      "delta_vs_anchor": {},
+      "baseline_rank": 0,
+      "rerank_delta": 0,
+      "price": 1399.0,
+      "stock_level": 8,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "8 units remaining",
+      "evidence": {
+       "price_fit": {
+        "status": "within",
+        "detail": "$1,399 within budget"
+       },
+       "inventory_fit": {
+        "status": "low_stock",
+        "detail": "8 in stock"
+       },
+       "office_fit": {
+        "status": "office_grade",
+        "detail": "business-line build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "no",
+        "detail": "none stated"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "none",
+        "detail": "no penalties"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+      "sku": "GAM-0006",
+      "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 169900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0006.svg",
+      "stock": 17,
+      "specs": {
+       "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+       "display_inches": 16,
+       "refresh_hz": 240,
+       "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "storage": "1TB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 86,
+       "weight_kg": 2.6,
+       "ports": [
+        "3x USB-A 3.2",
+        "1x USB-C (Thunderbolt 4)",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.6,
+       "shipping_days": 2,
+       "display_name": "Dell G16 7630",
+       "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+      },
+      "confidence": 0.991786,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.083,
+        "supplier_performance": 0.201,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.403214823059471,
+      "score_norm": 96.16,
+      "rank_delta": 0.02,
+      "why_not": [],
+      "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): vs the top pick — 21% more expensive ($1,699 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "21% more expensive ($1,699 vs $1,399)"
+      },
+      "baseline_rank": 1,
+      "rerank_delta": 0,
+      "price": 1699.0,
+      "stock_level": 17,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "within",
+        "detail": "$1,699 within budget"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "17 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "yes",
+        "detail": "docking/Thunderbolt"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "basic",
+        "detail": "webcam not specified"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "none",
+        "detail": "no penalties"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "cca6d4b2-e3b8-4d82-8792-4a3a833714bf",
+      "sku": "LAP-75988087",
+      "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+      "price_cents": 129900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-75988087.svg",
+      "stock": 21,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "display_inches": 14.0,
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "docking": "Thunderbolt 4",
+       "use_case": "business"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.149,
+        "supplier_performance": 0.091,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity",
+       "market-intel (demand-aware) ↑"
+      ],
+      "score": 15.400396198499983,
+      "score_norm": 85.95,
+      "rank_delta": 0.06,
+      "why_not": [],
+      "contrastive_why": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]: vs the top pick — 7% cheaper ($1,299 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% cheaper ($1,299 vs $1,399)"
+      },
+      "baseline_rank": 3,
+      "rerank_delta": 0,
+      "price": 1299.0,
+      "_sales_response_delta": 0.04,
+      "stock_level": 21,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "within",
+        "detail": "$1,299 within budget"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "21 in stock"
+       },
+       "office_fit": {
+        "status": "office_grade",
+        "detail": "business-line build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "yes",
+        "detail": "docking/Thunderbolt"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "512GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "none",
+        "detail": "no penalties"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "99d21e3c-af69-4abf-ac79-ad1886376ae7",
+      "sku": "LAP-433AB371",
+      "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+      "price_cents": 159900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-433AB371.svg",
+      "stock": 12,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "display_inches": 15.3,
+       "gpu": "UHD Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6",
+       "webcam": "HD webcam",
+       "use_case": "business"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.153,
+        "supplier_performance": 0.091,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.364717997769473,
+      "score_norm": 86.98,
+      "rank_delta": 0.05,
+      "why_not": [],
+      "contrastive_why": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]: vs the top pick — 14% more expensive ($1,599 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "14% more expensive ($1,599 vs $1,399)"
+      },
+      "baseline_rank": 2,
+      "rerank_delta": 0,
+      "price": 1599.0,
+      "stock_level": 12,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "within",
+        "detail": "$1,599 within budget"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "12 in stock"
+       },
+       "office_fit": {
+        "status": "office_grade",
+        "detail": "business-line build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "no",
+        "detail": "none stated"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "none",
+        "detail": "no penalties"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "b36808bd-f287-4088-917b-cf1460c38018",
+      "sku": "GAM-0002",
+      "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 149900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0002.svg",
+      "stock": 13,
+      "specs": {
+       "display": "15.6\" FHD (1920x1080) 144Hz IPS",
+       "display_inches": 15.6,
+       "refresh_hz": 144,
+       "cpu": "Intel Core i7-13620H (10-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "storage": "1TB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 86,
+       "weight_kg": 2.1,
+       "ports": [
+        "3x USB-A 3.2",
+        "1x USB-C",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.4,
+       "shipping_days": 3,
+       "display_name": "MSI Katana 15 B13VGK",
+       "subtitle": "RTX 4070 | 16GB RAM | 144Hz"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.085,
+        "supplier_performance": 0.146,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.350127137184563,
+      "score_norm": 83.5,
+      "rank_delta": 0.07,
+      "why_not": [],
+      "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 7% more expensive ($1,499 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% more expensive ($1,499 vs $1,399)"
+      },
+      "baseline_rank": 13,
+      "rerank_delta": 9,
+      "price": 1499.0,
+      "stock_level": 13,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "4a538235-dad4-4d30-a7ec-6b78bad13971",
+      "sku": "LAP-4A0017C0",
+      "name": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]",
+      "price_cents": 127800,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-4A0017C0.svg",
+      "stock": 20,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "display_inches": 16.0,
+       "gpu": "Adreno",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "use_case": "business"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.161,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity",
+       "market-intel (demand-aware) ↑"
+      ],
+      "score": 15.320643865780498,
+      "score_norm": 66.93,
+      "rank_delta": 0.14,
+      "why_not": [],
+      "contrastive_why": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]: vs the top pick — 9% cheaper ($1,278 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "9% cheaper ($1,278 vs $1,399)"
+      },
+      "baseline_rank": 5,
+      "rerank_delta": -1,
+      "price": 1278.0,
+      "_sales_response_delta": 0.04,
+      "stock_level": 20,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "29375bb1-f406-4e3c-81c1-1fe8a718c214",
+      "sku": "LAP-5DEB73EF",
+      "name": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]",
+      "price_cents": 127400,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-5DEB73EF.svg",
+      "stock": 19,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "display_inches": 14.0,
+       "gpu": "Adreno",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "webcam": "HD webcam",
+       "use_case": "content_creation"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.161,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.2806438657805,
+      "score_norm": 66.93,
+      "rank_delta": 0.14,
+      "why_not": [],
+      "contrastive_why": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]: vs the top pick — 9% cheaper ($1,274 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "9% cheaper ($1,274 vs $1,399)"
+      },
+      "baseline_rank": 4,
+      "rerank_delta": -1,
+      "price": 1274.0,
+      "stock_level": 19,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "3ef6886e-26e1-4f7c-8573-e59af528e6e7",
+      "sku": "LAP-EDDDE240",
+      "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 5)[512GB]",
+      "price_cents": 125900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-EDDDE240.svg",
+      "stock": 18,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "display_inches": 16.0,
+       "gpu": "Radeon Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "1080p webcam",
+       "use_case": "business"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.153,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.273392997769474,
+      "score_norm": 65.2,
+      "rank_delta": 0.15,
+      "why_not": [],
+      "contrastive_why": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 5)[512GB]: vs the top pick — 10% cheaper ($1,259 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "10% cheaper ($1,259 vs $1,399)"
+      },
+      "baseline_rank": 10,
+      "rerank_delta": 3,
+      "price": 1259.0,
+      "stock_level": 18,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "d99cd3d1-f9d1-433c-824b-69db02d6c13c",
+      "sku": "LAP-FF99E9FD",
+      "name": "Lenovo Yoga Slim 7i Aura Edition 14\" 2.8K OLED Laptop (Intel Core Ultra 5)[1TB]",
+      "price_cents": 149900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-FF99E9FD.svg",
+      "stock": 9,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "display_inches": 14.0,
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "use_case": "content_creation"
+      },
+      "confidence": 0.988886,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.151,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.27118578920369,
+      "score_norm": 64.67,
+      "rank_delta": 0.15,
+      "why_not": [],
+      "contrastive_why": "Lenovo Yoga Slim 7i Aura Edition 14\" 2.8K OLED Laptop (Intel Core Ultra 5)[1TB]: vs the top pick — 7% more expensive ($1,499 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% more expensive ($1,499 vs $1,399)"
+      },
+      "baseline_rank": 11,
+      "rerank_delta": 3,
+      "price": 1499.0,
+      "stock_level": 9,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "9 units remaining",
+      "product_type": "laptop"
+     },
+     {
+      "id": "9ffa5351-4a9e-426d-94b2-126ad8d18eb5",
+      "sku": "LAP-B8D8576C",
+      "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 9) [1TB]",
+      "price_cents": 149900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-B8D8576C.svg",
+      "stock": 10,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "refresh_hz": 60,
+       "display_inches": 15.6,
+       "gpu": "Intel Arc Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "use_case": "content_creation"
+      },
+      "confidence": 0.988886,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.14,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.259686059153914,
+      "score_norm": 61.93,
+      "rank_delta": 0.16,
+      "why_not": [],
+      "contrastive_why": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 9) [1TB]: vs the top pick — 7% more expensive ($1,499 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% more expensive ($1,499 vs $1,399)"
+      },
+      "baseline_rank": 6,
+      "rerank_delta": -3,
+      "price": 1499.0,
+      "stock_level": 10,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "10 units remaining",
+      "product_type": "laptop"
+     },
+     {
+      "id": "0c84c8b2-777d-4fc2-9ab2-0ee1e2c14e76",
+      "sku": "LAP-1886C355",
+      "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 7) [1TB]",
+      "price_cents": 149900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-1886C355.svg",
+      "stock": 11,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "refresh_hz": 60,
+       "display_inches": 15.6,
+       "gpu": "Intel Arc Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "use_case": "business"
+      },
+      "confidence": 0.988886,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.14,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.259686059153914,
+      "score_norm": 61.93,
+      "rank_delta": 0.16,
+      "why_not": [],
+      "contrastive_why": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 7) [1TB]: vs the top pick — 7% more expensive ($1,499 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% more expensive ($1,499 vs $1,399)"
+      },
+      "baseline_rank": 12,
+      "rerank_delta": 2,
+      "price": 1499.0,
+      "stock_level": 11,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "450ca740-5db3-4028-9624-ccf6a1ed8cdb",
+      "sku": "LAP-127DE00E",
+      "name": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]",
+      "price_cents": 179900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-127DE00E.svg",
+      "stock": 13,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 8,
+       "storage_gb": 512,
+       "refresh_hz": 144,
+       "display_inches": 15.0,
+       "gpu": "GeForce RTX 3050",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 4,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "1080p webcam",
+       "use_case": "gaming"
+      },
+      "confidence": 0.987834,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.129,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.249099444873579,
+      "score_norm": 59.41,
+      "rank_delta": 0.17,
+      "why_not": [],
+      "contrastive_why": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]: vs the top pick — 29% more expensive ($1,799 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "29% more expensive ($1,799 vs $1,399)"
+      },
+      "baseline_rank": 7,
+      "rerank_delta": -4,
+      "price": 1799.0,
+      "stock_level": 13,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "3a761d37-711c-4fc7-a67f-682f024e29a8",
+      "sku": "GAM-0005",
+      "name": "HP Victus 16 16\" FHD 144Hz Gaming Laptop (RTX 4060)",
+      "price_cents": 124900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0005.svg",
+      "stock": 16,
+      "specs": {
+       "display": "16\" FHD (1920x1080) 144Hz IPS",
+       "display_inches": 16.1,
+       "refresh_hz": 144,
+       "cpu": "Intel Core i7-13700H (14-core, up to 5.0GHz)",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "storage": "512GB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4060 8GB GDDR6",
+       "gpu_model": "RTX 4060",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 70,
+       "weight_kg": 2.3,
+       "ports": [
+        "2x USB-A 3.2",
+        "1x USB-C",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.2,
+       "shipping_days": 2,
+       "display_name": "HP Victus 16",
+       "subtitle": "RTX 4060 | 16GB RAM | 144Hz"
+      },
+      "confidence": 0.975869,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.086,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.206066296582387,
+      "score_norm": 49.14,
+      "rank_delta": 0.21,
+      "why_not": [],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 8,
+      "rerank_delta": -4,
+      "price": 1249.0,
+      "stock_level": 16,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "cf08d82e-2eb2-47cd-b49f-eb88dc88fa3b",
+      "sku": "GAM-0001",
+      "name": "ASUS ROG Strix G16 16\" FHD 165Hz Gaming Laptop (RTX 4060)",
+      "price_cents": 129900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0001.svg",
+      "stock": 12,
+      "specs": {
+       "display": "16\" FHD (1920x1080) 165Hz IPS Anti-glare",
+       "display_inches": 16,
+       "refresh_hz": 165,
+       "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "storage": "512GB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4060 8GB GDDR6",
+       "gpu_model": "RTX 4060",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 90,
+       "weight_kg": 2.5,
+       "ports": [
+        "2x USB-A 3.2",
+        "1x USB-C (USB4)",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.5,
+       "shipping_days": 2,
+       "display_name": "ASUS ROG Strix G16",
+       "subtitle": "RTX 4060 | 16GB RAM | 165Hz"
+      },
+      "confidence": 0.975869,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.083,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.203045479853738,
+      "score_norm": 48.42,
+      "rank_delta": 0.22,
+      "why_not": [],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 14,
+      "rerank_delta": 1,
+      "price": 1299.0,
+      "stock_level": 12,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "dfe9cccd-ff31-48c2-b6ca-3bcd78c9e7be",
+      "sku": "GAM-0004",
+      "name": "Acer Nitro 5 AN517-55 17.3\" FHD 144Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 139900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0004.svg",
+      "stock": 15,
+      "specs": {
+       "display": "17.3\" FHD (1920x1080) 144Hz IPS",
+       "display_inches": 17.3,
+       "refresh_hz": 144,
+       "cpu": "Intel Core i7-12700H (14-core, up to 4.7GHz)",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "storage": "512GB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.2",
+       "battery_wh": 90,
+       "weight_kg": 2.9,
+       "ports": [
+        "2x USB-A 3.2",
+        "1x USB-C",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.3,
+       "shipping_days": 4,
+       "display_name": "Acer Nitro 5 AN517-55",
+       "subtitle": "RTX 4070 | 16GB RAM | 144Hz 17.3\""
+      },
+      "confidence": 0.975869,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.083,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.20268982305947,
+      "score_norm": 48.34,
+      "rank_delta": 0.22,
+      "why_not": [],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 15,
+      "rerank_delta": 1,
+      "price": 1399.0,
+      "stock_level": 15,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "p-neg-apple",
+      "sku": "NEG-APL-1",
+      "name": "Apple MacBook Air",
+      "price_cents": 129900,
+      "currency": "USD",
+      "image_url": null,
+      "stock": 5,
+      "specs": {},
+      "confidence": 0.975869,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+supplier_performance"
+       ],
+       "negative": [
+        "-embedding_similarity"
+       ],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.0,
+        "supplier_performance": 0.201
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+supplier_performance"
+      ],
+      "score": 15.200525,
+      "score_norm": 47.82,
+      "rank_delta": 0.22,
+      "why_not": [
+       "-embedding_similarity"
+      ],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 9,
+      "rerank_delta": -6,
+      "price": 1299.0,
+      "stock_level": 5,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "5 units remaining",
+      "product_type": "laptop"
+     },
+     {
+      "id": "p-asus-near-1",
+      "sku": "ASUS-NEAR-1",
+      "name": "ASUS Vivobook S16",
+      "price_cents": 127800,
+      "currency": "USD",
+      "image_url": null,
+      "stock": 5,
+      "specs": {},
+      "confidence": 0.960609,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget"
+       ],
+       "negative": [
+        "-embedding_similarity"
+       ],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.0
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget"
+      ],
+      "score": 15.0,
+      "score_norm": 0.0,
+      "rank_delta": 0.42,
+      "why_not": [
+       "-embedding_similarity"
+      ],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 16,
+      "rerank_delta": 0,
+      "price": 1278.0,
+      "stock_level": 5,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "5 units remaining",
+      "product_type": "laptop"
+     }
+    ],
+    "products": [
+     {
+      "id": "d47bb9f2-50e0-4836-8668-01abb059ab1e",
+      "sku": "LAP-031E526F",
+      "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+      "price_cents": 139900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-031E526F.svg",
+      "stock": 8,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "display_inches": 16.0,
+       "gpu": "Radeon Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "1080p webcam",
+       "use_case": "business"
+      },
+      "confidence": 0.999172,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.153,
+        "supplier_performance": 0.146,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.419317997769474,
+      "score_norm": 100.0,
+      "rank_delta": 0.0,
+      "why_not": [],
+      "contrastive_why": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]: top pick — the strongest overall score across your criteria.",
+      "delta_vs_anchor": {},
+      "baseline_rank": 0,
+      "rerank_delta": 0,
+      "price": 1399.0,
+      "stock_level": 8,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "8 units remaining",
+      "evidence": {
+       "price_fit": {
+        "status": "within",
+        "detail": "$1,399 within budget"
+       },
+       "inventory_fit": {
+        "status": "low_stock",
+        "detail": "8 in stock"
+       },
+       "office_fit": {
+        "status": "office_grade",
+        "detail": "business-line build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "no",
+        "detail": "none stated"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "none",
+        "detail": "no penalties"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+      "sku": "GAM-0006",
+      "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 169900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0006.svg",
+      "stock": 17,
+      "specs": {
+       "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+       "display_inches": 16,
+       "refresh_hz": 240,
+       "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "storage": "1TB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 86,
+       "weight_kg": 2.6,
+       "ports": [
+        "3x USB-A 3.2",
+        "1x USB-C (Thunderbolt 4)",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.6,
+       "shipping_days": 2,
+       "display_name": "Dell G16 7630",
+       "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+      },
+      "confidence": 0.991786,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.083,
+        "supplier_performance": 0.201,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.403214823059471,
+      "score_norm": 96.16,
+      "rank_delta": 0.02,
+      "why_not": [],
+      "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): vs the top pick — 21% more expensive ($1,699 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "21% more expensive ($1,699 vs $1,399)"
+      },
+      "baseline_rank": 1,
+      "rerank_delta": 0,
+      "price": 1699.0,
+      "stock_level": 17,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "within",
+        "detail": "$1,699 within budget"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "17 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "yes",
+        "detail": "docking/Thunderbolt"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "basic",
+        "detail": "webcam not specified"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "none",
+        "detail": "no penalties"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "cca6d4b2-e3b8-4d82-8792-4a3a833714bf",
+      "sku": "LAP-75988087",
+      "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+      "price_cents": 129900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-75988087.svg",
+      "stock": 21,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "display_inches": 14.0,
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "docking": "Thunderbolt 4",
+       "use_case": "business"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.149,
+        "supplier_performance": 0.091,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity",
+       "market-intel (demand-aware) ↑"
+      ],
+      "score": 15.400396198499983,
+      "score_norm": 85.95,
+      "rank_delta": 0.06,
+      "why_not": [],
+      "contrastive_why": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]: vs the top pick — 7% cheaper ($1,299 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% cheaper ($1,299 vs $1,399)"
+      },
+      "baseline_rank": 3,
+      "rerank_delta": 0,
+      "price": 1299.0,
+      "_sales_response_delta": 0.04,
+      "stock_level": 21,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "within",
+        "detail": "$1,299 within budget"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "21 in stock"
+       },
+       "office_fit": {
+        "status": "office_grade",
+        "detail": "business-line build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "yes",
+        "detail": "docking/Thunderbolt"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "512GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "none",
+        "detail": "no penalties"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "99d21e3c-af69-4abf-ac79-ad1886376ae7",
+      "sku": "LAP-433AB371",
+      "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+      "price_cents": 159900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-433AB371.svg",
+      "stock": 12,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "display_inches": 15.3,
+       "gpu": "UHD Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6",
+       "webcam": "HD webcam",
+       "use_case": "business"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.153,
+        "supplier_performance": 0.091,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.364717997769473,
+      "score_norm": 86.98,
+      "rank_delta": 0.05,
+      "why_not": [],
+      "contrastive_why": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]: vs the top pick — 14% more expensive ($1,599 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "14% more expensive ($1,599 vs $1,399)"
+      },
+      "baseline_rank": 2,
+      "rerank_delta": 0,
+      "price": 1599.0,
+      "stock_level": 12,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "within",
+        "detail": "$1,599 within budget"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "12 in stock"
+       },
+       "office_fit": {
+        "status": "office_grade",
+        "detail": "business-line build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "no",
+        "detail": "none stated"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "none",
+        "detail": "no penalties"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "b36808bd-f287-4088-917b-cf1460c38018",
+      "sku": "GAM-0002",
+      "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 149900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0002.svg",
+      "stock": 13,
+      "specs": {
+       "display": "15.6\" FHD (1920x1080) 144Hz IPS",
+       "display_inches": 15.6,
+       "refresh_hz": 144,
+       "cpu": "Intel Core i7-13620H (10-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "storage": "1TB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 86,
+       "weight_kg": 2.1,
+       "ports": [
+        "3x USB-A 3.2",
+        "1x USB-C",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.4,
+       "shipping_days": 3,
+       "display_name": "MSI Katana 15 B13VGK",
+       "subtitle": "RTX 4070 | 16GB RAM | 144Hz"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+supplier_performance",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.085,
+        "supplier_performance": 0.146,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.350127137184563,
+      "score_norm": 83.5,
+      "rank_delta": 0.07,
+      "why_not": [],
+      "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 7% more expensive ($1,499 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% more expensive ($1,499 vs $1,399)"
+      },
+      "baseline_rank": 13,
+      "rerank_delta": 9,
+      "price": 1499.0,
+      "stock_level": 13,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "4a538235-dad4-4d30-a7ec-6b78bad13971",
+      "sku": "LAP-4A0017C0",
+      "name": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]",
+      "price_cents": 127800,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-4A0017C0.svg",
+      "stock": 20,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "display_inches": 16.0,
+       "gpu": "Adreno",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "use_case": "business"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.161,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity",
+       "market-intel (demand-aware) ↑"
+      ],
+      "score": 15.320643865780498,
+      "score_norm": 66.93,
+      "rank_delta": 0.14,
+      "why_not": [],
+      "contrastive_why": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]: vs the top pick — 9% cheaper ($1,278 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "9% cheaper ($1,278 vs $1,399)"
+      },
+      "baseline_rank": 5,
+      "rerank_delta": -1,
+      "price": 1278.0,
+      "_sales_response_delta": 0.04,
+      "stock_level": 20,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "29375bb1-f406-4e3c-81c1-1fe8a718c214",
+      "sku": "LAP-5DEB73EF",
+      "name": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]",
+      "price_cents": 127400,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-5DEB73EF.svg",
+      "stock": 19,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "display_inches": 14.0,
+       "gpu": "Adreno",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "webcam": "HD webcam",
+       "use_case": "content_creation"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.161,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.2806438657805,
+      "score_norm": 66.93,
+      "rank_delta": 0.14,
+      "why_not": [],
+      "contrastive_why": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]: vs the top pick — 9% cheaper ($1,274 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "9% cheaper ($1,274 vs $1,399)"
+      },
+      "baseline_rank": 4,
+      "rerank_delta": -1,
+      "price": 1274.0,
+      "stock_level": 19,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "3ef6886e-26e1-4f7c-8573-e59af528e6e7",
+      "sku": "LAP-EDDDE240",
+      "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 5)[512GB]",
+      "price_cents": 125900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-EDDDE240.svg",
+      "stock": 18,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "display_inches": 16.0,
+       "gpu": "Radeon Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "1080p webcam",
+       "use_case": "business"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.153,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.273392997769474,
+      "score_norm": 65.2,
+      "rank_delta": 0.15,
+      "why_not": [],
+      "contrastive_why": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 5)[512GB]: vs the top pick — 10% cheaper ($1,259 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "10% cheaper ($1,259 vs $1,399)"
+      },
+      "baseline_rank": 10,
+      "rerank_delta": 3,
+      "price": 1259.0,
+      "stock_level": 18,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "d99cd3d1-f9d1-433c-824b-69db02d6c13c",
+      "sku": "LAP-FF99E9FD",
+      "name": "Lenovo Yoga Slim 7i Aura Edition 14\" 2.8K OLED Laptop (Intel Core Ultra 5)[1TB]",
+      "price_cents": 149900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-FF99E9FD.svg",
+      "stock": 9,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "display_inches": 14.0,
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "use_case": "content_creation"
+      },
+      "confidence": 0.988886,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.151,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.27118578920369,
+      "score_norm": 64.67,
+      "rank_delta": 0.15,
+      "why_not": [],
+      "contrastive_why": "Lenovo Yoga Slim 7i Aura Edition 14\" 2.8K OLED Laptop (Intel Core Ultra 5)[1TB]: vs the top pick — 7% more expensive ($1,499 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% more expensive ($1,499 vs $1,399)"
+      },
+      "baseline_rank": 11,
+      "rerank_delta": 3,
+      "price": 1499.0,
+      "stock_level": 9,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "9 units remaining",
+      "product_type": "laptop"
+     },
+     {
+      "id": "9ffa5351-4a9e-426d-94b2-126ad8d18eb5",
+      "sku": "LAP-B8D8576C",
+      "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 9) [1TB]",
+      "price_cents": 149900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-B8D8576C.svg",
+      "stock": 10,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "refresh_hz": 60,
+       "display_inches": 15.6,
+       "gpu": "Intel Arc Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "use_case": "content_creation"
+      },
+      "confidence": 0.988886,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.14,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.259686059153914,
+      "score_norm": 61.93,
+      "rank_delta": 0.16,
+      "why_not": [],
+      "contrastive_why": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 9) [1TB]: vs the top pick — 7% more expensive ($1,499 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% more expensive ($1,499 vs $1,399)"
+      },
+      "baseline_rank": 6,
+      "rerank_delta": -3,
+      "price": 1499.0,
+      "stock_level": 10,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "10 units remaining",
+      "product_type": "laptop"
+     },
+     {
+      "id": "0c84c8b2-777d-4fc2-9ab2-0ee1e2c14e76",
+      "sku": "LAP-1886C355",
+      "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 7) [1TB]",
+      "price_cents": 149900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-1886C355.svg",
+      "stock": 11,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "refresh_hz": 60,
+       "display_inches": 15.6,
+       "gpu": "Intel Arc Graphics",
+       "gpu_discrete": false,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "use_case": "business"
+      },
+      "confidence": 0.988886,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.14,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.259686059153914,
+      "score_norm": 61.93,
+      "rank_delta": 0.16,
+      "why_not": [],
+      "contrastive_why": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 7) [1TB]: vs the top pick — 7% more expensive ($1,499 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "7% more expensive ($1,499 vs $1,399)"
+      },
+      "baseline_rank": 12,
+      "rerank_delta": 2,
+      "price": 1499.0,
+      "stock_level": 11,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "450ca740-5db3-4028-9624-ccf6a1ed8cdb",
+      "sku": "LAP-127DE00E",
+      "name": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]",
+      "price_cents": 179900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-127DE00E.svg",
+      "stock": 13,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 8,
+       "storage_gb": 512,
+       "refresh_hz": 144,
+       "display_inches": 15.0,
+       "gpu": "GeForce RTX 3050",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 4,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "1080p webcam",
+       "use_case": "gaming"
+      },
+      "confidence": 0.987834,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.129,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.249099444873579,
+      "score_norm": 59.41,
+      "rank_delta": 0.17,
+      "why_not": [],
+      "contrastive_why": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]: vs the top pick — 29% more expensive ($1,799 vs $1,399).",
+      "delta_vs_anchor": {
+       "price": "29% more expensive ($1,799 vs $1,399)"
+      },
+      "baseline_rank": 7,
+      "rerank_delta": -4,
+      "price": 1799.0,
+      "stock_level": 13,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "3a761d37-711c-4fc7-a67f-682f024e29a8",
+      "sku": "GAM-0005",
+      "name": "HP Victus 16 16\" FHD 144Hz Gaming Laptop (RTX 4060)",
+      "price_cents": 124900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0005.svg",
+      "stock": 16,
+      "specs": {
+       "display": "16\" FHD (1920x1080) 144Hz IPS",
+       "display_inches": 16.1,
+       "refresh_hz": 144,
+       "cpu": "Intel Core i7-13700H (14-core, up to 5.0GHz)",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "storage": "512GB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4060 8GB GDDR6",
+       "gpu_model": "RTX 4060",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 70,
+       "weight_kg": 2.3,
+       "ports": [
+        "2x USB-A 3.2",
+        "1x USB-C",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.2,
+       "shipping_days": 2,
+       "display_name": "HP Victus 16",
+       "subtitle": "RTX 4060 | 16GB RAM | 144Hz"
+      },
+      "confidence": 0.975869,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.086,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.206066296582387,
+      "score_norm": 49.14,
+      "rank_delta": 0.21,
+      "why_not": [],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 8,
+      "rerank_delta": -4,
+      "price": 1249.0,
+      "stock_level": 16,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "cf08d82e-2eb2-47cd-b49f-eb88dc88fa3b",
+      "sku": "GAM-0001",
+      "name": "ASUS ROG Strix G16 16\" FHD 165Hz Gaming Laptop (RTX 4060)",
+      "price_cents": 129900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0001.svg",
+      "stock": 12,
+      "specs": {
+       "display": "16\" FHD (1920x1080) 165Hz IPS Anti-glare",
+       "display_inches": 16,
+       "refresh_hz": 165,
+       "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "storage": "512GB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4060 8GB GDDR6",
+       "gpu_model": "RTX 4060",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 90,
+       "weight_kg": 2.5,
+       "ports": [
+        "2x USB-A 3.2",
+        "1x USB-C (USB4)",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.5,
+       "shipping_days": 2,
+       "display_name": "ASUS ROG Strix G16",
+       "subtitle": "RTX 4060 | 16GB RAM | 165Hz"
+      },
+      "confidence": 0.975869,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.083,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.203045479853738,
+      "score_norm": 48.42,
+      "rank_delta": 0.22,
+      "why_not": [],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 14,
+      "rerank_delta": 1,
+      "price": 1299.0,
+      "stock_level": 12,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "dfe9cccd-ff31-48c2-b6ca-3bcd78c9e7be",
+      "sku": "GAM-0004",
+      "name": "Acer Nitro 5 AN517-55 17.3\" FHD 144Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 139900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0004.svg",
+      "stock": 15,
+      "specs": {
+       "display": "17.3\" FHD (1920x1080) 144Hz IPS",
+       "display_inches": 17.3,
+       "refresh_hz": 144,
+       "cpu": "Intel Core i7-12700H (14-core, up to 4.7GHz)",
+       "ram_gb": 16,
+       "storage_gb": 512,
+       "storage": "512GB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.2",
+       "battery_wh": 90,
+       "weight_kg": 2.9,
+       "ports": [
+        "2x USB-A 3.2",
+        "1x USB-C",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.3,
+       "shipping_days": 4,
+       "display_name": "Acer Nitro 5 AN517-55",
+       "subtitle": "RTX 4070 | 16GB RAM | 144Hz 17.3\""
+      },
+      "confidence": 0.975869,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.083,
+        "cross_encoder": 0.12
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+embedding_similarity"
+      ],
+      "score": 15.20268982305947,
+      "score_norm": 48.34,
+      "rank_delta": 0.22,
+      "why_not": [],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 15,
+      "rerank_delta": 1,
+      "price": 1399.0,
+      "stock_level": 15,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "p-neg-apple",
+      "sku": "NEG-APL-1",
+      "name": "Apple MacBook Air",
+      "price_cents": 129900,
+      "currency": "USD",
+      "image_url": null,
+      "stock": 5,
+      "specs": {},
+      "confidence": 0.975869,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget",
+        "+supplier_performance"
+       ],
+       "negative": [
+        "-embedding_similarity"
+       ],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.0,
+        "supplier_performance": 0.201
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget",
+       "+supplier_performance"
+      ],
+      "score": 15.200525,
+      "score_norm": 47.82,
+      "rank_delta": 0.22,
+      "why_not": [
+       "-embedding_similarity"
+      ],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 9,
+      "rerank_delta": -6,
+      "price": 1299.0,
+      "stock_level": 5,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "5 units remaining",
+      "product_type": "laptop"
+     },
+     {
+      "id": "p-asus-near-1",
+      "sku": "ASUS-NEAR-1",
+      "name": "ASUS Vivobook S16",
+      "price_cents": 127800,
+      "currency": "USD",
+      "image_url": null,
+      "stock": 5,
+      "specs": {},
+      "confidence": 0.960609,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+within_budget"
+       ],
+       "negative": [
+        "-embedding_similarity"
+       ],
+       "checks": [],
+       "weights": {
+        "in_stock": 10.0,
+        "within_budget": 5.0,
+        "embedding_similarity": 0.0
+       }
+      },
+      "why": [
+       "+in_stock",
+       "+within_budget"
+      ],
+      "score": 15.0,
+      "score_norm": 0.0,
+      "rank_delta": 0.42,
+      "why_not": [
+       "-embedding_similarity"
+      ],
+      "contrastive_why": "",
+      "delta_vs_anchor": {},
+      "baseline_rank": 16,
+      "rerank_delta": 0,
+      "price": 1278.0,
+      "stock_level": 5,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "5 units remaining",
+      "product_type": "laptop"
+     }
+    ],
+    "price_filter": {
+     "budget_min": 1200,
+     "budget_max": 1800,
+     "candidates_before": 48,
+     "candidates_after": 17
+    },
+    "price_buckets": {
+     "within_budget": [
+      {
+       "id": "d47bb9f2-50e0-4836-8668-01abb059ab1e",
+       "sku": "LAP-031E526F",
+       "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+       "price_cents": 139900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-031E526F.svg",
+       "stock": 8,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "display_inches": 16.0,
+        "gpu": "Radeon Graphics",
+        "gpu_discrete": false,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 7",
+        "webcam": "1080p webcam",
+        "use_case": "business"
+       },
+       "confidence": 1.0,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+supplier_performance",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.153,
+         "supplier_performance": 0.146,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity"
+       ],
+       "score": 15.419317997769474,
+       "score_norm": 100.0,
+       "rank_delta": 0.0,
+       "why_not": [],
+       "contrastive_why": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]: top pick — the strongest overall score across your criteria.",
+       "delta_vs_anchor": {},
+       "baseline_rank": 0,
+       "rerank_delta": 0,
+       "price": 1399.0
+      },
+      {
+       "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+       "sku": "GAM-0006",
+       "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 169900,
+       "currency": "USD",
+       "image_url": "/static/images/GAM-0006.svg",
+       "stock": 17,
+       "specs": {
+        "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+        "display_inches": 16,
+        "refresh_hz": 240,
+        "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "storage": "1TB PCIe NVMe SSD",
+        "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+        "gpu_model": "RTX 4070",
+        "gpu_vram_gb": 8,
+        "os": "Windows 11 Home",
+        "wifi": "Wi-Fi 6E (802.11ax)",
+        "bluetooth": "Bluetooth 5.3",
+        "battery_wh": 86,
+        "weight_kg": 2.6,
+        "ports": [
+         "3x USB-A 3.2",
+         "1x USB-C (Thunderbolt 4)",
+         "HDMI 2.1",
+         "SD card reader",
+         "RJ45"
+        ],
+        "gaming_style": true,
+        "use_case": "gaming",
+        "rating": 4.6,
+        "shipping_days": 2,
+        "display_name": "Dell G16 7630",
+        "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+       },
+       "confidence": 0.999,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+supplier_performance",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.083,
+         "supplier_performance": 0.201,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity"
+       ],
+       "score": 15.403214823059471,
+       "score_norm": 96.16,
+       "rank_delta": 0.02,
+       "why_not": [],
+       "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): vs the top pick — 21% more expensive ($1,699 vs $1,399).",
+       "delta_vs_anchor": {
+        "price": "21% more expensive ($1,699 vs $1,399)"
+       },
+       "baseline_rank": 1,
+       "rerank_delta": 0,
+       "price": 1699.0
+      },
+      {
+       "id": "99d21e3c-af69-4abf-ac79-ad1886376ae7",
+       "sku": "LAP-433AB371",
+       "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+       "price_cents": 159900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-433AB371.svg",
+       "stock": 12,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "display_inches": 15.3,
+        "gpu": "UHD Graphics",
+        "gpu_discrete": false,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6",
+        "webcam": "HD webcam",
+        "use_case": "business"
+       },
+       "confidence": 0.996,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+supplier_performance",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.153,
+         "supplier_performance": 0.091,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity"
+       ],
+       "score": 15.364717997769473,
+       "score_norm": 86.98,
+       "rank_delta": 0.05,
+       "why_not": [],
+       "contrastive_why": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]: vs the top pick — 14% more expensive ($1,599 vs $1,399).",
+       "delta_vs_anchor": {
+        "price": "14% more expensive ($1,599 vs $1,399)"
+       },
+       "baseline_rank": 2,
+       "rerank_delta": 0,
+       "price": 1599.0
+      },
+      {
+       "id": "cca6d4b2-e3b8-4d82-8792-4a3a833714bf",
+       "sku": "LAP-75988087",
+       "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+       "price_cents": 129900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-75988087.svg",
+       "stock": 21,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "display_inches": 14.0,
+        "gpu_discrete": false,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "HD webcam",
+        "docking": "Thunderbolt 4",
+        "use_case": "business"
+       },
+       "confidence": 0.996,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+supplier_performance",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.149,
+         "supplier_performance": 0.091,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity"
+       ],
+       "score": 15.360396198499984,
+       "score_norm": 85.95,
+       "rank_delta": 0.06,
+       "why_not": [],
+       "contrastive_why": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]: vs the top pick — 7% cheaper ($1,299 vs $1,399).",
+       "delta_vs_anchor": {
+        "price": "7% cheaper ($1,299 vs $1,399)"
+       },
+       "baseline_rank": 3,
+       "rerank_delta": 0,
+       "price": 1299.0
+      }
+     ],
+     "closest_above_budget": [],
+     "closest_below_budget": []
+    },
+    "proposal": {
+     "decision_mode": "agent_rerank",
+     "ranked_skus": [
+      "LAP-031E526F",
+      "GAM-0006",
+      "LAP-433AB371",
+      "LAP-75988087",
+      "GAM-0002",
+      "LAP-5DEB73EF",
+      "LAP-4A0017C0",
+      "LAP-EDDDE240",
+      "LAP-FF99E9FD",
+      "LAP-B8D8576C",
+      "LAP-1886C355",
+      "LAP-127DE00E",
+      "GAM-0005",
+      "GAM-0001",
+      "GAM-0004",
+      "NEG-APL-1",
+      "ASUS-NEAR-1"
+     ],
+     "rationale": "Intent=multi_intent_query; focus=budget; query=laptop between $1200 and $1800",
+     "per_sku_rationale": {
+      "LAP-031E526F": [
+       "16GB RAM"
+      ],
+      "GAM-0006": [
+       "equipped with RTX 4070",
+       "16GB RAM"
+      ],
+      "LAP-433AB371": [
+       "16GB RAM"
+      ],
+      "LAP-75988087": [
+       "16GB RAM"
+      ],
+      "GAM-0002": [
+       "equipped with RTX 4070",
+       "16GB RAM"
+      ],
+      "LAP-5DEB73EF": [
+       "16GB RAM"
+      ]
+     },
+     "factor_telemetry": {
+      "decision_mode": "agent_rerank",
+      "window_precision": "na",
+      "context_multipliers": "default",
+      "factor_rankings": []
+     },
+     "nlp": {
+      "intent": "multi_intent_query",
+      "intent_confidence": 0.75,
+      "intent_chain": [
+       {
+        "intent": "multi_intent_query",
+        "confidence": 0.75
+       },
+       {
+        "intent": "price_range",
+        "confidence": 0.667
+       },
+       {
+        "intent": "best_overall_in_category",
+        "confidence": 0.2
+       },
+       {
+        "intent": "product_search",
+        "confidence": 0.133
+       }
+      ],
+      "intent_evidence": {
+       "rules": {
+        "price_range": [
+         "price_range_pattern"
+        ],
+        "best_overall_in_category": [
+         "best_keywords"
+        ]
+       },
+       "semantic": {}
+      },
+      "entities": {
+       "brands": [],
+       "specs": [],
+       "use_case": null,
+       "buyer_type": "consumer",
+       "compliance_requested": false,
+       "budget_max": 1800,
+       "budget_min": 1200
+      },
+      "use_case_tags": [],
+      "preferences": {
+       "brands": [],
+       "specs": [],
+       "budget_max": 1800,
+       "budget_min": 1200,
+       "use_case": null,
+       "use_case_tags": [],
+       "intent": "multi_intent_query",
+       "brand_excludes": [],
+       "availability": null,
+       "condition": null,
+       "buyer_type": "consumer",
+       "compliance_requested": false,
+       "quantity": null,
+       "locale": "en",
+       "lifecycle_signal": null
+      },
+      "context_pack": {
+       "intent": "multi_intent_query",
+       "use_case": null,
+       "use_case_tags": [],
+       "quantity": null,
+       "constraints": {
+        "price_min": 1200,
+        "price_max": 1800,
+        "budget": null,
+        "specs": {},
+        "availability": null,
+        "condition": null
+       },
+       "state": null,
+       "risk_band": null,
+       "buyer_type": "consumer",
+       "locale": "en",
+       "lifecycle_signal": null
+      },
+      "locale": "en",
+      "followups": [
+       "Any must-have specs (RAM, screen size, OS)?",
+       "What will you use the laptop for (work, travel, gaming)?"
+      ],
+      "slots": {
+       "price_min": 1200,
+       "price_max": 1800,
+       "budget": null,
+       "specs": {},
+       "brand_includes": [],
+       "brand_excludes": [],
+       "condition": null,
+       "availability": null,
+       "shipping_deadline": null,
+       "quantity": null
+      },
+      "llm_fallback": true,
+      "trace_tags": [
+       "nlu:intent_present",
+       "nlu:intent_conf_high",
+       "nlu:entity_budget",
+       "lifecycle:new_user",
+       "payments:single_provider",
+       "i18n:english_path",
+       "slsa:level_unknown",
+       "platform:caching_partial",
+       "platform:async_partial",
+       "platform:zero_trust_not_done",
+       "platform:advanced_anomaly_partial",
+       "platform:chaos_partial",
+       "platform:observability_slo_partial",
+       "platform:ai_act_partial"
+      ],
+      "trace_hidden": {
+       "domains": {
+        "nlu": {
+         "intent": "multi_intent_query",
+         "intent_confidence": 0.75,
+         "entity_count": 2,
+         "slot_keys": [
+          "availability",
+          "brand_excludes",
+          "brand_includes",
+          "budget",
+          "condition",
+          "price_max",
+          "price_min",
+          "quantity",
+          "shipping_deadline",
+          "specs"
+         ]
+        },
+        "lifecycle": {
+         "segment": "new_user",
+         "total_orders": 0,
+         "lifetime_value_cents": 0
+        },
+        "payments": {
+         "enabled_providers": [],
+         "enabled_count": 0,
+         "provider_concentration_risk": "high"
+        },
+        "i18n": {
+         "locale": null,
+         "non_english_detected": false,
+         "query_len": 30
+        },
+        "slsa": {
+         "slsa_level": null,
+         "sbom_ready_signal": false
+        },
+        "platform_readiness": {
+         "caching": "partial",
+         "async_processing": "partial",
+         "zero_trust": "not_done",
+         "advanced_anomaly_detection": "partial",
+         "chaos_engineering": "partial",
+         "observability_slo": "partial",
+         "ai_act": "partial"
+        }
+       },
+       "reasoning": {
+        "summary": "Tags correlate NLU extraction quality, lifecycle segment, payment diversity, i18n signals, supply-chain integrity posture, and platform-readiness gaps for decision-trace drilldown."
+       }
+      },
+      "followup_contract": {
+       "deictic_reference_detected": false,
+       "comparative_followup_detected": false,
+       "memory_carry_forward_required": false,
+       "coreference_mode": "none",
+       "intent_chain_size": 4
+      },
+      "intent_execution_plan": {
+       "plan_version": "intent_split_v1",
+       "is_multi_intent": true,
+       "steps": [
+        {
+         "step": 1,
+         "intent": "price_range",
+         "confidence": 0.667,
+         "route": "recommendation",
+         "status": "planned"
+        },
+        {
+         "step": 2,
+         "intent": "best_overall_in_category",
+         "confidence": 0.2,
+         "route": "recommendation",
+         "status": "planned"
+        },
+        {
+         "step": 3,
+         "intent": "product_search",
+         "confidence": 0.133,
+         "route": "recommendation",
+         "status": "planned"
+        }
+       ]
+      }
+     },
+     "evidence": [
+      {
+       "sku": "LAP-031E526F",
+       "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+       "price_cents": 139900
+      },
+      {
+       "sku": "GAM-0006",
+       "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 169900
+      },
+      {
+       "sku": "LAP-433AB371",
+       "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+       "price_cents": 159900
+      },
+      {
+       "sku": "LAP-75988087",
+       "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+       "price_cents": 129900
+      },
+      {
+       "sku": "GAM-0002",
+       "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 149900
+      }
+     ]
+    },
+    "constraints_used": {
+     "uid_hash": "fec1675e757fc559",
+     "budget_max": 1800,
+     "budget_min": 1200,
+     "brands": [],
+     "specs": [],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "multi_intent_query",
+     "use_case": null,
+     "use_case_tags": [],
+     "locale": null,
+     "query": "laptop between $1200 and $1800",
+     "slots": {
+      "price_min": 1200,
+      "price_max": 1800,
+      "budget": null,
+      "specs": {},
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "FILTER",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "premium",
+     "budget_tier_tags": [],
+     "warranty_candidate": "warranty_candidate_high",
+     "accessory_affinities": [
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "unknown",
+      "primary_intent": "multi_intent_query",
+      "secondary_needs": [],
+      "budget_min": 1200,
+      "budget_max": 1800,
+      "budget_tier": "premium",
+      "price_sensitivity": "low",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": null,
+      "accessory_affinities": [
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [],
+      "confidence": 0.75,
+      "warranty_tag": "warranty_candidate_high"
+     },
+     "constraint_status": {
+      "exact_match": true
+     },
+     "use_case_fit_status": {
+      "exact_fit": true,
+      "conflicts": []
+     }
+    },
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 4
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": true,
+     "steps": [
+      {
+       "step": 1,
+       "intent": "price_range",
+       "confidence": 0.667,
+       "route": "recommendation",
+       "status": "planned"
+      },
+      {
+       "step": 2,
+       "intent": "best_overall_in_category",
+       "confidence": 0.2,
+       "route": "recommendation",
+       "status": "planned"
+      },
+      {
+       "step": 3,
+       "intent": "product_search",
+       "confidence": 0.133,
+       "route": "recommendation",
+       "status": "planned"
+      }
+     ]
+    },
+    "policy_version": "v1",
+    "decision_id": "3f01af01-80f6-4af5-87bb-e9def5a16419",
+    "risk_score": 4.320000000000001,
+    "why_not": [
+     {
+      "sku": "LAP-75988087",
+      "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+      "reasons": [],
+      "score": 15.360396198499984
+     },
+     {
+      "sku": "GAM-0002",
+      "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+      "reasons": [],
+      "score": 15.350127137184563
+     },
+     {
+      "sku": "LAP-5DEB73EF",
+      "name": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]",
+      "reasons": [],
+      "score": 15.2806438657805
+     }
+    ],
+    "degraded": false,
+    "eligible": true,
+    "notice": null,
+    "approval_id": null,
+    "trace_id": "3f01af01-80f6-4af5-87bb-e9def5a16419",
+    "persona_tone": "neutral",
+    "buyer_persona": null,
+    "buyer_persona_confidence": null,
+    "buyer_persona_candidate": null,
+    "budget_fitness": {
+     "status": "unknown"
+    },
+    "requested_quantity": null,
+    "refusal_note": null,
+    "learn_more_url": "/ui/status",
+    "agent_chain": [
+     {
+      "agent": "Security_Observer_Agent",
+      "confidence": null,
+      "duration_ms": null,
+      "severity": "info"
+     },
+     {
+      "agent": "NLP_Search_Agent",
+      "confidence": 0.75,
+      "duration_ms": 3
+     },
+     {
+      "agent": "Candidate_Retrieval_Agent",
+      "candidates": 48,
+      "duration_ms": 19
+     },
+     {
+      "agent": "Price_Filter_Agent",
+      "candidates": 17,
+      "constraints": {
+       "budget_min": 1200,
+       "budget_max": 1800,
+       "candidates_before": 48,
+       "candidates_after": 17
+      }
+     },
+     {
+      "agent": "Product_Ranking_Agent",
+      "candidates": 17,
+      "duration_ms": 64,
+      "decision_mode": "agent_rerank"
+     }
+    ],
+    "trace_tags": [
+     "nlu:intent_present",
+     "nlu:intent_conf_high",
+     "nlu:entity_budget",
+     "lifecycle:new_user",
+     "payments:single_provider",
+     "i18n:english_path",
+     "slsa:level_unknown",
+     "platform:caching_partial",
+     "platform:async_partial",
+     "platform:zero_trust_not_done",
+     "platform:advanced_anomaly_partial",
+     "platform:chaos_partial",
+     "platform:observability_slo_partial",
+     "platform:ai_act_partial"
+    ],
+    "drilldown_hidden_tags": {
+     "domains": {
+      "nlu": {
+       "intent": "multi_intent_query",
+       "intent_confidence": 0.75,
+       "entity_count": 2,
+       "slot_keys": [
+        "availability",
+        "brand_excludes",
+        "brand_includes",
+        "budget",
+        "condition",
+        "price_max",
+        "price_min",
+        "quantity",
+        "shipping_deadline",
+        "specs"
+       ]
+      },
+      "lifecycle": {
+       "segment": "new_user",
+       "total_orders": 0,
+       "lifetime_value_cents": 0
+      },
+      "payments": {
+       "enabled_providers": [],
+       "enabled_count": 0,
+       "provider_concentration_risk": "high"
+      },
+      "i18n": {
+       "locale": null,
+       "non_english_detected": false,
+       "query_len": 30
+      },
+      "slsa": {
+       "slsa_level": null,
+       "sbom_ready_signal": false
+      },
+      "platform_readiness": {
+       "caching": "partial",
+       "async_processing": "partial",
+       "zero_trust": "not_done",
+       "advanced_anomaly_detection": "partial",
+       "chaos_engineering": "partial",
+       "observability_slo": "partial",
+       "ai_act": "partial"
+      }
+     },
+     "reasoning": {
+      "summary": "Tags correlate NLU extraction quality, lifecycle segment, payment diversity, i18n signals, supply-chain integrity posture, and platform-readiness gaps for decision-trace drilldown."
+     }
+    },
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [],
+     "conjunction_count": 1,
+     "score": 1
+    },
+    "timing_breakdown": {
+     "ollama_summary_ms": null,
+     "guard_ms": 0,
+     "catalog_profile_ms": 0,
+     "catalog_profile_cache_hit": true,
+     "security_analysis_ms": 26,
+     "seg_security_join_ms": 26.3,
+     "seg_policy_gate_and_session_ms": 28.2,
+     "seg_fraud_scoring_ms": 1.8,
+     "seg_budget_and_rollout_gates_ms": 2.6,
+     "nlp_ms": 3,
+     "seg_session_memory_loads_ms": 15.0,
+     "seg_intent_routing_ms": 0.9,
+     "seg_nlp_and_setup_ms": 0.0,
+     "budget_resolution_ms": 0.02,
+     "retrieve_ms": 19,
+     "seg_retrieve_ms": 39.1,
+     "seg_filter_cascades_ms": 1.9,
+     "seg_inventory_handoff_ms": 1.4,
+     "retrieval_mode": "shadow",
+     "rerank_ms": 64,
+     "seg_rerank_ms": 98.9,
+     "seg_decision_log_and_annotation_ms": 2408.7,
+     "route_total_ms": 3290,
+     "accounted_ms": 2731,
+     "unaccounted_ms": 0,
+     "seg_intelligence_stage_ms": 422.9,
+     "narration_mode": "async",
+     "summary_ms": 0,
+     "narration_pending": true,
+     "seg_narration_ms": 43.0,
+     "copywriting_ms": 0,
+     "seg_post_policy_ms": 6.5,
+     "seg_post_redaction_ms": 23.7,
+     "seg_post_watermark_theft_probe_ms": 0.7,
+     "seg_post_output_security_ms": 53.7,
+     "seg_post_incident_review_ms": 0.0,
+     "seg_post_final_transforms_ms": 1.1,
+     "compound_needed": false,
+     "compound_ms": 0
+    },
+    "source_statuses": [
+     {
+      "source": "catalog_db",
+      "status": "full",
+      "hit_count": 17,
+      "latency_ms": 19,
+      "error": null
+     }
+    ],
+    "fraud": {
+     "score": 0.0,
+     "level": "minimal",
+     "signals": {
+      "image_hash_match_fraud_db": false
+     },
+     "ja3_hash": null,
+     "ja4_hash": null,
+     "source_ip": "[REDACTED_IP]",
+     "ip_country": "ZZ",
+     "asn": null,
+     "gnn_score": 0.1,
+     "gnn_method": "heuristic",
+     "gnn_ring_detected": false
+    },
+    "turn_type": "zero_result_turn",
+    "turn_intent": "FILTER",
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.75,
+    "view_mode": "grid",
+    "view_reason": "Price range detected",
+    "security": {
+     "severity": "info",
+     "mitre": [],
+     "owasp": [],
+     "stride": [],
+     "signals": {
+      "jailbreak": false,
+      "embedding_jailbreak": false,
+      "unicode_obfuscation": false,
+      "pii": false,
+      "api_key": false,
+      "pci": false,
+      "prompt_injection": false,
+      "agentic_tool_abuse": false,
+      "data_exfiltration": false,
+      "supply_chain": false,
+      "training_poisoning": false,
+      "poisoning_attempt": false,
+      "model_drift": false,
+      "model_dos": false,
+      "plugin_insecure": false,
+      "overreliance": false,
+      "embedding_weakness": false,
+      "identity_abuse": false,
+      "unexpected_code_exec": false,
+      "cascading_failure": false,
+      "rogue_agent": false,
+      "pcap_dns_tunnel": false,
+      "pcap_high_entropy_dns": false,
+      "cv_prompt_injection": false,
+      "deception": false,
+      "authority_impersonation": false,
+      "social_engineering": false
+     },
+     "risk_adj": 4.320000000000001,
+     "cvss": {
+      "score": 0.2
+     },
+     "dread": {
+      "damage": 2.0,
+      "reproducibility": 3.0,
+      "exploitability": 3.0,
+      "affected_users": 3.0,
+      "discoverability": 5.0,
+      "avg": 3.2,
+      "weighted_avg": 3.56,
+      "kill_chain_stage": "Reconnaissance",
+      "kill_chain_stage_index": 0,
+      "stage_weights": {
+       "damage": 1,
+       "reproducibility": 2,
+       "exploitability": 2,
+       "affected_users": 1,
+       "discoverability": 3
+      },
+      "evidence": [
+       {
+        "signal": "severity:info",
+        "component": "damage",
+        "contribution": 2.0,
+        "mitre": "",
+        "owasp": "",
+        "kill_chain": "",
+        "source": "severity",
+        "signal_quality": "heuristic"
+       },
+       {
+        "signal": "signal_count:0",
+        "component": "reproducibility",
+        "contribution": 3.0,
+        "mitre": "",
+        "owasp": "",
+        "kill_chain": "",
+        "source": "heuristic",
+        "signal_quality": "heuristic"
+       }
+      ]
+     },
+     "pasta": {
+      "current_stage": "Stage1",
+      "stages": [
+       {
+        "id": "Stage1",
+        "name": "DefineObjectives",
+        "status": "current"
+       },
+       {
+        "id": "Stage2",
+        "name": "DefineTechnicalScope",
+        "status": "pending"
+       },
+       {
+        "id": "Stage3",
+        "name": "ApplicationDecomposition",
+        "status": "pending"
+       },
+       {
+        "id": "Stage4",
+        "name": "ThreatAnalysis",
+        "status": "pending"
+       },
+       {
+        "id": "Stage5",
+        "name": "VulnerabilityAnalysis",
+        "status": "pending"
+       },
+       {
+        "id": "Stage6",
+        "name": "ModellingAndSimulation",
+        "status": "pending"
+       },
+       {
+        "id": "Stage7",
+        "name": "RiskAndImpactAnalysis",
+        "status": "pending"
+       }
+      ],
+      "evidence_tags": []
+     },
+     "kev": [],
+     "maestro": [],
+     "cyber_risk_quantification": {
+      "model": "crq_v1",
+      "likelihood": 0.17,
+      "impact": 0.15,
+      "risk_score": 2.55,
+      "risk_band": "low",
+      "inputs": {
+       "security_risk": 0.04320000000000001,
+       "cv_risk": 0.3,
+       "fraud_risk": 0.2,
+       "history_risk": 0.2,
+       "monetary_exposure": null,
+       "policy_impact": 0.3,
+       "data_impact": 0.3
+      },
+      "weights": {
+       "likelihood": {
+        "security": 0.35,
+        "cv": 0.25,
+        "fraud": 0.25,
+        "history": 0.15
+       },
+       "impact": {
+        "monetary": 0.5,
+        "policy": 0.3,
+        "data": 0.2
+       }
+      }
+     },
+     "tls_fingerprint": null,
+     "gnn_fraud": {
+      "score": 0.1,
+      "method": "heuristic",
+      "ring_detected": false
+     },
+     "policy_route": "allow",
+     "route": "allow",
+     "image_untrusted": false,
+     "image_trust_channels": {
+      "visual_embedding_trusted": true,
+      "ocr_trusted": true,
+      "qr_trusted": true
+     },
+     "qr": {
+      "destination_url": null,
+      "final_url": null,
+      "redirect_hops": 0,
+      "reputation_verdict": "benign",
+      "confidence": 0.35,
+      "intel_pending": false,
+      "intel_risk": null,
+      "intel_sources": []
+     }
+    },
+    "policy_notes": {
+     "no_training_on_pii": true,
+     "retention_policy": {
+      "chat_ttl_hours": 2,
+      "cv_evidence_days": 30,
+      "audit_days": 90,
+      "consent_extended": false
+     },
+     "opt_out_automated_decisions": false,
+     "compliance_tags": []
+    },
+    "image_lane_fill": {
+     "applied": false,
+     "added": 0,
+     "reason": "not_image_flow"
+    },
+    "escalation": null,
+    "decision_trace_id": "3f01af01-80f6-4af5-87bb-e9def5a16419",
+    "_trace_recommendation_persisted": true,
+    "hippograph_insights_shadow": [
+     {
+      "id": "dell",
+      "kind": "brand",
+      "label": "dell",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "hp",
+      "kind": "brand",
+      "label": "hp",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "lenovo",
+      "kind": "brand",
+      "label": "lenovo",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "BAG-156C8941",
+      "kind": "product",
+      "label": "Lenovo Legion GB800 17\" Laptop Backpack (Black)",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "HDD-A9AE2F06",
+      "kind": "product",
+      "label": "Lenovo IdeaPad 5 14\" 2K OLED 2-in-1",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-04C4955F",
+      "kind": "product",
+      "label": "Lenovo IdeaPad Slim 3x 15.3\" 2K Copilot+ AI PC Laptop (Snapdragon X)[512GB]",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-0A1191AB",
+      "kind": "product",
+      "label": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-234E845E",
+      "kind": "product",
+      "label": "HP Laptop 15-fc0433AU 15.6\" FHD Laptop (Ryzen 5)[512GB]",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     }
+    ],
+    "hippograph_shadow_counterfactual": {
+     "would_boost": [],
+     "would_move_positions": 0,
+     "top_result_would_change": false,
+     "recall_products": 5,
+     "in_result_set": 0
+    },
+    "sales_response_nudge": {
+     "applied": 2,
+     "demand_trend": "falling",
+     "boosted": 2,
+     "suppressed": 0,
+     "gate": "allow"
+    },
+    "evidence_items": [
+     {
+      "type": "candidate",
+      "id": "LAP-031E526F",
+      "score": 15.419317997769474
+     },
+     {
+      "type": "candidate",
+      "id": "GAM-0006",
+      "score": 15.403214823059471
+     },
+     {
+      "type": "candidate",
+      "id": "LAP-75988087",
+      "score": 15.400396198499983
+     }
+    ],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 1.0,
+    "price_range": {
+     "min": 1249.0,
+     "max": 1799.0,
+     "median": 1399.0,
+     "count": 17
+    },
+    "question_plan": {
+     "mode": "assume",
+     "missing_fields": [
+      "specs",
+      "use_case",
+      "brand_preference"
+     ],
+     "confidence_band": "high",
+     "ambiguity_reason": "missing_specs"
+    },
+    "confidence_band": "high",
+    "ambiguity_reason": "missing_specs",
+    "assumptions_applied": [
+     "retain_budget_envelope"
+    ],
+    "next_questions": [
+     {
+      "id": "ask_use_case",
+      "text": "To avoid guessing, what will you mostly do: general office/school work, creator/engineering tools, or gaming?",
+      "goal": "resolve_use_case",
+      "question_slot": "use_case",
+      "options": [
+       {
+        "id": "use_case_general",
+        "label": "General office/school"
+       },
+       {
+        "id": "use_case_creator",
+        "label": "Creator/engineering tools"
+       },
+       {
+        "id": "use_case_gaming",
+        "label": "Gaming"
+       }
+      ]
+     },
+     {
+      "id": "ask_brand_pref",
+      "text": "Any brand preference (Apple, Dell, Lenovo, ASUS, etc.)?",
+      "goal": "clarify_details",
+      "evidence_needed": [
+       "none"
+      ],
+      "stop_condition": null,
+      "source": "template",
+      "options": [],
+      "question_slot": "brand_preference"
+     }
+    ],
+    "needs_disambiguation": true,
+    "budget_viability": {
+     "status": "unknown"
+    },
+    "explicit_spec_blocks": {
+     "minimum": {},
+     "recommended": {},
+     "has_explicit_blocks": false
+    },
+    "recommendation_tiers": {
+     "minimum": [
+      {
+       "id": "cca6d4b2-e3b8-4d82-8792-4a3a833714bf",
+       "sku": "LAP-75988087",
+       "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+       "price_cents": 129900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-75988087.svg",
+       "stock": 21,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "display_inches": 14.0,
+        "gpu_discrete": false,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "HD webcam",
+        "docking": "Thunderbolt 4",
+        "use_case": "business"
+       },
+       "confidence": 0.996,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+supplier_performance",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.149,
+         "supplier_performance": 0.091,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "market-intel (demand-aware) ↑"
+       ],
+       "score": 15.400396198499983,
+       "score_norm": 85.95,
+       "rank_delta": 0.06,
+       "why_not": [],
+       "contrastive_why": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]: vs the top pick — 7% cheaper ($1,299 vs $1,399).",
+       "delta_vs_anchor": {
+        "price": "7% cheaper ($1,299 vs $1,399)"
+       },
+       "baseline_rank": 3,
+       "rerank_delta": 0,
+       "price": 1299.0,
+       "_sales_response_delta": 0.04,
+       "stock_level": 21,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "within",
+         "detail": "$1,299 within budget"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "21 in stock"
+        },
+        "office_fit": {
+         "status": "office_grade",
+         "detail": "business-line build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "512GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "none",
+         "detail": "no penalties"
+        }
+       }
+      },
+      {
+       "id": "4a538235-dad4-4d30-a7ec-6b78bad13971",
+       "sku": "LAP-4A0017C0",
+       "name": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]",
+       "price_cents": 127800,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-4A0017C0.svg",
+       "stock": 20,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "display_inches": 16.0,
+        "gpu": "Adreno",
+        "gpu_discrete": false,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "HD webcam",
+        "use_case": "business"
+       },
+       "confidence": 0.991,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.161,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity",
+        "market-intel (demand-aware) ↑"
+       ],
+       "score": 15.320643865780498,
+       "score_norm": 66.93,
+       "rank_delta": 0.14,
+       "why_not": [],
+       "contrastive_why": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]: vs the top pick — 9% cheaper ($1,278 vs $1,399).",
+       "delta_vs_anchor": {
+        "price": "9% cheaper ($1,278 vs $1,399)"
+       },
+       "baseline_rank": 5,
+       "rerank_delta": -1,
+       "price": 1278.0,
+       "_sales_response_delta": 0.04,
+       "stock_level": 20,
+       "cart_eligible": true,
+       "stock_status": "in_stock"
+      },
+      {
+       "id": "29375bb1-f406-4e3c-81c1-1fe8a718c214",
+       "sku": "LAP-5DEB73EF",
+       "name": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]",
+       "price_cents": 127400,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-5DEB73EF.svg",
+       "stock": 19,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "display_inches": 14.0,
+        "gpu": "Adreno",
+        "gpu_discrete": false,
+        "os": "Windows 11",
+        "webcam": "HD webcam",
+        "use_case": "content_creation"
+       },
+       "confidence": 0.991,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.161,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity"
+       ],
+       "score": 15.2806438657805,
+       "score_norm": 66.93,
+       "rank_delta": 0.14,
+       "why_not": [],
+       "contrastive_why": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]: vs the top pick — 9% cheaper ($1,274 vs $1,399).",
+       "delta_vs_anchor": {
+        "price": "9% cheaper ($1,274 vs $1,399)"
+       },
+       "baseline_rank": 4,
+       "rerank_delta": -1,
+       "price": 1274.0,
+       "stock_level": 19,
+       "cart_eligible": true,
+       "stock_status": "in_stock"
+      }
+     ],
+     "recommended": [
+      {
+       "id": "d47bb9f2-50e0-4836-8668-01abb059ab1e",
+       "sku": "LAP-031E526F",
+       "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+       "price_cents": 139900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-031E526F.svg",
+       "stock": 8,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "display_inches": 16.0,
+        "gpu": "Radeon Graphics",
+        "gpu_discrete": false,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 7",
+        "webcam": "1080p webcam",
+        "use_case": "business"
+       },
+       "confidence": 1.0,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+supplier_performance",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.153,
+         "supplier_performance": 0.146,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity"
+       ],
+       "score": 15.419317997769474,
+       "score_norm": 100.0,
+       "rank_delta": 0.0,
+       "why_not": [],
+       "contrastive_why": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]: top pick — the strongest overall score across your criteria.",
+       "delta_vs_anchor": {},
+       "baseline_rank": 0,
+       "rerank_delta": 0,
+       "price": 1399.0,
+       "stock_level": 8,
+       "cart_eligible": true,
+       "stock_status": "low_stock",
+       "stock_urgency": "8 units remaining",
+       "evidence": {
+        "price_fit": {
+         "status": "within",
+         "detail": "$1,399 within budget"
+        },
+        "inventory_fit": {
+         "status": "low_stock",
+         "detail": "8 in stock"
+        },
+        "office_fit": {
+         "status": "office_grade",
+         "detail": "business-line build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "no",
+         "detail": "none stated"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "none",
+         "detail": "no penalties"
+        }
+       }
+      },
+      {
+       "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+       "sku": "GAM-0006",
+       "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 169900,
+       "currency": "USD",
+       "image_url": "/static/images/GAM-0006.svg",
+       "stock": 17,
+       "specs": {
+        "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+        "display_inches": 16,
+        "refresh_hz": 240,
+        "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "storage": "1TB PCIe NVMe SSD",
+        "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+        "gpu_model": "RTX 4070",
+        "gpu_vram_gb": 8,
+        "os": "Windows 11 Home",
+        "wifi": "Wi-Fi 6E (802.11ax)",
+        "bluetooth": "Bluetooth 5.3",
+        "battery_wh": 86,
+        "weight_kg": 2.6,
+        "ports": [
+         "3x USB-A 3.2",
+         "1x USB-C (Thunderbolt 4)",
+         "HDMI 2.1",
+         "SD card reader",
+         "RJ45"
+        ],
+        "gaming_style": true,
+        "use_case": "gaming",
+        "rating": 4.6,
+        "shipping_days": 2,
+        "display_name": "Dell G16 7630",
+        "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+       },
+       "confidence": 0.999,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+supplier_performance",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.083,
+         "supplier_performance": 0.201,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity"
+       ],
+       "score": 15.403214823059471,
+       "score_norm": 96.16,
+       "rank_delta": 0.02,
+       "why_not": [],
+       "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): vs the top pick — 21% more expensive ($1,699 vs $1,399).",
+       "delta_vs_anchor": {
+        "price": "21% more expensive ($1,699 vs $1,399)"
+       },
+       "baseline_rank": 1,
+       "rerank_delta": 0,
+       "price": 1699.0,
+       "stock_level": 17,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "within",
+         "detail": "$1,699 within budget"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "17 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "basic",
+         "detail": "webcam not specified"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "none",
+         "detail": "no penalties"
+        }
+       }
+      },
+      {
+       "id": "99d21e3c-af69-4abf-ac79-ad1886376ae7",
+       "sku": "LAP-433AB371",
+       "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+       "price_cents": 159900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-433AB371.svg",
+       "stock": 12,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "display_inches": 15.3,
+        "gpu": "UHD Graphics",
+        "gpu_discrete": false,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6",
+        "webcam": "HD webcam",
+        "use_case": "business"
+       },
+       "confidence": 0.996,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "+supplier_performance",
+         "+cross_encoder"
+        ],
+        "negative": [],
+        "checks": [],
+        "weights": {
+         "in_stock": 10.0,
+         "within_budget": 5.0,
+         "embedding_similarity": 0.153,
+         "supplier_performance": 0.091,
+         "cross_encoder": 0.12
+        }
+       },
+       "why": [
+        "+in_stock",
+        "+within_budget",
+        "+embedding_similarity"
+       ],
+       "score": 15.364717997769473,
+       "score_norm": 86.98,
+       "rank_delta": 0.05,
+       "why_not": [],
+       "contrastive_why": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]: vs the top pick — 14% more expensive ($1,599 vs $1,399).",
+       "delta_vs_anchor": {
+        "price": "14% more expensive ($1,599 vs $1,399)"
+       },
+       "baseline_rank": 2,
+       "rerank_delta": 0,
+       "price": 1599.0,
+       "stock_level": 12,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "within",
+         "detail": "$1,599 within budget"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "12 in stock"
+        },
+        "office_fit": {
+         "status": "office_grade",
+         "detail": "business-line build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "no",
+         "detail": "none stated"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "none",
+         "detail": "no penalties"
+        }
+       }
+      }
+     ],
+     "show_split": false,
+     "minimum_explanation": "Meets practical baseline with better value and battery/cost balance.",
+     "recommended_explanation": "Adds performance headroom for heavier tasks and longer-term use."
+    },
+    "intent_router_model": "rule-based (prefer_small)",
+    "narration_model": "qwen3:14b",
+    "narration_mode": "async",
+    "claim_guard_result": "skipped",
+    "b2b_assessment": {
+     "verdict": "consumer",
+     "quantity": 1,
+     "is_bulk": false,
+     "business_signal": false,
+     "discount_eligible": false,
+     "escalate": false,
+     "reasons": [
+      "consumer-scale purchase"
+     ]
+    },
+    "escalation_assessment": {
+     "escalate": false,
+     "band": "auto",
+     "score": 0.118,
+     "reasons": [],
+     "factors": {
+      "fraud": 0.0,
+      "uncertainty": 0.52,
+      "constraint_conflict": 0.0,
+      "claim_guard_rejected": 0.0,
+      "bulk_exposure": 0.1399,
+      "irreversibility": 0.0
+     },
+     "talk_to_client": false
+    },
+    "image_reupload_reasons": [],
+    "right_panel": {
+     "mode": "shopping",
+     "show_tiers": false,
+     "budget_status": "unknown",
+     "image_untrusted": false,
+     "image_degraded_mode": false,
+     "security_route": "allow",
+     "security_summary": null,
+     "lower_tier": {
+      "title": "Minimum / budget-fit",
+      "items": [
+       {
+        "id": "cca6d4b2-e3b8-4d82-8792-4a3a833714bf",
+        "sku": "LAP-75988087",
+        "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+        "price_cents": 129900,
+        "currency": "AUD",
+        "image_url": "/static/images/LAP-75988087.svg",
+        "stock": 21,
+        "specs": {
+         "category": "laptop",
+         "ram_gb": 16,
+         "storage_gb": 512,
+         "display_inches": 14.0,
+         "gpu_discrete": false,
+         "os": "Windows 11",
+         "wifi": "Wi-Fi 6E",
+         "webcam": "HD webcam",
+         "docking": "Thunderbolt 4",
+         "use_case": "business"
+        },
+        "confidence": 0.996,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity",
+          "+supplier_performance",
+          "+cross_encoder"
+         ],
+         "negative": [],
+         "checks": [],
+         "weights": {
+          "in_stock": 10.0,
+          "within_budget": 5.0,
+          "embedding_similarity": 0.149,
+          "supplier_performance": 0.091,
+          "cross_encoder": 0.12
+         }
+        },
+        "why": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "market-intel (demand-aware) ↑"
+        ],
+        "score": 15.400396198499983,
+        "score_norm": 85.95,
+        "rank_delta": 0.06,
+        "why_not": [],
+        "contrastive_why": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]: vs the top pick — 7% cheaper ($1,299 vs $1,399).",
+        "delta_vs_anchor": {
+         "price": "7% cheaper ($1,299 vs $1,399)"
+        },
+        "baseline_rank": 3,
+        "rerank_delta": 0,
+        "price": 1299.0,
+        "_sales_response_delta": 0.04,
+        "stock_level": 21,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "within",
+          "detail": "$1,299 within budget"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "21 in stock"
+         },
+         "office_fit": {
+          "status": "office_grade",
+          "detail": "business-line build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "yes",
+          "detail": "docking/Thunderbolt"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "conferencing",
+          "detail": "1080p/IR webcam (Windows Hello)"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "512GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "none",
+          "detail": "no penalties"
+         }
+        }
+       },
+       {
+        "id": "4a538235-dad4-4d30-a7ec-6b78bad13971",
+        "sku": "LAP-4A0017C0",
+        "name": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]",
+        "price_cents": 127800,
+        "currency": "AUD",
+        "image_url": "/static/images/LAP-4A0017C0.svg",
+        "stock": 20,
+        "specs": {
+         "category": "laptop",
+         "ram_gb": 16,
+         "storage_gb": 512,
+         "display_inches": 16.0,
+         "gpu": "Adreno",
+         "gpu_discrete": false,
+         "os": "Windows 11",
+         "wifi": "Wi-Fi 6E",
+         "webcam": "HD webcam",
+         "use_case": "business"
+        },
+        "confidence": 0.991,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity",
+          "+cross_encoder"
+         ],
+         "negative": [],
+         "checks": [],
+         "weights": {
+          "in_stock": 10.0,
+          "within_budget": 5.0,
+          "embedding_similarity": 0.161,
+          "cross_encoder": 0.12
+         }
+        },
+        "why": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity",
+         "market-intel (demand-aware) ↑"
+        ],
+        "score": 15.320643865780498,
+        "score_norm": 66.93,
+        "rank_delta": 0.14,
+        "why_not": [],
+        "contrastive_why": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]: vs the top pick — 9% cheaper ($1,278 vs $1,399).",
+        "delta_vs_anchor": {
+         "price": "9% cheaper ($1,278 vs $1,399)"
+        },
+        "baseline_rank": 5,
+        "rerank_delta": -1,
+        "price": 1278.0,
+        "_sales_response_delta": 0.04,
+        "stock_level": 20,
+        "cart_eligible": true,
+        "stock_status": "in_stock"
+       },
+       {
+        "id": "29375bb1-f406-4e3c-81c1-1fe8a718c214",
+        "sku": "LAP-5DEB73EF",
+        "name": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]",
+        "price_cents": 127400,
+        "currency": "AUD",
+        "image_url": "/static/images/LAP-5DEB73EF.svg",
+        "stock": 19,
+        "specs": {
+         "category": "laptop",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "display_inches": 14.0,
+         "gpu": "Adreno",
+         "gpu_discrete": false,
+         "os": "Windows 11",
+         "webcam": "HD webcam",
+         "use_case": "content_creation"
+        },
+        "confidence": 0.991,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity",
+          "+cross_encoder"
+         ],
+         "negative": [],
+         "checks": [],
+         "weights": {
+          "in_stock": 10.0,
+          "within_budget": 5.0,
+          "embedding_similarity": 0.161,
+          "cross_encoder": 0.12
+         }
+        },
+        "why": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity"
+        ],
+        "score": 15.2806438657805,
+        "score_norm": 66.93,
+        "rank_delta": 0.14,
+        "why_not": [],
+        "contrastive_why": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]: vs the top pick — 9% cheaper ($1,274 vs $1,399).",
+        "delta_vs_anchor": {
+         "price": "9% cheaper ($1,274 vs $1,399)"
+        },
+        "baseline_rank": 4,
+        "rerank_delta": -1,
+        "price": 1274.0,
+        "stock_level": 19,
+        "cart_eligible": true,
+        "stock_status": "in_stock"
+       }
+      ],
+      "explanation": "Meets practical baseline with better value and battery/cost balance."
+     },
+     "higher_tier": {
+      "title": "Recommended / performance-fit",
+      "items": [
+       {
+        "id": "d47bb9f2-50e0-4836-8668-01abb059ab1e",
+        "sku": "LAP-031E526F",
+        "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+        "price_cents": 139900,
+        "currency": "AUD",
+        "image_url": "/static/images/LAP-031E526F.svg",
+        "stock": 8,
+        "specs": {
+         "category": "laptop",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "display_inches": 16.0,
+         "gpu": "Radeon Graphics",
+         "gpu_discrete": false,
+         "os": "Windows 11",
+         "wifi": "Wi-Fi 7",
+         "webcam": "1080p webcam",
+         "use_case": "business"
+        },
+        "confidence": 1.0,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity",
+          "+supplier_performance",
+          "+cross_encoder"
+         ],
+         "negative": [],
+         "checks": [],
+         "weights": {
+          "in_stock": 10.0,
+          "within_budget": 5.0,
+          "embedding_similarity": 0.153,
+          "supplier_performance": 0.146,
+          "cross_encoder": 0.12
+         }
+        },
+        "why": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity"
+        ],
+        "score": 15.419317997769474,
+        "score_norm": 100.0,
+        "rank_delta": 0.0,
+        "why_not": [],
+        "contrastive_why": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]: top pick — the strongest overall score across your criteria.",
+        "delta_vs_anchor": {},
+        "baseline_rank": 0,
+        "rerank_delta": 0,
+        "price": 1399.0,
+        "stock_level": 8,
+        "cart_eligible": true,
+        "stock_status": "low_stock",
+        "stock_urgency": "8 units remaining",
+        "evidence": {
+         "price_fit": {
+          "status": "within",
+          "detail": "$1,399 within budget"
+         },
+         "inventory_fit": {
+          "status": "low_stock",
+          "detail": "8 in stock"
+         },
+         "office_fit": {
+          "status": "office_grade",
+          "detail": "business-line build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "no",
+          "detail": "none stated"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "conferencing",
+          "detail": "1080p/IR webcam (Windows Hello)"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "none",
+          "detail": "no penalties"
+         }
+        }
+       },
+       {
+        "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+        "sku": "GAM-0006",
+        "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+        "price_cents": 169900,
+        "currency": "USD",
+        "image_url": "/static/images/GAM-0006.svg",
+        "stock": 17,
+        "specs": {
+         "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+         "display_inches": 16,
+         "refresh_hz": 240,
+         "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "storage": "1TB PCIe NVMe SSD",
+         "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+         "gpu_model": "RTX 4070",
+         "gpu_vram_gb": 8,
+         "os": "Windows 11 Home",
+         "wifi": "Wi-Fi 6E (802.11ax)",
+         "bluetooth": "Bluetooth 5.3",
+         "battery_wh": 86,
+         "weight_kg": 2.6,
+         "ports": [
+          "3x USB-A 3.2",
+          "1x USB-C (Thunderbolt 4)",
+          "HDMI 2.1",
+          "SD card reader",
+          "RJ45"
+         ],
+         "gaming_style": true,
+         "use_case": "gaming",
+         "rating": 4.6,
+         "shipping_days": 2,
+         "display_name": "Dell G16 7630",
+         "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+        },
+        "confidence": 0.999,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity",
+          "+supplier_performance",
+          "+cross_encoder"
+         ],
+         "negative": [],
+         "checks": [],
+         "weights": {
+          "in_stock": 10.0,
+          "within_budget": 5.0,
+          "embedding_similarity": 0.083,
+          "supplier_performance": 0.201,
+          "cross_encoder": 0.12
+         }
+        },
+        "why": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity"
+        ],
+        "score": 15.403214823059471,
+        "score_norm": 96.16,
+        "rank_delta": 0.02,
+        "why_not": [],
+        "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): vs the top pick — 21% more expensive ($1,699 vs $1,399).",
+        "delta_vs_anchor": {
+         "price": "21% more expensive ($1,699 vs $1,399)"
+        },
+        "baseline_rank": 1,
+        "rerank_delta": 0,
+        "price": 1699.0,
+        "stock_level": 17,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "within",
+          "detail": "$1,699 within budget"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "17 in stock"
+         },
+         "office_fit": {
+          "status": "consumer",
+          "detail": "consumer build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "yes",
+          "detail": "docking/Thunderbolt"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "basic",
+          "detail": "webcam not specified"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "none",
+          "detail": "no penalties"
+         }
+        }
+       },
+       {
+        "id": "99d21e3c-af69-4abf-ac79-ad1886376ae7",
+        "sku": "LAP-433AB371",
+        "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+        "price_cents": 159900,
+        "currency": "AUD",
+        "image_url": "/static/images/LAP-433AB371.svg",
+        "stock": 12,
+        "specs": {
+         "category": "laptop",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "display_inches": 15.3,
+         "gpu": "UHD Graphics",
+         "gpu_discrete": false,
+         "os": "Windows 11",
+         "wifi": "Wi-Fi 6",
+         "webcam": "HD webcam",
+         "use_case": "business"
+        },
+        "confidence": 0.996,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity",
+          "+supplier_performance",
+          "+cross_encoder"
+         ],
+         "negative": [],
+         "checks": [],
+         "weights": {
+          "in_stock": 10.0,
+          "within_budget": 5.0,
+          "embedding_similarity": 0.153,
+          "supplier_performance": 0.091,
+          "cross_encoder": 0.12
+         }
+        },
+        "why": [
+         "+in_stock",
+         "+within_budget",
+         "+embedding_similarity"
+        ],
+        "score": 15.364717997769473,
+        "score_norm": 86.98,
+        "rank_delta": 0.05,
+        "why_not": [],
+        "contrastive_why": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]: vs the top pick — 14% more expensive ($1,599 vs $1,399).",
+        "delta_vs_anchor": {
+         "price": "14% more expensive ($1,599 vs $1,399)"
+        },
+        "baseline_rank": 2,
+        "rerank_delta": 0,
+        "price": 1599.0,
+        "stock_level": 12,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "within",
+          "detail": "$1,599 within budget"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "12 in stock"
+         },
+         "office_fit": {
+          "status": "office_grade",
+          "detail": "business-line build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "no",
+          "detail": "none stated"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "conferencing",
+          "detail": "1080p/IR webcam (Windows Hello)"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "none",
+          "detail": "no penalties"
+         }
+        }
+       }
+      ],
+      "explanation": "Adds performance headroom for heavier tasks and longer-term use."
+     },
+     "device_lanes": [
+      {
+       "key": "apple_macbook",
+       "title": "Apple / MacBook",
+       "explanation": "MacBooks: battery life, build quality, the macOS ecosystem and MDM support.",
+       "metrics": [
+        "battery",
+        "weight",
+        "os_ecosystem",
+        "build"
+       ],
+       "primary": false,
+       "non_primary": false,
+       "count": 1,
+       "price_min": 1299.0,
+       "price_max": 1299.0,
+       "skus": [
+        "NEG-APL-1"
+       ],
+       "products": [
+        {
+         "sku": "NEG-APL-1",
+         "name": "Apple MacBook Air",
+         "price": 1299.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        }
+       ]
+      },
+      {
+       "key": "budget_consumer",
+       "title": "Budget / Consumer",
+       "explanation": "Thin consumer laptops: lowest cost, but fewer business-management features.",
+       "metrics": [
+        "price",
+        "weight",
+        "battery"
+       ],
+       "primary": false,
+       "non_primary": false,
+       "count": 4,
+       "price_min": 1274.0,
+       "price_max": 1599.0,
+       "skus": [
+        "LAP-433AB371",
+        "LAP-4A0017C0",
+        "LAP-5DEB73EF",
+        "ASUS-NEAR-1"
+       ],
+       "products": [
+        {
+         "sku": "LAP-433AB371",
+         "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+         "price": 1599.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "LAP-4A0017C0",
+         "name": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]",
+         "price": 1278.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "LAP-5DEB73EF",
+         "name": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]",
+         "price": 1274.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "ASUS-NEAR-1",
+         "name": "ASUS Vivobook S16",
+         "price": 1278.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        }
+       ]
+      },
+      {
+       "key": "high_performance_gpu",
+       "title": "High-performance (discrete GPU)",
+       "explanation": "Powerful discrete-GPU laptops — the right pick for GPU-heavy work (AI/ML model training, content/video editing, 3D/CAD) and gaming. For normal office work they are a poor fit (thermals, battery, weight, webcam/conferencing), so they are demoted there.",
+       "metrics": [
+        "gpu",
+        "performance",
+        "vram"
+       ],
+       "primary": false,
+       "non_primary": true,
+       "count": 6,
+       "price_min": 1249.0,
+       "price_max": 1799.0,
+       "skus": [
+        "GAM-0006",
+        "GAM-0002",
+        "LAP-127DE00E",
+        "GAM-0005",
+        "GAM-0001",
+        "GAM-0004"
+       ],
+       "products": [
+        {
+         "sku": "GAM-0006",
+         "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+         "price": 1699.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "GAM-0002",
+         "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+         "price": 1499.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "LAP-127DE00E",
+         "name": "MSI Thin A15 15\" FHD 144Hz Gaming Laptop (Ryzen 5) [GeForce RTX 3050]",
+         "price": 1799.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "GAM-0005",
+         "name": "HP Victus 16 16\" FHD 144Hz Gaming Laptop (RTX 4060)",
+         "price": 1249.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "GAM-0001",
+         "name": "ASUS ROG Strix G16 16\" FHD 165Hz Gaming Laptop (RTX 4060)",
+         "price": 1299.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "GAM-0004",
+         "name": "Acer Nitro 5 AN517-55 17.3\" FHD 144Hz Gaming Laptop (RTX 4070)",
+         "price": 1399.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        }
+       ]
+      },
+      {
+       "key": "other",
+       "title": "Other options",
+       "explanation": "Other candidates that did not match a named lane.",
+       "metrics": [],
+       "primary": false,
+       "non_primary": true,
+       "count": 6,
+       "price_min": 1259.0,
+       "price_max": 1499.0,
+       "skus": [
+        "LAP-031E526F",
+        "LAP-75988087",
+        "LAP-EDDDE240",
+        "LAP-FF99E9FD",
+        "LAP-B8D8576C",
+        "LAP-1886C355"
+       ],
+       "products": [
+        {
+         "sku": "LAP-031E526F",
+         "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+         "price": 1399.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "LAP-75988087",
+         "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+         "price": 1299.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "LAP-EDDDE240",
+         "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 5)[512GB]",
+         "price": 1259.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "LAP-FF99E9FD",
+         "name": "Lenovo Yoga Slim 7i Aura Edition 14\" 2.8K OLED Laptop (Intel Core Ultra 5)[1TB]",
+         "price": 1499.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "LAP-B8D8576C",
+         "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 9) [1TB]",
+         "price": 1499.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        },
+        {
+         "sku": "LAP-1886C355",
+         "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 7) [1TB]",
+         "price": 1499.0,
+         "why": [
+          "+in_stock",
+          "+within_budget"
+         ]
+        }
+       ]
+      }
+     ],
+     "anchor_sections": [
+      {
+       "title": "Top Recommendations",
+       "match_basis": [
+        "query_match",
+        "budget_fit"
+       ],
+       "summary": "Matched to your query and budget.",
+       "top_products": [
+        {
+         "sku": "LAP-031E526F",
+         "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+         "price_cents": 139900,
+         "price": 1399.0,
+         "score_norm": 100.0,
+         "reasons": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity"
+         ],
+         "contrastive_why": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]: top pick — the strongest overall score across your criteria."
+        },
+        {
+         "sku": "GAM-0006",
+         "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+         "price_cents": 169900,
+         "price": 1699.0,
+         "score_norm": 96.16,
+         "reasons": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity"
+         ],
+         "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): vs the top pick — 21% more expensive ($1,699 vs $1,399)."
+        },
+        {
+         "sku": "LAP-75988087",
+         "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+         "price_cents": 129900,
+         "price": 1299.0,
+         "score_norm": 85.95,
+         "reasons": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity"
+         ],
+         "contrastive_why": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]: vs the top pick — 7% cheaper ($1,299 vs $1,399)."
+        },
+        {
+         "sku": "LAP-433AB371",
+         "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+         "price_cents": 159900,
+         "price": 1599.0,
+         "score_norm": 86.98,
+         "reasons": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity"
+         ],
+         "contrastive_why": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]: vs the top pick — 14% more expensive ($1,599 vs $1,399)."
+        },
+        {
+         "sku": "GAM-0002",
+         "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+         "price_cents": 149900,
+         "price": 1499.0,
+         "score_norm": 83.5,
+         "reasons": [
+          "+in_stock",
+          "+within_budget",
+          "+embedding_similarity"
+         ],
+         "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 7% more expensive ($1,499 vs $1,399)."
+        }
+       ]
+      }
+     ]
+    },
+    "storefront_emphasis": {
+     "experiment_id": "storefront_emphasis_v1",
+     "variant": "control",
+     "live": true,
+     "applied": false
+    },
+    "autonomy_tier": "caution",
+    "autonomy_badge": "CAUTION",
+    "intent_confidence": 0.75,
+    "assistant_message": "Yes, $1,800 covers these laptops options, with models starting from $1,249.\n\nBest fits here: Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB] ($1,399) and Dell G16 7630 ($1,699).\n\nWant a detailed list or comparison?\n\n💰 Price range: $1,249 – $1,799 (median $1,399) across 17 results.",
+    "catalog_profile": {
+     "primary_category": "laptop",
+     "dominant_categories": [
+      "laptop",
+      "general",
+      "accessory"
+     ],
+     "is_mixed_catalog": true,
+     "category_counts": {
+      "laptop": 45,
+      "fresh_produce": 10,
+      "monitor": 8,
+      "phone": 4,
+      "tablet": 1,
+      "general": 25,
+      "accessory": 13,
+      "desktop": 2,
+      "clothing": 6
+     },
+     "total_products": 114
+    },
+    "catalog_relevance": {
+     "off_domain": false,
+     "low_support": false,
+     "soft_warning": null,
+     "image_category": "laptop",
+     "catalog_primary": "laptop",
+     "dominant_categories": [
+      "laptop",
+      "general",
+      "accessory"
+     ],
+     "is_mixed_catalog": true,
+     "catalog_category_count": 45,
+     "catalog_category_share": 0.3947
+    },
+    "llm_summary_job_id": "73e46cf7405b4bb7aa862d1152300595",
+    "turn_envelope_diff": {
+     "changed_fields": [
+      "budget_min",
+      "budget_max",
+      "brands",
+      "specs",
+      "shortlist_locked",
+      "shortlist_size"
+     ],
+     "expanded": true,
+     "narrowed": false,
+     "reason": "candidate_or_result_envelope_expanded",
+     "previous": {},
+     "current": {
+      "budget_min": 1200,
+      "budget_max": 1800,
+      "brands": [],
+      "specs": [],
+      "candidates_count": 17,
+      "results_count": 17,
+      "shortlist_locked": false,
+      "shortlist_size": 0
+     }
+    },
+    "memory_health": {
+     "memory_confidence": 0.75,
+     "summary_age_sec": null,
+     "stale_slots": [],
+     "shortlist_lock_active": false,
+     "turn_type": "constraint_update_turn"
+    },
+    "session_summary": {
+     "ts": 1783727009,
+     "turn_type": "constraint_update_turn",
+     "goals": [
+      "budget_focused"
+     ],
+     "hard_constraints": {
+      "budget_min": 1200,
+      "budget_max": 1800,
+      "brands": [],
+      "gpu_preference": null
+     },
+     "soft_preferences": {
+      "specs": [],
+      "use_case_tags": []
+     },
+     "current_shortlist": [
+      "LAP-031E526F",
+      "GAM-0006",
+      "LAP-75988087",
+      "LAP-433AB371",
+      "GAM-0002",
+      "LAP-4A0017C0",
+      "LAP-5DEB73EF",
+      "LAP-EDDDE240",
+      "LAP-FF99E9FD",
+      "LAP-B8D8576C",
+      "LAP-1886C355",
+      "LAP-127DE00E"
+     ],
+     "pinned_context": {
+      "budget": {
+       "value": {
+        "min": 1200,
+        "max": 1800
+       },
+       "ts": 1783727009,
+       "source_turn_type": "constraint_update_turn"
+      },
+      "selected_skus": {
+       "value": [
+        "LAP-031E526F",
+        "GAM-0006",
+        "LAP-75988087",
+        "LAP-433AB371",
+        "GAM-0002",
+        "LAP-4A0017C0",
+        "LAP-5DEB73EF",
+        "LAP-EDDDE240",
+        "LAP-FF99E9FD",
+        "LAP-B8D8576C",
+        "LAP-1886C355",
+        "LAP-127DE00E"
+       ],
+       "ts": 1783727009,
+       "source_turn_type": "constraint_update_turn"
+      }
+     },
+     "referents": {
+      "has_reference": false,
+      "source": "none",
+      "skus": []
+     },
+     "unresolved_questions": [
+      "To avoid guessing, what will you mostly do: general office/school work, creator/engineering tools, or gaming?",
+      "Any brand preference (Apple, Dell, Lenovo, ASUS, etc.)?"
+     ]
+    },
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "model_watermark": "sqwm_547a460eeeb35873",
+    "model_output_fingerprint": "sqfp_86fe67d92138c9164e79a519"
+   },
+   "narration": {
+    "job_id": "73e46cf7405b4bb7aa862d1152300595",
+    "final_status": "done",
+    "meta": {
+     "storage_backend": "redis"
+    },
+    "prose_len": 422,
+    "prose": "Yes, there are great laptops in that range. The top pick is Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070), the Dell G16 with a powerful GPU for gaming and smooth performance. Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB] offers strong multitasking and storage, while HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB] is a lightweight, versatile 2-in-1"
+   },
+   "contract_violations": []
+  }
+ ]
+}

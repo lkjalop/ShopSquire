@@ -34,6 +34,51 @@ _SSN_GLUE_PAT = re.compile(
 )
 _CC_PAT = re.compile(r"\b(?:\d[ -]?){13,19}\b")
 _DOB_PAT = re.compile(r"\bdate\s+of\s+birth\b", re.IGNORECASE)
+
+
+def _luhn_valid(value: str) -> bool:
+    digits = [int(ch) for ch in re.sub(r"\D", "", value)]
+    if not 13 <= len(digits) <= 19:
+        return False
+    total = 0
+    parity = len(digits) % 2
+    for index, digit in enumerate(digits):
+        if index % 2 == parity:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
+
+
+def _redact_sensitive_text(value: str) -> str:
+    text_value = str(value or "")
+
+    def mask_ssn(match: re.Match) -> str:
+        digits = re.sub(r"\D", "", match.group(0))
+        return f"***-**-{digits[-4:]}"
+
+    def mask_pan(match: re.Match) -> str:
+        raw = match.group(0)
+        digits = re.sub(r"\D", "", raw)
+        return f"****-****-****-{digits[-4:]}" if _luhn_valid(raw) else raw
+
+    text_value = _SSN_PAT.sub(mask_ssn, text_value)
+    text_value = _SSN_BARE_PAT.sub(mask_ssn, text_value)
+    return _CC_PAT.sub(mask_pan, text_value)
+
+
+def redact_sensitive_artifact(value: Any) -> Any:
+    """Recursively redact sensitive values before the artifact leaves this module."""
+    if isinstance(value, dict):
+        return {key: redact_sensitive_artifact(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_sensitive_artifact(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_sensitive_artifact(item) for item in value)
+    if isinstance(value, str):
+        return _redact_sensitive_text(value)
+    return value
 _LURE_PATTERNS = [
     re.compile(r"\bpay(?:ment)?\b", re.IGNORECASE),
     re.compile(r"\binvoice\b", re.IGNORECASE),
@@ -612,7 +657,7 @@ def _fallback_url_only_assessment(*, raw_url: str, fetch_error: str | None = Non
             pii_detected=False,
         )
     )
-    return out
+    return redact_sensitive_artifact(out)
 
 
 def _provider_candidate_urls(*, source_url: str) -> List[str]:
@@ -1234,4 +1279,4 @@ def analyze_linked_artifact(
             pii_detected=bool(pii_types),
         )
     )
-    return out
+    return redact_sensitive_artifact(out)

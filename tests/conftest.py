@@ -1,12 +1,87 @@
 import os
 import sys
 import asyncio
+import faulthandler
+import hashlib
 import tempfile
 import uuid
 import threading
+import time
+import traceback
 from pathlib import Path
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# Per-test hang backstop (pytest-timeout is not installed in this venv)
+# ---------------------------------------------------------------------------
+# Converts a GENUINE hang into a bounded, diagnosable hard-stop: if a single
+# test's call phase runs longer than PYTEST_PER_TEST_TIMEOUT_SEC, a watchdog
+# thread dumps every thread's stack to the REAL stderr (flushed) and exits the
+# process — so CI fails fast with a stack instead of hanging forever. The
+# default (180s) is far above any real test here (the slowest app-building
+# integration tests are ~10-20s each), so it never trips legitimate work; set
+# to 0 to disable.
+_PER_TEST_TIMEOUT_SEC = float(os.environ.get("PYTEST_PER_TEST_TIMEOUT_SEC", "180") or 0)
+_REPORT_TEST_PROGRESS = os.environ.get("PYTEST_PROGRESS_LOG", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+_LAST_RUNNING_PATH = Path(
+    os.environ.get("PYTEST_LAST_RUNNING_FILE", ".pytest-last-running")
+)
+_TEST_STARTED_AT: dict[str, float] = {}
+_SESSION_BASELINE_THREAD_IDS: set[int] = set()
+
+
+def _hang_backstop_fire(test_id: str) -> None:
+    err = sys.__stderr__ or sys.stderr  # the REAL stderr, not pytest's capture buffer
+    try:
+        err.write(f"\n[HANG-BACKSTOP] test exceeded {_PER_TEST_TIMEOUT_SEC:.0f}s — aborting: {test_id}\n")
+        err.flush()
+        faulthandler.dump_traceback(file=err)
+        err.flush()
+    finally:
+        os._exit(1)  # hard stop: a hung test must not hang the whole CI run
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    timer = None
+    if _PER_TEST_TIMEOUT_SEC > 0:
+        timer = threading.Timer(_PER_TEST_TIMEOUT_SEC, _hang_backstop_fire, args=(item.nodeid,))
+        timer.daemon = True
+        timer.start()
+    try:
+        yield
+    finally:
+        if timer is not None:
+            timer.cancel()
+
+
+def pytest_runtest_logstart(nodeid, location):  # noqa: ARG001
+    """Expose the exact test running when a shard stalls."""
+    _TEST_STARTED_AT[nodeid] = time.monotonic()
+    try:
+        _LAST_RUNNING_PATH.write_text(nodeid + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    if _REPORT_TEST_PROGRESS:
+        out = sys.__stderr__ or sys.stderr
+        out.write(f"\n[RUNNING] {nodeid}\n")
+        out.flush()
+
+
+def pytest_runtest_logfinish(nodeid, location):  # noqa: ARG001
+    started = _TEST_STARTED_AT.pop(nodeid, None)
+    if started is None or not _REPORT_TEST_PROGRESS:
+        return
+    out = sys.__stderr__ or sys.stderr
+    out.write(f"[FINISHED {time.monotonic() - started:.2f}s] {nodeid}\n")
+    out.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +136,9 @@ def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     try:
         import json as _json
 
-        _fpath = Path("config/feature_flags.json")
+        _fpath = Path(
+            os.environ.get("FEATURE_FLAGS_PATH", "config/feature_flags.json")
+        )
         _fpath.parent.mkdir(parents=True, exist_ok=True)
 
         # Canonical flags baseline — written whenever the file is missing,
@@ -217,11 +294,43 @@ asyncio.run = _safe_asyncio_run
 
 
 def pytest_sessionstart(session):
-    # Isolate test DB for this session so stateful API tests don't collide.
-    db_file = os.path.join(tempfile.gettempdir(), f"shopsquire_test_{uuid.uuid4().hex}.sqlite")
-    session_db_url = f"sqlite+pysqlite:///{db_file}"
+    global _SESSION_BASELINE_THREAD_IDS
+    _SESSION_BASELINE_THREAD_IDS = {
+        thread.ident
+        for thread in threading.enumerate()
+        if thread.ident is not None
+    }
+    # Hosted file-isolated shards provide a migrated copy of the canonical
+    # template for each pytest process.  Preserve it instead of silently
+    # replacing it with an ensure_metadata-only database.  Other test runs
+    # retain the historical per-session isolation.
+    use_provided_database = os.getenv("TEST_USE_PROVIDED_DATABASE", "").strip().lower()
+    if use_provided_database in {"1", "true", "yes", "on"}:
+        session_db_url = os.environ.get("DATABASE_URL", "").strip()
+        if not session_db_url.startswith(("sqlite:///", "sqlite+pysqlite:///")):
+            raise RuntimeError(
+                "TEST_USE_PROVIDED_DATABASE requires an explicit SQLite DATABASE_URL"
+            )
+    else:
+        db_file = os.path.join(
+            tempfile.gettempdir(),
+            f"shopsquire_test_{uuid.uuid4().hex}.sqlite",
+        )
+        session_db_url = f"sqlite+pysqlite:///{db_file}"
     os.environ["DATABASE_URL"] = session_db_url
     os.environ["DATABASE_URL_RO"] = session_db_url
+
+    # ── Isolate tests from the DEMO .env's operational flags ────────────────
+    # config.py calls load_dotenv() at import, so a demo-configured .env
+    # (FULFILLMENT_DEMO_ENABLED=1) and the feature_flags baseline
+    # (FULFILLMENT_AUTO_DRAFT_ON_COMMIT=true) bleed into the test process and
+    # break tests that assert DEFAULT (off) behaviour — e.g. "replay gated off
+    # by default", "commit stops at COMMITTED (no auto-draft)". Force them OFF
+    # here (direct assignment — the .env set them truthy, so setdefault wouldn't
+    # win). Tests that need them ON opt in via monkeypatch.setenv(), as the
+    # auto-draft/replay-enabled tests already do.
+    os.environ["FULFILLMENT_DEMO_ENABLED"] = "0"
+    os.environ["FULFILLMENT_AUTO_DRAFT_ON_COMMIT"] = "0"
 
     # Keep full-suite tests deterministic by disabling background workers that
     # can create timing/port collisions during parallelized app startup.
@@ -291,9 +400,123 @@ def pytest_sessionstart(session):
             _ensure_minimal_sqlite_tables(_session_eng)
         except Exception:
             pass
+        # Connector reliability tables are migration-owned in production.
+        # The session-scoped ephemeral SQLite database intentionally does not
+        # run the historical Alembic chain, so mirror the current migration
+        # contract here rather than letting connector services create schema.
+        try:
+            from sqlalchemy import text as _sql_text  # noqa: PLC0415
+            with _session_eng.begin() as _connection:
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS erp_sync_state (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        provider TEXT NOT NULL,
+                        subscription_id TEXT NOT NULL DEFAULT 'default',
+                        entity_type TEXT NOT NULL,
+                        cursor_value TEXT,
+                        cursor_version INTEGER NOT NULL DEFAULT 0,
+                        checkpoint_json TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    )
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_erp_sync_state_scope
+                    ON erp_sync_state
+                    (tenant_id, provider, subscription_id, entity_type)
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS erp_outbound_queue (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL,
+                        provider TEXT NOT NULL,
+                        entity_type TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        max_attempts INTEGER NOT NULL DEFAULT 3,
+                        last_error TEXT,
+                        next_attempt_at TIMESTAMP,
+                        claimed_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    )
+                """))
+                for _column_ddl in (
+                    "ALTER TABLE inventory_sync_runs ADD COLUMN heartbeat_at TIMESTAMP",
+                    "ALTER TABLE inventory_sync_runs ADD COLUMN budget_deadline_at TIMESTAMP",
+                    "ALTER TABLE inventory_sync_runs ADD COLUMN outcome_type TEXT",
+                ):
+                    try:
+                        _connection.execute(_sql_text(_column_ddl))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         try:
             from src.app.models.orm import Base  # noqa: PLC0415
             Base.metadata.create_all(_session_eng)
+        except Exception:
+            pass
+        # Migration-owned auxiliary table used by endpoint tests. Production
+        # creates this through Alembic; the ephemeral unit-test DB does not run
+        # the migration chain.
+        try:
+            from sqlalchemy import text as _sql_text  # noqa: PLC0415
+            with _session_eng.begin() as _connection:
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS nqe_feedback_events (
+                        id TEXT PRIMARY KEY,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        tenant_id TEXT NOT NULL,
+                        trace_id TEXT NOT NULL,
+                        question_id TEXT NOT NULL,
+                        variant TEXT NOT NULL,
+                        converted BOOLEAN NOT NULL,
+                        latency_ms INTEGER NOT NULL,
+                        answer_value TEXT,
+                        helpful BOOLEAN
+                    )
+                """))
+                # Experiment persistence is migration-owned. The ephemeral
+                # session DB mirrors the current schema so services can validate
+                # it without reintroducing request-time DDL.
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS experiment_run (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL DEFAULT 'default',
+                        name TEXT NOT NULL,
+                        target_metric TEXT NOT NULL,
+                        policy_json TEXT NOT NULL,
+                        policy_version TEXT NOT NULL DEFAULT 'experiment-policy.v1',
+                        status TEXT NOT NULL DEFAULT 'draft',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        started_at TIMESTAMP,
+                        ended_at TIMESTAMP
+                    )
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS experiment_assignment (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL DEFAULT 'default',
+                        experiment_id TEXT NOT NULL,
+                        subject_hash TEXT NOT NULL,
+                        variant TEXT NOT NULL,
+                        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                _connection.execute(_sql_text("""
+                    CREATE TABLE IF NOT EXISTS experiment_result (
+                        id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL DEFAULT 'default',
+                        experiment_id TEXT NOT NULL,
+                        variant TEXT,
+                        decision TEXT,
+                        uplift_pct REAL,
+                        evidence_json TEXT,
+                        decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
         except Exception:
             pass
     except Exception:
@@ -329,6 +552,47 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
     with _SINGLETONS_LOCK:
         _SINGLETONS.clear()
 
+    try:
+        _LAST_RUNNING_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    # Release the lazily-created bounded dependency pool before enforcing the
+    # thread-leak gate. Production performs the same cleanup in app lifespan.
+    try:
+        from src.app.services.dependency_resilience import (
+            shutdown_resilience_executor,
+        )
+        shutdown_resilience_executor(wait=False)
+    except Exception:
+        pass
+    leaked_threads = [
+        thread
+        for thread in threading.enumerate()
+        if thread.ident is not None
+        and thread.ident not in _SESSION_BASELINE_THREAD_IDS
+        and thread.is_alive()
+        and not thread.daemon
+    ]
+    if leaked_threads:
+        out = sys.__stderr__ or sys.stderr
+        names = ", ".join(f"{thread.name}({thread.ident})" for thread in leaked_threads)
+        out.write(f"\n[RESOURCE-LEAK] non-daemon threads still alive: {names}\n")
+        frames = sys._current_frames()
+        for thread in leaked_threads:
+            frame = frames.get(thread.ident)
+            if frame is not None:
+                out.write(f"[RESOURCE-LEAK-STACK] {thread.name}\n")
+                traceback.print_stack(frame, file=out)
+        out.flush()
+        if os.environ.get("PYTEST_FAIL_ON_THREAD_LEAK", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
 
 @pytest.fixture(autouse=True)
 def _restore_feature_flags_file():
@@ -337,7 +601,9 @@ def _restore_feature_flags_file():
     Several tests write minimal payloads (e.g. only DECISION_LOG_WRITES_ENABLED),
     which can erase required keys for later tests if not restored.
     """
-    flags_path = Path("config/feature_flags.json")
+    flags_path = Path(
+        os.environ.get("FEATURE_FLAGS_PATH", "config/feature_flags.json")
+    )
     existed = flags_path.exists()
     original = flags_path.read_bytes() if existed else None
     yield
@@ -349,6 +615,37 @@ def _restore_feature_flags_file():
             flags_path.unlink()
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_store_profile_cache():
+    """Clear the StoreProfile lru_cache (and the profile-derived taxonomy/vocab caches)
+    between tests so a profile loaded under one vertical (e.g. pharmacy) can't leak into the
+    next test's reads. PROVABLY SAFE and NON-masking: it reloads identical static JSON, so it
+    can never change a test's verdict (unlike the catalog/Redis clears that masked NQE — see
+    docs/DETERMINISM.md)."""
+    def _reset_all():
+        for mod, fn in (
+            ("src.app.platform.store_profile", "reset_cache"),
+            ("src.app.services.product_classifier", "reset_cache"),
+            ("src.app.services.product_claim_guard", "reset_vocab_cache"),
+            ("src.app.services.query_decomposer", "reset_cache"),
+            # send-cage prohibited-claim profile-extension cache (fulfillment/draft) — clear so a
+            # profile swap can't leak one vertical's prohibited patterns into the next test.
+            ("src.app.services.fulfillment.draft", "reset_prohibited_cache"),
+            # Catalog-brands cache: forces a FRESH read of the real catalog each test, covering
+            # the row-count stamp's blind spot (count-equal mutations, e.g. insert-A + delete-B).
+            # Non-masking: it reveals the true catalog, never hides cross-test state (this stale
+            # cache WAS the ASUS order-dependence root cause — see DETERMINISM.md / grounding fix).
+            ("src.app.services.grounding_ladder", "reset_catalog_brands_cache"),
+        ):
+            try:
+                getattr(__import__(mod, fromlist=[fn]), fn)()
+            except Exception:
+                pass
+    _reset_all()
+    yield
+    _reset_all()
 
 
 @pytest.fixture(autouse=True)
@@ -364,17 +661,35 @@ def _restore_db_engine():
     This fixture is zero-overhead for the common case where no test changes
     the engine (just a reference comparison at teardown).
     """
+    original_database_url = os.environ.get("DATABASE_URL")
+    original_database_url_ro = os.environ.get("DATABASE_URL_RO")
     try:
+        import src.app.models.db as db_module
         from src.app.models.db import get_engine, set_engine  # noqa: PLC0415
         original_engine = get_engine()
+        original_session_factory = db_module.SessionLocal
     except Exception:
         yield
         return
     yield
     try:
+        if original_database_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = original_database_url
+        if original_database_url_ro is None:
+            os.environ.pop("DATABASE_URL_RO", None)
+        else:
+            os.environ["DATABASE_URL_RO"] = original_database_url_ro
+        import src.app.models.db as db_module
         from src.app.models.db import get_engine, set_engine  # noqa: PLC0415
-        if get_engine() is not original_engine:
+        engine_changed = get_engine() is not original_engine
+        session_factory_changed = db_module.SessionLocal is not original_session_factory
+        if engine_changed:
             set_engine(original_engine)
+        if session_factory_changed:
+            db_module.SessionLocal = original_session_factory
+        if engine_changed or session_factory_changed:
             # Re-align all singleton app.state.engine so that request handlers
             # use the same engine as db_session() after restoration.
             with _SINGLETONS_LOCK:
@@ -441,6 +756,21 @@ def yolo_damage_classifier():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
+def _clear_vision_cache_between_tests():
+    """Isolation: the image-hash vision_cache (shared by product_identity, cv_tier2.run_tier2 and the
+    vision-triage path) is process-local and persists across tests. Tests that reuse the same image
+    bytes would otherwise be served a PRIOR test's cached verdict — cross-test contamination that made
+    cv/vision-triage tests flap in full-suite runs. Clear it before each test. Safe: process-local,
+    correctness never depends on the cache (a miss just recomputes)."""
+    try:
+        from src.app.services import vision_cache
+        vision_cache.clear()
+    except Exception:
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _rss_guard():
     """Warn to stderr when a test grows process RSS by > 300 MB."""
     try:
@@ -484,9 +814,31 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
-    if config.getoption("--run-slow", default=False):
-        return  # run everything
-    skip_slow = pytest.mark.skip(reason="slow test — pass --run-slow to enable")
+    if not config.getoption("--run-slow", default=False):
+        skip_slow = pytest.mark.skip(reason="slow test — pass --run-slow to enable")
+        for item in items:
+            if item.get_closest_marker("slow"):
+                item.add_marker(skip_slow)
+
+    shard_total = int(os.environ.get("PYTEST_SERVICE_SHARD_TOTAL", "1") or 1)
+    shard_index = int(os.environ.get("PYTEST_SERVICE_SHARD_INDEX", "0") or 0)
+    if shard_total <= 1:
+        return
+    if shard_index < 0 or shard_index >= shard_total:
+        raise pytest.UsageError(
+            f"PYTEST_SERVICE_SHARD_INDEX={shard_index} must be in [0, {shard_total})"
+        )
+
+    selected = []
+    deselected = []
     for item in items:
-        if item.get_closest_marker("slow"):
-            item.add_marker(skip_slow)
+        normalized_path = str(item.path).replace("\\", "/")
+        if "/tests/services/" not in f"/{normalized_path}":
+            selected.append(item)
+            continue
+        digest = hashlib.sha256(item.nodeid.encode("utf-8")).digest()
+        bucket = int.from_bytes(digest[:8], "big") % shard_total
+        (selected if bucket == shard_index else deselected).append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = selected

@@ -1,0 +1,188 @@
+"""Margin advisor (agnostic CORE) — the sell engine's rung-A brain: COMPUTE + PROPOSE, never commit.
+
+Before a human approves sending a supplier reorder, they should see whether the deal is worth it: the margin
+at list, whether it clears the floor, the historical supplier price, and how much discount we could give the
+buyer to close the sale while still clearing the floor. This module computes all of that (pure analysis,
+$0 at risk, reversible) and proposes a discount — it NEVER applies a price or sends anything (that stays the
+human GATE 2 / rung C).
+
+verdict:
+  • healthy     — margin comfortably above the floor (room to discount to win)
+  • thin        — above the floor but within the buffer (discount cautiously)
+  • below_floor — the list deal does not clear the floor → flag before sending (the "not worth it" warning)
+
+Vertical-blind: cents + ratios only; no product vocabulary.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, Optional
+
+logger = logging.getLogger("shopsquire.margin_advisor")
+
+# margin above the floor we try to KEEP when proposing a buyer discount (so a discount never lands the deal
+# exactly on the floor — leave a safety buffer). Tunable; governance vocabulary, not product flavour.
+_DISCOUNT_BUFFER_PCT = 0.05
+
+
+def _int(v: Any) -> Optional[int]:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def assess(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
+           floor_margin_pct: float = 0.10, tenant_id: str = "default") -> Dict[str, Any]:
+    """Margin verdict + a proposed buyer discount for a case (operator-only, rung A). Returns
+    {available, verdict, economics, max_buyer_discount_cents, recommended_buyer_discount_cents,
+    supplier_last_invoice_cents, rationale}. available=False when the inputs aren't present yet."""
+    from src.app.services.fulfillment import economics as feco
+    econ = feco.from_case(db, case_id, retail_unit_cents=retail_unit_cents,
+                          floor_margin_pct=floor_margin_pct, tenant_id=tenant_id)
+    if not econ or not econ.get("retail_cents"):
+        return {"available": False, "reason": "insufficient_data", "verdict": None,
+                "economics": econ or {}, "rationale": ["Margin can't be computed yet — no retail/wholesale on the case."]}
+
+    floor = float(econ.get("floor_margin_pct") or floor_margin_pct)
+    margin = float(econ.get("margin_pct") or 0.0)
+    clears = bool(econ.get("clears_floor"))
+    retail = int(econ.get("retail_cents") or 0)
+    cost = int(econ.get("supplier_cost_cents") or 0)
+    max_discount = int(econ.get("max_buyer_discount_cents") or 0)
+    discount_authorized = bool(econ.get("discount_headroom_authorized"))
+
+    if not clears:
+        verdict = "below_floor"
+    elif margin < (floor + _DISCOUNT_BUFFER_PCT):
+        verdict = "thin"
+    else:
+        verdict = "healthy"
+
+    # propose a discount that LEAVES a buffer above the floor (never lands exactly on it). The smallest retail
+    # that still keeps margin at floor+buffer is cost/(1-(floor+buffer)); the discount is retail minus that.
+    target = min(0.95, floor + _DISCOUNT_BUFFER_PCT)
+    min_retail_for_target = (cost / (1.0 - target)) if (1.0 - target) > 0 else retail
+    recommended = max(0, int(round(retail - min_retail_for_target))) if clears and discount_authorized else 0
+    recommended = min(recommended, max_discount)
+
+    rationale = [
+        f"List margin {margin * 100:.1f}% vs floor {floor * 100:.0f}% — "
+        + ("clears the floor." if clears else "BELOW the floor: this reorder may not be worth it."),
+    ]
+    if not discount_authorized:
+        rationale.append("Discount headroom is locked until a validated supplier response includes landed unit cost.")
+        max_discount = 0
+    elif clears and recommended > 0:
+        rationale.append(f"You can offer up to {recommended / 100:.0f} discount and still keep a "
+                         f"{target * 100:.0f}% margin (hard ceiling {max_discount / 100:.0f}).")
+    last_inv = _supplier_last_invoice_cents(db, case_id, tenant_id)
+    if last_inv is not None:
+        rationale.append(f"Last invoiced from this supplier ~{last_inv / 100:.0f}.")
+
+    result = {
+        "available": True,
+        "verdict": verdict,
+        "economics": econ,
+        "max_buyer_discount_cents": max_discount,
+        "recommended_buyer_discount_cents": recommended,
+        "discount_headroom_authorized": discount_authorized,
+        "supplier_last_invoice_cents": last_inv,
+        "rationale": rationale,
+    }
+    result["deal_projection"] = _deal_projection(
+        db, case_id, economics=econ, verdict=verdict,
+        max_discount_cents=max_discount,
+        discount_authorized=discount_authorized,
+        tenant_id=tenant_id,
+    )
+    return result
+
+
+def _deal_projection(
+    db,
+    case_id: str,
+    *,
+    economics: Dict[str, Any],
+    verdict: str,
+    max_discount_cents: int,
+    discount_authorized: bool,
+    tenant_id: str,
+) -> Dict[str, Any]:
+    """Stable operator projection; estimated supplier tiers never authorize buyer pricing."""
+    retail_unit = int(economics.get("retail_unit_cents") or 0)
+    supplier_unit = int(economics.get("supplier_unit_cost_cents") or 0)
+    quantity = int(economics.get("quantity") or 0)
+    breaks = []
+    for row in _case_price_breaks(db, case_id, tenant_id):
+        try:
+            min_qty = int(row.get("min_qty") or 0)
+            discount_pct = float(row.get("discount_pct") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if min_qty <= 0 or discount_pct <= 0 or discount_pct >= 100:
+            continue
+        adjusted_cost = int(round(supplier_unit * (1.0 - discount_pct / 100.0)))
+        margin_pct = (
+            round((retail_unit - adjusted_cost) / retail_unit, 4)
+            if retail_unit > 0 else 0.0
+        )
+        breaks.append({
+            "min_qty": min_qty,
+            "discount_pct": discount_pct,
+            "estimated_supplier_unit_cents": adjusted_cost,
+            "margin_pct": margin_pct,
+            "projected_profit_cents_at_min_qty": max(
+                0, (retail_unit - adjusted_cost) * min_qty,
+            ),
+            "pricing_authorized": False,
+        })
+    return {
+        "verdict": verdict,
+        "currency": str(economics.get("currency") or "AUD"),
+        "quantity": quantity,
+        "list_unit_cents": retail_unit,
+        "wholesale_unit_cents": supplier_unit,
+        "gross_per_unit_cents": retail_unit - supplier_unit,
+        "margin_pct": float(economics.get("margin_pct") or 0.0),
+        "projected_profit_cents": int(economics.get("gross_profit_cents") or 0),
+        "max_discount_cents": int(max_discount_cents if discount_authorized else 0),
+        "discount_authorized": bool(discount_authorized),
+        "cost_basis": economics.get("cost_basis"),
+        "cost_is_estimated": bool(economics.get("cost_is_estimated", True)),
+        "landed_cost_complete": bool(economics.get("landed_cost_complete", False)),
+        "simulation_only": bool(economics.get("simulation_only", False)),
+        "bulk_breaks": breaks,
+    }
+
+
+def _case_price_breaks(db, case_id: str, tenant_id: str) -> list[Dict[str, Any]]:
+    try:
+        from src.app.services.fulfillment import workflow
+        cur = workflow.repository.current_version(db, case_id, tenant_id)
+        state = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
+        terms = (state.get("draft") or {}).get("supplier_terms") or {}
+        rows = terms.get("price_breaks") or []
+        return [dict(row) for row in rows if isinstance(row, dict)]
+    except Exception as exc:
+        logger.debug("price-break projection failed for %s: %s", case_id, exc)
+        return []
+
+
+def _supplier_last_invoice_cents(db, case_id: str, tenant_id: str) -> Optional[int]:
+    """The historical supplier price (last invoice ~ last quote proxy) for the case's resolved supplier
+    domain — surfaced so the operator can sanity-check the deal. None when unknown. Best-effort."""
+    try:
+        from src.app.services.fulfillment import workflow
+        from src.app.services.supplier_inbox_reader import recent_supplier_context
+        cur = workflow.repository.current_version(db, case_id, tenant_id)
+        st = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
+        domain = str(st.get("recipient_domain")
+                     or (st.get("draft") or {}).get("recipient_domain") or "").strip()
+        if not domain:
+            return None
+        ctx = recent_supplier_context(domain=domain, tenant_id=tenant_id)
+        return ctx.last_invoice_cents if ctx else None
+    except Exception as exc:
+        logger.debug("supplier last invoice lookup failed for %s: %s", case_id, exc)
+        return None

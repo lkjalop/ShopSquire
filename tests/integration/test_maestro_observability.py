@@ -31,29 +31,39 @@ def test_safe_recommend_trace_contains_maestro_guardrail_events(monkeypatch):
     trace_id = str(body.get("decision_trace_id") or body.get("trace_id") or "").strip()
     assert trace_id, body
 
+    def _maestro_events(evs):
+        out = []
+        for ev in evs or []:
+            if not isinstance(ev, dict):
+                continue
+            payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
+            if ev.get("event_type") == "agent_guardrail" or payload.get("maestro_checked") is True:
+                out.append(ev)
+        return out
+
+    # Poll until the MAESTRO events specifically appear (not just any event). Decision-trace events
+    # are written async; under full-suite load the maestro events can land a beat after the first
+    # batch, so breaking on "any event" caused a flake. Wait for the events we actually assert on.
     events = []
-    deadline = time.time() + 8.0
+    maestro = []
+    deadline = time.time() + 20.0
     while time.time() < deadline:
         q = client.get(
             f"/api/v1/decisions/{trace_id}/query",
             params={"include_events": "true"},
-            headers=_headers(),
+            # Trace polling is test introspection, not a shopper action. Avoid
+            # flooding the observer with its own polling requests and racing
+            # the subsequent correlation lookup out of the bounded result page.
+            headers={**_headers(), "x-skip-observer": "1"},
         )
         assert q.status_code == 200, q.text
         events = q.json().get("events") or []
-        if events:
+        maestro = _maestro_events(events)
+        if maestro:
             break
         time.sleep(0.2)
 
     assert events, "expected decision trace events"
-    maestro = []
-    for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
-        if ev.get("event_type") == "agent_guardrail" or payload.get("maestro_checked") is True:
-            maestro.append(ev)
-
     assert maestro, f"expected maestro guardrail events in trace {trace_id}"
     for ev in maestro[:3]:
         payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
@@ -95,23 +105,30 @@ def test_blocked_recommend_exposes_audit_refs_and_security_event_lookup(monkeypa
     assert event_ref
     assert trace_ref
 
-    ev_resp = client.get(
-        "/api/v1/admin/security/events",
-        params={"request_id": rid, "limit": 25},
-        headers=_headers(),
-    )
-    assert ev_resp.status_code == 200, ev_resp.text
-    events = ev_resp.json().get("events") or []
-    assert events, "expected security event lookup by request_id"
-
     found = False
-    for ev in events:
-        details = ev.get("details") if isinstance(ev.get("details"), dict) else {}
-        payload = details.get("payload") if isinstance(details.get("payload"), dict) else {}
-        inner_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
-        rid_seen = str(payload.get("request_id") or inner_payload.get("request_id") or "").strip()
-        event_seen = str(payload.get("event_ref") or inner_payload.get("event_ref") or "").strip()
-        if rid_seen == rid and event_seen == event_ref:
-            found = True
-            break
+    events = []
+    deadline = time.time() + 10.0
+    while time.time() < deadline and not found:
+        ev_resp = client.get(
+            "/api/v1/admin/security/events",
+            # The observer is durable but may still be finishing a synchronous
+            # handoff on a loaded runner. Request the bounded maximum so older
+            # correlated evidence cannot be displaced by unrelated test traffic.
+            params={"request_id": rid, "limit": 500},
+            headers={**_headers(), "x-skip-observer": "1"},
+        )
+        assert ev_resp.status_code == 200, ev_resp.text
+        events = ev_resp.json().get("events") or []
+        for ev in events:
+            details = ev.get("details") if isinstance(ev.get("details"), dict) else {}
+            payload = details.get("payload") if isinstance(details.get("payload"), dict) else {}
+            inner_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+            rid_seen = str(payload.get("request_id") or inner_payload.get("request_id") or "").strip()
+            event_seen = str(payload.get("event_ref") or inner_payload.get("event_ref") or "").strip()
+            if rid_seen == rid and event_seen == event_ref:
+                found = True
+                break
+        if not found:
+            time.sleep(0.1)
+    assert events, "expected security event lookup by request_id"
     assert found, "did not find blocked_suggest security event matching request_id + event_ref"

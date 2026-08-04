@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -20,6 +21,17 @@ from src.app.security.oob_verification import get_verification
 
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
+
+
+def _require_xero_direct_writes() -> None:
+    enabled = str(
+        os.getenv("XERO_DIRECT_WRITES_ENABLED", "0") or "0"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="xero_direct_writes_disabled_use_governed_delivery_job",
+        )
 
 
 def _money_cents(payload: Dict[str, Any], *keys: str) -> int:
@@ -175,6 +187,7 @@ def xero_credit_note(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _require_xero_direct_writes()
     enforce_action_authority(
         "refund",
         value_aud_cents=_money_cents(payload, "amount_cents", "amount", "total_cents", "total"),
@@ -194,6 +207,7 @@ def xero_invoice(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _require_xero_direct_writes()
     enforce_action_authority(
         "supplier_pay",
         value_aud_cents=_money_cents(payload, "amount_cents", "amount", "total_cents", "total"),
@@ -209,6 +223,7 @@ def xero_purchase_order(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _require_xero_direct_writes()
     enforce_action_authority(
         "supplier_pay",
         value_aud_cents=_money_cents(payload, "amount_cents", "amount", "total_cents", "total"),
@@ -230,6 +245,7 @@ def xero_inventory_adjustment(
     reason = str((payload or {}).get("reason") or "adjustment")
     if not sku:
         raise HTTPException(status_code=400, detail="sku required")
+    _require_xero_direct_writes()
     return connector.push_inventory_adjustment(sku=sku, qty=qty, reason=reason)
 
 

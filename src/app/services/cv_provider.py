@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import base64
-from typing import Dict, Optional, Tuple, List
+from typing import Any, Dict, List, Optional, Tuple
 import logging
+import time
+import threading
+import urllib.error
+import urllib.request
+
 from src.app.security.url_guard import ensure_safe_outbound_url
 
 # ── Vision prompt templates (mode-selectable) ──
@@ -29,6 +35,15 @@ _PRODUCT_IDENTITY_PROMPT = (
     '"labels":["gaming","rgb_keyboard","dragon_logo"],"text":"GT76 10SF"}.'
 )
 from src.app.services.cv_ocr import extract_text as extract_text_stage_a
+
+
+class VisionProviderBusy(RuntimeError):
+    """The bounded vision provider is at capacity; callers should retry later."""
+
+
+_VISION_PROVIDER_GATE = threading.BoundedSemaphore(
+    max(1, min(int(os.getenv("CV_VISION_MAX_CONCURRENCY", "1") or 1), 4))
+)
 
 
 class ManagedCVProvider:
@@ -81,12 +96,23 @@ class ManagedCVProvider:
         otherwise ``None``.
         """
         product_identity: Optional[Dict] = None
+        # Image-hash cache: same image (demo/retry/fan-out) skips the 50-86s vision call.
+        # Namespaced by mode so triage vs visual_search prompts don't collide. Fail-open.
+        _vc_key = None
+        try:
+            from src.app.services import vision_cache as _vcache
+            _vc_key = _vcache.image_key(image_bytes, f"labels:{mode}")
+            _vc_hit = _vcache.get(_vc_key)
+            if isinstance(_vc_hit, tuple) and len(_vc_hit) == 3:
+                return _vc_hit
+        except Exception:
+            _vc_key = None
         if self.provider == "google":
             try:
                 from google.cloud import vision  # type: ignore
                 client = vision.ImageAnnotatorClient()
                 image = vision.Image(content=image_bytes)
-                response = client.annotate_image(
+                response = await asyncio.to_thread(client.annotate_image,
                     {
                         "image": image,
                         "features": [
@@ -109,7 +135,7 @@ class ManagedCVProvider:
                 pass
         if self.provider == "ollama":
             try:
-                labels, text, product_identity = self._ollama_labels_and_text(image_bytes, mode=mode)
+                labels, text, product_identity = await asyncio.to_thread(self._ollama_labels_and_text, image_bytes, mode=mode)
                 self._set_last_ocr_meta(
                     ocr_confidence=None,
                     ocr_engine="ollama_vision",
@@ -117,13 +143,36 @@ class ManagedCVProvider:
                     cv_model_confidence=None,
                     cv_extraction_method="managed_ollama_vision",
                 )
+                # Only cache a non-empty result so a transient miss isn't poisoned.
+                if _vc_key and (labels or text or product_identity):
+                    try:
+                        from src.app.services import vision_cache as _vcache
+                        _vcache.put(_vc_key, (labels, text, product_identity))
+                    except Exception:
+                        pass
                 return labels, text, product_identity
+            except VisionProviderBusy:
+                raise
             except Exception:
                 # Fall through to local OCR so the pipeline still has text evidence.
                 logging.getLogger(__name__).exception("cv_provider.ollama_failed")
+        # The visual-search VLM already extracts visible text. If it times out, starting the
+        # local Stage-A/Stage-B ladder can turn one bounded miss into another minute-long path.
+        # Risk-triggered OCR in the router remains available for suspicious screenshots.
+        if (mode == "visual_search"
+                and str(os.getenv("CV_VISUAL_SEARCH_OCR_FALLBACK", "0")).lower()
+                not in ("1", "true", "yes", "on")):
+            self._set_last_ocr_meta(
+                ocr_confidence=0.0,
+                ocr_engine=None,
+                ocr_word_count=0,
+                cv_model_confidence=None,
+                cv_extraction_method="visual_search_ocr_deferred",
+            )
+            return [], "", None
         # Degradation path: if managed providers fail/misconfigured, use local OCR (tesseract)
         try:
-            text = self._tesseract_text(image_bytes)
+            text = await asyncio.to_thread(self._tesseract_text, image_bytes)
             if text:
                 return [], text, None
         except Exception:
@@ -143,9 +192,21 @@ class ManagedCVProvider:
 
         Expects Ollama running locally on 127.0.0.1:11434.
         """
-        import urllib.request
-        import urllib.error
+        queue_timeout = max(
+            0.0,
+            min(float(os.getenv("CV_VISION_QUEUE_TIMEOUT_SEC", "0.25") or 0.25), 5.0),
+        )
+        if not _VISION_PROVIDER_GATE.acquire(timeout=queue_timeout):
+            raise VisionProviderBusy("vision_provider_capacity_exhausted")
+        try:
+            return self._ollama_labels_and_text_authorized(image_bytes, mode=mode)
+        finally:
+            _VISION_PROVIDER_GATE.release()
 
+    def _ollama_labels_and_text_authorized(
+        self, image_bytes: bytes, *, mode: str = "triage",
+    ) -> Tuple[List[str], str, Optional[Dict]]:
+        """Call Ollama after process-level vision admission has been granted."""
         img_b64 = base64.b64encode(image_bytes).decode("ascii")
         prompt = _PRODUCT_IDENTITY_PROMPT if mode == "visual_search" else _TRIAGE_PROMPT
         _ollama_url_env = (os.getenv("OLLAMA_URL", "") or "").strip().rstrip("/")
@@ -156,6 +217,8 @@ class ManagedCVProvider:
         # when Ollama is not running.  Individual production deployments can
         # raise this via CV_VISION_TIMEOUT_SEC.
         timeout = float(os.getenv("CV_VISION_TIMEOUT_SEC", "4") or 4)
+        total_timeout = float(os.getenv("CV_VISION_TOTAL_TIMEOUT_SEC", str(timeout)) or timeout)
+        deadline = time.monotonic() + max(1.0, total_timeout)
 
         # Fast connectivity probe: hit /api/tags with a 2-second timeout before
         # attempting any model inference.  This avoids 6 × timeout hangs when
@@ -175,7 +238,10 @@ class ManagedCVProvider:
 
         # Try configured model first, then a small fallback list for resilience.
         model_candidates = []
-        for m in (self.model, os.getenv("CV_VISION_MODEL"), os.getenv("OLLAMA_DEFAULT_MODEL"), "llava-latest:latest", "llava:latest", "llava-latest", "llava"):
+        # Never fall back to the text router model for an image request. On constrained GPUs that
+        # caused a costly model swap followed by a guaranteed modality failure.
+        for m in (self.model, os.getenv("CV_VISION_MODEL"), os.getenv("OLLAMA_VISION_MODEL"),
+                  "llava-latest:latest", "llava:latest", "llava-latest", "llava"):
             if m and str(m).strip():
                 model_candidates.append(str(m).strip())
         # stable de-dupe preserving order
@@ -184,6 +250,10 @@ class ManagedCVProvider:
 
         last_err = None
         for model_name in model_candidates[:2]:  # cap at 2 models after connectivity confirmed
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.1:
+                last_err = last_err or "vision_total_deadline_exceeded"
+                break
             req = urllib.request.Request(
                 url=url,
                 data=json.dumps(
@@ -192,13 +262,14 @@ class ManagedCVProvider:
                         "prompt": prompt,
                         "images": [img_b64],
                         "stream": False,
+                        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                     }
                 ).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with urllib.request.urlopen(req, timeout=max(0.1, min(timeout, remaining))) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     output = str(data.get("response") or "")
                 # Parse below; if parsing fails we'll still fall back to heuristics.

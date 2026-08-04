@@ -54,6 +54,12 @@ def evaluate_transaction_firewall(
         action = "manual_review"
     elif score >= 55.0:
         action = "step_up_mfa"
+    # Hard policy floor: an explicit BLOCK decision from the threat evaluator (e.g. a suspicious
+    # 'stolen card testing / bypass 3ds' description) must hard_block regardless of the velocity
+    # score. Previously the firewall was purely score-driven, so a first-seen fraud description
+    # only step-up'd (401) on clean counters and the classification drifted with shared counters.
+    if str(base.get("decision") or "") == "block":
+        action = "hard_block"
     # Hard policy floor: explicit high-risk behavioral indicators should never auto-allow.
     if action == "allow" and impossible_travel and float(device_risk or 0.0) >= 0.7:
         action = "step_up_mfa"

@@ -1,0 +1,371 @@
+name: Procurement browser and worker isolation
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: procurement-browser-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: shopsquire_test
+          POSTGRES_DB: shopsquire
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shopsquire"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      APP_ENV: testing
+      DISABLE_PLAYWRIGHT_TESTS: "0"
+      PYTEST_PER_TEST_TIMEOUT_SEC: "120"
+      PLAYWRIGHT_HTML_OPEN: never
+      DATABASE_URL: postgresql+psycopg2://postgres:shopsquire_test@127.0.0.1:5432/shopsquire
+      DATABASE_URL_RO: postgresql+psycopg2://postgres:shopsquire_test@127.0.0.1:5432/shopsquire
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      CELERY_HMAC_KEY: ci-only-browser-worker-signing-key
+      SHOPSQUIRE_RUNTIME_PROFILE: demo_v2
+      RECOMMEND_CORE_MODE: primary
+      RECOMMEND_CART_SERVE: "1"
+      RECOMMEND_PROCUREMENT_ADVICE_MODE: "on"
+      RECOMMEND_POLICY_ANSWER_MODE: "on"
+      RECOMMEND_SUPPORT_HANDOFF_MODE: "on"
+      RECOMMEND_INVENTORY_READ_MODE: "on"
+      RECOMMEND_LEGACY_DELEGATE_ENABLED: "0"
+      MULTI_INTENT_PLANNER_ENABLED: "1"
+      FULFILLMENT_DEMO_ENABLED: "1"
+      USE_MOCK_LLM: "1"
+      USE_OLLAMA_INTENT: "0"
+      MODEL_WARMUP_ON_STARTUP: "0"
+      DISABLE_TRACING: "1"
+      DECISION_LOG_PREWARM_ON_START: "0"
+      AUTO_SEED_CATALOG_ON_START: "0"
+      CV_PROVIDER: basic
+      CV_VISION_ENABLED: "0"
+      CV_OCR_PROVIDER: disabled
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
+      # Exercise the production quota boundary without making a nine-test
+      # conversation battery consume the entire guest allowance.
+      TOKEN_BUDGET_ENABLED: "1"
+      TOKEN_BUDGET_GUEST_DAILY_TOKENS: "100000"
+      TOKEN_BUDGET_GUEST_DAILY_USD: "10"
+      TENANT_QUOTAS_ENABLED: "1"
+      TENANT_QUOTA_RECOMMEND_CALLS_DAILY: "10000"
+      EMAIL_CONNECTOR_IDENTITY_MODE: shared_secret
+      GMAIL_INGEST_SECRET: ci-browser-ingress-only
+      EMAIL_EVIDENCE_ACTIVE_KEY_ID: ci-v1
+      EMAIL_EVIDENCE_KEYS: ci-v1:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+      RATE_LIMIT_PER_IP_PER_MIN: "10000"
+      RATE_LIMIT_PER_MINUTE_IP: "10000"
+      RATE_LIMIT_PER_MINUTE_KEY: "10000"
+      MERCHANT_API_KEY: ci-browser-merchant-key
+      OWNER_API_KEY: ci-browser-owner-key
+      DEVELOPER_API_KEY: ci-browser-developer-key
+      VITE_API_KEY: ci-browser-merchant-key
+      VITE_OWNER_API_KEY: ci-browser-owner-key
+      SIEM_WEBHOOK_URL: http://127.0.0.1:18089/events
+      SECURITY_HANDOFF_INLINE: "1"
+      # Override developer .env files explicitly. The hosted backend listens
+      # on 8080; a local 8099 value would only test connection refusal.
+      VITE_API_BASE_URL: http://localhost:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend and browser dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install --no-interaction --no-ansi --no-root
+          # Python E2E tests launch Playwright through the Poetry environment.
+          # The Node install below uses a separately versioned browser cache and
+          # cannot satisfy the Python package's expected Chromium revision.
+          poetry run python -m playwright install --with-deps chromium
+          npm ci --prefix frontend
+          npm ci --prefix src/frontend/admin-react
+          npx --prefix frontend playwright install --with-deps chromium
+      - name: Create isolated database and validate migrations
+        run: |
+          set -o pipefail
+          mkdir -p tmp proof-artifacts
+          timeout 180s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-upgrade.log
+          poetry run alembic current 2>&1 | tee proof-artifacts/migration-current.log
+          timeout 60s poetry run alembic downgrade -1 2>&1 | tee proof-artifacts/migration-rollback.log
+          timeout 60s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-reupgrade.log
+          poetry run python -m scripts.seed_portable_catalog
+          poetry run python -m scripts.seed_suppliers
+      - name: React component battery
+        run: |
+          timeout 420s npm --prefix frontend test -- --run --reporter=verbose --testTimeout=15000
+          timeout 180s npm --prefix src/frontend/admin-react test -- --run --reporter=verbose --testTimeout=15000
+      - name: Start isolated backend and storefront
+        run: |
+          poetry run python scripts/security_handoff_test_receiver.py --port 18089 --output proof-artifacts/siem-events.jsonl > proof-artifacts/siem-receiver.log 2>&1 &
+          poetry run python -m uvicorn src.app.main:create_app --factory --host 127.0.0.1 --port 8080 > proof-artifacts/backend.log 2>&1 &
+          poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > proof-artifacts/celery.log 2>&1 &
+          npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173 > proof-artifacts/storefront.log 2>&1 &
+          npm --prefix src/frontend/admin-react run dev -- --host 127.0.0.1 --port 3001 > proof-artifacts/admin.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null &&
+               curl --fail --silent http://127.0.0.1:5173 >/dev/null &&
+               curl --fail --silent http://127.0.0.1:3001 >/dev/null &&
+               curl --fail --silent http://127.0.0.1:18089/health >/dev/null &&
+               timeout 5s poetry run celery -A src.app.workers.celery_app:celery_app inspect ping |
+                 grep -q pong; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Prove canonical SIEM protocol handoff
+        run: |
+          poetry run python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.app.security.siem_adapter import emit_security_handoff
+
+          event = {
+              "schema_version": "shopsquire.security.v1",
+              "event_time": 1785739200,
+              "source": "hosted_protocol_probe",
+              "tenant_id": "ci-tenant",
+              "decision_id": "ci-siem-decision",
+              "trace_id": "ci-siem-trace",
+              "entity": {"message_id_hash": "sha256:protocol-probe"},
+              "verdict": {
+                  "severity": "medium", "action": "quarantine",
+                  "route": "human_review", "escalation": "security_operator",
+              },
+              "reasons": ["hosted_protocol_contract"],
+              "tags": ["certification:protocol_only"],
+              "ioc": {},
+              "evidence": {"claim_scope": "loopback receiver; not live SIEM certification"},
+          }
+          # The published adapter is synchronous. Keep this proof compatible with
+          # a clean checkout instead of depending on an uncommitted async-adapter
+          # extension that adds a force_inline keyword.
+          result = emit_security_handoff(event)
+          Path("proof-artifacts/siem-handoff-result.json").write_text(
+              json.dumps(result, indent=2, sort_keys=True), encoding="utf-8",
+          )
+          assert "siem_webhook" in result["sent"], result
+          PY
+          test -s proof-artifacts/siem-events.jsonl
+          poetry run python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(line) for line in Path("proof-artifacts/siem-events.jsonl").read_text().splitlines()]
+          assert any(
+              row.get("schema_version") == "shopsquire.security.v1"
+              and row.get("trace_id") == "ci-siem-trace"
+              and "certification:protocol_only" in row.get("tags", [])
+              for row in rows
+          )
+          PY
+      - name: Isolated malicious-reply security regression
+        env:
+          RUN_LIVE_BROWSER_TESTS: "1"
+          LIVE_SHOPPER_URL: http://127.0.0.1:5173
+          LIVE_ADMIN_URL: http://127.0.0.1:3001
+          LIVE_GMAIL_INGEST_SECRET: ci-browser-ingress-only
+        run: |
+          timeout 240s poetry run pytest -vv -s tests/e2e/test_procurement_malicious_reply_playwright.py
+      - name: Storefront Playwright battery
+        working-directory: frontend
+        # One backend/database serves this suite. Serial execution prevents
+        # cross-spec market signals and cart writes from contaminating peers.
+        run: timeout 600s npx playwright test --reporter=line --workers=1
+      - name: Policy-trace and closed-loop regressions
+        env:
+          RUN_LIVE_BROWSER_TESTS: "1"
+          LIVE_SHOPPER_URL: http://127.0.0.1:5173
+          LIVE_ADMIN_URL: http://127.0.0.1:3001
+          LIVE_GMAIL_INGEST_SECRET: ci-browser-ingress-only
+        run: |
+          timeout 240s poetry run pytest -vv -s tests/e2e/test_live_policy_trace.py
+          timeout 240s poetry run pytest -vv -s tests/e2e/test_live_procurement_closed_loop.py
+      - name: Reject transaction-abort signatures
+        if: always()
+        run: |
+          test -f proof-artifacts/backend.log
+          test -f proof-artifacts/celery.log
+          if grep -Eqi \
+            'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
+            proof-artifacts/backend.log proof-artifacts/celery.log; then
+            echo "::error::PostgreSQL transaction-abort signature found in runtime logs"
+            grep -Ein \
+              'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
+              proof-artifacts/backend.log proof-artifacts/celery.log
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("proof-artifacts/transaction-abort-gate.json").write_text(json.dumps({
+              "schema_version": "shopsquire.runtime_log_gate.v1",
+              "status": "pass",
+              "patterns": ["current transaction is aborted", "InFailedSqlTransaction", "SQLSTATE 25P02"],
+              "files": ["backend.log", "celery.log"],
+              "matched_signatures": 0,
+          }, indent=2), encoding="utf-8")
+          PY
+      - name: Inventory retained proof
+        if: always()
+        run: |
+          test -d proof-artifacts
+          find proof-artifacts frontend/test-results -type f -printf '%p\t%s bytes\n' |
+            sort | tee proof-artifacts/artifact-manifest.txt
+      - name: Upload browser and runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: procurement-browser-evidence
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+            proof-artifacts/
+            tmp/*.sqlite*
+          if-no-files-found: error
+          retention-days: 14
+
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: shopsquire_test
+          POSTGRES_DB: shopsquire
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d shopsquire"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      APP_ENV: testing
+      PYTEST_PER_TEST_TIMEOUT_SEC: "90"
+      DATABASE_URL: postgresql+psycopg2://postgres:shopsquire_test@127.0.0.1:5432/shopsquire
+      DATABASE_URL_RO: postgresql+psycopg2://postgres:shopsquire_test@127.0.0.1:5432/shopsquire
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      CELERY_HMAC_KEY: ci-only-worker-signing-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install --no-interaction --no-ansi --no-root
+      - name: Create dedicated worker database
+        run: |
+          set -o pipefail
+          mkdir -p tmp proof-artifacts
+          timeout 180s poetry run alembic upgrade head 2>&1 | tee proof-artifacts/migration-upgrade.log
+      - name: Start worker and prove broker delivery
+        run: |
+          poetry run celery -A src.app.workers.celery_app:celery_app worker --loglevel=INFO --pool=solo > proof-artifacts/celery.log 2>&1 &
+          echo $! > proof-artifacts/celery.pid
+          for attempt in $(seq 1 30); do
+            if timeout 5s poetry run celery -A src.app.workers.celery_app:celery_app inspect ping | grep -q pong; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Worker, delivery, connector, and recovery suites
+        run: |
+          timeout 420s poetry run pytest -vv \
+            --junitxml=proof-artifacts/worker-tests.xml \
+            tests/services/fulfillment/test_outbound_delivery_jobs.py \
+            tests/services/test_connector_runtime.py \
+            tests/api/test_admin_inventory_netsuite_jobs.py \
+            tests/api/test_admin_inventory_generic_deep_provider_jobs.py
+      - name: Reject worker transaction-abort signatures
+        if: always()
+        run: |
+          test -f proof-artifacts/celery.log
+          if grep -Eqi \
+            'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
+            proof-artifacts/celery.log; then
+            echo "::error::PostgreSQL transaction-abort signature found in worker logs"
+            grep -Ein \
+              'current transaction is aborted|InFailedSqlTransaction|SQLSTATE[ =:]+25P02' \
+              proof-artifacts/celery.log
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("proof-artifacts/transaction-abort-gate.json").write_text(json.dumps({
+              "schema_version": "shopsquire.runtime_log_gate.v1",
+              "status": "pass",
+              "patterns": ["current transaction is aborted", "InFailedSqlTransaction", "SQLSTATE 25P02"],
+              "files": ["celery.log"],
+              "matched_signatures": 0,
+          }, indent=2), encoding="utf-8")
+          PY
+      - name: Inventory retained worker proof
+        if: always()
+        run: |
+          test -f proof-artifacts/migration-upgrade.log
+          test -f proof-artifacts/celery.log
+          test -f proof-artifacts/worker-tests.xml
+          find proof-artifacts -type f -printf '%p\t%s bytes\n' |
+            sort | tee proof-artifacts/artifact-manifest.txt
+      - name: Upload worker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: procurement-worker-evidence
+          path: |
+            proof-artifacts/
+            tmp/*.sqlite*
+          if-no-files-found: error
+          retention-days: 14

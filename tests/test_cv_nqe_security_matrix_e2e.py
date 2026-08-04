@@ -18,6 +18,16 @@ from tests.utils import default_headers
 from src.app.main import create_app
 from src.app.services.recommendations import RecommendationService
 
+pytestmark = [
+    pytest.mark.frozen_characterization,
+    pytest.mark.skip(
+        reason=(
+            "frozen V1 RecommendationService/CV/NQE characterization; active V2 "
+            "multimodal and security contracts live in protocol and browser suites"
+        )
+    ),
+]
+
 app = create_app()
 client = TestClient(app, headers=default_headers())
 

@@ -21,7 +21,9 @@ def _run_async_safe(coro):
         asyncio.get_running_loop()
         # We ARE inside a running loop — delegate to a thread where it's safe.
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result()
+            # H fix: generous backstop so a hung wrapped coroutine surfaces a TimeoutError instead
+            # of parking the calling thread forever (wrapped coros are individually bounded).
+            return pool.submit(asyncio.run, coro).result(timeout=300.0)
     except RuntimeError:
         # No running loop in this thread — asyncio.run() is safe.
         return asyncio.run(coro)
@@ -35,7 +37,7 @@ import time
 from sqlalchemy import text
 from src.app.observability.metrics import chaos_injected_total
 from src.app.observability.metrics import record_cv_auto_decision, record_cv_escalation, record_security_event
-from src.app.observability.health import dependency_health_snapshot
+from src.app.observability.health import dependency_health_cached_snapshot
 from src.app.deps import security_sanitize, hash_uid
 from src.app.security.observer import analyze_payload
  
@@ -77,6 +79,7 @@ from src.app.policy.gate import evaluate_policy_gate
 from src.app.security.tool_intent_gate import evaluate_tool_intent
 from src.app.security.agent_guardrails import assess_agent_interaction
 from src.app.security.maestro_boundaries import validate_agent_action as _maestro_validate
+from src.app.security.guardrails import apply_guardrails
 
 logger = logging.getLogger("shopsquire.orchestrator")
 
@@ -279,88 +282,19 @@ class Orchestrator:
         multi_turn: bool,
         event_signals: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        q = str(query or "").lower()
-        complexity_hits = 0
-        for tok in ("compare", "tradeoff", "versus", "detailed", "why", "explain", "multi"):
-            if tok in q:
-                complexity_hits += 1
-        factor = 1.0
-        if int(tier or 1) >= 2:
-            factor += 0.25
-        if float(risk_adj or 0.0) >= 40.0:
-            factor += 0.25
-        if float(intent_confidence or 1.0) < 0.70:
-            factor += 0.20
-        if bool(multi_turn):
-            factor += 0.10
-        if complexity_hits >= 2:
-            factor += 0.15
-        # ── Risk register domain-aware budget boost ──
-        # When org risk posture is elevated, boost relevant agents.
-        _rr_high_domains: list = []
-        try:
-            from src.app.routers.admin_grc import get_latest_risk_bands
-            _rr_bands = get_latest_risk_bands()
-            _rr_high_domains = [d for d, b in _rr_bands.items() if b in ("high", "critical")]
-        except Exception:
-            pass
-        if _rr_high_domains:
-            factor += 0.15  # global budget bump
-        global_budget = max(1, min(12, int(round(float(base_tool_budget or 1) * factor))))
-        agent_weights = {
-            "Security_Observer_Agent": 0.20,
-            "NLP_Search_Agent": 0.20,
-            "Candidate_Retrieval_Agent": 0.16,
-            "Product_Ranking_Agent": 0.20,
-            "CV_Label_Agent": 0.12,
-            "Inventory_Agent": 0.06,
-            "Fraud_Scoring_Agent": 0.06,
-        }
-        # Domain-specific weight boosts from risk register
-        if any(d in ("supplier_trust", "inventory_resilience") for d in _rr_high_domains):
-            agent_weights["Inventory_Agent"] = 0.18  # +200% budget for inventory checks
-            agent_weights["Fraud_Scoring_Agent"] = 0.12
-        if any(d in ("insider_threat", "email_deliverability") for d in _rr_high_domains):
-            agent_weights["Security_Observer_Agent"] = 0.30  # +50% more security scrutiny
-        # ── Event-signal-driven weight boosts ──
-        _ev = event_signals or {}
-        if _ev.get("cart_abandonment_detected"):
-            # Retargeting / merchandising: boost ranking + NLP + candidate retrieval
-            agent_weights["Product_Ranking_Agent"] = max(agent_weights.get("Product_Ranking_Agent", 0.20), 0.28)
-            agent_weights["NLP_Search_Agent"] = max(agent_weights.get("NLP_Search_Agent", 0.20), 0.24)
-            agent_weights["Candidate_Retrieval_Agent"] = max(agent_weights.get("Candidate_Retrieval_Agent", 0.16), 0.20)
-            factor += 0.10
-        if _ev.get("coupon_abuse_signals"):
-            # Fraud defence: boost security + fraud scoring
-            agent_weights["Security_Observer_Agent"] = max(agent_weights.get("Security_Observer_Agent", 0.20), 0.30)
-            agent_weights["Fraud_Scoring_Agent"] = max(agent_weights.get("Fraud_Scoring_Agent", 0.06), 0.16)
-            factor += 0.15
-        if _ev.get("high_value_session"):
-            # VIP-tier: bump overall budget and ranking agent
-            agent_weights["Product_Ranking_Agent"] = max(agent_weights.get("Product_Ranking_Agent", 0.20), 0.26)
-            factor += 0.10
-        per_agent: Dict[str, int] = {}
-        remaining = global_budget
-        keys = list(agent_weights.keys())
-        for idx, agent in enumerate(keys):
-            w = float(agent_weights.get(agent) or 0.0)
-            if idx == len(keys) - 1:
-                alloc = max(0, remaining)
-            else:
-                alloc = max(0, int(round(global_budget * w)))
-                remaining -= alloc
-            per_agent[agent] = alloc
-        token_base = int(self.flags.get("AGENT_TOKEN_BUDGET_DEFAULT", 2200) or 2200)
-        per_agent_tokens: Dict[str, int] = {}
-        for agent, tb in per_agent.items():
-            per_agent_tokens[agent] = int(max(256, token_base * (0.6 + (float(tb) / max(1.0, float(global_budget))))))
-        return {
-            "global_tool_budget": global_budget,
-            "factor": round(float(factor), 4),
-            "complexity_hits": complexity_hits,
-            "agent_tool_budgets": per_agent,
-            "agent_token_budgets": per_agent_tokens,
-        }
+        # Extracted to services/agent_budgets.py (pure, unit-tested). Thin delegate preserves the
+        # method signature/call sites; self.flags is the only instance dependency.
+        from src.app.services.agent_budgets import compute_adaptive_agent_budgets
+        return compute_adaptive_agent_budgets(
+            query=query,
+            tier=tier,
+            base_tool_budget=base_tool_budget,
+            risk_adj=risk_adj,
+            intent_confidence=intent_confidence,
+            multi_turn=multi_turn,
+            flags=self.flags,
+            event_signals=event_signals,
+        )
 
     def _ensure_trace_id(self, payload: Dict[str, Any]) -> str:
         trace_id = payload.get("trace_id") if isinstance(payload, dict) else None
@@ -397,11 +331,6 @@ class Orchestrator:
                 target_id=None,
                 payload=payload,
             )
-        except Exception:
-            pass
-
-        try:
-            print(f"[orch.run] after auto-decision block; proposal_keys={list(proposal.keys())[:8] if isinstance(proposal, dict) else None}")
         except Exception:
             pass
 
@@ -820,7 +749,7 @@ class Orchestrator:
             "structured_state": structured_state,
             "product_memory_bank": product_memory_bank,
             "live": live,
-            "dependency_health": dependency_health_snapshot(),
+            "dependency_health": dependency_health_cached_snapshot(),
         }
         # --- Layer 2/3/4 RECALL ---
         episodic_profile = {}
@@ -911,7 +840,7 @@ class Orchestrator:
         timings: dict[str, float] = {}
         t0 = time.time()
         trace_id = self._ensure_trace_id(payload)
-        trace_id = self._ensure_trace_id(payload)
+        tenant_id = payload.get("tenant_id") if isinstance(payload, dict) else None
         query = (payload.get("query") or payload.get("input") or "").strip()
         # Guardrails first
         try:
@@ -1328,13 +1257,31 @@ class Orchestrator:
                 from src.app.services.cv_triage_basic import BasicCVTriage
                 from src.app.services.vision_reasoning import VisionReasoningService
                 t_agent_start = time.time()
-                labels, text, *_ = _run_async_safe(ManagedCVProvider().get_labels_and_text(images[0]))
-                cv_analysis = _run_async_safe(BasicCVTriage().analyze(labels, text))
+
+                # Labels/OCR and the product-identity VLM are INDEPENDENT — run them concurrently
+                # inside ONE event loop instead of three serial _run_async_safe round-trips (each of
+                # which paid its own loop spin-up AND full model latency back-to-back; a major slice
+                # of the 52-86s image path). Triage still waits on labels (real dependency); the
+                # vision task overlaps both. cv_provider's blocking HTTP now runs via to_thread, so
+                # the gather genuinely overlaps rather than serializing on the loop.
+                async def _cv_phase(_img):
+                    import asyncio as _aio
+                    _vision = VisionReasoningService()
+                    _vision_task = _aio.create_task(_vision.analyze_product(_img)) if _vision.available else None
+                    _labels, _text, *_rest = await ManagedCVProvider().get_labels_and_text(_img)
+                    _triage = await BasicCVTriage().analyze(_labels, _text)
+                    _pv = None
+                    if _vision_task is not None:
+                        try:
+                            _pv = await _vision_task
+                        except Exception:
+                            _pv = None   # vision failure must not kill triage (same contract as before)
+                    return _labels, _text, _triage, _pv
+
+                labels, _ocr_text, cv_analysis, _product_vision_res = _run_async_safe(_cv_phase(images[0]))
                 try:
-                    vision = VisionReasoningService()
-                    if vision.available:
-                        product_vision = _run_async_safe(vision.analyze_product(images[0]))
-                        if product_vision and not product_vision.error:
+                    product_vision = _product_vision_res
+                    if product_vision and not product_vision.error:
                             if not isinstance(cv_analysis, dict):
                                 cv_analysis = {}
                             cv_analysis["product_vision"] = product_vision.to_dict()
@@ -1541,7 +1488,7 @@ class Orchestrator:
                                     run_fraud=lambda: fraud_summary or {},
                                     run_inventory=lambda: inv_evals,
                                     tenant_id=str(tenant_id) if tenant_id else None,
-                                    budget=controller.state.tool_budget_remaining if hasattr(controller, "state") else None,
+                                    budget=tool_budget_remaining,
                                 )
                             )
                         except Exception:
@@ -2724,15 +2671,44 @@ class Orchestrator:
         # effects, but we still persist the decision for audit/observability.
         return not policy.get("approval_required", False) and not simulate_only
 
+    def _emit_synthesis_reasoning(
+        self,
+        *,
+        trace_id: str | None,
+        synthesis: Dict[str, Any] | None,
+        proposal: Dict[str, Any] | None = None,
+    ) -> None:
+        if not trace_id or not isinstance(synthesis, dict):
+            return
+        try:
+            event_payload = {
+                "stage": "phase3",
+                "synthesis_reasoning": synthesis,
+                "proposal_id": (proposal or {}).get("proposal_id"),
+                "synthesis_weight": synthesis.get("synthesis_weight"),
+            }
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="synthesis_reasoning",
+                source_type="orchestrator",
+                source_id="synthesis_engine",
+                target_type=None,
+                target_id=None,
+                payload=event_payload,
+            )
+        except Exception:
+            pass
+
     def _run_internal(self, uid: str, payload: Dict[str, Any], simulate_only: bool = False, use_rules: bool = False) -> OrchestratorResult:
         timings: dict[str, float] = {}
         t0 = time.time()
         trace_id = self._ensure_trace_id(payload)
         self._init_trace_runtime(trace_id)
-        try:
-            print(f"[orch.run] start trace_id={trace_id} uid={uid} simulate_only={simulate_only}")
-        except Exception:
-            pass
+        logger.debug(
+            "orchestrator_run_started trace_id=%s simulate_only=%s",
+            trace_id,
+            simulate_only,
+        )
         # In test/local runs where decision log DB isn't available, avoid
         # calling DB-backed logging functions to prevent OperationalError.
         # Respect monkeypatching in tests: only override if the globals still
@@ -3250,10 +3226,7 @@ class Orchestrator:
             record_agent_invocation("orchestrator", "proposed", None)
         except Exception:
             pass
-        try:
-            print("[orch.run] policy computed")
-        except Exception:
-            pass
+        logger.debug("orchestrator_policy_computed trace_id=%s", trace_id)
         # Policy gate evaluation (LLM/rules); attach to policy metadata and emit trace
         try:
             if getattr(self, "policy_gate", None) is not None:
@@ -3318,10 +3291,6 @@ class Orchestrator:
         timings["policy"] = t4 - t3
         # Auto-decision: allow CV-driven auto approve/deny when enabled and safe
         try:
-            try:
-                print(f"[orch.run] entering auto-decision block; flags.AUTO_CV_DECISIONS_ENABLED={self.flags.get('AUTO_CV_DECISIONS_ENABLED')}")
-            except Exception:
-                pass
             if self.flags.get("AUTO_CV_DECISIONS_ENABLED", False):
                 # Candidate sources: payload (e.g., /cv/upload), proposal['cv'], or proposal['cv_tier2']
                 candidate = None
@@ -3331,10 +3300,6 @@ class Orchestrator:
                     candidate = proposal.get("cv_tier2")
                 elif isinstance(proposal, dict) and proposal.get("cv"):
                     candidate = proposal.get("cv")
-                try:
-                    print(f"[orch.run] auto-decision candidate={candidate}")
-                except Exception:
-                    pass
                 if isinstance(candidate, dict):
                     # extract an explicit decision_action or nested verdict
                     decision_action = None
@@ -3353,10 +3318,6 @@ class Orchestrator:
                         policy_override_allowed = not policy.get("approval_required", False) or bool(simulate_only)
                         if policy_override_allowed:
                             proposal["auto_decision"] = {"action": decision_action, "source": "cv", "verdict": candidate.get("verdict")}
-                            try:
-                                print(f"[orch.run] set auto_decision={proposal.get('auto_decision')}")
-                            except Exception:
-                                pass
                             # Record a trace event for audit
                             try:
                                 if trace_id:
@@ -3375,10 +3336,6 @@ class Orchestrator:
                             try:
                                 tenant = payload.get("tenant_id") or payload.get("tenant") or None
                                 record_cv_auto_decision(decision_action, source="cv")
-                                try:
-                                    print(f"[orch.run] recorded metric for auto_decision {decision_action}")
-                                except Exception:
-                                    pass
                             except Exception:
                                 pass
                             # Return immediately with a proposed result when auto-decision applies
@@ -3430,34 +3387,6 @@ class Orchestrator:
                                 return OrchestratorResult(proposal=proposal, firewall=policy, executed=not simulate_only, timings=timings)
                             except Exception:
                                 pass
-        except Exception:
-            pass
-
-    def _emit_synthesis_reasoning(
-        self,
-        *,
-        trace_id: str | None,
-        synthesis: Dict[str, Any] | None,
-        proposal: Dict[str, Any] | None = None,
-    ) -> None:
-        if not trace_id or not isinstance(synthesis, dict):
-            return
-        try:
-            payload = {
-                "stage": "phase3",
-                "synthesis_reasoning": synthesis,
-                "proposal_id": (proposal or {}).get("proposal_id"),
-                "synthesis_weight": (synthesis.get("synthesis_weight") if isinstance(synthesis, dict) else None),
-            }
-            log_trace_event(
-                trace_id=trace_id,
-                event_type="synthesis_reasoning",
-                source_type="orchestrator",
-                source_id="synthesis_engine",
-                target_type=None,
-                target_id=None,
-                payload=payload,
-            )
         except Exception:
             pass
 
@@ -3563,7 +3492,6 @@ class Orchestrator:
                 # Wire ticketing for approvals on PB-POL playbooks
                 try:
                     if pbid in ("PB-POL-001", "PB-POL-002") and policy.get("approval_required", False):
-                        from src.app.services.ticketing import TicketingAgent
                         ta = TicketingAgent()
                         title = f"Approval workflow: {pbid}"
                         desc = f"Policy gate verdict requires approval. playbook={pbid}, trace_id={trace_id}"
@@ -3919,14 +3847,11 @@ class Orchestrator:
                     )
         except Exception:
             pass
-        try:
-            print(f"[orch.run] returning result trace_id={trace_id} executed={executed} proposal_keys={list(proposal.keys())[:12]}")
-        except Exception:
-            pass
-        try:
-            print("[orch.run] final return reached")
-        except Exception:
-            pass
+        logger.debug(
+            "orchestrator_run_completed trace_id=%s executed=%s",
+            trace_id,
+            executed,
+        )
         return OrchestratorResult(proposal=proposal, firewall=policy, executed=executed, timings=timings)
 
     def run(self, uid: str, payload: Dict[str, Any], simulate_only: bool = False, use_rules: bool = False) -> OrchestratorResult:
@@ -3937,16 +3862,8 @@ class Orchestrator:
         except Exception:
             trace_id = None
         try:
-            try:
-                print("[orch.run] wrapper invoked")
-            except Exception:
-                pass
             res = self._run_internal(uid, payload, simulate_only=simulate_only, use_rules=use_rules)
             if res is None:
-                try:
-                    print("[orch.run] internal returned None; using fallback")
-                except Exception:
-                    pass
                 raise RuntimeError("orchestrator_internal_return_none")
             return res
         except Exception as e:
@@ -3956,7 +3873,10 @@ class Orchestrator:
                     pid = (payload or {}).get("trace_id") or (payload or {}).get("decision_id")
                 except Exception:
                     pid = None
-                print(f"[orch.run] exception fallback: {e}")
+                logger.exception(
+                    "orchestrator_run_fallback trace_id=%s",
+                    pid or trace_id,
+                )
             except Exception:
                 pass
             self._emit_runtime_error(

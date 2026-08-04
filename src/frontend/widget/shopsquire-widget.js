@@ -197,7 +197,7 @@ class ShopSquireWidget extends HTMLElement {
         setTimeout(() => run(idx + 1), 3500);
       } else {
         setTimeout(() => {
-          window.open('/ui/status', '_blank');
+          window.open('/docs', '_blank');
           this.demoRunning = false;
         }, 3500);
       }
@@ -250,14 +250,22 @@ class ShopSquireWidget extends HTMLElement {
 
   async fetchRecommend(query) {
     const base = this.config.apiBase || window.location.origin;
-    const url = `${base.replace(/\/$/, '')}/api/v1/recommend/suggest?uid=${encodeURIComponent(this.config.uid)}&query=${encodeURIComponent(query)}`;
-    const headers = {};
+    const url = `${base.replace(/\/$/, '')}/api/v1/chat/query`;
+    const headers = { 'Content-Type': 'application/json' };
     if (this.config.apiKey) headers['x-api-key'] = this.config.apiKey;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        uid: this.config.uid,
+        query,
+      }),
+    });
     clearTimeout(timer);
-    if (!resp.ok) throw new Error(`Recommend failed ${resp.status}`);
+    if (!resp.ok) throw new Error(`Chat recommendation failed ${resp.status}`);
     const data = await resp.json();
     return data;
   }
@@ -621,6 +629,8 @@ class ShopSquireWidget extends HTMLElement {
         why_not: r.why_not
       }));
       this.state.results = ranked;
+      // Surface the answer-first narration above the product cards (was invisible).
+      this.state.answer = data.assistant_message || data.message || '';
       this.state.decisionMeta = {
         proposal: data.proposal || {},
         security: data.security || {},
@@ -631,7 +641,9 @@ class ShopSquireWidget extends HTMLElement {
         policy: data.policy_version || 'v1',
         riskScore: data.risk_score,
         whyNot: data.why_not || [],
-        traceId: data.trace_id || null
+        traceId: data.trace_id || null,
+        timing: data.timing_breakdown || null,
+        sourceStatuses: data.source_statuses || []
       };
       this.state.traceEvents = [];
       if (this.state.decisionMeta.traceId) {
@@ -742,14 +754,19 @@ class ShopSquireWidget extends HTMLElement {
         ${wfRows ? `<div class="waterfall">${wfRows}</div>` : ''}
         ${latest && latest.id ? `<div class="decision-notice">Last log: ${latest.id} | ${latest.execution_status} | ${latest.valid_from}</div>` : ''}
         <div class="decision-links">
-          <a href="/ui/status" target="_blank">View live decisions</a>
+          <a href="/docs" target="_blank">API & decisions</a>
           ${meta.traceId ? ` | <a href="http://localhost:16686/trace/${meta.traceId}" target="_blank">View last trace</a>` : ''}
         </div>
       </div>
     `;
+    // Answer-first banner: the buyer-facing narration, above the product cards.
+    const _ans = String(this.state.answer || '').trim();
+    const answerBanner = _ans
+      ? `<div data-test="answer-banner" style="margin:0 0 12px;padding:12px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;font-size:14px;line-height:1.5;color:#0c4a6e;">${_ans.replace(/</g, '&lt;')}</div>`
+      : '';
     // render variants: grid, list, compact
     if (view === 'compact') {
-      c.innerHTML = decisionPanel + `<div class="compact-list">${this.state.results.map((p, idx) => `
+      c.innerHTML = answerBanner + decisionPanel + `<div class="compact-list">${this.state.results.map((p, idx) => `
         <div class="card" style="padding:8px;display:flex;justify-content:space-between;align-items:center;">
           <div style="flex:1;min-width:0;">
             <div style="font-weight:600;">${idx + 1}. ${p.name}</div>
@@ -762,7 +779,7 @@ class ShopSquireWidget extends HTMLElement {
         </div>
       `).join('')}</div>`;
     } else if (view === 'list') {
-      c.innerHTML = decisionPanel + `<div class="list-view">${this.state.results.map((p, idx) => `
+      c.innerHTML = answerBanner + decisionPanel + `<div class="list-view">${this.state.results.map((p, idx) => `
         <div class="card" style="display:flex;gap:12px;align-items:flex-start;">
           <div style="width:120px;height:80px;background:#f6f4f2;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#6b7280;">Img</div>
           <div style="flex:1;">
@@ -779,7 +796,7 @@ class ShopSquireWidget extends HTMLElement {
       `).join('')}</div>`;
     } else {
       // default grid
-      c.innerHTML = decisionPanel + this.state.results.map((p, idx) => `
+      c.innerHTML = answerBanner + decisionPanel + this.state.results.map((p, idx) => `
       <div class="card">
         <div class="card-title">${idx + 1}. ${p.name}</div>
         <div class="card-sub">$${p.price} | ${p.ram}GB | ${p.storage} | ${p.display || ''} ${p.cpu || ''} | Rating: ${p.rating || 'n/a'} | Stock: ${p.stock ?? 'n/a'} | Ship: ${p.shippingDays ?? 'n/a'}d</div>
@@ -1353,13 +1370,33 @@ class ShopSquireWidget extends HTMLElement {
       </div>
     ` : '<div style="font-size:12px;color:#6b7280;">No NLP quality gate event yet.</div>';
 
+    // Evidence Sources + latency (item 1) — turns retrieval/timing into on-screen
+    // credibility. Null-safe; renders nothing extra when the fields are absent.
+    const ss = meta.sourceStatuses || [];
+    const tb = meta.timing || {};
+    const _statusColor = (s) => s === 'full' ? '#059669' : (s === 'empty' ? '#9ca3af' : '#dc2626');
+    const sourceRows = ss.length ? ss.map(s => `
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#374151;">
+        <span>${s.source}</span>
+        <span style="color:${_statusColor(s.status)}">${s.status} · ${s.hit_count} hits · ${s.latency_ms}ms</span>
+      </div>`).join('') : '<div style="font-size:12px;color:#6b7280;">No source status.</div>';
+    const timingRows = Object.keys(tb).filter(k => k.endsWith('_ms')).map(k => `
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;"><span>${k.replace(/_ms$/, '')}</span><span>${tb[k]}ms</span></div>`).join('');
+    const evidenceHtml = `
+      <div data-test="evidence-sources" style="margin-top:8px;padding:8px;border:1px solid #eef2f7;border-radius:8px;background:#fff;">
+        <div style="font-weight:600;">Evidence Sources</div>
+        ${sourceRows}
+        ${timingRows ? `<div style="font-weight:600;margin-top:8px;">Latency</div>${timingRows}` : ''}
+      </div>`;
+
     const summaryHtml = `
       <div style="margin-bottom:10px;">
         <div style="font-weight:600;">Model Selection</div>
         <div class="meta">Selected model: ${model}</div>
       </div>
       <div style="margin-bottom:10px; font-size:12px; color:#6b7280;">Trace ID: ${traceId || 'n/a'}</div>
-      <div style="font-weight:600; margin-bottom:6px;">Contract & Quality</div>
+      ${evidenceHtml}
+      <div style="font-weight:600; margin:10px 0 6px;">Contract & Quality</div>
       ${contractHtml}
       ${gateHtml}
       ${why}

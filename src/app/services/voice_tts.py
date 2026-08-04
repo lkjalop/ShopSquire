@@ -6,6 +6,8 @@ from typing import Dict
 
 import httpx
 
+from src.app.security.provider_boundary import require_provider_transfer
+
 
 class TTSAdapter:
     """Base TTS adapter interface."""
@@ -21,7 +23,7 @@ class TTSAdapter:
 
 
 class ElevenLabsTTSAdapter(TTSAdapter):
-    """TTS adapter with ElevenLabs/OpenAI support and deterministic fallback."""
+    """Bounded TTS adapter with explicit unavailable/error outcomes."""
 
     name: str = "tts"
 
@@ -32,15 +34,24 @@ class ElevenLabsTTSAdapter(TTSAdapter):
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
         self.openai_base_url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1").rstrip("/")
         self.openai_model = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+        try:
+            configured = float(os.getenv("VOICE_PROVIDER_TIMEOUT_SECONDS", "12") or 12)
+        except Exception:
+            configured = 12.0
+        self.timeout_seconds = min(15.0, max(1.0, configured))
 
     def _to_b64(self, data: bytes) -> str:
         return base64.b64encode(data).decode("ascii") if data else ""
 
     def _synthesize_elevenlabs(self, text: str) -> Dict:
         if not (self.elevenlabs_api_key and text):
-            return {"audio_base64": "", "confidence": 0.0}
+            return {
+                "audio_base64": "", "confidence": 0.0, "provider": "none",
+                "mime_type": None, "status": "unavailable",
+            }
         try:
-            with httpx.Client(timeout=20.0) as client:
+            require_provider_transfer("elevenlabs", data_categories=["response_text"])
+            with httpx.Client(timeout=self.timeout_seconds) as client:
                 resp = client.post(
                     f"{self.elevenlabs_base_url}/text-to-speech/{self.elevenlabs_voice_id}",
                     headers={
@@ -55,16 +66,29 @@ class ElevenLabsTTSAdapter(TTSAdapter):
                     },
                 )
             if resp.status_code >= 300:
-                return {"audio_base64": "", "confidence": 0.0}
-            return {"audio_base64": self._to_b64(resp.content), "confidence": 0.9}
+                return {
+                    "audio_base64": "", "confidence": 0.0,
+                    "provider": "elevenlabs", "mime_type": None, "status": "error",
+                }
+            return {
+                "audio_base64": self._to_b64(resp.content), "confidence": 0.9,
+                "provider": "elevenlabs", "mime_type": "audio/mpeg", "status": "ready",
+            }
         except Exception:
-            return {"audio_base64": "", "confidence": 0.0}
+            return {
+                "audio_base64": "", "confidence": 0.0,
+                "provider": "elevenlabs", "mime_type": None, "status": "error",
+            }
 
     def _synthesize_openai(self, text: str, voice: str | None = None) -> Dict:
         if not (self.openai_api_key and text):
-            return {"audio_base64": "", "confidence": 0.0}
+            return {
+                "audio_base64": "", "confidence": 0.0, "provider": "none",
+                "mime_type": None, "status": "unavailable",
+            }
         try:
-            with httpx.Client(timeout=20.0) as client:
+            require_provider_transfer("openai", data_categories=["response_text"])
+            with httpx.Client(timeout=self.timeout_seconds) as client:
                 resp = client.post(
                     f"{self.openai_base_url}/audio/speech",
                     headers={
@@ -79,23 +103,36 @@ class ElevenLabsTTSAdapter(TTSAdapter):
                     },
                 )
             if resp.status_code >= 300:
-                return {"audio_base64": "", "confidence": 0.0}
-            return {"audio_base64": self._to_b64(resp.content), "confidence": 0.88}
+                return {
+                    "audio_base64": "", "confidence": 0.0, "provider": "openai",
+                    "mime_type": None, "status": "error",
+                }
+            return {
+                "audio_base64": self._to_b64(resp.content), "confidence": 0.88,
+                "provider": "openai", "mime_type": "audio/mpeg", "status": "ready",
+            }
         except Exception:
-            return {"audio_base64": "", "confidence": 0.0}
+            return {
+                "audio_base64": "", "confidence": 0.0, "provider": "openai",
+                "mime_type": None, "status": "error",
+            }
 
     def synthesize(self, text: str, voice: str | None = None) -> Dict:
         if not text:
-            return {"audio_base64": "", "confidence": 0.0}
+            return {
+                "audio_base64": "", "confidence": 0.0, "provider": "none",
+                "mime_type": None, "status": "unavailable",
+            }
         out = self._synthesize_elevenlabs(text)
         if out.get("audio_base64"):
             return out
         out = self._synthesize_openai(text, voice=voice)
         if out.get("audio_base64"):
             return out
-        # Deterministic fallback payload for local environments without provider keys.
-        payload = f"LOCAL_TTS:{(voice or 'default')}:{text[:32]}".encode("utf-8")
-        return {"audio_base64": base64.b64encode(payload).decode("ascii"), "confidence": 0.6}
+        return {
+            "audio_base64": "", "confidence": 0.0, "provider": "none",
+            "mime_type": None, "status": "unavailable",
+        }
 
 
 # Backward compatibility import alias.
