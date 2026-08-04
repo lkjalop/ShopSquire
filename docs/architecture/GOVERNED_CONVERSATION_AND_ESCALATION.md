@@ -68,4 +68,3 @@ projected by guessing a default tenant.
 - The 20-turn browser contract proves session/correction/pronoun transport; it is not a claim
   that a mocked model response proves semantic quality.
 - Live ticketing, supplier providers and tenant outcome data remain adapter/pilot work.
-

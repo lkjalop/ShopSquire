@@ -48,4 +48,3 @@ hosted database was at migration `20260855_case_escalation`; the current topic b
 Use the hosted procurement journey video as reproducible evidence. Record the polished
 narrated demonstration only after the current topic PR's PostgreSQL, worker and browser checks
 are green.
-
