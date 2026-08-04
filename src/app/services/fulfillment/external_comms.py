@@ -180,7 +180,11 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
     response_expectation = (
         channel_plan.get("response_expectation")
         or draft.get("supplier_response_expectation")
-        or (cur.state_json.get("supplier_response_expectation") if cur else None)
+        or (
+            (getattr(cur, "state_json", None) or {}).get("supplier_response_expectation")
+            if cur
+            else None
+        )
         or {}
     )
     if channel == "phone":
