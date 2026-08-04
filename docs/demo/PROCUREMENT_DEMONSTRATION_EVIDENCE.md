@@ -19,8 +19,7 @@ The hosted run retains:
   connector/outbound tests, migration evidence and transaction-abort gate.
 
 The transaction-abort gate found zero `SQLSTATE 25P02`/aborted-transaction signatures. The
-hosted database was at migration `20260855_case_escalation`; the current topic branch adds
-`20260856_escalation_projection` and must receive its own hosted certification.
+hosted database was at migration `20260855_case_escalation`.
 
 ## Current topic branch proof
 
@@ -33,6 +32,19 @@ hosted database was at migration `20260855_case_escalation`; the current topic b
   `20260856_escalation_projection`.
 - New 20-turn rendered browser regression: passed locally; Playwright trace, screenshot and
   video retained under `frontend/test-results/` and intentionally not committed.
+
+## Certified escalation and semantic-proposal slice
+
+- Pull request: `#9` (`agent/escalation-projection-semantic-evidence-20260804`)
+- Certified head: `81eae09e5d30be2eb4de3b4ea887ef3fd3a26841`
+- Integration merge: `06910779f36b3640ff0e786b4372f6ccbd5d8c00`
+- Hosted browser/worker run: <https://github.com/lkjalop/ShopSquire/actions/runs/30875656813>
+- Browser artifact `8879579241`; worker artifact `8879526887`.
+- PostgreSQL migration, rollback and re-upgrade reached
+  `20260856_escalation_projection`.
+- Runtime transaction-abort gate passed with zero matching signatures.
+- The hosted storefront battery retained videos and traces for the 20-turn conversation,
+  temporary-chat isolation and procurement journey.
 
 ## Recording sequence
 

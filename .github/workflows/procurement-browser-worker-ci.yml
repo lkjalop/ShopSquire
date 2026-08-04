@@ -214,6 +214,7 @@ jobs:
         run: |
           timeout 240s poetry run pytest -vv -s tests/e2e/test_live_policy_trace.py
           timeout 240s poetry run pytest -vv -s tests/e2e/test_live_procurement_closed_loop.py
+          timeout 240s poetry run pytest -vv -s tests/e2e/test_live_allocation_workbench.py
       - name: Reject transaction-abort signatures
         if: always()
         run: |
