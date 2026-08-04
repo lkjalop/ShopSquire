@@ -70,7 +70,12 @@ def test_request_is_tenant_scoped_deduplicated_and_preserves_evidence() -> None:
     assert replay["escalation_id"] == first["escalation_id"]
     assert replay["idempotent"] is True
     assert other_tenant["escalation_id"] != first["escalation_id"]
-    stored = get_escalation(db, tenant_id="tenant-a", escalation_id=first["escalation_id"])
+    stored = get_escalation(
+        db,
+        tenant_id="tenant-a",
+        escalation_id=first["escalation_id"],
+        now_iso="2026-08-04T03:00:00+00:00",
+    )
     assert stored["evidence_refs"] == ["calendar/au-nsw-v4", "promise/calc-1"]
     assert stored["queue_age_seconds"] == 0
 
