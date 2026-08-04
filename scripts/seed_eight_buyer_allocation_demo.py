@@ -47,6 +47,10 @@ def _run_optional_enrichment(
     try:
         with db.begin_nested():
             value = operation()
+            # A legacy helper may catch the original DBAPI error and return an
+            # empty result while PostgreSQL has already aborted the savepoint.
+            # Probe before release so the context manager can roll it back.
+            db.execute(text("SELECT 1"))
         return {"label": label, "status": "applied", "value": value}
     except Exception as exc:
         return {

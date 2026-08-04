@@ -6,21 +6,21 @@ from scripts.seed_eight_buyer_allocation_demo import _run_optional_enrichment
 
 
 class _NestedTransaction(AbstractContextManager):
-    def __init__(self, *, fail_on_exit: bool = False) -> None:
-        self.fail_on_exit = fail_on_exit
-
     def __exit__(self, exc_type, exc, traceback):
-        if self.fail_on_exit and exc_type is None:
-            raise RuntimeError("postgres transaction aborted by swallowed query error")
         return False
 
 
 class _Database:
-    def __init__(self, *, fail_on_exit: bool = False) -> None:
-        self.fail_on_exit = fail_on_exit
+    def __init__(self, *, fail_health_probe: bool = False) -> None:
+        self.fail_health_probe = fail_health_probe
 
     def begin_nested(self):
-        return _NestedTransaction(fail_on_exit=self.fail_on_exit)
+        return _NestedTransaction()
+
+    def execute(self, _statement):
+        if self.fail_health_probe:
+            raise RuntimeError("postgres transaction aborted by swallowed query error")
+        return None
 
 
 def test_optional_enrichment_reports_success() -> None:
@@ -49,7 +49,7 @@ def test_optional_enrichment_contains_explicit_query_failure() -> None:
 
 def test_optional_enrichment_detects_swallowed_postgres_abort() -> None:
     result = _run_optional_enrichment(
-        _Database(fail_on_exit=True),
+        _Database(fail_health_probe=True),
         label="qualified_substitute",
         operation=lambda: [],
     )
