@@ -28,13 +28,17 @@ def _ref() -> str:
 
 
 def generate_reply(*, case_ref: str, scenario: str, requested_qty: int,
-                   unit_amount_cents: int = 111500) -> Dict[str, Any]:
+                   unit_amount_cents: int = 111500,
+                   sender_domain: str | None = None) -> Dict[str, Any]:
     """Return a deterministic inbound reply: {sender_domain, provider_ref, subject, body, scenario}.
     Dates are fixed strings (no clock) so replays are reproducible."""
     qty = int(requested_qty)
     unit = unit_amount_cents // 100
     subject = f"Re: Availability and quote request — {case_ref}"
-    sender = TRUSTED_DOMAIN
+    # Normal demo replies must come from the supplier selected for this RFQ.
+    # A hard-coded sender makes the security boundary correctly quarantine a
+    # benign reply whenever another catalogue supplier wins selection.
+    sender = str(sender_domain or TRUSTED_DOMAIN).strip().lower()
     if scenario == "full_quote":
         body = (f"Thank you for your enquiry ({case_ref}). We can supply {qty} units at ${unit} each. "
                 f"Ready to dispatch on 2026-07-03. Estimated delivery 2026-07-08. "
