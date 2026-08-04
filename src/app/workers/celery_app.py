@@ -345,9 +345,24 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
         "schedule": crontab(minute="15", hour="3"),  # 03:15 UTC daily, low-traffic window
         "args": (),
     }
+    beat_schedule["security-handoff-recovery"] = {
+        "task": "src.app.tasks.security_handoff_tasks.recover_due_security_handoffs",
+        "schedule": max(15, int(os.getenv("SECURITY_HANDOFF_RECOVERY_SECONDS", "60") or 60)),
+        "options": {"queue": default_q},
+    }
     beat_schedule["temporal-cache-rebuild-dispatch"] = {
         "task": "src.app.tasks.temporal_cache_tasks.dispatch_temporal_cache_rebuilds",
         "schedule": max(15, int(os.getenv("TEMPORAL_CACHE_DISPATCH_SECONDS", "30") or 30)),
+        "options": {"queue": default_q},
+    }
+    beat_schedule["temporal-cache-eviction-dispatch"] = {
+        "task": "src.app.tasks.temporal_cache_tasks.dispatch_temporal_cache_evictions",
+        "schedule": max(15, int(os.getenv("TEMPORAL_CACHE_EVICTION_SECONDS", "30") or 30)),
+        "options": {"queue": default_q},
+    }
+    beat_schedule["return-evidence-dispatch"] = {
+        "task": "src.app.tasks.return_evidence_tasks.dispatch_return_evidence_jobs",
+        "schedule": max(15, int(os.getenv("RETURN_EVIDENCE_DISPATCH_SECONDS", "30") or 30)),
         "options": {"queue": default_q},
     }
 
@@ -454,8 +469,14 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.experiment_ops_tasks.experiment_watchdog": {"queue": default_q},
             "src.app.tasks.fulfillment_tasks.retry_supplier_drafts": {"queue": default_q},
             "src.app.tasks.connector_recovery_tasks.recover_stalled_connector_jobs": {"queue": default_q},
+            "src.app.tasks.security_handoff_tasks.deliver_security_handoff": {"queue": default_q},
+            "src.app.tasks.security_handoff_tasks.recover_due_security_handoffs": {"queue": default_q},
             "src.app.tasks.temporal_cache_tasks.rebuild_temporal_cache_entry": {"queue": default_q},
             "src.app.tasks.temporal_cache_tasks.dispatch_temporal_cache_rebuilds": {"queue": default_q},
+            "src.app.tasks.temporal_cache_tasks.evict_superseded_cache_entry": {"queue": default_q},
+            "src.app.tasks.temporal_cache_tasks.dispatch_temporal_cache_evictions": {"queue": default_q},
+            "src.app.tasks.return_evidence_tasks.process_return_evidence": {"queue": default_q},
+            "src.app.tasks.return_evidence_tasks.dispatch_return_evidence_jobs": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -477,7 +498,9 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.vision_prewarm_tasks",
             "src.app.tasks.fulfillment_tasks",
             "src.app.tasks.connector_recovery_tasks",
+            "src.app.tasks.security_handoff_tasks",
             "src.app.tasks.temporal_cache_tasks",
+            "src.app.tasks.return_evidence_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,
