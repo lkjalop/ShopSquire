@@ -21,7 +21,7 @@ The hosted run retains:
 The transaction-abort gate found zero `SQLSTATE 25P02`/aborted-transaction signatures. The
 hosted database was at migration `20260855_case_escalation`.
 
-## Current topic branch proof
+## Local implementation proof
 
 - Implementation commit: `3695ebdd`.
 - Focused projection/semantic tests: 12 passed.
@@ -46,6 +46,22 @@ hosted database was at migration `20260855_case_escalation`.
 - The hosted storefront battery retained videos and traces for the 20-turn conversation,
   temporary-chat isolation and procurement journey.
 
+## Certified eight-buyer allocation workbench
+
+- Pull request: `#10` (`agent/escalation-browser-cert-followup-20260804`)
+- Certified head: `98410dba775e4aab3f2fc2fd73b3cbfc40e552be`
+- Integration merge: `32de35eaba6b0032cf4cb52921eabb1a4939002e`
+- Hosted browser/worker run: <https://github.com/lkjalop/ShopSquire/actions/runs/30878849553>
+- Browser artifact `8880679092`; worker artifact `8880613038`.
+- The hosted PostgreSQL scenario proves eight committed child demands, 80 requested,
+  53 atomically allocated, a 27-unit consolidated shortfall, an 18-unit partial supplier
+  confirmation, 9 unresolved units and a human-gated RFQ with no external action.
+- The scenario now reports optional alternative/substitute enrichment as `applied` or
+  `degraded`; a swallowed advisory query failure cannot abort authoritative ATP seeding.
+- Browser, worker, PostgreSQL migration, SIEM handoff and transaction-abort rejection gates
+  passed. All 12 general shards and all 8 service shards passed; service shard 2 passed on an
+  isolated rerun after a runner-native segmentation fault in its first attempt.
+
 ## Recording sequence
 
 1. Ask for a named SKU and quantity, then amend destination, deadline and quantity without
@@ -57,6 +73,5 @@ hosted database was at migration `20260855_case_escalation`.
 5. Amend the case and show the old calculation/cache generation superseded rather than
    silently reused.
 
-Use the hosted procurement journey video as reproducible evidence. Record the polished
-narrated demonstration only after the current topic PR's PostgreSQL, worker and browser checks
-are green.
+Use the hosted procurement journey and eight-buyer videos as reproducible evidence. The
+polished narrated demonstration can now be recorded against the certified integration merge.
