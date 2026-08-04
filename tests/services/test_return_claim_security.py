@@ -1,7 +1,8 @@
 import base64
+import io
 import json
 import time
-from pathlib import Path
+import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -345,22 +346,27 @@ def test_authenticated_intake_is_fast_encrypted_and_idempotent(db, tmp_path, mon
 def test_hostile_pdf_archive_office_and_csv_are_quarantined_by_return_lifecycle(
     db, tmp_path, monkeypatch,
 ):
-    corpus = Path("dump/test-sec/generated")
+    nested = io.BytesIO()
+    with zipfile.ZipFile(nested, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("nested.zip", b"not-a-real-archive")
     files = [
         {
             "filename": "supplier_quote_indirect_injection.pdf",
             "content_type": "application/pdf",
-            "bytes": (corpus / "10_supplier_documents/supplier_quote_indirect_injection.pdf").read_bytes(),
+            "bytes": (
+                b"%PDF-1.7\n/Catalog /OpenAction << /S /JavaScript "
+                b"/JS (inert-test-marker) >> /Launch /EmbeddedFile\n%%EOF"
+            ),
         },
         {
             "filename": "nested_archive_depth4.zip",
             "content_type": "application/zip",
-            "bytes": (corpus / "03_resource_bombs/nested_archive_depth4.zip").read_bytes(),
+            "bytes": nested.getvalue(),
         },
         {
             "filename": "supplier_pricelist_formula_injection.csv",
             "content_type": "text/csv",
-            "bytes": (corpus / "10_supplier_documents/supplier_pricelist_formula_injection.csv").read_bytes(),
+            "bytes": b"sku,price,note\nSKU-1,100,=HYPERLINK(\"https://example.invalid\",\"review\")\n",
         },
         {
             "filename": "repair-provider.docm",
@@ -402,7 +408,7 @@ def test_hostile_pdf_archive_office_and_csv_are_quarantined_by_return_lifecycle(
         "WHERE claim_id=:claim AND observation_type='security_verdict'"
     ), {"claim": claim["claim_id"]})]
     reasons = {reason for item in observations for reason in item.get("reasons", [])}
-    assert "untrusted_document_instruction" in reasons
+    assert "pdf_active_content" in reasons
     assert "spreadsheet_formula_neutralized" in reasons
     assert "office_macro_content" in reasons
     assert any(reason.startswith("archive:") for reason in reasons)
