@@ -13,6 +13,7 @@ import ProcurementOperationalTrace, {
   DisruptionEvidenceTrace,
   TemporalCacheTechnicalTrace,
 } from './ProcurementOperationalTrace';
+import ReturnLifecycleTrace from './ReturnLifecycleTrace';
 
 type TraceEvent = {
   id?: string;
@@ -1340,7 +1341,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     const s = String((e as any).source_id || '').toLowerCase();
     const t = String(e.event_type || '').toLowerCase();
     return s.includes('procurement') || s.includes('split') || s.includes('supplier') || s.includes('sourcing')
-      || t.includes('procurement') || t.includes('split') || t.includes('sourc') || t.includes('availability') || t.includes('channel');
+      || t.includes('procurement') || t.includes('split') || t.includes('sourc') || t.includes('availability')
+      || t.includes('channel') || t.includes('return_claim');
   });
   const eventCorpus = JSON.stringify(allDisplayEvents || []).toLowerCase();
   const hasSecuritySignal = /(security|quarantin|blocked|threat|risk|review_required)/.test(eventCorpus);
@@ -4187,6 +4189,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             first, the event table is demoted below, and raw JSON stays behind the per-event
                             "Raw recorded payload" disclosure. */}
                         {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
+
+                        <ReturnLifecycleTrace events={src || []} />
 
                         {canSeeOperatorDraft && allocationView?.summary && (
                           <ProcurementOperationalTrace allocationView={allocationView} />

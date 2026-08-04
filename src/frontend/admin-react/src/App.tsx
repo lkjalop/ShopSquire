@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Overview } from './components/Overview';
 import { fetchMe, setApiKeyCookie, setClientApiKey } from './api';
+import { ADMIN_NAV_GROUPS } from './adminNavigation';
 
 const Decisions = React.lazy(() => import('./components/Decisions').then((m) => ({ default: m.Decisions })));
 const Security = React.lazy(() => import('./components/Security').then((m) => ({ default: m.Security })));
@@ -29,6 +30,7 @@ const SupplyChainSim = React.lazy(() => import('./components/SupplyChainSim').th
 const AgentIntelligence = React.lazy(() => import('./components/AgentIntelligence').then((m) => ({ default: m.AgentIntelligence })));
 const MaestroRegistry = React.lazy(() => import('./components/MaestroRegistry').then((m) => ({ default: m.MaestroRegistry })));
 const AccountIntelligence = React.lazy(() => import('./components/AccountIntelligence').then((m) => ({ default: m.AccountIntelligence })));
+const ReturnClaims = React.lazy(() => import('./components/ReturnClaims').then((m) => ({ default: m.ReturnClaims })));
 
 type Role = 'merchant' | 'owner' | 'developer';
 
@@ -43,6 +45,7 @@ export default function App() {
   const [authVersion, setAuthVersion] = useState(0);
   const [authError, setAuthError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [openNavGroups, setOpenNavGroups] = useState<string[]>(['command']);
 
   const _TAB_KEYWORDS: Record<string, string[]> = {
     decisions: ['decision', 'decisions', 'log', 'audit'],
@@ -54,6 +57,7 @@ export default function App() {
     approvals: ['approval', 'approvals', 'approve'],
     accounts: ['account', 'accounts', 'party', 'customer', 'identity', 'timeline'],
     orders: ['order', 'orders'],
+    returns: ['return', 'returns', 'repair', 'refund', 'evidence'],
     analytics: ['analytics', 'ragas', 'eval'],
     compliance: ['compliance', 'gdpr', 'pci'],
     grc: ['grc', 'risk'],
@@ -117,6 +121,20 @@ export default function App() {
 
   const canOwner = allowedRoles.includes('owner');
   const canDeveloper = allowedRoles.includes('developer');
+  useEffect(() => {
+    const group = ADMIN_NAV_GROUPS.find((candidate) =>
+      candidate.items.some((item) => item.id === active),
+    );
+    if (group) {
+      setOpenNavGroups((current) => current.includes(group.id) ? current : [...current, group.id]);
+    }
+  }, [active]);
+
+  const toggleNavGroup = (groupId: string) => {
+    setOpenNavGroups((current) => current.includes(groupId)
+      ? current.filter((id) => id !== groupId)
+      : [...current, groupId]);
+  };
   const roleOptions = useMemo(() => {
     const opts: Role[] = ['merchant'];
     if (canOwner) opts.push('owner');
@@ -130,18 +148,42 @@ export default function App() {
         <div className="brand">ShopSquire</div>
         <div className="brand-sub">Trust-first commerce ops</div>
 
-        <div className="nav-section">Merchant</div>
-        <div className="nav">
-          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'accounts', 'procurement', 'market-intel', 'investor', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
-            const locked = (key === 'compliance' && !canOwner) || (key === 'rules' && !(canOwner || canDeveloper)) || (key === 'grc' && !(canOwner || canDeveloper));
+        <div className="nav-section">Merchant workspace</div>
+        <div className="nav nav-groups" aria-label="Admin workspace sections">
+          {ADMIN_NAV_GROUPS.map((group) => {
+            const expanded = openNavGroups.includes(group.id);
+            const activeInside = group.items.some((item) => item.id === active);
             return (
-              <button
-                key={key}
-                className={`${active === key ? 'active' : ''} ${locked ? 'nav-locked' : ''}`}
-                onClick={() => setActive(key)}
-              >
-                {key[0].toUpperCase() + key.slice(1)} <span>{locked ? 'Locked' : 'Core'}</span>
-              </button>
+              <div className="nav-group" key={group.id}>
+                <button
+                  type="button"
+                  className={`nav-group-toggle ${activeInside ? 'contains-active' : ''}`}
+                  aria-expanded={expanded}
+                  aria-controls={`admin-nav-group-${group.id}`}
+                  onClick={() => toggleNavGroup(group.id)}
+                >
+                  {group.label}<span aria-hidden="true">{expanded ? '−' : '+'}</span>
+                </button>
+                {expanded && (
+                  <div id={`admin-nav-group-${group.id}`} className="nav-group-items">
+                    {group.items.map(({ id: key, label }) => {
+                      const locked = (key === 'compliance' && !canOwner)
+                        || (key === 'rules' && !(canOwner || canDeveloper))
+                        || (key === 'grc' && !(canOwner || canDeveloper));
+                      return (
+                        <button
+                          key={key}
+                          data-testid={`admin-nav-${key}`}
+                          className={`${active === key ? 'active' : ''} ${locked ? 'nav-locked' : ''}`}
+                          onClick={() => setActive(key)}
+                        >
+                          {label} <span>{locked ? 'Locked' : 'Core'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -235,6 +277,7 @@ export default function App() {
             {active === 'playbooks' && 'Playbook Editor'}
             {active === 'approvals' && 'Human Approvals'}
             {active === 'accounts' && 'Account Intelligence'}
+            {active === 'returns' && 'Returns & Repair Control Room'}
             {active === 'procurement' && 'Procurement Control Room'}
             {active === 'market-intel' && 'Market Intelligence (Synthetic Replay)'}
             {active === 'investor' && 'Investor Metrics'}
@@ -264,6 +307,7 @@ export default function App() {
             {active === 'market-intel' && 'Advance a synthetic 7-day market replay through the REAL ingestion→analysis→finding path (isolated demo tenant).'}
             {active === 'investor' && 'One screen: exec KPIs, bounded-autonomy proof, procurement cycle time, capability-gap ledger, governance pulse.'}
             {active === 'orders' && 'Manage order lifecycle for refunds, cancellations, and returns.'}
+            {active === 'returns' && 'Review tenant-scoped return evidence, legal holds and governed repair or refund transitions.'}
             {active === 'analytics' && 'Time-series performance across orders, decisions, and security.'}
             {active === 'grafana' && 'Full Grafana observability suite with drill-down dashboards.'}
             {active === 'compliance' && 'Owner-only compliance coverage, evidence, and audit exports.'}
@@ -310,6 +354,7 @@ export default function App() {
         )}
         {active === 'investor' && <InvestorMetrics authVersion={authVersion} authReady={authReady} />}
         {active === 'orders' && <Orders role={role} />}
+        {active === 'returns' && <ReturnClaims role={role} />}
         {active === 'analytics' && <Analytics role={role} />}
         {active === 'grafana' && <GrafanaDashboards role={role} />}
         {active === 'incidents' && <Incidents />}

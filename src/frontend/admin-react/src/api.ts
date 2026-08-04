@@ -70,6 +70,45 @@ export async function fetchMe(): Promise<{ role: 'merchant' | 'owner' | 'develop
   return http(`/api/v1/admin/me`);
 }
 
+export type ReturnClaim = {
+  claim_id: string;
+  order_id?: string | null;
+  sku: string;
+  status: string;
+  order_verification_status: string;
+  abuse_status: string;
+  abuse_reasons: string[];
+  evidence_job?: { status: string; security_status: string; visual_status: string } | null;
+  evidence?: Array<{
+    evidence_id: string; filename: string; cipher: string; encryption_key_id: string;
+    retention_until: string; legal_hold: boolean;
+  }>;
+  timeline?: Array<{ sequence: number; event_type: string; to_status: string }>;
+};
+
+export async function fetchReturnClaims(): Promise<{ claims: ReturnClaim[] }> {
+  return http('/api/v1/returns/operator/claims?limit=100');
+}
+
+export async function fetchReturnClaim(claimId: string): Promise<ReturnClaim> {
+  return http(`/api/v1/returns/operator/claims/${encodeURIComponent(claimId)}`);
+}
+
+export async function transitionReturnClaim(claimId: string, status: string, reason: string): Promise<any> {
+  return http(`/api/v1/returns/claims/${encodeURIComponent(claimId)}/transition`, {
+    method: 'POST', body: JSON.stringify({ status, reason }),
+  });
+}
+
+export async function setReturnEvidenceLegalHold(
+  claimId: string, evidenceId: string, enabled: boolean, purpose: string,
+): Promise<any> {
+  return http(
+    `/api/v1/returns/claims/${encodeURIComponent(claimId)}/evidence/${encodeURIComponent(evidenceId)}/legal-hold`,
+    { method: 'POST', body: JSON.stringify({ enabled, purpose }) },
+  );
+}
+
 export async function fetchOverview(): Promise<{
   revenue_today: number;
   orders_today: number;
