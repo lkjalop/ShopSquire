@@ -43,6 +43,11 @@ def _db():
       dispatch_attempts INTEGER DEFAULT 0,created_at TEXT,dispatched_at TEXT,started_at TEXT,
       finished_at TEXT,last_error TEXT,
       UNIQUE(tenant_id,idempotency_key))"""))
+    db.execute(text("""CREATE TABLE temporal_cache_eviction_job (
+      id TEXT PRIMARY KEY,tenant_id TEXT,entry_id TEXT,cache_key TEXT,idempotency_key TEXT,
+      status TEXT,reason TEXT,attempts INTEGER,dispatch_attempts INTEGER DEFAULT 0,
+      created_at TEXT,dispatched_at TEXT,started_at TEXT,finished_at TEXT,last_error TEXT,
+      UNIQUE(tenant_id,idempotency_key))"""))
     db.execute(text("""CREATE TABLE temporal_cache_binding (
       id TEXT PRIMARY KEY,tenant_id TEXT,cache_key TEXT,namespace TEXT,subject_type TEXT,
       subject_id TEXT,session_epoch TEXT,rebuild_payload_json TEXT,created_at TEXT,
@@ -256,6 +261,72 @@ def test_stale_and_superseded_states_fail_closed():
         db, tenant_id="tenant-a", cache_key=key, reason="new_contract", cache=cache,
     )["status"] == "superseded"
     assert cache_lifecycle(db, tenant_id="tenant-a", cache_key=key)["status"] == "superseded"
+
+
+def test_superseded_provider_failure_is_durable_and_retryable():
+    from src.app.services.temporal_invalidation import execute_cache_eviction
+
+    db = _db()
+    key = "cache:v2:faq:eviction"
+    register_cache_dependency(
+        db, tenant_id="tenant-a", cache_key=key,
+        source_type="faq_corpus", source_id="faq", source_version="v1",
+    )
+
+    class FailingCache:
+        def delete_strict(self, _key):
+            raise RuntimeError("redis unavailable")
+
+    result = supersede_cache_entry(
+        db, tenant_id="tenant-a", cache_key=key, reason="case_amended", cache=FailingCache(),
+    )
+    assert result["status"] == "superseded_eviction_pending"
+    assert result["eviction"]["job_id"]
+    assert read_current_cache(db, tenant_id="tenant-a", cache_key=key, cache=FailingCache()) is None
+
+    cache = SemanticCache()
+    cache.set(key, {"stale": True})
+    retried = execute_cache_eviction(
+        db, tenant_id="tenant-a", job_id=result["eviction"]["job_id"], cache=cache,
+    )
+    assert retried["status"] == "succeeded"
+    assert cache.get(key) is None
+    assert cache_lifecycle(db, tenant_id="tenant-a", cache_key=key)["status"] == "superseded"
+
+
+def test_failed_retry_stays_read_blocked_and_can_be_redispatched():
+    from src.app.services.temporal_invalidation import (
+        dispatch_queued_evictions,
+        execute_cache_eviction,
+    )
+
+    db = _db()
+    key = "cache:v2:faq:retry"
+    register_cache_dependency(
+        db, tenant_id="tenant-a", cache_key=key,
+        source_type="faq_corpus", source_id="faq", source_version="v1",
+    )
+
+    class FailingCache:
+        def delete_strict(self, _key):
+            raise RuntimeError("redis unavailable")
+
+    first = supersede_cache_entry(
+        db, tenant_id="tenant-a", cache_key=key, reason="case_amended", cache=FailingCache(),
+    )
+    job_id = first["eviction"]["job_id"]
+    retry = execute_cache_eviction(
+        db, tenant_id="tenant-a", job_id=job_id, cache=FailingCache(),
+    )
+    assert retry["status"] == "degraded"
+    assert read_current_cache(db, tenant_id="tenant-a", cache_key=key, cache=FailingCache()) is None
+
+    dispatched: list[tuple[str, str]] = []
+    sweep = dispatch_queued_evictions(
+        db, dispatch=lambda tenant, job: dispatched.append((tenant, job)),
+    )
+    assert sweep["dispatched"] == [job_id]
+    assert dispatched == [("tenant-a", job_id)]
 
 
 def test_worker_orchestration_publishes_handler_result_and_missing_handler_degrades():
