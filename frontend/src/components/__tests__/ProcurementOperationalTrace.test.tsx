@@ -99,6 +99,38 @@ describe('ProcurementOperationalTrace', () => {
     expect(screen.getByText(/dispatch 1–2d · transit 2–3d · inspection 1–2d/)).toBeInTheDocument();
   });
 
+  it('renders canonical escalation authority and linked adapter records', () => {
+    render(<ProcurementOperationalTrace allocationView={{
+      summary: {
+        committed_quantity: 80,
+        allocated_quantity: 53,
+        shortfall_quantity: 27,
+        supplier_confirmed_quantity: 0,
+        supplier_unresolved_quantity: 27,
+        allocation_pressure: 0.3375,
+        oldest_queue_age_seconds: 120,
+      },
+      canonical_escalation: {
+        state: 'assigned',
+        priority: 'high',
+        reason_code: 'deadline_infeasible',
+        sla_status: 'due',
+        queue_age_seconds: 90,
+        assigned_operator_id: 'operator-7',
+        projections: [{
+          source_kind: 'procurement_room',
+          source_id: 'room-7',
+          source_version: '2',
+        }],
+      },
+    }} />);
+
+    expect(screen.getByTestId('proc-canonical-escalation')).toHaveTextContent('Operator escalation');
+    expect(screen.getByTestId('proc-canonical-escalation')).toHaveTextContent(/deadline infeasible/i);
+    expect(screen.getByTestId('proc-canonical-escalation')).toHaveTextContent(/procurement room room-7/i);
+    expect(screen.getByTestId('proc-canonical-escalation')).toHaveTextContent('external tickets remain adapters');
+  });
+
   it('renders phone-only contact as queued rather than supplier contacted', () => {
     const queued = {
       ...VIEW,

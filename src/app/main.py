@@ -2168,6 +2168,16 @@ def create_app() -> FastAPI:
 
         logging.getLogger("shopsquire.startup").exception("failed_to_include_allocation_router: %s", e)
     try:
+        from src.app.routers.case_escalations import router as case_escalations_router
+
+        app.include_router(case_escalations_router)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception(
+            "failed_to_include_case_escalations_router: %s", e
+        )
+    try:
         from src.app.routers.merchant_dashboard import router as merchant_dashboard_router
         app.include_router(merchant_dashboard_router)
     except Exception as e:

@@ -274,6 +274,38 @@ export default function ProcurementOperationalTrace({
           <div>Version {safeText(allocationView.human_room.version, 'not recorded')} Â· tenant and case scoped</div>
         </section>
       )}
+      {allocationView.canonical_escalation && (
+        <section data-testid="proc-canonical-escalation" style={nestedStyle} aria-label="Canonical escalation">
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <strong>Operator escalation</strong>
+            <span>{humanize(allocationView.canonical_escalation.sla_status)}</span>
+          </div>
+          <div style={rowStyle}>
+            <span>Lifecycle</span>
+            <span>{humanize(allocationView.canonical_escalation.state)}</span>
+          </div>
+          <div style={rowStyle}>
+            <span>Priority / reason</span>
+            <span>{humanize(allocationView.canonical_escalation.priority)} · {humanize(allocationView.canonical_escalation.reason_code)}</span>
+          </div>
+          <div style={rowStyle}>
+            <span>Queue age</span>
+            <span>{duration(allocationView.canonical_escalation.queue_age_seconds)}</span>
+          </div>
+          <div style={rowStyle}>
+            <span>Assigned operator</span>
+            <span>{safeText(allocationView.canonical_escalation.assigned_operator_id, 'not assigned')}</span>
+          </div>
+          {asArray(allocationView.canonical_escalation.projections).length > 0 && (
+            <div>
+              Linked records: {asArray(allocationView.canonical_escalation.projections)
+                .map((projection: any) => `${humanize(projection.source_kind)} ${safeText(projection.source_id)}`)
+                .join(' · ')}
+            </div>
+          )}
+          <div>Authority: canonical escalation lifecycle · external tickets remain adapters</div>
+        </section>
+      )}
       {allocationView.payment_consequence && (
         <section data-testid="proc-payment-consequence" style={nestedStyle} aria-label="Payment consequence">
           <strong>Payment consequence</strong>

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 
 _STATUS = re.compile(r"\b(status|summary|where (?:is|are)|what(?:'s| is) happening)\b", re.I)
@@ -58,6 +58,94 @@ def _json(value: Any) -> str | None:
     if value is None:
         return None
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+class _DurableOnlyCache:
+    """The DB pointer fails closed even when no provider cache adapter is in this call path."""
+
+    @staticmethod
+    def delete(_key: str) -> None:
+        return None
+
+
+def _propagate_case_supersession(
+    db,
+    *,
+    tenant_id: str,
+    case_id: str,
+    amendment_id: str,
+    trace_id: str | None,
+    prior_version: int,
+    new_version: int,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Invalidate exact prior-version consumers and expose one evidence-only graph edge."""
+    tables = set(inspect(db.connection()).get_table_names())
+    temporal: dict[str, Any] = {"invalidated_count": 0, "rebuilds_enqueued": 0}
+    if "temporal_dependency" in tables:
+        from src.app.services.temporal_invalidation import (
+            invalidate_source_and_schedule_rebuild,
+            invalidate_source_dependencies,
+        )
+
+        values = {
+            "tenant_id": tenant_id,
+            "source_type": "conversation_case_state",
+            "source_id": case_id,
+            "source_version": str(prior_version),
+            "reason": f"case_amended:{amendment_id}",
+        }
+        if {"temporal_cache_entry", "temporal_cache_rebuild_job"}.issubset(tables):
+            temporal = invalidate_source_and_schedule_rebuild(
+                db, cache=_DurableOnlyCache(), **values
+            )
+        else:
+            temporal = invalidate_source_dependencies(db, **values)
+
+    if trace_id and "decision_trace_events" in tables:
+        columns = {
+            item["name"]
+            for item in inspect(db.connection()).get_columns("decision_trace_events")
+        }
+        event_id = hashlib.sha256(
+            f"{tenant_id}|{case_id}|{prior_version}|{new_version}|{amendment_id}".encode()
+        ).hexdigest()
+        values = {
+            "id": event_id,
+            "trace": trace_id,
+            "event": "case_revision_superseded",
+            "source_type": "case_revision",
+            "source_id": f"{case_id}@v{prior_version}",
+            "target_type": "case_revision",
+            "target_id": f"{case_id}@v{new_version}",
+            "payload": _json({
+                "amendment_id": amendment_id,
+                "superseded_version": prior_version,
+                "active_version": new_version,
+                "authority": "evidence_only",
+            }),
+            "created": timestamp,
+            "tenant": tenant_id,
+        }
+        names = [
+            "id", "trace_id", "event_type", "source_type", "source_id",
+            "target_type", "target_id", "payload", "created_at",
+        ]
+        params = [
+            ":id", ":trace", ":event", ":source_type", ":source_id",
+            ":target_type", ":target_id", ":payload", ":created",
+        ]
+        if "tenant_id" in columns:
+            names.append("tenant_id")
+            params.append(":tenant")
+        db.execute(
+            text(
+                f"INSERT INTO decision_trace_events ({','.join(names)}) "
+                f"VALUES ({','.join(params)})"
+            ),
+            values,
+        )
+    return temporal
 
 
 def classify_case_turn(message: str, *, current_state: dict[str, Any]) -> CaseTurn:
@@ -186,7 +274,7 @@ def record_case_turn(
 ) -> dict[str, Any]:
     row = db.execute(
         text(
-            "SELECT id,state_json FROM conversation_case_state "
+            "SELECT id,state_json,version FROM conversation_case_state "
             "WHERE tenant_id=:tenant AND case_id=:case_id AND session_epoch=:epoch AND subject_ref=:subject"
         ),
         {"tenant": tenant_id, "case_id": case_id, "epoch": session_epoch, "subject": subject_ref},
@@ -253,6 +341,17 @@ def record_case_turn(
             {"state": _json(current), "timestamp": timestamp, "id": row[0]},
         ).rowcount
         state_changed = changed == 1
+        if state_changed:
+            _propagate_case_supersession(
+                db,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                amendment_id=amendment_id,
+                trace_id=trace_id,
+                prior_version=int(row[2]),
+                new_version=int(row[2]) + 1,
+                timestamp=timestamp,
+            )
     db.commit()
     return {
         "amendment_id": amendment_id, "dialogue_act": turn.dialogue_act,
@@ -274,7 +373,8 @@ def apply_case_amendment(
 ) -> dict[str, Any]:
     row = db.execute(
         text(
-            "SELECT a.case_state_id,a.field_name,a.proposed_value_json,a.status,s.state_json "
+            "SELECT a.case_state_id,a.field_name,a.proposed_value_json,a.status,s.state_json,"
+            "s.version,a.trace_id "
             "FROM conversation_case_amendment a JOIN conversation_case_state s ON s.id=a.case_state_id "
             "WHERE a.id=:id AND a.tenant_id=:tenant AND a.case_id=:case_id AND a.session_epoch=:epoch"
         ),
@@ -302,6 +402,16 @@ def apply_case_amendment(
             "timestamp": timestamp, "id": amendment_id,
             "provenance": _json({"kind": "buyer_confirmation", "actor_id": actor_id, "classifier": "bounded_case_turns_v1"}),
         },
+    )
+    _propagate_case_supersession(
+        db,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        amendment_id=amendment_id,
+        trace_id=row[6],
+        prior_version=int(row[5]),
+        new_version=int(row[5]) + 1,
+        timestamp=timestamp,
     )
     db.commit()
     return {"ok": True, "idempotent": False, "state_changed": True}

@@ -203,3 +203,57 @@ def test_ambiguous_reference_returns_typed_clarification() -> None:
     assert parsed.dialogue_act == "clarify"
     assert parsed.reason == "quantity_anchor_required"
     assert parsed.proposed_value is None
+
+
+def test_accepted_amendment_invalidates_prior_version_and_projects_supersession() -> None:
+    db = _db()
+    db.execute(text("""
+        CREATE TABLE temporal_dependency (
+            id TEXT PRIMARY KEY, tenant_id TEXT, source_type TEXT, source_id TEXT,
+            source_version TEXT, derived_type TEXT, derived_id TEXT, status TEXT,
+            created_at TEXT, invalidated_at TEXT, invalidation_reason TEXT
+        )
+    """))
+    db.execute(text("""
+        CREATE TABLE decision_trace_events (
+            id TEXT PRIMARY KEY, trace_id TEXT, event_type TEXT, source_type TEXT,
+            source_id TEXT, target_type TEXT, target_id TEXT, payload TEXT,
+            created_at TEXT, tenant_id TEXT
+        )
+    """))
+    _seed(db)
+    db.execute(text("""
+        INSERT INTO temporal_dependency (
+            id,tenant_id,source_type,source_id,source_version,derived_type,derived_id,status,created_at
+        ) VALUES (
+            'dep-1','tenant-a','conversation_case_state','case-1','1',
+            'hippograph_edge','edge-old','active','2026-08-04T01:00:00+00:00'
+        )
+    """))
+    db.commit()
+
+    result = record_case_turn(
+        db,
+        tenant_id="tenant-a",
+        case_id="case-1",
+        session_epoch="epoch-1",
+        subject_ref="buyer-hash",
+        source_message_id="destination-with-trace",
+        message="Ship them to Penrith.",
+        trace_id="trace-1",
+        now_iso="2026-08-04T01:05:00+00:00",
+    )
+
+    assert result["state_changed"] is True
+    dependency = db.execute(text(
+        "SELECT status,invalidation_reason FROM temporal_dependency WHERE id='dep-1'"
+    )).first()
+    assert dependency[0] == "invalidated"
+    assert dependency[1].startswith("case_amended:")
+    edge = db.execute(text(
+        "SELECT event_type,source_id,target_id,payload FROM decision_trace_events"
+    )).first()
+    assert edge[0:3] == (
+        "case_revision_superseded", "case-1@v1", "case-1@v2"
+    )
+    assert json.loads(edge[3])["authority"] == "evidence_only"
