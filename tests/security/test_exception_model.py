@@ -81,9 +81,10 @@ def sqlite_db(monkeypatch):
         c.exec_driver_sql(
             """
             CREATE TABLE exception_queue (
-                id TEXT PRIMARY KEY, trace_id TEXT, action TEXT, requester TEXT,
+                id TEXT PRIMARY KEY, tenant_id TEXT, domain TEXT, ref_id TEXT,
+                trace_id TEXT, action TEXT, requester TEXT,
                 terminal_outcome TEXT, reason TEXT, subject_id TEXT, value_usd REAL,
-                residual TEXT, status TEXT DEFAULT 'open', resolved_outcome TEXT,
+                residual TEXT, payload TEXT, status TEXT DEFAULT 'open', resolved_outcome TEXT,
                 created_at TEXT, resolved_at TEXT
             )
             """
@@ -110,7 +111,8 @@ def test_resolver_drives_all_open_rows_to_terminal(sqlite_db):
             "INSERT INTO exception_queue (id, action, requester, terminal_outcome, status, created_at) "
             "VALUES (:id, 'refund', 'x', :o, 'open', :ts)"
         ), {"id": f"e{i}", "o": outcome, "ts": f"t{i}"})
-    s.commit(); s.close()
+    s.commit()
+    s.close()
 
     summary = resolve_open_exceptions()
     assert summary["scanned"] == 4
@@ -131,7 +133,8 @@ def test_resolver_is_idempotent(sqlite_db):
         "INSERT INTO exception_queue (id, action, requester, terminal_outcome, status, created_at) "
         "VALUES ('e1', 'refund', 'x', 'reject_under_policy', 'open', 't0')"
     ))
-    s.commit(); s.close()
+    s.commit()
+    s.close()
     first = resolve_open_exceptions()
     second = resolve_open_exceptions()  # nothing left open
     assert first["scanned"] == 1
@@ -157,8 +160,8 @@ def test_new_domain_terminals_all_have_a_resolution_and_stay_autonomous():
     assert non_auto == {"escalate_governance"}
 
 
-def test_ensure_exception_table_repairs_legacy_schema():
-    # a table created with the OLD db.py schema (no terminal_outcome/resolved_outcome) must be repaired
+def test_ensure_exception_table_rejects_unmigrated_legacy_schema():
+    # Services must not repair schema at runtime; a partial deploy fails visibly.
     from sqlalchemy import create_engine, text as _t
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
@@ -168,7 +171,8 @@ def test_ensure_exception_table_repairs_legacy_schema():
         c.exec_driver_sql("CREATE TABLE exception_queue (id TEXT PRIMARY KEY, tenant_id TEXT, domain TEXT, "
                           "kind TEXT, payload TEXT, outcome TEXT, status TEXT, created_at TEXT, resolved_at TEXT)")
     s = sessionmaker(bind=eng)()
-    ensure_exception_table(s)
+    with pytest.raises(RuntimeError, match="exception_queue_schema_incomplete"):
+        ensure_exception_table(s)
     cols = {r[1] for r in s.execute(_t("PRAGMA table_info(exception_queue)")).fetchall()}
     s.close()
-    assert {"terminal_outcome", "resolved_outcome", "ref_id"} <= cols
+    assert "terminal_outcome" not in cols

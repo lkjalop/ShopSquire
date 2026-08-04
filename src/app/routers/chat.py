@@ -150,6 +150,10 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
     _rq = data.get("requested_quantity")
     if isinstance(_rq, (int, float)) and 1 <= int(_rq) <= 1000:
         out["order_quantity"] = int(_rq)
+    decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+    exact_product_sku = str(decision.get("exact_product_sku") or "").strip()
+    if exact_product_sku:
+        out["exact_product_sku"] = exact_product_sku
     for key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition", "buyer_persona", "issue_type"):
         v = applied.get(key)
         if v is None:
@@ -504,6 +508,13 @@ def _cart_mutation_short_circuit(
         "execution_lane": data.get("execution_lane") or "CART_MUTATE",
         "delegation_reason": data.get("delegation_reason"),
         "action_executed": bool(data.get("action_executed")),
+        # Read-only case status/summary responses intentionally keep the buyer's
+        # current product/cart/procurement panel in place. This is a typed UI
+        # contract, not an inference from an empty product list.
+        "preserve_current_view": bool(data.get("preserve_current_view")),
+        "case_operation": data.get("case_operation"),
+        "case_anchor": data.get("case_anchor") if isinstance(data.get("case_anchor"), dict) else None,
+        "state_changed": data.get("state_changed"),
         "decision_trace_id": tid,
         "trace_id": tid,
         "next_questions": [],
@@ -3315,6 +3326,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "execution_lane": data.get("execution_lane") or turn_intent,
         "delegation_reason": data.get("delegation_reason"),
         "action_executed": bool(data.get("action_executed")),
+        # Read-only case status/summary responses intentionally keep the buyer's
+        # current product/cart/procurement panel in place. This typed contract
+        # prevents an empty status response from looking like a fresh search.
+        "preserve_current_view": bool(data.get("preserve_current_view")),
+        "case_operation": data.get("case_operation"),
+        "case_anchor": data.get("case_anchor") if isinstance(data.get("case_anchor"), dict) else None,
+        "state_changed": data.get("state_changed"),
         # N1/N6 forward-through: the evidence orchestrator's block (legs/citations) is produced in
         # recommend.suggest but was DROPPED here — so the frontend (which hits /chat/query, not
         # /suggest) never saw it and the Evidence tab + Source chips stayed empty. Forward it.
@@ -3551,6 +3569,81 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     decision_trace_id,
                     observation_exc,
                 )
+            # A transcript observation is not enough to preserve an active procurement
+            # case. Project the same turn through the canonical case reducer when the
+            # response carries a durable case identity. This is isolated from the request
+            # transaction and is advisory only: consequential amendments remain pending
+            # until the appropriate confirmation/execution boundary applies them.
+            fulfillment_case = (
+                out.get("fulfillment_case")
+                if isinstance(out.get("fulfillment_case"), dict)
+                else {}
+            )
+            case_anchor = (
+                out.get("case_anchor") if isinstance(out.get("case_anchor"), dict) else {}
+            )
+            active_case_id = str(
+                fulfillment_case.get("case_id") or case_anchor.get("case_id") or ""
+            ).strip()
+            if active_case_id:
+                try:
+                    from src.app.services.conversation_case_state import (
+                        ensure_case_state,
+                        record_case_turn,
+                    )
+
+                    bind = db.get_bind() if hasattr(db, "get_bind") else getattr(db, "bind", None)
+                    if bind is None:
+                        raise RuntimeError("conversation_case_store_requires_database_bind")
+                    first_product = products[0] if products and isinstance(products[0], dict) else {}
+                    sku = str(
+                        fulfillment_case.get("item_ref")
+                        or case_anchor.get("sku")
+                        or first_product.get("sku")
+                        or first_product.get("id")
+                        or ""
+                    ).strip() or None
+                    anchor = {
+                        "sku": sku,
+                        "quantity": out.get("requested_quantity") or case_anchor.get("quantity"),
+                        "destination": (
+                            response_confirmed_slots.get("destination")
+                            or response_confirmed_slots.get("ship_to")
+                            or case_anchor.get("destination_token")
+                        ),
+                        "deadline": (
+                            response_confirmed_slots.get("deadline")
+                            or case_anchor.get("deadline")
+                        ),
+                        "case_status": fulfillment_case.get("status"),
+                    }
+                    with Session(bind=bind, future=True) as case_db:
+                        ensure_case_state(
+                            case_db,
+                            tenant_id=tenant_id,
+                            case_id=active_case_id,
+                            session_epoch=session_epoch,
+                            subject_ref=hash_uid(uid),
+                            authoritative_anchor=anchor,
+                        )
+                        out["case_memory"] = record_case_turn(
+                            case_db,
+                            tenant_id=tenant_id,
+                            case_id=active_case_id,
+                            session_epoch=session_epoch,
+                            subject_ref=hash_uid(uid),
+                            source_message_id=user_message_id,
+                            trace_id=decision_trace_id,
+                            message=q,
+                        )
+                except Exception as case_state_exc:
+                    logger.warning(
+                        "conversation case projection unavailable tenant=%s case=%s trace=%s: %s",
+                        tenant_id,
+                        active_case_id,
+                        decision_trace_id,
+                        case_state_exc,
+                    )
         _store_chat_message(
             db,
             uid=uid,
