@@ -25,9 +25,29 @@ import queue
 import re
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 _REORDER_RE = re.compile(r"\b(?:again|reorder|re-?order|last\s+time|previous\s+order|bought|purchased)\b", re.I)
+
+
+@dataclass(frozen=True)
+class EvidenceBudget:
+    """Provider-neutral limits; cost units are relative, not currency claims."""
+
+    per_lane_ms: int = 2500
+    total_ms: int = 3000
+    max_cost_units: int = 12
+
+
+_LEG_COST_UNITS = {
+    "market": 3,
+    "policy": 1,
+    "availability": 1,
+    "purchase_history": 1,
+    "image": 2,
+    "web": 5,
+}
 
 
 def _table_has_column(db: Any, table: str, column: str) -> bool:
@@ -229,6 +249,7 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
                     image_identity: Optional[Dict[str, Any]] = None,
                     leg_fns: Optional[Dict[str, Callable[..., Dict[str, Any]]]] = None,
                     budget_s: Optional[float] = None,
+                    evidence_budget: Optional[EvidenceBudget] = None,
                     web_consent: bool = False,
                     tenant_id: Optional[str] = None) -> Dict[str, Any]:
     """Run the selected legs concurrently under a per-leg budget. Returns
@@ -236,11 +257,43 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
     a timed-out/failed leg reports found=False with an error note instead of vanishing silently."""
     t0 = time.perf_counter()
     selected = select_legs(plan, query=query, uid=uid, image_identity=image_identity, web_consent=web_consent)
-    out: Dict[str, Any] = {"selected": selected, "legs": {}, "citations": [], "ms": 0}
+    configured = evidence_budget or EvidenceBudget(
+        per_lane_ms=max(1, int((budget_s if budget_s is not None else _leg_budget_s()) * 1000)),
+        total_ms=max(1, int((budget_s if budget_s is not None else _leg_budget_s()) * 1000)),
+    )
+    out: Dict[str, Any] = {
+        "selected": selected,
+        "legs": {},
+        "citations": [],
+        "contradictions": [],
+        "source_health": "healthy",
+        "budget": {
+            "per_lane_ms": configured.per_lane_ms,
+            "total_ms": configured.total_ms,
+            "max_cost_units": configured.max_cost_units,
+            "used_cost_units": 0,
+        },
+        "ms": 0,
+    }
     if not selected:
         return out
     fns = leg_fns or _LEG_FNS
-    budget = budget_s if budget_s is not None else _leg_budget_s()
+    admitted: list[str] = []
+    used_cost = 0
+    for name in selected:
+        cost = int(_LEG_COST_UNITS.get(name, 1))
+        if used_cost + cost > configured.max_cost_units:
+            out["legs"][name] = {
+                "source": name, "found": False, "summary": "", "data": {},
+                "error": "cost_budget_exceeded", "health": "cancelled",
+            }
+            continue
+        admitted.append(name)
+        used_cost += cost
+    out["budget"]["used_cost_units"] = used_cost
+    if not admitted:
+        out["source_health"] = "degraded"
+        return out
 
     def _run(name: str) -> Dict[str, Any]:
         fn = fns.get(name)
@@ -254,7 +307,7 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
             return {"source": name, "found": False, "summary": "", "data": {}, "error": str(exc)[:160]}
 
     tasks: queue.Queue[Optional[str]] = queue.Queue()
-    completed = {name: threading.Event() for name in selected}
+    completed = {name: threading.Event() for name in admitted}
     results: Dict[str, Dict[str, Any]] = {}
 
     def _worker() -> None:
@@ -275,18 +328,20 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
             name=f"evidence-leg-{index}",
             daemon=True,
         )
-        for index in range(min(5, len(selected)))
+        for index in range(min(5, len(admitted)))
     ]
     for worker in workers:
         worker.start()
-    for name in selected:
+    for name in admitted:
         tasks.put(name)
     for _worker_thread in workers:
         tasks.put(None)
 
-    deadline = time.perf_counter() + budget
-    for name in selected:
-        remaining = max(0.0, deadline - time.perf_counter())
+    launched_at = time.perf_counter()
+    total_deadline = launched_at + configured.total_ms / 1000.0
+    lane_deadline = launched_at + configured.per_lane_ms / 1000.0
+    for name in admitted:
+        remaining = max(0.0, min(total_deadline, lane_deadline) - time.perf_counter())
         if completed[name].wait(timeout=remaining):
             out["legs"][name] = results[name]
         else:
@@ -295,15 +350,48 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
                 "found": False,
                 "summary": "",
                 "data": {},
-                "error": f"leg_timeout>{budget}s",
+                "error": f"leg_timeout>{configured.per_lane_ms}ms",
+                "health": "timed_out",
             }
     for name in selected:
         leg = out["legs"].get(name) or {}
+        if "health" not in leg:
+            if leg.get("error"):
+                leg["health"] = "failed"
+            elif not leg.get("found"):
+                leg["health"] = "empty"
+            else:
+                data = leg.get("data") if isinstance(leg.get("data"), dict) else {}
+                leg["health"] = "degraded" if (
+                    data.get("trust_state") == "advisory"
+                    or (data.get("injection_scan") or {}).get("dropped", 0)
+                ) else "healthy"
         if leg.get("found") and leg.get("summary"):
             data = leg.get("data") if isinstance(leg.get("data"), dict) else {}
             citation = {"source": leg.get("source") or name, "summary": leg["summary"]}
             if data.get("trust_state"):
                 citation["trusted"] = data.get("trust_state") == "verified_internal"
             out["citations"].append(citation)
+    claims: dict[str, list[dict[str, Any]]] = {}
+    for name, leg in out["legs"].items():
+        data = leg.get("data") if isinstance(leg.get("data"), dict) else {}
+        for claim in data.get("claims") or []:
+            if not isinstance(claim, dict) or not claim.get("key"):
+                continue
+            claims.setdefault(str(claim["key"]), []).append({
+                "source": str(leg.get("source") or name),
+                "value": claim.get("value"),
+                "scope": claim.get("scope"),
+            })
+    out["contradictions"] = [
+        {"claim_key": key, "claims": values}
+        for key, values in sorted(claims.items())
+        if len({repr(item.get("value")) for item in values}) > 1
+    ]
+    health_values = {str(leg.get("health")) for leg in out["legs"].values()}
+    if out["contradictions"] or health_values & {"failed", "timed_out", "cancelled", "degraded"}:
+        out["source_health"] = "degraded"
+    elif health_values and health_values <= {"empty"}:
+        out["source_health"] = "empty"
     out["ms"] = int((time.perf_counter() - t0) * 1000)
     return out

@@ -255,3 +255,28 @@ def list_open_escalations(db, *, tenant_id: str, now_iso: str | None = None) -> 
     ).mappings().all()
     return [_view(row, now_iso=now_iso, include_party=False) for row in rows]
 
+
+def list_escalation_timeline(
+    db, *, tenant_id: str, escalation_id: str
+) -> list[dict[str, Any]]:
+    """Return the tenant-scoped append-only lifecycle without leaking another tenant's case."""
+    rows = db.execute(
+        text(
+            "SELECT from_state,to_state,actor_type,actor_id,reason,payload_json,occurred_at "
+            "FROM case_escalation_event WHERE tenant_id=:tenant AND escalation_id=:escalation "
+            "ORDER BY occurred_at,id"
+        ),
+        {"tenant": str(tenant_id), "escalation": str(escalation_id)},
+    ).fetchall()
+    return [
+        {
+            "from_state": row[0],
+            "to_state": str(row[1]),
+            "actor_type": str(row[2]),
+            "actor_id": str(row[3]),
+            "reason": str(row[4] or ""),
+            "payload": json.loads(row[5] or "{}"),
+            "occurred_at": str(row[6]),
+        }
+        for row in rows
+    ]

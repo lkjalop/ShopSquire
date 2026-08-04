@@ -19,6 +19,12 @@ observations -> evidence -> hypotheses -> proposals -> authorization -> executio
 
 Model-generated text cannot skip those boundaries and become business authority.
 
+The conversational control path is a constrained semantic proposal architecture: a model may
+propose a typed dialogue act and exact references; JSON schema and tenant/case consistency
+validate it; a deterministic reducer accepts, clarifies or rejects it. Parallel evidence lanes
+remain concurrent, but commercial authority stays in canonical state, policy and explicit
+authorization. See [Governed conversation and escalation](docs/architecture/GOVERNED_CONVERSATION_AND_ESCALATION.md).
+
 ## Why it exists
 
 Most AI commerce demos optimize for a persuasive answer. ShopSquire explores the harder
@@ -192,6 +198,8 @@ replayability. It is permanently marked `simulation_only`; it is not evidence of
 
 The concise interview narrative and the concepts behind the demo are in the
 [AI/ML portfolio guide](docs/SHOPSQUIRE_AI_ML_PORTFOLIO_DEMO_GUIDE_2026-07-29.md).
+Hosted run IDs, artifact boundaries and the recording sequence are pinned in the
+[procurement demonstration evidence index](docs/demo/PROCUREMENT_DEMONSTRATION_EVIDENCE.md).
 
 ## Local start
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from contextlib import contextmanager
 
-from src.app.services.evidence_orchestrator import gather_evidence, select_legs
+from src.app.services.evidence_orchestrator import EvidenceBudget, gather_evidence, select_legs
 
 
 class _Plan:
@@ -110,6 +110,43 @@ def test_broken_leg_reports_error_never_raises():
                          leg_fns={"market": boom})
     assert ev["legs"]["market"]["found"] is False
     assert "db exploded" in ev["legs"]["market"]["error"]
+    assert ev["legs"]["market"]["health"] == "failed"
+    assert ev["source_health"] == "degraded"
+
+
+def test_cost_budget_cancels_expensive_lane_before_dispatch(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    calls = []
+
+    def web(*args, **kwargs):
+        calls.append("web")
+        return {"source": "web", "found": True, "summary": "late", "data": {}}
+
+    ev = gather_evidence(
+        _Plan(), query="research", web_consent=True,
+        leg_fns={"web": web},
+        evidence_budget=EvidenceBudget(per_lane_ms=100, total_ms=100, max_cost_units=2),
+    )
+    assert calls == []
+    assert ev["legs"]["web"]["health"] == "cancelled"
+
+
+def test_structured_contradictions_are_visible_and_degrade_bundle(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    plan = _Plan(needs_market_evidence=True)
+    fns = {
+        "market": lambda *args, **kwargs: {
+            "source": "internal_market", "found": True, "summary": "lead time 7",
+            "data": {"claims": [{"key": "lead_time_days", "value": 7, "scope": "sku-a"}]},
+        },
+        "web": lambda *args, **kwargs: {
+            "source": "public_source", "found": True, "summary": "lead time 14",
+            "data": {"claims": [{"key": "lead_time_days", "value": 14, "scope": "sku-a"}]},
+        },
+    }
+    ev = gather_evidence(plan, query="q", web_consent=True, leg_fns=fns)
+    assert ev["contradictions"][0]["claim_key"] == "lead_time_days"
+    assert ev["source_health"] == "degraded"
 
 
 def test_purchase_history_fails_closed_without_tenant_scoped_orders(monkeypatch):

@@ -1140,6 +1140,7 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
     case_ids = sorted({str(row[1]) for row in rows if row[1]})
     outbound_contact_schedule = None
     human_room = None
+    canonical_escalation = None
     payment_consequence = None
     if case_ids and "outbound_message" in workbench_tables:
         params_cases = {f"case_{index}": value for index, value in enumerate(case_ids)}
@@ -1166,6 +1167,25 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
         if room:
             human_room = {"state": str(room[0]), "assigned_operator_id": room[1],
                           "version": int(room[2]), "updated_at": str(room[3])}
+    if case_ids and "case_escalation" in workbench_tables:
+        params_cases = {f"case_{index}": value for index, value in enumerate(case_ids)}
+        clause = ",".join(f":case_{index}" for index in range(len(case_ids)))
+        escalation_row = db.execute(text(
+            "SELECT id FROM case_escalation WHERE tenant_id=:tenant "
+            "AND case_id IN (" + clause + ") AND state!='resolved' "
+            "ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
+            "WHEN 'medium' THEN 2 ELSE 3 END, created_at LIMIT 1"
+        ), {"tenant": tenant_id, **params_cases}).first()
+        if escalation_row:
+            from src.app.services.case_escalation import get_escalation
+            from src.app.services.case_escalation_projection import list_escalation_projections
+
+            canonical_escalation = get_escalation(
+                db, tenant_id=tenant_id, escalation_id=str(escalation_row[0])
+            )
+            canonical_escalation["projections"] = list_escalation_projections(
+                db, tenant_id=tenant_id, escalation_id=str(escalation_row[0])
+            ) if "case_escalation_projection" in workbench_tables else []
     if case_ids and "procurement_payment_consequence" in workbench_tables:
         params_cases = {f"case_{index}": value for index, value in enumerate(case_ids)}
         clause = ",".join(f":case_{index}" for index in range(len(case_ids)))
@@ -1226,6 +1246,7 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
             "promise_calculation": promise_calculations[0] if promise_calculations else None,
             "outbound_contact_schedule": outbound_contact_schedule,
             "human_room": human_room,
+            "canonical_escalation": canonical_escalation,
             "payment_consequence": payment_consequence,
             "sourcing_batches": [
                 {"batch_ref": "Batch " + str(row[0])[:8], "sku": str(row[1]),

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from src.app.services.case_escalation import (
     get_escalation,
+    list_escalation_timeline,
     list_open_escalations,
     request_escalation,
     transition_escalation,
@@ -166,3 +167,27 @@ def test_internal_queue_reports_sla_state_without_external_credentials() -> None
     assert rows[0]["queue_age_seconds"] == 7500
     assert "party_ref" not in rows[0]
     assert json.dumps(rows[0])
+
+
+def test_timeline_is_tenant_scoped_and_append_only() -> None:
+    db = _db()
+    escalation_id = _request(db)["escalation_id"]
+    transition_escalation(
+        db,
+        tenant_id="tenant-a",
+        escalation_id=escalation_id,
+        to_state="assigned",
+        actor_type="dispatcher",
+        actor_id="queue",
+        idempotency_key="assign-timeline",
+        assigned_operator_id="op-1",
+    )
+
+    timeline = list_escalation_timeline(
+        db, tenant_id="tenant-a", escalation_id=escalation_id
+    )
+    assert [event["to_state"] for event in timeline] == ["requested", "assigned"]
+    assert timeline[1]["payload"]["assigned_operator_id"] == "op-1"
+    assert list_escalation_timeline(
+        db, tenant_id="tenant-b", escalation_id=escalation_id
+    ) == []
