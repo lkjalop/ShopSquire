@@ -212,8 +212,12 @@ jobs:
           LIVE_ADMIN_URL: http://127.0.0.1:3001
           LIVE_GMAIL_INGEST_SECRET: ci-browser-ingress-only
         run: |
+          set -o pipefail
           timeout 240s poetry run pytest -vv -s tests/e2e/test_live_policy_trace.py
           timeout 240s poetry run pytest -vv -s tests/e2e/test_live_procurement_closed_loop.py
+          poetry run python -m scripts.seed_eight_buyer_allocation_demo 2>&1 |
+            tee proof-artifacts/eight-buyer-allocation-seed.log
+          timeout 240s poetry run pytest -vv -s tests/e2e/test_live_allocation_workbench.py
       - name: Reject transaction-abort signatures
         if: always()
         run: |
