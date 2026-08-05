@@ -456,6 +456,7 @@ export default function App() {
   const [escalationBuyerToken, setEscalationBuyerToken] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isThinking, setIsThinking] = useState(false);
+  const [streamAcknowledgement, setStreamAcknowledgement] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1535,6 +1536,20 @@ export default function App() {
     const currentSttSrc = stt.source;
     setAttachedFiles([]);
     setAttachedThumbs([]);
+    // Render a local acknowledgement before authentication, preflight, or an occupied
+    // inference lane can delay the first SSE frame. This is deliberately non-authoritative:
+    // it confirms receipt only and never claims that retrieval, fit, ATP, or mutation ran.
+    const acknowledgedSku = String(
+      (confirmedSlots as any)?.exact_product_sku
+      || (confirmedSlots as any)?.canonical_sku
+      || (confirmedSlots as any)?.sku
+      || '',
+    ).trim();
+    setStreamAcknowledgement(
+      acknowledgedSku
+        ? `Request understood. Keeping ${acknowledgedSku} while I check the current case…`
+        : 'Request understood. Checking the current case without changing it…',
+    );
     setIsThinking(true);
 
     const mode = detectPanelMode(q);
@@ -1878,6 +1893,12 @@ export default function App() {
               }
               if (eventName === 'error') {
                 throw new Error((parsed && parsed.message) ? parsed.message : 'chat_stream_failed');
+              }
+              if (eventName === 'acknowledgement' && parsed?.message) {
+                setStreamAcknowledgement(String(parsed.message));
+              }
+              if (eventName === 'progress' && parsed?.message) {
+                setStreamAcknowledgement(String(parsed.message));
               }
               if (eventName === 'answer' && parsed) {
                 answerPayload = parsed;
@@ -2247,6 +2268,7 @@ export default function App() {
       }]);
       return;
     } finally {
+      setStreamAcknowledgement(null);
       setIsThinking(false);
     }
   };
@@ -2675,9 +2697,15 @@ export default function App() {
                 {(isThinking || imageRoutingInFlight) && (
                   <div className={`${styles.message} ${styles.assistant}`}>
                     <div className={`${styles.messageContent} ${styles.thinkingBubble}`}>
-                      <span className={styles.thinkingDot}>.</span>
-                      <span className={styles.thinkingDot}>.</span>
-                      <span className={styles.thinkingDot}>.</span>
+                      {streamAcknowledgement ? (
+                        <span role="status" data-testid="stream-acknowledgement">{streamAcknowledgement}</span>
+                      ) : (
+                        <>
+                          <span className={styles.thinkingDot}>.</span>
+                          <span className={styles.thinkingDot}>.</span>
+                          <span className={styles.thinkingDot}>.</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
