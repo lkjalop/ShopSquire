@@ -123,3 +123,36 @@ def test_stage_cannot_claim_stronger_authority_than_lifecycle() -> None:
         authority="committed",
     )
     assert row["authority"] == "interest"
+
+
+def test_return_outcome_is_attributed_without_inflating_committed_demand() -> None:
+    db = _db()
+    previous = None
+    for stage in (
+        "search_interest", "qualified_interest", "provisional_cart",
+        "buyer_commitment", "allocation", "order", "fulfilled", "return",
+    ):
+        row = append_search_observation(
+            db,
+            tenant_id="tenant-a",
+            trace_id="trace-return",
+            case_id="case-return",
+            session_epoch="epoch-return",
+            actor_hash="actor-return",
+            query="return the fulfilled laptop order",
+            requirement={"sku": "SKU-RET", "quantity": 4},
+            qualification_outcome="qualified",
+            lifecycle_stage=stage,
+            resolved_sku="SKU-RET",
+            requested_quantity=4,
+            source_policy_status="approved",
+            supersedes_id=previous,
+        )
+        previous = row["id"]
+
+    projection = project_search_demand_authority(db, tenant_id="tenant-a")
+    assert projection["return_reached_count"] == 1
+    assert projection["cancellation_reached_count"] == 0
+    assert projection["committed_demand_units"] == 0
+    assert projection["eligible_forecast_signal_count"] == 0
+    assert projection["fulfilled_case_count"] == 0

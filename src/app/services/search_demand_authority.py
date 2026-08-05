@@ -231,9 +231,20 @@ def project_search_demand_authority(db, *, tenant_id: str) -> dict[str, Any]:
     }
     reached_order = {key for key, stages in reached.items() if stages & {"order", "fulfilled"}}
     reached_fulfilled = {key for key, stages in reached.items() if "fulfilled" in stages}
-    qualified = [row for row in rows if _AUTHORITY_RANK.get(str(row["authority"]), -1) >= 1]
+    reached_return = {key for key, stages in reached.items() if "return" in stages}
+    reached_cancellation = {key for key, stages in reached.items() if "cancellation" in stages}
+    qualified = [
+        row for row in rows
+        if str(row["lifecycle_stage"]) in {
+            "qualified_interest", "product_viewed", "provisional_cart", "buyer_commitment",
+            "allocation", "order", "fulfilled",
+        }
+    ]
     provisional = [row for row in rows if str(row["authority"]) == "provisional"]
-    committed = [row for row in rows if _AUTHORITY_RANK.get(str(row["authority"]), -1) >= 3]
+    committed = [
+        row for row in rows
+        if str(row["lifecycle_stage"]) in {"buyer_commitment", "allocation", "order", "fulfilled"}
+    ]
     ordered = [row for row in rows if str(row["lifecycle_stage"]) in {"order", "fulfilled"}]
     fulfilled = [row for row in rows if str(row["authority"]) == "fulfilled"]
     unresolved = [row for row in rows if row.get("unresolved_concept") or row["qualification_outcome"] in {"blocked", "unresolved"}]
@@ -279,6 +290,8 @@ def project_search_demand_authority(db, *, tenant_id: str) -> dict[str, Any]:
         "order_reached_count": len(reached_order),
         "fulfilled_case_count": len(fulfilled),
         "fulfilment_reached_count": len(reached_fulfilled),
+        "return_reached_count": len(reached_return),
+        "cancellation_reached_count": len(reached_cancellation),
         "qualified_to_cart_rate": round(len(reached_cart) / len(reached_qualified), 4) if reached_qualified else None,
         "cart_to_commitment_rate": round(len(reached_commitment) / len(reached_cart), 4) if reached_cart else None,
         "qualified_interest_units": sum(int(row.get("requested_quantity") or 0) for row in qualified),
