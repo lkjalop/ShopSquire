@@ -12,11 +12,12 @@ from fastapi.testclient import TestClient
 from src.app.main import app
 from tests.utils import default_headers
 
-# Use a deterministic, non-routable test identity so this module's quota does not
-# depend on how many unrelated TestClient requests ran earlier in the same shard.
+# Use the owner test credential and per-test UIDs so this module's quota does not
+# depend on unrelated guest requests. Older supported Starlette TestClient
+# versions do not accept the newer ``client=`` constructor argument.
 _headers = default_headers()
 _headers["x-api-key"] = os.getenv("OWNER_API_KEY", "local-owner-key")
-client = TestClient(app, headers=_headers, client=("192.0.2.101", 50000))
+client = TestClient(app, headers=_headers)
 
 
 def _suggest(uid, **params):
