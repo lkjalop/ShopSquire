@@ -41,7 +41,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 
 logger = logging.getLogger("shopsquire.taxonomy_registry")
 
@@ -254,13 +254,18 @@ def classification_nodes_for_skus(db, skus: List[str], *,
         return {}
     try:
         ensure_tables(db)
+        # Use explicit named parameters here.  Some session/proxy combinations
+        # stringify TextClause objects before execution, which leaks SQLAlchemy's
+        # ``__[POSTCOMPILE_skus]`` token into PostgreSQL as literal SQL.
+        params = {f"sku_{idx}": sku for idx, sku in enumerate(normalized)}
+        placeholders = ", ".join(f":sku_{idx}" for idx in range(len(normalized)))
         stmt = text(
             "SELECT sku, node_handle FROM product_classification "
-            "WHERE tenant_id=:tenant_id AND status='approved' AND sku IN :skus"
-        ).bindparams(bindparam("skus", expanding=True))
+            f"WHERE tenant_id=:tenant_id AND status='approved' AND sku IN ({placeholders})"
+        )
         rows = db.execute(stmt, {
             "tenant_id": str(tenant_id).strip() or DEFAULT_TENANT,
-            "skus": normalized,
+            **params,
         }).fetchall()
         return {str(row[0]): str(row[1]) for row in rows if get_node(str(row[1])) is not None}
     except Exception as exc:
@@ -351,9 +356,10 @@ def _sold_set(db, tenant_id: str) -> tuple:
         return (GROUNDING_ERROR, frozenset())
     try:
         ensure_tables(db)
-        rows = db.execute(text(
-            "SELECT node_handle FROM sold_taxonomy WHERE tenant_id=:t"),
-            {"t": str(tenant_id).strip() or DEFAULT_TENANT}).fetchall()
+        with db.begin_nested():
+            rows = db.execute(text(
+                "SELECT node_handle FROM sold_taxonomy WHERE tenant_id=:t"),
+                {"t": str(tenant_id).strip() or DEFAULT_TENANT}).fetchall()
         handles = frozenset(str(r[0]) for r in rows)
         return (GROUNDING_GROUNDED, handles) if handles else (GROUNDING_EMPTY, frozenset())
     except Exception as exc:

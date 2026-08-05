@@ -14,12 +14,15 @@ def _catalog_subject_scope(db, *, tenant_id: str, result_skus: List[str]) -> tup
     if db is None or not result_skus:
         return [], []
     try:
-        from sqlalchemy import bindparam, text
+        from sqlalchemy import text
+        normalized = list(dict.fromkeys(str(sku) for sku in result_skus if str(sku)))
+        params = {f"sku_{idx}": sku for idx, sku in enumerate(normalized)}
+        placeholders = ", ".join(f":sku_{idx}" for idx in range(len(normalized)))
         stmt = text(
             "SELECT DISTINCT node_handle FROM product_classification "
-            "WHERE tenant_id=:tenant AND status='approved' AND sku IN :skus"
-        ).bindparams(bindparam("skus", expanding=True))
-        rows = db.execute(stmt, {"tenant": tenant_id, "skus": list(result_skus)}).fetchall()
+            f"WHERE tenant_id=:tenant AND status='approved' AND sku IN ({placeholders})"
+        )
+        rows = db.execute(stmt, {"tenant": tenant_id, **params}).fetchall()
         nodes = sorted({str(row[0]) for row in rows if row and row[0]})
         from src.app.services.taxonomy_registry import ancestors
         parent_nodes = sorted({a.handle for node in nodes for a in ancestors(node)})
