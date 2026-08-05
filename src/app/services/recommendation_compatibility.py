@@ -376,6 +376,19 @@ def _persist_compatibility_outcome(
     )
 
 
+def _append_generic_procurement_question(
+    questions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add generic B2B discovery after any material V2 blockers."""
+    ordered = [dict(question) for question in questions if isinstance(question, dict)]
+    if not any(question.get("id") == "ask_b2b_procurement" for question in ordered):
+        ordered.append({
+            "id": "ask_b2b_procurement",
+            "label": "Confirm procurement requirements",
+        })
+    return ordered
+
+
 def serve_v2_compatibility(
     *,
     request: Any,
@@ -572,18 +585,10 @@ def serve_v2_compatibility(
         if escalation_assessment.escalate:
             payload["needs_human_review"] = True
         if b2b_assessment.wants_procurement_questions:
-            questions = [
+            questions = _append_generic_procurement_question([
                 question for question in (payload.get("next_questions") or [])
                 if isinstance(question, dict)
-            ]
-            if not any(question.get("id") == "ask_b2b_procurement" for question in questions):
-                questions.insert(
-                    0,
-                    {
-                        "id": "ask_b2b_procurement",
-                        "label": "Confirm procurement requirements",
-                    },
-                )
+            ])
             payload["next_questions"] = questions
         if classification.get("injection_attempt") or payload.get("injection_blocked"):
             payload["products"] = []
@@ -741,12 +746,9 @@ def serve_v2_compatibility(
     if escalation_assessment.escalate:
         unavailable["needs_human_review"] = True
     if b2b_assessment.wants_procurement_questions:
-        unavailable["next_questions"] = [
-            {
-                "id": "ask_b2b_procurement",
-                "label": "Confirm procurement requirements",
-            }
-        ]
+        unavailable["next_questions"] = _append_generic_procurement_question(
+            list(unavailable.get("next_questions") or [])
+        )
     if nqe_selection:
         unavailable["nqe_selection_applied"] = nqe_selection
     unavailable.setdefault("decision_id", trace_id)
