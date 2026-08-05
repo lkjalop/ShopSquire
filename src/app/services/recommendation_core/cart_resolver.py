@@ -34,7 +34,6 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.app.domain.cart_mutation import (   # THE shared typed contract (C1) — re-exported
@@ -208,14 +207,37 @@ def _grammar_cart_data(envelope: TurnEnvelope) -> Optional[Dict[str, Any]]:
     except Exception as exc:
         logger.debug("cart amendment grammar failed: %s", repr(exc)[:100])
         return None
-    if not intent.amendments or intent.new_lines:
+    if intent.amendments and not intent.new_lines:
+        return {
+            "ops": [
+                {"action": "set_quantity", "targets": [item.ref], "quantity": item.new_qty}
+                for item in intent.amendments
+            ],
+            "confidence": intent.confidence,
+        }
+
+    # Relative quantity language is deterministic arithmetic, not a product
+    # judgment. Resolve it before invoking the model so phrases such as
+    # "another 40" cannot change behavior with model availability. Target
+    # binding below still requires one real cart line (or a uniquely named
+    # line); a multi-line ambiguity fails closed and asks the buyer.
+    relative = _relative_quantity_instruction(envelope.query)
+    if relative is None:
         return None
+    mode, operand = relative
+    usable_lines = [
+        line for line in (envelope.cart or [])
+        if isinstance(line, dict) and str(line.get("sku") or "").strip()
+    ]
+    target = "__last__" if len(usable_lines) == 1 else envelope.query
     return {
-        "ops": [
-            {"action": "set_quantity", "targets": [item.ref], "quantity": item.new_qty}
-            for item in intent.amendments
-        ],
-        "confidence": intent.confidence,
+        "ops": [{
+            "action": "set_quantity",
+            "targets": [target],
+            "quantity_mode": mode,
+            "quantity": operand,
+        }],
+        "confidence": 1.0,
     }
 
 

@@ -34,6 +34,26 @@ def test_contextual_quantity_amendment_does_not_need_repeated_product_noun():
     ) == (15, "15")
 
 
+def test_delivery_deadline_day_is_not_reclassified_as_quantity():
+    assert extract_quantity_span(
+        "need them by 25 September with colour-accurate display support",
+        unit_nouns=("laptop",),
+    ) is None
+    assert extract_quantity_span(
+        "delivery required by 18/09/2026",
+        unit_nouns=("laptop",),
+    ) is None
+
+
+def test_beneficiary_count_is_product_agnostic_order_quantity():
+    assert extract_quantity_span(
+        "I'm starting a studio for 20 students",
+    ) == (20, "20")
+    assert extract_quantity_span(
+        "actually make that 12 people",
+    ) == (12, "12")
+
+
 def test_catalog_fast_path_defers_to_full_economics_for_catalog_command_quantity():
     from types import SimpleNamespace
 

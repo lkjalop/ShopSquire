@@ -474,7 +474,9 @@ def test_default_tenant_bridges_bounded_legacy_session_fields_only():
             "budget_scope": "total",
             "requirements": {},
             "quantity": 25,
+            "exact_product_sku": None,
         },
+        "session_epoch": None,
         "legacy_bridge": True,
     }
     assert F._read_session_slice(r, "u1", "other-tenant") == {}
