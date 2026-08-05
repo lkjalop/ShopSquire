@@ -176,15 +176,20 @@ def _legacy_search(db, *, text_query: Optional[str], brand: Optional[str], categ
                            "LOWER(p.product_type) LIKE :q OR LOWER(p.brand) LIKE :q)")
             params["q"] = f"%{str(text_query).strip().lower()}%"
         if brand:
-            clauses.append("LOWER(p.brand) = :br"); params["br"] = str(brand).lower()
+            clauses.append("LOWER(p.brand) = :br")
+            params["br"] = str(brand).lower()
         if category:
-            clauses.append("LOWER(p.category) = :ca"); params["ca"] = str(category).lower()
+            clauses.append("LOWER(p.category) = :ca")
+            params["ca"] = str(category).lower()
         if product_type:
-            clauses.append("LOWER(p.product_type) = :pt"); params["pt"] = str(product_type).lower()
+            clauses.append("LOWER(p.product_type) = :pt")
+            params["pt"] = str(product_type).lower()
         if min_price_cents is not None:
-            clauses.append("p.price_cents >= :pmin"); params["pmin"] = int(min_price_cents)
+            clauses.append("p.price_cents >= :pmin")
+            params["pmin"] = int(min_price_cents)
         if max_price_cents is not None:
-            clauses.append("p.price_cents <= :pmax"); params["pmax"] = int(max_price_cents)
+            clauses.append("p.price_cents <= :pmax")
+            params["pmax"] = int(max_price_cents)
         rows = db.execute(text(
             f"SELECT {_LEGACY_COLS} FROM products p WHERE {' AND '.join(clauses)} "
             "ORDER BY p.price_cents ASC LIMIT :lim"), params).fetchall()
@@ -289,9 +294,11 @@ def _canonical_search(db, *, text_query: Optional[str], brand: Optional[str], ca
             clauses.append("(LOWER(pr.title) LIKE :q OR LOWER(pr.category) LIKE :q OR LOWER(pr.brand) LIKE :q)")
             params["q"] = f"%{str(text_query).strip().lower()}%"
         if brand:
-            clauses.append("LOWER(pr.brand) = :br"); params["br"] = str(brand).lower()
+            clauses.append("LOWER(pr.brand) = :br")
+            params["br"] = str(brand).lower()
         if category:
-            clauses.append("LOWER(pr.category) = :ca"); params["ca"] = str(category).lower()
+            clauses.append("LOWER(pr.category) = :ca")
+            params["ca"] = str(category).lower()
         rows = db.execute(text(
             "SELECT v.sku FROM variant v "
             "LEFT JOIN product pr ON pr.id = v.product_id AND pr.tenant_id = v.tenant_id "

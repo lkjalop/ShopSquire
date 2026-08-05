@@ -9,12 +9,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.app.services.supplier_catalog import (
-    DEMO_SKUS,
     all_catalog_skus,
     cheapest_wholesale_cents,
     domain_for_supplier,
     ensure_supplier_coverage,
-    ensure_tables,
     best_supplier_cost,
     seed_demo,
     seed_demo_supplier_offers,
@@ -189,12 +187,17 @@ def test_register_or_backfill_vendor_fills_missing_contact():
     # else the draft keeps resolving the bare domain. Must NOT create a duplicate insert.
     from src.app.services.supplier_catalog import _register_or_backfill_vendor
     calls = {}
+
     def lookup(*, tenant_id, domain):
         return {"contact_email": ""}  # exists, contact missing
+
     def register(**k):
-        calls["register"] = k; return {"ok": True}
+        calls["register"] = k
+        return {"ok": True}
+
     def backfill(*, tenant_id, domain, contact_email):
-        calls["backfill"] = (domain, contact_email); return True
+        calls["backfill"] = (domain, contact_email)
+        return True
     assert _register_or_backfill_vendor(lookup, register, backfill,
                                         tenant_id="default", name="X", domain="d.example",
                                         email="e@d.example") is True
@@ -205,12 +208,17 @@ def test_register_or_backfill_vendor_fills_missing_contact():
 def test_register_or_backfill_vendor_registers_when_absent():
     from src.app.services.supplier_catalog import _register_or_backfill_vendor
     seen = {}
+
     def lookup(*, tenant_id, domain):
         return None  # absent
+
     def register(**k):
-        seen["reg"] = k; return {"ok": True}
+        seen["reg"] = k
+        return {"ok": True}
+
     def backfill(**k):
-        seen["bf"] = k; return True
+        seen["bf"] = k
+        return True
     assert _register_or_backfill_vendor(lookup, register, backfill,
                                         tenant_id="default", name="X", domain="d.example",
                                         email="e@d.example") is True

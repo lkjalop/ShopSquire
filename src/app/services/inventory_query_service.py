@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Inventory query service — safe direct DB lookups for stock-level queries.
 
 This module is the ONLY authorised path for surfacing stock counts to users.
@@ -13,6 +11,8 @@ Security properties:
 - is_inventory_query() short-circuits the full recommendation pipeline so an
   injection attempt in a stock query cannot influence product ranking.
 """
+
+from __future__ import annotations
 
 import re
 import logging

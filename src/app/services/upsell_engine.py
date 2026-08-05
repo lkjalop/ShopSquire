@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Upsell / cross-sell engine (vertical-agnostic — flavour comes from the StoreProfile).
 
 Generates companion recommendations when an item is added to cart, from two complementary signals:
@@ -16,6 +14,8 @@ Design:
 - No LLM required — fast, deterministic, DB-backed.
 - Results surfaced as `upsell` field in cart response.
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
