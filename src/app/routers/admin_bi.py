@@ -8,8 +8,6 @@ from datetime import datetime, timedelta
 import logging
 from typing import Dict, Any, List
 
-logger = logging.getLogger("shopsquire.admin_bi")
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text as sql_text
@@ -19,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
-from src.app.config import get_settings, load_feature_flags
+from src.app.config import get_settings
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.schemas.ui_contracts import TransactionTimeseriesResponse
 from src.app.schemas.metric_evidence import (
@@ -35,6 +33,7 @@ from src.app.services.bi_intelligence import (
 from src.app.services.bi_query_agent import run_query_agent
 
 
+logger = logging.getLogger("shopsquire.admin_bi")
 router = APIRouter(prefix="/api/v1/admin/bi", tags=["admin", "bi"])
 
 
