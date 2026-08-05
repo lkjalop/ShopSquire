@@ -8,6 +8,7 @@ from src.app.services.budget_grammar import (
 def test_explicit_whole_order_budget_is_total():
     assert classify_budget_scope("25 laptops; total budget is $41,000") == "total"
     assert classify_budget_scope("20 laptops with a total order budget of $14,000") == "total"
+    assert classify_budget_scope("I need 30 units. AUD 140000 total.") == "total"
     assert classify_budget_scope("$41k all in for the fleet") == "total"
     assert classify_budget_scope("50 laptops but keep the total under 5 grand") == "total"
 
