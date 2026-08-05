@@ -11,9 +11,10 @@ import {
   experimentEvaluate, experimentPromote, experimentRevert, experimentState,
   fetchExecutiveMetrics,
   governancePulse, marketDigest, marketState, refreshMarket, replayAdvance, replayReset, replayState,
-  supportResponse,
+  searchDemandAuthority, supportResponse,
   type ExperimentState, type GovernancePulse, type MarketDigest, type ReplayState, type SupportResponse,
   type ExecutiveMetricProjection,
+  type SearchDemandAuthorityProjection,
 } from '../api';
 
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
@@ -28,6 +29,7 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [executiveMetrics, setExecutiveMetrics] = useState<ExecutiveMetricProjection | null>(null);
+  const [searchAuthority, setSearchAuthority] = useState<SearchDemandAuthorityProjection | null>(null);
 
   const [mode, setMode] = useState<'replay' | 'live'>('replay');
 
@@ -39,8 +41,9 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
   useEffect(() => {
     if (authReady) {
       fetchExecutiveMetrics().then(setExecutiveMetrics).catch(() => setExecutiveMetrics(null));
+      searchDemandAuthority().then(setSearchAuthority).catch(() => setSearchAuthority(null));
     }
-  }, [authVersion, authReady, st]);
+  }, [authVersion, authReady]);
 
   const refreshLive = async () => {
     setBusy(true); setError(null);
@@ -223,6 +226,44 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
                 ))}
               </tbody>
             </table>
+          </>
+        )}
+      </section>
+
+      <section data-testid="search-demand-authority"
+               style={{ border: '1px solid #dbeafe', background: '#f8fbff', borderRadius: 8,
+                        padding: 12, marginBottom: 14 }}>
+        <h4 style={{ margin: '0 0 4px' }}>Search → demand authority</h4>
+        <div style={{ color: '#475569', fontSize: 12, marginBottom: 10 }}>
+          Search is interest, not demand. Inventory and revenue remain unchanged until an authoritative commitment.
+        </div>
+        {!searchAuthority ? (
+          <div>Authority projection unavailable.</div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+              <div>Search interest<br/><strong>{searchAuthority.search_interest_count}</strong></div>
+              <div>Qualified searches<br/><strong>{searchAuthority.qualified_searches}</strong></div>
+              <div>Unresolved concepts<br/><strong>{searchAuthority.unresolved_concept_count}</strong></div>
+              <div>Qualified interest<br/><strong>{searchAuthority.qualified_interest_units} units</strong></div>
+              <div>Committed demand<br/><strong>{searchAuthority.committed_demand_units} units</strong></div>
+              <div>Qualified unmet<br/><strong>{searchAuthority.qualified_unmet_units} units</strong></div>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, fontSize: 12 }}>
+              <span className="badge">Projected revenue: {searchAuthority.projected_revenue == null ? 'undefined' : searchAuthority.projected_revenue}</span>
+              <span className="badge">Forecast influence: shadow only</span>
+              <span className="badge">Inventory action: {searchAuthority.inventory_action_allowed ? 'allowed' : 'not allowed'}</span>
+              <span className="badge">Authority: {searchAuthority.observation_authority.replace(/_/g, ' ')}</span>
+            </div>
+            <details style={{ marginTop: 10 }}>
+              <summary>Evidence and inventory snapshot status</summary>
+              <div>Confirmed ATP: {searchAuthority.confirmed_atp_units} units</div>
+              <div>Transferable: {searchAuthority.transferable_units} units</div>
+              <div>Supplier-enquiry pressure: {searchAuthority.supplier_enquiry_pressure_units} units</div>
+              <div>Source version(s): {searchAuthority.inventory_source_versions.join(', ') || 'not recorded'}</div>
+              <div>Freshness: {searchAuthority.inventory_freshness_states.join(', ') || 'not recorded'}</div>
+              <div>Forecast comparison: {searchAuthority.forecast_comparison_status.replace(/_/g, ' ')}</div>
+            </details>
           </>
         )}
       </section>

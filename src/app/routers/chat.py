@@ -3173,6 +3173,79 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
 
     # Persist search event for chat route (UI-friendly shape)
     try:
+        semantic = (
+            data.get("semantic_resolution")
+            if isinstance(data.get("semantic_resolution"), dict) else {}
+        )
+        alignment = (
+            data.get("catalog_alignment")
+            if isinstance(data.get("catalog_alignment"), dict) else {}
+        )
+        concepts = [item for item in semantic.get("concepts") or [] if isinstance(item, dict)]
+        unresolved = next(
+            (str(item.get("text") or "") for item in concepts
+             if str(item.get("status") or "unresolved") != "resolved"),
+            None,
+        )
+        alignment_status = str(alignment.get("status") or "")
+        qualification_map = {
+            "exact_catalog_match": "exact",
+            "qualified_catalog_match": "qualified",
+            "no_exact_catalog_match": (
+                "alternative" if alignment.get("alternatives") else "no_match"
+            ),
+            "unsupported": "no_match",
+            "blocked": "blocked",
+        }
+        qualification_outcome = qualification_map.get(
+            alignment_status,
+            "blocked" if semantic.get("catalog_authority") == "blocked" else "unresolved",
+        )
+        lifecycle_stage = (
+            "clarification_requested"
+            if semantic.get("outcome") in {"clarify", "research", "rejected"}
+            else "qualified_interest"
+            if alignment_status in {"exact_catalog_match", "qualified_catalog_match", "no_exact_catalog_match"}
+            else "search_interest"
+        )
+        semantic_evidence_rows = [
+            item for item in semantic.get("evidence") or [] if isinstance(item, dict)
+        ]
+        evidence_refs = [
+            str(item.get("citation_id")) for item in semantic_evidence_rows
+            if item.get("citation_id")
+        ]
+        source_policy_status = (
+            "approved"
+            if semantic_evidence_rows and all(
+                item.get("source_policy_status") == "approved"
+                for item in semantic_evidence_rows
+            )
+            else "candidate_only" if semantic_evidence_rows else "not_evaluated"
+        )
+        active_case = (
+            data.get("fulfillment_case")
+            if isinstance(data.get("fulfillment_case"), dict) else {}
+        )
+        search_constraints = (
+            data.get("constraints_used")
+            if isinstance(data.get("constraints_used"), dict) else {}
+        )
+        requested_quantity = (
+            search_constraints.get("quantity") or search_constraints.get("order_quantity")
+        )
+        inventory_snapshot = (
+            data.get("inventory_snapshot")
+            if isinstance(data.get("inventory_snapshot"), dict)
+            else (data.get("procurement_context") or {}).get("inventory_snapshot")
+            if isinstance(data.get("procurement_context"), dict)
+            else None
+        )
+        resolved_sku = (
+            alignment.get("resolved_sku")
+            or alignment.get("sku")
+            or semantic.get("resolved_sku")
+        )
         log_search_event(
             uid=_resolve_uid(payload, request),
             query=q,
@@ -3180,10 +3253,29 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             result_skus=[p.get("sku") for p in products],
             view_mode=view_mode,
             trace_id=decision_trace_id,
-            session_id=None,
+            session_id=str(payload.get("session_id") or "") or None,
+            session_epoch=session_epoch,
+            tenant_id=_request_tenant_id(request),
+            case_id=str(active_case.get("case_id") or "") or None,
+            requirement={
+                "desired_outcome": semantic.get("desired_outcome"),
+                "concepts": concepts,
+                "constraints": search_constraints,
+            },
+            requested_quantity=requested_quantity,
+            qualification_outcome=qualification_outcome,
+            lifecycle_stage=lifecycle_stage,
+            unresolved_concept=unresolved,
+            resolved_sku=str(resolved_sku or "") or None,
+            evidence_refs=evidence_refs,
+            source_policy_status=source_policy_status,
+            actor_dedup_class=str(data.get("actor_dedup_class") or "distinct_actor"),
+            abuse_status=str(data.get("search_abuse_status") or "not_evaluated"),
+            inventory_snapshot=inventory_snapshot,
+            simulation_only=bool(data.get("simulation_only", False)),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("search authority observation preparation failed: %s", exc)
 
     budget_viability = data.get("budget_viability") if isinstance(data.get("budget_viability"), dict) else {"status": "unknown"}
     use_case_analysis = data.get("use_case_analysis") if isinstance(data.get("use_case_analysis"), dict) else None

@@ -6,6 +6,7 @@ import {
   fetchExecutiveMetrics,
   governancePulse,
   replayState,
+  searchDemandAuthority,
   supportResponse,
 } from '../api';
 
@@ -22,6 +23,7 @@ vi.mock('../api', () => ({
   replayAdvance: vi.fn(),
   replayReset: vi.fn(),
   replayState: vi.fn(),
+  searchDemandAuthority: vi.fn(),
   supportResponse: vi.fn(),
 }));
 
@@ -74,6 +76,22 @@ describe('MarketIntelligence trust labels', () => {
     });
     vi.mocked(governancePulse).mockRejectedValue(new Error('not configured'));
     vi.mocked(supportResponse).mockRejectedValue(new Error('not configured'));
+    vi.mocked(searchDemandAuthority).mockResolvedValue({
+      tenant_id: 'replay-demo', search_interest_count: 1, qualified_searches: 1,
+      unresolved_concept_count: 0, unresolved_concept_rate: 0,
+      no_qualified_match_count: 0, no_qualified_match_rate: 0,
+      provisional_cart_count: 0, committed_case_count: 0, ordered_case_count: 0,
+      fulfilled_case_count: 0, qualified_to_cart_rate: null, cart_to_commitment_rate: null,
+      qualified_interest_units: 30, committed_demand_units: 0, confirmed_atp_units: 0,
+      transferable_units: 0, qualified_unmet_units: 0, supplier_enquiry_pressure_units: 0,
+      inventory_source_versions: [], inventory_freshness_states: [],
+      eligible_forecast_signal_count: 1, forecast_influence: 'shadow_only',
+      forecast_comparison_status: 'insufficient_sealed_outcomes', projected_revenue: null,
+      projected_revenue_status: 'undefined_without_order_or_approved_value_basis',
+      inventory_action_allowed: false, authority_note: 'search is interest', simulation_only: true,
+      observation_authority: 'simulation',
+      as_of: '2026-08-05T00:00:00Z',
+    });
   });
 
   it('shows synthetic, shadow and freshness labels and separates coverage from confidence', async () => {
@@ -85,5 +103,11 @@ describe('MarketIntelligence trust labels', () => {
     expect(labels).toHaveTextContent('Freshness: data through 2026-07-28');
     expect(await screen.findByText(/80% coverage/)).toHaveTextContent('60% confidence');
     expect(screen.getByText('simulated')).toBeInTheDocument();
+    const authority = await screen.findByTestId('search-demand-authority');
+    expect(authority).toHaveTextContent('Qualified interest30 units');
+    expect(authority).toHaveTextContent('Committed demand0 units');
+    expect(authority).toHaveTextContent('Projected revenue: undefined');
+    expect(authority).toHaveTextContent('Forecast influence: shadow only');
+    expect(authority).toHaveTextContent('Inventory action: not allowed');
   });
 });

@@ -86,6 +86,24 @@ def executive_metrics_api(
     return _executive_metric_projection(str(current_tenant_id() or "default"))
 
 
+@router.get("/executive-metrics/search-demand-authority")
+def search_demand_authority_api(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Tenant-scoped funnel projection; raw searches never become operational demand."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.search_demand_authority import project_search_demand_authority
+
+    tenant_id = str(current_tenant_id() or "default")
+    try:
+        with db_session() as db:
+            return project_search_demand_authority(db, tenant_id=tenant_id)
+    except SQLAlchemyError as exc:
+        logger.warning("search demand projection unavailable for %s: %s", tenant_id, exc)
+        raise HTTPException(status_code=503, detail="search_demand_projection_unavailable") from exc
+
+
 @router.get("/executive-metrics/audit", response_model=AuditorMetricProjection)
 def executive_metrics_audit_api(
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),

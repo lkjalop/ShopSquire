@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -9,42 +10,12 @@ from sqlalchemy import text
 from src.app.models.db import db_session
 from src.app.deps import redact_for_trace, security_sanitize, hash_uid, scrub_pii
 
+logger = logging.getLogger("shopsquire.search_events")
+
 
 def ensure_search_events_table() -> None:
-    try:
-        from src.app.models.db import get_engine
-
-        eng = get_engine()
-        try:
-            if getattr(eng, "dialect", None) is not None and eng.dialect.name != "sqlite":
-                return
-        except Exception:
-            pass
-        with db_session() as db:
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS search_events (
-                        id TEXT PRIMARY KEY,
-                        event_time TEXT DEFAULT CURRENT_TIMESTAMP,
-                        uid_hash TEXT,
-                        query TEXT,
-                        filters_json TEXT,
-                        result_skus_json TEXT,
-                        result_count INTEGER,
-                        view_mode TEXT,
-                        trace_id TEXT,
-                        session_id TEXT
-                    )
-                    """
-                )
-            )
-            try:
-                db.commit()
-            except Exception:
-                pass
-    except Exception:
-        pass
+    """Compatibility no-op: Alembic owns the production schema."""
+    return None
 
 
 def log_search_event(
@@ -56,8 +27,22 @@ def log_search_event(
     view_mode: str | None,
     trace_id: str | None,
     session_id: str | None = None,
+    tenant_id: str = "default",
+    case_id: str | None = None,
+    session_epoch: str | None = None,
+    requirement: Dict[str, Any] | None = None,
+    requested_quantity: int | None = None,
+    qualification_outcome: str = "unresolved",
+    lifecycle_stage: str = "search_interest",
+    unresolved_concept: str | None = None,
+    resolved_sku: str | None = None,
+    evidence_refs: List[str] | None = None,
+    source_policy_status: str = "not_evaluated",
+    actor_dedup_class: str = "distinct_actor",
+    abuse_status: str = "not_evaluated",
+    inventory_snapshot: Dict[str, Any] | None = None,
+    simulation_only: bool = False,
 ) -> Optional[str]:
-    ensure_search_events_table()
     event_id = str(uuid.uuid4())
     safe_query = scrub_pii(query or "")
     safe_filters = redact_for_trace(security_sanitize(filters or {}))
@@ -89,10 +74,39 @@ def log_search_event(
                 ),
                 payload,
             )
-            try:
-                db.commit()
-            except Exception:
-                pass
-        return event_id
-    except Exception:
+            db.commit()
+    except Exception as exc:
+        logger.warning("legacy search event persistence failed: %s", exc)
         return None
+
+    try:
+        from src.app.services.search_demand_authority import append_search_observation
+
+        canonical_sku = str(resolved_sku or "").strip() or (safe_skus[0] if len(safe_skus) == 1 else None)
+        with db_session() as db:
+            append_search_observation(
+                db,
+                tenant_id=str(tenant_id or "default"),
+                trace_id=str(trace_id or event_id),
+                case_id=case_id,
+                session_epoch=str(session_epoch or session_id or trace_id or event_id),
+                actor_hash=payload["uid_hash"],
+                query=safe_query,
+                requirement=dict(requirement or {"filters": safe_filters}),
+                requested_quantity=requested_quantity,
+                resolved_sku=canonical_sku,
+                unresolved_concept=unresolved_concept,
+                qualification_outcome=qualification_outcome,
+                lifecycle_stage=lifecycle_stage,
+                evidence_refs=evidence_refs or [],
+                source_policy_status=source_policy_status,
+                actor_dedup_class=actor_dedup_class,
+                abuse_status=abuse_status,
+                inventory_snapshot=inventory_snapshot,
+                simulation_only=simulation_only,
+            )
+            db.commit()
+    except Exception as exc:
+        # Search analytics must not break the buyer path, but failure is observable.
+        logger.warning("canonical search observation persistence failed: %s", exc)
+    return event_id
