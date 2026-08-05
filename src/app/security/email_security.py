@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple, List
-import base64
+from typing import Any, Dict, List
 import json
-import xml.etree.ElementTree as ET
-import zipfile
-import io
 import re
 import os
 import logging
-from difflib import SequenceMatcher
 
 from src.app.observability.telemetry import telemetry_emit
 from src.app.config import load_feature_flags, get_settings
@@ -17,7 +12,7 @@ from src.app.services.ticketing import TicketingAgent
 import hashlib
 from src.app.services.decision_log import log_decision, log_trace_event
 
-from src.app.security.email_security_rules import extract_domain, extract_indicators
+from src.app.security.email_security_rules import extract_domain as extract_domain, extract_indicators
 from src.app.security.email_security_verdict import verdict as compute_verdict
 from src.app.security.email_sender_trust import score_sender_trust, update_sender_trust
 from src.app.security.threshold_tuning import get_runtime_thresholds
@@ -31,7 +26,9 @@ from src.app.security.phishing_page_detector import analyze_phishing_targets
 from src.app.security.yara_email_scan import scan_email_yara
 from src.app.security.semantic_bec_scorer import score_semantic_bec
 from src.app.security.thread_conversation_graph import analyze_thread_conversation_graph
-from src.app.security.passive_payload_analysis import classify_passive_payload
+from src.app.security.passive_payload_analysis import (
+    classify_passive_payload as classify_passive_payload,
+)
 from src.app.security.supplier_governance_store import (
     build_incident_graph_snapshot,
     build_vendor_trust_graph_snapshot,
@@ -43,8 +40,11 @@ from src.app.security.ransomware_detector import analyze_ransomware_artifacts, c
 from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
 from src.app.security.threat_hunter_leads import build_threat_hunter_leads
-from src.app.security.maestro_boundaries import validate_agent_action
-from src.app.security.email_dns_verify import run_dns_auth_checks, run_dns_auth_checks_parallel
+from src.app.security.maestro_boundaries import validate_agent_action as validate_agent_action
+from src.app.security.email_dns_verify import (
+    run_dns_auth_checks as run_dns_auth_checks,
+    run_dns_auth_checks_parallel,
+)
 import time
 from src.app.services.intake_gate import (
     normalize_email_intake,
@@ -52,7 +52,10 @@ from src.app.services.intake_gate import (
     strict_attachment_ingest_gate,
 )
 from src.app.services.playbook_engine import start_playbook_run, append_playbook_step, execute_typed_actions, complete_playbook_run
-from src.app.security.control_registry import get_control_record, get_control_registry_version
+from src.app.security.control_registry import (
+    get_control_record as get_control_record,
+    get_control_registry_version as get_control_registry_version,
+)
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.services.trust_routing import fuse_security_trust_score
 
@@ -83,7 +86,6 @@ def _hash16(value: str | None) -> str | None:
     """Return the first 16 hex chars of SHA-256(value), or None for empty input."""
     if not value:
         return None
-    import hashlib
     return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
@@ -101,10 +103,6 @@ def _record_runtime_error(
     if isinstance(details, dict) and details:
         row["details"] = details
     errors.append(row)
-    try:
-        return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
-    except Exception:
-        return None
 
 
 def _classify_email_content_mode(email: Dict[str, Any]) -> Dict[str, Any]:
@@ -628,19 +626,19 @@ from src.app.security.email_forensics_snapshots import (  # noqa: E402
 # Finding normalization/ranking/compliance-mapping + agent boundaries extracted to
 # security/email_findings.py (session-3 decomposition). Re-exported for the orchestrator.
 from src.app.security.email_findings import (  # noqa: E402
-    _artifact_evidence_refs,
-    _artifact_finding_category,
-    _artifact_provenance_rows,
-    _claim_contract_for_finding,
-    _confidence_band,
+    _artifact_evidence_refs as _artifact_evidence_refs,
+    _artifact_finding_category as _artifact_finding_category,
+    _artifact_provenance_rows as _artifact_provenance_rows,
+    _claim_contract_for_finding as _claim_contract_for_finding,
+    _confidence_band as _confidence_band,
     _dedupe_ranked_findings,
     _email_agent_boundaries,
-    _finding_agentic_tags,
-    _finding_compliance_mapping,
-    _finding_rank_score,
-    _finding_source_toolset,
-    _is_benign_comment_only_vba_artifact,
-    _normalize_finding,
+    _finding_agentic_tags as _finding_agentic_tags,
+    _finding_compliance_mapping as _finding_compliance_mapping,
+    _finding_rank_score as _finding_rank_score,
+    _finding_source_toolset as _finding_source_toolset,
+    _is_benign_comment_only_vba_artifact as _is_benign_comment_only_vba_artifact,
+    _normalize_finding as _normalize_finding,
 )
 
 
@@ -648,8 +646,8 @@ from src.app.security.email_findings import (  # noqa: E402
 # security/email_business_bundle.py (session-4 decomposition). Re-exported for the orchestrator.
 from src.app.security.email_business_bundle import (  # noqa: E402
     _decorate_structured_findings,
-    _finding_business_bundle,
-    _hidden_payload_drilldown,
+    _finding_business_bundle as _finding_business_bundle,
+    _hidden_payload_drilldown as _hidden_payload_drilldown,
 )
 
 
@@ -657,7 +655,7 @@ from src.app.security.email_business_bundle import (  # noqa: E402
 # security/email_action_policy.py (session-5 decomposition). Re-exported for the orchestrator.
 from src.app.security.email_action_policy import (  # noqa: E402
     _build_action_policy,
-    _canonical_action_name,
+    _canonical_action_name as _canonical_action_name,
     _enforce_playbook_actions,
 )
 
@@ -689,7 +687,6 @@ def _persist_incident(
     ticket_rate_limited: bool,
     ticket_deduped: bool,
 ) -> str | None:
-    import json
     import uuid
     from sqlalchemy import text
 
@@ -829,10 +826,10 @@ def _persist_incident(
 # Re-exported so `from src.app.security.email_security import parse_dmarc_aggregate` (and the other
 # names) keep resolving — call sites and tests are untouched.
 from src.app.security.email_dmarc import (  # noqa: E402
-    _parse_dmarc_xml,
-    detect_bec_indicators,
-    parse_dmarc_aggregate,
-    process_dmarc_report,
+    _parse_dmarc_xml as _parse_dmarc_xml,
+    detect_bec_indicators as detect_bec_indicators,
+    parse_dmarc_aggregate as parse_dmarc_aggregate,
+    process_dmarc_report as process_dmarc_report,
 )
 
 
@@ -2138,12 +2135,6 @@ def evaluate_email_security(
                 structured_findings=structured_findings,
                 policy_gate=v.get("policy_gate") if isinstance(v.get("policy_gate"), dict) else {},
             )
-            if isinstance(security_analysis, dict):
-                security_analysis["agent_invocations"] = list(evs.get("agent_runs") or [])[:8]
-                if isinstance(ocr_sanitization_meta, dict):
-                    security_analysis["ocr_confidence"] = ocr_sanitization_meta.get("ocr_confidence")
-                    security_analysis["ocr_engine"] = ocr_sanitization_meta.get("ocr_engine")
-                    security_analysis["ocr_word_count"] = ocr_sanitization_meta.get("ocr_word_count")
             v["action_policy"] = action_policy
             v["human_gate"] = dict(action_policy.get("human_gate") or {})
             v["threat_hunter_leads"] = list(evs.get("threat_hunter_leads") or [])
@@ -2400,6 +2391,19 @@ def evaluate_email_security(
                 "coverage_limits": (v.get("evidence_snapshot") or {}).get("coverage_limits"),
             },
         )
+        if isinstance(security_analysis, dict):
+            evidence_snapshot = v.get("evidence_snapshot") or {}
+            security_analysis["agent_invocations"] = list(
+                evidence_snapshot.get("agent_runs") or []
+            )[:8]
+            if isinstance(ocr_sanitization_meta, dict):
+                security_analysis["ocr_confidence"] = ocr_sanitization_meta.get(
+                    "ocr_confidence"
+                )
+                security_analysis["ocr_engine"] = ocr_sanitization_meta.get("ocr_engine")
+                security_analysis["ocr_word_count"] = ocr_sanitization_meta.get(
+                    "ocr_word_count"
+                )
     except Exception as exc:
         _record_runtime_error(runtime_errors, stage="security_framework_correlation", exc=(exc if isinstance(exc, Exception) else RuntimeError(str(exc))))
         security_analysis = None
