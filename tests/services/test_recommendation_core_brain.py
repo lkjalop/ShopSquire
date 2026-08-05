@@ -170,6 +170,25 @@ def test_model_outage_on_ordinary_query_is_typed_and_visibly_degraded(db):
     assert response.extras["router_outcome"]["fallback_authority"] == "deterministic_only"
 
 
+def test_plan_and_core_share_the_research_authority_contract(db):
+    """A partial deploy must not crash before ordinary catalog retrieval.
+
+    The core immutably adds the request's research authority to its Plan.  If
+    the Plan schema is older, ``dataclasses.replace`` raises and the facade can
+    silently fall through to compatibility behavior.  Keep this deployment
+    boundary under a direct contract test.
+    """
+    response = recommend_turn(
+        db,
+        _env("gaming laptop under 2000", external_research_consent=True),
+        llm_fn=_route_stub("SEARCH", "el-6-11-2"),
+    )
+
+    assert response.grounding != "error"
+    assert response.extras["plan"]["external_research_authorized"] is True
+    assert response.extras["plan"]["plan_version"] == "core-v2-semantic"
+
+
 def test_confirm_purchase_order_without_selected_sku_cannot_retrieve_or_commit(db):
     response = recommend_turn(
         db,

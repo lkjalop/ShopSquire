@@ -51,19 +51,44 @@ _LANE_PLANS: Dict[str, List[str]] = {
 class Plan:
     steps: List[str] = field(default_factory=lambda: ["retrieve"])
     source: str = "derived"                # derived | model
+    needs_concept_resolution: bool = False
+    semantic_proposal: Dict[str, Any] = field(default_factory=dict)
+    external_research_authorized: bool = False
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"steps": list(self.steps), "source": self.source, "plan_version": "core-v1"}
+        return {
+            "steps": list(self.steps),
+            "source": self.source,
+            "plan_version": "core-v2-semantic",
+            "needs_concept_resolution": self.needs_concept_resolution,
+            "semantic_proposal": dict(self.semantic_proposal),
+            "external_research_authorized": self.external_research_authorized,
+        }
 
 
 def derive_plan(decision: TurnDecision) -> Plan:
+    if decision.lane == "PROCUREMENT" and decision.case_operation in ("status", "summary"):
+        return Plan(steps=["handoff_procurement"], source="derived")
     steps = list(_LANE_PLANS.get(decision.lane, ["retrieve"]))
     # honesty guard at derivation too: an ungranted refusal can never be planned
     if "off_catalog_honesty" in steps and not decision.refusal_granted:
         steps = ["retrieve", "fit_check"]
     if "fit_check" in steps and not decision.requirements:
         steps.remove("fit_check")          # nothing to check — don't fabricate a verdict step
-    return Plan(steps=steps, source="derived")
+    semantic = dict(decision.semantic_proposal or {})
+    needs_concept = bool(
+        semantic.get("validation") == "valid"
+        and any(
+            isinstance(item, dict) and bool(item.get("material"))
+            for item in (semantic.get("concepts") or [])
+        )
+    )
+    return Plan(
+        steps=steps,
+        source="derived",
+        needs_concept_resolution=needs_concept,
+        semantic_proposal=semantic,
+    )
 
 
 def validate_plan(candidate: Any, decision: TurnDecision) -> Optional[Plan]:
