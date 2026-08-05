@@ -341,6 +341,22 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 "Prior subject continuation skipped: %s",
                 repr(exc)[:120],
             )
+    # A budget-only amendment changes the amount, not the already answered scope.
+    # During a provider outage the bounded router can correctly preserve the prior
+    # product while returning ``unknown`` for scope.  Reopening the material
+    # per-unit/total question here contradicts the sealed buyer answer and leaves
+    # the response internally inconsistent (confirmed_slots says per_unit while
+    # the decision asks again).  Inherit only a previously accepted closed-vocabulary
+    # scope and only when this turn contains a canonically parsed amount; fresh
+    # product requests and scope-free conversation remain unaffected.
+    if (
+        _parsed_turn_budget is not None
+        and decision.subject_action == "continue"
+        and decision.budget_scope == "unknown"
+    ):
+        _prior_scope = str(_accepted.get("budget_scope") or "").strip().lower()
+        if _prior_scope in {"per_unit", "total"}:
+            decision = dataclasses.replace(decision, budget_scope=_prior_scope)
     # The HTTP contract may not pre-parse a textual budget.  The model maps its value and
     # scope; deterministic arithmetic turns that bounded proposal into the per-unit ceiling
     # used by evidence retrieval.  A total budget for N units is never treated as per-unit.

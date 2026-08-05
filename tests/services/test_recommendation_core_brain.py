@@ -2132,6 +2132,33 @@ def test_budget_only_revision_overrides_incorrect_model_switch(db):
     assert decision["subject_from_session"] is True
 
 
+def test_budget_only_revision_preserves_answered_scope_when_model_is_unavailable(db):
+    env = dataclasses.replace(
+        _env("actually budget is now 1800 max"),
+        session={
+            "prior_node": "el-6-6",
+            "shortlist_skus": ["LAP-1"],
+            "accepted_constraints": {
+                "quantity": 10,
+                "budget_scope": "per_unit",
+                "budget_min_cents": 120_000,
+                "budget_max_cents": 150_000,
+            },
+        },
+    )
+
+    decision = recommend_turn(
+        db,
+        env,
+        llm_fn=lambda *_args: (_ for _ in ()).throw(ConnectionError("offline")),
+    ).extras["decision"]
+
+    assert decision["node_handle"] == "el-6-6"
+    assert decision["subject_action"] == "continue"
+    assert decision["budget_scope"] == "per_unit"
+
+
+
 def test_fresh_search_does_not_inherit_prior_node(db):
     """A NEW search (not a narrowing lane) must NOT drag the prior subject in — context-rot
     guard: only FILTER/COMPARE/EXPLAIN continuations inherit."""
