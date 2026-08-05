@@ -79,6 +79,26 @@ def test_demo_supplier_offers_are_per_sku_tenant_currency_and_simulation_only(db
     assert best_supplier_cost(db, "LAP-A", tenant_id="tenant-a", currency="USD") is None
 
 
+def test_supplier_offer_text_validity_is_evaluated_portably(db):
+    db.execute(text(
+        "CREATE TABLE products (sku TEXT PRIMARY KEY, name TEXT, price_cents INT, "
+        "currency TEXT, specs TEXT, active INTEGER DEFAULT 1)"
+    ))
+    db.execute(text(
+        "INSERT INTO products VALUES ('LAP-A','Work Laptop',100000,'AUD','{}',1)"
+    ))
+    db.commit()
+    ensure_supplier_coverage(db)
+    seed_demo_supplier_offers(db, tenant_id="tenant-a")
+    db.execute(text(
+        "UPDATE supplier_offer SET effective_to='2020-01-01T00:00:00+00:00' "
+        "WHERE tenant_id='tenant-a' AND sku='LAP-A'"
+    ))
+    db.commit()
+
+    assert best_supplier_cost(db, "LAP-A", tenant_id="tenant-a", currency="AUD") is None
+
+
 def test_seed_demo_vendor_contacts_registers_verified_email():
     # the live-packet fix: seed a KYV vendor so the draft resolves a CONTACT EMAIL, not the bare domain
     from src.app.security.kyv_registry import lookup_vendor_by_domain

@@ -68,7 +68,7 @@ def top_up_image_results(
             """
             SELECT sku, name, price_cents, image_url, specs
             FROM products
-            WHERE COALESCE(active, 1) = 1
+            WHERE active IS NOT FALSE
             ORDER BY COALESCE(price_cents, 0) ASC, name ASC
             """
         )).fetchall()

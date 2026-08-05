@@ -119,7 +119,7 @@ def from_db(
     Returns a list of product dicts ranked by text relevance score.
     """
     try:
-        conditions = ["COALESCE(p.active, 1) = 1"]
+        conditions = ["p.active IS NOT FALSE"]
         params: Dict[str, Any] = {"lim": int(limit)}
 
         if budget_min is not None:

@@ -34,6 +34,24 @@ _EXPLAIN_CACHE: dict[str, tuple[float, Dict]] = {}
 _EXPLAIN_CACHE_TTL_SECONDS = 300.0
 
 
+def _evidence_bundle_lookup_column(db) -> str | None:
+    """Return the migrated evidence ownership key without probing bad SQL.
+
+    ``case_id`` is authoritative. ``trace_id`` is retained only for frozen test
+    fixtures created before the migration. Inspecting the schema first prevents
+    a compatibility read from aborting a PostgreSQL request transaction.
+    """
+    try:
+        columns = {str(col["name"]) for col in sa_inspect(db.get_bind()).get_columns("evidence_bundles")}
+    except Exception:
+        return None
+    if "case_id" in columns:
+        return "case_id"
+    if "trace_id" in columns:
+        return "trace_id"
+    return None
+
+
 def _default_model_decision(model_selection: Dict) -> Dict[str, str]:
     if (
         model_selection.get("authority") == "proposes"
@@ -1602,10 +1620,15 @@ def query_decision_trace(
             pass
     if include_evidence:
         try:
-            rows = db.execute(
-                text("SELECT * FROM evidence_bundles WHERE trace_id = :trace_id"),
-                {"trace_id": trace_id},
-            ).mappings().all()
+            lookup_column = _evidence_bundle_lookup_column(db)
+            rows = (
+                db.execute(
+                    text(f"SELECT * FROM evidence_bundles WHERE {lookup_column} = :trace_id"),
+                    {"trace_id": trace_id},
+                ).mappings().all()
+                if lookup_column
+                else []
+            )
             base["evidence"] = [dict(r) for r in rows]
         except Exception:
             base["evidence"] = []
@@ -2137,10 +2160,15 @@ async def explain_decision(trace_id: str, role: str = Depends(require_role([ROLE
     try:
         from sqlalchemy import text as _text
         bundles = []
-        rows = db.execute(
-            _text("SELECT bundle_json FROM evidence_bundles WHERE trace_id = :trace_id"),
-            {"trace_id": trace_id},
-        ).fetchall()
+        lookup_column = _evidence_bundle_lookup_column(db)
+        rows = (
+            db.execute(
+                _text(f"SELECT bundle_json FROM evidence_bundles WHERE {lookup_column} = :trace_id"),
+                {"trace_id": trace_id},
+            ).fetchall()
+            if lookup_column
+            else []
+        )
         for (bj,) in rows or []:
             try:
                 bundles.append(json.loads(bj))

@@ -170,7 +170,7 @@ def _legacy_search(db, *, text_query: Optional[str], brand: Optional[str], categ
                    product_type: Optional[str], min_price_cents: Optional[int],
                    max_price_cents: Optional[int], limit: int) -> List[VariantView]:
     try:
-        clauses, params = ["COALESCE(p.active,1)=1"], {"lim": max(1, min(int(limit), 500))}
+        clauses, params = ["p.active IS NOT FALSE"], {"lim": max(1, min(int(limit), 500))}
         if text_query:
             clauses.append("(LOWER(p.name) LIKE :q OR LOWER(p.category) LIKE :q OR "
                            "LOWER(p.product_type) LIKE :q OR LOWER(p.brand) LIKE :q)")
@@ -394,7 +394,7 @@ def coverage_report(db, *, tenant_id: str = DEFAULT_TENANT, sample: int = 500) -
     out: Dict[str, Any] = {"mode": read_model_mode()}
     try:
         legacy_skus = {str(r[0]) for r in db.execute(text(
-            "SELECT sku FROM products WHERE COALESCE(active,1)=1 AND sku IS NOT NULL")).fetchall()}
+            "SELECT sku FROM products WHERE active IS NOT FALSE AND sku IS NOT NULL")).fetchall()}
     except Exception:
         legacy_skus = set()
     try:
@@ -434,7 +434,7 @@ def coverage_report(db, *, tenant_id: str = DEFAULT_TENANT, sample: int = 500) -
         from src.app.services.taxonomy_registry import ensure_tables as _tax_tables
         _tax_tables(db)
         out["unclassified_active_count"] = int(db.execute(text(
-            "SELECT COUNT(*) FROM products p WHERE COALESCE(p.active,1)=1 AND p.sku NOT IN "
+            "SELECT COUNT(*) FROM products p WHERE p.active IS NOT FALSE AND p.sku NOT IN "
             "(SELECT sku FROM product_classification WHERE tenant_id = :t)"),
             {"t": tenant_id}).fetchone()[0])
     except Exception:
@@ -454,7 +454,7 @@ def backfill_canonical_from_legacy(db, *, tenant_id: str = DEFAULT_TENANT, commi
     try:
         rows = db.execute(text(
             f"SELECT {_LEGACY_COLS}, p.id FROM products p "
-            "WHERE COALESCE(p.active,1)=1 AND p.sku IS NOT NULL")).fetchall()
+            "WHERE p.active IS NOT FALSE AND p.sku IS NOT NULL")).fetchall()
     except Exception:
         return stats
     for r in rows:

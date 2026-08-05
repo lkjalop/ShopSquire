@@ -52,9 +52,9 @@ def _maybe_project_catalog(db, graph: HippoGraph, *, tenant_id: str, alias_map, 
     try:
         from src.app.services.hippograph import project_catalog
         rows = db.execute(
-            text("SELECT DISTINCT p.sku, p.name FROM products p "
+            text("SELECT DISTINCT p.sku, p.name, p.id FROM products p "
                  "JOIN product_classification pc ON pc.sku=p.sku "
-                 "WHERE p.active = 1 AND pc.tenant_id=:tenant ORDER BY p.id DESC LIMIT :lim"),
+                 "WHERE p.active IS NOT FALSE AND pc.tenant_id=:tenant ORDER BY p.id DESC LIMIT :lim"),
             {"tenant": tenant_id, "lim": int(limit)},
         ).fetchall()
         return project_catalog(graph, [{"sku": r[0], "name": r[1]} for r in rows],

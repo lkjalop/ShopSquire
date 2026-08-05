@@ -283,7 +283,7 @@ def build_narration_preamble(
                     bind = {f"s{i}": sk for i, sk in enumerate(skus)}
                     placeholders = ", ".join(f":s{i}" for i in range(len(skus)))
                     rows = db.execute(
-                        _sqla_text(f"SELECT sku, name, price_cents, specs FROM products WHERE sku IN ({placeholders}) AND active=1"),
+                        _sqla_text(f"SELECT sku, name, price_cents, specs FROM products WHERE sku IN ({placeholders}) AND active IS NOT FALSE"),
                         bind,
                     ).mappings().all()
                     prior_prods = [

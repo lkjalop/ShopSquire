@@ -787,7 +787,7 @@ def inventory_drift_check(
                             SELECT COUNT(*)
                             FROM products p
                             LEFT JOIN inventory i ON i.product_id = p.id
-                            WHERE i.id IS NULL AND COALESCE(p.active, 1) = 1
+                            WHERE i.id IS NULL AND p.active IS NOT FALSE
                             """
                         )
                     ).scalar()

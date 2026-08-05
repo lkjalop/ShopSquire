@@ -86,7 +86,7 @@ def fuzzy_sku_lookup(query: str, limit: int = 3) -> List[Dict[str, Any]]:
                 _text(
                     "SELECT sku, name, brand FROM products "
                     "WHERE (LOWER(name) LIKE LOWER(:t) OR LOWER(sku) LIKE LOWER(:t)) "
-                    "AND COALESCE(active, 1) = 1 LIMIT :lim"
+                    "AND active IS NOT FALSE LIMIT :lim"
                 ),
                 {"t": term, "lim": int(limit)},
             ).fetchall()

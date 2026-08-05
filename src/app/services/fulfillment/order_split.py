@@ -48,7 +48,7 @@ def _load_active_products(db) -> List[Any]:
     if db is None:
         return []
     try:  # name + specs (the type word — "laptop"/"monitor" — is in the name); robust to a missing category col
-        return list(db.execute(text("SELECT sku, name, specs FROM products WHERE COALESCE(active,1)=1")).fetchall())
+        return list(db.execute(text("SELECT sku, name, specs FROM products WHERE active IS NOT FALSE")).fetchall())
     except Exception as exc:
         logger.debug("_load_active_products query failed: %s", exc)
         return []

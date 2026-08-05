@@ -310,7 +310,7 @@ def seed_synthetic_interactions(
         ensure_recommend_interactions_table(db)
         _ensure_metrics_tables(db)
         prows = db.execute(
-            text("SELECT sku, specs, price_cents FROM products WHERE sku LIKE 'SYN-%' AND COALESCE(active, 1) = 1")
+            text("SELECT sku, specs, price_cents FROM products WHERE sku LIKE 'SYN-%' AND active IS NOT FALSE")
         ).fetchall()
         if not prows:
             return {"status": "no_products", "inserted": 0}
