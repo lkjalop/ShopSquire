@@ -86,6 +86,50 @@ def test_material_clarification_can_cross_delegated_lane_without_execution(monke
     assert outcome.payload["next_questions"][0]["reason"] == "missing_material_budget_scope"
 
 
+@pytest.mark.parametrize("with_products", [True, False])
+def test_compatibility_cutover_serves_grounded_bounded_fallback(monkeypatch, with_products):
+    """With V1 archived, a grounded deterministic fallback has no safer delegate.
+
+    Model unavailability is visible in the response, but must not erase explicit
+    quantity/budget context by turning a usable V2 result into ``v2_unavailable``.
+    """
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+
+    def grounded_fallback(_db, envelope):
+        response = CoreResponse(
+            envelope=envelope,
+            lane="PROCUREMENT",
+            message="I can continue with bounded catalog evidence.",
+            products=(
+                [ProductCard(sku="LAP-1", title="Laptop", price_cents=129_900)]
+                if with_products else []
+            ),
+            grounding="grounded",
+            degraded=True,
+        )
+        response.extras["requested_quantity"] = 25
+        response.extras["router_outcome"] = {
+            "status": "source_unavailable",
+            "late_results_accepted": False,
+        }
+        return response.finalize()
+
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.core.recommend_turn",
+        grounded_fallback,
+    )
+    outcome = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="25 work laptops", uid="u1",
+        tenant_id="t1", budget_min=1200, budget_max=1500, trace_id="tr-fallback",
+        with_trace=_wt, record_failure=lambda *a, **k: None,
+        compatibility_cutover=True,
+    )
+
+    assert outcome.status == "served"
+    assert outcome.payload["requested_quantity"] == 25
+    assert outcome.payload["router_outcome"]["status"] == "source_unavailable"
+
+
 def test_procurement_advice_requires_its_own_serve_flag(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
     monkeypatch.delenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", raising=False)

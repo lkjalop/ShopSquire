@@ -592,3 +592,26 @@ def test_router_failure_recovers_only_bounded_bulk_facts(db):
     assert decision.budget_scope == "per_unit"
     assert decision.use_cases == ()
     assert decision.requirements == {}
+
+
+def test_router_failure_preserves_explicit_work_laptop_quantity_and_budget_scope(db):
+    """The deterministic demo runtime disables model inference.
+
+    A plainly named, tenant-sold product category must still retain its explicit
+    bulk quantity and per-unit budget range.  Losing the quantity here makes the
+    browser render an ordinary empty search and silently drops procurement context.
+    """
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    decision = route_turn(
+        db,
+        _env("I need 25 work laptops, budget 1200 to 1500"),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert decision.source == "fallback:model_unavailable"
+    assert decision.node_handle == "el-6-6"
+    assert decision.lane == "PROCUREMENT"
+    assert decision.quantity == 25
+    assert decision.budget_scope == "unknown"

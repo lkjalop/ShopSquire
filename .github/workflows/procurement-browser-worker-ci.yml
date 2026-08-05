@@ -55,6 +55,10 @@ jobs:
       RECOMMEND_SUPPORT_HANDOFF_MODE: "on"
       RECOMMEND_INVENTORY_READ_MODE: "on"
       RECOMMEND_LEGACY_DELEGATE_ENABLED: "0"
+      # recommend.py is archived. The rendered journey must exercise the V2
+      # compatibility facade instead of converting a bounded model-degraded
+      # result into an empty ``v2_unavailable`` response.
+      RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED: "1"
       MULTI_INTENT_PLANNER_ENABLED: "1"
       FULFILLMENT_DEMO_ENABLED: "1"
       USE_MOCK_LLM: "1"
