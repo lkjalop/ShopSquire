@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -82,10 +83,17 @@ def research(
     cache_namespace: str = "",
     timeout_s: float = 4.0,
     max_items: int = 8,
+    cancellation: Any = None,
 ) -> Dict[str, Any]:
     """Run guarded external research. Returns {status, items, source_status}. Never raises."""
     if not enabled:
         return _disabled()
+    if bool(getattr(cancellation, "cancelled", False)):
+        return {
+            "status": "cancelled",
+            "items": [],
+            "source_status": SourceStatus(source=_SOURCE, status="unavailable").to_dict(),
+        }
     scrub = scrub or (lambda x: x)
     scrubbed = scrub(str(query or ""))
     allow = [a for a in (allowlist or []) if str(a or "").strip()]
@@ -106,7 +114,14 @@ def research(
                 return cached
 
     try:
-        hits = fetcher.fetch(scrubbed, allowlist=list(allow), timeout_s=timeout_s) or []
+        parameters = inspect.signature(fetcher.fetch).parameters
+        cancel_kw = {"cancellation": cancellation} if (
+            "cancellation" in parameters
+            or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+        ) else {}
+        hits = fetcher.fetch(
+            scrubbed, allowlist=list(allow), timeout_s=timeout_s, **cancel_kw,
+        ) or []
     except Exception as exc:
         return {
             "status": "error",
@@ -155,6 +170,7 @@ def run_external_research_stage(
     scrub: Optional[Callable[[str], str]] = None,
     redis: Any = None,
     tenant_id: Optional[str] = None,
+    cancellation: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """Route wrapper for safe internet search. Resolves enabled (env EXTERNAL_RESEARCH_ENABLED >
     flag), picks the fetcher (SSRF-safe httpx adapter when EXTERNAL_RESEARCH_SEARCH_URL is set, else
@@ -176,8 +192,10 @@ def run_external_research_stage(
     # the NullFetcher keeps external research inert (empty) even when the flag is on.
     if os.getenv("EXTERNAL_RESEARCH_SEARCH_URL"):
         from src.app.adapters.external_research_httpx import HttpxResearchFetcher as _fetcher
+        default_provider_id = "allowlisted_http_search"
     else:
         from src.app.ports.external_product_research import NullFetcher as _fetcher
+        default_provider_id = "null_fetcher"
     from src.app.platform.store_profile import active_profile_id as _active_pid, profile_slot as _profile_slot
 
     # AGNOSTIC: allowlist comes from the ACTIVE profile, falling back to the global config.
@@ -195,5 +213,18 @@ def run_external_research_stage(
         scrub=scrub,
         redis=redis,
         cache_namespace=f"{tenant_id or ''}:{_active_pid()}",
+        cancellation=cancellation,
     )
-    return {"items": res.get("items") or [], "source_status": res.get("source_status")}
+    run_status = str(res.get("status") or "unknown")
+    return {
+        "items": res.get("items") or [],
+        "source_status": res.get("source_status"),
+        "provider_id": str(
+            os.getenv("EXTERNAL_RESEARCH_PROVIDER_ID") or default_provider_id
+        ).strip()[:80],
+        "run_status": run_status,
+        "cache_status": "hit" if run_status == "cached" else "miss_or_disabled",
+        # Proves which scrubbed query ran without exposing endpoint credentials or
+        # the tenant-specific cache namespace.
+        "query_hash": hashlib.sha256(str(query or "").encode("utf-8")).hexdigest()[:16],
+    }

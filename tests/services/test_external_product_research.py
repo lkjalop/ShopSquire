@@ -133,3 +133,7 @@ def test_stage_uses_nullfetcher_when_no_endpoint(monkeypatch):
                                       flags={"EXTERNAL_RESEARCH_ALLOWLIST": ["trusted.com"]})
     assert out is not None and out["items"] == []  # inert NullFetcher -> no items
     assert out["source_status"]["source"] == "external_research"
+    assert out["provider_id"] == "null_fetcher"
+    assert out["run_status"] == "empty"
+    assert out["cache_status"] == "miss_or_disabled"
+    assert len(out["query_hash"]) == 16

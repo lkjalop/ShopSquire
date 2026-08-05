@@ -3,9 +3,15 @@ the intelligence under test is SELECTION (plan decides the fan-out) + bounded ga
 from __future__ import annotations
 
 import time
+import threading
 from contextlib import contextmanager
 
-from src.app.services.evidence_orchestrator import EvidenceBudget, gather_evidence, select_legs
+from src.app.services.evidence_orchestrator import (
+    EvidenceBudget,
+    gather_evidence,
+    outstanding_evidence_lanes,
+    select_legs,
+)
 
 
 class _Plan:
@@ -129,6 +135,56 @@ def test_cost_budget_cancels_expensive_lane_before_dispatch(monkeypatch):
     )
     assert calls == []
     assert ev["legs"]["web"]["health"] == "cancelled"
+
+
+def test_timeout_signals_cooperative_cancellation_and_rejects_late_result():
+    observed = []
+
+    def slow(*args, cancellation, **kwargs):
+        while not cancellation.cancelled:
+            time.sleep(0.002)
+        observed.append(cancellation.reason)
+        return {"source": "market", "found": True, "summary": "too late", "data": {}}
+
+    result = gather_evidence(
+        _Plan(needs_market_evidence=True), query="q", leg_fns={"market": slow},
+        evidence_budget=EvidenceBudget(per_lane_ms=20, total_ms=20, max_cost_units=12),
+        tenant_id="tenant-a",
+    )
+    assert result["legs"]["market"]["health"] == "timed_out"
+    assert result["runtime"]["cooperative_cancellations"] == 1
+    deadline = time.time() + 1
+    while outstanding_evidence_lanes() and time.time() < deadline:
+        time.sleep(0.005)
+    assert observed == ["lane_timeout"]
+    assert result["runtime"]["late_results_rejected"] == 1
+
+
+def test_tenant_concurrency_limit_bounds_underlying_work(monkeypatch):
+    monkeypatch.setenv("EVIDENCE_TENANT_CONCURRENCY", "1")
+    import src.app.services.evidence_orchestrator as eo
+
+    eo._TENANT_SEMAPHORES.clear()
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def bounded(*args, cancellation, **kwargs):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return {"source": "lane", "found": True, "summary": "ok", "data": {}}
+
+    plan = _Plan(needs_market_evidence=True, quantity=2)
+    gather_evidence(
+        plan, leg_fns={"market": bounded, "availability": bounded}, tenant_id="tenant-a",
+        evidence_budget=EvidenceBudget(per_lane_ms=100, total_ms=100, max_cost_units=12),
+    )
+    assert peak == 1
 
 
 def test_structured_contradictions_are_visible_and_degrade_bundle(monkeypatch):

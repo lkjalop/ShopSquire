@@ -6,9 +6,11 @@ from sqlalchemy.orm import Session
 from src.app.services.conversation_case_state import (
     apply_case_amendment,
     classify_case_turn,
+    decompose_case_obligations,
     ensure_case_state,
     get_case_state,
     record_case_turn,
+    reduce_case_obligations,
 )
 
 
@@ -203,6 +205,110 @@ def test_ambiguous_reference_returns_typed_clarification() -> None:
     assert parsed.dialogue_act == "clarify"
     assert parsed.reason == "quantity_anchor_required"
     assert parsed.proposed_value is None
+
+
+def test_relative_quantity_reduction_uses_the_sealed_case_quantity() -> None:
+    by_amount = classify_case_turn(
+        "Actually reduce it by 10 units.",
+        current_state={"sku": "RGAM-0007", "quantity": 30},
+    )
+    to_amount = classify_case_turn(
+        "Actually reduce it to 10 units.",
+        current_state={"sku": "RGAM-0007", "quantity": 30},
+    )
+
+    assert by_amount.dialogue_act == "amend_quantity"
+    assert by_amount.proposed_value == 20
+    assert by_amount.reason == "relative_quantity_reduction"
+    assert to_amount.dialogue_act == "amend_quantity"
+    assert to_amount.proposed_value == 10
+    assert to_amount.reason == "absolute_quantity"
+
+
+def test_relative_quantity_without_a_selected_line_fails_closed() -> None:
+    parsed = classify_case_turn(
+        "Reduce it by 10.",
+        current_state={"quantity": 30},
+    )
+
+    assert parsed.dialogue_act == "clarify"
+    assert parsed.reason == "selected_product_anchor_required"
+    assert parsed.proposed_value is None
+
+
+def test_mixed_turn_decomposes_every_obligation_without_executing_any() -> None:
+    obligations = decompose_case_obligations(
+        "Reduce it by 10, deliver it by Friday, then confirm the purchase order and pay a deposit.",
+        current_state={"sku": "RGAM-0007", "quantity": 30},
+    )
+
+    assert [item["kind"] for item in obligations] == [
+        "quantity_amendment",
+        "deadline",
+        "buyer_commitment",
+        "payment_request",
+    ]
+    assert obligations[0]["proposed_value"] == 20
+    assert all(item["authority"] == "proposed" for item in obligations)
+    assert all(item["requires_reducer"] is True for item in obligations)
+
+
+def test_place_noun_is_not_misread_as_order_commitment() -> None:
+    assert decompose_case_obligations(
+        "Find a pizza place near me.", current_state={}
+    ) == ()
+
+
+def test_mixed_reducer_blocks_commitment_behind_pending_quantity_amendment() -> None:
+    result = reduce_case_obligations(
+        "Reduce it by 10, deliver it by Friday, then confirm the purchase order.",
+        current_state={
+            "sku": "RGAM-0007",
+            "quantity": 30,
+            "budget": {"amount": 75000, "currency": "AUD", "scope": "total"},
+            "destination": "Sydney",
+            "atp_snapshot": {"source_version": "ATP-7", "observed_at": "2026-08-05T10:00:00Z"},
+        },
+        catalog_authority="permitted",
+    )
+
+    assert result[0]["status"] == "pending_confirmation"
+    assert result[0]["proposed_value"] == 20
+    assert result[-1]["kind"] == "buyer_commitment"
+    assert result[-1]["status"] == "blocked"
+    assert result[-1]["reason"] == "prior_obligation_requires_confirmation"
+
+
+def test_commitment_requires_selected_sku_and_versioned_atp() -> None:
+    missing_sku = reduce_case_obligations(
+        "Confirm the purchase order.",
+        current_state={"quantity": 20},
+        catalog_authority="permitted",
+    )
+    missing_atp = reduce_case_obligations(
+        "Confirm the purchase order.",
+        current_state={"sku": "RGAM-0007", "quantity": 20},
+        catalog_authority="permitted",
+    )
+
+    assert missing_sku[0]["reason"] == "selected_product_anchor_required"
+    assert missing_atp[0]["reason"] == "versioned_atp_snapshot_required"
+
+
+def test_commitment_is_routed_to_authorization_never_granted_by_case_reducer() -> None:
+    result = reduce_case_obligations(
+        "Confirm the purchase order.",
+        current_state={
+            "sku": "RGAM-0007",
+            "quantity": 20,
+            "atp_snapshot": {"source_version": "ATP-7", "observed_at": "2026-08-05T10:00:00Z"},
+        },
+        catalog_authority="permitted",
+    )
+
+    assert result[0]["status"] == "authorization_required"
+    assert result[0]["residual_route"] == "AUTHORIZE"
+    assert result[0]["authorization_granted"] is False
 
 
 def test_accepted_amendment_invalidates_prior_version_and_projects_supersession() -> None:

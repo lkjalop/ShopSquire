@@ -21,11 +21,12 @@ under EVIDENCE_LEG_BUDGET_SEC (default 2.5s) in a thread and times out to found=
 from __future__ import annotations
 
 import os
+import inspect
 import queue
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 _REORDER_RE = re.compile(r"\b(?:again|reorder|re-?order|last\s+time|previous\s+order|bought|purchased)\b", re.I)
@@ -40,7 +41,71 @@ class EvidenceBudget:
     max_cost_units: int = 12
 
 
+@dataclass
+class EvidenceCancellation:
+    """Cooperative cancellation contract passed to capable evidence lanes."""
+
+    lane: str
+    deadline_monotonic: float
+    event: threading.Event = field(default_factory=threading.Event)
+    reason: str | None = None
+
+    def cancel(self, reason: str) -> None:
+        self.reason = str(reason)
+        self.event.set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self.event.is_set()
+
+    @property
+    def deadline_exceeded(self) -> bool:
+        return time.perf_counter() >= self.deadline_monotonic
+
+    def raise_if_cancelled(self) -> None:
+        if self.cancelled:
+            raise EvidenceLaneCancelled(self.reason or "deadline_exceeded")
+
+
+class EvidenceLaneCancelled(RuntimeError):
+    pass
+
+
+_TENANT_SEMAPHORES: dict[str, threading.BoundedSemaphore] = {}
+_TENANT_SEMAPHORES_LOCK = threading.Lock()
+_OUTSTANDING_LOCK = threading.Lock()
+_OUTSTANDING_LANES = 0
+
+
+def _tenant_semaphore(tenant_id: str | None) -> threading.BoundedSemaphore:
+    tenant = str(tenant_id or "_anonymous")
+    limit = max(1, int(os.getenv("EVIDENCE_TENANT_CONCURRENCY", "4") or 4))
+    key = f"{tenant}:{limit}"
+    with _TENANT_SEMAPHORES_LOCK:
+        return _TENANT_SEMAPHORES.setdefault(key, threading.BoundedSemaphore(limit))
+
+
+def _outstanding(delta: int) -> int:
+    global _OUTSTANDING_LANES
+    with _OUTSTANDING_LOCK:
+        _OUTSTANDING_LANES = max(0, _OUTSTANDING_LANES + int(delta))
+        current = _OUTSTANDING_LANES
+    try:
+        from src.app.observability.evidence_metrics import evidence_outstanding_lanes
+
+        evidence_outstanding_lanes.set(current)
+    except Exception:
+        pass
+    return current
+
+
+def outstanding_evidence_lanes() -> int:
+    with _OUTSTANDING_LOCK:
+        return _OUTSTANDING_LANES
+
+
 _LEG_COST_UNITS = {
+    "concept_resolution": 3,
     "market": 3,
     "policy": 1,
     "availability": 1,
@@ -83,6 +148,8 @@ def select_legs(plan: Any, *, query: str = "", uid: Optional[str] = None,
     the web for X" therefore cannot force a fetch; the imperative only surfaces the consent chip."""
     legs: List[str] = []
     intent = str(getattr(plan, "intent", "") or "").lower()
+    if bool(getattr(plan, "needs_concept_resolution", False)):
+        legs.append("concept_resolution")
     if getattr(plan, "needs_market_evidence", False):
         legs.append("market")
     if intent in ("support", "knowledge") or "policy" in str(query or "").lower():
@@ -194,8 +261,130 @@ def _leg_image(plan: Any, query: str, uid: Optional[str], image_identity: Option
             "summary": ("photo identified as " + " ".join(bits)) if bits else "", "data": dict(ident)}
 
 
+def _leg_concept_resolution(
+    plan: Any,
+    query: str,
+    uid: Optional[str],
+    *,
+    tenant_id: Optional[str] = None,
+    cancellation: EvidenceCancellation | None = None,
+) -> Dict[str, Any]:
+    """Resolve a validated unfamiliar concept through the existing guarded search port.
+
+    The semantic validator has already required the concept text to occur in the buyer's
+    request.  This lane still PII-scrubs it before egress, uses the operator allowlist and
+    configured search endpoint, and treats returned snippets as untrusted data.  Search
+    results are evidence candidates; they cannot grant catalog fit or execution authority.
+    """
+    semantic = getattr(plan, "semantic_proposal", None)
+    if not isinstance(semantic, dict):
+        return {
+            "source": "concept_resolution",
+            "found": False,
+            "summary": "",
+            "data": {"status": "not_requested", "claims": [], "catalog_qualifications": []},
+        }
+    concepts = [
+        item for item in list(semantic.get("concepts") or [])[:2]
+        if isinstance(item, dict) and item.get("material") and item.get("text")
+    ]
+    if not concepts:
+        return {
+            "source": "concept_resolution",
+            "found": False,
+            "summary": "",
+            "data": {"status": "no_material_concepts", "claims": [], "catalog_qualifications": []},
+        }
+    concept = str(concepts[0]["text"])[:120]
+    from src.app.services.semantic_research_fixture import resolve_fixture
+
+    fixture = resolve_fixture(concept)
+    if fixture is not None:
+        return {
+            "source": "concept_resolution",
+            "found": bool(fixture.get("items")),
+            "summary": str((fixture.get("items") or [{}])[0].get("snippet") or "")[:300],
+            "data": fixture,
+        }
+    if not bool(getattr(plan, "external_research_authorized", False)):
+        return {
+            "source": "concept_resolution",
+            "found": False,
+            "summary": "Buyer consent is required before external concept research.",
+            "data": {
+                "status": "consent_required",
+                "claims": [],
+                "catalog_qualifications": [],
+                "authority": "evidence_candidate_only",
+            },
+        }
+    from src.app.deps import scrub_pii
+    from src.app.services.external_product_research_service import run_external_research_stage
+
+    outbound_query = scrub_pii(f"{concept} definition requirements compatibility")
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
+    result = run_external_research_stage(
+        query=outbound_query,
+        results=None,
+        scrub=scrub_pii,
+        tenant_id=tenant_id,
+        cancellation=cancellation,
+    )
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
+    if result is None:
+        return {
+            "source": "concept_resolution",
+            "found": False,
+            "summary": "External concept research is not enabled.",
+            "data": {
+                "status": "disabled",
+                "query": outbound_query,
+                "claims": [],
+                "catalog_qualifications": [],
+                "authority": "evidence_candidate_only",
+            },
+        }
+    items = [item for item in list(result.get("items") or [])[:4] if isinstance(item, dict)]
+    clean: list[dict[str, Any]] = []
+    dropped = 0
+    try:
+        from src.app.security.image_threat_signals import detect_ocr_prompt_injection
+    except Exception:
+        detect_ocr_prompt_injection = None
+    for item in items:
+        content = f"{item.get('title') or ''} {item.get('snippet') or ''}"
+        if detect_ocr_prompt_injection is not None and detect_ocr_prompt_injection(content):
+            dropped += 1
+            continue
+        clean.append(item)
+    summary = str((clean[0] if clean else {}).get("snippet") or "")[:300]
+    return {
+        "source": "concept_resolution",
+        "found": bool(clean),
+        "summary": summary,
+        "data": {
+            "status": "evidence_candidates" if clean else "insufficient",
+            "concept": concept,
+            "query": outbound_query,
+            "query_hash": result.get("query_hash"),
+            "provider_id": result.get("provider_id") or "external_research",
+            "provider_run_status": result.get("run_status") or "unknown",
+            "cache_status": result.get("cache_status") or "not_recorded",
+            "source_status": result.get("source_status") or {},
+            "items": clean,
+            "claims": [],
+            "catalog_qualifications": [],
+            "injection_scan": {"checked": len(items), "dropped": dropped},
+            "authority": "evidence_candidate_only",
+        },
+    }
+
+
 def _leg_web(plan: Any, query: str, uid: Optional[str], *,
-             tenant_id: Optional[str] = None) -> Dict[str, Any]:
+             tenant_id: Optional[str] = None,
+             cancellation: EvidenceCancellation | None = None) -> Dict[str, Any]:
     """Governed external research leg (N3). Reuses the SSRF-safe guardrailed service end-to-end
     (allowlist from profile, size-bounded single-endpoint fetch, cache). Adds the inbound-content
     governance this leg owes on top: every snippet is injection-scanned (same detector as OCR text);
@@ -203,7 +392,13 @@ def _leg_web(plan: Any, query: str, uid: Optional[str], *,
     hidden. The outbound query is TEMPLATED from plan slots (zero user tokens)."""
     from src.app.services.external_product_research_service import run_external_research_stage
     templated = _templated_web_query(plan)
-    res = run_external_research_stage(query=templated, results=None, tenant_id=tenant_id)
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
+    res = run_external_research_stage(
+        query=templated, results=None, tenant_id=tenant_id, cancellation=cancellation,
+    )
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
     if res is None:
         return {"source": "external_web", "found": False, "summary": "", "data": {"disabled": True}}
     items = res.get("items") or []
@@ -236,6 +431,7 @@ def _leg_web(plan: Any, query: str, uid: Optional[str], *,
 
 
 _LEG_FNS: Dict[str, Callable[..., Dict[str, Any]]] = {
+    "concept_resolution": _leg_concept_resolution,
     "market": _leg_market,
     "policy": _leg_policy,
     "availability": _leg_availability,
@@ -274,6 +470,11 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
             "used_cost_units": 0,
         },
         "ms": 0,
+        "runtime": {
+            "cooperative_cancellations": 0,
+            "late_results_rejected": 0,
+            "outstanding_lanes_at_return": 0,
+        },
     }
     if not selected:
         return out
@@ -295,28 +496,86 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
         out["source_health"] = "degraded"
         return out
 
+    launched_at = time.perf_counter()
+    total_deadline = launched_at + configured.total_ms / 1000.0
+    lane_deadline = launched_at + configured.per_lane_ms / 1000.0
+    cancellations = {
+        name: EvidenceCancellation(name, min(total_deadline, lane_deadline)) for name in admitted
+    }
+
     def _run(name: str) -> Dict[str, Any]:
         fn = fns.get(name)
         if fn is None:
             return {"source": name, "found": False, "summary": "", "data": {}, "error": "no_leg_fn"}
         try:
+            cancellation = cancellations[name]
+            cancellation.raise_if_cancelled()
+            parameters = inspect.signature(fn).parameters
+            accepts_cancel = "cancellation" in parameters or any(
+                value.kind == inspect.Parameter.VAR_KEYWORD for value in parameters.values()
+            )
+            cancel_kw = {"cancellation": cancellation} if accepts_cancel else {}
             if name == "image":
-                return fn(plan, query, uid, image_identity=image_identity, tenant_id=tenant_id)
-            return fn(plan, query, uid, tenant_id=tenant_id)
+                result = fn(
+                    plan, query, uid, image_identity=image_identity, tenant_id=tenant_id, **cancel_kw
+                )
+            else:
+                result = fn(plan, query, uid, tenant_id=tenant_id, **cancel_kw)
+            cancellation.raise_if_cancelled()
+            return result
+        except EvidenceLaneCancelled as exc:
+            return {
+                "source": name, "found": False, "summary": "", "data": {},
+                "error": str(exc), "health": "cancelled",
+            }
         except Exception as exc:   # a broken leg is EVIDENCE of a problem, not silence
             return {"source": name, "found": False, "summary": "", "data": {}, "error": str(exc)[:160]}
 
     tasks: queue.Queue[Optional[str]] = queue.Queue()
     completed = {name: threading.Event() for name in admitted}
     results: Dict[str, Dict[str, Any]] = {}
+    result_lock = threading.Lock()
+    tenant_slots = _tenant_semaphore(tenant_id)
 
     def _worker() -> None:
         while True:
             name = tasks.get()
             if name is None:
                 return
-            results[name] = _run(name)
-            completed[name].set()
+            cancellation = cancellations[name]
+            remaining = max(0.0, cancellation.deadline_monotonic - time.perf_counter())
+            if not tenant_slots.acquire(timeout=remaining):
+                cancellation.cancel("tenant_concurrency_limit")
+                with result_lock:
+                    results[name] = {
+                        "source": name, "found": False, "summary": "", "data": {},
+                        "error": "tenant_concurrency_limit", "health": "cancelled",
+                    }
+                completed[name].set()
+                continue
+            _outstanding(1)
+            try:
+                result = _run(name)
+                with result_lock:
+                    if cancellation.cancelled:
+                        out["runtime"]["late_results_rejected"] += 1
+                        results[name] = {
+                            "source": name, "found": False, "summary": "", "data": {},
+                            "error": cancellation.reason or "late_result_rejected",
+                            "health": "cancelled",
+                        }
+                        try:
+                            from src.app.observability.evidence_metrics import evidence_late_results_total
+
+                            evidence_late_results_total.labels(lane=name).inc()
+                        except Exception:
+                            pass
+                    else:
+                        results[name] = result
+            finally:
+                _outstanding(-1)
+                tenant_slots.release()
+                completed[name].set()
 
     # Python threads cannot be killed safely. Executor workers are non-daemon,
     # so abandoning a timed-out future can keep a process alive. Daemon workers
@@ -337,14 +596,13 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
     for _worker_thread in workers:
         tasks.put(None)
 
-    launched_at = time.perf_counter()
-    total_deadline = launched_at + configured.total_ms / 1000.0
-    lane_deadline = launched_at + configured.per_lane_ms / 1000.0
     for name in admitted:
         remaining = max(0.0, min(total_deadline, lane_deadline) - time.perf_counter())
         if completed[name].wait(timeout=remaining):
             out["legs"][name] = results[name]
         else:
+            cancellations[name].cancel("lane_timeout")
+            out["runtime"]["cooperative_cancellations"] += 1
             out["legs"][name] = {
                 "source": name,
                 "found": False,
@@ -394,4 +652,5 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
     elif health_values and health_values <= {"empty"}:
         out["source_health"] = "empty"
     out["ms"] = int((time.perf_counter() - t0) * 1000)
+    out["runtime"]["outstanding_lanes_at_return"] = outstanding_evidence_lanes()
     return out
