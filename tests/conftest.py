@@ -566,6 +566,13 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
         shutdown_resilience_executor(wait=False)
     except Exception:
         pass
+    try:
+        from src.app.services.recommend_narration_jobs import (
+            shutdown_narration_resources,
+        )
+        shutdown_narration_resources(wait=False)
+    except Exception:
+        pass
     leaked_threads = [
         thread
         for thread in threading.enumerate()

@@ -1,6 +1,7 @@
 from src.app.services.recommend_narration_jobs import (
     narration_decision_fingerprint,
     observe_narration_fingerprint,
+    shutdown_narration_resources,
 )
 
 
@@ -38,3 +39,8 @@ def test_narration_fingerprint_observation_measures_duplicates_without_reusing_p
     assert first["outcome"] == "first_seen"
     assert second["outcome"] == "duplicate_candidate"
     assert second["prose_reused"] is False
+
+
+def test_narration_resource_shutdown_is_idempotent():
+    shutdown_narration_resources(wait=False)
+    shutdown_narration_resources(wait=False)

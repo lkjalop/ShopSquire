@@ -226,6 +226,22 @@ def _dedicated_resources() -> tuple[ThreadPoolExecutor, threading.BoundedSemapho
     return _DEDICATED_EXECUTOR, _DEDICATED_SLOTS
 
 
+def shutdown_narration_resources(*, wait: bool = False) -> None:
+    """Release the process-local narration pool during app or test shutdown.
+
+    The pool is lazy and may be recreated by a later app instance.  Clearing the
+    module references under the same lock prevents a concurrent submitter from
+    receiving an executor that has already begun shutting down.
+    """
+    global _DEDICATED_EXECUTOR, _DEDICATED_SLOTS
+    with _DEDICATED_LOCK:
+        executor = _DEDICATED_EXECUTOR
+        _DEDICATED_EXECUTOR = None
+        _DEDICATED_SLOTS = None
+    if executor is not None:
+        executor.shutdown(wait=wait, cancel_futures=True)
+
+
 def submit_narration(executor: Any, redis: Any, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     """Enqueue a narration job; return its id. The worker inherits the current context (active
     StoreProfile) via copy_context().run. Marks the job 'pending' synchronously so an immediate poll
