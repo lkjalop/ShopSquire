@@ -67,12 +67,13 @@ jobs:
       CV_VISION_ENABLED: "0"
       CV_OCR_PROVIDER: disabled
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
-      # Exercise the production quota boundary without making a nine-test
-      # conversation battery consume the entire guest allowance.
-      TOKEN_BUDGET_ENABLED: "1"
+      # Functional journeys own semantic/procurement behavior, not quota behavior.
+      # Quota contracts have dedicated tests; sharing a tenant-level allowance here
+      # makes test order change product outcomes and hides the real failure.
+      TOKEN_BUDGET_ENABLED: "0"
       TOKEN_BUDGET_GUEST_DAILY_TOKENS: "100000"
       TOKEN_BUDGET_GUEST_DAILY_USD: "10"
-      TENANT_QUOTAS_ENABLED: "1"
+      TENANT_QUOTAS_ENABLED: "0"
       TENANT_QUOTA_RECOMMEND_CALLS_DAILY: "10000"
       EMAIL_CONNECTOR_IDENTITY_MODE: shared_secret
       GMAIL_INGEST_SECRET: ci-browser-ingress-only
@@ -92,12 +93,12 @@ jobs:
       # on 8080; a local 8099 value would only test connection refusal.
       VITE_API_BASE_URL: http://localhost:8080
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: npm
@@ -251,7 +252,7 @@ jobs:
             sort | tee proof-artifacts/artifact-manifest.txt
       - name: Upload browser and runtime evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: procurement-browser-evidence
           path: |
@@ -297,8 +298,8 @@ jobs:
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
       CELERY_HMAC_KEY: ci-only-worker-signing-key
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -365,7 +366,7 @@ jobs:
             sort | tee proof-artifacts/artifact-manifest.txt
       - name: Upload worker evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: procurement-worker-evidence
           path: |
