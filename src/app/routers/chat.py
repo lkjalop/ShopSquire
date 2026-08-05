@@ -511,7 +511,9 @@ def _cart_mutation_short_circuit(
         # Read-only case status/summary responses intentionally keep the buyer's
         # current product/cart/procurement panel in place. This is a typed UI
         # contract, not an inference from an empty product list.
-        "preserve_current_view": bool(data.get("preserve_current_view")),
+        # A cart amendment is an in-place operation on the visible cart/procurement case.  An
+        # empty products list is not permission to replace that view with search results.
+        "preserve_current_view": True,
         "case_operation": data.get("case_operation"),
         "case_anchor": data.get("case_anchor") if isinstance(data.get("case_anchor"), dict) else None,
         "state_changed": data.get("state_changed"),
@@ -1420,6 +1422,8 @@ def _persist_chat_structured_state(
     assistant_message: str | None = None,
     recent_messages: List[Dict[str, Any]] | None = None,
     confirmed_slots: Dict[str, Any] | None = None,
+    semantic_resolution: Dict[str, Any] | None = None,
+    case_anchor: Dict[str, Any] | None = None,
     tenant_id: str | None = None,
     session_epoch: str | None = None,
 ) -> None:
@@ -1480,6 +1484,18 @@ def _persist_chat_structured_state(
     if skus:
         out["last_shortlist_skus"] = skus
         out["last_valid_shortlist_skus"] = skus
+
+    # Material semantic blockers are case authority, not transient presentation. Preserve them
+    # across short follow-ups so "choose" and "confirm" cannot silently reopen retrieval. A
+    # later permitted resolution explicitly clears the blocker; an unrelated response leaves the
+    # prior state intact rather than losing it because one adapter omitted the field.
+    if isinstance(semantic_resolution, dict):
+        if semantic_resolution.get("catalog_authority") == "blocked":
+            out["semantic_resolution"] = dict(semantic_resolution)
+        elif semantic_resolution.get("catalog_authority") == "permitted":
+            out.pop("semantic_resolution", None)
+    if isinstance(case_anchor, dict) and str(case_anchor.get("case_id") or "").strip():
+        out["case_anchor"] = dict(case_anchor)
 
     mem.set_structured_state(uid, out)
 
@@ -3450,6 +3466,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # /chat/query, not /suggest) loses the comparison AGAIN.
         "off_catalog": data.get("off_catalog"),
         "workload_fit": data.get("workload_fit"),
+        "semantic_resolution": (
+            data.get("semantic_resolution")
+            if isinstance(data.get("semantic_resolution"), dict) else None
+        ),
         # Canonical V2 presentation contract. These fields must survive the chat edge or the
         # browser falls back to an unlabeled legacy-looking slate even when the core correctly
         # separated best-fit, stretch, and noncompliant alternatives.
@@ -3698,6 +3718,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     anchor = {
                         "sku": sku,
                         "quantity": out.get("requested_quantity") or case_anchor.get("quantity"),
+                        "budget": {
+                            "currency": str(out.get("currency") or "AUD"),
+                            "scope": response_confirmed_slots.get("budget_scope"),
+                            "total_cents": response_confirmed_slots.get("total_budget_cents"),
+                        },
                         "destination": (
                             response_confirmed_slots.get("destination")
                             or response_confirmed_slots.get("ship_to")
@@ -3708,6 +3733,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             or case_anchor.get("deadline")
                         ),
                         "case_status": fulfillment_case.get("status"),
+                        "semantic_resolution": (
+                            out.get("semantic_resolution")
+                            if isinstance(out.get("semantic_resolution"), dict)
+                            else None
+                        ),
+                        "catalog_authority": case_anchor.get("catalog_authority"),
                     }
                     with Session(bind=bind, future=True) as case_db:
                         ensure_case_state(
@@ -3765,6 +3796,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             assistant_message=str(out.get("assistant_message") or ""),
             recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
             confirmed_slots=response_confirmed_slots,
+            semantic_resolution=(
+                out.get("semantic_resolution")
+                if isinstance(out.get("semantic_resolution"), dict) else None
+            ),
+            case_anchor=(
+                out.get("case_anchor")
+                if isinstance(out.get("case_anchor"), dict) else None
+            ),
             tenant_id=tenant_id,
             session_epoch=session_epoch,
         )

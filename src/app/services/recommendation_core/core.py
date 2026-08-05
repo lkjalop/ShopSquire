@@ -12,7 +12,9 @@ breadcrumbs, which is what the shadow differ diffs against the oracle.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
+import os
 import re
 import time
 from typing import Any, Callable, Dict, Optional
@@ -256,7 +258,15 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # continuation inheritance) — this is the turn's dominant latency, so the canary can attribute
     # the p50 to the model call vs the deterministic stages (P1 instrumentation).
     _t_route = time.perf_counter()
-    decision = route_turn(db, envelope, llm_fn=llm_fn)
+    from src.app.services.recommendation_core.turn_router import router_runtime_contract
+
+    router_contract = router_runtime_contract()
+    decision = route_turn(
+        db,
+        envelope,
+        llm_fn=llm_fn,
+        timeout=float(router_contract["inference_timeout_s"]),
+    )
     # Monetary changes require buyer-supplied evidence. A BYO router may propose a number
     # even when the turn only says "keep the total budget"; accepting that proposal would
     # let narration silently rewrite an order constraint. The canonical grammar is the
@@ -474,21 +484,59 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             logger.warning("ignored invalid inherited quantity: %s", exc)
 
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
+    plan = dataclasses.replace(
+        plan,
+        external_research_authorized=bool(envelope.external_research_consent),
+    )
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
     resp.record_stage("route+intent", status="ok",
                       latency_ms=(time.perf_counter() - _t_route) * 1000.0,
                       won_message=False, source=decision.source)
-    if decision.model_proposal:
-        resp.extras["llm_model"] = (
-            last_router_call_metrics().get("model") or active_router_model()
+    model_metrics = last_router_call_metrics()
+    if decision.model_proposal or model_metrics.get("model"):
+        resp.extras["llm_model"] = model_metrics.get("model") or active_router_model()
+        resp.extras["model_invocation"] = {
+            key: model_metrics.get(key)
+            for key in (
+                "provider", "model", "model_version", "prompt_version", "policy_version",
+                "outcome", "wall_ms", "queue_ms",
+            )
+            if model_metrics.get(key) is not None
+        }
+    if decision.source == "fallback:model_unavailable":
+        model_outcome = str(model_metrics.get("outcome") or "source_unavailable")
+        typed_outcome = (
+            "timed_out"
+            if model_outcome in {"timeout", "queue_timeout"}
+            else "source_unavailable"
         )
+        resp.degraded = True
+        resp.extras["router_outcome"] = {
+            "status": typed_outcome,
+            "source": decision.source,
+            "provider_outcome": model_outcome,
+            "late_results_accepted": False,
+            "fallback_authority": "deterministic_only",
+        }
     resp.extras["decision"] = decision.as_dict()
     resp.extras["secondary_lanes"] = list(decision.secondary_lanes)
     if requested_quantity is not None:
         resp.extras["requested_quantity"] = requested_quantity
         resp.extras["quantity_inherited"] = quantity_inherited
     resp.extras["plan"] = plan.as_dict()
+    resp.extras["execution_budgets"] = {
+        "acknowledgement_ms": 1000,
+        "router": dict(router_contract),
+        "research": {
+            "per_lane_ms": int(os.getenv("RESEARCH_LANE_TIMEOUT_MS", "1800") or 1800),
+            "total_ms": int(os.getenv("RESEARCH_TOTAL_TIMEOUT_MS", "2000") or 2000),
+        },
+        "narration": {
+            "mode": str(os.getenv("RECOMMEND_NARRATION_MODE", "blocking") or "blocking"),
+            "separate_background_pool": True,
+        },
+    }
     # the resolver's reasoning, surfaced for the 'Why Recommended' decision-trace tab
     resp.extras["intent"] = {"use_cases": intent["use_cases"],
                              "use_case_variants": intent.get("use_case_variants") or {},
@@ -521,6 +569,92 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "requirements_inherited": requirements_inherited,
     }
 
+    # MIXED-TURN AUTHORITY. Explicit money/quantity/date/identity grammar is only a
+    # conservative fallback; every recognized obligation is still passed through the
+    # canonical case reducer. The reducer may identify an authorization boundary but never
+    # grants it. This prevents a trailing "confirm" from leapfrogging a pending amendment.
+    from src.app.services.conversation_case_state import reduce_case_obligations
+
+    session_anchor = (
+        envelope.session.get("case_anchor")
+        if isinstance(envelope.session.get("case_anchor"), dict) else {}
+    )
+    accepted_case = (
+        envelope.session.get("accepted_constraints")
+        if isinstance(envelope.session.get("accepted_constraints"), dict) else {}
+    )
+    prior_semantic = (
+        envelope.session.get("semantic_resolution")
+        if isinstance(envelope.session.get("semantic_resolution"), dict) else {}
+    )
+    case_state = {
+        **accepted_case,
+        **session_anchor,
+        "sku": (
+            session_anchor.get("selected_sku")
+            or session_anchor.get("sku")
+            or accepted_case.get("exact_product_sku")
+        ),
+        "quantity": requested_quantity or session_anchor.get("quantity") or accepted_case.get("quantity"),
+        "budget": session_anchor.get("budget") or accepted_case.get("budget"),
+        "atp_snapshot": session_anchor.get("atp_snapshot") or accepted_case.get("atp_snapshot"),
+    }
+    catalog_authority = str(
+        prior_semantic.get("catalog_authority")
+        or session_anchor.get("catalog_authority")
+        or ("permitted" if not prior_semantic else "blocked")
+    )
+    case_obligations = reduce_case_obligations(
+        envelope.query,
+        current_state=case_state,
+        catalog_authority=catalog_authority,
+        selected_sku_candidate=decision.exact_product_sku,
+    )
+    if case_obligations:
+        resp.extras["case_obligations"] = list(case_obligations)
+        blocked_commitment = next(
+            (
+                item for item in case_obligations
+                if item.get("kind") == "buyer_commitment"
+                and item.get("status") in {"blocked", "clarify"}
+            ),
+            None,
+        )
+        if blocked_commitment is not None:
+            reason = str(blocked_commitment.get("reason") or "commitment_prerequisite_missing")
+            question_text = {
+                "selected_product_anchor_required": "Select one evidence-qualified product before confirming the order.",
+                "versioned_atp_snapshot_required": "I need a current, versioned availability check before confirming this order.",
+                "catalog_authority_blocked": "Resolve the material product requirements before selecting or confirming an order.",
+                "prior_obligation_requires_confirmation": "Confirm the pending case amendment before confirming the order.",
+            }.get(reason, "Resolve the missing commitment prerequisite before confirming the order.")
+            resp.clarify.append({
+                "id": "commitment_prerequisite",
+                "goal": "authorize_buyer_commitment",
+                "reason": reason,
+                "missing_slots": [reason],
+                "text": question_text,
+                "options": [],
+            })
+            resp.extras["semantic_resolution"] = {
+                "outcome": "clarify",
+                "catalog_authority": catalog_authority,
+                "residual_route": str(blocked_commitment.get("residual_route") or "ASK"),
+                "residual_reasons": [reason],
+                "questions": [{"question_id": "commitment_prerequisite", "question": question_text}],
+                "state_prevented": ["buyer_commitment", "allocation", "supplier_rfq", "purchase_order"],
+                "next_permitted_action": "resolve_commitment_prerequisite",
+                "case_obligations": list(case_obligations),
+            }
+            resp.set_message(question_text, MsgPriority.BULK_SCOPE_CLARIFY)
+            resp.record_stage(
+                "case_obligations:pre_commitment",
+                status="clarify",
+                won_message=True,
+                reason=reason,
+            )
+            return resp.finalize()
+
     # SMALL LOOP, BEFORE RETRIEVAL: only material missing slots stop execution. Generic workload
     # refinement remains post-retrieval; an unresolved bulk budget scope changes the authorized
     # price ceiling and therefore must be answered before products are selected.
@@ -537,6 +671,122 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     resp.extras["gates"] = gates
     if gates["policy_route"] != "allow":
         resp.degraded = True
+
+    # GENERIC SEMANTIC AUTHORITY GATE.  The model can identify an unfamiliar or
+    # ambiguous concept and propose questions, but cannot turn that proposal into
+    # catalog fit.  Evidence collection is bounded and consent-aware; only fully
+    # normalized, provenance-bearing claims can resolve a material concept.
+    semantic_decision_for_alignment = None
+    semantic_catalog_qualifications: list[dict[str, Any]] = []
+    if plan.needs_concept_resolution:
+        from src.app.services.evidence_orchestrator import (
+            EvidenceBudget,
+            gather_evidence as gather_semantic_evidence,
+        )
+        from src.app.services.semantic_resolution import (
+            approved_narration_evidence,
+            normalize_concept_evidence,
+            reduce_semantic_proposal,
+            validate_semantic_proposal,
+        )
+
+        raw_semantic = {
+            key: value for key, value in plan.semantic_proposal.items()
+            if key not in ("validation", "reasons")
+        }
+        semantic_anchor = (
+            str(raw_semantic.get("desired_outcome") or envelope.query)
+            if raw_semantic.get("persisted_case_blocker")
+            else envelope.query
+        )
+        raw_semantic.pop("persisted_case_blocker", None)
+        raw_semantic.pop("state_prevented", None)
+        validation = validate_semantic_proposal(raw_semantic, query=semantic_anchor)
+        try:
+            semantic_lane_ms = max(100, min(int(os.getenv("RESEARCH_LANE_TIMEOUT_MS", "1800") or 1800), 30_000))
+            semantic_total_ms = max(100, min(int(os.getenv("RESEARCH_TOTAL_TIMEOUT_MS", "2000") or 2000), 60_000))
+        except (TypeError, ValueError):
+            semantic_lane_ms, semantic_total_ms = 1800, 2000
+        evidence_bundle = gather_semantic_evidence(
+            plan,
+            query=envelope.query,
+            uid=envelope.uid,
+            tenant_id=envelope.tenant_id,
+            web_consent=envelope.external_research_consent,
+            evidence_budget=EvidenceBudget(
+                per_lane_ms=semantic_lane_ms,
+                total_ms=semantic_total_ms,
+                max_cost_units=3,
+            ),
+        )
+        normalized_rows = []
+        concept_leg = (evidence_bundle.get("legs") or {}).get("concept_resolution") or {}
+        concept_data = concept_leg.get("data") or {}
+        if isinstance(concept_data.get("normalized_evidence"), list):
+            normalized_rows = concept_data["normalized_evidence"]
+        normalized = normalize_concept_evidence(normalized_rows)
+        semantic_decision = reduce_semantic_proposal(validation, evidence=normalized)
+        semantic_decision_for_alignment = semantic_decision
+        semantic_catalog_qualifications = [
+            dict(item) for item in (concept_data.get("catalog_qualifications") or [])
+            if isinstance(item, dict)
+        ][:100]
+        resp.extras["semantic_resolution"] = semantic_decision.as_dict()
+        resp.extras["semantic_evidence"] = evidence_bundle
+        resp.extras["approved_narration_evidence"] = list(
+            approved_narration_evidence(normalized)
+        )
+        if semantic_decision.catalog_authority != "permitted":
+            prior_case_anchor = (
+                envelope.session.get("case_anchor")
+                if isinstance(envelope.session.get("case_anchor"), dict)
+                else {}
+            )
+            semantic_case_id = str(prior_case_anchor.get("case_id") or "").strip()
+            if not semantic_case_id:
+                session_epoch = str(envelope.session.get("session_epoch") or "current")
+                semantic_case_id = "semantic-" + hashlib.sha256(
+                    f"{envelope.tenant_id}|{envelope.uid}|{session_epoch}".encode("utf-8")
+                ).hexdigest()[:24]
+            resp.extras["case_anchor"] = {
+                **prior_case_anchor,
+                "case_id": semantic_case_id,
+                "kind": "semantic_qualification",
+                "selected_sku": prior_case_anchor.get("selected_sku"),
+                "catalog_authority": "blocked",
+            }
+            proposed = list(semantic_decision.questions or ())
+            if proposed:
+                first = proposed[0]
+                question = {
+                    "id": str(first.get("question_id") or "concept_resolution"),
+                    "goal": str(first.get("purpose") or "resolve_concept"),
+                    "reason": "unresolved_material_concept",
+                    "missing_slots": ["concept_resolution"],
+                    "text": str(first.get("question") or "").strip(),
+                    "options": [],
+                }
+            else:
+                question = {
+                    "id": "concept_resolution",
+                    "goal": "resolve_concept",
+                    "reason": "unresolved_material_concept",
+                    "missing_slots": ["concept_resolution"],
+                    "text": (
+                        "Which exact meaning, standard, software, material, compatibility target, "
+                        "or performance requirement should the product satisfy?"
+                    ),
+                    "options": [],
+                }
+            resp.clarify.append(question)
+            resp.set_message(question["text"], MsgPriority.BULK_SCOPE_CLARIFY)
+            resp.record_stage(
+                "semantic_resolution:pre_catalog",
+                status=semantic_decision.outcome,
+                won_message=True,
+                reason=question["reason"],
+            )
+            return resp.finalize()
     if decision.product_type_options:
         choices = []
         for handle in decision.product_type_options:
@@ -581,6 +831,55 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                       latency_ms=(time.perf_counter() - _t_plan) * 1000.0,
                       retrieval_count=int((resp.extras.get("evidence") or {}).get("count") or 0),
                       won_message=resp._msg_priority > _prio_before)
+
+    # Resolving a concept permits catalog alignment; it does not itself prove
+    # that any SKU is suitable. Only SKU qualifications emitted by an enrolled
+    # evidence provider are eligible. Similarity and product prose stay
+    # unverified and are withheld from the recommendation slate.
+    if semantic_decision_for_alignment is not None:
+        from src.app.services.semantic_resolution import align_catalog
+
+        qualification_by_sku = {
+            str(item.get("sku")): str(item.get("alignment_status") or "unverified")
+            for item in semantic_catalog_qualifications
+            if item.get("sku")
+        }
+        alignment = align_catalog(
+            semantic_decision_for_alignment,
+            [
+                {
+                    "sku": product.sku,
+                    "alignment_status": qualification_by_sku.get(product.sku, "unverified"),
+                }
+                for product in resp.products
+            ],
+        )
+        resp.extras["catalog_alignment"] = alignment.as_dict()
+        allowed_skus = set(alignment.exact + alignment.qualified + alignment.alternatives)
+        resp.products = [product for product in resp.products if product.sku in allowed_skus]
+        if alignment.status == "no_exact_catalog_match":
+            resp.extras["supplier_enquiry_option"] = {
+                "status": "available_after_buyer_commitment",
+                "auto_sent": False,
+                "evidence_refs": [
+                    row.get("citation_id")
+                    for row in (resp.extras.get("approved_narration_evidence") or [])
+                    if row.get("citation_id")
+                ],
+            }
+            if alignment.alternatives:
+                resp.set_message(
+                    "No exact evidence-qualified catalog match was found. These are qualified "
+                    "alternatives; supplier enquiry remains available after buyer commitment.",
+                    MsgPriority.CAPABILITY_STATEMENT,
+                )
+            else:
+                resp.set_message(
+                    "No exact or qualified catalog match is currently supported by approved "
+                    "evidence. I can preserve the requirements for a supplier enquiry after "
+                    "buyer commitment.",
+                    MsgPriority.CAPABILITY_STATEMENT,
+                )
 
     # Closed, model-interpreted scope with a deterministic authorization clamp in the router.
     # This is intentionally generic: the core does not learn pizza, restaurants, plumbers, or
@@ -812,8 +1111,11 @@ def _apply_capability_budget(db, envelope: TurnEnvelope, decision: TurnDecision,
         # The broader host-scope probe may recover a valid product that the initial leaf
         # retrieval missed. If it is still inside the authorized cap, it belongs in the primary
         # slate; do not merely quote its floor while showing inferior failing products.
+        bmin = envelope.budget_min_cents
         recovered = [c for c in bf_cards
-                     if c.price_cents is not None and c.price_cents <= bmax
+                     if c.price_cents is not None
+                     and (bmin is None or c.price_cents >= bmin)
+                     and c.price_cents <= bmax
                      and (c.fit or {}).get("overall") == "meets"]
         if recovered:
             existing = {c.sku for c in recovered}
@@ -1421,6 +1723,31 @@ def _retrieve_prior_shortlist(db, envelope: TurnEnvelope, decision: TurnDecision
     if not variants:
         return False
     variants = _currency_eligible_variants(variants, envelope, resp)
+    # Subject continuity does not override the current accepted constraints.
+    # Replaying an earlier shortlist after a buyer changed their price range or
+    # brand boundary otherwise makes the trace and visible cards disagree.
+    lo, hi = envelope.budget_min_cents, envelope.budget_max_cents
+    if lo is not None or hi is not None:
+        variants = [
+            variant for variant in variants
+            if variant.price_cents is not None
+            and (lo is None or variant.price_cents >= lo)
+            and (hi is None or variant.price_cents <= hi)
+        ]
+    if decision.brand_filter:
+        brand = decision.brand_filter.strip().lower()
+        variants = [
+            variant for variant in variants
+            if (variant.brand or "").strip().lower() == brand
+        ]
+    if decision.exclude_brand:
+        excluded = decision.exclude_brand.strip().lower()
+        variants = [
+            variant for variant in variants
+            if (variant.brand or "").strip().lower() != excluded
+        ]
+    if not variants:
+        return False
     resp.extras["evidence"] = {"retrieval_mode": "prior_shortlist", "count": len(variants),
                                "skus": [v.sku for v in variants]}
     # a NAMED compare over the shortlist ('the ROG vs the Katana') narrows the same way (R9.3)
@@ -1491,7 +1818,9 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
             bundle.errors = [err for leg in legs for err in leg.errors]
     if bundle is None:
         bundle = gather_evidence(db, envelope, node_handle=decision.node_handle,
-                                 limit=max(limit * 3, 30))
+                                 limit=max(limit * 3, 30),
+                                 exact_skus=([decision.exact_product_sku]
+                                             if decision.exact_product_sku else None))
     # RETRIEVAL SCOPE UNION (Phase 1.5 fix): when the routed node is a workload-HOST device with
     # capability requirements, augment the candidate set with the store's device host UNION
     # (Laptops + Gaming Laptops) — mirroring the capability FLOOR, which already spans the union via
@@ -1499,7 +1828,8 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     # classified under a sibling node was never even a candidate and closest-match faithfully showed
     # FAILING laptops (the source of the gpu_vram_gb/ram_gb replay 'failures' — a retrieval gap, not
     # a ranking bug). Budget stays applied (real envelope, not the free floor env).
-    if decision.requirements and _is_workload_host_product(decision.node_handle):
+    if (decision.requirements and not decision.exact_product_sku
+            and _is_workload_host_product(decision.node_handle)):
         _siblings = [n for n in _capability_scope_nodes(decision)
                      if n and n != decision.node_handle]
         if _siblings:
@@ -1697,6 +2027,40 @@ def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
 
 def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision,
                               resp: CoreResponse, limit: int) -> None:
+    if decision.case_operation in ("status", "summary"):
+        session = envelope.session or {}
+        accepted = session.get("accepted_constraints") if isinstance(
+            session.get("accepted_constraints"), dict
+        ) else {}
+        sku = decision.exact_product_sku
+        quantity = decision.quantity
+        case_id = (session.get("fulfillment_case_id") or session.get("procurement_case_id")
+                   or session.get("sourcing_request_id"))
+        anchor = " · ".join(
+            value for value in (
+                sku,
+                f"{quantity} units" if quantity else None,
+                f"case {case_id}" if case_id else None,
+            ) if value
+        )
+        message = "Your procurement case is still active"
+        if anchor:
+            message += f" for {anchor}"
+        message += ". I kept the existing product and case context; no new search or commercial action was started."
+        resp.extras.update({
+            "case_operation": decision.case_operation,
+            "preserve_current_view": True,
+            "state_changed": False,
+            "case_anchor": {
+                "sku": sku,
+                "quantity": quantity,
+                "case_id": case_id,
+                "destination_token": accepted.get("destination_token"),
+                "deadline": accepted.get("deadline"),
+            },
+        })
+        resp.set_message(message, MsgPriority.LANE_BASE)
+        return
     from .procurement import build_procurement_advice
     advice = build_procurement_advice(envelope)
     resp.extras.update({key: value for key, value in advice.items() if key != "message"})

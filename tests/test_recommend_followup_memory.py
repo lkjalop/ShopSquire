@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from src.app.main import create_app
+from src.app.deps import get_redis
 from src.app.models.db import db_session
 from src.app.services.commerce_catalog import upsert_inventory, upsert_price
 from src.app.services.memory import Memory
@@ -33,6 +34,11 @@ class _MemoryRedis:
 
     def setex(self, key, _ttl, value):
         self.values[key] = value
+
+    def incrby(self, key, amount):
+        value = int(self.values.get(key) or 0) + int(amount)
+        self.values[key] = str(value)
+        return value
 
     def sadd(self, key, value):
         self.sets.setdefault(key, set()).add(value)
@@ -189,7 +195,15 @@ def test_followup_query_reads_scoped_budget_context():
 
 
 def test_followup_widen_budget_by_delta_uses_prior_envelope(monkeypatch):
+    # The repository's developer .env may intentionally exercise a one-turn
+    # guest quota. This contract owns multi-turn memory semantics, so give the
+    # isolated buyer enough bounded allowance to reach the follow-up rather
+    # than making the assertion depend on a maintainer's local FinOps profile.
+    monkeypatch.setenv("TOKEN_BUDGET_ENABLED", "1")
+    monkeypatch.setenv("TOKEN_BUDGET_GUEST_DAILY_TOKENS", "10000")
     app = create_app()
+    redis = _MemoryRedis()
+    app.dependency_overrides[get_redis] = lambda: redis
     client = TestClient(app, headers=default_headers())
     state: dict[str, dict] = {}
 
@@ -205,20 +219,37 @@ def test_followup_widen_budget_by_delta_uses_prior_envelope(monkeypatch):
 
     uid = "followup-memory-user-delta"
 
-    first = client.get(
-        "/api/v1/recommend/suggest",
-        params={"uid": uid, "query": "show me gaming laptops between 1500 to 1900"},
-    )
-    assert first.status_code == 200
-    first_constraints = (first.json() or {}).get("constraints_used") or {}
-    assert int(first_constraints.get("budget_max")) == 1900
-    assert int(first_constraints.get("budget_min")) == 1500
+    try:
+        first = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": uid, "query": "show me gaming laptops between 1500 to 1900"},
+        )
+        assert first.status_code == 200
+        first_constraints = (first.json() or {}).get("constraints_used") or {}
+        assert int(first_constraints.get("budget_max")) == 1900
+        assert int(first_constraints.get("budget_min")) == 1500
 
-    second = client.get(
-        "/api/v1/recommend/suggest",
-        params={"uid": uid, "query": "can we widen the budget range by 600?"},
-    )
-    assert second.status_code == 200
-    second_constraints = (second.json() or {}).get("constraints_used") or {}
-    assert int(second_constraints.get("budget_max")) == 2500
-    assert int(second_constraints.get("budget_min")) == 2100
+        second = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": uid, "query": "can we widen the budget range by 600?"},
+        )
+        assert second.status_code == 200, second.text
+        second_constraints = (second.json() or {}).get("constraints_used") or {}
+        assert int(second_constraints.get("budget_max")) == 2500
+        assert int(second_constraints.get("budget_min")) == 2100
+
+        third = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": uid, "query": "only show options with at least 16 GB RAM"},
+        )
+        assert third.status_code == 200, third.text
+        third_body = third.json() or {}
+        third_constraints = third_body.get("constraints_used") or {}
+        assert third_constraints.get("budget_inherited") is True
+        assert int(third_constraints.get("budget_max")) == 2500
+        assert int(third_constraints.get("budget_min")) == 2100
+        for product in third_body.get("products") or []:
+            price_cents = int(product.get("price_cents") or 0)
+            assert 210_000 <= price_cents <= 250_000
+    finally:
+        app.dependency_overrides.pop(get_redis, None)

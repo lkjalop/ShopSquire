@@ -335,6 +335,27 @@ def _cart_confirm_message(plan) -> str:
                 detail += f" to remain within the ${op.budget_max_cents / 100:,.0f} total budget"
             bits.append(detail)
     what = "; ".join(bits) or "apply that cart change"
+    budget_note = ""
+    for op in plan.ops:
+        if not (
+            op.action == "set_quantity"
+            and op.budget_max_cents is not None
+            and op.unit_price_cents is not None
+            and op.quantity is not None
+            and op.previous_quantity is not None
+            and op.quantity < op.previous_quantity
+        ):
+            continue
+        proposed_total = int(op.quantity) * int(op.unit_price_cents)
+        headroom = max(0, int(op.budget_max_cents) - proposed_total)
+        budget_note = (
+            f" Your ${op.budget_max_cents / 100:,.0f} whole-order budget remains unchanged. "
+            f"At the current unit price, {op.quantity} units use ${proposed_total / 100:,.0f} "
+            f"and leave ${headroom / 100:,.0f} unallocated. That does not authorize a more "
+            "expensive model; after the quantity change, choose whether to keep this model, "
+            "raise the per-unit ceiling for a qualified alternative, or lower the total budget."
+        )
+        break
     reconfirm = ""
     if any(op.action in {"set_quantity", "replace_item", "remove_items", "clear_all",
                          "clear_previous", "keep_only"} for op in plan.ops):
@@ -342,7 +363,7 @@ def _cart_confirm_message(plan) -> str:
                      "before checkout.")
     return (f"Just to confirm before I touch your cart — you want me to: {what}. "
             f"Nothing is changed yet; confirm and I'll apply it (undo stays available)."
-            f"{reconfirm}")
+            f"{budget_note}{reconfirm}")
 
 
 def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
@@ -530,7 +551,9 @@ def _read_session_slice(
                 procurement_active = bool(legacy.get("last_sourcing_intent"))
             shortlist = (legacy.get("last_valid_shortlist_skus")
                          or legacy.get("last_shortlist_skus") or [])
+            exact_product_sku = confirmed.get("exact_product_sku")
             return {
+                "session_epoch": session_epoch,
                 "prior_node": _classified_subject(db, shortlist, tenant_id),
                 # The mature legacy procurement workflow remains the executor. Bridge only its
                 # explicit workflow state into the V2 routing context; do not infer procurement
@@ -545,16 +568,26 @@ def _read_session_slice(
                     "budget_scope": budget_scope,
                     "requirements": {},
                     "quantity": quantity,
+                    "exact_product_sku": exact_product_sku,
                 },
                 "legacy_bridge": True,
             }
         shortlist = data.get("last_shortlist_skus") or []
-        return {"prior_node": (data.get("last_node_handle")
+        return {"session_epoch": session_epoch,
+                "prior_node": (data.get("last_node_handle")
                                or _classified_subject(db, shortlist, tenant_id)),
                 "prior_lane": data.get("last_lane"),
                 "active_workflow_lane": data.get("active_workflow_lane"),
                 "shortlist_skus": shortlist,
-                "accepted_constraints": data.get("constraints") or {}}
+                "accepted_constraints": data.get("constraints") or {},
+                "semantic_resolution": (
+                    data.get("semantic_resolution")
+                    if isinstance(data.get("semantic_resolution"), dict) else None
+                ),
+                "case_anchor": (
+                    data.get("case_anchor")
+                    if isinstance(data.get("case_anchor"), dict) else None
+                )}
     except Exception:
         return {}
 

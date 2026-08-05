@@ -85,8 +85,30 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
     )
     model_selection = None
     if decision.get("model_proposal"):
+        from src.app.services.llm_providers import invocation_version_trace
+
+        recorded_invocation = (
+            core.extras.get("model_invocation")
+            if isinstance(core.extras.get("model_invocation"), dict) else {}
+        )
+        selected_model = str(
+            recorded_invocation.get("model") or core.extras.get("llm_model") or "unknown"
+        )
+        provider = str(recorded_invocation.get("provider") or (
+            "ollama" if selected_model != "unknown" else "unrecorded"
+        ))
+        invocation = invocation_version_trace(
+            provider,
+            selected_model,
+            {
+                "model_version": recorded_invocation.get("model_version"),
+                "prompt_version": recorded_invocation.get("prompt_version") or "recommend-router-v2",
+                "policy_version": recorded_invocation.get("policy_version") or "semantic-authority-v1",
+            },
+        )
         model_selection = {
-            "selected": core.extras.get("llm_model") or "unknown",
+            "selected": selected_model,
+            **invocation,
             "source": decision.get("source") or "unknown",
             "authority": "proposes",
             "latency_ms": route_stage.get("latency_ms"),
@@ -129,6 +151,20 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "availability": core.extras.get("availability"),
         "fulfillment_options": core.extras.get("fulfillment_options"),
         "sourcing_intent": core.extras.get("sourcing_intent"),
+        "semantic_resolution": core.extras.get("semantic_resolution"),
+        "semantic_evidence": core.extras.get("semantic_evidence"),
+        "approved_narration_evidence": core.extras.get("approved_narration_evidence", []),
+        "catalog_alignment": core.extras.get("catalog_alignment"),
+        "supplier_enquiry_option": core.extras.get("supplier_enquiry_option"),
+        # Read-only procurement operations are a first-class compatibility contract.
+        # Dropping these fields made the browser replace the current case with an empty
+        # recommendation slate even though the V2 core correctly performed no retrieval.
+        "preserve_current_view": bool(core.extras.get("preserve_current_view")),
+        "case_operation": core.extras.get("case_operation"),
+        "case_anchor": core.extras.get("case_anchor"),
+        "state_changed": core.extras.get("state_changed"),
+        "case_obligations": core.extras.get("case_obligations", []),
+        "router_outcome": core.extras.get("router_outcome"),
         # v1 semantics: a budget-carrying search reads as FILTER (the recorded naming)
         "turn_intent": ("FILTER" if core.lane == "SEARCH"
                         and (core.envelope.budget_max_cents is not None
