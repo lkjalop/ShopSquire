@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -23,7 +24,7 @@ DERIVED_TYPES = frozenset({
 
 CACHE_LIFECYCLE_STATUSES = frozenset({
     "fresh", "stale", "invalidated", "rebuild_queued", "rebuilding",
-    "rebuilt", "degraded", "superseded", "failed",
+    "rebuilt", "degraded", "superseded", "superseded_eviction_pending", "failed",
 })
 SERVABLE_CACHE_STATUSES = frozenset({"fresh", "rebuilt"})
 # These are mutable operational authorities. They must be read from their
@@ -33,6 +34,49 @@ _NON_CACHEABLE_AUTHORITY_NAMESPACES = frozenset({
     "inventory_reservations", "payment_authorization", "buyer_promise",
     "supplier_availability",
 })
+_LOG = logging.getLogger(__name__)
+
+
+def _record_eviction_metric(outcome: str) -> None:
+    try:
+        from src.app.observability.cache_metrics import temporal_cache_eviction_total
+
+        temporal_cache_eviction_total.labels(outcome=str(outcome)).inc()
+    except Exception:
+        _LOG.debug("temporal cache metric unavailable", exc_info=True)
+
+
+def _strict_cache_delete(cache: Any, cache_key: str) -> None:
+    strict = getattr(cache, "delete_strict", None)
+    if callable(strict):
+        strict(cache_key)
+        return
+    cache.delete(cache_key)
+
+
+def _queue_cache_eviction(
+    db, *, tenant_id: str, entry_id: str, cache_key: str, reason: str, error: str,
+) -> dict[str, Any]:
+    idem = hashlib.sha256(
+        "|".join((str(tenant_id), str(entry_id), str(cache_key), str(reason))).encode("utf-8")
+    ).hexdigest()
+    existing = db.execute(text(
+        "SELECT id,status FROM temporal_cache_eviction_job "
+        "WHERE tenant_id=:t AND idempotency_key=:idem"
+    ), {"t": str(tenant_id), "idem": idem}).fetchone()
+    if existing:
+        return {"job_id": str(existing[0]), "status": str(existing[1]), "idempotent": True}
+    job_id = str(uuid.uuid4())
+    db.execute(text(
+        "INSERT INTO temporal_cache_eviction_job "
+        "(id,tenant_id,entry_id,cache_key,idempotency_key,status,reason,attempts,"
+        "dispatch_attempts,created_at,last_error) VALUES "
+        "(:id,:t,:eid,:key,:idem,'queued',:reason,0,0,:now,:error)"
+    ), {
+        "id": job_id, "t": str(tenant_id), "eid": str(entry_id), "key": str(cache_key),
+        "idem": idem, "reason": str(reason), "now": _now(), "error": str(error)[:2000],
+    })
+    return {"job_id": job_id, "status": "queued", "idempotent": False}
 
 
 def _now() -> str:
@@ -199,13 +243,109 @@ def supersede_cache_entry(
         "UPDATE temporal_cache_generation SET status='superseded',superseded_at=:now "
         "WHERE entry_id=:eid AND generation=:gen AND status IN ('fresh','rebuilt')"
     ), {"now": now, "eid": str(row[0]), "gen": row[1]})
+    eviction = {"status": "not_requested", "job_id": None}
     if cache is not None:
         try:
-            cache.delete(str(cache_key))
-        except Exception:
-            pass
+            _strict_cache_delete(cache, str(cache_key))
+            eviction = {"status": "evicted", "job_id": None}
+            _record_eviction_metric("succeeded")
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            db.execute(text(
+                "UPDATE temporal_cache_entry SET status='superseded_eviction_pending',"
+                "last_error=:error,updated_at=:now WHERE id=:id"
+            ), {"error": error[:2000], "now": _now(), "id": str(row[0])})
+            job = _queue_cache_eviction(
+                db, tenant_id=str(tenant_id), entry_id=str(row[0]), cache_key=str(cache_key),
+                reason=str(reason), error=error,
+            )
+            eviction = {"status": "eviction_pending", "job_id": job["job_id"], "error": error}
+            _record_eviction_metric("failed")
+            _LOG.warning(
+                "temporal_cache_eviction_pending tenant=%s cache_key=%s job_id=%s error=%s",
+                tenant_id, cache_key, job["job_id"], type(exc).__name__,
+            )
     return {"tenant_id": str(tenant_id), "cache_key": str(cache_key),
-            "status": "superseded", "changed": True}
+            "status": "superseded" if eviction["status"] != "eviction_pending"
+            else "superseded_eviction_pending", "changed": True, "eviction": eviction}
+
+
+def dispatch_queued_evictions(
+    db, *, dispatch: Any, tenant_id: str | None = None, limit: int = 50,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"limit": max(1, min(int(limit), 200))}
+    tenant_clause = ""
+    if tenant_id is not None:
+        tenant_clause = " AND tenant_id=:tenant"
+        params["tenant"] = str(tenant_id)
+    rows = db.execute(text(
+        "SELECT id,tenant_id FROM temporal_cache_eviction_job WHERE status IN ('queued','degraded') "
+        f"AND dispatched_at IS NULL{tenant_clause} ORDER BY created_at,id LIMIT :limit"
+    ), params).fetchall()
+    sent, failed = [], []
+    for row in rows:
+        job_id, owner = str(row[0]), str(row[1])
+        try:
+            dispatch(owner, job_id)
+            db.execute(text(
+                "UPDATE temporal_cache_eviction_job SET dispatched_at=CURRENT_TIMESTAMP,"
+                "dispatch_attempts=dispatch_attempts+1 WHERE id=:id AND tenant_id=:t"
+            ), {"id": job_id, "t": owner})
+            sent.append(job_id)
+        except Exception as exc:
+            db.execute(text(
+                "UPDATE temporal_cache_eviction_job SET dispatch_attempts=dispatch_attempts+1,"
+                "last_error=:error WHERE id=:id AND tenant_id=:t"
+            ), {"error": f"dispatch:{type(exc).__name__}"[:2000], "id": job_id, "t": owner})
+            failed.append(job_id)
+    return {"examined": len(rows), "dispatched": sent, "failed": failed}
+
+
+def execute_cache_eviction(
+    db, *, tenant_id: str, job_id: str, cache: Any,
+) -> dict[str, Any]:
+    row = db.execute(text(
+        "SELECT id,entry_id,cache_key,status FROM temporal_cache_eviction_job "
+        "WHERE id=:id AND tenant_id=:t"
+    ), {"id": str(job_id), "t": str(tenant_id)}).fetchone()
+    if not row:
+        raise ValueError("cache_eviction_job_not_found")
+    if str(row[3]) == "succeeded":
+        return {"job_id": str(job_id), "status": "succeeded", "idempotent": True}
+    if str(row[3]) not in {"queued", "degraded"}:
+        return {"job_id": str(job_id), "status": str(row[3]), "idempotent": True}
+    now = _now()
+    db.execute(text(
+        "UPDATE temporal_cache_eviction_job SET status='running',attempts=attempts+1,"
+        "started_at=:now WHERE id=:id"
+    ), {"now": now, "id": str(job_id)})
+    try:
+        _strict_cache_delete(cache, str(row[2]))
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        db.execute(text(
+            "UPDATE temporal_cache_eviction_job SET status='degraded',finished_at=:now,"
+            "dispatched_at=NULL,last_error=:error WHERE id=:id"
+        ), {"now": _now(), "error": error[:2000], "id": str(job_id)})
+        db.execute(text(
+            "UPDATE temporal_cache_entry SET status='superseded_eviction_pending',"
+            "last_error=:error,updated_at=:now WHERE id=:eid"
+        ), {"error": error[:2000], "now": _now(), "eid": str(row[1])})
+        _record_eviction_metric("retry_failed")
+        return {
+            "job_id": str(job_id), "status": "degraded", "idempotent": False,
+            "error": error,
+        }
+    db.execute(text(
+        "UPDATE temporal_cache_eviction_job SET status='succeeded',finished_at=:now,"
+        "last_error=NULL WHERE id=:id"
+    ), {"now": _now(), "id": str(job_id)})
+    db.execute(text(
+        "UPDATE temporal_cache_entry SET status='superseded',last_error=NULL,updated_at=:now "
+        "WHERE id=:eid"
+    ), {"now": _now(), "eid": str(row[1])})
+    _record_eviction_metric("retry_succeeded")
+    return {"job_id": str(job_id), "status": "succeeded", "idempotent": False}
 
 
 def register_derived_dependency(

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import re
-import threading
 import uuid
 from typing import Any, Dict
 
@@ -160,22 +159,10 @@ def _apply_narration_compatibility(payload: Dict[str, Any], redis: Any) -> None:
         timing["summary_ms"] = 0
     if mode == "async":
         timing["narration_pending"] = True
-        from src.app.services.recommend_narration_jobs import (
-            new_job_id,
-            put_narration,
-            run_narration_job,
-        )
+        from src.app.services.recommend_narration_jobs import submit_narration
 
-        job_id = new_job_id()
-        put_narration(redis, job_id, status="pending", message=None)
         message = str(payload.get("assistant_message") or payload.get("message") or "")
-        worker = threading.Thread(
-            target=run_narration_job,
-            args=(redis, job_id, lambda: message),
-            name=f"compat-narration-{job_id[:8]}",
-            daemon=True,
-        )
-        worker.start()
+        job_id = submit_narration(None, redis, lambda: message)
         payload["llm_summary_job_id"] = job_id
     payload["timing_breakdown"] = timing
 
@@ -237,6 +224,21 @@ def _apply_frozen_compatibility_fields(
     constraints = payload.get("constraints_used")
     constraints = constraints if isinstance(constraints, dict) else {}
     payload["constraints_used"] = constraints
+    from src.app.services.budget_grammar import parse_budget, parse_budget_delta
+
+    if (
+        parse_budget(query) is None
+        and parse_budget_delta(query) is None
+        and (
+            constraints.get("budget_min_cents") is not None
+            or constraints.get("budget_max_cents") is not None
+            or constraints.get("budget_min") is not None
+            or constraints.get("budget_max") is not None
+        )
+    ):
+        # No monetary instruction occurred on this turn; any effective budget
+        # necessarily came from the accepted tenant/session envelope.
+        constraints["budget_inherited"] = True
     tags = _compatibility_use_case_tags(query, payload)
     if tags:
         constraints.setdefault("use_case_tags", tags)
@@ -268,6 +270,55 @@ def _apply_frozen_compatibility_fields(
     timing.setdefault("compound_needed", False)
     timing.setdefault("compound_mode", "skip")
     payload["timing_breakdown"] = timing
+
+
+def _ensure_frozen_contract_spine(payload: Dict[str, Any]) -> None:
+    """Keep every compatibility response shape structurally byte-stable.
+
+    The V2 core intentionally emits only fields supported by the lane that ran.
+    The retired ``/suggest`` surface, however, promised a stable top-level
+    envelope even for zero-result, support, and off-domain turns.  Fill absent
+    presentation fields with explicit unknown/empty values; never manufacture
+    evidence, products, authority, or a model decision.
+    """
+    questions = payload.get("next_questions")
+    questions = questions if isinstance(questions, list) else []
+    products = payload.get("results")
+    products = products if isinstance(products, list) else []
+    turn_type = str(payload.get("turn_type") or payload.get("turn_intent") or "unknown")
+    needs_disambiguation = bool(payload.get("needs_disambiguation") or questions)
+    right_panel = payload.get("right_panel")
+    right_panel = right_panel if isinstance(right_panel, dict) else {}
+    assistant_message = str(
+        payload.get("assistant_message")
+        or payload.get("message")
+        or "No verified recommendation is available for this turn."
+    )
+    payload.setdefault("assistant_message", assistant_message)
+    payload.setdefault("message", assistant_message)
+    payload.setdefault("status", "ok" if products else "no_verified_result")
+    defaults: Dict[str, Any] = {
+        "agent_chain": [],
+        "ambiguity_reason": None,
+        "buyer_persona": None,
+        "buyer_persona_candidate": None,
+        "buyer_persona_confidence": 0.0,
+        "complexity_signals": {},
+        "confidence_band": "unknown",
+        "followup_contract": {},
+        "intent_execution_plan": [],
+        "llm_model": None,
+        "memory_confidence": 0.0,
+        "model_tier": "deterministic",
+        "needs_disambiguation": needs_disambiguation,
+        "question_plan": {"mode": "clarify" if needs_disambiguation else "none"},
+        "referents": {},
+        "turn_type": turn_type,
+        "view_mode": str(right_panel.get("mode") or ("results" if products else "message")),
+        "view_reason": str(payload.get("status") or "compatibility_contract"),
+    }
+    for key, value in defaults.items():
+        payload.setdefault(key, value)
 
 
 def _persist_compatibility_outcome(
@@ -323,6 +374,19 @@ def _persist_compatibility_outcome(
         event_type="recommendation_compatibility_outcome",
         execution_status="blocked" if status == "blocked" else "unavailable",
     )
+
+
+def _append_generic_procurement_question(
+    questions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add generic B2B discovery after any material V2 blockers."""
+    ordered = [dict(question) for question in questions if isinstance(question, dict)]
+    if not any(question.get("id") == "ask_b2b_procurement" for question in ordered):
+        ordered.append({
+            "id": "ask_b2b_procurement",
+            "label": "Confirm procurement requirements",
+        })
+    return ordered
 
 
 def serve_v2_compatibility(
@@ -521,18 +585,10 @@ def serve_v2_compatibility(
         if escalation_assessment.escalate:
             payload["needs_human_review"] = True
         if b2b_assessment.wants_procurement_questions:
-            questions = [
+            questions = _append_generic_procurement_question([
                 question for question in (payload.get("next_questions") or [])
                 if isinstance(question, dict)
-            ]
-            if not any(question.get("id") == "ask_b2b_procurement" for question in questions):
-                questions.insert(
-                    0,
-                    {
-                        "id": "ask_b2b_procurement",
-                        "label": "Confirm procurement requirements",
-                    },
-                )
+            ])
             payload["next_questions"] = questions
         if classification.get("injection_attempt") or payload.get("injection_blocked"):
             payload["products"] = []
@@ -586,6 +642,7 @@ def serve_v2_compatibility(
             payload["message"] = bounded_message
             payload["assistant_message"] = bounded_message
             payload.pop("right_panel", None)
+        _ensure_frozen_contract_spine(payload)
         _apply_narration_compatibility(payload, redis)
         from src.app.security.model_theft import protect_recommendation_output
 
@@ -642,6 +699,7 @@ def serve_v2_compatibility(
                 lane=outcome.lane,
                 payload=blocked_payload,
             )
+            _ensure_frozen_contract_spine(blocked_payload)
             _apply_narration_compatibility(blocked_payload, redis)
             return blocked_payload
         raise HTTPException(
@@ -688,15 +746,13 @@ def serve_v2_compatibility(
     if escalation_assessment.escalate:
         unavailable["needs_human_review"] = True
     if b2b_assessment.wants_procurement_questions:
-        unavailable["next_questions"] = [
-            {
-                "id": "ask_b2b_procurement",
-                "label": "Confirm procurement requirements",
-            }
-        ]
+        unavailable["next_questions"] = _append_generic_procurement_question(
+            list(unavailable.get("next_questions") or [])
+        )
     if nqe_selection:
         unavailable["nqe_selection_applied"] = nqe_selection
     unavailable.setdefault("decision_id", trace_id)
+    _ensure_frozen_contract_spine(unavailable)
     _persist_compatibility_outcome(
         trace_id=trace_id,
         tenant_id=tenant_id,

@@ -86,8 +86,10 @@ def _build_cart(uid):
     add_item(CartItemPayload(uid=uid, sku="SKU-IDEA", quantity=1), role=ROLE_OWNER)
 
 
-def _env(uid, query, cart):
-    return TurnEnvelope.from_suggest_params(query=query, uid=uid, tenant_id="t1", cart=cart)
+def _env(uid, query, cart, **kwargs):
+    return TurnEnvelope.from_suggest_params(
+        query=query, uid=uid, tenant_id="t1", cart=cart, **kwargs,
+    )
 
 
 def _fixed_llm(obj):
@@ -247,6 +249,41 @@ def test_compound_action_question_returns_confirmation_without_model_wait(wired)
     assert items[0]["quantity"] == 20
 
 
+def test_quantity_reduction_preserves_total_budget_without_reallocating_it(wired):
+    uid = "u-budget-headroom"
+    from src.app.routers.cart import CartItemPayload, add_item
+
+    add_item(CartItemPayload(uid=uid, sku="SKU-IDEA", quantity=30), role=ROLE_OWNER)
+    cart = [{
+        "sku": "SKU-IDEA",
+        "name": "Lenovo IdeaPad Slim 3i",
+        "quantity": 30,
+        "price_cents": 249_900,
+    }]
+    session = {"accepted_constraints": {
+        "budget_scope": "total",
+        "total_budget_cents": 7_500_000,
+    }}
+
+    payload = F._serve_cart_mutation(
+        _env(
+            uid,
+            "Actually reduce it by 10 units, but I don't think it is powerful enough.",
+            cart,
+            session=session,
+        ),
+        role=ROLE_OWNER,
+        with_trace=_IDENTITY_TRACE,
+    )
+
+    assert payload["cart_mutation"]["needs_confirmation"] is True
+    assert payload["cart_mutation"]["ops"][0]["quantity"] == 20
+    assert "$75,000 whole-order budget remains unchanged" in payload["message"]
+    assert "$49,980" in payload["message"]
+    assert "$25,020 unallocated" in payload["message"]
+    assert "does not authorize a more expensive model" in payload["message"]
+
+
 def test_over_limit_increase_confirms_then_handler_rejects(wired, monkeypatch):
     # review-5 #9: qty 600 > handler line gate (500) → rejected → cart_updated must be False.
     # auto-apply ON to exercise the apply-outcome path (default is confirmation-only, review-6 #4).
@@ -323,7 +360,7 @@ def test_dispatch_shadow_mode_enqueues_cart_never_executes(wired, monkeypatch):
     import json as _json
     job = _json.loads(r.pushed[0][1])
     assert job["cart_only"] is True
-    assert {l["sku"] for l in job["cart"]} == {"SKU-ENVY", "SKU-TPAD", "SKU-IDEA"}
+    assert {line_item["sku"] for line_item in job["cart"]} == {"SKU-ENVY", "SKU-TPAD", "SKU-IDEA"}
     assert job["trace_id"] == "tid-shadow-1"
     # and the cart was NOT touched
     from src.app.routers.cart import _get_or_create_cart

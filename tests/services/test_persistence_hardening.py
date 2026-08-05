@@ -19,12 +19,14 @@ from src.app.services.market_analysis import (
     persist_findings,
 )
 from src.app.services.market_signal_adapters import backfill_from_db
+from tests.market_migration_helpers import apply_market_migration
 
 
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_market_migration(s)
     try:
         yield s
     finally:

@@ -4,12 +4,75 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from src.app.services.conversation_case_state import (
+    CaseTurn,
     apply_case_amendment,
     classify_case_turn,
+    decompose_case_obligations,
     ensure_case_state,
     get_case_state,
     record_case_turn,
+    reduce_case_obligations,
 )
+
+
+class _FakeResult:
+    def __init__(self, row=None, rowcount=0):
+        self._row = row
+        self.rowcount = rowcount
+
+    def first(self):
+        return self._row
+
+
+class _CaptureCaseDb:
+    def __init__(self) -> None:
+        self.insert_params = None
+        self.committed = False
+
+    def execute(self, statement, params):
+        sql = str(statement)
+        if "FROM conversation_case_state" in sql:
+            return _FakeResult(("state-1", json.dumps({"sku": "SKU-1"}), 1))
+        if "field_name=:field" in sql:
+            return _FakeResult(None)
+        if "SELECT status FROM conversation_case_amendment" in sql:
+            return _FakeResult(None)
+        if "INSERT INTO conversation_case_amendment" in sql:
+            self.insert_params = dict(params)
+            return _FakeResult(rowcount=1)
+        raise AssertionError(sql)
+
+    def commit(self):
+        self.committed = True
+
+
+def test_case_amendment_binds_native_boolean_for_postgres(monkeypatch) -> None:
+    from src.app.services import conversation_case_state as service
+
+    db = _CaptureCaseDb()
+    monkeypatch.setattr(
+        service,
+        "classify_case_turn",
+        lambda _message, current_state: CaseTurn(
+            "amend_destination", "destination", "Melbourne", 1.0,
+            "high", True, "explicit_destination",
+        ),
+    )
+
+    result = service.record_case_turn(
+        db,
+        tenant_id="tenant-a",
+        case_id="case-1",
+        session_epoch="epoch-1",
+        subject_ref="buyer-hash",
+        source_message_id="message-1",
+        message="ship it to Melbourne",
+    )
+
+    assert result["status"] == "pending_confirmation"
+    assert db.insert_params is not None
+    assert db.insert_params["confirmation"] is True
+    assert db.committed is True
 
 
 def _db() -> Session:
@@ -203,6 +266,110 @@ def test_ambiguous_reference_returns_typed_clarification() -> None:
     assert parsed.dialogue_act == "clarify"
     assert parsed.reason == "quantity_anchor_required"
     assert parsed.proposed_value is None
+
+
+def test_relative_quantity_reduction_uses_the_sealed_case_quantity() -> None:
+    by_amount = classify_case_turn(
+        "Actually reduce it by 10 units.",
+        current_state={"sku": "RGAM-0007", "quantity": 30},
+    )
+    to_amount = classify_case_turn(
+        "Actually reduce it to 10 units.",
+        current_state={"sku": "RGAM-0007", "quantity": 30},
+    )
+
+    assert by_amount.dialogue_act == "amend_quantity"
+    assert by_amount.proposed_value == 20
+    assert by_amount.reason == "relative_quantity_reduction"
+    assert to_amount.dialogue_act == "amend_quantity"
+    assert to_amount.proposed_value == 10
+    assert to_amount.reason == "absolute_quantity"
+
+
+def test_relative_quantity_without_a_selected_line_fails_closed() -> None:
+    parsed = classify_case_turn(
+        "Reduce it by 10.",
+        current_state={"quantity": 30},
+    )
+
+    assert parsed.dialogue_act == "clarify"
+    assert parsed.reason == "selected_product_anchor_required"
+    assert parsed.proposed_value is None
+
+
+def test_mixed_turn_decomposes_every_obligation_without_executing_any() -> None:
+    obligations = decompose_case_obligations(
+        "Reduce it by 10, deliver it by Friday, then confirm the purchase order and pay a deposit.",
+        current_state={"sku": "RGAM-0007", "quantity": 30},
+    )
+
+    assert [item["kind"] for item in obligations] == [
+        "quantity_amendment",
+        "deadline",
+        "buyer_commitment",
+        "payment_request",
+    ]
+    assert obligations[0]["proposed_value"] == 20
+    assert all(item["authority"] == "proposed" for item in obligations)
+    assert all(item["requires_reducer"] is True for item in obligations)
+
+
+def test_place_noun_is_not_misread_as_order_commitment() -> None:
+    assert decompose_case_obligations(
+        "Find a pizza place near me.", current_state={}
+    ) == ()
+
+
+def test_mixed_reducer_blocks_commitment_behind_pending_quantity_amendment() -> None:
+    result = reduce_case_obligations(
+        "Reduce it by 10, deliver it by Friday, then confirm the purchase order.",
+        current_state={
+            "sku": "RGAM-0007",
+            "quantity": 30,
+            "budget": {"amount": 75000, "currency": "AUD", "scope": "total"},
+            "destination": "Sydney",
+            "atp_snapshot": {"source_version": "ATP-7", "observed_at": "2026-08-05T10:00:00Z"},
+        },
+        catalog_authority="permitted",
+    )
+
+    assert result[0]["status"] == "pending_confirmation"
+    assert result[0]["proposed_value"] == 20
+    assert result[-1]["kind"] == "buyer_commitment"
+    assert result[-1]["status"] == "blocked"
+    assert result[-1]["reason"] == "prior_obligation_requires_confirmation"
+
+
+def test_commitment_requires_selected_sku_and_versioned_atp() -> None:
+    missing_sku = reduce_case_obligations(
+        "Confirm the purchase order.",
+        current_state={"quantity": 20},
+        catalog_authority="permitted",
+    )
+    missing_atp = reduce_case_obligations(
+        "Confirm the purchase order.",
+        current_state={"sku": "RGAM-0007", "quantity": 20},
+        catalog_authority="permitted",
+    )
+
+    assert missing_sku[0]["reason"] == "selected_product_anchor_required"
+    assert missing_atp[0]["reason"] == "versioned_atp_snapshot_required"
+
+
+def test_commitment_is_routed_to_authorization_never_granted_by_case_reducer() -> None:
+    result = reduce_case_obligations(
+        "Confirm the purchase order.",
+        current_state={
+            "sku": "RGAM-0007",
+            "quantity": 20,
+            "atp_snapshot": {"source_version": "ATP-7", "observed_at": "2026-08-05T10:00:00Z"},
+        },
+        catalog_authority="permitted",
+    )
+
+    assert result[0]["status"] == "authorization_required"
+    assert result[0]["residual_route"] == "AUTHORIZE"
+    assert result[0]["authorization_granted"] is False
 
 
 def test_accepted_amendment_invalidates_prior_version_and_projects_supersession() -> None:

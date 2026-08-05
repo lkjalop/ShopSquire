@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from src.app.main import app
@@ -19,6 +21,13 @@ from src.app.services.recommend_narration_jobs import (
 from tests.utils import default_headers
 
 client = TestClient(app, headers=default_headers())
+
+
+@pytest.fixture(autouse=True)
+def _isolated_narration_quota(monkeypatch):
+    monkeypatch.setenv("TOKEN_BUDGET_ENABLED", "0")
+    # Unit tests inject a synchronous executor; production defaults to a dedicated bounded pool.
+    monkeypatch.setenv("NARRATION_DEDICATED_EXECUTOR", "0")
 
 
 class _FakeRedis:
@@ -40,11 +49,13 @@ class _SyncExecutor:
 def test_submit_runs_and_persists_done():
     r = _FakeRedis()
     jid = submit_narration(_SyncExecutor(), r, lambda *a, **k: ("the prose", None), "q", [], {})
-    assert get_narration(r, jid) == {
-        "status": "done",
-        "assistant_message": "the prose",
-        "storage_backend": "redis",
-    }
+    result = get_narration(r, jid)
+    assert result is not None
+    assert result["status"] == "done"
+    assert result["assistant_message"] == "the prose"
+    assert result["storage_backend"] == "redis"
+    assert result["resource_pool"] == "caller_executor"
+    assert result["endpoint_isolated"] is False
 
 
 def test_job_error_persists_error_status():

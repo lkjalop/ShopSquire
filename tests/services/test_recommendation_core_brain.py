@@ -54,6 +54,233 @@ def _env(q, **kw):
     return TurnEnvelope.from_suggest_params(query=q, uid="u1", **kw)
 
 
+@pytest.mark.parametrize(
+    ("query", "concept", "question", "expected_quantity"),
+    [
+        (
+            "I need 30 laptops capable for digital twin simulations for an engine.",
+            "digital twin simulations",
+            "Which simulation software, model scale and execution location must be supported?",
+            30,
+        ),
+        (
+            "Find 20 chairs made from iron birch for a hotel refurbishment.",
+            "iron birch",
+            "Does iron birch mean a certified wood species or a supplier trade name?",
+            20,
+        ),
+        (
+            "I need 30 laptops for Path of Exile end-game play.",
+            "end-game",
+            "Which resolution, target frame rate and network conditions matter?",
+            30,
+        ),
+    ],
+)
+def test_unresolved_fit_blocks_procurement_before_catalog_retrieval(
+    db, query, concept, question, expected_quantity,
+):
+    model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "quantity": 30,
+        "confidence": 0.86,
+        "semantic_proposal": {
+            "desired_outcome": "find twenty chairs for a hotel refurbishment",
+            "concepts": [{
+                "text": concept,
+                "status": "unresolved",
+                "material": True,
+                "interpretations": ["wood species", "supplier trade name"],
+            }],
+            "evidence_questions": [{
+                "question_id": "material_identity",
+                "question": question,
+                "purpose": "resolve_concept",
+                "material": True,
+            }],
+            "proposed_action": "research_then_clarify",
+            "confidence": 0.75,
+        },
+    }
+
+    response = recommend_turn(
+        db,
+        _env(query),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.products == []
+    assert response.clarify[0]["reason"] == "unresolved_material_concept"
+    assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert response.extras["case_anchor"]["case_id"].startswith("semantic-")
+    assert response.extras["case_anchor"]["catalog_authority"] == "blocked"
+    assert "catalog_recommendation" in response.extras["semantic_resolution"]["state_prevented"]
+    assert "supplier_enquiry" in response.extras["semantic_resolution"]["state_prevented"]
+    assert response.extras["requested_quantity"] == expected_quantity
+    assert not any(item.stage.startswith("plan:") for item in response.stage_results)
+
+
+def test_material_capability_relation_blocks_when_model_omits_semantic_proposal(db):
+    """The live router may omit the optional proposal; omission must not grant fit."""
+    model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "quantity": 30,
+        "confidence": 0.91,
+    }
+
+    response = recommend_turn(
+        db,
+        _env("Please recommend 30 laptops capable of digital twin simulations for an engine."),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.products == []
+    assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert response.extras["case_anchor"]["kind"] == "semantic_qualification"
+    assert response.extras["semantic_resolution"]["desired_outcome"].startswith("Please recommend")
+    questions = [item["question"] for item in response.extras["semantic_resolution"]["questions"]]
+    assert any("software" in item.lower() and "version" in item.lower() for item in questions)
+    assert any("time-to-result" in item.lower() for item in questions)
+    assert "catalog_recommendation" in response.extras["semantic_resolution"]["state_prevented"]
+
+
+def test_model_outage_still_blocks_material_capability_fit(db):
+    response = recommend_turn(
+        db,
+        _env("Recommend a laptop for simulating a digital twin model."),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert response.products == []
+    assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+
+
+def test_model_outage_on_ordinary_query_is_typed_and_visibly_degraded(db):
+    response = recommend_turn(
+        db,
+        _env("Show me ordinary work laptops."),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert response.degraded is True
+    assert response.extras["router_outcome"]["status"] == "source_unavailable"
+    assert response.extras["router_outcome"]["late_results_accepted"] is False
+    assert response.extras["router_outcome"]["fallback_authority"] == "deterministic_only"
+
+
+def test_plan_and_core_share_the_research_authority_contract(db):
+    """A partial deploy must not crash before ordinary catalog retrieval.
+
+    The core immutably adds the request's research authority to its Plan.  If
+    the Plan schema is older, ``dataclasses.replace`` raises and the facade can
+    silently fall through to compatibility behavior.  Keep this deployment
+    boundary under a direct contract test.
+    """
+    response = recommend_turn(
+        db,
+        _env("gaming laptop under 2000", external_research_consent=True),
+        llm_fn=_route_stub("SEARCH", "el-6-11-2"),
+    )
+
+    assert response.grounding != "error"
+    assert response.extras["plan"]["external_research_authorized"] is True
+    assert response.extras["plan"]["plan_version"] == "core-v2-semantic"
+
+
+def test_confirm_purchase_order_without_selected_sku_cannot_retrieve_or_commit(db):
+    response = recommend_turn(
+        db,
+        _env("Confirm the purchase order."),
+        llm_fn=_route_stub("PROCUREMENT", "el-6-6"),
+    )
+
+    assert response.products == []
+    assert response.extras["case_obligations"][0]["kind"] == "buyer_commitment"
+    assert response.extras["case_obligations"][0]["status"] == "blocked"
+    assert response.extras["semantic_resolution"]["residual_route"] == "ASK"
+    assert "purchase_order" in response.extras["semantic_resolution"]["state_prevented"]
+
+
+def test_resolved_concept_shows_only_evidence_qualified_catalog_alternative(db, monkeypatch):
+    model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "confidence": 0.9,
+        "semantic_proposal": {
+            "desired_outcome": "find a laptop for digital twin simulation",
+            "concepts": [{
+                "text": "digital twin simulation",
+                "status": "unresolved",
+                "material": True,
+                "interpretations": [],
+            }],
+            "evidence_questions": [],
+            "proposed_action": "research",
+            "confidence": 0.8,
+        },
+    }
+    evidence = {
+        "selected": ["concept_resolution"],
+        "legs": {"concept_resolution": {"data": {
+            "status": "resolved",
+            "normalized_evidence": [{
+                "concept": "digital twin simulation",
+                "status": "resolved",
+                "claim": "The enrolled software profile requires an evidence-qualified device.",
+                "claim_type": "minimum_requirements",
+                "source_id": "tenant-vendor-docs",
+                "source_record_id": "software-profile-1",
+                "source_revision": "2026.08",
+                "observed_at": "2026-08-05T00:00:00Z",
+                "citation_id": "cite:software-profile-1:2026.08",
+                "source_policy": {
+                    "policy_version": "semantic-source-v1",
+                    "review_status": "approved",
+                    "reviewer_type": "independent_human",
+                    "reviewed_by": "tenant-engineering-reviewer",
+                    "licence": "tenant-authorized",
+                    "trust_tier": "authoritative",
+                    "allowed_claim_types": ["minimum_requirements"],
+                    "freshness_status": "fresh",
+                },
+            }],
+            "catalog_qualifications": [{
+                "sku": "LAP-1",
+                "alignment_status": "alternative",
+                "evidence_refs": ["cite:software-profile-1:2026.08"],
+            }],
+        }}},
+        "citations": [],
+        "source_health": "healthy",
+        "ms": 4,
+    }
+    monkeypatch.setattr(
+        "src.app.services.evidence_orchestrator.gather_evidence",
+        lambda *_args, **_kwargs: evidence,
+    )
+
+    response = recommend_turn(
+        db,
+        _env(
+            "Find a laptop for digital twin simulation.",
+            external_research_consent=True,
+        ),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert [item.sku for item in response.products] == ["LAP-1"], response.extras
+    assert response.extras["catalog_qualification_candidates"] == ["LAP-1"]
+    assert response.extras["catalog_alignment"]["status"] == "no_exact_catalog_match"
+    assert response.extras["supplier_enquiry_option"] == {
+        "status": "available_after_buyer_commitment",
+        "auto_sent": False,
+        "evidence_refs": ["cite:software-profile-1:2026.08"],
+    }
+    assert "qualified alternatives" in response.message.lower()
+
+
 def test_ambiguous_workload_product_type_stops_before_retrieval(db):
     from src.app.services.taxonomy_registry import add_sold_node
 
@@ -1063,6 +1290,64 @@ def test_bulk_budget_range_defaults_to_per_unit_despite_model_total_claim(db):
     assert all(150_000 <= (product.price_cents or 0) <= 190_000 for product in resp.products)
 
 
+def test_model_unavailable_bulk_search_keeps_quantity_while_scope_is_blocked(db):
+    """The production-shaped demo deliberately disables the optional router model.
+
+    Explicit tenant-sold product language and bounded quantity/budget facts remain
+    sufficient to preserve the request, but an unresolved budget scope still blocks
+    retrieval.  The follow-up can resolve it without losing the quantity.
+    """
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    envelope = dataclasses.replace(
+        _env("I need 25 work laptops, budget 1200 to 1500"),
+        budget_min_cents=120_000,
+        budget_max_cents=150_000,
+    )
+    response = recommend_turn(db, envelope, llm_fn=lambda _prompt, _timeout: "")
+
+    assert response.extras["requested_quantity"] == 25
+    assert response.extras["decision"]["budget_scope"] == "unknown"
+    assert response.clarify and response.clarify[0]["id"] == "budget_scope"
+    assert response.products == []
+
+
+def test_mixed_choose_confirm_preserves_original_evidence_blocker_in_trace(db):
+    blocked = {
+        "outcome": "clarify",
+        "catalog_authority": "blocked",
+        "desired_outcome": "recommend a laptop for simulating a digital twin",
+        "concepts": [{
+            "text": "digital twin simulation",
+            "status": "unresolved",
+            "material": True,
+            "interpretations": [],
+        }],
+        "questions": [{
+            "question_id": "software_or_standard",
+            "question": "Which exact software and version must be supported?",
+            "material": True,
+        }],
+        "state_prevented": ["catalog_recommendation", "commerce_execution"],
+    }
+    response = recommend_turn(
+        db,
+        _env(
+            "Choose a laptop and confirm the purchase order.",
+            session={"semantic_resolution": blocked},
+        ),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    semantic = response.extras["semantic_resolution"]
+    assert "digital twin" in semantic["desired_outcome"]
+    assert semantic["questions"][0]["question_id"] == "software_or_standard"
+    assert semantic["catalog_authority"] == "blocked"
+    assert "buyer_commitment" in semantic["state_prevented"]
+    assert semantic["case_obligations"]
+
+
 def test_explicit_per_unit_budget_does_not_inherit_prior_total_budget(db):
     payload = {"lane": "FILTER", "handle": "el-6-6", "requirements": {},
                "quantity": 25, "total_budget": None, "budget_scope": "per_unit",
@@ -1497,6 +1782,243 @@ def test_active_procurement_can_use_bounded_context_judgment_when_subject_is_unc
 
 
 @pytest.mark.parametrize(
+    "query",
+    [
+        "ship the order to Sydney",
+        "we need delivery by 18 September",
+        "include a three year onsite warranty",
+        "use supplier-direct shipping if it is faster",
+        "what is the status of this order?",
+        "summarise the sourcing plan so far",
+        "that budget is total for all 30",
+    ],
+)
+def test_active_procurement_context_amendments_cannot_change_product_anchor(db, query):
+    """Closed context/status operations amend the active case; they are not product searches.
+
+    This clamp is deliberately tested against a hostile/weak router response because product
+    identity and case continuity cannot depend on a model interpreting words such as Sydney,
+    Teams, warranty, or supplier correctly.
+    """
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-11-2",
+        "shortlist_skus": ["RGAM-0002"],
+        "accepted_constraints": {
+            "quantity": 30,
+            "budget_scope": "unknown",
+            "total_budget_cents": 20_000_000,
+        },
+        "procurement_case_id": "case-30",
+    }
+    hostile = json.dumps({
+        "lane": "SEARCH",
+        "handle": "el-7-1",
+        "subject_action": "switch",
+        "procurement_context": "none",
+        "confidence": 0.99,
+    })
+
+    decision = route_turn(
+        db,
+        _env_session(query, session),
+        llm_fn=lambda _prompt, _timeout: hostile,
+    )
+
+    assert decision.lane == "PROCUREMENT"
+    assert decision.subject_action == "continue"
+    assert decision.procurement_context == "current_order"
+    assert decision.node_handle == "el-6-11-2"
+    assert decision.quantity == 30
+
+
+def test_active_procurement_status_is_deterministic_and_retrieval_free(db):
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-11-2",
+        "shortlist_skus": ["RGAM-0007"],
+        "accepted_constraints": {"quantity": 80, "budget_scope": "total"},
+        "procurement_case_id": "case-7",
+    }
+    calls = {"model": 0}
+
+    def should_not_run(_prompt, _timeout):
+        calls["model"] += 1
+        raise AssertionError("status must not invoke classification")
+
+    decision = route_turn(
+        db,
+        _env_session("what is the status?", session),
+        llm_fn=should_not_run,
+    )
+
+    assert calls["model"] == 0
+    assert decision.case_operation == "status"
+    assert decision.exact_product_sku == "RGAM-0007"
+    assert decision.quantity == 80
+    assert derive_plan(decision).steps == ["handoff_procurement"]
+
+
+def test_post_purchase_failure_outranks_remembered_procurement_status(db):
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-11-2",
+        "shortlist_skus": ["RGAM-0007"],
+        "accepted_constraints": {"quantity": 20, "budget_scope": "total"},
+        "procurement_case_id": "case-7",
+    }
+    calls = {"model": 0}
+
+    def should_not_run(_prompt, _timeout):
+        calls["model"] += 1
+        raise AssertionError("post-purchase claim must not invoke product routing")
+
+    decision = route_turn(
+        db,
+        _env_session(
+            "My laptop failed after three weeks; what is my warranty or return status?",
+            session,
+        ),
+        llm_fn=should_not_run,
+    )
+
+    assert calls["model"] == 0
+    assert decision.lane == "SUPPORT_CLAIM"
+    assert decision.source == "deterministic_post_purchase_claim"
+    assert derive_plan(decision).steps == ["handoff_support"]
+
+
+def test_explicit_sku_suffix_cannot_replace_bulk_quantity(db):
+    decision = route_turn(
+        db,
+        _env("I need 30 HP OMEN MAX 16 RGAM-0007 laptops. AUD 140000 total."),
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "PROCUREMENT",
+            "handle": "el-6-11-2",
+            "quantity": 7,
+            "total_budget": 140000,
+            "budget_scope": "total",
+            "confidence": 0.99,
+        }),
+    )
+
+    assert decision.quantity == 30
+
+
+def test_single_prior_sku_is_preserved_on_context_amendment(db):
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-11-2",
+        "shortlist_skus": ["RGAM-0007"],
+        "accepted_constraints": {"quantity": 30},
+    }
+    decision = route_turn(
+        db,
+        _env_session("ship the order to Sydney", session),
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-7-1",
+            "subject_action": "switch",
+            "confidence": 0.9,
+        }),
+    )
+
+    assert decision.subject_action == "continue"
+    assert decision.exact_product_sku == "RGAM-0007"
+
+
+def test_deadline_context_cannot_accept_model_invented_quantity(db):
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-11-2",
+        "shortlist_skus": ["RGAM-0007"],
+        "accepted_constraints": {"quantity": 18, "exact_product_sku": "RGAM-0007"},
+    }
+    decision = route_turn(
+        db,
+        _env_session("need them by 25 September with colour-accurate display support", session),
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "PROCUREMENT", "handle": "el-6-11-2", "quantity": 1,
+            "subject_action": "continue", "procurement_context": "current_order",
+            "confidence": 0.99,
+        }),
+    )
+
+    assert decision.quantity == 18
+    assert decision.exact_product_sku == "RGAM-0007"
+
+
+def test_total_for_all_settles_scope_without_reopening_disambiguation(db):
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-11-2",
+        "accepted_constraints": {
+            "quantity": 30,
+            "budget_scope": "unknown",
+            "total_budget_cents": 20_000_000,
+        },
+        "procurement_case_id": "case-30",
+    }
+    decision = route_turn(
+        db,
+        _env_session("yes, the AUD 200k budget is total for all 30", session),
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH", "handle": "el-7-1", "subject_action": "switch",
+            "budget_scope": "per_unit", "confidence": 0.99,
+        }),
+    )
+
+    assert decision.node_handle == "el-6-11-2"
+    assert decision.quantity == 30
+    assert decision.budget_scope == "total"
+    assert decision.total_budget_cents == 20_000_000
+
+
+def test_total_budget_for_all_preserves_sealed_exact_sku(db):
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-11-2",
+        "shortlist_skus": ["RGAM-0007", "SIBLING-2"],
+        "accepted_constraints": {
+            "quantity": 18,
+            "exact_product_sku": "RGAM-0007",
+            "budget_scope": "unknown",
+            "total_budget_cents": 8_500_000,
+        },
+    }
+    decision = route_turn(
+        db,
+        _env_session("total budget for all 18", session),
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH", "handle": "el-7-1", "subject_action": "switch",
+            "budget_scope": "per_unit", "confidence": 0.99,
+        }),
+    )
+
+    assert decision.subject_action == "continue"
+    assert decision.exact_product_sku == "RGAM-0007"
+    assert decision.quantity == 18
+    assert decision.budget_scope == "total"
+
+
+def test_explicit_catalog_model_reference_deterministically_binds_its_taxonomy_node(db):
+    """A model name is catalog identity evidence; a stochastic router cannot redirect it."""
+    weak_router = json.dumps({
+        "lane": "SEARCH", "handle": "el-6-11-2", "subject_action": "uncertain",
+        "confidence": 0.99,
+    })
+    decision = route_turn(
+        db,
+        _env("show me the MSI Thin 15in FHD 120Hz Gaming Laptop"),
+        llm_fn=lambda _prompt, _timeout: weak_router,
+    )
+
+    assert decision.node_handle == "el-6-6"
+    assert decision.subject_action == "switch"
+    assert "explicit_catalog_product" in decision.source
+
+
+@pytest.mark.parametrize(
     ("subject_action", "procurement_context", "expected_lane"),
     [
         ("continue", "current_order", "PROCUREMENT"),
@@ -1609,6 +2131,33 @@ def test_budget_only_revision_overrides_incorrect_model_switch(db):
     decision = resp.extras["decision"]
     assert decision["node_handle"] == "el-6-6"
     assert decision["subject_from_session"] is True
+
+
+def test_budget_only_revision_preserves_answered_scope_when_model_is_unavailable(db):
+    env = dataclasses.replace(
+        _env("actually budget is now 1800 max"),
+        session={
+            "prior_node": "el-6-6",
+            "shortlist_skus": ["LAP-1"],
+            "accepted_constraints": {
+                "quantity": 10,
+                "budget_scope": "per_unit",
+                "budget_min_cents": 120_000,
+                "budget_max_cents": 150_000,
+            },
+        },
+    )
+
+    decision = recommend_turn(
+        db,
+        env,
+        llm_fn=lambda *_args: (_ for _ in ()).throw(ConnectionError("offline")),
+    ).extras["decision"]
+
+    assert decision["node_handle"] == "el-6-6"
+    assert decision["subject_action"] == "continue"
+    assert decision["budget_scope"] == "per_unit"
+
 
 
 def test_fresh_search_does_not_inherit_prior_node(db):

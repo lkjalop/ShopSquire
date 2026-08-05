@@ -701,6 +701,13 @@ def create_app() -> FastAPI:
             shutdown_resilience_executor(wait=False)
         except Exception:
             pass
+        try:
+            from src.app.services.recommend_narration_jobs import (
+                shutdown_narration_resources,
+            )
+            shutdown_narration_resources(wait=False)
+        except Exception:
+            pass
     app = FastAPI(title="ShopSquire API", default_response_class=ORJSONResponse, lifespan=lifespan)
     # Bind a fresh engine using current settings to the app state so
     # tests that mutate DATABASE_URL get an engine scoped to the app.

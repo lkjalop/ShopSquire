@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from src.app.deps import get_redis
-from src.app.models.db import get_db
+from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.response_normalizer import ResponseNormalizer
 
@@ -37,6 +37,35 @@ def _heartbeat_seconds() -> float:
     except (TypeError, ValueError):
         value = 5.0
     return max(1.0, min(value, 15.0))
+
+
+def _typed_acknowledgement(payload: Dict[str, Any], *, trace_id: str) -> Dict[str, Any]:
+    """Return a fast, non-authoritative acknowledgement for progressive UX.
+
+    The acknowledgement never claims that retrieval, allocation, or mutation
+    has happened.  It may repeat an already-confirmed SKU so the buyer can see
+    that the existing case anchor is being retained while bounded work runs.
+    """
+    slots = payload.get("confirmed_slots") if isinstance(payload.get("confirmed_slots"), dict) else {}
+    sku = str(
+        slots.get("exact_product_sku")
+        or slots.get("canonical_sku")
+        or slots.get("sku")
+        or slots.get("product_sku")
+        or ""
+    ).strip()
+    message = (
+        f"Request understood. Keeping {sku} while I check the current case…"
+        if sku
+        else "Request understood. Checking the current case without changing it…"
+    )
+    return {
+        "message": message,
+        "trace_id": trace_id,
+        "authority": "acknowledgement_only",
+        "state_changed": False,
+        "ts": time.time(),
+    }
 
 
 async def _run_with_heartbeats(awaitable, *, interval_s: float) -> AsyncIterator[Tuple[str, Any]]:
@@ -67,7 +96,6 @@ async def chat_stream(
     request: Request,
     payload: Dict,
     redis=Depends(get_redis),
-    db=Depends(get_db),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ):
     """SSE streaming chat endpoint.
@@ -84,25 +112,39 @@ async def chat_stream(
 
     async def _generate():
         yield _sse_event("thinking", {"trace_id": trace_id, "ts": time.time()})
+        yield _sse_event("acknowledgement", _typed_acknowledgement(payload, trace_id=trace_id))
 
         try:
             # Delegate to the normal chat query handler. Flag the call so it does NOT consume the replay
             # token — otherwise the frontend's stream→/chat/query fallback 409s (chat_replay_detected).
             from src.app.routers.chat import chat_query
             result = None
-            async for state, value in _run_with_heartbeats(
-                chat_query(request, {**payload, "_internal_skip_replay": True}, redis, db, role),
-                interval_s=_heartbeat_seconds(),
-            ):
-                if state == "heartbeat":
-                    yield _sse_event("progress", {
-                        "phase": "recommendation",
-                        "trace_id": trace_id,
-                        "ts": time.time(),
-                        **value,
-                    })
-                else:
-                    result = value
+            # A yield-style FastAPI dependency is torn down when the endpoint
+            # returns its StreamingResponse, while this generator continues to
+            # run. Keeping that request session here caused close()/commit()
+            # races under real SSE traffic. Own the session for the lifetime of
+            # the generator instead, and close it only after chat_query and all
+            # persistence have completed.
+            with db_session() as stream_db:
+                async for state, value in _run_with_heartbeats(
+                    chat_query(
+                        request,
+                        {**payload, "_internal_skip_replay": True},
+                        redis,
+                        stream_db,
+                        role,
+                    ),
+                    interval_s=_heartbeat_seconds(),
+                ):
+                    if state == "heartbeat":
+                        yield _sse_event("progress", {
+                            "phase": "recommendation",
+                            "trace_id": trace_id,
+                            "ts": time.time(),
+                            **value,
+                        })
+                    else:
+                        result = value
 
             # Emit intermediate signals from the result
             if isinstance(result, dict):

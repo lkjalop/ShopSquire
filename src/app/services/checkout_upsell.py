@@ -365,7 +365,7 @@ def _product_catalog(db) -> list[dict]:
                     SELECT p.sku, p.name, p.price_cents, p.specs, COALESCE(i.stock, 0) AS stock
                     FROM products p
                     LEFT JOIN inventory i ON i.product_id = p.id
-                    WHERE COALESCE(p.active, 1) = 1
+                    WHERE p.active IS NOT FALSE
                     """
                 )
             ).fetchall()

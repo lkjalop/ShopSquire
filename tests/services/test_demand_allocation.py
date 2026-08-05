@@ -759,6 +759,15 @@ def test_workbench_anonymizes_buyers_and_reports_pressure_queue_and_child_count(
     assert view["summary"]["supplier_confirmed_quantity"] == 0
     assert view["summary"]["supplier_unresolved_quantity"] == 0
     assert view["summary"]["allocation_pressure"] == 0.6
+    evidence = view["metric_evidence"]
+    assert evidence["allocation_pressure"]["formula"] == "shortfall_quantity / committed_quantity"
+    assert evidence["allocation_pressure"]["numerator"] == 3
+    assert evidence["allocation_pressure"]["denominator"] == 5
+    assert evidence["allocation_pressure"]["authority"] == "shadow_allocation"
+    assert evidence["allocation_pressure"]["source_record_count"] == 1
+    assert evidence["allocation_pressure"]["trend_status"] == "not_materialized"
+    assert evidence["allocated_quantity"]["source"] == "demand_allocation"
+    assert evidence["supplier_unresolved_quantity"]["source"] == "buyer_supply_promise"
     assert view["sourcing_batches"][0]["child_demand_count"] == 1
     assert view["privacy"]["buyer_identities_exposed"] is False
     assert "buyer" not in view["demands"][0]

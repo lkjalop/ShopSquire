@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import requests
 from src.app.observability.metrics import record_security_handoff
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from src.app.models.db import db_session
 
 
@@ -27,36 +27,10 @@ def _handoff_id(trace_id: str | None, decision_id: str | None, target: str) -> s
 
 
 def _ensure_handoff_table() -> None:
-    try:
-        with db_session() as db:
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS security_handoff_attempts (
-                      id TEXT PRIMARY KEY,
-                      decision_id TEXT,
-                      trace_id TEXT,
-                      tenant_id TEXT,
-                      target TEXT NOT NULL,
-                      status TEXT NOT NULL,
-                      attempts INTEGER DEFAULT 0,
-                      max_attempts INTEGER DEFAULT 0,
-                      first_attempt_at TEXT,
-                      last_attempt_at TEXT,
-                      next_attempt_at TEXT,
-                      backoff_ms INTEGER DEFAULT 0,
-                      last_error TEXT,
-                      last_http_status INTEGER,
-                      payload_json TEXT NOT NULL,
-                      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """
-                )
-            )
-            db.commit()
-    except Exception:
-        pass
+    """Require the migration-owned outbox; request handling must never run DDL."""
+    with db_session() as db:
+        if "security_handoff_attempts" not in inspect(db.get_bind()).get_table_names():
+            raise RuntimeError("security_handoff_migration_required")
 
 
 def _persist_handoff_attempt(
@@ -98,54 +72,40 @@ def _persist_handoff_attempt(
                 "created_at": now,
                 "updated_at": now,
             }
-            try:
-                db.execute(
-                    text(
-                        """
-                        INSERT INTO security_handoff_attempts (
-                          id, decision_id, trace_id, tenant_id, target, status, attempts, max_attempts,
-                          first_attempt_at, last_attempt_at, next_attempt_at, backoff_ms, last_error,
-                          last_http_status, payload_json, created_at, updated_at
-                        ) VALUES (
-                          :id, :decision_id, :trace_id, :tenant_id, :target, :status, :attempts, :max_attempts,
-                          :first_attempt_at, :last_attempt_at, :next_attempt_at, :backoff_ms, :last_error,
-                          :last_http_status, :payload_json, :created_at, :updated_at
-                        )
-                        """
-                    ),
-                    params,
-                )
-            except Exception:
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                db.execute(
-                    text(
-                        """
-                        UPDATE security_handoff_attempts
-                        SET decision_id=:decision_id,
-                            trace_id=:trace_id,
-                            tenant_id=:tenant_id,
-                            target=:target,
-                            status=:status,
-                            attempts=:attempts,
-                            max_attempts=:max_attempts,
-                            last_attempt_at=:last_attempt_at,
-                            next_attempt_at=:next_attempt_at,
-                            backoff_ms=:backoff_ms,
-                            last_error=:last_error,
-                            last_http_status=:last_http_status,
-                            payload_json=:payload_json,
-                            updated_at=:updated_at
-                        WHERE id=:id
-                        """
-                    ),
-                    params,
-                )
+            db.execute(
+                text(
+                    """
+                    INSERT INTO security_handoff_attempts (
+                      id, decision_id, trace_id, tenant_id, target, status, attempts, max_attempts,
+                      first_attempt_at, last_attempt_at, next_attempt_at, backoff_ms, last_error,
+                      last_http_status, payload_json, created_at, updated_at
+                    ) VALUES (
+                      :id, :decision_id, :trace_id, :tenant_id, :target, :status, :attempts, :max_attempts,
+                      :first_attempt_at, :last_attempt_at, :next_attempt_at, :backoff_ms, :last_error,
+                      :last_http_status, :payload_json, :created_at, :updated_at
+                    )
+                    ON CONFLICT (id) DO UPDATE SET
+                      decision_id=EXCLUDED.decision_id,
+                      trace_id=EXCLUDED.trace_id,
+                      tenant_id=EXCLUDED.tenant_id,
+                      target=EXCLUDED.target,
+                      status=EXCLUDED.status,
+                      attempts=EXCLUDED.attempts,
+                      max_attempts=EXCLUDED.max_attempts,
+                      last_attempt_at=EXCLUDED.last_attempt_at,
+                      next_attempt_at=EXCLUDED.next_attempt_at,
+                      backoff_ms=EXCLUDED.backoff_ms,
+                      last_error=EXCLUDED.last_error,
+                      last_http_status=EXCLUDED.last_http_status,
+                      payload_json=EXCLUDED.payload_json,
+                      updated_at=EXCLUDED.updated_at
+                    """
+                ),
+                params,
+            )
             db.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("security_handoff_persist_failed handoff_id=%s target=%s error=%s", handoff_id, target, exc)
 
 
 def _post_json(url: str, headers: Dict[str, str], payload: Dict[str, Any], timeout_s: float = 4.0) -> tuple[bool, int | None, str | None]:
@@ -257,17 +217,45 @@ def map_security_event_for_sentinel(event: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def emit_security_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
+def map_security_event_for_cef(event: Dict[str, Any]) -> str:
+    """Map the canonical event to a bounded CEF record for a trusted log forwarder."""
+    verdict = event.get("verdict") if isinstance(event.get("verdict"), dict) else {}
+    severity_name = str(verdict.get("severity") or "info").lower()
+    severity = {"critical": 10, "high": 8, "error": 8, "medium": 5, "warning": 5, "low": 3, "info": 1}.get(severity_name, 1)
+
+    def _header(value: Any) -> str:
+        return str(value or "").replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ")[:256]
+
+    def _extension(value: Any) -> str:
+        return str(value or "").replace("\\", "\\\\").replace("=", "\\=").replace("\n", "\\n").replace("\r", "")[:1024]
+
+    reasons = ",".join(str(item) for item in list(event.get("reasons") or [])[:12])
+    extension = {
+        "rt": int(event.get("event_time") or time.time()) * 1000,
+        "cs1Label": "tenantId", "cs1": event.get("tenant_id"),
+        "cs2Label": "traceId", "cs2": event.get("trace_id"),
+        "cs3Label": "decisionId", "cs3": event.get("decision_id"),
+        "act": verdict.get("action"), "outcome": verdict.get("route"), "reason": reasons,
+    }
+    ext = " ".join(f"{key}={_extension(value)}" for key, value in extension.items() if value not in (None, ""))
+    return f"CEF:0|ShopSquire|Commerce Security|1|artifact-verdict|{_header(event.get('source') or 'Security finding')}|{severity}|{ext}"
+
+
+def emit_security_handoff(event: Dict[str, Any], *, force_inline: bool = False) -> Dict[str, Any]:
     """Emit normalized security event to SIEM/security middleware connectors.
 
     This is intentionally scoped to interoperability handoff only; it does not
     implement XDR-style endpoint/network telemetry.
     """
-    status: Dict[str, Any] = {"sent": [], "failed": [], "retrying": [], "dlq": [], "details": []}
+    status: Dict[str, Any] = {"queued": [], "sent": [], "failed": [], "retrying": [], "dlq": [], "details": []}
     max_attempts = max(1, int(os.getenv("SECURITY_HANDOFF_MAX_ATTEMPTS", "3") or 3))
     backoff_base = max(0.01, float(os.getenv("SECURITY_HANDOFF_BACKOFF_BASE_SECONDS", "0.2") or 0.2))
     backoff_max = max(backoff_base, float(os.getenv("SECURITY_HANDOFF_BACKOFF_MAX_SECONDS", "3.0") or 3.0))
     timeout_s = max(1.0, float(os.getenv("SECURITY_HANDOFF_TIMEOUT_SECONDS", "4.0") or 4.0))
+    env = str(os.getenv("APP_ENV") or "dev").strip().lower()
+    inline = force_inline or str(os.getenv("SECURITY_HANDOFF_INLINE", "")).strip().lower() in {"1", "true", "yes", "on"}
+    if not force_inline and not os.getenv("SECURITY_HANDOFF_INLINE"):
+        inline = env not in {"prod", "production", "staging"}
 
     def _dispatch_target(
         target: str,
@@ -280,11 +268,27 @@ def emit_security_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
         if not url:
             return
         hid = _handoff_id(str(event.get("trace_id") or ""), str(event.get("decision_id") or ""), target)
-        last_error = None
-        last_code: int | None = None
+        _persist_handoff_attempt(
+            handoff_id=hid,
+            decision_id=event.get("decision_id"),
+            trace_id=event.get("trace_id"),
+            tenant_id=event.get("tenant_id"),
+            target=target,
+            status="queued",
+            attempts=0,
+            max_attempts=max_attempts,
+            next_attempt_at=_utc_now_iso(),
+            backoff_ms=0,
+            last_error=None,
+            last_http_status=None,
+            payload=persist_payload,
+        )
+        if not inline:
+            status["queued"].append(target)
+            status["details"].append({"target": target, "status": "queued", "attempts": 0})
+            return
         for attempt in range(1, max_attempts + 1):
             ok, code, err = _post_json(url, headers, payload, timeout_s=timeout_s)
-            last_error, last_code = err, code
             if ok:
                 status["sent"].append(target)
                 status["details"].append({"target": target, "status": "sent", "attempts": attempt, "http_status": code})
@@ -478,6 +482,15 @@ def emit_security_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
             last_http_status=None,
             payload=event,
         )
+    elif not inline:
+        try:
+            from src.app.tasks.security_handoff_tasks import deliver_security_handoff
+
+            deliver_security_handoff.delay(event)
+            status["worker_submission"] = "accepted"
+        except Exception as exc:
+            status["worker_submission"] = "failed"
+            status["worker_submission_error"] = str(exc)[:300]
 
     try:
         logger.info("security_handoff status=%s", json.dumps(status))

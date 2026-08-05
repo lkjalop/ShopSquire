@@ -1,0 +1,51 @@
+{
+  "fixture_version": "siemens-digital-twin-demo-1",
+  "authority": "simulation_only",
+  "concept_triggers": [
+    "digital twin",
+    "engine digital-twin"
+  ],
+  "query_template": "{concept} software version local remote model scale time to result hardware requirements",
+  "sources": [
+    {
+      "title": "Digital Twin",
+      "source_domain": "siemens.com",
+      "url": "https://www.siemens.com/en-us/technology/digital-twin/",
+      "snippet": "Primary vendor context for product, production and performance digital-twin use cases.",
+      "fetched_ts": "2026-08-05T00:00:00Z",
+      "source_policy_status": "pending_independent_review"
+    },
+    {
+      "title": "NX manufacturing system requirements",
+      "source_domain": "siemens.com",
+      "url": "https://www.siemens.com/en-us/products/nx-manufacturing/cam-software/",
+      "snippet": "Primary vendor candidate for operating system, processor, memory, graphics and storage requirements.",
+      "fetched_ts": "2026-08-05T00:00:00Z",
+      "source_policy_status": "pending_independent_review"
+    }
+  ],
+  "normalized_evidence": [
+    {
+      "concept": "digital twin",
+      "status": "insufficient",
+      "claim": "The exact software/version, execution location, model scale and time-to-result target are required before a device can be qualified.",
+      "claim_type": "minimum_requirements",
+      "source_id": "siemens-primary-candidate",
+      "source_record_id": "siemens-digital-twin-demo",
+      "source_revision": "2026-08-05",
+      "observed_at": "2026-08-05T00:00:00Z",
+      "citation_id": "fixture:siemens-digital-twin-demo:2026-08-05",
+      "source_policy": {
+        "policy_version": "semantic-source-v1",
+        "review_status": "pending_independent_review",
+        "reviewer_type": "unreviewed",
+        "reviewed_by": "not-reviewed",
+        "licence": "primary-source-link-only",
+        "trust_tier": "candidate",
+        "allowed_claim_types": ["minimum_requirements"],
+        "freshness_status": "fresh"
+      }
+    }
+  ],
+  "catalog_qualifications": []
+}

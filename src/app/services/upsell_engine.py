@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Upsell / cross-sell engine (vertical-agnostic — flavour comes from the StoreProfile).
 
 Generates companion recommendations when an item is added to cart, from two complementary signals:
@@ -16,6 +14,8 @@ Design:
 - No LLM required — fast, deterministic, DB-backed.
 - Results surfaced as `upsell` field in cart response.
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -43,9 +43,9 @@ def _co_purchase_candidates(sku: str, limit: int = 10) -> List[Dict[str, Any]]:
             rows = db.execute(
                 _text(
                     "SELECT oi2.sku, COUNT(*) AS co_count "
-                    "FROM orders_items oi1 "
-                    "JOIN orders_items oi2 ON oi1.order_id = oi2.order_id AND oi2.sku != oi1.sku "
-                    "JOIN products p ON p.sku = oi2.sku AND COALESCE(p.active, 1) = 1 "
+                    "FROM order_items oi1 "
+                    "JOIN order_items oi2 ON oi1.order_id = oi2.order_id AND oi2.sku != oi1.sku "
+                    "JOIN products p ON p.sku = oi2.sku AND p.active IS NOT FALSE "
                     "WHERE oi1.sku = :sku "
                     "GROUP BY oi2.sku ORDER BY co_count DESC LIMIT :lim"
                 ),
@@ -73,7 +73,7 @@ def _hydrate_candidates(skus: List[str], stock_map: Dict[str, int]) -> List[Dict
             rows = db.execute(
                 _text(
                     f"SELECT sku, name, price_cents, image_url "
-                    f"FROM products WHERE sku IN ({placeholders}) AND COALESCE(active, 1) = 1"
+                    f"FROM products WHERE sku IN ({placeholders}) AND active IS NOT FALSE"
                 ),
                 params,
             ).fetchall()
@@ -135,7 +135,7 @@ def _companion_type_candidates(
         excl = set(exclude_skus or [])
         with db_session() as db:
             rows = db.execute(
-                _text("SELECT sku, name FROM products WHERE COALESCE(active, 1) = 1 LIMIT 500")
+                _text("SELECT sku, name FROM products WHERE active IS NOT FALSE LIMIT 500")
             ).fetchall()
         out: List[str] = []
         for sku, name in rows:

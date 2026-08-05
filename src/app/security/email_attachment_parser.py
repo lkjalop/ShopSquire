@@ -6,6 +6,7 @@ import io
 import re
 import zipfile
 import logging
+import zlib
 from typing import Any, Dict, List
 from xml.etree import ElementTree as ET
 from urllib.parse import urlparse
@@ -36,6 +37,63 @@ _PAYMENT_HINT_PAT = re.compile(
     r"|bank(?:ing)?\s+details?\s+have\s+changed"
     r")\b"
 )
+
+
+def _decode_pdf_literal(value: bytes) -> str:
+    """Decode the bounded subset of PDF literal-string escapes used in text streams."""
+    def _octal(match: re.Match[bytes]) -> bytes:
+        try:
+            return bytes([int(match.group(1), 8)])
+        except (TypeError, ValueError):
+            return b"?"
+
+    value = re.sub(rb"\\([0-7]{1,3})", _octal, value)
+    value = (
+        value.replace(rb"\(", b"(")
+        .replace(rb"\)", b")")
+        .replace(b"\\\\", b"\\")
+        .replace(rb"\n", b"\n")
+        .replace(rb"\r", b"\r")
+        .replace(rb"\t", b"\t")
+    )
+    return value.decode("latin-1", errors="ignore").strip()
+
+
+def _extract_filtered_pdf_stream_text(blob: bytes) -> str:
+    """Extract literal text from bounded Flate/ASCII85 PDF streams.
+
+    This is a dependency-free fallback for environments that deliberately do
+    not install a general PDF parser. It never executes actions or resolves
+    external resources; it only decodes local streams with strict output caps.
+    """
+    chunks: List[str] = []
+    for match in re.finditer(rb"stream\r?\n(.*?)endstream", blob, re.DOTALL):
+        if len(chunks) >= 40:
+            break
+        raw = match.group(1).strip()
+        if not raw or len(raw) > 2_000_000:
+            continue
+        header = blob[max(0, match.start() - 256):match.start()]
+        try:
+            decoded = raw
+            if b"ASCII85Decode" in header:
+                decoded = base64.a85decode(decoded, adobe=True)
+            if b"FlateDecode" in header:
+                inflater = zlib.decompressobj()
+                decoded = inflater.decompress(decoded, 2_000_000)
+                if inflater.unconsumed_tail:
+                    continue
+            if len(decoded) > 2_000_000:
+                continue
+        except Exception:
+            continue
+        for literal in re.finditer(rb"\(((?:\\.|[^\\)])*)\)\s*Tj\b", decoded, re.DOTALL):
+            text_value = _decode_pdf_literal(literal.group(1))
+            if text_value:
+                chunks.append(text_value)
+                if sum(len(item) for item in chunks) >= 20_000:
+                    return "\n".join(chunks)[:20_000]
+    return "\n".join(chunks)[:20_000]
 logger = logging.getLogger(__name__)
 
 
@@ -102,6 +160,49 @@ def _extract_vba_strings(blob: bytes) -> str:
     return " ".join(out)[:10000]
 
 
+def _office_forensics(blob: bytes) -> Dict[str, Any]:
+    """Inspect OOXML package relationships without resolving external targets."""
+    out: Dict[str, Any] = {
+        "external_relationships": [],
+        "macro_member_count": 0,
+        "embedded_object_count": 0,
+    }
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            names = zf.namelist()
+            out["macro_member_count"] = sum(
+                1 for name in names
+                if "vbaproject" in name.lower() or name.lower().endswith((".bas", ".cls", ".frm"))
+            )
+            out["embedded_object_count"] = sum(
+                1 for name in names
+                if "/embeddings/" in name.lower() or name.lower().endswith((".bin", ".ole"))
+            )
+            external: List[Dict[str, str]] = []
+            for name in [item for item in names if item.lower().endswith(".rels")][:32]:
+                try:
+                    root = ET.fromstring(zf.read(name))
+                except Exception:
+                    continue
+                for node in root.iter():
+                    attrs = {str(key).split("}")[-1]: str(value) for key, value in node.attrib.items()}
+                    target = attrs.get("Target", "").strip()
+                    if attrs.get("TargetMode", "").lower() == "external" or target.lower().startswith(
+                        ("http://", "https://", "file://", "ftp://", "\\\\")
+                    ):
+                        external.append({
+                            "relationship_file": name,
+                            "type": attrs.get("Type", "")[-160:],
+                            "target": target[:500],
+                        })
+                        if len(external) >= 24:
+                            break
+            out["external_relationships"] = external
+    except Exception:
+        out["parse_error"] = "office_package_parse_failed"
+    return out
+
+
 def _dedupe_text_blocks(parts: List[str]) -> str:
     out: List[str] = []
     seen: set[str] = set()
@@ -136,6 +237,9 @@ def _extract_pdf_text_basic(blob: bytes) -> str:
             return "\n".join(parts)[:20000]
     except Exception:
         pass
+    filtered = _extract_filtered_pdf_stream_text(blob)
+    if filtered:
+        return filtered
     chunks = []
     for m in _PDF_TEXT_PAT.finditer(blob):
         try:
@@ -209,6 +313,7 @@ def _pdf_forensics(blob: bytes) -> Dict[str, Any]:
         "embedded_files_count": 0,
         "objstm_count": 0,
         "xrefstm_present": False,
+        "actions": {},
     }
     try:
         out["embedded_files_count"] = int(blob.count(b"/EmbeddedFile") + blob.count(b"/Filespec"))
@@ -222,6 +327,18 @@ def _pdf_forensics(blob: bytes) -> Dict[str, Any]:
         out["xrefstm_present"] = bool(b"/XRefStm" in blob or b"XRefStm" in blob)
     except Exception:
         out["xrefstm_present"] = False
+    action_markers = {
+        "javascript": (b"/JavaScript", b"/JS"),
+        "open_action": (b"/OpenAction",),
+        "additional_actions": (b"/AA",),
+        "launch": (b"/Launch",),
+        "external_uri": (b"/URI",),
+        "remote_goto": (b"/GoToR",),
+    }
+    out["actions"] = {
+        name: sum(blob.count(marker) for marker in markers)
+        for name, markers in action_markers.items()
+    }
     try:
         import pypdf  # type: ignore
 
@@ -619,6 +736,18 @@ def hydrate_attachments_from_bytes(
                     )
             except Exception:
                 parse_errors.append("text_extract_failed")
+            # Keep raw bytes as evidence, but never expose executable spreadsheet
+            # formulas through the sanitized operational representation.
+            try:
+                ctype = str(row.get("content_type") or "").lower()
+                name = str(row.get("name") or "").lower()
+                if ctype in {"text/csv", "application/csv"} or name.endswith(".csv"):
+                    from src.app.security.csv_safety import neutralize_csv_text
+                    safe_csv, formula_hits = neutralize_csv_text(str(row.get("extracted_text") or ""))
+                    row["extracted_text"] = safe_csv
+                    row["spreadsheet_formula_neutralized"] = int(formula_hits)
+            except Exception:
+                parse_errors.append("csv_formula_sanitization_failed")
             # PDF forensics
             try:
                 ctype = str(row.get("content_type") or "").lower()
@@ -631,8 +760,21 @@ def hydrate_attachments_from_bytes(
                     row["pdf_objstm_count"] = int(f.get("objstm_count") or 0)
                     row["pdf_xrefstm_present"] = bool(f.get("xrefstm_present"))
                     row["pdf_embedded_urls"] = _extract_pdf_urls(blob)
+                    row["pdf_actions"] = dict(f.get("actions") or {})
             except Exception:
-                pass
+                parse_errors.append("pdf_forensics_failed")
+            try:
+                ctype = str(row.get("content_type") or "").lower()
+                name = str(row.get("name") or "").lower()
+                if name.endswith((".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm")) or "officedocument" in ctype:
+                    office = _office_forensics(blob)
+                    row["office_external_relationships"] = list(office.get("external_relationships") or [])
+                    row["office_macro_member_count"] = int(office.get("macro_member_count") or 0)
+                    row["office_embedded_object_count"] = int(office.get("embedded_object_count") or 0)
+                    if office.get("parse_error"):
+                        parse_errors.append(str(office["parse_error"]))
+            except Exception:
+                parse_errors.append("office_forensics_failed")
             # Explicit bank field extraction + fingerprint
             try:
                 bank_fields = _extract_bank_fields(str(row.get("extracted_text") or ""))

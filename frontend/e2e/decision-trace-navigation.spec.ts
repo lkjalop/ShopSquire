@@ -52,7 +52,113 @@ function tracePayload(traceId: string) {
         timestamp: '2026-07-31T00:00:04Z',
         payload: { summary: 'Image evidence assessed' },
       },
+      {
+        id: 'semantic-resolution',
+        seq: 6,
+        event_type: 'recommendation_result',
+        timestamp: '2026-07-31T00:00:05Z',
+        payload: {
+          products_summary: [],
+          semantic_resolution: {
+            outcome: 'proceed_catalog',
+            catalog_authority: 'permitted',
+            residual_route: 'AUTHORIZE',
+            residual_reasons: ['consequential_action_requires_policy'],
+            authorization_granted: false,
+            desired_outcome: 'source hotel chairs made from the requested material',
+            concepts: [{ text: 'iron birch', status: 'resolved' }],
+            questions: [],
+            state_prevented: [],
+            next_permitted_action: 'evaluate_consequential_action_policy',
+          },
+          catalog_alignment: { status: 'qualified_catalog_match', qualified: ['DEMO-ALT-1'] },
+          case_obligations: [{
+            kind: 'buyer_commitment', status: 'authorization_required',
+            authorization_granted: false, residual_route: 'AUTHORIZE',
+            selected_sku: 'DEMO-ALT-1', quantity: 20,
+            atp_snapshot: { source_version: 'ATP-FIXTURE-42', observed_at: '2026-07-31T00:00:04Z' },
+          }],
+          semantic_evidence: {
+            selected: ['concept_resolution'],
+            legs: { concept_resolution: { data: {
+              status: 'evidence_candidates',
+              authority: 'evidence_candidate_only',
+              query: 'iron birch definition requirements compatibility',
+              query_hash: 'fixture-query-01',
+              provider_id: 'approved_search_proxy',
+              provider_run_status: 'cached',
+              cache_status: 'hit',
+              source_status: { status: 'full', hit_count: 1, latency_ms: 17 },
+              items: [{
+                title: 'Material identity reference',
+                source_domain: 'docs.example.org',
+                url: 'https://docs.example.org/materials/iron-birch',
+                fetched_ts: 1785859200,
+              }],
+            } } },
+          },
+        },
+      },
+      {
+        id: 'return-claim-1', seq: 7, event_type: 'return_claim_evidence_pending',
+        source_id: 'Returns_Agent', timestamp: '2026-08-04T01:00:00Z',
+        payload: {
+          claim_id: 'claim-1', status: 'evidence_pending', order_verification_status: 'found',
+          evidence_count: 2, evidence_status: 'pending_security_review',
+          authority: 'observation_only', commercial_action_prevented: true,
+        },
+      },
+      {
+        id: 'return-claim-2', seq: 8, event_type: 'return_claim_under_review',
+        source_id: 'Returns_Agent', timestamp: '2026-08-04T01:03:00Z',
+        payload: {
+          claim_id: 'claim-1', status: 'under_review', order_verification_status: 'found',
+          evidence_count: 2, evidence_status: 'clean', authority: 'human_review_required',
+          commercial_action_prevented: true,
+        },
+      },
     ],
+    intent_analysis: {
+      semantic_resolution: {
+        outcome: 'proceed_catalog',
+        catalog_authority: 'permitted',
+        residual_route: 'AUTHORIZE',
+        residual_reasons: ['consequential_action_requires_policy'],
+        authorization_granted: false,
+        desired_outcome: 'source hotel chairs made from the requested material',
+        concepts: [{ text: 'iron birch', status: 'resolved' }],
+        questions: [],
+        state_prevented: [],
+        next_permitted_action: 'evaluate_consequential_action_policy',
+      },
+    },
+    catalog_alignment: { status: 'qualified_catalog_match', qualified: ['DEMO-ALT-1'] },
+    case_obligations: [{
+      kind: 'buyer_commitment', status: 'authorization_required',
+      authorization_granted: false, residual_route: 'AUTHORIZE',
+      selected_sku: 'DEMO-ALT-1', quantity: 20,
+      atp_snapshot: { source_version: 'ATP-FIXTURE-42', observed_at: '2026-07-31T00:00:04Z' },
+    }],
+    semantic_evidence: {
+      selected: ['concept_resolution'],
+      legs: { concept_resolution: { data: {
+        status: 'evidence_candidates',
+        authority: 'evidence_candidate_only',
+        query: 'iron birch definition requirements compatibility',
+        query_hash: 'fixture-query-01',
+        provider_id: 'approved_search_proxy',
+        provider_run_status: 'cached',
+        cache_status: 'hit',
+        source_status: { status: 'full', hit_count: 1, latency_ms: 17 },
+        items: [{
+          title: 'Material identity reference',
+          source_domain: 'docs.example.org',
+          url: 'https://docs.example.org/materials/iron-birch',
+          fetched_ts: 1785859200,
+        }],
+      } } },
+    },
+    products: [{ sku: 'DEMO-ALT-1', name: 'Evidence-qualified alternative' }],
     model_selection: { tier: 2, complexity: 0.4 },
     execution_steps: [{ kind: 'policy_gate', authority: 'authorizes', status: 'passed' }],
   };
@@ -132,5 +238,34 @@ test('consolidated Decision Trace preserves requests, keyboard use, and every de
   for (const leaf of leaves) {
     await page.goto(`/?trace=trace-nav&tracetab=${leaf}`);
     await expect(page.getByTestId(`trace-leaf-${leaf}`)).toHaveAttribute('aria-selected', 'true');
+    if (leaf === 'why') {
+      const semantic = page.getByTestId('semantic-resolution-trace');
+      await expect(semantic).toContainText('iron birch');
+      await expect(semantic).toContainText('iron birch definition requirements compatibility');
+      await expect(semantic).toContainText('approved search proxy');
+      await expect(semantic).toContainText('candidate only');
+      await expect(semantic.getByRole('link', { name: 'Material identity reference' }))
+        .toHaveAttribute('href', 'https://docs.example.org/materials/iron-birch');
+      await expect(semantic).toContainText('qualified catalog match');
+      await expect(page.getByText('Score not recorded')).toBeVisible();
+    }
+    if (leaf === 'procurement') {
+      const lifecycle = page.getByTestId('return-lifecycle-trace');
+      await expect(lifecycle).toContainText('Under human review');
+      await expect(lifecycle).toContainText('Authenticated order matched');
+      await expect(lifecycle).toContainText(/no refund, replacement or repair authorization/i);
+    }
   }
+});
+
+test('qualified evidence chain remains visibly human gated', async ({ page }) => {
+  await page.goto('/?trace=trace-nav&tracetab=why');
+  const modal = page.getByTestId('decision-trace-modal');
+  await expect(modal).toBeVisible();
+  const authority = modal.getByTestId('semantic-commercial-authority');
+  await expect(authority).toContainText(/qualified catalog match/i);
+  await expect(authority).toContainText('DEMO-ALT-1');
+  await expect(authority).toContainText('ATP-FIXTURE-42');
+  await expect(authority).toContainText(/authorization required/i);
+  await expect(authority).toContainText(/not granted/i);
 });

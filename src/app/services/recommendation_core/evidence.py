@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
 
-from src.app.services.catalog_read_model import VariantView, search_variants
+from src.app.services.catalog_read_model import VariantView, get_variants, search_variants
 from src.app.services.recommendation_core.envelope import CoreResponse, TurnEnvelope
 from src.app.services.taxonomy_registry import grounding_status, sells_within
 
@@ -110,7 +110,8 @@ def _attach_taxonomy_nodes(db, variants: List[VariantView], tenant_id: str) -> L
 def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = None,
                     text_query: Optional[str] = None, category: Optional[str] = None,
                     product_type: Optional[str] = None, limit: int = 50,
-                    mode: Optional[str] = None, broad: bool = False) -> EvidenceBundle:
+                    mode: Optional[str] = None, broad: bool = False,
+                    exact_skus: Optional[List[str]] = None) -> EvidenceBundle:
     """Facade-only retrieval, tenant-scoped, budget applied in CENTS at the evidence edge
     (one budget surface — never re-parsed downstream). PRIMARY key: the routed TAXONOMY NODE
     (subtree lookup over product_classification — the phrase 'a laptop with A100-like
@@ -122,8 +123,16 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
     bundle = EvidenceBundle(tenant_id=tenant, grounding=grounding_status(db, tenant_id=tenant))
     counted = _CountingDB(db)      # retrieval legs only; grounding/refusal reads not in scope
     variants: List[VariantView] = []
-    if node_handle:
-        from src.app.services.catalog_read_model import get_variants
+    if exact_skus:
+        try:
+            variants = [variant for variant in get_variants(
+                counted, list(exact_skus), tenant_id=tenant, mode=mode
+            ) if variant.active]
+            bundle.retrieval_mode = "exact_product_alias"
+        except Exception as exc:
+            bundle.errors.append(f"exact_product_lookup:{type(exc).__name__}")
+            variants = []
+    elif node_handle:
         try:
             # BATCH (M2-B3): one sku-list query + one query per table — was ~3 × N per turn
             skus = _skus_for_node(counted, node_handle, tenant, limit)
@@ -133,9 +142,9 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
             _log.warning("taxonomy sku lookup FAILED (node=%s): %s", node_handle, repr(exc)[:120])
             bundle.errors.append(f"taxonomy_lookup:{type(exc).__name__}")
             variants = []
-    if variants:
+    if variants and not exact_skus:
         bundle.retrieval_mode = f"taxonomy:{node_handle}"
-    else:
+    elif not variants and not exact_skus:
         # TEXT FALLBACK always attempted (review #1): a taxonomy-leg ERROR must still fall
         # through to text search — the old code did, and dropping it turned a transient
         # product_classification blip into a buyer-visible 'couldn't verify catalog'. The
@@ -154,7 +163,8 @@ def gather_evidence(db, envelope: TurnEnvelope, *, node_handle: Optional[str] = 
         # a taxonomy error that the text leg RECOVERED from is no longer a turn error
         if variants and not text_errored:
             bundle.errors = [e for e in bundle.errors if not e.startswith("taxonomy_lookup")]
-    if not bundle.retrieval_mode.startswith("taxonomy:"):
+    if (not bundle.retrieval_mode.startswith("taxonomy:")
+            and bundle.retrieval_mode != "exact_product_alias"):
         bundle.retrieval_mode = mode or "default"
     variants = _attach_taxonomy_nodes(counted, variants, tenant)
     bundle.total_before_budget = len(variants)

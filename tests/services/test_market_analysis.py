@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -295,8 +294,8 @@ def test_analyze_composes_new_detectors():
 def test_run_analysis_reads_market_signal():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     db = sessionmaker(bind=eng, future=True)()
-    from src.app.services.market_signal import ensure_table
-    ensure_table(db)
+    from tests.market_migration_helpers import apply_market_migration
+    apply_market_migration(db)
     for i, day in enumerate(["2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24"]):
         n = 2 if i < 4 else 20
         for j in range(n):

@@ -7,6 +7,7 @@ vi.mock('../../lib/api', () => ({
   confirmCartSourcing: vi.fn(),
   commitFulfillmentCase: vi.fn(),
   getSplitOffer: vi.fn(),
+  fetchBuyerProcurementContext: vi.fn(async () => ({ status: 'not_found', lines: [] })),
 }));
 
 import * as api from '../../lib/api';
@@ -106,5 +107,35 @@ describe('CartPanel sourcing amendments', () => {
     await waitFor(() => expect(screen.getByTestId('cart-sourcing-note')).toHaveTextContent(/previous supplier request was retired/i));
     expect(api.confirmCartSourcing).toHaveBeenLastCalledWith('u1', 'pr-1', [{ item_ref: 'LAP-1', quantity: 15 }], 'trace-2', true, undefined);
     expect(api.commitFulfillmentCase).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not claim an RFQ was drafted when only buyer commitment persisted', async () => {
+    (api.getSplitOffer as any).mockResolvedValue(splitOffer(20));
+    (api.confirmCartSourcing as any).mockResolvedValue({
+      case_count: 1,
+      cases: [{ case_id: 'case-pending-draft' }],
+      idempotent: false,
+    });
+    (api.commitFulfillmentCase as any).mockResolvedValue({
+      state: 'COMMITTED',
+      state_json: {},
+    });
+
+    render(<CartPanel
+      uid="u1"
+      cart={cart(20)}
+      onRefresh={vi.fn()}
+      onRemove={vi.fn()}
+      onClear={vi.fn()}
+      onAdd={vi.fn()}
+      traceId="trace-draft-pending"
+    />);
+
+    fireEvent.click(await screen.findByTestId('split-confirm'));
+
+    await waitFor(() => expect(screen.getByTestId('cart-sourcing-note')).toHaveTextContent(
+      /commitment recorded.*RFQ drafting is pending/i,
+    ));
+    expect(screen.getByTestId('cart-sourcing-note')).not.toHaveTextContent(/RFQ\(s\) drafted/i);
   });
 });

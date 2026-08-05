@@ -38,12 +38,35 @@ from src.app.services.catalog_classifier import candidate_nodes
 from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
-from src.app.services.taxonomy_registry import (get_node, primary_sold_node, search_nodes,
-                                                sells_within, sold_nodes)
+from src.app.services.taxonomy_registry import (classification_nodes_for_skus, get_node,
+                                                primary_sold_node, search_nodes, sells_within,
+                                                sold_nodes)
 
 _ROUTER_MAX_CONCURRENCY = max(1, min(int(os.getenv("ROUTER_MAX_CONCURRENCY", "1") or 1), 4))
 _ROUTER_GATE = threading.BoundedSemaphore(_ROUTER_MAX_CONCURRENCY)
 _ROUTER_CALL_STATE = threading.local()
+
+
+def router_runtime_contract() -> Dict[str, Any]:
+    """Return the bounded router budget independently of research/narration.
+
+    Queue contention must not consume the entire inference allowance.  A caller
+    can still override these values for a deliberately slower BYO deployment.
+    """
+    try:
+        inference_s = max(0.5, min(float(os.getenv("ROUTER_TIMEOUT_SEC", "12") or 12), 60.0))
+    except (TypeError, ValueError):
+        inference_s = 12.0
+    try:
+        queue_s = max(0.01, min(float(os.getenv("ROUTER_QUEUE_TIMEOUT_SEC", "0.25") or 0.25), 5.0))
+    except (TypeError, ValueError):
+        queue_s = 0.25
+    return {
+        "inference_timeout_s": inference_s,
+        "queue_timeout_s": min(queue_s, inference_s),
+        "max_concurrency": _ROUTER_MAX_CONCURRENCY,
+        "late_results_accepted": False,
+    }
 
 
 def last_router_call_metrics() -> Dict[str, Any]:
@@ -129,8 +152,13 @@ _router_model = active_router_model
 
 def _default_llm_fn(prompt: str, timeout: float) -> str:
     started = time.monotonic()
+    model = _router_model()
     metrics: Dict[str, Any] = {
-        "model": _router_model(),
+        "provider": "ollama",
+        "model": model,
+        "model_version": os.getenv("ROUTER_MODEL_VERSION") or model,
+        "prompt_version": "recommend-router-v2",
+        "policy_version": "semantic-authority-v1",
         "outcome": "error",
         "queue_ms": 0.0,
         "wall_ms": 0.0,
@@ -138,12 +166,24 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
     _ROUTER_CALL_STATE.metrics = metrics
     acquired = False
     try:
+        explicit_enabled = str(os.getenv("ROUTER_MODEL_ENABLED", "")).strip().lower()
+        mock_runtime = str(os.getenv("USE_MOCK_LLM", "")).strip().lower() in {
+            "1", "true", "yes", "on",
+        }
+        enabled = (
+            explicit_enabled in {"1", "true", "yes", "on"}
+            if explicit_enabled else not mock_runtime
+        )
+        if not enabled:
+            metrics["provider"] = "mock" if mock_runtime else "disabled"
+            metrics["outcome"] = "mock_disabled" if mock_runtime else "disabled"
+            return ""
         import httpx
         url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-        model = _router_model()
         metrics["model"] = model
         queue_started = time.monotonic()
-        acquired = _ROUTER_GATE.acquire(timeout=max(0.1, float(timeout or 20.0)))
+        contract = router_runtime_contract()
+        acquired = _ROUTER_GATE.acquire(timeout=float(contract["queue_timeout_s"]))
         metrics["queue_ms"] = round((time.monotonic() - queue_started) * 1000.0, 1)
         if not acquired:
             metrics["outcome"] = "queue_timeout"
@@ -258,6 +298,7 @@ class TurnDecision:
     # retrieval target (rerouted to the device for a run_on turn).
     requested_product_node: Optional[str] = None   # the DEVICE to retrieve (== node_handle)
     requested_category_label: Optional[str] = None  # buyer-facing label when taxonomy is approximate
+    exact_product_sku: Optional[str] = None          # indexed literal alias; never fuzzy/model-selected
     # Closed model signal for requests outside product commerce. It is advisory until the clamp
     # confirms there is no grounded product node; it can never suppress a catalog result.
     request_scope: str = "uncertain"               # product | service_or_place | uncertain
@@ -309,6 +350,9 @@ class TurnDecision:
     # current_order | general_policy | none. Kept separate from subject continuity so an omitted
     # quantity can only be inherited for a real active procurement workflow.
     procurement_context: str = "none"
+    # none | status | summary. Read-only case operations are resolved from the
+    # existing sealed session and never authorize fresh catalog retrieval.
+    case_operation: str = "none"
     # A turn may ask for an explanation while also changing bounded constraints. The primary
     # lane performs the consequential read (normally FILTER); secondary lanes describe the
     # additional response obligation without inventing another execution path.
@@ -320,6 +364,10 @@ class TurnDecision:
     # never consumed by retrieval or execution; it exists so the trace can prove which component
     # proposed a value and which component authorized the final decision.
     model_proposal: Dict[str, Any] = field(default_factory=dict)
+    # Generic, non-executable interpretation of unfamiliar concepts.  Product/domain facts
+    # never live here: the model proposes ambiguity and evidence questions; the semantic
+    # reducer decides whether catalog retrieval may proceed.
+    semantic_proposal: Dict[str, Any] = field(default_factory=dict)
     authorization_changes: Tuple[str, ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
@@ -334,6 +382,7 @@ class TurnDecision:
                 "confidence": round(self.confidence, 3), "source": self.source,
                 "requested_product_node": self.requested_product_node,
                 "requested_category_label": self.requested_category_label,
+                "exact_product_sku": self.exact_product_sku,
                 "request_scope": self.request_scope,
                 "workloads": list(self.workloads), "relationship": self.relationship,
                 "prior_shortlist": list(self.prior_shortlist),
@@ -346,9 +395,11 @@ class TurnDecision:
                 "budget_scope": self.budget_scope, "budget_cap_mode": self.budget_cap_mode,
                 "subject_action": self.subject_action,
                 "procurement_context": self.procurement_context,
+                "case_operation": self.case_operation,
                 "secondary_lanes": list(self.secondary_lanes),
                 "product_type_options": list(self.product_type_options),
                 "model_proposal": dict(self.model_proposal),
+                "semantic_proposal": dict(self.semantic_proposal),
                 "authorization_changes": list(self.authorization_changes)}
 
 
@@ -387,6 +438,50 @@ def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _validated_semantic_proposal(data: Dict[str, Any], query: str) -> Dict[str, Any]:
+    """Clamp the model's generic concept proposal; invalid output grants no authority."""
+    raw = data.get("semantic_proposal")
+    if not isinstance(raw, dict):
+        return {}
+    try:
+        from src.app.services.semantic_resolution import validate_semantic_proposal
+
+        result = validate_semantic_proposal(raw, query=query)
+        if result.outcome == "valid" and result.proposal is not None:
+            return {"validation": "valid", **result.proposal.model_dump()}
+        return {"validation": "rejected", "reasons": list(result.reasons)}
+    except Exception:
+        return {"validation": "rejected", "reasons": ["semantic_validator_unavailable"]}
+
+
+def _semantic_proposal_or_relation_fallback(
+    data: Dict[str, Any],
+    *,
+    query: str,
+    exact_product_sku: str | None = None,
+    requirements: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Use valid model semantics, otherwise fail closed on a material relation.
+
+    The fallback recognizes only generic language relations.  It never supplies a product fact,
+    a hardware floor, or catalog authority; the semantic reducer still owns the decision.
+    """
+    proposed = _validated_semantic_proposal(data, query)
+    if proposed.get("validation") == "valid":
+        return proposed
+    try:
+        from src.app.services.semantic_resolution import fallback_semantic_proposal
+
+        return fallback_semantic_proposal(
+            query=query,
+            exact_product_sku=exact_product_sku,
+            requirements=requirements,
+        ) or proposed
+    except Exception as exc:
+        logger.warning("deterministic semantic fallback failed: %s", repr(exc)[:120])
+        return proposed
+
+
 def _authorization_changes(proposal: Dict[str, Any], accepted: Dict[str, Any]) -> Tuple[str, ...]:
     """Describe platform defaults separately from rejected or corrected model values."""
     comparisons = {
@@ -414,6 +509,51 @@ def _authorization_changes(proposal: Dict[str, Any], accepted: Dict[str, Any]) -
 
 
 DEFAULT_DECISION = TurnDecision(source="default")
+
+
+_BLOCKED_COMMERCE_COMMAND = _re.compile(
+    r"\b(?:choose|select|pick|add(?:\s+it)?\s+to\s+(?:my\s+)?cart|"
+    r"confirm|commit|place\s+(?:the\s+)?order|purchase\s+order|proceed|buy)\b",
+    _re.IGNORECASE,
+)
+
+
+def persisted_semantic_blocker_decision(
+    query: str, session: Dict[str, Any] | None,
+) -> Optional[TurnDecision]:
+    """Keep a material evidence blocker authoritative across short action turns.
+
+    The previous accepted semantic resolution is platform state, not new model output.  A short
+    command such as ``choose`` or ``confirm`` therefore cannot reopen retrieval or manufacture a
+    selection.  A substantive answer is allowed back through the normal semantic planner so the
+    buyer can resolve the questions naturally.
+    """
+    state = session if isinstance(session, dict) else {}
+    resolution = state.get("semantic_resolution")
+    if not isinstance(resolution, dict) or resolution.get("catalog_authority") != "blocked":
+        return None
+    if not _BLOCKED_COMMERCE_COMMAND.search(str(query or "")):
+        return None
+    concepts = [dict(item) for item in (resolution.get("concepts") or []) if isinstance(item, dict)]
+    questions = [dict(item) for item in (resolution.get("questions") or []) if isinstance(item, dict)]
+    if not concepts:
+        return None
+    proposal = {
+        "validation": "valid",
+        "desired_outcome": str(resolution.get("desired_outcome") or "resolve material requirements")[:240],
+        "concepts": concepts[:4],
+        "evidence_questions": questions[:5],
+        "proposed_action": "research_then_clarify",
+        "confidence": 1.0,
+        "state_prevented": list(resolution.get("state_prevented") or ()),
+        "persisted_case_blocker": True,
+    }
+    return TurnDecision(
+        lane="SEARCH",
+        source="deterministic_persisted_semantic_blocker",
+        semantic_proposal=proposal,
+        subject_action="continue",
+    )
 
 
 def _approved_policy_lane(envelope: TurnEnvelope) -> bool:
@@ -457,6 +597,15 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     }
     parsed_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
     quantity = parsed_quantity[0] if parsed_quantity is not None else None
+    from src.app.services.attribute_registry import (
+        defs_union,
+        extract_keyed_quantity_requirements,
+    )
+
+    explicit_requirements = extract_keyed_quantity_requirements(
+        envelope.query,
+        defs_union(DEFAULT_VERTICALS),
+    )
     named_handles = set(_query_named_sold_handles(db, envelope))
     node = None
     subject_action = "switch"
@@ -478,8 +627,36 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
                 and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True):
             node = prior
             subject_action = "continue"
+    if node is None and explicit_requirements:
+        # A number+unit bound to a registry attribute is a verifiable filter,
+        # not a new product identity. During model outage it may refine the
+        # already accepted sold subject, but cannot create one on cold start.
+        prior = get_node(str(session.get("prior_node") or ""))
+        if (
+            prior is not None
+            and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True
+        ):
+            node = prior
+            subject_action = "continue"
     if node is None:
-        return TurnDecision(source=f"fallback:{reason}")
+        semantic = _semantic_proposal_or_relation_fallback(
+            {}, query=envelope.query, requirements={},
+        )
+        budget_scope = classify_budget_scope(envelope.query)
+        total_budget_cents = None
+        if budget_scope == "total":
+            parsed_budget = parse_budget(envelope.query)
+            if parsed_budget is not None and parsed_budget.budget_max is not None:
+                total_budget_cents = int(parsed_budget.budget_max) * 100
+        return TurnDecision(
+            lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
+            source=f"fallback:{reason}",
+            quantity=quantity,
+            total_budget_cents=total_budget_cents,
+            budget_scope=budget_scope,
+            semantic_proposal=semantic,
+            requirements=explicit_requirements,
+        )
 
     budget_scope = classify_budget_scope(envelope.query)
     if budget_scope == "unknown" and subject_action == "continue":
@@ -494,6 +671,9 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         if parsed_budget is not None and parsed_budget.budget_max is not None:
             total_budget_cents = int(parsed_budget.budget_max) * 100
 
+    semantic = _semantic_proposal_or_relation_fallback(
+        {}, query=envelope.query, requirements={},
+    )
     return TurnDecision(
         lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
         node_handle=node.handle,
@@ -505,6 +685,8 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         quantity=quantity,
         total_budget_cents=total_budget_cents,
         budget_scope=budget_scope,
+        semantic_proposal=semantic,
+        requirements=explicit_requirements,
     )
 
 
@@ -516,8 +698,12 @@ def _clamp_brand(db, raw: Any) -> Optional[str]:
         return None
     try:
         from sqlalchemy import text as _t
-        rows = db.execute(_t("SELECT DISTINCT brand FROM products "
-                             "WHERE brand IS NOT NULL AND brand != ''")).fetchall()
+        # These are advisory clamps. A schema/read failure must roll back only
+        # this probe; otherwise PostgreSQL marks the request transaction failed
+        # and every later authoritative taxonomy read also fails.
+        with db.begin_nested():
+            rows = db.execute(_t("SELECT DISTINCT brand FROM products "
+                                 "WHERE brand IS NOT NULL AND brand != ''")).fetchall()
         for (name,) in rows:
             if str(name).strip().lower() == b:
                 return str(name)
@@ -538,9 +724,10 @@ def _explicitly_excluded_brand(db, query: str) -> Optional[str]:
         return None
     try:
         from sqlalchemy import text as _t
-        rows = db.execute(_t(
-            "SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != ''"
-        )).fetchall()
+        with db.begin_nested():
+            rows = db.execute(_t(
+                "SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != ''"
+            )).fetchall()
     except Exception as exc:
         logger.debug("brand exclusion lookup failed: %s", repr(exc)[:100])
         return None
@@ -593,10 +780,11 @@ def _catalog_brand_anchor_nodes(db, tenant_id: str, query: str) -> tuple:
         return ()
     try:
         from sqlalchemy import text as _t
-        brands = db.execute(_t(
-            "SELECT DISTINCT brand FROM products "
-            "WHERE brand IS NOT NULL AND brand != '' AND active=:active"
-        ), {"active": True}).fetchall()
+        with db.begin_nested():
+            brands = db.execute(_t(
+                "SELECT DISTINCT brand FROM products "
+                "WHERE brand IS NOT NULL AND brand != '' AND active=:active"
+            ), {"active": True}).fetchall()
         named = []
         for (raw_brand,) in brands:
             brand = str(raw_brand or "").strip()
@@ -604,12 +792,13 @@ def _catalog_brand_anchor_nodes(db, tenant_id: str, query: str) -> tuple:
                 named.append(brand)
         if len(named) != 1 or _explicitly_excluded_brand(db, query):
             return ()
-        rows = db.execute(_t(
-            "SELECT DISTINCT pc.node_handle FROM product_classification pc "
-            "JOIN products p ON p.sku=pc.sku "
-            "WHERE pc.tenant_id=:tenant AND pc.status='approved' "
-            "AND LOWER(p.brand)=:brand AND p.active=:active"
-        ), {"tenant": str(tenant_id), "brand": named[0].lower(), "active": True}).fetchall()
+        with db.begin_nested():
+            rows = db.execute(_t(
+                "SELECT DISTINCT pc.node_handle FROM product_classification pc "
+                "JOIN products p ON p.sku=pc.sku "
+                "WHERE pc.tenant_id=:tenant AND pc.status='approved' "
+                "AND LOWER(p.brand)=:brand AND p.active=:active"
+            ), {"tenant": str(tenant_id), "brand": named[0].lower(), "active": True}).fetchall()
     except Exception as exc:
         logger.debug("catalog brand anchor lookup failed: %s", repr(exc)[:120])
         return ()
@@ -649,6 +838,157 @@ def _prior_context_block(prior: Optional[Dict[str, Any]]) -> str:
         f"clearly starts a new search. Set subject_action: 'continue' if this message refines the "
         f"PRIOR subject (adds a spec/quantity/budget, 'also', 'the class needs', 'make it N'), "
         f"'switch' if it is a genuinely new product search, 'uncertain' if unclear.\n\n")
+
+
+# These are closed *operations on an already-active procurement case*, not a second
+# product-intent classifier. They carry no product/category vocabulary; their only authority is
+# to preserve the accepted subject while the buyer amends logistics/commercial requirements or
+# asks for read-only status. A fresh conversation never enters this path.
+_CASE_CONTEXT_OPERATION = _re.compile(
+    r"(?:"
+    r"\b(?:ship|deliver|delivery|destination|address|postcode|postal|pickup)\b|"
+    r"\b(?:need|required|arrive|deliver(?:ed)?)\s+by\b|\bdeadline\b|"
+    r"\b(?:warranty|support|service\s+level|sla)\b|"
+    r"\b(?:supplier[ -]?direct|direct\s+ship|cross[ -]?dock|merchant[ -]?inspect|"
+    r"warehouse\s+inspect|source|sourcing|rfq|quote|lead[ -]?time)\b|"
+    r"\b(?:status|progress|where\s+(?:are|is)|what(?:'s|\s+is)\s+happening|"
+    r"summari[sz]e|recap)\b|"
+    r"\b(?:total(?:\s+budget)?|all[ -]?in)\s+for\s+all\b"
+    r")",
+    _re.IGNORECASE,
+)
+
+_CASE_READ_OPERATION = _re.compile(
+    r"\b(?:status|progress|where\s+(?:are|is)|what(?:'s|\s+is)\s+happening|"
+    r"summari[sz]e|recap)\b",
+    _re.IGNORECASE,
+)
+
+
+def _is_active_case_context_operation(query: str, session: Dict[str, Any]) -> bool:
+    """True only for a bounded amendment/status operation on an existing procurement case."""
+    active = str(session.get("active_workflow_lane") or session.get("prior_lane") or "").upper()
+    if active != "PROCUREMENT" or not session.get("prior_node"):
+        return False
+    if _re.search(r"\b(?:start over|new search|different product|forget (?:that|this))\b", query,
+                  _re.IGNORECASE):
+        return False
+    return bool(_CASE_CONTEXT_OPERATION.search(query or ""))
+
+
+def _active_case_read_decision(envelope: TurnEnvelope) -> Optional[TurnDecision]:
+    """Build a retrieval-free decision for status/summary on an active case."""
+    session = envelope.session or {}
+    if not _is_active_case_context_operation(envelope.query, session):
+        return None
+    if not _CASE_READ_OPERATION.search(envelope.query or ""):
+        return None
+    prior_node = get_node(str(session.get("prior_node") or ""))
+    if prior_node is None:
+        return None
+    accepted = session.get("accepted_constraints") if isinstance(
+        session.get("accepted_constraints"), dict
+    ) else {}
+    quantity = accepted.get("quantity") or session.get("requested_quantity")
+    try:
+        quantity = int(quantity) if quantity is not None else None
+    except (TypeError, ValueError):
+        quantity = None
+    shortlist = tuple(str(value) for value in (
+        session.get("prior_shortlist") or session.get("shortlist_skus") or []
+    ) if value)
+    operation = "summary" if _re.search(
+        r"\b(?:summari[sz]e|recap)\b", envelope.query, _re.I
+    ) else "status"
+    return TurnDecision(
+        lane="PROCUREMENT",
+        node_handle=prior_node.handle,
+        node_path=prior_node.full_path,
+        requested_product_node=prior_node.handle,
+        exact_product_sku=(
+            str(accepted.get("exact_product_sku"))
+            if accepted.get("exact_product_sku")
+            else (shortlist[0] if len(shortlist) == 1 else None)
+        ),
+        prior_shortlist=shortlist,
+        quantity=quantity,
+        total_budget_cents=accepted.get("total_budget_cents"),
+        budget_scope=str(accepted.get("budget_scope") or "unknown"),
+        subject_action="continue",
+        subject_from_session=True,
+        procurement_context="current_order",
+        case_operation=operation,
+        confidence=1.0,
+        source="deterministic_case_read",
+    )
+
+
+_PRODUCT_IDENTITY_STOP = frozenset({
+    "a", "an", "and", "for", "in", "inch", "laptop", "notebook", "computer", "gaming",
+    "core", "with", "the", "show", "me", "need", "want", "geforce", "radeon", "oled", "fhd",
+})
+
+
+def _explicit_catalog_product_identity(db, tenant_id: str, query: str):
+    """Bind a literal SKU/model reference to one approved catalog node, or abstain.
+
+    This is deliberately conservative. It never performs semantic/fuzzy matching: a direct SKU
+    wins, otherwise at least three identifying title tokens must occur literally and one candidate
+    must have a strictly better coverage score. Ambiguity returns no anchor.
+    """
+    if db is None:
+        return None, None
+    try:
+        from src.app.services.product_identity import resolve_product_alias
+        resolved = resolve_product_alias(db, tenant_id=tenant_id, query=query)
+    except Exception:
+        resolved = None
+    if resolved:
+        resolved_sku, _alias_type = resolved
+        handle = classification_nodes_for_skus(db, [resolved_sku], tenant_id=tenant_id).get(resolved_sku)
+        return (get_node(handle) if handle else None), resolved_sku
+    query_tokens = set(_re.findall(r"[a-z0-9]+", (query or "").lower()))
+    if not query_tokens:
+        return None, None
+    try:
+        from sqlalchemy import text as _text
+        with db.begin_nested():
+            rows = db.execute(_text(
+                "SELECT sku, name FROM products WHERE active IS TRUE ORDER BY sku LIMIT 5000"
+            )).fetchall()
+    except Exception as exc:
+        logger.debug("explicit product identity lookup failed: %s", repr(exc)[:120])
+        return None, None
+    # A clean checkout may have canonical catalog rows before the disposable alias index has
+    # been rebuilt. Exact SKUs must still bind deterministically: compare normalized contiguous
+    # token sequences (``RGAM-0007`` -> ``rgam 0007``), never fuzzy similarity.
+    normalized_query = " ".join(_re.findall(r"[a-z0-9]+", (query or "").lower()))
+    direct = []
+    for raw_sku, _name in rows:
+        candidate = str(raw_sku)
+        normalized_sku = " ".join(_re.findall(r"[a-z0-9]+", candidate.lower()))
+        if normalized_sku and _re.search(
+            rf"(?:^|\s){_re.escape(normalized_sku)}(?:$|\s)", normalized_query
+        ):
+            direct.append(candidate)
+    scored = []
+    for sku, name in rows:
+        sku = str(sku)
+        title_tokens = set(_re.findall(r"[a-z0-9]+", str(name or "").lower()))
+        identifiers = {token for token in title_tokens
+                       if token not in _PRODUCT_IDENTITY_STOP and (len(token) >= 3 or any(c.isdigit() for c in token))}
+        overlap = identifiers & query_tokens
+        if len(overlap) >= 3:
+            scored.append((len(overlap) / max(1, len(identifiers)), len(overlap), sku))
+    sku = direct[0] if len(set(direct)) == 1 else None
+    if sku is None and scored:
+        scored.sort(reverse=True)
+        if len(scored) == 1 or scored[0][:2] > scored[1][:2]:
+            sku = scored[0][2]
+    if sku is None:
+        return None, None
+    handle = classification_nodes_for_skus(db, [sku], tenant_id=tenant_id).get(sku)
+    return (get_node(handle) if handle else None), sku
 
 
 def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str],
@@ -789,6 +1129,12 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "object mapping key to [operator,number]. Price and item count are not specs.\n"
         "WORKLOAD_ENTITIES: copy at most three explicitly named games or software applications "
         "from the message as {kind: game|software, name: literal title}. Never infer names.\n"
+        "SEMANTIC_PROPOSAL: when unfamiliar or materially ambiguous wording could change whether "
+        "a product is suitable, emit one generic resolution record. Copy concept text from the "
+        "MESSAGE; do not invent product facts. Include desired_outcome, concepts (text, "
+        "status=unresolved|ambiguous, material, optional interpretations), evidence_questions "
+        "whose answers could change catalog fit, proposed_action, and confidence. Omit the entire "
+        "object when the request is already specific enough for catalog search.\n"
         "REFINE: brand=hard-only, prefer_brand=soft, exclude_brand=negation, sort=price_asc, "
         "price_desc or null. brand_action=keep when brands are unmentioned, set when adding or "
         "replacing a brand constraint, clear only when the shopper explicitly removes all brand "
@@ -808,7 +1154,7 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "workload_entities, "
         "audience_contexts, use_case_variant, requirements, refine, compare_targets, quantity, "
         "total_budget, budget_scope, budget_cap_mode, subject_action, procurement_context, "
-        "confidence. Inside refine, emit only changed keys from brand, prefer_brand, "
+        "confidence, semantic_proposal. Inside refine, emit only changed keys from brand, prefer_brand, "
         "exclude_brand, sort, brand_action. Never add prose or keys outside this contract.\n")
 
 
@@ -886,12 +1232,37 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
 
 
 def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
-               timeout: float = 20.0) -> TurnDecision:
+               timeout: float | None = None) -> TurnDecision:
     """One model judgment, four deterministic clamps, one grounded refusal gate.
     Never raises; every failure path is the deterministic default (SEARCH, ungated)."""
     _reset_router_call_metrics()
+    if timeout is None:
+        timeout = float(router_runtime_contract()["inference_timeout_s"])
     if not envelope.query:
         return DEFAULT_DECISION
+    # A genuine post-purchase claim owns its own lifecycle even when a procurement case is
+    # still remembered.  Running the generic case-status shortcut first caused "my laptop failed
+    # after three weeks; what is the warranty/return status?" to report sourcing status instead
+    # of opening the governed support boundary.  The shared predicate distinguishes this from a
+    # pre-sales warranty-policy question.
+    try:
+        from src.app.services.answer_quality import is_support_claim
+
+        if is_support_claim(envelope.query):
+            return TurnDecision(
+                lane="SUPPORT_CLAIM",
+                confidence=1.0,
+                source="deterministic_post_purchase_claim",
+                subject_action="continue",
+            )
+    except Exception as exc:
+        logger.warning("support-claim authority check failed: %s", repr(exc)[:120])
+    case_read = _active_case_read_decision(envelope)
+    if case_read is not None:
+        return case_read
+    semantic_block = persisted_semantic_blocker_decision(envelope.query, envelope.session)
+    if semantic_block is not None:
+        return semantic_block
     try:
         cands = candidate_nodes(envelope.query, semantic=False)
     except Exception:
@@ -906,6 +1277,62 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         _top = max((sc for _, sc in cands), default=3.0)
         cands = [(_prior, _top + 0.5)] + cands
     brand_anchors = _catalog_brand_anchor_nodes(db, envelope.tenant_id, envelope.query)
+    explicit_product_node, explicit_product_sku = _explicit_catalog_product_identity(
+        db, envelope.tenant_id, envelope.query
+    )
+    # A literal indexed SKU/MPN/model plus an explicit bulk count is fully
+    # decidable without an LLM. Resolve it before the router semaphore so eight
+    # identical buyers cannot diverge or time out while waiting for model slots.
+    if explicit_product_node is not None and explicit_product_sku:
+        from src.app.services.bulk_intent import extract_quantity_span
+        from src.app.services.budget_grammar import classify_budget_scope, parse_budget
+
+        identity_unit_nouns = {
+            segment.strip().lower()
+            for candidate, _score in cands
+            for segment in candidate.full_path.split(">")
+            if segment.strip()
+        }
+        explicit_quantity = extract_quantity_span(
+            envelope.query, unit_nouns=identity_unit_nouns
+        )
+        if explicit_quantity is not None and explicit_quantity[0] >= 2:
+            scope = classify_budget_scope(envelope.query)
+            parsed = parse_budget(envelope.query)
+            total_cents = (
+                int(parsed.budget_max) * 100
+                if scope == "total" and parsed is not None and parsed.budget_max is not None
+                else None
+            )
+            return TurnDecision(
+                lane="PROCUREMENT",
+                node_handle=explicit_product_node.handle,
+                node_path=explicit_product_node.full_path,
+                requested_product_node=explicit_product_node.handle,
+                exact_product_sku=explicit_product_sku,
+                request_scope="product",
+                relationship="buy",
+                quantity=explicit_quantity[0],
+                total_budget_cents=total_cents,
+                budget_scope=scope,
+                subject_action="switch",
+                procurement_context="none",
+                confidence=1.0,
+                source="deterministic_explicit_product",
+            )
+    # Material capability/compatibility relations do not need a generation call merely to
+    # discover that evidence is missing.  Resolve that *shape* before the router semaphore so
+    # an unfamiliar-domain request remains responsive under concurrent load.  This preflight
+    # is deliberately product-agnostic: it proposes no hardware floor or fit claim and the
+    # semantic reducer still blocks catalog/ATP/sourcing until approved evidence answers the
+    # generated questions.
+    preflight_semantic = _semantic_proposal_or_relation_fallback(
+        {}, query=envelope.query, requirements={},
+    )
+    if preflight_semantic.get("validation") == "valid":
+        return _bounded_fallback_decision(
+            db, envelope, cands, reason="material_relation_preflight",
+        )
     if brand_anchors:
         _top = max((sc for _, sc in cands), default=3.0)
         for offset, anchor in enumerate(brand_anchors):
@@ -930,11 +1357,24 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                  "use_cases": _acc.get("use_cases") or [],
                  "budget_max_cents": _acc.get("budget_max_cents"),
                  "lane": _prior_lane or None}
+    model_snapshot = None
     try:
+        # Keep the potentially long/provider-backed classification boundary in
+        # a savepoint. If an adapter or callback performs a caught SQL probe,
+        # rolling this read-only snapshot back restores PostgreSQL without
+        # discarding caller-owned fixture or request writes.
+        if db is not None:
+            model_snapshot = db.begin_nested()
         raw = fn(_build_prompt(envelope, cands, fit_keys, known_use_cases(), stocked, prior), timeout)
         data = json.loads(raw) if raw else None
     except Exception:
         data = None
+    finally:
+        try:
+            if model_snapshot is not None and model_snapshot.is_active:
+                model_snapshot.rollback()
+        except Exception as exc:
+            logger.warning("router read-savepoint reset failed: %s", repr(exc)[:120])
     if not isinstance(data, dict):
         return _bounded_fallback_decision(db, envelope, cands, reason="model_unavailable")
 
@@ -984,6 +1424,19 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     _pc = str(data.get("procurement_context") or "").strip().lower()
     procurement_context = (_pc if _pc in ("current_order", "general_policy", "none")
                            else "none")
+    # A weak/model-backed router may interpret a location, collaboration product name ("Teams"),
+    # warranty term, or RFQ status word as a new catalog search.  Once a procurement case exists,
+    # the closed operation grammar above has higher authority over *continuity only*: it cannot
+    # select a SKU or mutate state; it merely binds the turn back to the accepted case subject.
+    context_operation = _is_active_case_context_operation(envelope.query, session)
+    if context_operation:
+        lane = "PROCUREMENT"
+        subject_action = "continue"
+        procurement_context = "current_order"
+        prior_context_node = get_node(str(session.get("prior_node") or ""))
+        if prior_context_node is not None:
+            node = prior_context_node
+            subject_from_session = True
     # The model supplies two independent semantic judgments: lane and subject continuity. When a
     # mature legacy procurement workflow is explicitly active, a current-order judgment paired
     # with POLICY_QUESTION is an internal contradiction: it describes the active order, not a
@@ -993,6 +1446,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         str(session.get("active_workflow_lane")
             or session.get("prior_lane") or "").strip().upper() == "PROCUREMENT"
     )
+
+
     if (active_procurement
             and lane == "POLICY_QUESTION"
             and procurement_context != "general_policy"
@@ -1257,6 +1712,22 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     explicit_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
     if explicit_quantity is not None:
         quantity = explicit_quantity[0]
+    elif context_operation:
+        # Logistics, warranty, sourcing and status amendments cannot acquire a new quantity
+        # from model inference. Only the canonical quantity grammar may authorize a change;
+        # otherwise retain the sealed case count. This blocks dates such as "by 25 September"
+        # and arbitrary model defaults such as 1 from silently shrinking the order.
+        accepted_quantity = (session.get("accepted_constraints") or {}).get("quantity")
+        if (isinstance(accepted_quantity, int) and not isinstance(accepted_quantity, bool)
+                and 1 <= accepted_quantity <= 100_000):
+            quantity = accepted_quantity
+    elif quantity is not None:
+        # A fresh-turn model proposal is interpretation, not quantity authority. Product model
+        # numbers and dimensions ("Dell 15", "15 inch") routinely tempt a model to emit a
+        # default count of one. Only the shared product-agnostic grammar, or an already sealed
+        # case quantity below, may populate consequential order quantity.
+        logger.info("ignored model-only quantity without an anchored buyer span: %s", quantity)
+        quantity = None
     # A model or the permissive count grammar may copy a currency amount into
     # quantity. Reject that contradiction while preserving contextual amendments
     # such as "make it 15", whose target is resolved from session state.
@@ -1312,6 +1783,15 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         parsed_budget = parse_budget(envelope.query)
         if parsed_budget is not None and parsed_budget.budget_max is not None:
             total_budget_cents = int(parsed_budget.budget_max) * 100
+        elif subject_action == "continue":
+            # A scope-only answer ("total for all 30") settles how the already accepted amount
+            # applies; it does not need to repeat that amount.  Only inherit a previously sealed
+            # whole-order value inside the same case.
+            accepted_total = (session.get("accepted_constraints") or {}).get(
+                "total_budget_cents"
+            )
+            if isinstance(accepted_total, int) and not isinstance(accepted_total, bool):
+                total_budget_cents = accepted_total
     _bcm = str(data.get("budget_cap_mode") or "").strip().lower()
     budget_cap_mode = _bcm if _bcm in ("hard", "soft", "ambiguous") else "hard"
 
@@ -1544,6 +2024,20 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         node = anchor
         routing_source = "model+catalog_brand_anchor"
 
+    if explicit_product_node is not None:
+        # Literal catalog identity outranks semantic category inference.  This makes repeated
+        # requests for the same named model resolve identically across model seeds/sessions.
+        prior_identity_node = get_node(str(session.get("prior_node") or ""))
+        node = explicit_product_node
+        if not context_operation:
+            subject_action = (
+                "continue"
+                if prior_identity_node is not None
+                and prior_identity_node.handle == explicit_product_node.handle
+                else "switch"
+            )
+        routing_source = "model+explicit_catalog_product"
+
     workloads: List[str] = []
     relationship = "buy"
     if node is not None and _WORKLOAD_RE.match(node.handle):
@@ -1599,6 +2093,12 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             lane = "SEARCH"
 
     proposal = _bounded_model_proposal(data)
+    semantic_proposal = _semantic_proposal_or_relation_fallback(
+        data,
+        query=envelope.query,
+        exact_product_sku=explicit_product_sku,
+        requirements=requirements,
+    )
     accepted_audit = {
         "lane": lane,
         "node_handle": (node.handle if node else None),
@@ -1616,6 +2116,20 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         "secondary_lanes": list(secondary_lanes),
         "product_type_options": list(product_type_options),
     }
+    anchored_product_sku = explicit_product_sku
+    if anchored_product_sku is None and subject_action == "continue":
+        accepted_product_sku = (session.get("accepted_constraints") or {}).get(
+            "exact_product_sku"
+        )
+        if accepted_product_sku:
+            anchored_product_sku = str(accepted_product_sku)
+    if anchored_product_sku is None and subject_action == "continue":
+        prior_skus = tuple(str(value) for value in (
+            session.get("shortlist_skus") or session.get("prior_shortlist") or []
+        ) if value)
+        if len(prior_skus) == 1:
+            anchored_product_sku = prior_skus[0]
+
     return TurnDecision(lane=lane, node_handle=(node.handle if node else None),
                         node_path=(node.full_path if node else None),
                         requirements=requirements, use_cases=tuple(use_cases),
@@ -1625,6 +2139,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         refusal_granted=refusal_granted, confidence=conf, source=routing_source,
                         requested_product_node=(node.handle if node else None),
                         requested_category_label=(wanted_category or None),
+                        exact_product_sku=anchored_product_sku,
                         request_scope=request_scope,
                         workloads=tuple(workloads), relationship=relationship,
                         prior_shortlist=prior_shortlist,
@@ -1636,7 +2151,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         budget_scope=budget_scope, budget_cap_mode=budget_cap_mode,
                         subject_action=subject_action,
                         procurement_context=procurement_context,
+                        case_operation="none",
                         secondary_lanes=secondary_lanes,
                         product_type_options=product_type_options,
                         model_proposal=proposal,
+                        semantic_proposal=semantic_proposal,
                         authorization_changes=_authorization_changes(proposal, accepted_audit))

@@ -8,8 +8,6 @@ from datetime import datetime, timedelta
 import logging
 from typing import Dict, Any, List
 
-logger = logging.getLogger("shopsquire.admin_bi")
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text as sql_text
@@ -19,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
-from src.app.config import get_settings, load_feature_flags
+from src.app.config import get_settings
 from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.schemas.ui_contracts import TransactionTimeseriesResponse
 from src.app.schemas.metric_evidence import (
@@ -35,6 +33,7 @@ from src.app.services.bi_intelligence import (
 from src.app.services.bi_query_agent import run_query_agent
 
 
+logger = logging.getLogger("shopsquire.admin_bi")
 router = APIRouter(prefix="/api/v1/admin/bi", tags=["admin", "bi"])
 
 
@@ -84,6 +83,24 @@ def executive_metrics_api(
     _ = role
     from src.app.platform.tenant_context import current_tenant_id
     return _executive_metric_projection(str(current_tenant_id() or "default"))
+
+
+@router.get("/executive-metrics/search-demand-authority")
+def search_demand_authority_api(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Tenant-scoped funnel projection; raw searches never become operational demand."""
+    _ = role
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.search_demand_authority import project_search_demand_authority
+
+    tenant_id = str(current_tenant_id() or "default")
+    try:
+        with db_session() as db:
+            return project_search_demand_authority(db, tenant_id=tenant_id)
+    except SQLAlchemyError as exc:
+        logger.warning("search demand projection unavailable for %s: %s", tenant_id, exc)
+        raise HTTPException(status_code=503, detail="search_demand_projection_unavailable") from exc
 
 
 @router.get("/executive-metrics/audit", response_model=AuditorMetricProjection)

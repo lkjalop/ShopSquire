@@ -12,11 +12,24 @@ supplier with it. Vertical-blind; best-effort; idempotent.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
 logger = logging.getLogger("shopsquire.supplier_catalog")
+
+
+def _effective_timestamp(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
 
 _SUPPLIERS_DDL = """
 CREATE TABLE IF NOT EXISTS suppliers (
@@ -670,23 +683,33 @@ def best_supplier_cost(db, sku: str, *, tenant_id: str = "default",
     if db is None or not str(sku or "").strip() or not str(tenant_id or "").strip():
         return None
     try:
-        row = db.execute(text("""
-            SELECT supplier_id, landed_unit_cost_cents, purchase_unit_cost_cents,
-                   freight_unit_cents, duty_unit_cents, handling_unit_cents,
-                   currency, cost_kind, tax_basis, source_system, source_record_id,
-                   provenance_json, confidence, simulation_only, effective_from, effective_to
-            FROM supplier_offer
-            WHERE tenant_id=:tenant AND sku=:sku AND currency=:currency
-              AND status='active'
-              AND effective_from <= CURRENT_TIMESTAMP
-              AND (effective_to IS NULL OR effective_to > CURRENT_TIMESTAMP)
-            ORDER BY simulation_only ASC, landed_unit_cost_cents ASC, effective_from DESC
-            LIMIT 1
-        """), {"tenant": str(tenant_id), "sku": str(sku),
-                 "currency": str(currency).upper()}).fetchone()
+        with db.begin_nested():
+            rows = db.execute(text("""
+                SELECT supplier_id, landed_unit_cost_cents, purchase_unit_cost_cents,
+                       freight_unit_cents, duty_unit_cents, handling_unit_cents,
+                       currency, cost_kind, tax_basis, source_system, source_record_id,
+                       provenance_json, confidence, simulation_only, effective_from, effective_to
+                FROM supplier_offer
+                WHERE tenant_id=:tenant AND sku=:sku AND currency=:currency
+                  AND status='active'
+                ORDER BY simulation_only ASC, landed_unit_cost_cents ASC, effective_from DESC
+                LIMIT 100
+            """), {"tenant": str(tenant_id), "sku": str(sku),
+                     "currency": str(currency).upper()}).fetchall()
     except Exception:
         return None
-    if not row:
+    now = datetime.now(timezone.utc)
+    row = None
+    for candidate in rows:
+        valid_from = _effective_timestamp(candidate[14])
+        valid_to = _effective_timestamp(candidate[15])
+        if valid_from is None or valid_from > now:
+            continue
+        if candidate[15] not in (None, "") and (valid_to is None or valid_to <= now):
+            continue
+        row = candidate
+        break
+    if row is None:
         return None
     try:
         import json as _json
@@ -820,7 +843,7 @@ def seed_demo_supplier_offers(db, *, tenant_id: str = "default", commit: bool = 
             FROM products p
             JOIN supplier_products sp ON sp.sku=p.sku AND COALESCE(sp.active,1)=1
             JOIN suppliers s ON s.id=sp.supplier_id AND COALESCE(s.active,1)=1
-            WHERE COALESCE(p.active,1)=1 AND p.price_cents IS NOT NULL
+            WHERE p.active IS NOT FALSE AND p.price_cents IS NOT NULL
             ORDER BY p.sku, COALESCE(s.reliability_score,0) DESC, sp.supplier_id
         """)).fetchall()
     except Exception:

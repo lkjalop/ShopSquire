@@ -12,12 +12,14 @@ from src.app.services import attribution
 from src.app.services.hippograph import recall
 from src.app.services.hippograph_db import build_from_db
 from tests.utils import default_headers
+from tests.market_migration_helpers import apply_market_migration
 
 
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_market_migration(s)
     s.execute(text(
         "CREATE TABLE decision_trace_events (id TEXT, tenant_id TEXT NOT NULL DEFAULT 'default', trace_id TEXT, event_type TEXT, "
         "source_type TEXT, source_id TEXT, target_type TEXT, target_id TEXT, payload TEXT, "
@@ -84,8 +86,6 @@ def test_build_from_db_requires_explicit_tenant(db):
 
 def test_build_from_db_include_findings_projects_finding_nodes(db):
     # seed market_signal with recurring zero-result searches → inventory_demand_mismatch finding
-    from src.app.services.market_signal import ensure_table as _ms_ensure
-    _ms_ensure(db)
     # NOTE (2026-07-12): detect_inventory_demand_mismatch was hardened against poisoning — it
     # requires DISTINCT-user identity (uid_hash/session) per zero-result search and gates on
     # >= min_unmet(3) distinct users. Seed 4 DISTINCT users so the finding legitimately surfaces

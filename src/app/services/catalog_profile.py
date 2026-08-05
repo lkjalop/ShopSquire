@@ -34,7 +34,7 @@ def _catalog_profile_signature(db) -> Dict[str, Any]:
                 """
                 SELECT COUNT(*) AS product_count, MAX(COALESCE(updated_at, '')) AS max_updated_at
                 FROM products
-                WHERE COALESCE(active, 1) = 1
+                WHERE active IS NOT FALSE
                 """
             )
         ).fetchone()
@@ -75,7 +75,7 @@ def build_catalog_profile(db) -> Dict[str, Any]:
                 """
                 SELECT name, specs
                 FROM products
-                WHERE COALESCE(active, 1) = 1
+                WHERE active IS NOT FALSE
                 """
             )
         ).fetchall()

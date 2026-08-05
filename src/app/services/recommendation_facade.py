@@ -335,6 +335,27 @@ def _cart_confirm_message(plan) -> str:
                 detail += f" to remain within the ${op.budget_max_cents / 100:,.0f} total budget"
             bits.append(detail)
     what = "; ".join(bits) or "apply that cart change"
+    budget_note = ""
+    for op in plan.ops:
+        if not (
+            op.action == "set_quantity"
+            and op.budget_max_cents is not None
+            and op.unit_price_cents is not None
+            and op.quantity is not None
+            and op.previous_quantity is not None
+            and op.quantity < op.previous_quantity
+        ):
+            continue
+        proposed_total = int(op.quantity) * int(op.unit_price_cents)
+        headroom = max(0, int(op.budget_max_cents) - proposed_total)
+        budget_note = (
+            f" Your ${op.budget_max_cents / 100:,.0f} whole-order budget remains unchanged. "
+            f"At the current unit price, {op.quantity} units use ${proposed_total / 100:,.0f} "
+            f"and leave ${headroom / 100:,.0f} unallocated. That does not authorize a more "
+            "expensive model; after the quantity change, choose whether to keep this model, "
+            "raise the per-unit ceiling for a qualified alternative, or lower the total budget."
+        )
+        break
     reconfirm = ""
     if any(op.action in {"set_quantity", "replace_item", "remove_items", "clear_all",
                          "clear_previous", "keep_only"} for op in plan.ops):
@@ -342,7 +363,7 @@ def _cart_confirm_message(plan) -> str:
                      "before checkout.")
     return (f"Just to confirm before I touch your cart — you want me to: {what}. "
             f"Nothing is changed yet; confirm and I'll apply it (undo stays available)."
-            f"{reconfirm}")
+            f"{budget_note}{reconfirm}")
 
 
 def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
@@ -481,11 +502,25 @@ def _read_session_slice(
     try:
         from src.app.services.memory import Memory
 
-        data = Memory(
+        memory = Memory(
             redis,
             tenant_id=tenant_id,
             session_epoch=session_epoch,
-        ).get_structured_state(uid)
+        )
+        data = memory.get_structured_state(uid)
+        legacy_from_context: Dict[str, Any] = {}
+        if not isinstance(data, dict) or not data:
+            # Some compatibility callers still persist the accepted slice in
+            # ``kv_state``.  Read it through Memory's tenant/epoch-scoped API;
+            # do not fall back to an unscoped key for named tenants.
+            context = memory.get_context(uid)
+            structured = context.get("structured_state") if isinstance(context, dict) else None
+            if isinstance(structured, dict) and structured:
+                data = structured
+            else:
+                candidate = context.get("kv") if isinstance(context, dict) else None
+                if isinstance(candidate, dict):
+                    legacy_from_context = candidate
         if (not isinstance(data, dict) or not data) and not session_epoch:
             # Compatibility for non-chat callers that have not adopted an
             # explicit epoch yet. Explicit epochs never read this shared key.
@@ -500,7 +535,7 @@ def _read_session_slice(
             if tenant_id != "default" or session_epoch:
                 return {}
             legacy_raw = redis.get(f"session:{uid}:kv_state")
-            legacy = json.loads(legacy_raw) if legacy_raw else {}
+            legacy = legacy_from_context or (json.loads(legacy_raw) if legacy_raw else {})
             if not isinstance(legacy, dict) or not legacy:
                 return {}
             confirmed = legacy.get("confirmed_slots") or {}
@@ -530,7 +565,9 @@ def _read_session_slice(
                 procurement_active = bool(legacy.get("last_sourcing_intent"))
             shortlist = (legacy.get("last_valid_shortlist_skus")
                          or legacy.get("last_shortlist_skus") or [])
+            exact_product_sku = confirmed.get("exact_product_sku")
             return {
+                "session_epoch": session_epoch,
                 "prior_node": _classified_subject(db, shortlist, tenant_id),
                 # The mature legacy procurement workflow remains the executor. Bridge only its
                 # explicit workflow state into the V2 routing context; do not infer procurement
@@ -545,16 +582,26 @@ def _read_session_slice(
                     "budget_scope": budget_scope,
                     "requirements": {},
                     "quantity": quantity,
+                    "exact_product_sku": exact_product_sku,
                 },
                 "legacy_bridge": True,
             }
         shortlist = data.get("last_shortlist_skus") or []
-        return {"prior_node": (data.get("last_node_handle")
+        return {"session_epoch": session_epoch,
+                "prior_node": (data.get("last_node_handle")
                                or _classified_subject(db, shortlist, tenant_id)),
                 "prior_lane": data.get("last_lane"),
                 "active_workflow_lane": data.get("active_workflow_lane"),
                 "shortlist_skus": shortlist,
-                "accepted_constraints": data.get("constraints") or {}}
+                "accepted_constraints": data.get("constraints") or {},
+                "semantic_resolution": (
+                    data.get("semantic_resolution")
+                    if isinstance(data.get("semantic_resolution"), dict) else None
+                ),
+                "case_anchor": (
+                    data.get("case_anchor")
+                    if isinstance(data.get("case_anchor"), dict) else None
+                )}
     except Exception:
         return {}
 
@@ -1055,7 +1102,12 @@ def dispatch_recommendation_core_typed(
         # (grounding error / retrieval failure) must NOT serve a 'try again' apology to a
         # canary buyer while a healthy legacy sits one return away. Honest degradation only
         # falls back when it produced nothing — an off-catalog refusal is a real answer, keep it.
-        if core.grounding in ("error", "empty") or (core.degraded and not core.products and not core.off_catalog):
+        if core.grounding in ("error", "empty") or (
+            not compatibility_cutover
+            and core.degraded
+            and not core.products
+            and not core.off_catalog
+        ):
             logger.info("core degraded (grounding=%s reason=%s) — falling through to legacy",
                         core.grounding, (core.extras or {}).get("degraded_reason"))
             _fallback_metric(f"grounding:{core.grounding}")

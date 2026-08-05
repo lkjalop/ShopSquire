@@ -1,0 +1,306 @@
+status,path,topic,ownership,proposed_disposition,test_proof,notes
+ M,.github/dependabot.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/ci.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/ci_prometheus.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/ci_smoke.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/clean-checkout-smoke.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/integration-tests.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/playwright-smoke.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/playwright-tests.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/playwright-ui-smoke.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/ruff-changed.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/security-tests.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/security_scans.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/service-tests-sharded.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/trivy.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,.github/workflows/v2-gates.yml,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,Dockerfile,CI/cloud,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,config/feature_flags.json,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,config/observability/alerts.yml,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,config/security/cv_playbooks.json,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,config/security/taxonomy/risk_correlation_policy.json,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/e2e/market-adaptation.spec.ts,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/package-lock.json,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/package.json,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/src/App.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/src/components/CartPanel.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/src/components/ImageRecommendPanel.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/src/components/SplitFulfillmentCard.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/src/components/__tests__/CartPanel.sourcing.test.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/src/components/__tests__/SplitFulfillmentCard.test.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/src/lib/api.ts,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,frontend/vite.config.ts,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,pyproject.toml,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,scripts/run_syslog_listener.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,scripts/seed_gaming_laptops.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,scripts/tool_bridge.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/config.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/models/db.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/observability/metrics.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/routers/admin.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/routers/admin_inventory.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/routers/auth.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/routers/decisions.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/routers/payments.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/routers/security_integrations.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/routers/support_complaints.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/dread_scorer.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/email_forensics_snapshots.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/email_sender_trust.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/framework_correlation.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/idempotency.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/maestro_boundaries.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/observer.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/rate_limit.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/security_event_ingest.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/supplier_baseline.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/telemetry_emit.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/thread_conversation_graph.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/security/threshold_tuning.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/audit_chain.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/budget_grammar.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/candidate_retriever.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/catalog_profile.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/catalog_read_model.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/checkout_upsell.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/commerce_catalog.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/demand_allocation.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/fulfillment/order_split.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/geoip.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/hippograph_db.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/image_downscale.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/inventory_query_service.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/market_intelligence_agent.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/market_projection.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/product_identity.py,semantic reasoning and research,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/recommend_catalog_fill.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/recommend_fulfillment_stage.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/recommend_narration_stage.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/registry.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/returns.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/semantic_cache.py,semantic reasoning and research,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/shadow_actions.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/substitute_generator.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/supplier_catalog.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/supplier_domain_guard.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/synthetic_reco_lab.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/syslog_listener.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/taxonomy_registry.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/services/upsell_engine.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/app/tools/runner.py,manual classification required,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/frontend/admin-react/package-lock.json,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/frontend/admin-react/package.json,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/frontend/admin-react/src/api/fulfillment.ts,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/frontend/admin-react/src/components/procurement/AllocationWorkbench.test.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/frontend/admin-react/src/components/procurement/AllocationWorkbench.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,src/frontend/admin-react/src/components/procurement/SupplierDraftPacket.tsx,frontend and Decision Trace,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/e2e/test_live_procurement_closed_loop.py,tests/evidence requiring topic assignment,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/integration/test_fulfillment_api.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/pw/test_storefront_chat_with_admin_flow.py,tests/evidence requiring topic assignment,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/security/test_maestro_all_agents.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/services/test_cart_resolver.py,tests/evidence requiring topic assignment,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/services/test_demand_allocation.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/services/test_recommend_fulfillment_stage.py,"procurement, ATP and temporal cache",mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/services/test_shadow_actions.py,tests/evidence requiring topic assignment,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/services/test_substitute_generator.py,tests/evidence requiring topic assignment,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/test_security_llm_top10.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/test_security_pci_detection.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/unit/test_geoip_contract.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+ M,tests/unit/test_rate_limit_distributed.py,security and vision,mixed_tracked_history,stage_reviewed_hunks_only,not_yet_linked,Do not stage the whole file when unrelated user changes are present.
+??,.dockerignore,CI/cloud,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,.github/workflows/publish-cloud-images.yml,CI/cloud,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,.tmp-20260850-cert.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-20260857-cert.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-r2-run.err.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-r2-run.out.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-r2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-r3-run.err.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-r3-run.out.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-r3/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-r4/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-run.err.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802-run.out.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-allocation-browser-20260802/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-artifact-authority-migration.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-baseline-browser-20260805/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-30595195363/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-30598696977/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-8e805-shard4.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-b0bd-shard4.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-final-shard4.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-shard4-logs.zip,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-test11-logs.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-test2-logs.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-test5-logs.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-test6-logs.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-ci-tests-30595195363/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-conversation-case-cert.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-current-browser-31009500711/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-cutover-audit-browser-20260802-r2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-cutover-audit-browser-20260802/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-disruption-migration.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-eight-buyer-browser-20260803-r2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-eight-buyer-browser-20260803-r3/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-eight-buyer-browser-20260803-r4/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-eight-buyer-browser-20260803/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-emphasis-migrated-20260730.sqlite-shm,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-emphasis-migrated-20260730.sqlite-wal,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-escalation-projection-cert.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-final-browser-20260805/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-final-ci-4-logs.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-final-ci-8-logs.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-final-ci-9-logs.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-fixture-contracts-migration.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-fixture-contracts-migration.sqlite3-shm,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-fixture-contracts-migration.sqlite3-wal,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30492413550/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30494051488/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30507144463/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30527843277/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30529111794/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30529987303/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30534964025/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30535999673/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-browser-30537028867/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-proof-30546515524/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-proof-30547400629/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-proof-30548255100/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-proof-30782526073/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-proof-30783423382/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-proof-30869738072-service7/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-hosted-proof-30870592385/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-integrated-disruption-cache.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-last-shard4.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-latest-stability-browser-20260804-r2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-latest-stability-browser-20260804-run.err.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-latest-stability-browser-20260804-run.out.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-latest-stability-browser-20260804-run2.err.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-latest-stability-browser-20260804-run2.exit,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-latest-stability-browser-20260804-run2.out.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-backend-search-authority.err.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-backend-search-authority.out.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-backend.err.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-backend.out.log,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-recording-certified-r2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-recording-certified/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-recording-final/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-recording-ready/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-live-stack/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-local-browser-2ecf2b7c/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-parity-exception-migration.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-policy-contracts-migration.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-policy-contracts-migration.sqlite3-shm,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-policy-contracts-migration.sqlite3-wal,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-postchange-browser-20260805/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-pr8-certified/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-pr9-certified/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-proc-trace-30527843277/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-procurement-demo-pr10/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-procurement-orchestration-browser-20260802-r2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-procurement-orchestration-browser-20260802/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-procurement-temporal-browser-20260804/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-qty-trace-30529111794/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-qty-trace-30529987303/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-reassessment-browser-20260803/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-recording-readiness-20260803-r2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-recording-readiness-20260803-r3/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-recording-readiness-20260803/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-recording-readiness-debug/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-recovery-migration.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-repro-followup.sqlite-shm,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-repro-followup.sqlite-wal,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-return-claims-cert-v2.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-return-claims-cert-v3.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-return-claims-cert.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-return-lifecycle-browser-20260804-r2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-return-lifecycle-browser-20260804/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-search-demand-authority.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-after/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-cert2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-certified/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-delta/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-diagnose/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final10/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final3/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final4/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final5/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final7/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final8/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-final9/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-browser-pgdiag/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-security-threshold-migration.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-seed-quality.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-seed-quality.sqlite3-shm,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-seed-quality.sqlite3-wal,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-semantic-browser-20260805-r3/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-final-0/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-final-1/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-final-2/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-final-3/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-final-4/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-final-5/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-final-6/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-final-7/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-service-shards/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-supplier-sourcing-authority.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-temporal-cache-migration.sqlite3,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-trace-context-30507144463/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-trace-context-30527843277/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-trace-qty-30507144463/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-trace-t4-30507144463/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,.tmp-v2-contract-url.txt,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,Dockerfile.web,CI/cloud,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,admin-3001-market-intel-audit.png,manual classification required,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,celerybeat-schedule.bak,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,celerybeat-schedule.dat,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,celerybeat-schedule.dir,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,deploy/,CI/cloud,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_CACHERAG_AND_TEMPORAL_ASSESSMENT_2026-08-02.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_CRM_LANDSCAPE_AND_ADJACENCY_2026-07-28.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_DAVID_FEEDBACK_RESPONSE_AND_VIDEO_PLAN_2026-07-30.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_DELTA_AND_CANONICAL_SEMANTICS_2026-07-28.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_DELTA_COMPETITIVE_AND_SHOWCASE_2026-08-02.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_DEMO_BUILD_HANDOFF_2026-07-24.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_DEMO_TRIGGERS_AND_SOURCING_THESIS_2026-08-02.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_EXEC_METRICS_GAP_2026-07-24.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_FULL_CAPABILITY_DEEPDIVE_2026-08-02.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_HYBRID_EDGE_DEPLOYMENT_2026-07-29.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_NARRATIVE_AND_STAKEHOLDER_DECK_2026-08-01.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_ROUTING_ARCHITECTURE_DIAGRAM_2026-08-02.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_SECOND_VERTICAL_CONNECTOR_ROADMAP_2026-07-26.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_SECURITY_CORPUS_AND_TRACE_UX_2026-08-01.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_SELFHOSTED_PIVOT_AND_POSITIONING_2026-07-28.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_STATE_OF_THE_PLATFORM_2026-07-29.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_SWOT_PESTEL_AND_DEFENSIBILITY_2026-07-29.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_V2_ROUTING_CHAT_UX_LATENCY_2026-07-22.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,docs/SHOPSQUIRE_WORKLOAD_GROUNDING_OVERFIT_2026-07-26.md,documentation,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,frontend/e2e/artifact-security-boundary.spec.ts,frontend and Decision Trace,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,frontend/e2e/decision-trace-live-audit.spec.ts,frontend and Decision Trace,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,frontend/e2e/procurement-amendment-permutations.spec.ts,frontend and Decision Trace,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,frontend/src/lib/chatOutcome.test.ts,frontend and Decision Trace,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,frontend/src/lib/chatOutcome.ts,frontend and Decision Trace,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,scratchpad/,manual classification required,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,scripts/gen_security_upload_corpus.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,scripts/reproduce_vision_native_teardown.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,scripts/start_recording_stack.ps1,manual classification required,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,src/app/models/read_db.py,manual classification required,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,src/app/observability/evidence_metrics.py,manual classification required,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,src/app/security/client_ip.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,src/app/services/security_connector_identity.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,src/frontend/admin-react/src/components/procurement/SupplierDraftPacket.test.tsx,frontend and Decision Trace,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,terraform/.terraform/,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,tests/architecture/test_security_threshold_schema_authority.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/security/test_generated_security_corpus.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/security/test_qr_ssrf_probe.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/security/test_supplier_baseline_identity.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/security/test_syslog_secure_defaults.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/security/test_tool_bridge_identity_contract.py,security and vision,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/services/test_audit_chain_azure_anchor.py,tests/evidence requiring topic assignment,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/services/test_product_identity.py,semantic reasoning and research,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/unit/test_client_ip_resolution.py,tests/evidence requiring topic assignment,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/unit/test_cloud_runtime_config.py,tests/evidence requiring topic assignment,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tests/unit/test_read_db_boundary.py,tests/evidence requiring topic assignment,authorship_unverified,review_then_add_to_topic_commit,not_yet_linked,Untracked source/evidence must be reviewed before staging.
+??,tmp-thread-debug.db-shm,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.
+??,tmp-thread-debug.db-wal,generated runtime evidence,generated,verify_then_remove_or_archive,not_yet_linked,Retain only when no hosted/final certification artifact supersedes it.

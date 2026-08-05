@@ -1209,6 +1209,85 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
         for row in committed
         if row["promise_state"]
     )
+    evidence_sku_clause = " AND d.sku=:sku" if sku else ""
+    allocated_source_count = int(db.execute(text(
+        "SELECT COUNT(*) FROM demand_allocation a "
+        "JOIN demand_commitment d ON d.id=a.demand_id AND d.tenant_id=a.tenant_id "
+        "WHERE d.tenant_id=:t AND d.stage='committed' AND a.status='allocated'" +
+        evidence_sku_clause
+    ), params).scalar() or 0)
+    promise_source_count = int(db.execute(text(
+        "SELECT COUNT(*) FROM buyer_supply_promise p "
+        "JOIN demand_commitment d ON d.id=p.demand_id AND d.tenant_id=p.tenant_id "
+        "WHERE d.tenant_id=:t AND d.stage='committed'" + evidence_sku_clause
+    ), params).scalar() or 0)
+    projection_end = now.isoformat()
+    projection_start = min(
+        (_parse_timestamp(str(row[9])) for row in rows if str(row[5]) == "committed"),
+        default=now,
+    ).isoformat()
+    allocation_shortfall = max(0, total_requested - total_allocated)
+    evidence_common = {
+        "authority": "shadow_allocation",
+        "calculated_at": projection_end,
+        "window": {"kind": "current_projection", "start": projection_start, "end": projection_end},
+        "trend_status": "not_materialized",
+        "reason": "historical_snapshots_not_materialized",
+    }
+    metric_evidence = {
+        "committed_quantity": {
+            **evidence_common, "metric": "committed_quantity", "value": total_requested,
+            "unit": "units", "status": "observed", "formula": "sum(committed demand.quantity)",
+            "numerator": total_requested, "denominator": None,
+            "source": "demand_commitment", "source_record_count": len(committed),
+        },
+        "allocated_quantity": {
+            **evidence_common, "metric": "allocated_quantity", "value": total_allocated,
+            "unit": "units", "status": "observed",
+            "formula": "sum(allocation.quantity where status = 'allocated')",
+            "numerator": total_allocated, "denominator": None,
+            "source": "demand_allocation", "source_record_count": allocated_source_count,
+        },
+        "shortfall_quantity": {
+            **evidence_common, "metric": "shortfall_quantity", "value": allocation_shortfall,
+            "unit": "units", "status": "calculated",
+            "formula": "max(0, committed_quantity - allocated_quantity)",
+            "numerator": allocation_shortfall, "denominator": total_requested or None,
+            "source": "demand_commitment + demand_allocation",
+            "source_record_count": len(committed) + allocated_source_count,
+        },
+        "allocation_pressure": {
+            **evidence_common, "metric": "allocation_pressure",
+            "value": round(allocation_shortfall / total_requested, 4) if total_requested else 0.0,
+            "unit": "ratio", "status": "calculated",
+            "formula": "shortfall_quantity / committed_quantity",
+            "numerator": allocation_shortfall, "denominator": total_requested or None,
+            "source": "demand_commitment + demand_allocation",
+            "source_record_count": len(committed),
+        },
+        "supplier_confirmed_quantity": {
+            **evidence_common, "metric": "supplier_confirmed_quantity",
+            "value": supplier_confirmed, "unit": "units", "status": "observed",
+            "formula": "sum(max(0, covered_quantity - allocated_quantity))",
+            "numerator": supplier_confirmed, "denominator": total_requested or None,
+            "source": "buyer_supply_promise", "source_record_count": promise_source_count,
+        },
+        "supplier_unresolved_quantity": {
+            **evidence_common, "metric": "supplier_unresolved_quantity",
+            "value": supplier_unresolved, "unit": "units", "status": "observed",
+            "formula": "sum(active promise.shortfall_quantity)",
+            "numerator": supplier_unresolved, "denominator": total_requested or None,
+            "source": "buyer_supply_promise", "source_record_count": promise_source_count,
+        },
+        "oldest_queue_age_seconds": {
+            **evidence_common, "metric": "oldest_queue_age_seconds",
+            "value": max((row["queue_age_seconds"] for row in committed), default=0),
+            "unit": "seconds", "status": "calculated",
+            "formula": "max(now - committed demand.created_at)",
+            "numerator": None, "denominator": None,
+            "source": "demand_commitment", "source_record_count": len(committed),
+        },
+    }
     supplier_refs = [(str(row[1]), str(row[2])) for row in waves]
     from src.app.services.supply_recovery import project_supply_recovery
     recovery_options = []
@@ -1234,13 +1313,14 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
     return {"tenant_id": tenant_id, "sku": sku, "authority": "shadow_allocation",
             "execution_authority": "legacy_inventory_reservations",
             "summary": {"committed_quantity": total_requested, "allocated_quantity": total_allocated,
-                        "shortfall_quantity": max(0, total_requested - total_allocated),
+                        "shortfall_quantity": allocation_shortfall,
                         "supplier_confirmed_quantity": supplier_confirmed,
                         "supplier_unresolved_quantity": supplier_unresolved,
                         "allocation_pressure": (
                             round(max(0, total_requested - total_allocated) / total_requested, 4)
                             if total_requested else 0.0),
                         "oldest_queue_age_seconds": max((row["queue_age_seconds"] for row in committed), default=0)},
+            "metric_evidence": metric_evidence,
             "demands": demands,
             "promise_calculations": promise_calculations,
             "promise_calculation": promise_calculations[0] if promise_calculations else None,

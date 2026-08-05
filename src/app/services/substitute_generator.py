@@ -14,6 +14,9 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError, TimeoutError as SATimeoutError
+
 DEFAULT_TENANT = "default"
 
 
@@ -65,37 +68,67 @@ def _attr_match(seed: Dict[str, Any], cand: Dict[str, Any], keys: List[str]) -> 
     return score
 
 
-def find_substitutes(db, sku: str, *, use_case: Optional[str] = None, specs: Optional[List[str]] = None,
-                     budget_min: Optional[float] = None, budget_max: Optional[float] = None,
-                     exclude_brands: Optional[List[str]] = None, limit: int = 5,
-                     tenant_id: str = DEFAULT_TENANT, profile_fn=None) -> List[Dict[str, Any]]:
-    """Ranked substitutes for ``sku``: same category, in-budget, nearest by profile attributes, seed +
-    excluded brands removed. Returns [{sku, name, price_cents, brand, spec_match, spec_total,
-    price_delta_cents, tradeoff}]. Empty on any failure or no catalog row. Budgets in DOLLARS."""
+def _failure_status(exc: Exception) -> str:
+    if isinstance(exc, SATimeoutError) or "timeout" in type(exc).__name__.lower():
+        return "timed_out"
+    message = str(exc).lower()
+    if isinstance(exc, (ProgrammingError, OperationalError)) and any(
+        marker in message
+        for marker in ("no such table", "does not exist", "undefined table", "undefined column")
+    ):
+        return "schema_incompatible"
+    return "source_unavailable"
+
+
+def find_substitutes_typed(
+    db,
+    sku: str,
+    *,
+    use_case: Optional[str] = None,
+    specs: Optional[List[str]] = None,
+    budget_min: Optional[float] = None,
+    budget_max: Optional[float] = None,
+    exclude_brands: Optional[List[str]] = None,
+    limit: int = 5,
+    tenant_id: str = DEFAULT_TENANT,
+    profile_fn=None,
+) -> Dict[str, Any]:
+    """Return ranked substitutes plus an explicit catalog-source outcome.
+
+    Reads run inside a savepoint so a degraded PostgreSQL catalog cannot poison
+    the caller's commercial transaction. Ranking remains vertical-agnostic and
+    profile-driven.
+    """
     if db is None or not sku:
-        return []
+        return {"status": "source_unavailable", "items": [], "reason": "missing_database_or_sku"}
     if profile_fn is None:
         try:
             from src.app.platform.store_profile import profile_slot as profile_fn  # type: ignore
         except Exception:
             profile_fn = None
     try:
-        from sqlalchemy import text
-        seed = db.execute(text("SELECT name, price_cents, specs, category, brand FROM products "
-                               "WHERE sku=:s AND COALESCE(active,1)=1 LIMIT 1"), {"s": str(sku)}).fetchone()
-        if not seed:
-            return []
-        seed_price = int(seed[1] or 0)
-        seed_specs = _parse_specs(seed[2])
-        category = str(seed[3] or seed_specs.get("category") or "").strip()
-        if not category:
-            return []
-        rows = db.execute(text(
-            "SELECT sku, name, price_cents, specs, brand FROM products "
-            "WHERE COALESCE(active,1)=1 AND category=:c AND sku<>:s"),
-            {"c": category, "s": str(sku)}).fetchall()
-    except Exception:
-        return []
+        with db.begin_nested():
+            seed = db.execute(text(
+                "SELECT name, price_cents, specs, category, brand FROM products "
+                "WHERE sku=:s AND active IS NOT FALSE LIMIT 1"
+            ), {"s": str(sku)}).fetchone()
+            if not seed:
+                return {"status": "none_qualified", "items": [], "reason": "seed_not_found"}
+            seed_price = int(seed[1] or 0)
+            seed_specs = _parse_specs(seed[2])
+            category = str(seed[3] or seed_specs.get("category") or "").strip()
+            if not category:
+                return {"status": "none_qualified", "items": [], "reason": "category_unknown"}
+            rows = db.execute(text(
+                "SELECT sku, name, price_cents, specs, brand FROM products "
+                "WHERE active IS NOT FALSE AND category=:c AND sku<>:s"
+            ), {"c": category, "s": str(sku)}).fetchall()
+    except (DBAPIError, SATimeoutError) as exc:
+        return {"status": _failure_status(exc), "items": [],
+                "reason": f"{type(exc).__name__}: {exc}"[:500]}
+    except Exception as exc:
+        return {"status": "source_unavailable", "items": [],
+                "reason": f"{type(exc).__name__}: {exc}"[:500]}
 
     keys = _comparable_keys(profile_fn)
     excl = {str(b).strip().lower() for b in (exclude_brands or []) if str(b).strip()}
@@ -123,7 +156,25 @@ def find_substitutes(db, sku: str, *, use_case: Optional[str] = None, specs: Opt
     out.sort(key=lambda x: x["_rank"], reverse=True)
     for x in out:
         x.pop("_rank", None)
-    return out[: max(1, int(limit))]
+    items = out[: max(1, int(limit))]
+    return {"status": "found" if items else "none_qualified", "items": items,
+            "reason": None if items else "no_candidate_passed_constraints"}
+
+
+def find_substitutes(db, sku: str, *, use_case: Optional[str] = None, specs: Optional[List[str]] = None,
+                     budget_min: Optional[float] = None, budget_max: Optional[float] = None,
+                     exclude_brands: Optional[List[str]] = None, limit: int = 5,
+                     tenant_id: str = DEFAULT_TENANT, profile_fn=None) -> List[Dict[str, Any]]:
+    """Compatibility wrapper returning ranked items only.
+
+    New decision code should use ``find_substitutes_typed`` so empty evidence and
+    an unavailable catalog remain distinguishable.
+    """
+    return list(find_substitutes_typed(
+        db, sku, use_case=use_case, specs=specs, budget_min=budget_min,
+        budget_max=budget_max, exclude_brands=exclude_brands, limit=limit,
+        tenant_id=tenant_id, profile_fn=profile_fn,
+    )["items"])
 
 
 def _tradeoff(name: str, delta_cents: int, match: int, total: int) -> str:

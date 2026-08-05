@@ -26,6 +26,7 @@ import ipaddress
 import json
 import os
 import socket
+import threading
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import quote_plus, urlparse
 
@@ -97,15 +98,25 @@ class HttpxResearchFetcher:
         self._ua = user_agent
         self._max_bytes = int(max_bytes)
 
-    def fetch(self, scrubbed_query: str, *, allowlist: List[str], timeout_s: float = 4.0) -> List[Dict[str, Any]]:
+    def fetch(
+        self, scrubbed_query: str, *, allowlist: List[str], timeout_s: float = 4.0,
+        cancellation: Any = None,
+    ) -> List[Dict[str, Any]]:
         """Port entry point — never raises."""
         try:
-            return self._fetch(scrubbed_query, allowlist or [], float(timeout_s))
+            return self._fetch(
+                scrubbed_query, allowlist or [], float(timeout_s), cancellation=cancellation,
+            )
         except Exception:
             return []
 
-    def _fetch(self, scrubbed_query: str, allowlist: List[str], timeout_s: float) -> List[Dict[str, Any]]:
+    def _fetch(
+        self, scrubbed_query: str, allowlist: List[str], timeout_s: float,
+        *, cancellation: Any = None,
+    ) -> List[Dict[str, Any]]:
         if httpx is None or not self._template or not str(scrubbed_query).strip():
+            return []
+        if bool(getattr(cancellation, "cancelled", False)):
             return []
         url = self._template.replace("{query}", quote_plus(str(scrubbed_query)))
         parsed = urlparse(url)
@@ -118,12 +129,26 @@ class HttpxResearchFetcher:
             timeout=timeout_s, follow_redirects=False, headers={"User-Agent": self._ua}
         )
         owns = self._client is None
+        watch_done = threading.Event()
+        cancel_event = getattr(cancellation, "event", None)
+        if owns and cancel_event is not None:
+            def _cancel_transport() -> None:
+                if cancel_event.wait(timeout=max(0.0, timeout_s)) and not watch_done.is_set():
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+
+            threading.Thread(
+                target=_cancel_transport, name="external-research-cancel", daemon=True,
+            ).start()
         try:
             resp = client.get(url, timeout=timeout_s)
             if not (200 <= resp.status_code < 300):  # 3xx (un-followed redirect) / 4xx / 5xx → no data
                 return []
             data = json.loads(resp.text[: self._max_bytes])
         finally:
+            watch_done.set()
             if owns:
                 try:
                     client.close()

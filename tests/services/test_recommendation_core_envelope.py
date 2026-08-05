@@ -94,6 +94,11 @@ def test_full_pipeline_preserves_authoritative_currency_and_model_proposal():
     assert payload["constraints_used"]["currency"] == "AUD"
     assert payload["model_selection"] == {
         "selected": "qwen3:14b",
+        "provider": "ollama",
+        "model": "qwen3:14b",
+        "model_version": "qwen3:14b",
+        "prompt_version": "recommend-router-v2",
+        "policy_version": "semantic-authority-v1",
         "source": "model",
         "authority": "proposes",
         "latency_ms": 123.0,

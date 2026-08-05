@@ -31,6 +31,7 @@ _QTY_PRECEDING_OK = frozenset({
     # Catalog commands before a count: "suggest 10 suitable laptops" is a quantity request,
     # while the existing name-token guard still rejects product names such as "Dell 15 laptops".
     "suggest", "recommend", "show", "find", "list", "compare",
+    "quote", "rfq", "source",
     # amendment phrasings — "make it 12 units", "change that to 10", "just 5" (all function words;
     # without these the name-token guard built for "dell 15" wrongly rejected fresh amendments,
     # letting a REMEMBERED qty beat a fresh one — caught live by the T3 memory probe)
@@ -40,7 +41,23 @@ _QTY_PRECEDING_OK = frozenset({
 # a word between the number and the unit-noun that means the number is a SPEC, not a quantity.
 _QTY_SPEC_FILLERS = re.compile(r"\b(?:inch(?:es)?|in|\"|gb|tb|mb|hz|ghz|kg|lb|nits?|core|gen)\b", re.I)
 # vertical-blind unit nouns — real product nouns are injected per-vertical by the caller.
-_GENERIC_UNIT_NOUNS = ("units?", "items?", "pieces?", "pcs", r"of\s+(?:them|these|those)")
+_GENERIC_UNIT_NOUNS = (
+    "units?",
+    "items?",
+    "pieces?",
+    "pcs",
+    # A beneficiary count is a common product-agnostic way to state order quantity:
+    # "laptops for 20 students" and "seats for 12 users". These nouns establish
+    # the magnitude of the request without encoding a product category or capability.
+    "people",
+    "persons?",
+    "students?",
+    "employees?",
+    "users?",
+    "staff",
+    r"team\s+members?",
+    r"of\s+(?:them|these|those)",
+)
 _NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -76,7 +93,38 @@ def extract_quantity_span(query: Optional[str], unit_nouns: Iterable[str] = ()) 
         return None
     nouns = _noun_alternation(tuple(sorted({str(n).strip().lower() for n in unit_nouns if str(n).strip()})))
 
+    def _looks_like_date(start: int, end: int) -> bool:
+        """Keep delivery dates out of the consequential quantity slot.
+
+        Procurement amendments commonly say ``need them by 25 September``. The broad
+        ``need ... <number>`` fallback used to reinterpret that day-of-month as a new order
+        quantity, silently shrinking an existing case.
+        """
+        before = q[max(0, start - 24):start]
+        after = q[end:end + 16]
+        month = (
+            r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+            r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+        )
+        return bool(
+            re.search(r"\bby\s*$", before)
+            or re.match(rf"\s*(?:st|nd|rd|th)?\s+{month}\b", after)
+            or re.match(r"\s*[/.-]\s*\d{1,2}(?:\s*[/.-]\s*\d{2,4})?", after)
+        )
+
     def _ok(m: "re.Match", *, check_fillers: bool = False) -> Optional[Tuple[int, str]]:
+        # Never interpret a numeric suffix embedded in a SKU/model token as an
+        # order count ("RGAM-0007 laptops" previously became seven laptops).
+        # A real count is whitespace/delimiter separated; identifier punctuation
+        # and adjacent alphanumerics keep the number inside product identity.
+        start = m.start(1)
+        end = m.end(1)
+        if _looks_like_date(start, end):
+            return None
+        if start > 0 and (q[start - 1].isalnum() or q[start - 1] in "-_/."):
+            return None
+        if end < len(q) and (q[end].isalnum() or q[end] in "_/."):
+            return None
         try:
             qty = int(m.group(1))
         except (TypeError, ValueError):

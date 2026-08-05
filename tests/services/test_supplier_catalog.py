@@ -9,12 +9,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.app.services.supplier_catalog import (
-    DEMO_SKUS,
     all_catalog_skus,
     cheapest_wholesale_cents,
     domain_for_supplier,
     ensure_supplier_coverage,
-    ensure_tables,
     best_supplier_cost,
     seed_demo,
     seed_demo_supplier_offers,
@@ -77,6 +75,26 @@ def test_demo_supplier_offers_are_per_sku_tenant_currency_and_simulation_only(db
     assert a["currency"] == "AUD"
     assert best_supplier_cost(db, "LAP-A", tenant_id="tenant-b", currency="AUD") is None
     assert best_supplier_cost(db, "LAP-A", tenant_id="tenant-a", currency="USD") is None
+
+
+def test_supplier_offer_text_validity_is_evaluated_portably(db):
+    db.execute(text(
+        "CREATE TABLE products (sku TEXT PRIMARY KEY, name TEXT, price_cents INT, "
+        "currency TEXT, specs TEXT, active INTEGER DEFAULT 1)"
+    ))
+    db.execute(text(
+        "INSERT INTO products VALUES ('LAP-A','Work Laptop',100000,'AUD','{}',1)"
+    ))
+    db.commit()
+    ensure_supplier_coverage(db)
+    seed_demo_supplier_offers(db, tenant_id="tenant-a")
+    db.execute(text(
+        "UPDATE supplier_offer SET effective_to='2020-01-01T00:00:00+00:00' "
+        "WHERE tenant_id='tenant-a' AND sku='LAP-A'"
+    ))
+    db.commit()
+
+    assert best_supplier_cost(db, "LAP-A", tenant_id="tenant-a", currency="AUD") is None
 
 
 def test_seed_demo_vendor_contacts_registers_verified_email():
@@ -169,12 +187,17 @@ def test_register_or_backfill_vendor_fills_missing_contact():
     # else the draft keeps resolving the bare domain. Must NOT create a duplicate insert.
     from src.app.services.supplier_catalog import _register_or_backfill_vendor
     calls = {}
+
     def lookup(*, tenant_id, domain):
         return {"contact_email": ""}  # exists, contact missing
+
     def register(**k):
-        calls["register"] = k; return {"ok": True}
+        calls["register"] = k
+        return {"ok": True}
+
     def backfill(*, tenant_id, domain, contact_email):
-        calls["backfill"] = (domain, contact_email); return True
+        calls["backfill"] = (domain, contact_email)
+        return True
     assert _register_or_backfill_vendor(lookup, register, backfill,
                                         tenant_id="default", name="X", domain="d.example",
                                         email="e@d.example") is True
@@ -185,12 +208,17 @@ def test_register_or_backfill_vendor_fills_missing_contact():
 def test_register_or_backfill_vendor_registers_when_absent():
     from src.app.services.supplier_catalog import _register_or_backfill_vendor
     seen = {}
+
     def lookup(*, tenant_id, domain):
         return None  # absent
+
     def register(**k):
-        seen["reg"] = k; return {"ok": True}
+        seen["reg"] = k
+        return {"ok": True}
+
     def backfill(**k):
-        seen["bf"] = k; return True
+        seen["bf"] = k
+        return True
     assert _register_or_backfill_vendor(lookup, register, backfill,
                                         tenant_id="default", name="X", domain="d.example",
                                         email="e@d.example") is True

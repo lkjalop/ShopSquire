@@ -24,7 +24,9 @@ the legacy path is retired — not a same-day big-bang extraction of suggest()'s
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -167,15 +169,51 @@ def run_postflight(
     except Exception as exc:   # observable, not silent (no-silent-except ratchet)
         logger.warning("telemetry emit failed (non-fatal): %s", repr(exc)[:120])
     if narrate and executor is not None and core.products:
-        out["narration_job_id"] = _enqueue_narration(redis, envelope, core, executor)
+        out["narration_job_id"] = _enqueue_narration(
+            redis, envelope, core, executor, session_epoch=session_epoch,
+        )
     return out
 
 
-def _enqueue_narration(redis, envelope: TurnEnvelope, core: CoreResponse, executor) -> Optional[str]:
+def _enqueue_narration(
+    redis, envelope: TurnEnvelope, core: CoreResponse, executor,
+    *, session_epoch: str | None = None,
+) -> Optional[str]:
     """Optional async prose (parity with v1). Extension point — the deterministic message is
     already honest, so this only enriches; guarded so it can never break the turn."""
     try:
-        from src.app.services.recommend_narration_jobs import submit_narration
+        from src.app.services.recommend_narration_jobs import (
+            narration_decision_fingerprint,
+            observe_narration_fingerprint,
+            submit_narration,
+        )
+        product_material = [
+            {"sku": product.sku, "price_cents": product.price_cents,
+             "currency": product.currency, "stock": product.stock}
+            for product in core.products
+        ]
+        evidence_digest = hashlib.sha256(
+            json.dumps({"products": product_material, "grounding": core.grounding,
+                        "lane": core.lane}, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        quantity = core.extras.get("requested_quantity") or core.extras.get("order_quantity")
+        fingerprint = narration_decision_fingerprint({
+            "tenant_id": envelope.tenant_id, "subject_id": envelope.uid,
+            "session_epoch": session_epoch or "current", "decision_id": core.decision_id,
+            "sku": product_material[0]["sku"] if product_material else None,
+            "quantity": quantity, "currency": envelope.currency,
+            "destination_token": core.extras.get("destination_token"),
+            "required_by": core.extras.get("required_by"),
+            "fulfillment_route": core.extras.get("fulfillment_route"),
+            "supplier_promise_version": core.extras.get("supplier_promise_version"),
+            "evidence_digest": evidence_digest,
+            "model_version": os.getenv("OLLAMA_NARRATION_MODEL", "unconfigured"),
+            "prompt_version": "v2-grounded-message", "policy_version": "v2-core",
+        })
+        observe_narration_fingerprint(
+            redis, tenant_id=envelope.tenant_id, subject_id=envelope.uid,
+            session_epoch=session_epoch or "current", fingerprint=fingerprint,
+        )
         # a real narration fn (grounded, guard-checked) is wired when narration parity is
         # prioritized; today we reserve the job id so the contract/handshake exists.
         def _noop(*_a, **_k) -> str:

@@ -63,6 +63,14 @@ export interface AllocationWorkbenchView {
     allocation_pressure: number;
     oldest_queue_age_seconds: number;
   };
+  metric_evidence?: Record<string, {
+    metric: string; value: number | null; unit: string; status: string;
+    formula: string; numerator: number | null; denominator: number | null;
+    source: string; source_record_count: number; authority: string;
+    calculated_at: string;
+    window: { kind: string; start: string; end: string };
+    trend_status: string; reason?: string | null;
+  }>;
   demands: Array<{
     demand_ref: string; case_ref: string; sku: string; destination_id: string; stage: string;
     requested_quantity: number; allocated_quantity: number; shortfall_quantity: number;

@@ -29,6 +29,18 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _effective_timestamp(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
 def _canonical_json(value: Dict[str, Any]) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -76,8 +88,6 @@ def _authoritative_offer(
         WHERE tenant_id=:tenant AND sku=:sku AND currency=:currency
           AND status='active' AND simulation_only=0
           AND cost_kind='validated_landed_quote'
-          AND effective_from <= CURRENT_TIMESTAMP
-          AND (effective_to IS NULL OR effective_to > CURRENT_TIMESTAMP)
     """
     params: Dict[str, Any] = {
         "tenant": tenant_id,
@@ -87,15 +97,27 @@ def _authoritative_offer(
     if source_record_id:
         sql += " AND source_record_id=:source_record_id"
         params["source_record_id"] = source_record_id
-    sql += " ORDER BY landed_unit_cost_cents ASC, effective_from DESC LIMIT 1"
+    sql += " ORDER BY landed_unit_cost_cents ASC, effective_from DESC LIMIT 100"
     try:
-        row = db.execute(text(sql), params).fetchone()
+        with db.begin_nested():
+            rows = db.execute(text(sql), params).fetchall()
     except Exception as exc:
         raise ReorderBoundaryError(
             "authoritative_supplier_offer_unavailable",
             detail={"reason": type(exc).__name__},
         ) from exc
-    if not row:
+    now = _utcnow()
+    row = None
+    for candidate in rows:
+        valid_from = _effective_timestamp(candidate[6])
+        valid_to = _effective_timestamp(candidate[7])
+        if valid_from is None or valid_from > now:
+            continue
+        if candidate[7] not in (None, "") and (valid_to is None or valid_to <= now):
+            continue
+        row = candidate
+        break
+    if row is None:
         raise ReorderBoundaryError("authoritative_supplier_offer_missing")
     try:
         provenance = json.loads(row[4] or "[]")

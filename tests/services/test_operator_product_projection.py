@@ -1,6 +1,21 @@
 from types import SimpleNamespace
 
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
+
 from src.app.services import market_projection
+
+
+def test_sparse_projection_sources_do_not_poison_the_caller_transaction():
+    db = Session(create_engine("sqlite+pysqlite:///:memory:", future=True))
+    try:
+        result = market_projection.load_projection_inputs(db, tenant_id="tenant-a")
+
+        assert result["sales_status"] == "insufficient_data"
+        assert result["inventory_status"] == "unavailable"
+        assert db.execute(text("SELECT 1")).scalar_one() == 1
+    finally:
+        db.close()
 
 
 def test_operator_projection_keeps_demo_wholesale_unapproved(monkeypatch):

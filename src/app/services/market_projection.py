@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Sequence
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from src.app.services.decision_log import log_trace_event
 from src.app.services.executive_metrics import gmroi_unavailable, inventory_productivity
@@ -26,6 +26,24 @@ def _recent(rows: Iterable[Dict[str, Any]], key: str, since: datetime) -> list[D
     return [row for row in rows if (_as_utc(row.get(key)) or datetime.min.replace(tzinfo=timezone.utc)) >= since]
 
 
+def _optional_rows(db, table_name: str, statement: str, params: Dict[str, Any] | None = None):
+    """Read an optional projection source without poisoning the caller transaction.
+
+    Production databases are migration-first, but sparse demo/test profiles may
+    intentionally omit a source table. PostgreSQL marks the whole transaction as
+    failed after a missing-table/column query, so a bare ``except`` is not a safe
+    fallback. Inspect first and retain a savepoint for schema drift between the
+    inspection and the read.
+    """
+    if not inspect(db.get_bind()).has_table(table_name):
+        return []
+    try:
+        with db.begin_nested():
+            return db.execute(text(statement), params or {}).fetchall()
+    except Exception:
+        return []
+
+
 def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict[str, Any]:
     """Load facts without database-specific date arithmetic."""
     now = datetime.now(timezone.utc)
@@ -33,36 +51,50 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
     sales_rows: list[Dict[str, Any]] = []
     inventory_rows: list[Dict[str, Any]] = []
     case_rows: list[Dict[str, Any]] = []
-    try:
-        rows = db.execute(text(
+    rows = _optional_rows(
+        db,
+        "marketing_event_fact",
+        (
             "SELECT sku, quantity, occurred_at, source_system, source_record_id "
             "FROM marketing_event_fact "
-            "WHERE tenant_id=:tenant AND event_type='purchase' AND status='active'"),
-            {"tenant": tenant_id}).fetchall()
+            "WHERE tenant_id=:tenant AND event_type='purchase' AND status='active'"
+        ),
+        {"tenant": tenant_id},
+    )
+    if rows:
         sales_rows = _recent([
             {"sku": row[0], "quantity": row[1], "event_time": row[2],
              "source_system": row[3], "source_record_id": row[4]} for row in rows
         ], "event_time", since)
-    except Exception:
-        pass
     # sales_metrics is a legacy, unscoped demo fixture. It may inform only the
     # default demo tenant; it must never bleed into a real tenant projection.
-    if not sales_rows and tenant_id == "default":
-        try:
-            rows = db.execute(text(
-                "SELECT sku, quantity, event_time FROM sales_metrics")).fetchall()
+    if (
+        not sales_rows
+        and tenant_id == "default"
+        and inspect(db.get_bind()).has_table("sales_metrics")
+    ):
+        rows = _optional_rows(
+            db,
+            "sales_metrics",
+            "SELECT sku, quantity, event_time FROM sales_metrics",
+        )
+        if rows:
             sales_rows = _recent([
                 {"sku": row[0], "quantity": row[1], "event_time": row[2]} for row in rows
             ], "event_time", since)
-        except Exception:
-            pass
     inventory_status = "unavailable"
-    try:
-        rows = db.execute(text(
+    rows = _optional_rows(
+        db,
+        "inventory_atp_fact",
+        (
             "SELECT sku, location_id, on_hand_quantity, committed_quantity, "
             "confirmed_quantity, observed_at, source_system, confidence, source_record_id "
             "FROM inventory_atp_fact WHERE tenant_id=:tenant AND status='active' "
-            "ORDER BY observed_at DESC"), {"tenant": tenant_id}).fetchall()
+            "ORDER BY observed_at DESC"
+        ),
+        {"tenant": tenant_id},
+    )
+    if rows:
         latest: Dict[tuple[str, str], Any] = {}
         for row in rows:
             key = (str(row[0] or ""), str(row[1] or "default"))
@@ -80,16 +112,21 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
             if _as_utc(row[5]) and _as_utc(row[5]) >= now - timedelta(days=1)
         ]
         inventory_status = "observed" if inventory_rows else "insufficient_data"
-    except Exception:
-        inventory_status = "unavailable"
-    try:
-        rows = db.execute(text(
+    elif inspect(db.get_bind()).has_table("inventory_atp_fact"):
+        inventory_status = "insufficient_data"
+    rows = _optional_rows(
+        db,
+        "fulfillment_case",
+        (
             "SELECT f.id, v.state_json, v.valid_from FROM fulfillment_case f "
             "JOIN fulfillment_case_version v ON v.case_id=f.id "
             "AND v.valid_from=(SELECT MAX(v2.valid_from) FROM fulfillment_case_version v2 "
             "                  WHERE v2.case_id=f.id) "
-            "WHERE COALESCE(f.tenant_id,'default')=:tenant"),
-            {"tenant": tenant_id}).fetchall()
+            "WHERE COALESCE(f.tenant_id,'default')=:tenant"
+        ),
+        {"tenant": tenant_id},
+    ) if inspect(db.get_bind()).has_table("fulfillment_case_version") else []
+    if rows:
         for case_id, raw, occurred_at in rows:
             try:
                 state = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
@@ -101,8 +138,6 @@ def load_projection_inputs(db, *, tenant_id: str, window_days: int = 30) -> Dict
                     "quantity": line.get("quantity"), "occurred_at": occurred_at,
                 })
         case_rows = _recent(case_rows, "occurred_at", now - timedelta(days=90))
-    except Exception:
-        pass
     sales_status = (
         "observed" if sales_rows and tenant_id != "default"
         else "simulated" if sales_rows

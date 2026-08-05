@@ -16,7 +16,10 @@ from typing import Any, Dict, List, Protocol, runtime_checkable
 
 @runtime_checkable
 class ExternalResearchFetcher(Protocol):
-    def fetch(self, scrubbed_query: str, *, allowlist: List[str], timeout_s: float = 4.0) -> List[Dict[str, Any]]:
+    def fetch(
+        self, scrubbed_query: str, *, allowlist: List[str], timeout_s: float = 4.0,
+        cancellation: Any = None,
+    ) -> List[Dict[str, Any]]:
         ...
 
 
@@ -24,5 +27,9 @@ class NullFetcher:
     """Default fetcher: no network. Returns no hits. Safe to wire on the live path before a real
     allowlisted httpx adapter exists — external research stays 'empty', never errors."""
 
-    def fetch(self, scrubbed_query: str, *, allowlist: List[str], timeout_s: float = 4.0) -> List[Dict[str, Any]]:
+    def fetch(
+        self, scrubbed_query: str, *, allowlist: List[str], timeout_s: float = 4.0,
+        cancellation: Any = None,
+    ) -> List[Dict[str, Any]]:
+        del cancellation
         return []

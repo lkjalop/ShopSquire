@@ -97,6 +97,10 @@ def finalize_core_response(
             ],
         }]
     right_panel["canonical_identity"] = canonical_identity
+    right_panel["semantic_resolution"] = out.get("semantic_resolution")
+    right_panel["semantic_evidence"] = out.get("semantic_evidence")
+    right_panel["catalog_alignment"] = out.get("catalog_alignment")
+    right_panel["case_obligations"] = out.get("case_obligations")
     out["right_panel"] = right_panel
     lane = str(out.get("turn_intent") or "").strip().upper() or None
     routing_source = str(out.get("routing_source") or "").strip() or None
@@ -159,6 +163,7 @@ def finalize_core_response(
         "quantity": (constraints.get("quantity") or constraints.get("order_quantity")
                      or out.get("requested_quantity")),
         "currency": constraints.get("currency") or out.get("currency"),
+        "semantic_resolution": out.get("semantic_resolution"),
     }
     evidence_items = [
         {"type": "candidate", "id": item["sku"], "score": 1.0}
@@ -192,7 +197,11 @@ def finalize_core_response(
                      "execution_mode": str(out.get("execution_mode") or "v2_served"),
                      "intent_analysis": intent_analysis, "constraints_used": constraints,
                      "execution_steps": execution_steps, "security": security,
-                     "model_selection": model_selection},
+                     "model_selection": model_selection,
+                     "semantic_resolution": out.get("semantic_resolution"),
+                     "semantic_evidence": out.get("semantic_evidence"),
+                     "catalog_alignment": out.get("catalog_alignment"),
+                     "case_obligations": out.get("case_obligations")},
         )
         persisted = log_decision(
             agent_name="Recommendation_Core",
@@ -204,6 +213,10 @@ def finalize_core_response(
                 "intent_analysis": intent_analysis,
                 "execution_steps": execution_steps,
                 "llm": model_selection,
+                "semantic_resolution": out.get("semantic_resolution"),
+                "semantic_evidence": out.get("semantic_evidence"),
+                "catalog_alignment": out.get("catalog_alignment"),
+                "case_obligations": out.get("case_obligations"),
             },
             proposed_action={
                 "decision_mode": str(out.get("decision_mode") or "catalog_recommendation"),
@@ -218,6 +231,10 @@ def finalize_core_response(
                 "security": security,
                 "evidence_items": evidence_items,
                 "model_selection": model_selection,
+                "semantic_resolution": out.get("semantic_resolution"),
+                "semantic_evidence": out.get("semantic_evidence"),
+                "catalog_alignment": out.get("catalog_alignment"),
+                "case_obligations": out.get("case_obligations"),
             },
             decision_id=trace_id, tenant_id=str(tenant_id or "default"),
             actor_id=str(uid or "") or None, actor_role="buyer",

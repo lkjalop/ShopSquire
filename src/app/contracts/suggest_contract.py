@@ -104,6 +104,14 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     # Approved policy provenance: the answer came from the tenant StoreProfile, never invented
     # by the model. These fields were added with the independently owned policy lane.
     "policy_source", "policy_answered",
+    # V2 semantic-authority and case-amendment surfaces (reviewed 2026-08-05). These fields
+    # expose why catalog/commerce authority was withheld and preserve the current case view;
+    # they do not allow the model to mutate catalog, cart, procurement, or payment state.
+    "semantic_resolution", "semantic_evidence", "approved_narration_evidence",
+    "catalog_alignment", "supplier_enquiry_option", "preserve_current_view",
+    "case_operation", "case_anchor", "state_changed",
+    "case_obligations",
+    "router_outcome",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):

@@ -22,9 +22,15 @@ export function SupplierDraftPacket({
   onSaveEdit: () => void;
 }) {
   if (!draft.subject) return null;
+  const channelPlan = (draft.channel_plan || {}) as Record<string, any>;
+  const channel = String(channelPlan.channel || 'email').toLowerCase();
+  const channelOwner = channelPlan.requires_human
+    ? 'Human operator'
+    : channelPlan.integration_kind ? 'Dedicated connector' : 'Agent drafts; human approves';
+  const terms = (draft.supplier_terms || {}) as Record<string, any>;
   return (
     <details open data-testid="op-supplier-draft">
-      <summary>Supplier email approval packet - hash {shortHash(draft.content_hash)}</summary>
+      <summary>Supplier outreach approval packet - hash {shortHash(draft.content_hash)}</summary>
       {draft.send_gate?.decision && (
         <div data-testid="op-send-gate" style={{
           margin: '6px 0', padding: '4px 8px', borderRadius: 6, fontSize: 12, fontWeight: 700,
@@ -45,6 +51,25 @@ export function SupplierDraftPacket({
           <div data-testid="op-draft-recipient">{recipientDisplay}</div>
           <small style={{ color: '#6b7280' }}>
             Domain boundary: {draft.recipient_domain || 'unknown'}; source: approved supplier allowlist
+          </small>
+        </div>
+        <div data-testid="op-supplier-channel" style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}>
+          <strong>Supplier channel: {channel.toUpperCase()}</strong>
+          <div>{channelOwner}</div>
+          <small style={{ color: '#6b7280' }}>
+            {channelPlan.rationale || 'Email is the safe fallback when no authoritative preference is recorded.'}
+          </small>
+          {channel !== 'email' && (
+            <div style={{ color: '#92400e', marginTop: 4 }}>
+              The email transport will not send this packet; use the required task or connector.
+            </div>
+          )}
+        </div>
+        <div data-testid="op-supplier-terms" style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}>
+          <strong>Recorded ordering terms</strong>
+          <div>MOQ {terms.moq ?? 'not reported'} · lead time {terms.lead_time_days ?? 'not reported'} days</div>
+          <small style={{ color: '#6b7280' }}>
+            Contract {terms.contract_status || 'not reported'}; source: tenant supplier registry.
           </small>
         </div>
         <div style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}>

@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from src.app.services import taxonomy_registry as registry
 from src.app.services.taxonomy_registry import (
     PINNED_RELEASE,
     add_sold_node,
@@ -64,6 +65,37 @@ def test_classification_nodes_for_skus_is_tenant_scoped_and_approved_only(db):
     db.commit()
 
     assert classification_nodes_for_skus(db, ["A", "B", "C", "A"]) == {"A": "el-6-6"}
+
+
+def test_classification_batch_uses_portable_named_parameters(monkeypatch):
+    """A proxy that stringifies TextClause must never see POSTCOMPILE tokens.
+
+    PostgreSQL interprets a leaked ``__[POSTCOMPILE_skus]`` token as an
+    identifier, aborting the request transaction and degrading every later
+    taxonomy read.  Explicit scalar binds remain valid through both native
+    SQLAlchemy sessions and stringifying instrumentation proxies.
+    """
+
+    class _Rows:
+        def fetchall(self):
+            return [("A", "el-6-6")]
+
+    class _StringifyingSession:
+        statement = ""
+        params = {}
+
+        def execute(self, statement, params):
+            self.statement = str(statement)
+            self.params = dict(params)
+            return _Rows()
+
+    monkeypatch.setattr(registry, "ensure_tables", lambda _db: None)
+    session = _StringifyingSession()
+
+    assert classification_nodes_for_skus(session, ["A", "A"]) == {"A": "el-6-6"}
+    assert "POSTCOMPILE" not in session.statement
+    assert "sku IN (:sku_0)" in session.statement
+    assert session.params == {"tenant_id": "default", "sku_0": "A"}
 
 
 # ── pinned release integrity (drift tests — rerun on every release upgrade) ──

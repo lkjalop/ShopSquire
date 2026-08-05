@@ -6,6 +6,21 @@ from src.app.main import create_app
 from tests.utils import default_headers
 
 
+def test_material_questions_precede_generic_procurement_discovery():
+    from src.app.services.recommendation_compatibility import (
+        _append_generic_procurement_question,
+    )
+
+    questions = _append_generic_procurement_question([
+        {"id": "budget_scope", "label": "Per item or total?"},
+    ])
+
+    assert [question["id"] for question in questions] == [
+        "budget_scope",
+        "ask_b2b_procurement",
+    ]
+
+
 def test_compatibility_route_is_deprecated_and_v2_backed(monkeypatch):
     from src.app.routers import recommend_compat
 

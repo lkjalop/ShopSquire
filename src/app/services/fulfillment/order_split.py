@@ -48,7 +48,7 @@ def _load_active_products(db) -> List[Any]:
     if db is None:
         return []
     try:  # name + specs (the type word — "laptop"/"monitor" — is in the name); robust to a missing category col
-        return list(db.execute(text("SELECT sku, name, specs FROM products WHERE COALESCE(active,1)=1")).fetchall())
+        return list(db.execute(text("SELECT sku, name, specs FROM products WHERE active IS NOT FALSE")).fetchall())
     except Exception as exc:
         logger.debug("_load_active_products query failed: %s", exc)
         return []
@@ -270,7 +270,9 @@ def plan_order_split(db, *, lines: List[Dict[str, Any]], tenant_id: str = "defau
 
     return {
         "line_count": len(line_out),
-        "sourcing_line_count": sum(1 for l in line_out if l.get("status") == "needs_sourcing"),
+        "sourcing_line_count": sum(
+            1 for line in line_out if line.get("status") == "needs_sourcing"
+        ),
         "group_count": len(groups),
         "case_model": "one_case_per_sku_or_supplier_group",
         "groups": list(groups.values()),
@@ -326,20 +328,33 @@ def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
     group_id = str(order_group_id or f"order-{_uuid.uuid4().hex[:10]}")
     created: List[Dict[str, Any]] = []
     for g in (plan.get("groups") or []):
-        lines = [l for l in (g.get("lines") or []) if isinstance(l, dict) and l.get("item_ref")]
+        lines = [
+            line
+            for line in (g.get("lines") or [])
+            if isinstance(line, dict) and line.get("item_ref")
+        ]
         if not lines:
             continue
-        order_lines = [{"item_ref": str(l["item_ref"]), "quantity": _int(l.get("requested_qty")),
-                        "shortfall": _int(l.get("shortfall"))} for l in lines]
-        total_qty = sum(int(l["quantity"]) for l in order_lines)
-        total_short = sum(int(l["shortfall"]) for l in order_lines)
+        order_lines = [
+            {
+                "item_ref": str(line["item_ref"]),
+                "quantity": _int(line.get("requested_qty")),
+                "shortfall": _int(line.get("shortfall")),
+            }
+            for line in lines
+        ]
+        total_qty = sum(int(line["quantity"]) for line in order_lines)
+        total_short = sum(int(line["shortfall"]) for line in order_lines)
         try:
             cid = fwf.open_case(db, buyer_uid_hash=(uid_hash or uid), source_trace_id=trace_id,
                                 requested_by="recommend", tenant_id=tenant_id)
             if not cid:
                 continue
             line_availability = [
-                dict(l.get("availability") or {}) for l in lines if isinstance(l.get("availability"), dict)]
+                dict(line.get("availability") or {})
+                for line in lines
+                if isinstance(line.get("availability"), dict)
+            ]
             patch = {"availability": {"requested_qty": total_qty, "shortfall": total_short,
                                       "in_stock": max(0, total_qty - total_short),
                                       "item_ref": order_lines[0]["item_ref"],

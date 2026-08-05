@@ -77,6 +77,24 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
             },
         },
         "right_panel": {"mode": "recommendations"},
+        "semantic_resolution": {
+            "outcome": "clarify",
+            "catalog_authority": "blocked",
+            "state_prevented": ["catalog_recommendation"],
+        },
+        "semantic_evidence": {
+            "selected": ["concept_resolution"],
+            "source_health": "degraded",
+        },
+        "catalog_alignment": {
+            "outcome": "qualified",
+            "qualified_skus": ["SKU-B"],
+            "authority": "candidate_only",
+        },
+        "case_obligations": {
+            "selected_sku": None,
+            "unresolved": ["explicit_sku_selection"],
+        },
     }
     out = finalizer.finalize_core_response(
         payload, "trace-voice-1", query="compare these",
@@ -93,6 +111,15 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     assert out["right_panel"]["anchor_sections"][0]["top_products"][0]["sku"] == "SKU-B"
     assert recorded["event"]["payload"]["canonical_identity"] == expected
     assert recorded["event"]["payload"]["right_panel_contract"]["canonical_identity"] == expected
+    assert recorded["event"]["payload"]["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert recorded["decision"]["retrieved_context"]["semantic_evidence"]["source_health"] == "degraded"
+    assert out["right_panel"]["semantic_resolution"]["outcome"] == "clarify"
+    assert out["right_panel"]["catalog_alignment"]["qualified_skus"] == ["SKU-B"]
+    assert out["right_panel"]["case_obligations"]["selected_sku"] is None
+    assert recorded["event"]["payload"]["catalog_alignment"]["authority"] == "candidate_only"
+    assert recorded["decision"]["retrieved_context"]["case_obligations"]["unresolved"] == [
+        "explicit_sku_selection",
+    ]
     proposed = recorded["decision"]["proposed_action"]
     assert proposed["canonical_identity"] == expected
     assert [row["sku"] for row in proposed["products_summary"]] == expected["ordered_skus"]

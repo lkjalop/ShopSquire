@@ -91,7 +91,7 @@ def seed_demo_locations(db, *, skus: Optional[List[str]] = None, tenant_id: str 
     ensure_tables(db)
     if skus is None:
         try:
-            rows = db.execute(text("SELECT sku FROM products WHERE COALESCE(active,1)=1 AND sku IS NOT NULL "
+            rows = db.execute(text("SELECT sku FROM products WHERE active IS NOT FALSE AND sku IS NOT NULL "
                                    "AND sku <> ''")).fetchall()
             skus = sorted({str(r[0]) for r in rows if r and r[0]})
         except Exception:
@@ -276,7 +276,7 @@ def backfill_price_book_from_products(db, *, tenant_id: str = DEFAULT_TENANT,
     ensure_tables(db)
     tid = str(tenant_id).strip() or DEFAULT_TENANT
     rows = db.execute(text(
-        "SELECT sku, price_cents FROM products WHERE COALESCE(active,1)=1 "
+        "SELECT sku, price_cents FROM products WHERE active IS NOT FALSE "
         "AND sku IS NOT NULL AND price_cents IS NOT NULL")).fetchall()
     existing = {str(r[0]): str(r[1] or "") for r in db.execute(text(
         "SELECT sku, source FROM price_book_entry WHERE tenant_id=:t AND channel='default' "

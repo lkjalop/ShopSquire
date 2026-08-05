@@ -92,3 +92,40 @@ export interface GovernancePulse {
 // else the real 'default' operational tenant.
 export const governancePulse = (tenantId = 'default') =>
   http<GovernancePulse>(`/api/v1/fulfillment/governance/pulse?tenant_id=${encodeURIComponent(tenantId)}`);
+
+export interface SearchDemandAuthorityProjection {
+  tenant_id: string;
+  search_interest_count: number;
+  qualified_searches: number;
+  unresolved_concept_count: number;
+  unresolved_concept_rate: number | null;
+  no_qualified_match_count: number;
+  no_qualified_match_rate: number | null;
+  provisional_cart_count: number;
+  committed_case_count: number;
+  ordered_case_count: number;
+  fulfilled_case_count: number;
+  qualified_to_cart_rate: number | null;
+  cart_to_commitment_rate: number | null;
+  qualified_interest_units: number;
+  committed_demand_units: number;
+  confirmed_atp_units: number;
+  transferable_units: number;
+  qualified_unmet_units: number;
+  supplier_enquiry_pressure_units: number;
+  inventory_source_versions: string[];
+  inventory_freshness_states: string[];
+  eligible_forecast_signal_count: number;
+  forecast_influence: 'shadow_only';
+  forecast_comparison_status: string;
+  projected_revenue: number | null;
+  projected_revenue_status: string;
+  inventory_action_allowed: false;
+  authority_note: string;
+  simulation_only: boolean;
+  observation_authority: 'no_observations' | 'simulation' | 'live_or_mixed';
+  as_of: string;
+}
+
+export const searchDemandAuthority = () =>
+  http<SearchDemandAuthorityProjection>('/api/v1/admin/bi/executive-metrics/search-demand-authority');

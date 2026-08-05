@@ -267,7 +267,15 @@ class OllamaProvider(BaseLLMProvider):
                 "stream": False,
                 "options": {"temperature": kwargs.get("temperature", 0.1), "num_predict": kwargs.get("max_tokens", 512)},
             }
-            r = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=30.0)
+            if kwargs.get("format"):
+                payload["format"] = kwargs["format"]
+            if "think" in kwargs:
+                payload["think"] = bool(kwargs["think"])
+            elif "qwen3" in str(model).lower():
+                # Structured and bounded commerce roles must not return hidden-reasoning wrappers.
+                payload["think"] = False
+            timeout_s = max(1.0, min(float(kwargs.get("timeout_s", 30.0)), 180.0))
+            r = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=timeout_s)
             r.raise_for_status()
             j = r.json()
             txt = str(j.get("response") or "").strip()

@@ -9,9 +9,11 @@ import re
 import uuid
 import hashlib
 import inspect
+import logging
 
 from src.app.models.event_log import ensure_event_log_table
 from src.app.models.db import db_session
+from sqlalchemy import text as sql_text
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.cv_triage_basic import BasicCVTriage
 from src.app.services.cv_provider import ManagedCVProvider, VisionProviderBusy
@@ -23,15 +25,89 @@ from src.app.routers.support_complaints import _normalize_ocr_and_detect, _probe
 from src.app.security import linked_artifact_analysis
 from src.app.security.passive_payload_analysis import classify_passive_payload
 from src.app.security.threat_hunter_leads import build_threat_hunter_leads
+from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.services.faq_bank import match_faq
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
+logger = logging.getLogger("shopsquire.vision")
 
 _IMAGE_WORKERS = max(1, min(int(os.getenv("CV_IMAGE_WORKERS", "3") or 3), 8))
 _IMAGE_EXECUTOR = _futures.ThreadPoolExecutor(
     max_workers=_IMAGE_WORKERS,
     thread_name_prefix="vision-bounded",
 )
+
+
+def _persist_artifact_verdict(*, artifact_id: str, sha256: str, state: str,
+                              coverage: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Append the upload verdict under the request's authorized tenant context."""
+    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.security.artifact_authority import (
+        invalidate_bindings_for_late_verdict,
+        record_verdict,
+    )
+
+    tenant_id = current_tenant_id()
+    with db_session() as db:
+        current = db.execute(
+            sql_text(
+                "SELECT verdict_version, state FROM artifact_security_verdicts "
+                "WHERE tenant_id=:tenant AND artifact_id=:artifact "
+                "ORDER BY verdict_version DESC LIMIT 1"
+            ),
+            {"tenant": tenant_id, "artifact": artifact_id},
+        ).mappings().first()
+        previous_state = str(current["state"]) if current else ""
+        previous_version = int(current["verdict_version"]) if current else 0
+        if not current:
+            last = record_verdict(
+                db, artifact_id=artifact_id, tenant_id=tenant_id,
+                artifact_sha256=sha256, state="received", reason="upload_received",
+            )
+            previous_version = int(last["verdict_version"])
+            if state in {"pending", "clean"}:
+                for next_state, reason in (
+                    ("admitted", "strict_admission_passed"),
+                    ("pending", "inspection_started"),
+                ):
+                    last = record_verdict(
+                        db, artifact_id=artifact_id, tenant_id=tenant_id,
+                        artifact_sha256=sha256, state=next_state, reason=reason,
+                        expected_previous_version=previous_version,
+                    )
+                    previous_version = int(last["verdict_version"])
+                if state == "clean":
+                    last = record_verdict(
+                        db, artifact_id=artifact_id, tenant_id=tenant_id,
+                        artifact_sha256=sha256, state="clean", reason="inspection_complete",
+                        coverage=coverage, expected_previous_version=previous_version,
+                    )
+            else:
+                last = record_verdict(
+                    db, artifact_id=artifact_id, tenant_id=tenant_id,
+                    artifact_sha256=sha256, state=state, reason=f"inspection_{state}",
+                    coverage=coverage, expected_previous_version=previous_version,
+                )
+        elif previous_state == state or (previous_state == "clean" and state == "pending"):
+            last = {
+                "artifact_id": artifact_id, "tenant_id": tenant_id,
+                "artifact_sha256": sha256, "verdict_version": previous_version,
+                "state": previous_state,
+            }
+        else:
+            last = record_verdict(
+                db, artifact_id=artifact_id, tenant_id=tenant_id,
+                artifact_sha256=sha256, state=state, reason=f"inspection_{state}",
+                coverage=coverage, expected_previous_version=previous_version,
+            )
+            if previous_state == "clean" and state in {"quarantined", "degraded"}:
+                invalidate_bindings_for_late_verdict(
+                    db, tenant_id=tenant_id, artifact_id=artifact_id,
+                    reason=f"late_{state}_verdict",
+                )
+        db.commit()
+        return last
 
 
 async def _run_bounded_image_work(fn, *, timeout: float):
@@ -75,6 +151,30 @@ _BRAND_HINT_KW = {
 _MIN_STAGE_B_OCR_BYTES = max(1024, int(os.getenv("CV_STAGE_B_OCR_MIN_BYTES", "4096") or 4096))
 
 
+def _canonical_qr_assessment(signals: Dict[str, Any]) -> Dict[str, Any] | None:
+    payloads = signals.get("qr_payloads")
+    if not isinstance(payloads, list) or not payloads:
+        return None
+    if bool(signals.get("qr_prompt_injection")):
+        risk_levels = ["malicious"]
+        action = "block"
+        reason = "QR payload contains instruction-like content targeting the assistant."
+    elif bool(signals.get("qr_external_url_detected") or signals.get("qr_external_url")):
+        risk_levels = [str(x.get("risk_level") or "review") for x in payloads if isinstance(x, dict)] or ["review"]
+        action = "review"
+        reason = str(signals.get("qr_reason_summary") or "QR destination requires review.")
+    else:
+        risk_levels = [str(x.get("risk_level") or "benign") for x in payloads if isinstance(x, dict)] or ["benign"]
+        action = "allow"
+        reason = str(signals.get("qr_reason_summary") or "QR content decoded and no risky pattern was observed.")
+    return {
+        "risk_levels": risk_levels[:5],
+        "reason_summary": reason,
+        "policy_action": action,
+        "decoded_count": len(payloads),
+    }
+
+
 def _needs_damage_reasoning(labels: List[str], text: str, filename: str) -> bool:
     combined = " ".join([*(str(label).lower() for label in labels), str(text or "").lower(),
                          str(filename or "").lower()])
@@ -92,7 +192,6 @@ def _vision_payload_drilldown(
     linked_artifact: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     linked = linked_artifact if isinstance(linked_artifact, dict) else {}
-    qr_probe = security_signals.get("qr_redirect_probe") if isinstance(security_signals.get("qr_redirect_probe"), dict) else {}
     if finding_type == "lolbin_command_sequence":
         return {
             "headline": "Hidden LOLBin command-sequence pattern observed",
@@ -367,6 +466,7 @@ def _derive_query_from_analysis(analysis: Dict) -> str:
 async def triage(
     image: UploadFile = File(...),
     fast: bool = Query(False),
+    artifact_id: Optional[str] = Query(None, min_length=8, max_length=128),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
     """Run lightweight CV triage from uploaded image and persist event metadata."""
@@ -383,6 +483,8 @@ async def triage(
     raw_content = await image.read()
     if not raw_content:
         raise HTTPException(status_code=400, detail="empty_image")
+    artifact_id = str(artifact_id or uuid.uuid4())
+    artifact_sha256 = hashlib.sha256(raw_content).hexdigest()
     gate = strict_image_ingest_gate(
         filename=str(name or "image.jpg"),
         content_type=mime,
@@ -390,12 +492,27 @@ async def triage(
         size_bytes=len(raw_content),
     )
     if bool(gate.get("blocked")):
+        try:
+            persisted_artifact = _persist_artifact_verdict(
+                artifact_id=artifact_id,
+                sha256=artifact_sha256,
+                state="quarantined",
+                coverage={"strict_admission": "fail"},
+            )
+        except Exception:
+            persisted_artifact = None
         raise HTTPException(
             status_code=400,
             detail={
                 "error": "ingest_gate_blocked",
                 "message": "Upload blocked by strict ingest gate (type/size/archive/AV policy).",
                 "ingest_gate": gate,
+                "artifact": persisted_artifact or {
+                    "artifact_id": artifact_id,
+                    "sha256": artifact_sha256,
+                    "state": "degraded",
+                    "authority": "blocked",
+                },
             },
         )
     try:
@@ -405,9 +522,39 @@ async def triage(
         else:
             sanitized_content = None
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="image_sanitization_failed") from exc
+        try:
+            _persist_artifact_verdict(
+                artifact_id=artifact_id, sha256=artifact_sha256,
+                state="degraded", coverage={"sanitization": "error"},
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=422, detail={
+            "error": "image_malformed_or_unsupported",
+            "stage": "sanitization",
+            "message": "The image could not be decoded and sanitized safely.",
+            "artifact": {
+                "artifact_id": artifact_id, "sha256": artifact_sha256,
+                "state": "degraded", "authority": "blocked",
+            },
+        }) from exc
     if not sanitized_content:
-        raise HTTPException(status_code=422, detail="image_sanitization_failed")
+        try:
+            _persist_artifact_verdict(
+                artifact_id=artifact_id, sha256=artifact_sha256,
+                state="degraded", coverage={"sanitization": "error"},
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=422, detail={
+            "error": "image_malformed_or_unsupported",
+            "stage": "sanitization",
+            "message": "The image could not be decoded and sanitized safely.",
+            "artifact": {
+                "artifact_id": artifact_id, "sha256": artifact_sha256,
+                "state": "degraded", "authority": "blocked",
+            },
+        })
 
     # Bound the VLM/OCR cost: reject decode-bombs and downscale a COPY for the model pass.
     # `raw_content` is preserved only for steg/forensic analysis below, which is
@@ -420,11 +567,32 @@ async def triage(
         _bound = bound_image_for_vlm(sanitized_content)
         if bool(_bound.get("reject")):
             _m = _bound.get("meta") or {}
+            _reason = str(_bound.get("reason") or "")
+            if _reason in {"decode", "resize"}:
+                try:
+                    _persist_artifact_verdict(
+                        artifact_id=artifact_id, sha256=artifact_sha256,
+                        state="degraded", coverage={"safe_image_decode": "error"},
+                    )
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "image_malformed_or_unsupported",
+                        "reason": _reason,
+                        "message": "The image is malformed or cannot be decoded safely.",
+                        "artifact": {
+                            "artifact_id": artifact_id, "sha256": artifact_sha256,
+                            "state": "degraded", "authority": "blocked",
+                        },
+                    },
+                )
             raise HTTPException(
                 status_code=413,
                 detail={
                     "error": "image_too_large",
-                    "reason": _bound.get("reason"),
+                    "reason": _reason,
                     "message": (
                         "This image is too large to process safely. Please upload a smaller "
                         "product photo (under 30 MP / 25 MB)."
@@ -438,7 +606,22 @@ async def triage(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="image_decode_or_resize_failed") from exc
+        try:
+            _persist_artifact_verdict(
+                artifact_id=artifact_id, sha256=artifact_sha256,
+                state="degraded", coverage={"safe_image_decode": "error"},
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=422, detail={
+            "error": "image_malformed_or_unsupported",
+            "reason": "decode_or_resize",
+            "message": "The image is malformed or cannot be decoded safely.",
+            "artifact": {
+                "artifact_id": artifact_id, "sha256": artifact_sha256,
+                "state": "degraded", "authority": "blocked",
+            },
+        }) from exc
     if not analysis_content:
         raise HTTPException(status_code=422, detail="image_decode_or_resize_failed")
 
@@ -774,13 +957,13 @@ async def triage(
         pass
 
     if qr_codes := security_signals.get("qr_payloads"):
-        resp["qr_assessment"] = {
-            "risk_levels": qr_risk_levels[:5],
-            "reason_summary": security_signals.get("qr_reason_summary")
-            or ("Detected benign QR content." if security_signals.get("qr_benign_detected") else "QR content requires review."),
-            "policy_action": security_signals.get("qr_policy_action") or "allow",
-            "decoded_count": len(qr_codes) if isinstance(qr_codes, list) else 0,
-        }
+        if bool(security_signals.get("qr_prompt_injection")):
+            for item in qr_codes if isinstance(qr_codes, list) else []:
+                if isinstance(item, dict):
+                    item["risk_level"] = "malicious"
+                    item["risk_reason"] = "QR payload contains instruction-like content targeting the assistant."
+            qr_risk_levels = ["malicious"]
+        resp["qr_assessment"] = _canonical_qr_assessment(security_signals)
 
     if not fast:
         try:
@@ -816,7 +999,11 @@ async def triage(
                 security_signals["steg_score"] = round(steg_score, 3)
             if steg_score >= steg_elevated_min:
                 security_signals["steg_score_elevated"] = True
-                security_clean = False
+                # Keep a near-threshold statistical signal visible for drift and
+                # evidence review, but do not turn it into a user-facing block.
+                # Compressed/blurred benign images can sit in this advisory band;
+                # only the detector's calibrated verdict (or another active
+                # finding) may require quarantine/re-upload.
             if getattr(steg, "explanations", None):
                 security_signals["steg_explanations"] = list(getattr(steg, "explanations", []) or [])[:8]
             if getattr(steg, "details", None):
@@ -1023,6 +1210,9 @@ async def triage(
         signals=security_signals,
     )
     security_signals = dict(payload_analysis.get("signals_updated") or security_signals)
+    canonical_qr = _canonical_qr_assessment(security_signals)
+    if canonical_qr:
+        resp["qr_assessment"] = canonical_qr
     if payload_analysis.get("attack_hypothesis") not in (None, "", "unknown"):
         if payload_analysis.get("suggested_next_step") != "allow" or security_signals:
             security_clean = False
@@ -1146,18 +1336,120 @@ async def triage(
         import logging as _sqlog
         _sqlog.getLogger(__name__).debug("vision: sandbox_queue failed (non-fatal): %s", _sq_exc)
 
-    analysis_state["security_risk"] = not security_clean
+    detected_security_risk = not security_clean
+    if detected_security_risk:
+        artifact_state = "quarantined"
+    elif bool(analysis_state.get("analysis_pending")):
+        artifact_state = "pending"
+    elif bool(analysis_state.get("analysis_degraded")):
+        artifact_state = "degraded"
+    else:
+        artifact_state = "clean"
+    # Incomplete inspection is not a clean verdict. Keep security_risk distinct so
+    # a timeout is not mislabeled as a confirmed attack.
+    canonical_clean = artifact_state == "clean"
+    analysis_state["security_risk"] = detected_security_risk
+    analysis_state["artifact_state"] = artifact_state
     analysis_state["degraded_reasons"] = sorted(set(analysis_state["degraded_reasons"]))
+    resp["artifact"] = {
+        "artifact_id": artifact_id,
+        "sha256": artifact_sha256,
+        "verdict_version": 1,
+        "state": artifact_state,
+        "authority": "read_only" if canonical_clean else "blocked",
+    }
+    _degraded = set(str(x) for x in (analysis_state.get("degraded_reasons") or []))
+    def _coverage_status(*, fail: bool = False, prefixes: tuple[str, ...] = (), not_applicable: bool = False) -> str:
+        if fail:
+            return "fail"
+        if not_applicable:
+            return "not_applicable"
+        matching = [reason for reason in _degraded if any(reason.startswith(prefix) for prefix in prefixes)]
+        if any("timeout" in reason for reason in matching):
+            return "timeout"
+        if matching:
+            return "error"
+        return "pass"
+    inspection_coverage = [
+        {"check": "strict_admission", "status": "pass", "authority_effect": "admitted"},
+        {"check": "safe_image_decode", "status": "pass", "authority_effect": "decoded"},
+        {"check": "vision_provider", "status": _coverage_status(prefixes=("provider_", "managed_cv_", "identity_")), "authority_effect": artifact_state},
+        {
+            "check": "qr_decode_and_policy",
+            "status": "skipped" if fast else _coverage_status(
+                fail=bool(security_signals.get("qr_prompt_injection") or security_signals.get("qr_external_url_detected")),
+                prefixes=("qr_decode_",),
+                not_applicable=not bool(security_signals.get("qr_code_detected")),
+            ),
+            "authority_effect": "blocked" if bool(security_signals.get("qr_prompt_injection")) else "none",
+        },
+        {
+            "check": "adversarial_image",
+            "status": "skipped" if fast else _coverage_status(
+                fail=bool(security_signals.get("adversarial_detected")), prefixes=("adversarial_",)
+            ),
+            "authority_effect": "blocked" if bool(security_signals.get("adversarial_detected")) else "none",
+        },
+        {
+            "check": "steganography",
+            "status": "skipped" if fast else _coverage_status(
+                fail=bool(security_signals.get("steg_suspicious")), prefixes=("steg_",)
+            ),
+            "authority_effect": "blocked" if bool(security_signals.get("steg_suspicious")) else "none",
+        },
+    ]
+    try:
+        persisted_artifact = _persist_artifact_verdict(
+            artifact_id=artifact_id,
+            sha256=artifact_sha256,
+            state=artifact_state,
+            coverage={row["check"]: row["status"] for row in inspection_coverage},
+        )
+        resp["artifact"].update({
+            "verdict_version": persisted_artifact["verdict_version"],
+            "state": persisted_artifact["state"],
+        })
+        # A retry can observe a verdict that advanced after this request began.
+        # The durable current version is authoritative; never return a pending
+        # security object beside a clean (or quarantined) artifact object.
+        artifact_state = str(persisted_artifact["state"])
+        canonical_clean = artifact_state == "clean"
+        analysis_state["artifact_state"] = artifact_state
+        resp["artifact"]["authority"] = "read_only" if canonical_clean else "blocked"
+    except Exception as exc:
+        logger.error(
+            "artifact verdict persistence failed artifact_id=%s error_type=%s error=%s",
+            artifact_id,
+            type(exc).__name__,
+            str(exc)[:240],
+        )
+        analysis_state["analysis_degraded"] = True
+        analysis_state["degraded_reasons"].append("artifact_verdict_persistence_error")
+        resp["artifact"].update({"state": "degraded", "authority": "blocked"})
+        artifact_state = "degraded"
+        canonical_clean = False
+        analysis_state["artifact_state"] = artifact_state
     resp["security"] = {
-        "clean": security_clean,
+        "clean": canonical_clean,
+        "artifact_state": artifact_state,
+        "commercial_authority": "read_only" if canonical_clean else "blocked",
+        "inspection_coverage": inspection_coverage,
+        "containment": {
+            "model_context": "allowed_sanitized" if canonical_clean else "blocked",
+            "memory_write": "blocked" if not canonical_clean else "sanitized_only",
+            "commercial_actions": "blocked" if not canonical_clean else "requires_independent_policy_gate",
+            "raw_evidence": "retained_by_policy",
+        },
         # Plain-English image authenticity verdict for merchant UI
         "verdict": (
             "This image contains security flags — see signals for details."
-            if not security_clean
-            else "Image passed security checks."
+            if detected_security_risk
+            else "Image inspection is incomplete; commercial authority remains blocked."
+            if not canonical_clean
+            else "Image passed the completed security checks."
         ),
         "signals": security_signals,
-        "reupload_needed": not security_clean,
+        "reupload_needed": detected_security_risk,
         # Surface the OCR/extracted text here so the UI Security Matrix can show it
         "extracted_text": (extracted_text or "")[:500],
         "ocr_confidence": ocr_meta.get("ocr_confidence"),
@@ -1269,6 +1561,37 @@ async def triage(
                 }
             )
         resp["security"]["threat_hunter_leads"] = fallback_leads
+    if artifact_state != "clean":
+        normalized_event = build_normalized_security_event(
+            source="vision_artifact_inspection",
+            tenant_id=current_tenant_id(),
+            decision_id=None,
+            trace_id=artifact_id,
+            message_id_hash=artifact_sha256,
+            severity="high" if artifact_state == "quarantined" else "medium",
+            verdict_action="block_commercial_authority",
+            route="security_review",
+            escalation="human_security_review",
+            reasons=sorted({
+                artifact_state,
+                *[str(row.get("check")) for row in inspection_coverage if row.get("status") in {"fail", "timeout", "error"}],
+            }),
+            tags=["artifact_upload", str(payload_analysis.get("attack_hypothesis") or "unknown")],
+            ioc_counts={"payload_findings": len(payload_findings)},
+            risk_band="high" if artifact_state == "quarantined" else "medium",
+            playbook_id="artifact_security_review",
+            ticket_id=None,
+            evidence={
+                "artifact_id": artifact_id,
+                "artifact_sha256": artifact_sha256,
+                "verdict_version": resp["artifact"].get("verdict_version"),
+                "inspection_coverage": inspection_coverage,
+            },
+        )
+        resp["security"]["siem_handoff"] = {
+            "event": normalized_event,
+            "status": emit_security_handoff(normalized_event),
+        }
     faq_query_parts = [
         str(name or ""),
         str(extracted_text or ""),
@@ -1296,7 +1619,7 @@ async def triage(
     # Attach productive QR data (manufacturer URLs, model hints) for downstream identity extraction
     if qr_product_data:
         resp["qr_product_data"] = qr_product_data
-    if not security_clean:
+    if detected_security_risk:
         resp["security_message"] = (
             "For your security, we detected potentially unsafe content in this image. "
             "Please upload a new, unedited photo without QR codes or overlays."

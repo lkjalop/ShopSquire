@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import io
 import os
-import signal
+import pathlib
+import stat
 import tarfile
-import time
 import zipfile
 from dataclasses import dataclass, field
 from multiprocessing import Process, Queue
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,15 @@ def _inspect_zip(
             for info in infos:
                 fn = info.filename or ""
                 result.members.append(fn)
+                normalized = fn.replace("\\", "/")
+                parts = pathlib.PurePosixPath(normalized).parts
+                if normalized.startswith("/") or ".." in parts:
+                    result.allowed = False
+                    result.reasons.append("path_traversal_attempt")
+                unix_mode = (int(info.external_attr or 0) >> 16) & 0xFFFF
+                if stat.S_ISLNK(unix_mode):
+                    result.allowed = False
+                    result.reasons.append("symlink_member")
                 sz = int(info.file_size or 0)
                 csz = int(info.compress_size or 0)
                 total_comp += csz
@@ -129,10 +138,13 @@ def _inspect_zip(
                         )
                         if not nested.allowed:
                             result.allowed = False
-                            result.reasons.extend(nested.reasons)
+                            if "archive_parse_error" in nested.reasons:
+                                result.reasons.append("nested_archive_parse_error")
+                            result.reasons.extend(reason for reason in nested.reasons if reason != "archive_parse_error")
                         result.nesting_depth = max(result.nesting_depth, nested.nesting_depth)
                     except Exception:
-                        pass
+                        result.allowed = False
+                        result.reasons.append("nested_archive_parse_error")
             result.total_uncompressed = total_uncomp
             ratio = float(total_uncomp) / float(max(1, total_comp))
             result.compression_ratio = round(ratio, 3)
@@ -185,6 +197,9 @@ def _inspect_tar(
                 if fn.startswith("/") or ".." in fn:
                     result.allowed = False
                     result.reasons.append("path_traversal_attempt")
+                if m.issym() or m.islnk():
+                    result.allowed = False
+                    result.reasons.append("symlink_member")
             result.total_uncompressed = total
             if total > max_total:
                 result.allowed = False
@@ -266,7 +281,6 @@ def run_isolated(
 
     if not SUBPROCESS_ENABLED:
         # In-process fallback with timeout signal (Unix) or simple try/except (Windows)
-        t0 = time.monotonic()
         try:
             result = func(*args)
             return True, result

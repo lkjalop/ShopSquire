@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Candidate retrieval service (Sprint R3 extraction).
 
 Responsible for fetching and merging product candidates from all sources:
@@ -20,10 +18,10 @@ Usage (Sprint R5 scatter-gather pattern):
     candidates = CandidateRetriever.merge_rrf(db_hits, vec_hits)
     candidates = CandidateRetriever.apply_inventory_filter(candidates, inv_stock)
 """
+from __future__ import annotations
 
 import logging
 import json
-import math
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text as _text, bindparam
@@ -119,7 +117,7 @@ def from_db(
     Returns a list of product dicts ranked by text relevance score.
     """
     try:
-        conditions = ["COALESCE(p.active, 1) = 1"]
+        conditions = ["p.active IS NOT FALSE"]
         params: Dict[str, Any] = {"lim": int(limit)}
 
         if budget_min is not None:

@@ -47,6 +47,12 @@ test('Commercial Journey renders governed supplier pressure, wave and route evid
         failed_constraints: ['supplier_response_expectation_unknown'],
         state_prevented: 'unsupported_full_delivery_promise',
       },
+      payment_consequence: {
+        plan_type: 'deposit_then_balance', status: 'authorization_held', currency: 'AUD',
+        deposit_amount_cents: 900000, balance_amount_cents: 2700000,
+        authorization_expires_at: '2026-08-10T03:00:00+00:00',
+        state_prevented: 'balance_capture',
+      },
       sourcing_batches: [{
         batch_ref: 'Batch b-27', quantity: 27, child_demand_count: 3, status: 'draft',
       }],
@@ -122,6 +128,8 @@ test('Commercial Journey renders governed supplier pressure, wave and route evid
   await expect(trace.getByTestId('proc-temporal-response')).toContainText('Calendar calendar-v3');
   await expect(trace.getByTestId('proc-promise-feasibility')).toContainText('Feasible by deadline53 unit(s)');
   await expect(trace.getByTestId('proc-promise-feasibility')).toContainText('State prevented: unsupported full delivery promise');
+  await expect(trace.getByTestId('proc-payment-consequence')).toContainText('deposit then balance');
+  await expect(trace.getByTestId('proc-payment-consequence')).toContainText('State prevented: balance capture');
   await expect(trace.getByTestId('proc-supplier-pressure')).toContainText('portal-adapter · snapshot-7 · fresh');
   await expect(trace.getByTestId('proc-sourcing-wave')).toContainText('Estimated freight saving AUD 90');
   await expect(trace.getByTestId('proc-route-proposal')).toContainText('ETA 5–8 days');

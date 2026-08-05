@@ -2,6 +2,7 @@ from src.app.security.siem_adapter import (
     build_normalized_security_event,
     map_security_event_for_sentinel,
     map_security_event_for_splunk,
+    map_security_event_for_cef,
 )
 
 
@@ -76,3 +77,13 @@ def test_sentinel_mapping_contract_shape():
     ):
         assert key in body
     assert body["ContractVersion_s"] == "sentinel.v1"
+
+
+def test_cef_mapping_escapes_headers_and_keeps_tenant_trace_correlation():
+    event = _sample_event()
+    event["source"] = "supplier|document"
+    body = map_security_event_for_cef(event)
+    assert body.startswith("CEF:0|ShopSquire|Commerce Security|1|")
+    assert "supplier\\|document" in body
+    assert "cs1Label=tenantId cs1=tenant-a" in body
+    assert "cs2Label=traceId cs2=trace-1" in body

@@ -11,7 +11,7 @@ def _ocr_timeout_sec() -> int | None:
     try:
         v = os.getenv("CV_OCR_TIMEOUT_SEC")
         if v is None or str(v).strip() == "":
-            return None
+            return 5
         sec = int(float(str(v).strip()))
         if sec <= 0:
             return None
@@ -65,14 +65,6 @@ def _tesseract_ocr(image_bytes: bytes) -> Dict[str, Any]:
     except Exception as exc:
         return {"text": "", "confidence": 0.0, "boxes": [], "error": str(exc), "provider": "tesseract"}
     timeout = _ocr_timeout_sec()
-    text = ""
-    try:
-        if timeout is not None:
-            text = pytesseract.image_to_string(img, timeout=timeout) or ""
-        else:
-            text = pytesseract.image_to_string(img) or ""
-    except Exception:
-        return {"text": "", "confidence": 0.0, "boxes": [], "error": "ocr_failed_or_timed_out", "provider": "tesseract"}
     boxes: List[Dict[str, Any]] = []
     try:
         if timeout is not None:
@@ -95,7 +87,14 @@ def _tesseract_ocr(image_bytes: bytes) -> Dict[str, Any]:
                 }
             )
     except Exception:
-        boxes = []
+        return {
+            "text": "", "confidence": 0.0, "boxes": [],
+            "error": "ocr_failed_or_timed_out", "provider": "tesseract",
+        }
+    # image_to_data already invokes Tesseract and returns every recognized token.
+    # Reconstructing text from it avoids launching a second native OCR process via
+    # image_to_string, which previously doubled both latency and teardown exposure.
+    text = " ".join(str(box.get("text") or "").strip() for box in boxes).strip()
     confs = [b.get("conf") for b in boxes if isinstance(b.get("conf"), (int, float))]
     confidence = max(0.0, min(1.0, (sum(confs) / max(len(confs), 1)) / 100.0)) if confs else 0.4
     return {"text": text[:2000], "confidence": confidence, "boxes": boxes, "provider": "tesseract"}
@@ -128,7 +127,6 @@ def _paddle_ocr(image_bytes: bytes) -> Dict[str, Any]:
 def _glm_ocr(image_bytes: bytes) -> Dict[str, Any]:
     """OCR via glm-ocr:latest served by Ollama — no local binary required."""
     import base64
-    import json as _json
     try:
         import requests as _req  # lightweight; already in requirements
     except Exception as exc:

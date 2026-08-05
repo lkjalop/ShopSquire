@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_UP, Decimal
-from typing import Any
+from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import text
 
@@ -373,3 +374,112 @@ def convert_uom(
     if units[source][0] != units[target][0]:
         raise ValueError("uom_category_mismatch")
     return Decimal(value) * units[source][1] / units[target][1]
+
+
+# Indexed literal aliases extend the canonical product identity boundary.
+def normalize_product_alias(value: Any) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(value or "").lower()))
+
+
+def _candidate_spans(query: str) -> list[str]:
+    tokens = normalize_product_alias(query).split()
+    spans = set(tokens)
+    for width in range(2, min(9, len(tokens) + 1)):
+        spans.update(" ".join(tokens[start:start + width]) for start in range(len(tokens) - width + 1))
+    return sorted((span for span in spans if span), key=lambda value: (-len(value.split()), -len(value)))
+
+
+def register_product_aliases(
+    db,
+    *,
+    tenant_id: str,
+    sku: str,
+    name: str = "",
+    manufacturer_part_number: str = "",
+    model: str = "",
+    source: str = "catalog",
+) -> int:
+    aliases: Dict[str, str] = {
+        "sku": sku,
+        "manufacturer_part_number": manufacturer_part_number,
+        "model": model,
+        "title": name,
+    }
+    written = 0
+    for alias_type, raw in aliases.items():
+        alias = normalize_product_alias(raw)
+        if not alias:
+            continue
+        db.execute(text(
+            "DELETE FROM product_identity_alias WHERE tenant_id=:t AND normalized_alias=:a "
+            "AND alias_type=:k AND sku=:s"
+        ), {"t": tenant_id, "a": alias, "k": alias_type, "s": sku})
+        db.execute(text(
+            "INSERT INTO product_identity_alias "
+            "(tenant_id, normalized_alias, alias_type, sku, source, active) "
+            "VALUES (:t, :a, :k, :s, :src, 1)"
+        ), {"t": tenant_id, "a": alias, "k": alias_type, "s": sku, "src": source})
+        written += 1
+    return written
+
+
+def rebuild_legacy_product_aliases(db, *, tenant_id: str) -> int:
+    rows = db.execute(text(
+        "SELECT sku, name, specs FROM products WHERE active IS NOT FALSE ORDER BY sku"
+    )).fetchall()
+    written = 0
+    for sku, name, raw_specs in rows:
+        try:
+            specs = json.loads(raw_specs) if isinstance(raw_specs, str) else (raw_specs or {})
+        except (TypeError, ValueError):
+            specs = {}
+        mpn = specs.get("manufacturer_part_number") or specs.get("mpn") or ""
+        model = specs.get("model") or specs.get("model_number") or ""
+        written += register_product_aliases(
+            db,
+            tenant_id=tenant_id,
+            sku=str(sku),
+            name=str(name or ""),
+            manufacturer_part_number=str(mpn),
+            model=str(model),
+        )
+    return written
+
+
+def resolve_product_alias(db, *, tenant_id: str, query: str) -> Optional[Tuple[str, str]]:
+    spans = _candidate_spans(query)
+    if not spans:
+        return None
+    params: Dict[str, Any] = {"tenant": tenant_id}
+    placeholders = []
+    for index, span in enumerate(spans):
+        key = f"a{index}"
+        params[key] = span
+        placeholders.append(f":{key}")
+    # The migration deliberately uses an integer flag on both supported engines.
+    # The savepoint is essential: alias lookup is advisory, so a missing or
+    # incompatible projection must not poison the caller's transaction and make
+    # the authoritative taxonomy read fail later with ``InFailedSqlTransaction``.
+    params["active"] = 1
+    with db.begin_nested():
+        rows = db.execute(text(
+            "SELECT normalized_alias, sku, alias_type FROM product_identity_alias "
+            "WHERE tenant_id=:tenant AND active=:active "
+            f"AND normalized_alias IN ({', '.join(placeholders)})"
+        ), params).fetchall()
+    if not rows:
+        return None
+    # Longest matching alias wins, but only if it identifies exactly one SKU.
+    by_alias: Dict[str, list[Tuple[str, str]]] = {}
+    for alias, sku, alias_type in rows:
+        by_alias.setdefault(str(alias), []).append((str(sku), str(alias_type)))
+    for alias in spans:
+        matches = by_alias.get(alias, [])
+        skus = {sku for sku, _kind in matches}
+        if len(skus) == 1:
+            sku = next(iter(skus))
+            kind = sorted(kind for found_sku, kind in matches if found_sku == sku)[0]
+            return sku, kind
+        if len(skus) > 1:
+            return None
+    return None

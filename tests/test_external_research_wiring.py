@@ -5,12 +5,19 @@ owns or fabricates the retired V1 ``external_research`` result surface.
 """
 from __future__ import annotations
 
+import os
+
 from fastapi.testclient import TestClient
 
 from src.app.main import app
 from tests.utils import default_headers
 
-client = TestClient(app, headers=default_headers())
+# Use the owner test credential and per-test UIDs so this module's quota does not
+# depend on unrelated guest requests. Older supported Starlette TestClient
+# versions do not accept the newer ``client=`` constructor argument.
+_headers = default_headers()
+_headers["x-api-key"] = os.getenv("OWNER_API_KEY", "local-owner-key")
+client = TestClient(app, headers=_headers)
 
 
 def _suggest(uid, **params):
@@ -18,11 +25,22 @@ def _suggest(uid, **params):
         "/api/v1/recommend/suggest",
         params={"uid": uid, "query": "gaming laptop under 1800", **params},
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     return response.json()
 
 
-def test_disabled_by_default_no_external_field():
+def test_disabled_by_default_no_external_field(monkeypatch):
+    from src.app.routers import recommend_compat
+
+    monkeypatch.setattr(
+        recommend_compat,
+        "serve_v2_compatibility",
+        lambda **_: {
+            "assistant_message": "V2 compatibility response",
+            "results": [{"sku": "OWNED-1"}],
+            "evidence_items": [],
+        },
+    )
     body = _suggest("u-ext-off")
     assert "external_research" not in body
     assert "external_research_status" not in body

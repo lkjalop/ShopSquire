@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './CartPanel.module.css';
 import type { Product } from '../App';
-import { apiUrl, safeJson, confirmCartSourcing, commitFulfillmentCase } from '../lib/api';
+import { apiUrl, safeJson, confirmCartSourcing, commitFulfillmentCase, fetchBuyerProcurementContext } from '../lib/api';
 import { sourcedCasesFrom, sourcedCaseCountFrom } from '../lib/sourcing';
 import { withRetry } from '../lib/retry';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
@@ -25,6 +25,29 @@ type BundleSavings = {
   approval_id?: string | null;
 };
 type CartState = { cart_id: string; items: CartItem[]; subtotal_cents: number; currency: string; bundle_savings?: BundleSavings };
+
+// React development StrictMode deliberately replays effects. Share the same
+// in-flight read so that replay does not double model/database work. The entry
+// is removed after settlement; a later genuine cart change still gets fresh data.
+const checkoutUpsellInflight = new Map<string, Promise<any>>();
+
+function loadCheckoutUpsell(url: string, apiKey: string): Promise<any> {
+  const existing = checkoutUpsellInflight.get(url);
+  if (existing) return existing;
+  const request = fetch(url, {
+    credentials: 'include',
+    headers: apiKey ? { 'x-api-key': apiKey } : undefined,
+  }).then(async (response) => {
+    const payload = await safeJson(response);
+    if (!response.ok || !payload) throw new Error('upsell_failed');
+    return payload;
+  });
+  checkoutUpsellInflight.set(url, request);
+  request.finally(() => {
+    if (checkoutUpsellInflight.get(url) === request) checkoutUpsellInflight.delete(url);
+  }).catch(() => undefined);
+  return request;
+}
 
 export default function CartPanel({
   uid,
@@ -93,12 +116,7 @@ export default function CartPanel({
         if (lastQuery) u.searchParams.set('query', lastQuery);
         if (lastPersona) u.searchParams.set('persona', lastPersona);
         if (lastUseCase) u.searchParams.set('use_case', lastUseCase);
-        const r = await fetch(u.toString(), {
-          credentials: 'include',
-          headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
-        });
-        const j = await safeJson(r);
-        if (!r.ok || !j) throw new Error('upsell_failed');
+        const j = await loadCheckoutUpsell(u.toString(), API_KEY);
         const results = (j.results || []) as any[];
         const prods = results.slice(0, 4).map((it) => ({
           sku: it.sku,
@@ -146,6 +164,7 @@ export default function CartPanel({
   const [sourcingNote, setSourcingNote] = useState<string | null>(null);
   const [sourcedSplitKey, setSourcedSplitKey] = useState<string | null>(null);
   const [checkingSourcing, setCheckingSourcing] = useState(false);
+  const [procurementContext, setProcurementContext] = useState<any | null>(null);
   // Pre-payment split-fulfilment confirmation. The card reports whether the cart splits (a supplier-backed
   // second shipment exists) and whether the buyer has confirmed the plan; checkout is gated on that confirm.
   const [splitHasSplit, setSplitHasSplit] = useState(false);
@@ -156,6 +175,15 @@ export default function CartPanel({
     [cart],
   );
   const sourcingNeedsReview = Boolean(sourcedSplitKey && sourcedSplitKey !== splitKey);
+  useEffect(() => {
+    const caseId = String(confirmedSourcingOrderId || sourcingOrderId || '').trim();
+    if (!caseId) { setProcurementContext(null); return; }
+    let active = true;
+    fetchBuyerProcurementContext(uid, caseId)
+      .then((value) => { if (active) setProcurementContext(value); })
+      .catch(() => { if (active) setProcurementContext(null); });
+    return () => { active = false; };
+  }, [uid, confirmedSourcingOrderId, sourcingOrderId, splitKey, sourcingNote]);
   useEffect(() => {
     if (items.length === 0) onConfirmedSourcingOrderId?.(null);
   }, [items.length, onConfirmedSourcingOrderId]);
@@ -203,11 +231,11 @@ export default function CartPanel({
   // LATER, PCI-gated step — a demo can show the drafted RFQ without ever touching payment credentials.
   const confirmPlanSourcing = async () => {
     try {
-      if (!cart?.cart_id || !items.length) return;
+      if (!cart?.cart_id || !items.length) return false;
       const res = await sourceCurrentCart();
       if (!res) {
         setSourcingNote('This order changed after a supplier was already engaged — an operator must amend it. Nothing was re-sent.');
-        return;
+        return false;
       }
       const cases = sourcedCasesFrom(res);
       const caseCount = sourcedCaseCountFrom(res);
@@ -215,30 +243,50 @@ export default function CartPanel({
       setSourcedSplitKey(splitKey);
       if (res.idempotent) {
         setSourcingNote(`${caseCount} sourcing request(s) were already confirmed earlier. No duplicate RFQ was created; open the original case in Admin to review its draft and audit.`);
-        return;
+        return caseCount > 0;
       }
       let committed = 0;
+      let drafted = 0;
       for (const c of cases) {
         // retry once: a multi-case commit burst can hit a transient write lock — without the retry one
         // supplier's case silently stays uncommitted and its RFQ is never drafted (observed live).
         try {
-          await withRetry(() => commitFulfillmentCase((c as any).case_id, uid));
+          const committedCase: any = await withRetry(
+            () => commitFulfillmentCase((c as any).case_id, uid),
+          );
           committed += 1;
+          const committedState = String(committedCase?.state || '').toUpperCase();
+          if (
+            ['QUOTE_DRAFTED', 'AWAITING_APPROVAL', 'APPROVED_TO_SEND'].includes(committedState)
+            || Boolean(committedCase?.state_json?.draft)
+          ) {
+            drafted += 1;
+          }
         } catch {
           // Report the partial failure below. The case remains visible in the operator queue for retry.
         }
       }
       if (committed === caseCount && caseCount > 0) {
-        setSourcingNote(`${caseCount} sourcing request(s) committed — supplier RFQ(s) drafted for human review (nothing sent). Open Decision Trace → Procurement to see the drafts + audit.`);
+        if (drafted === caseCount) {
+          setSourcingNote(`${caseCount} sourcing request(s) committed — supplier RFQ(s) drafted for human review (nothing sent). Open Decision Trace → Procurement to see the drafts + audit.`);
+        } else {
+          setSourcingNote(`${caseCount} sourcing request(s) commitment recorded — supplier RFQ drafting is pending. Nothing has been sent; Decision Trace will show the draft only after it is persisted.`);
+        }
         // Do NOT overwrite the decision trace id with order_group_id here: the Procurement tab resolves
         // the case via /cases/by-trace/{source_trace_id}; traceId already IS that trace.
+        return true;
       } else if (caseCount > 0) {
         setSourcingNote(`${committed} of ${caseCount} sourcing request(s) committed. The remaining case(s) need operator retry; no draft is claimed for them.`);
+        return false;
       } else if (res.status === 'superseded') {
         setSourcingNote('The previous supplier request was retired because the updated cart is fully in stock. Nothing new was drafted or sent.');
+        return true;
       }
+      setSourcingNote('The delivery plan could not create a governed sourcing request. Retry or ask an operator; no supplier message was sent.');
+      return false;
     } catch {
       setSourcingNote('The delivery plan was confirmed, but sourcing could not be recorded. Retry or ask an operator; no supplier message was sent.');
+      return false;
     }
   };
   const splitBlocksCheckout = splitHasSplit && !splitConfirmed;
@@ -381,6 +429,27 @@ export default function CartPanel({
               </div>
             </div>
           ))}
+
+          {procurementContext?.lines?.length > 0 && (
+            <section data-testid="cart-procurement-context" aria-label="Procurement context"
+                     style={{ border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 10, padding: 12, margin: '10px 0' }}>
+              <div className={styles.sectionTitle}>Procurement context</div>
+              <div className={styles.muted}>Buyer-scoped ledger · other buyers are never shown</div>
+              {procurementContext.lines.map((line: any) => (
+                <div key={line.demand_ref} style={{ marginTop: 8 }}>
+                  <div className={styles.summaryLine}><span>Product</span><strong>{line.sku}</strong></div>
+                  <div className={styles.summaryLine}><span>Requested</span><span>{line.requested_quantity}</span></div>
+                  <div className={styles.summaryLine}><span>Destination</span><span>{line.destination_token} · not released to supplier</span></div>
+                  <div className={styles.summaryLine}><span>Required by</span><span>{line.required_by || 'not provided'}</span></div>
+                  <div className={styles.summaryLine}><span>Supply evidence</span><span>{line.allocated_quantity} allocated · {line.shortfall_quantity} unconfirmed</span></div>
+                  <div className={styles.summaryLine}><span>Status</span><span>{String(line.promise_state || line.stage).replace(/_/g, ' ')}</span></div>
+                  {line.atp_evidence && (
+                    <div className={styles.muted}>ATP {line.atp_evidence.freshness} · {line.atp_evidence.authority} · snapshot {line.atp_evidence.snapshot_version}</div>
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
 
           <div ref={splitCardRef}>
             <SplitFulfillmentCard uid={uid} refreshKey={splitKey} nameFor={nameForSku} onSplitState={onSplitState}

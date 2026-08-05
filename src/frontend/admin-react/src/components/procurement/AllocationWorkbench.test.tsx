@@ -14,6 +14,20 @@ describe('AllocationWorkbench', () => {
       summary: { committed_quantity: 80, allocated_quantity: 53, shortfall_quantity: 27,
         supplier_confirmed_quantity: 18, supplier_unresolved_quantity: 9,
         allocation_pressure: 0.3375, oldest_queue_age_seconds: 720 },
+      metric_evidence: {
+        allocation_pressure: { metric: 'allocation_pressure', value: 0.3375, unit: 'ratio',
+          formula: 'shortfall_quantity / committed_quantity', numerator: 27, denominator: 80,
+          source: 'demand_commitment + demand_allocation', source_record_count: 1,
+          authority: 'shadow_allocation', status: 'calculated', calculated_at: '2026-08-02T01:00:00Z',
+          window: { kind: 'current_projection', start: '2026-08-02T00:48:00Z', end: '2026-08-02T01:00:00Z' },
+          trend_status: 'not_materialized', reason: 'historical_snapshots_not_materialized' },
+        allocated_quantity: { metric: 'allocated_quantity', value: 53, unit: 'units',
+          formula: "sum(allocation.quantity where status = 'allocated')", numerator: 53, denominator: null,
+          source: 'demand_allocation', source_record_count: 1, authority: 'shadow_allocation',
+          status: 'observed', calculated_at: '2026-08-02T01:00:00Z',
+          window: { kind: 'current_projection', start: '2026-08-02T00:48:00Z', end: '2026-08-02T01:00:00Z' },
+          trend_status: 'not_materialized', reason: 'historical_snapshots_not_materialized' },
+      },
       demands: [{ demand_ref: 'Demand abc12345', case_ref: 'Case def67890', sku: 'RGAM-0007',
         destination_id: 'SYD', stage: 'committed', requested_quantity: 80,
         allocated_quantity: 53, shortfall_quantity: 27, priority_tier: 50,
@@ -53,6 +67,13 @@ describe('AllocationWorkbench', () => {
     expect(screen.getByText(/Estimated consolidation saving/)).toBeInTheDocument();
     expect(screen.getByText(/cross dock/)).toBeInTheDocument();
     expect(screen.getByText(/calculated range, not a promise/)).toBeInTheDocument();
+    expect(screen.getByTestId('allocation-current-state-bar')).toHaveAttribute(
+      'aria-label', '53 allocated, 27 shortfall from 80 committed units',
+    );
+    expect(screen.getByText('Metric evidence')).toBeInTheDocument();
+    expect(screen.getByText(/Historical trend unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/shortfall_quantity \/ committed_quantity/)).toBeInTheDocument();
+    expect(screen.getByText(/Denominator: 80/)).toBeInTheDocument();
     expect(screen.queryByText(/buyer@/i)).toBeNull();
   });
 

@@ -170,21 +170,26 @@ def _legacy_search(db, *, text_query: Optional[str], brand: Optional[str], categ
                    product_type: Optional[str], min_price_cents: Optional[int],
                    max_price_cents: Optional[int], limit: int) -> List[VariantView]:
     try:
-        clauses, params = ["COALESCE(p.active,1)=1"], {"lim": max(1, min(int(limit), 500))}
+        clauses, params = ["p.active IS NOT FALSE"], {"lim": max(1, min(int(limit), 500))}
         if text_query:
             clauses.append("(LOWER(p.name) LIKE :q OR LOWER(p.category) LIKE :q OR "
                            "LOWER(p.product_type) LIKE :q OR LOWER(p.brand) LIKE :q)")
             params["q"] = f"%{str(text_query).strip().lower()}%"
         if brand:
-            clauses.append("LOWER(p.brand) = :br"); params["br"] = str(brand).lower()
+            clauses.append("LOWER(p.brand) = :br")
+            params["br"] = str(brand).lower()
         if category:
-            clauses.append("LOWER(p.category) = :ca"); params["ca"] = str(category).lower()
+            clauses.append("LOWER(p.category) = :ca")
+            params["ca"] = str(category).lower()
         if product_type:
-            clauses.append("LOWER(p.product_type) = :pt"); params["pt"] = str(product_type).lower()
+            clauses.append("LOWER(p.product_type) = :pt")
+            params["pt"] = str(product_type).lower()
         if min_price_cents is not None:
-            clauses.append("p.price_cents >= :pmin"); params["pmin"] = int(min_price_cents)
+            clauses.append("p.price_cents >= :pmin")
+            params["pmin"] = int(min_price_cents)
         if max_price_cents is not None:
-            clauses.append("p.price_cents <= :pmax"); params["pmax"] = int(max_price_cents)
+            clauses.append("p.price_cents <= :pmax")
+            params["pmax"] = int(max_price_cents)
         rows = db.execute(text(
             f"SELECT {_LEGACY_COLS} FROM products p WHERE {' AND '.join(clauses)} "
             "ORDER BY p.price_cents ASC LIMIT :lim"), params).fetchall()
@@ -289,9 +294,11 @@ def _canonical_search(db, *, text_query: Optional[str], brand: Optional[str], ca
             clauses.append("(LOWER(pr.title) LIKE :q OR LOWER(pr.category) LIKE :q OR LOWER(pr.brand) LIKE :q)")
             params["q"] = f"%{str(text_query).strip().lower()}%"
         if brand:
-            clauses.append("LOWER(pr.brand) = :br"); params["br"] = str(brand).lower()
+            clauses.append("LOWER(pr.brand) = :br")
+            params["br"] = str(brand).lower()
         if category:
-            clauses.append("LOWER(pr.category) = :ca"); params["ca"] = str(category).lower()
+            clauses.append("LOWER(pr.category) = :ca")
+            params["ca"] = str(category).lower()
         rows = db.execute(text(
             "SELECT v.sku FROM variant v "
             "LEFT JOIN product pr ON pr.id = v.product_id AND pr.tenant_id = v.tenant_id "
@@ -394,7 +401,7 @@ def coverage_report(db, *, tenant_id: str = DEFAULT_TENANT, sample: int = 500) -
     out: Dict[str, Any] = {"mode": read_model_mode()}
     try:
         legacy_skus = {str(r[0]) for r in db.execute(text(
-            "SELECT sku FROM products WHERE COALESCE(active,1)=1 AND sku IS NOT NULL")).fetchall()}
+            "SELECT sku FROM products WHERE active IS NOT FALSE AND sku IS NOT NULL")).fetchall()}
     except Exception:
         legacy_skus = set()
     try:
@@ -434,7 +441,7 @@ def coverage_report(db, *, tenant_id: str = DEFAULT_TENANT, sample: int = 500) -
         from src.app.services.taxonomy_registry import ensure_tables as _tax_tables
         _tax_tables(db)
         out["unclassified_active_count"] = int(db.execute(text(
-            "SELECT COUNT(*) FROM products p WHERE COALESCE(p.active,1)=1 AND p.sku NOT IN "
+            "SELECT COUNT(*) FROM products p WHERE p.active IS NOT FALSE AND p.sku NOT IN "
             "(SELECT sku FROM product_classification WHERE tenant_id = :t)"),
             {"t": tenant_id}).fetchone()[0])
     except Exception:
@@ -454,7 +461,7 @@ def backfill_canonical_from_legacy(db, *, tenant_id: str = DEFAULT_TENANT, commi
     try:
         rows = db.execute(text(
             f"SELECT {_LEGACY_COLS}, p.id FROM products p "
-            "WHERE COALESCE(p.active,1)=1 AND p.sku IS NOT NULL")).fetchall()
+            "WHERE p.active IS NOT FALSE AND p.sku IS NOT NULL")).fetchall()
     except Exception:
         return stats
     for r in rows:

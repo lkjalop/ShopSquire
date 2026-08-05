@@ -94,6 +94,11 @@ def classify_budget_scope(text: str) -> str:
         q,
     ):
         return "total"
+    if re.search(
+        r"\b(?:(?:aud|usd|cad|nzd|gbp|eur)\s*)?\$?\s*[\d,]+(?:\.\d+)?\s+total\b",
+        q,
+    ):
+        return "total"
     return "unknown"
 
 
