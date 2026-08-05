@@ -52,7 +52,10 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         add.wait_for(timeout=75_000)
         add.click()
         page.get_by_text("Delivery plan", exact=False).first.wait_for(timeout=20_000)
-        assert page.locator('[data-testid^="qty-"]').first.inner_text() == "100"
+        cart_quantity = page.locator('[data-testid^="qty-"]').first
+        assert cart_quantity.inner_text() == "100"
+        initial_cart_line_id = cart_quantity.get_attribute("data-testid")
+        assert initial_cart_line_id
 
         page.get_by_role("button", name="Confirm delivery plan", exact=True).click()
         page.get_by_test_id("cart-sourcing-note").wait_for(timeout=30_000)
@@ -68,7 +71,6 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         assert "Ordering terms" in before
         initial_shortfall_match = re.search(r"(\d+) supplier-shortfall", before)
         assert initial_shortfall_match, before
-        initial_shortfall = int(initial_shortfall_match.group(1))
 
         # Every trace projection must remain navigable on the same immutable trace. Individual
         # tabs may truthfully report no activity, but none may crash, detach, or replace identity.
@@ -119,6 +121,13 @@ def test_procurement_trace_survives_amendment_and_redrafts():
             "() => document.querySelector('[data-testid^=qty-]')?.textContent?.trim() === '80'",
             timeout=20_000,
         )
+        # A quantity amendment must bind to the existing cart line. Replacing
+        # the SKU would make any RFQ-shortfall comparison meaningless and is a
+        # context-rot failure, not a successful amendment.
+        assert (
+            page.locator('[data-testid^="qty-"]').first.get_attribute("data-testid")
+            == initial_cart_line_id
+        )
 
         page.get_by_test_id("split-confirm").click()
         page.wait_for_timeout(4_000)
@@ -136,7 +145,19 @@ def test_procurement_trace_survives_amendment_and_redrafts():
         assert amended_trace_id != original_trace_id
         revised_shortfall_match = re.search(r"(\d+) supplier-shortfall", after)
         assert revised_shortfall_match, after
-        assert int(revised_shortfall_match.group(1)) == max(0, initial_shortfall - 20)
+        revised_shortfall = int(revised_shortfall_match.group(1))
+        # ATP may legitimately change between confirmations (and the production-shaped battery
+        # runs other buyer flows against the same operational database). Prove conservation from
+        # the amended trace instead of assuming a frozen stock snapshot.
+        amended_demand = re.search(
+            r"80 requested\s*[·.]\s*(\d+) in stock\s*[·.]\s*(\d+) sourced",
+            after,
+        )
+        assert amended_demand, after
+        amended_internal = int(amended_demand.group(1))
+        amended_sourced = int(amended_demand.group(2))
+        assert amended_internal + amended_sourced == 80
+        assert revised_shortfall == amended_sourced
         assert "supersed" in after.lower()
         assert "state transitions" in after
         assert not console_errors
