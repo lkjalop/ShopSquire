@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import re
-import threading
 import uuid
 from typing import Any, Dict
 
@@ -160,22 +159,10 @@ def _apply_narration_compatibility(payload: Dict[str, Any], redis: Any) -> None:
         timing["summary_ms"] = 0
     if mode == "async":
         timing["narration_pending"] = True
-        from src.app.services.recommend_narration_jobs import (
-            new_job_id,
-            put_narration,
-            run_narration_job,
-        )
+        from src.app.services.recommend_narration_jobs import submit_narration
 
-        job_id = new_job_id()
-        put_narration(redis, job_id, status="pending", message=None)
         message = str(payload.get("assistant_message") or payload.get("message") or "")
-        worker = threading.Thread(
-            target=run_narration_job,
-            args=(redis, job_id, lambda: message),
-            name=f"compat-narration-{job_id[:8]}",
-            daemon=True,
-        )
-        worker.start()
+        job_id = submit_narration(None, redis, lambda: message)
         payload["llm_summary_job_id"] = job_id
     payload["timing_breakdown"] = timing
 

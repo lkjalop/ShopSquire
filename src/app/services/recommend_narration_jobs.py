@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import hashlib
 import json
 import logging
+import os
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger("shopsquire.narration_jobs")
@@ -33,6 +36,9 @@ _TTL_SECONDS = 300
 # so the state is fail-VISIBLE, never silently muted again.
 _MEM_STORE: Dict[str, Tuple[float, str]] = {}
 _MEM_LOCK = threading.Lock()
+_DEDICATED_EXECUTOR: ThreadPoolExecutor | None = None
+_DEDICATED_SLOTS: threading.BoundedSemaphore | None = None
+_DEDICATED_LOCK = threading.Lock()
 
 
 def _mem_put(job_id: str, record_json: str) -> None:
@@ -63,6 +69,49 @@ def _redis_live(redis: Any) -> bool:
 
 def new_job_id() -> str:
     return uuid.uuid4().hex
+
+
+_NARRATION_FINGERPRINT_FIELDS = (
+    "tenant_id", "subject_id", "session_epoch", "decision_id", "sku", "quantity",
+    "currency", "destination_token", "required_by", "fulfillment_route",
+    "supplier_promise_version", "evidence_digest", "model_version", "prompt_version",
+    "policy_version",
+)
+
+
+def narration_decision_fingerprint(material: Dict[str, Any]) -> str:
+    """Hash a closed, commercially complete narration identity; never hash generated prose."""
+    normalized = {key: material.get(key) for key in _NARRATION_FINGERPRINT_FIELDS}
+    return hashlib.sha256(
+        json.dumps(normalized, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def observe_narration_fingerprint(
+    redis: Any, *, tenant_id: str, subject_id: str, session_epoch: str,
+    fingerprint: str, ttl_seconds: int = 300,
+) -> Dict[str, Any]:
+    """Measure duplicate work without reusing prose or changing the job lifecycle."""
+    scope = hashlib.sha256(
+        f"{tenant_id}|{subject_id}|{session_epoch}".encode("utf-8")
+    ).hexdigest()[:24]
+    key = f"narration_fingerprint:v1:{scope}:{str(fingerprint)}"
+    first_seen = True
+    if redis is not None:
+        try:
+            result = redis.set(key, "1", nx=True, ex=max(30, min(int(ttl_seconds), 3600)))
+            first_seen = bool(result)
+        except Exception:
+            first_seen = True
+    outcome = "first_seen" if first_seen else "duplicate_candidate"
+    try:
+        from src.app.observability.metrics import record_narration_fingerprint
+
+        record_narration_fingerprint(outcome)
+    except Exception:
+        pass
+    return {"outcome": outcome, "fingerprint": str(fingerprint), "prose_reused": False,
+            "measurement_only": True, "scope_hash": scope}
 
 
 def _key(job_id: str) -> str:
@@ -131,7 +180,8 @@ def get_narration(redis: Any, job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def run_narration_job(redis: Any, job_id: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+def run_narration_job(redis: Any, job_id: str, fn: Callable[..., Any], *args: Any,
+                      _job_meta: Optional[Dict[str, Any]] = None, **kwargs: Any) -> None:
     """Run the narration fn in this worker and persist its result. fn returns (message, _) or str,
     optionally with a third meta dict (e.g. guard-rejection violations) that rides in the job
     record so a no-prose outcome is DEBUGGABLE from the poll endpoint, never silent."""
@@ -139,11 +189,41 @@ def run_narration_job(redis: Any, job_id: str, fn: Callable[..., Any], *args: An
         out = fn(*args, **kwargs)
         msg = out[0] if isinstance(out, tuple) else out
         meta = out[2] if isinstance(out, tuple) and len(out) > 2 and isinstance(out[2], dict) else None
-        put_narration(redis, job_id, status="done", message=msg if isinstance(msg, str) else None, meta=meta)
+        put_narration(redis, job_id, status="done", message=msg if isinstance(msg, str) else None,
+                      meta={**(_job_meta or {}), **(meta or {})})
     except Exception as exc:
         logger.debug("run_narration_job failed: %s", exc)
         put_narration(redis, job_id, status="error", message=None,
-                      meta={"error": str(exc)[:200]})
+                      meta={**(_job_meta or {}), "error": str(exc)[:200]})
+
+
+def narration_runtime_contract() -> Dict[str, Any]:
+    workers = max(1, min(int(os.getenv("NARRATION_EXECUTOR_WORKERS", "2") or 2), 32))
+    queue = max(workers, min(int(os.getenv("NARRATION_EXECUTOR_QUEUE", "8") or 8), 512))
+    endpoint = str(os.getenv("OLLAMA_NARRATION_URL", "") or "").strip()
+    router_endpoint = str(os.getenv("OLLAMA_URL", "") or "").strip()
+    return {
+        "dedicated_executor": str(os.getenv("NARRATION_DEDICATED_EXECUTOR", "1")).lower()
+        in {"1", "true", "yes", "on"},
+        "workers": workers,
+        "queue_capacity": queue,
+        "model": str(os.getenv("OLLAMA_NARRATION_MODEL", os.getenv("OLLAMA_SUMMARY_MODEL", "")) or ""),
+        "endpoint_configured": bool(endpoint),
+        "endpoint_isolated_from_router": bool(endpoint and endpoint != router_endpoint),
+        "resource_authority": "bounded_background_only",
+    }
+
+
+def _dedicated_resources() -> tuple[ThreadPoolExecutor, threading.BoundedSemaphore]:
+    global _DEDICATED_EXECUTOR, _DEDICATED_SLOTS
+    with _DEDICATED_LOCK:
+        if _DEDICATED_EXECUTOR is None or _DEDICATED_SLOTS is None:
+            contract = narration_runtime_contract()
+            _DEDICATED_EXECUTOR = ThreadPoolExecutor(
+                max_workers=int(contract["workers"]), thread_name_prefix="narration",
+            )
+            _DEDICATED_SLOTS = threading.BoundedSemaphore(int(contract["queue_capacity"]))
+    return _DEDICATED_EXECUTOR, _DEDICATED_SLOTS
 
 
 def submit_narration(executor: Any, redis: Any, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
@@ -151,7 +231,41 @@ def submit_narration(executor: Any, redis: Any, fn: Callable[..., Any], *args: A
     StoreProfile) via copy_context().run. Marks the job 'pending' synchronously so an immediate poll
     sees a known state."""
     job_id = new_job_id()
-    put_narration(redis, job_id, status="pending", message=None)
+    contract = narration_runtime_contract()
+    use_dedicated = bool(contract["dedicated_executor"] or executor is None)
+    meta = {"resource_pool": "dedicated_narration" if use_dedicated else "caller_executor",
+            "model": contract["model"], "endpoint_isolated": contract["endpoint_isolated_from_router"]}
+    put_narration(redis, job_id, status="pending", message=None, meta=meta)
     ctx = contextvars.copy_context()
-    executor.submit(ctx.run, run_narration_job, redis, job_id, fn, *args, **kwargs)
+    submitted_at = time.monotonic()
+
+    def _record_queue_wait() -> None:
+        try:
+            from src.app.observability.metrics import record_narration_queue_wait
+
+            record_narration_queue_wait(time.monotonic() - submitted_at)
+        except Exception:
+            pass
+
+    if use_dedicated:
+        dedicated, slots = _dedicated_resources()
+        if not slots.acquire(blocking=False):
+            put_narration(redis, job_id, status="degraded", message=None,
+                          meta={**meta, "reason": "narration_queue_saturated"})
+            return job_id
+
+        def _bounded_run() -> None:
+            try:
+                _record_queue_wait()
+                ctx.run(run_narration_job, redis, job_id, fn, *args, _job_meta=meta, **kwargs)
+            finally:
+                slots.release()
+
+        dedicated.submit(_bounded_run)
+    else:
+        def _caller_run() -> None:
+            _record_queue_wait()
+            ctx.run(run_narration_job, redis, job_id, fn, *args, _job_meta=meta, **kwargs)
+
+        executor.submit(_caller_run)
     return job_id

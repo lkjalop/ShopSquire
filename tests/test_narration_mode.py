@@ -8,12 +8,20 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from src.app.main import app
 from tests.utils import default_headers
 
 client = TestClient(app, headers=default_headers())
+
+
+@pytest.fixture(autouse=True)
+def _isolated_narration_quota(monkeypatch):
+    """Narration mode contracts must not depend on a developer Redis usage counter."""
+    monkeypatch.setenv("TOKEN_BUDGET_ENABLED", "0")
 
 
 def _suggest(query="gaming laptop under 1800", uid="u-narr"):

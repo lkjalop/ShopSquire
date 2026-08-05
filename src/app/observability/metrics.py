@@ -301,6 +301,17 @@ vision_cache_total = Counter(
     labelnames=["outcome"],
 )
 
+narration_fingerprint_total = Counter(
+    "shopsquire_narration_fingerprint_total",
+    "Narration decision fingerprints observed before any cache or single-flight policy",
+    labelnames=["outcome"],
+)
+
+narration_queue_wait_seconds = Histogram(
+    "shopsquire_narration_queue_wait_seconds",
+    "Time a background narration waits before its bounded worker begins",
+)
+
 vision_extract_failures_total = Counter(
     "shopsquire_vision_extract_failures_total",
     "Vision-LLM extraction failures (timeout/unreachable) — otherwise a silent empty identity",
@@ -366,6 +377,14 @@ def record_tool_invocation(tool: str, status: str, duration_seconds: float):
 
 def record_mcp_security_block(tool: str, reason: str):
     mcp_security_blocks_total.labels(tool=tool or "unknown", reason=reason or "unknown").inc()
+
+
+def record_narration_fingerprint(outcome: str):
+    narration_fingerprint_total.labels(outcome=str(outcome or "unknown")).inc()
+
+
+def record_narration_queue_wait(seconds: float):
+    narration_queue_wait_seconds.observe(max(0.0, float(seconds)))
 
 
 def record_webhook_verification(vendor: str, status: str):
