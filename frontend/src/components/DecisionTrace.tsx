@@ -715,17 +715,23 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
   // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
   const [pendingSplit, setPendingSplit] = useState<SplitOfferResult | null>(null);
-  useEffect(() => {
-    if (activeTab !== 'procurement' || procCase) { return; }
-    let alive = true;
-    const uid = (() => { try { return sessionStorage.getItem('uid') || 'demo-user'; } catch { return 'demo-user'; } })();
-    getSplitOffer(uid)
-      .then((r) => { if (alive) setPendingSplit(r?.split && !r.split.fully_in_stock ? r : null); })
-      .catch(() => { if (alive) setPendingSplit(null); });
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, procCase]);
   const [procLoading, setProcLoading] = useState(false);
+  useEffect(() => {
+    if (activeTab !== 'procurement' || procLoading || procCase || procurementCaseId) { return; }
+    let alive = true;
+    // Case resolution is a faster, authoritative read. Give it a short head
+    // start before asking for a provisional live-cart split; otherwise opening
+    // a committed trace issues a redundant split calculation while the case
+    // lookup is already in flight.
+    const timer = window.setTimeout(() => {
+      const uid = (() => { try { return sessionStorage.getItem('uid') || 'demo-user'; } catch { return 'demo-user'; } })();
+      getSplitOffer(uid)
+        .then((r) => { if (alive) setPendingSplit(r?.split && !r.split.fully_in_stock ? r : null); })
+        .catch(() => { if (alive) setPendingSplit(null); });
+    }, 750);
+    return () => { alive = false; window.clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, procLoading, procCase, procurementCaseId]);
   const canSeeOperatorDraft = !!getOwnerApiKey();
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);

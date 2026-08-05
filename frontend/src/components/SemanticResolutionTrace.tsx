@@ -30,6 +30,7 @@ export default function SemanticResolutionTrace({ resolution, evidence, alignmen
   const sourceStatus = conceptData.source_status && typeof conceptData.source_status === 'object'
     ? conceptData.source_status : {};
   const researchRan = selected.includes('concept_resolution');
+  const simulationContract = conceptData.authority === 'simulation_contract_only';
   const commitment = caseObligations.find((item: any) => item?.kind === 'buyer_commitment') || null;
   const alignedSkus = [
     ...(Array.isArray(alignment?.exact) ? alignment.exact : []),
@@ -128,7 +129,11 @@ export default function SemanticResolutionTrace({ resolution, evidence, alignmen
               ))}
             </ol>
           ) : <div style={{ marginTop: 7, color: '#64748b' }}>No external result was used.</div>}
-          <div style={{ marginTop: 7, color: '#92400e' }}>Search results are untrusted candidates until an approved source policy and stable citation verify the claim.</div>
+          <div style={{ marginTop: 7, color: '#92400e' }}>
+            {simulationContract
+              ? 'Synthetic qualification contract only — this proves the governed workflow, not live vendor requirements or availability.'
+              : 'Search results are untrusted candidates until an approved source policy and stable citation verify the claim.'}
+          </div>
         </details>
       )}
 

@@ -61,6 +61,9 @@ jobs:
       RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED: "1"
       MULTI_INTENT_PLANNER_ENABLED: "1"
       FULFILLMENT_DEMO_ENABLED: "1"
+      # GATE 1 may materialize an internal RFQ draft for browser proof. The
+      # outbound send gate remains human and the scenario asserts nothing sent.
+      FULFILLMENT_AUTO_DRAFT_ON_COMMIT: "1"
       USE_MOCK_LLM: "1"
       USE_OLLAMA_INTENT: "0"
       MODEL_WARMUP_ON_STARTUP: "0"
@@ -75,6 +78,11 @@ jobs:
       # Quota contracts have dedicated tests; sharing a tenant-level allowance here
       # makes test order change product outcomes and hides the real failure.
       TOKEN_BUDGET_ENABLED: "0"
+      # Versioned synthetic evidence may exercise qualification in hosted UI proof,
+      # but cannot be enabled in staging/production and is labelled simulation-only.
+      SEMANTIC_RESEARCH_FIXTURES_ENABLED: "1"
+      SEMANTIC_RESEARCH_FIXTURE_ID: siemens_digital_twin_qualified_contract
+      SEMANTIC_SIMULATION_AUTHORITY_ENABLED: "1"
       TOKEN_BUDGET_GUEST_DAILY_TOKENS: "100000"
       TOKEN_BUDGET_GUEST_DAILY_USD: "10"
       TENANT_QUOTAS_ENABLED: "0"

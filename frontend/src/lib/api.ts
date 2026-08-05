@@ -174,15 +174,29 @@ export interface SplitOfferResult {
   suppliers?: Record<string, { name?: string | null; channel?: string | null }>;
 }
 
+const splitOfferInflight = new Map<string, Promise<SplitOfferResult>>();
+
 // Pre-payment split-fulfilment offer: what ships now (stock) vs follows from a supplier (with the supplier's
 // REAL lead time as the ETA), plus the store's delivery economics. The buyer confirms this before payment.
 export async function getSplitOffer(uid: string): Promise<SplitOfferResult> {
   const u = new URL(apiUrl('/api/v1/cart/split-offer'), window.location.href);
   u.searchParams.set('uid', uid || 'demo-user');
-  const r = await fetch(u.toString(), { credentials: 'include', headers: authHeaders() });
-  const j = await safeJson(r);
-  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `split_offer_failed (${r.status})`);
-  return j as SplitOfferResult;
+  const key = u.toString();
+  const existing = splitOfferInflight.get(key);
+  if (existing) return existing;
+  const request = fetch(key, { credentials: 'include', headers: authHeaders() })
+    .then(async (r) => {
+      const j = await safeJson(r);
+      if (!r.ok || !j) {
+        throw new Error((j && j.detail) ? j.detail : `split_offer_failed (${r.status})`);
+      }
+      return j as SplitOfferResult;
+    });
+  splitOfferInflight.set(key, request);
+  request.finally(() => {
+    if (splitOfferInflight.get(key) === request) splitOfferInflight.delete(key);
+  }).catch(() => undefined);
+  return request;
 }
 
 // ── Fulfilment / procurement (buyer-facing; operator actions live in admin-react) ──
@@ -296,6 +310,15 @@ export async function confirmCartSourcing(
   });
   const j = await safeJson(r);
   if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `confirm_cart_failed (${r.status})`);
+  return j;
+}
+
+export async function fetchBuyerProcurementContext(uid: string, caseId: string): Promise<any> {
+  const u = new URL(apiUrl(`/api/v1/fulfillment/procurement-context/${encodeURIComponent(caseId)}`), window.location.href);
+  u.searchParams.set('uid', uid || 'demo-user');
+  const r = await fetch(u.toString(), { credentials: 'include', headers: authHeaders() });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error(`procurement_context_failed (${r.status})`);
   return j;
 }
 

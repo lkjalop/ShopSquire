@@ -114,4 +114,40 @@ describe('SemanticResolutionTrace', () => {
     expect(trace).toHaveTextContent(/authorization required/i);
     expect(trace).toHaveTextContent(/not granted/i);
   });
+
+  it('labels a simulation qualification contract without implying live vendor proof', () => {
+    render(
+      <SemanticResolutionTrace
+        resolution={{
+          outcome: 'proceed_catalog',
+          catalog_authority: 'permitted',
+          residual_route: 'CONNECTOR',
+          concepts: [{ text: 'digital twin simulation', status: 'resolved' }],
+          questions: [],
+          state_prevented: [],
+          next_permitted_action: 'align_catalog',
+        }}
+        evidence={{
+          selected: ['concept_resolution'],
+          legs: { concept_resolution: { data: {
+            status: 'simulation_fixture',
+            authority: 'simulation_contract_only',
+            query: 'digital twin simulation synthetic requirements',
+            provider_id: 'deterministic_fixture:qualified_contract',
+            provider_run_status: 'fixture_replay',
+            cache_status: 'versioned_fixture',
+            items: [],
+          } } },
+        }}
+        alignment={{ status: 'qualified_catalog_match', qualified: ['RGAM-0007'] }}
+      />,
+    );
+
+    expect(screen.getByTestId('semantic-resolution-trace')).toHaveTextContent(
+      /synthetic qualification contract only/i,
+    );
+    expect(screen.getByTestId('semantic-resolution-trace')).toHaveTextContent(
+      /not live vendor requirements or availability/i,
+    );
+  });
 });
