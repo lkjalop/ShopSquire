@@ -38,7 +38,7 @@ WORKDIR /app
 
 COPY pyproject.toml /app/
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --only main --no-root
+    && poetry install --no-interaction --no-ansi --only main --extras azure --no-root
 
 # Optional: install PyTorch Geometric for GNN fraud-ring detection.
 # Skipped by default (adds ~1.5GB to image). Set INSTALL_PYGEOMETRIC=1 to enable.
