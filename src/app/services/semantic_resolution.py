@@ -8,6 +8,7 @@ and deterministically decides whether catalog selection may proceed.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, Sequence
@@ -305,7 +306,30 @@ def validate_semantic_source_policy(policy: Any, *, claim_type: str) -> tuple[bo
     missing = [key for key in required if not policy.get(key)]
     if missing:
         return False, "source_policy_incomplete"
-    if str(policy.get("review_status")).lower() != "approved":
+    review_status = str(policy.get("review_status") or "").lower()
+    if review_status == "simulation_contract":
+        # A versioned synthetic contract can exercise the complete architecture in
+        # local/test demonstrations, but it is not independent source approval.  It
+        # requires two explicit controls and is structurally unavailable in staging
+        # and production so it cannot silently promote real catalog or commerce
+        # authority.
+        app_env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+        enabled = str(os.getenv("SEMANTIC_SIMULATION_AUTHORITY_ENABLED", "") or "").lower() in {
+            "1", "true", "yes", "on",
+        }
+        allowed_env = app_env in {"local", "dev", "development", "test", "testing"}
+        valid_contract = (
+            policy.get("simulation_only") is True
+            and str(policy.get("reviewer_type") or "").lower() == "deterministic_fixture"
+            and str(policy.get("trust_tier") or "").lower() == "simulation"
+        )
+        allowed_claims = {str(value).strip() for value in policy.get("allowed_claim_types") or []}
+        if not (enabled and allowed_env and valid_contract and claim_type in allowed_claims):
+            return False, "simulation_contract_not_permitted"
+        if str(policy.get("freshness_status") or "").lower() != "fresh":
+            return False, "source_policy_stale"
+        return True, "simulation_contract"
+    if review_status != "approved":
         return False, "source_policy_not_approved"
     if str(policy.get("reviewer_type")).lower() != "independent_human":
         return False, "source_policy_not_independently_reviewed"

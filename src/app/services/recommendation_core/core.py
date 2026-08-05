@@ -774,6 +774,15 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             dict(item) for item in (concept_data.get("catalog_qualifications") or [])
             if isinstance(item, dict)
         ][:100]
+        # Provider-qualified identities are bounded retrieval candidates, not a
+        # buyer selection.  Without this join, ordinary top-N category retrieval
+        # can omit a qualified (often higher-cost) SKU and the alignment stage
+        # incorrectly reports no match even though approved evidence named one.
+        resp.extras["catalog_qualification_candidates"] = [
+            str(item["sku"])
+            for item in semantic_catalog_qualifications
+            if item.get("sku")
+        ]
         resp.extras["semantic_resolution"] = semantic_decision.as_dict()
         resp.extras["semantic_evidence"] = evidence_bundle
         resp.extras["approved_narration_evidence"] = list(
@@ -1860,10 +1869,15 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
             bundle.budget_filtered = sum(leg.budget_filtered for leg in legs)
             bundle.errors = [err for leg in legs for err in leg.errors]
     if bundle is None:
+        qualified_candidate_skus = [
+            str(value) for value in (resp.extras.get("catalog_qualification_candidates") or [])
+            if value
+        ][:100]
         bundle = gather_evidence(db, envelope, node_handle=decision.node_handle,
                                  limit=max(limit * 3, 30),
                                  exact_skus=([decision.exact_product_sku]
-                                             if decision.exact_product_sku else None))
+                                             if decision.exact_product_sku
+                                             else (qualified_candidate_skus or None)))
     # RETRIEVAL SCOPE UNION (Phase 1.5 fix): when the routed node is a workload-HOST device with
     # capability requirements, augment the candidate set with the store's device host UNION
     # (Laptops + Gaming Laptops) — mirroring the capability FLOOR, which already spans the union via

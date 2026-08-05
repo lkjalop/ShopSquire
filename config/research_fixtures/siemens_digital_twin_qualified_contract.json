@@ -1,0 +1,52 @@
+{
+  "fixture_version": "siemens-digital-twin-qualified-contract-1",
+  "authority": "simulation_only",
+  "result_authority": "simulation_contract_only",
+  "requires_explicit_consent": true,
+  "concept_triggers": [
+    "digital twin",
+    "digital twin simulation"
+  ],
+  "query_template": "{concept} Siemens NX local interactive hardware requirements",
+  "sources": [
+    {
+      "title": "Synthetic Siemens NX capability profile",
+      "source_domain": "fixture.local",
+      "url": "fixture://siemens-digital-twin-profile-1",
+      "snippet": "Versioned synthetic capability floor used only to prove qualification, catalog alignment and authority boundaries.",
+      "fetched_ts": "2026-08-05T00:00:00Z",
+      "source_policy_status": "simulation_contract"
+    }
+  ],
+  "normalized_evidence": [
+    {
+      "concept": "digital twin simulation",
+      "status": "resolved",
+      "claim": "For this synthetic demonstration, local interactive simulation requires 32 GB RAM, 16 GB GPU VRAM, a high-core-count CPU, 1 TB NVMe-class storage and Windows 11.",
+      "claim_type": "minimum_requirements",
+      "source_id": "demo-contract",
+      "source_record_id": "digital-twin-profile-1",
+      "source_revision": "2026-08-05",
+      "observed_at": "2026-08-05T00:00:00Z",
+      "citation_id": "fixture:digital-twin-profile-1:2026-08-05",
+      "source_policy": {
+        "policy_version": "semantic-source-v1",
+        "review_status": "simulation_contract",
+        "reviewer_type": "deterministic_fixture",
+        "reviewed_by": "versioned-test-contract",
+        "licence": "synthetic-demonstration-only",
+        "trust_tier": "simulation",
+        "allowed_claim_types": ["minimum_requirements"],
+        "freshness_status": "fresh",
+        "simulation_only": true
+      }
+    }
+  ],
+  "catalog_qualifications": [
+    {
+      "sku": "RGAM-0007",
+      "alignment_status": "qualified",
+      "evidence_refs": ["fixture:digital-twin-profile-1:2026-08-05"]
+    }
+  ]
+}

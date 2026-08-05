@@ -45,3 +45,25 @@ def test_local_fixture_exercises_provenance_without_external_egress_consent(monk
     assert data["status"] == "simulation_fixture"
     assert data["provider_id"].startswith("deterministic_fixture:")
     assert data["authority"] == "simulation_candidate_only"
+
+
+def test_qualified_fixture_requires_explicit_research_consent(monkeypatch) -> None:
+    monkeypatch.setenv("SEMANTIC_RESEARCH_FIXTURES_ENABLED", "1")
+    monkeypatch.setenv(
+        "SEMANTIC_RESEARCH_FIXTURE_ID",
+        "siemens_digital_twin_qualified_contract",
+    )
+
+    assert resolve_fixture("digital twin simulation", authorized=False) is None
+    result = resolve_fixture("digital twin simulation", authorized=True)
+
+    assert result is not None
+    assert result["simulation_only"] is True
+    assert result["authority"] == "simulation_contract_only"
+    assert result["catalog_qualifications"] == [
+        {
+            "sku": "RGAM-0007",
+            "alignment_status": "qualified",
+            "evidence_refs": ["fixture:digital-twin-profile-1:2026-08-05"],
+        }
+    ]

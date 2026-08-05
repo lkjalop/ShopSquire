@@ -33,7 +33,7 @@ def _load_fixture(fixture_id: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def resolve_fixture(concept: str) -> dict[str, Any] | None:
+def resolve_fixture(concept: str, *, authorized: bool = False) -> dict[str, Any] | None:
     enabled = str(os.getenv("SEMANTIC_RESEARCH_FIXTURES_ENABLED", "")).lower() in {
         "1", "true", "yes", "on",
     }
@@ -42,6 +42,8 @@ def resolve_fixture(concept: str) -> dict[str, Any] | None:
         return None
     fixture = _load_fixture(fixture_id)
     if not fixture:
+        return None
+    if fixture.get("requires_explicit_consent") is True and not authorized:
         return None
     normalized = " ".join(str(concept or "").lower().split())
     triggers = [" ".join(str(item).lower().split()) for item in fixture.get("concept_triggers") or []]
@@ -73,6 +75,6 @@ def resolve_fixture(concept: str) -> dict[str, Any] | None:
             dict(item) for item in fixture.get("catalog_qualifications") or []
             if isinstance(item, dict)
         ][:100],
-        "authority": "simulation_candidate_only",
+        "authority": str(fixture.get("result_authority") or "simulation_candidate_only"),
         "simulation_only": True,
     }

@@ -271,6 +271,7 @@ def test_resolved_concept_shows_only_evidence_qualified_catalog_alternative(db, 
     )
 
     assert [item.sku for item in response.products] == ["LAP-1"], response.extras
+    assert response.extras["catalog_qualification_candidates"] == ["LAP-1"]
     assert response.extras["catalog_alignment"]["status"] == "no_exact_catalog_match"
     assert response.extras["supplier_enquiry_option"] == {
         "status": "available_after_buyer_commitment",

@@ -7,6 +7,7 @@ from src.app.services.semantic_resolution import (
     normalize_concept_evidence,
     reduce_semantic_proposal,
     validate_semantic_proposal,
+    validate_semantic_source_policy,
 )
 
 
@@ -199,6 +200,61 @@ def test_resolved_evidence_allows_catalog_alignment_but_does_not_invent_fit():
     assert alignment.exact == ()
     assert alignment.alternatives == ("CHAIR-ASH", "CHAIR-OAK")
     assert "supplier_enquiry_after_buyer_commitment" in alignment.permitted_actions
+
+
+def test_simulation_contract_can_resolve_only_when_explicitly_enabled(monkeypatch):
+    evidence_row = {
+        "concept": "digital twin simulation",
+        "status": "resolved",
+        "claim": "A versioned demonstration contract defines the synthetic capability floor.",
+        "source_id": "demo-contract",
+        "source_record_id": "digital-twin-profile-1",
+        "source_revision": "2026-08-05",
+        "observed_at": "2026-08-05T00:00:00Z",
+        "citation_id": "fixture:digital-twin-profile-1:2026-08-05",
+        "claim_type": "minimum_requirements",
+        "source_policy": {
+            "policy_version": "semantic-source-v1",
+            "review_status": "simulation_contract",
+            "reviewer_type": "deterministic_fixture",
+            "reviewed_by": "versioned-test-contract",
+            "licence": "synthetic-demonstration-only",
+            "trust_tier": "simulation",
+            "allowed_claim_types": ["minimum_requirements"],
+            "freshness_status": "fresh",
+            "simulation_only": True,
+        },
+    }
+
+    monkeypatch.setenv("APP_ENV", "testing")
+    monkeypatch.delenv("SEMANTIC_SIMULATION_AUTHORITY_ENABLED", raising=False)
+    assert normalize_concept_evidence([evidence_row])[0].status == "insufficient"
+
+    monkeypatch.setenv("SEMANTIC_SIMULATION_AUTHORITY_ENABLED", "1")
+    accepted = normalize_concept_evidence([evidence_row])[0]
+    assert accepted.status == "resolved"
+    assert accepted.source_policy_status == "simulation_contract"
+
+
+def test_simulation_contract_never_resolves_in_production(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SEMANTIC_SIMULATION_AUTHORITY_ENABLED", "1")
+    allowed, reason = validate_semantic_source_policy(
+        {
+            "policy_version": "semantic-source-v1",
+            "review_status": "simulation_contract",
+            "reviewer_type": "deterministic_fixture",
+            "reviewed_by": "versioned-test-contract",
+            "licence": "synthetic-demonstration-only",
+            "trust_tier": "simulation",
+            "allowed_claim_types": ["minimum_requirements"],
+            "freshness_status": "fresh",
+            "simulation_only": True,
+        },
+        claim_type="minimum_requirements",
+    )
+    assert allowed is False
+    assert reason == "simulation_contract_not_permitted"
 
 
 def test_evidence_without_stable_provenance_is_not_resolved():

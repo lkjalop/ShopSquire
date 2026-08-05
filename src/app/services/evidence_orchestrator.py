@@ -298,7 +298,10 @@ def _leg_concept_resolution(
     concept = str(concepts[0]["text"])[:120]
     from src.app.services.semantic_research_fixture import resolve_fixture
 
-    fixture = resolve_fixture(concept)
+    fixture = resolve_fixture(
+        concept,
+        authorized=bool(getattr(plan, "external_research_authorized", False)),
+    )
     if fixture is not None:
         return {
             "source": "concept_resolution",
