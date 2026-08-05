@@ -1289,6 +1289,64 @@ def test_bulk_budget_range_defaults_to_per_unit_despite_model_total_claim(db):
     assert all(150_000 <= (product.price_cents or 0) <= 190_000 for product in resp.products)
 
 
+def test_model_unavailable_bulk_search_keeps_quantity_while_scope_is_blocked(db):
+    """The production-shaped demo deliberately disables the optional router model.
+
+    Explicit tenant-sold product language and bounded quantity/budget facts remain
+    sufficient to preserve the request, but an unresolved budget scope still blocks
+    retrieval.  The follow-up can resolve it without losing the quantity.
+    """
+    from src.app.services.taxonomy_registry import add_sold_node
+
+    add_sold_node(db, node_handle="el-6-6")
+    envelope = dataclasses.replace(
+        _env("I need 25 work laptops, budget 1200 to 1500"),
+        budget_min_cents=120_000,
+        budget_max_cents=150_000,
+    )
+    response = recommend_turn(db, envelope, llm_fn=lambda _prompt, _timeout: "")
+
+    assert response.extras["requested_quantity"] == 25
+    assert response.extras["decision"]["budget_scope"] == "unknown"
+    assert response.clarify and response.clarify[0]["id"] == "budget_scope"
+    assert response.products == []
+
+
+def test_mixed_choose_confirm_preserves_original_evidence_blocker_in_trace(db):
+    blocked = {
+        "outcome": "clarify",
+        "catalog_authority": "blocked",
+        "desired_outcome": "recommend a laptop for simulating a digital twin",
+        "concepts": [{
+            "text": "digital twin simulation",
+            "status": "unresolved",
+            "material": True,
+            "interpretations": [],
+        }],
+        "questions": [{
+            "question_id": "software_or_standard",
+            "question": "Which exact software and version must be supported?",
+            "material": True,
+        }],
+        "state_prevented": ["catalog_recommendation", "commerce_execution"],
+    }
+    response = recommend_turn(
+        db,
+        _env(
+            "Choose a laptop and confirm the purchase order.",
+            session={"semantic_resolution": blocked},
+        ),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    semantic = response.extras["semantic_resolution"]
+    assert "digital twin" in semantic["desired_outcome"]
+    assert semantic["questions"][0]["question_id"] == "software_or_standard"
+    assert semantic["catalog_authority"] == "blocked"
+    assert "buyer_commitment" in semantic["state_prevented"]
+    assert semantic["case_obligations"]
+
+
 def test_explicit_per_unit_budget_does_not_inherit_prior_total_budget(db):
     payload = {"lane": "FILTER", "handle": "el-6-6", "requirements": {},
                "quantity": 25, "total_budget": None, "budget_scope": "per_unit",

@@ -640,14 +640,37 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 "text": question_text,
                 "options": [],
             })
+            # A mixed ``choose + confirm`` turn adds a commitment blocker; it does
+            # not replace the evidence problem that caused the blocker. Preserve
+            # the exact concepts, questions, source coverage and next permitted
+            # action from the sealed semantic case so Decision Trace can explain
+            # *what* remains unresolved instead of collapsing to a generic message.
+            prevented = list(prior_semantic.get("state_prevented") or [])
+            for item in ("buyer_commitment", "allocation", "supplier_rfq", "purchase_order"):
+                if item not in prevented:
+                    prevented.append(item)
+            prior_questions = [
+                dict(item) for item in (prior_semantic.get("questions") or [])
+                if isinstance(item, dict)
+            ]
             resp.extras["semantic_resolution"] = {
+                **prior_semantic,
                 "outcome": "clarify",
                 "catalog_authority": catalog_authority,
                 "residual_route": str(blocked_commitment.get("residual_route") or "ASK"),
-                "residual_reasons": [reason],
-                "questions": [{"question_id": "commitment_prerequisite", "question": question_text}],
-                "state_prevented": ["buyer_commitment", "allocation", "supplier_rfq", "purchase_order"],
-                "next_permitted_action": "resolve_commitment_prerequisite",
+                "residual_reasons": list(dict.fromkeys([
+                    *list(prior_semantic.get("residual_reasons") or []),
+                    reason,
+                ])),
+                "questions": (
+                    prior_questions
+                    or [{"question_id": "commitment_prerequisite", "question": question_text}]
+                ),
+                "state_prevented": prevented,
+                "next_permitted_action": str(
+                    prior_semantic.get("next_permitted_action")
+                    or "resolve_commitment_prerequisite"
+                ),
                 "case_obligations": list(case_obligations),
             }
             resp.set_message(question_text, MsgPriority.BULK_SCOPE_CLARIFY)
