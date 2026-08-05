@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from src.app.services.search_demand_authority import (
+    append_lifecycle_transition,
     append_search_observation,
     project_search_demand_authority,
 )
@@ -156,3 +157,43 @@ def test_return_outcome_is_attributed_without_inflating_committed_demand() -> No
     assert projection["committed_demand_units"] == 0
     assert projection["eligible_forecast_signal_count"] == 0
     assert projection["fulfilled_case_count"] == 0
+
+
+def test_transition_clones_prior_identity_and_versions_inventory() -> None:
+    db = _db()
+    first = append_search_observation(
+        db, tenant_id="tenant-a", trace_id="trace-live", session_epoch="epoch-live",
+        actor_hash="actor-live", query="twenty qualified laptops",
+        requirement={"sku": "SKU-20", "quantity": 20}, resolved_sku="SKU-20",
+        requested_quantity=20, qualification_outcome="qualified",
+        lifecycle_stage="qualified_interest", evidence_refs=["citation-20"],
+        source_policy_status="approved",
+    )
+    committed = append_lifecycle_transition(
+        db, tenant_id="tenant-a", trace_id="trace-live", case_id="order-20",
+        lifecycle_stage="buyer_commitment", inventory_snapshot={
+            "source_version": "ATP-v20", "observed_at": "2026-08-05T01:00:00Z",
+            "freshness_status": "fresh", "confirmed_atp": 12,
+            "transferable": 3, "unconfirmed_shortfall": 5,
+        },
+    )
+    assert committed["status"] == "appended"
+    assert committed["supersedes_id"] == first["id"]
+    assert committed["case_id"] == "order-20"
+    assert committed["authority"] == "committed"
+    projection = project_search_demand_authority(db, tenant_id="tenant-a")
+    assert projection["committed_demand_units"] == 20
+    assert projection["inventory_source_versions"] == ["ATP-v20"]
+
+
+def test_transition_without_prior_identity_is_not_fabricated() -> None:
+    db = _db()
+    result = append_lifecycle_transition(
+        db, tenant_id="tenant-a", case_id="unknown-order", lifecycle_stage="return",
+    )
+    assert result == {
+        "status": "not_linked",
+        "state_prevented": "lifecycle_attribution_without_prior_search_identity",
+        "lifecycle_stage": "return",
+    }
+    assert project_search_demand_authority(db, tenant_id="tenant-a")["search_interest_count"] == 0

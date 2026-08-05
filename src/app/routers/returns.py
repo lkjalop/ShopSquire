@@ -145,6 +145,24 @@ def create_return_claim(body: Dict[str, Any], request: Request):
         job_id = queue_evidence_job(
             db, tenant_id=principal.tenant_id, claim_id=claim["claim_id"]
         )
+        try:
+            from src.app.services.search_demand_authority import append_lifecycle_transition
+
+            with db.begin_nested():
+                lifecycle_attribution = append_lifecycle_transition(
+                    db,
+                    tenant_id=principal.tenant_id,
+                    case_id=str(verification.order_id or ""),
+                    trace_id=str(claim.get("trace_id") or ""),
+                    lifecycle_stage="return",
+                    resolved_sku=sku,
+                )
+        except Exception as exc:
+            logger.warning(
+                "return lifecycle attribution degraded claim=%s error=%s",
+                claim["claim_id"], type(exc).__name__,
+            )
+            lifecycle_attribution = {"status": "degraded", "reason": type(exc).__name__}
         db.commit()
     try:
         from src.app.tasks.return_evidence_tasks import process_return_evidence
@@ -188,6 +206,7 @@ def create_return_claim(body: Dict[str, Any], request: Request):
             "claimant_window_count": abuse.claimant_window_count,
             "order_window_count": abuse.order_window_count,
         },
+        "search_demand_attribution": lifecycle_attribution,
         "message": (
             "Evidence accepted for bounded review. No refund, replacement, or repair was authorized."
         ),

@@ -945,6 +945,30 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
                 "allocates_supply": False,
                 "reason": type(exc).__name__,
             }
+        try:
+            from src.app.services.search_demand_authority import append_lifecycle_transition
+
+            with db.begin_nested():
+                result["search_demand_attribution"] = append_lifecycle_transition(
+                    db,
+                    tenant_id=(principal.tenant_id if principal else "default"),
+                    trace_id=body.trace_id,
+                    case_id=body.order_id,
+                    lifecycle_stage="buyer_commitment",
+                    requested_quantity=sum(int(line.get("requested_qty") or 0) for line in resolved),
+                    resolved_sku=(
+                        str(resolved[0].get("item_ref") or "") if len(resolved) == 1 else None
+                    ),
+                )
+        except Exception as exc:
+            logging.getLogger("shopsquire.fulfillment.search_attribution").warning(
+                "buyer commitment attribution degraded order=%s error=%s",
+                body.order_id,
+                type(exc).__name__,
+            )
+            result["search_demand_attribution"] = {
+                "status": "degraded", "reason": type(exc).__name__,
+            }
         _notify_from_confirm(db, result)
     return result
 

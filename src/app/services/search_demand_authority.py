@@ -167,6 +167,102 @@ def append_search_observation(
     return dict(row)
 
 
+def append_lifecycle_transition(
+    db,
+    *,
+    tenant_id: str,
+    lifecycle_stage: str,
+    case_id: str | None = None,
+    trace_id: str | None = None,
+    requested_quantity: int | None = None,
+    resolved_sku: str | None = None,
+    inventory_snapshot: dict[str, Any] | None = None,
+    observed_at: str | None = None,
+    simulation_only: bool | None = None,
+) -> dict[str, Any]:
+    """Advance an existing search subject without reconstructing its identity from prose.
+
+    The prior observation supplies the tenant/session/actor/requirement/evidence identity.
+    If no prior subject exists, the caller receives a typed ``not_linked`` result rather
+    than a synthetic lifecycle record that would corrupt funnel attribution.
+    """
+    stage = str(lifecycle_stage or "").strip()
+    if stage not in STAGE_AUTHORITY:
+        raise ValueError("unsupported_search_lifecycle_stage")
+    tenant = str(tenant_id or "").strip()
+    case = str(case_id or "").strip()
+    trace = str(trace_id or "").strip()
+    if not tenant or not (case or trace):
+        raise ValueError("tenant_and_case_or_trace_required")
+    predicates = []
+    params: dict[str, Any] = {"tenant": tenant}
+    if case:
+        predicates.append("case_id=:case_id")
+        params["case_id"] = case
+    if trace:
+        predicates.append("trace_id=:trace_id")
+        params["trace_id"] = trace
+    prior = db.execute(text(
+        "SELECT id,trace_id,case_id,session_epoch,actor_hash,actor_dedup_class,"
+        "abuse_status,requirement_fingerprint,query_hash,resolved_sku,unresolved_concept,"
+        "requested_quantity,qualification_outcome,evidence_refs_json,source_policy_status,"
+        "inventory_snapshot_json,simulation_only FROM search_demand_observation "
+        "WHERE tenant_id=:tenant AND (" + " OR ".join(predicates) + ") "
+        "ORDER BY created_at DESC,id DESC LIMIT 1"
+    ), params).mappings().first()
+    if prior is None:
+        return {
+            "status": "not_linked",
+            "state_prevented": "lifecycle_attribution_without_prior_search_identity",
+            "lifecycle_stage": stage,
+        }
+
+    now = str(observed_at or _now())
+    row = dict(prior)
+    row.update({
+        "id": str(uuid.uuid4()),
+        "tenant_id": tenant,
+        "trace_id": trace or str(prior["trace_id"]),
+        "case_id": case or str(prior.get("case_id") or "") or None,
+        "resolved_sku": str(resolved_sku or prior.get("resolved_sku") or "").strip() or None,
+        "requested_quantity": (
+            max(0, int(requested_quantity))
+            if requested_quantity is not None else prior.get("requested_quantity")
+        ),
+        "lifecycle_stage": stage,
+        "authority": STAGE_AUTHORITY[stage],
+        "inventory_snapshot_json": (
+            json.dumps(_validated_inventory_snapshot(inventory_snapshot), sort_keys=True)
+            if inventory_snapshot is not None else str(prior["inventory_snapshot_json"])
+        ),
+        "observed_at": now,
+        "effective_at": now,
+        "supersedes_id": str(prior["id"]),
+        "simulation_only": (
+            bool(simulation_only) if simulation_only is not None else bool(prior["simulation_only"])
+        ),
+        "created_at": _now(),
+    })
+    db.execute(text("""
+        INSERT INTO search_demand_observation (
+          id, tenant_id, trace_id, case_id, session_epoch, actor_hash,
+          actor_dedup_class, abuse_status, requirement_fingerprint, query_hash,
+          resolved_sku, unresolved_concept, requested_quantity, qualification_outcome,
+          evidence_refs_json, source_policy_status, lifecycle_stage, authority,
+          inventory_snapshot_json, observed_at, effective_at, supersedes_id,
+          simulation_only, created_at
+        ) VALUES (
+          :id, :tenant_id, :trace_id, :case_id, :session_epoch, :actor_hash,
+          :actor_dedup_class, :abuse_status, :requirement_fingerprint, :query_hash,
+          :resolved_sku, :unresolved_concept, :requested_quantity, :qualification_outcome,
+          :evidence_refs_json, :source_policy_status, :lifecycle_stage, :authority,
+          :inventory_snapshot_json, :observed_at, :effective_at, :supersedes_id,
+          :simulation_only, :created_at
+        )
+    """), row)
+    return {"status": "appended", **row}
+
+
 def _all_rows(db, *, tenant_id: str) -> list[dict[str, Any]]:
     rows = db.execute(text("""
         SELECT id, trace_id, case_id, session_epoch, actor_hash, actor_dedup_class,
