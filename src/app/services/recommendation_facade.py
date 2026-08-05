@@ -502,11 +502,25 @@ def _read_session_slice(
     try:
         from src.app.services.memory import Memory
 
-        data = Memory(
+        memory = Memory(
             redis,
             tenant_id=tenant_id,
             session_epoch=session_epoch,
-        ).get_structured_state(uid)
+        )
+        data = memory.get_structured_state(uid)
+        legacy_from_context: Dict[str, Any] = {}
+        if not isinstance(data, dict) or not data:
+            # Some compatibility callers still persist the accepted slice in
+            # ``kv_state``.  Read it through Memory's tenant/epoch-scoped API;
+            # do not fall back to an unscoped key for named tenants.
+            context = memory.get_context(uid)
+            structured = context.get("structured_state") if isinstance(context, dict) else None
+            if isinstance(structured, dict) and structured:
+                data = structured
+            else:
+                candidate = context.get("kv") if isinstance(context, dict) else None
+                if isinstance(candidate, dict):
+                    legacy_from_context = candidate
         if (not isinstance(data, dict) or not data) and not session_epoch:
             # Compatibility for non-chat callers that have not adopted an
             # explicit epoch yet. Explicit epochs never read this shared key.
@@ -521,7 +535,7 @@ def _read_session_slice(
             if tenant_id != "default" or session_epoch:
                 return {}
             legacy_raw = redis.get(f"session:{uid}:kv_state")
-            legacy = json.loads(legacy_raw) if legacy_raw else {}
+            legacy = legacy_from_context or (json.loads(legacy_raw) if legacy_raw else {})
             if not isinstance(legacy, dict) or not legacy:
                 return {}
             confirmed = legacy.get("confirmed_slots") or {}
@@ -1088,7 +1102,12 @@ def dispatch_recommendation_core_typed(
         # (grounding error / retrieval failure) must NOT serve a 'try again' apology to a
         # canary buyer while a healthy legacy sits one return away. Honest degradation only
         # falls back when it produced nothing — an off-catalog refusal is a real answer, keep it.
-        if core.grounding in ("error", "empty") or (core.degraded and not core.products and not core.off_catalog):
+        if core.grounding in ("error", "empty") or (
+            not compatibility_cutover
+            and core.degraded
+            and not core.products
+            and not core.off_catalog
+        ):
             logger.info("core degraded (grounding=%s reason=%s) — falling through to legacy",
                         core.grounding, (core.extras or {}).get("degraded_reason"))
             _fallback_metric(f"grounding:{core.grounding}")

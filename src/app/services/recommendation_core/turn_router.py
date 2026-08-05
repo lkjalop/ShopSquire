@@ -597,6 +597,15 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     }
     parsed_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
     quantity = parsed_quantity[0] if parsed_quantity is not None else None
+    from src.app.services.attribute_registry import (
+        defs_union,
+        extract_keyed_quantity_requirements,
+    )
+
+    explicit_requirements = extract_keyed_quantity_requirements(
+        envelope.query,
+        defs_union(DEFAULT_VERTICALS),
+    )
     named_handles = set(_query_named_sold_handles(db, envelope))
     node = None
     subject_action = "switch"
@@ -618,6 +627,17 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
                 and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True):
             node = prior
             subject_action = "continue"
+    if node is None and explicit_requirements:
+        # A number+unit bound to a registry attribute is a verifiable filter,
+        # not a new product identity. During model outage it may refine the
+        # already accepted sold subject, but cannot create one on cold start.
+        prior = get_node(str(session.get("prior_node") or ""))
+        if (
+            prior is not None
+            and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True
+        ):
+            node = prior
+            subject_action = "continue"
     if node is None:
         semantic = _semantic_proposal_or_relation_fallback(
             {}, query=envelope.query, requirements={},
@@ -635,6 +655,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             total_budget_cents=total_budget_cents,
             budget_scope=budget_scope,
             semantic_proposal=semantic,
+            requirements=explicit_requirements,
         )
 
     budget_scope = classify_budget_scope(envelope.query)
@@ -665,6 +686,7 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         total_budget_cents=total_budget_cents,
         budget_scope=budget_scope,
         semantic_proposal=semantic,
+        requirements=explicit_requirements,
     )
 
 

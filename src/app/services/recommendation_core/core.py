@@ -324,13 +324,17 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     if decision.node_handle is None and (envelope.session or {}).get("prior_node"):
         try:
             prior = get_node(str((envelope.session or {}).get("prior_node") or ""))
-            if parse_budget(envelope.query) is not None and prior is not None:
+            if (
+                (parse_budget(envelope.query) is not None or decision.requirements)
+                and prior is not None
+            ):
                 decision = dataclasses.replace(
                     decision,
                     node_handle=prior.handle,
                     node_path=prior.full_path,
                     requested_product_node=prior.handle,
                     subject_from_session=True,
+                    subject_action="continue",
                 )
         except Exception as exc:
             logger.debug(
