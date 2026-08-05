@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { evidenceRows } from '../lib/evidenceDisplay';
 import styles from './DecisionTrace.module.css';
+import SemanticResolutionTrace from './SemanticResolutionTrace';
 import { procurementDraftPending, procurementGateDisplay } from '../lib/procurementGateDisplay';
 import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResult } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
@@ -39,6 +40,12 @@ type Trace = {
   policy_gates?: any;
   bitemporal?: any;
   model_selection?: {
+    provider?: string | null;
+    model?: string | null;
+    model_version?: string | null;
+    prompt_version?: string | null;
+    policy_version?: string | null;
+    authority?: string | null;
     selected?: string | null;
     tier?: number | null;
     complex?: boolean | null;
@@ -268,8 +275,8 @@ function getSummary(evt: TraceEvent): string {
   return String(original || 'event').replace(/_/g, ' ');
 }
 
-function humanizeKey(key: string): string {
-  return key
+function humanizeKey(key: unknown): string {
+  return String(key ?? 'not recorded')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
@@ -1128,7 +1135,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
         });
         if (r.ok) {
           const d = await safeJson(r);
-          if (mounted) setTrace(d);
+          if (mounted) {
+            setTrace(d);
+            if (Array.isArray((d as any)?.events)) mergeEvents((d as any).events);
+          }
           return;
         }
         // fallback to query endpoint
@@ -1431,6 +1441,35 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     candidates.sort((a, b) => b.score - a.score);
     return candidates[0].payload || null;
   })();
+  // Semantic resolution may be persisted on the normalized recommendation
+  // envelope, the trace projection, or an event retained by older stores.  It
+  // is decision evidence, so do not make its visibility depend on anchor/product
+  // scoring used to choose the preferred recommendation event.
+  const semanticEventPayload: any = [...(allDisplayEvents || [])]
+    .reverse()
+    .map((event: any) => event?.payload || {})
+    .find((eventPayload: any) => eventPayload?.semantic_resolution) || {};
+  const semanticResolution: any = (recommendationEventPayload as any)?.semantic_resolution
+    || (recommendationEventPayload as any)?.right_panel_contract?.semantic_resolution
+    || (trace as any)?.semantic_resolution
+    || (trace as any)?.intent_analysis?.semantic_resolution
+    || semanticEventPayload?.semantic_resolution
+    || null;
+  const semanticEvidence: any = (recommendationEventPayload as any)?.semantic_evidence
+    || (recommendationEventPayload as any)?.right_panel_contract?.semantic_evidence
+    || (trace as any)?.semantic_evidence
+    || semanticEventPayload?.semantic_evidence
+    || null;
+  const catalogAlignment: any = (recommendationEventPayload as any)?.catalog_alignment
+    || (recommendationEventPayload as any)?.right_panel_contract?.catalog_alignment
+    || (trace as any)?.catalog_alignment
+    || semanticEventPayload?.catalog_alignment
+    || null;
+  const caseObligations: any[] = (recommendationEventPayload as any)?.case_obligations
+    || (recommendationEventPayload as any)?.right_panel_contract?.case_obligations
+    || (trace as any)?.case_obligations
+    || semanticEventPayload?.case_obligations
+    || [];
   const whyAnchorSections: any[] = resolveWhyAnchorSections(trace, allDisplayEvents);
   const whyProducts: any[] = Array.isArray(trace?.products) && trace!.products!.length > 0
     ? (trace!.products || [])
@@ -2660,6 +2699,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
               {activeTab === 'why' && (
                 <div className={styles.summaryPane}>
+                  <SemanticResolutionTrace
+                    resolution={semanticResolution}
+                    evidence={semanticEvidence}
+                    alignment={catalogAlignment}
+                    caseObligations={caseObligations}
+                  />
                   <HippographEvidenceSurface insights={hippographInsights} />
                   {Array.isArray(whyAnchorSections) && whyAnchorSections.length > 0 ? (
                     (whyAnchorSections || []).map((sec: any, idx: number) => (
@@ -2676,7 +2721,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                               <strong>{p?.name || p?.sku || 'Product'}</strong>
                             </div>
                             <div className={styles.rowRight}>
-                              <span className={styles.scoreChip}>score {p?.score_norm ?? '?'}</span>
+                              <span className={styles.scoreChip}>
+                                {typeof p?.score_norm === 'number' ? `score ${p.score_norm}` : 'Score not recorded'}
+                              </span>
                             </div>
                             {Array.isArray(p?.reasons) && p.reasons.length > 0 && (
                               <div className={styles.pillRow}>
@@ -2702,7 +2749,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                           <span className={styles.sku}>{p?.sku || ''}</span>
                         </div>
                         <div className={styles.rowRight}>
-                          <span className={styles.scoreChip}>{p?.score_norm ?? '?'}</span>
+                          <span className={styles.scoreChip}>
+                            {typeof p?.score_norm === 'number' ? p.score_norm : 'Score not recorded'}
+                          </span>
                         </div>
                         {Array.isArray(p?.reason_codes) && p.reason_codes.length > 0 ? (
                           <div className={styles.pillRow}>
@@ -3073,6 +3122,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         <div className={styles.kvRow}><span>Score</span><span className={styles.mono}>{score ?? '--'} / 10</span></div>
                         <div className={styles.kvRow}><span>Tier</span><span>{tierName}</span></div>
                         <div className={styles.kvRow}><span>Model Selected</span><span>{cxEvt?.payload?.model || cxEvt?.payload?.llm_model || msTr?.selected || '--'}</span></div>
+                        <div className={styles.kvRow}><span>Provider</span><span>{(msTr as any)?.provider || 'deterministic / not recorded'}</span></div>
+                        <div className={styles.kvRow}><span>Model version</span><span className={styles.mono}>{(msTr as any)?.model_version || (msTr as any)?.model || '--'}</span></div>
+                        <div className={styles.kvRow}><span>Prompt / policy</span><span className={styles.mono}>{(msTr as any)?.prompt_version || '--'} / {(msTr as any)?.policy_version || '--'}</span></div>
+                        <div className={styles.kvRow}><span>Decision authority</span><span>{(msTr as any)?.authority || 'model proposes; reducer authorizes'}</span></div>
                         {/* Score bar */}
                         <div className={styles.scoreBar}>
                           <div className={styles.scoreBarFill} style={{ width: `${Math.min(100, (Number(score) || 0) * 10)}%` }} />
@@ -4766,7 +4819,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 </div>
               )}
 
-              {activeTab === 'raw' && trace && (
+              {activeTab === 'raw' && (trace || events.length > 0) && (
                 <>
                   {explainReplayLoading && <div className={styles.muted}>Loading replay payload...</div>}
                   {replay && (
@@ -4776,14 +4829,24 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     </>
                   )}
                   <div className={styles.sectionTitle}>Trace Payload</div>
-                  <pre className={styles.rawJson}>{JSON.stringify(trace, null, 2)}</pre>
+                  <pre className={styles.rawJson}>{JSON.stringify(
+                    trace || {
+                      trace_id: traceIdText,
+                      snapshot_status: 'unavailable',
+                      retained_normalized_events: events,
+                    },
+                    null,
+                    2,
+                  )}</pre>
                 </>
               )}
               </div>
 
               {!trace && (
                 <div className={styles.empty}>
-                  {traceIdText
+                  {traceIdText && events.length > 0
+                    ? `Durable trace snapshot unavailable for ${traceIdText}. ${events.length} normalized event(s) remain visible; no missing state or evidence is inferred.`
+                    : traceIdText
                     ? `Waiting for the durable trace snapshot for ${traceIdText}. No state or evidence is inferred while it is unavailable.`
                     : 'No backend trace id is available yet. Showing local image triage only.'}
                 </div>
