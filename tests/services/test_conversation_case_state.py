@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from src.app.services.conversation_case_state import (
+    CaseTurn,
     apply_case_amendment,
     classify_case_turn,
     decompose_case_obligations,
@@ -12,6 +13,66 @@ from src.app.services.conversation_case_state import (
     record_case_turn,
     reduce_case_obligations,
 )
+
+
+class _FakeResult:
+    def __init__(self, row=None, rowcount=0):
+        self._row = row
+        self.rowcount = rowcount
+
+    def first(self):
+        return self._row
+
+
+class _CaptureCaseDb:
+    def __init__(self) -> None:
+        self.insert_params = None
+        self.committed = False
+
+    def execute(self, statement, params):
+        sql = str(statement)
+        if "FROM conversation_case_state" in sql:
+            return _FakeResult(("state-1", json.dumps({"sku": "SKU-1"}), 1))
+        if "field_name=:field" in sql:
+            return _FakeResult(None)
+        if "SELECT status FROM conversation_case_amendment" in sql:
+            return _FakeResult(None)
+        if "INSERT INTO conversation_case_amendment" in sql:
+            self.insert_params = dict(params)
+            return _FakeResult(rowcount=1)
+        raise AssertionError(sql)
+
+    def commit(self):
+        self.committed = True
+
+
+def test_case_amendment_binds_native_boolean_for_postgres(monkeypatch) -> None:
+    from src.app.services import conversation_case_state as service
+
+    db = _CaptureCaseDb()
+    monkeypatch.setattr(
+        service,
+        "classify_case_turn",
+        lambda _message, current_state: CaseTurn(
+            "amend_destination", "destination", "Melbourne", 1.0,
+            "high", True, "explicit_destination",
+        ),
+    )
+
+    result = service.record_case_turn(
+        db,
+        tenant_id="tenant-a",
+        case_id="case-1",
+        session_epoch="epoch-1",
+        subject_ref="buyer-hash",
+        source_message_id="message-1",
+        message="ship it to Melbourne",
+    )
+
+    assert result["status"] == "pending_confirmation"
+    assert db.insert_params is not None
+    assert db.insert_params["confirmation"] is True
+    assert db.committed is True
 
 
 def _db() -> Session:

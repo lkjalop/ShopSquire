@@ -554,7 +554,9 @@ def record_case_turn(
             "act": turn.dialogue_act, "field": turn.field_name,
             "old": _json(current.get(turn.field_name)) if turn.field_name else None,
             "proposed": _json(turn.proposed_value), "confidence": turn.confidence, "risk": turn.risk,
-            "confirmation": int(turn.requires_confirmation), "status": status, "reason": turn.reason,
+            # Bind the semantic type. SQLite accepts bool for its integer affinity;
+            # PostgreSQL requires bool for the migration-owned BOOLEAN column.
+            "confirmation": bool(turn.requires_confirmation), "status": status, "reason": turn.reason,
             "provenance": _json({"kind": "buyer_conversation", "source_message_id": source_message_id, "classifier": "bounded_case_turns_v1"}),
             "supersedes": prior[0] if prior and status == "accepted" else None,
             "observed": timestamp, "effective": timestamp if status == "accepted" else None, "created": timestamp,
