@@ -208,6 +208,13 @@ def test_network_breakdown_merged_onto_availability(monkeypatch):
     net = payload["availability"]["network"]
     assert net["total_in_network"] == 17 and net["preferred_location"] == "sydney"
     assert net["transfer_plan"] == [{"from_location": "melbourne", "qty": 5}]
+    snapshot = payload["inventory_snapshot"]
+    assert snapshot["requested_quantity"] == 10
+    assert snapshot["local_atp"] == 5
+    assert snapshot["transferable"] == 5
+    assert snapshot["confirmed_atp"] == 10
+    assert snapshot["unconfirmed_shortfall"] == 0
+    assert snapshot["conservation_ok"] is True
     assert line == "On availability: 10 are available across the network; 5 at your preferred location now and 5 can transfer from other locations."
 
 
@@ -238,6 +245,13 @@ def test_bulk_alternatives_attached_on_shortfall(monkeypatch):
                                 payload=payload, uid="u1", trace_id="T1", flags={})
     opts = payload.get("fulfillment_options") or []
     types = {o["type"] for o in opts}
+    snapshot = payload["inventory_snapshot"]
+    assert snapshot["local_atp"] == 4
+    assert snapshot["confirmed_atp"] == 4
+    assert snapshot["unconfirmed_shortfall"] == 6
+    assert snapshot["conservation_ok"] is True
+    source = next(item for item in opts if item["type"] == "source_shortfall")
+    assert source["shortfall"] == 6
     assert "source_shortfall" in types and "substitute" in types  # supplier path + the alternative
     assert "fulfillment_case" not in payload  # flag off → still no case (alternatives are pre-commitment)
 

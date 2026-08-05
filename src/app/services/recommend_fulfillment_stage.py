@@ -15,6 +15,7 @@ NO procurement workflow logic lives in recommend.py — only this stage call. Ve
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from src.app.services.safe_stage import record_partial_failure
@@ -43,6 +44,53 @@ def _safe_int(v: Any) -> Optional[int]:
         return int(v)
     except (TypeError, ValueError):
         return None  # observable: callers treat None as "not stated"
+
+
+def _canonical_supply_snapshot(avail: Dict[str, Any], requested_qty: int) -> Dict[str, Any]:
+    """One conserved supply view for narration, alternatives, cases, RFQs, and analytics."""
+    requested = max(0, int(requested_qty or 0))
+    network = (avail or {}).get("network") if isinstance(avail, dict) else {}
+    # ``assess_network_availability`` historically returned ``applicable=True`` with an
+    # empty location map when its loader had no evidence (and also after a swallowed read
+    # failure).  Empty is therefore *unknown*, not an authoritative zero.  Use the network
+    # projection only when it carries at least one location observation; otherwise adapt
+    # the legacy aggregate availability into the same canonical snapshot.
+    has_location_evidence = bool(network.get("by_location")) if isinstance(network, dict) else False
+    if isinstance(network, dict) and network.get("applicable", True) is not False and has_location_evidence:
+        from src.app.services.multi_location_availability import combined_availability
+
+        combined = combined_availability(
+            str((avail or {}).get("sku") or ""),
+            requested,
+            by_location=dict(network.get("by_location") or {}),
+            preferred_location=network.get("preferred_location"),
+        )
+        local = int(combined.get("local_now") or 0)
+        transfer = int(combined.get("network_transfer") or 0)
+        shortfall = int(combined.get("supplier_rfq_qty") or 0)
+        confirmed = min(requested, local + transfer)
+    else:
+        confirmed = min(requested, max(0, int((avail or {}).get("in_stock") or 0)))
+        local = confirmed
+        transfer = 0
+        shortfall = max(0, requested - confirmed)
+    # The legacy inventory read does not yet expose a durable source revision.  Preserve that
+    # limitation explicitly instead of inventing a fresh version.
+    source_version = str((avail or {}).get("source_version") or "unversioned_inventory_read")
+    observed_at = str((avail or {}).get("observed_at") or datetime.now(timezone.utc).isoformat())
+    freshness = str((avail or {}).get("freshness_status") or "unknown")
+    return {
+        "status": "recorded" if source_version != "unversioned_inventory_read" else "degraded",
+        "requested_quantity": requested,
+        "local_atp": local,
+        "transferable": transfer,
+        "confirmed_atp": confirmed,
+        "unconfirmed_shortfall": shortfall,
+        "source_version": source_version,
+        "observed_at": observed_at,
+        "freshness_status": freshness,
+        "conservation_ok": requested == confirmed + shortfall,
+    }
 
 
 def _emit_trace(trace_id: Optional[str], event_type: str, source_id: str, payload_obj: Dict[str, Any],
@@ -288,6 +336,9 @@ def run_fulfillment_stage(
                 "transfer_plan": net.get("transfer_plan"), "fillable_from_network": net.get("fillable_from_network"),
                 "shortfall": net.get("shortfall"),
             }
+            snapshot = _canonical_supply_snapshot(payload["availability"], qty)
+            payload["availability"]["inventory_snapshot"] = snapshot
+            payload["inventory_snapshot"] = snapshot
             if not _primary_over_budget:  # G: don't advertise cross-store stock of an over-budget pick
                 line = _network_adjusted_availability_line(line, payload["availability"], primary_name=_primary_name)
     except Exception as exc:
@@ -296,11 +347,18 @@ def run_fulfillment_stage(
     # even before procurement cases are enabled) → fixes the blank-trace "market intelligence" gap.
     if is_bulk:
         _av = payload.get("availability") or {}
+        if not isinstance(_av.get("inventory_snapshot"), dict):
+            snapshot = _canonical_supply_snapshot(_av, qty)
+            _av["inventory_snapshot"] = snapshot
+            payload["inventory_snapshot"] = snapshot
         # HONEST labels: inventory availability is an INVENTORY step (was mislabelled Market_Intelligence);
         # the genuine market-intelligence step is emitted separately from the real analysis engine below.
         _emit_trace(trace_id, "bulk_availability_assessed", "Inventory_Availability_Agent",
-                    {"sku": _av.get("sku"), "order_qty": qty, "in_stock": _av.get("in_stock"),
-                     "shortfall": _av.get("shortfall"), "network": _av.get("network")})
+                    {"sku": _av.get("sku"), "order_qty": qty,
+                     "in_stock": _av.get("inventory_snapshot", {}).get("confirmed_atp"),
+                     "shortfall": _av.get("inventory_snapshot", {}).get("unconfirmed_shortfall"),
+                     "network": _av.get("network"),
+                     "inventory_snapshot": _av.get("inventory_snapshot")})
         _emit_market_intelligence(
             trace_id=trace_id, query=query, avail=_av, tenant_id=tenant_id)
         if not _primary_over_budget:
@@ -404,11 +462,12 @@ def _maybe_multiline_order(*, query, uid, uid_hash, trace_id, payload) -> str:
     # buyer-safe summary (no supplier identity): how the mixed order was split + the line items.
     payload["order_group"] = {
         "order_group_id": created.get("order_group_id"), "case_count": created.get("case_count"),
-        "lines": [{"item_ref": l["item_ref"], "quantity": l["requested_qty"]} for l in lines],
+        "lines": [{"item_ref": line_item["item_ref"], "quantity": line_item["requested_qty"]}
+                  for line_item in lines],
         "cases": [{"case_id": c["case_id"], "item_count": len(c["lines"]),
                    "total_quantity": c["total_quantity"]} for c in created.get("cases", [])],
     }
-    n_units = sum(int(l["requested_qty"]) for l in lines)
+    n_units = sum(int(line_item["requested_qty"]) for line_item in lines)
     return (f"Your mixed order ({len(lines)} item lines, {n_units} units) was split into "
             f"{created.get('case_count')} sourcing request(s) — each is awaiting your confirmation before "
             f"any supplier is contacted.")
@@ -437,12 +496,13 @@ def _fluid_multiline_intent(*, query, constraints, trace_id, payload, pr_id=None
         # NOTE: we proceed even when only ONE line resolved — collapsing a ≥2-phrase order to the single-line
         # path lost the other resolved line(s). The buyer's full intent is surfaced here (resolved + unresolved).
         plan = plan_order_split(db, lines=lines) if lines else {"group_count": 0}
-        _names = product_names(db, [l["item_ref"] for l in lines])  # buyer-facing names, not raw SKUs
+        _names = product_names(db, [line_item["item_ref"] for line_item in lines])  # buyer-facing names, not raw SKUs
     emit_split_trace(trace_id, plan=plan)  # the split is a visible (read-only) preview step
     payload["sourcing_intent"] = {
         "mode": "deferred_to_cart",
         "pr_id": pr_id,  # the STABLE order identity — amendments re-confirm onto the same PR (no duplicate cases)
-        "lines": [{"item_ref": l["item_ref"], "name": _names.get(l["item_ref"]), "quantity": l["requested_qty"]} for l in lines],
+        "lines": [{"item_ref": line_item["item_ref"], "name": _names.get(line_item["item_ref"]),
+                   "quantity": line_item["requested_qty"]} for line_item in lines],
         "planned_case_count": int(plan.get("group_count") or 0),
     }
     if unresolved:
@@ -451,7 +511,7 @@ def _fluid_multiline_intent(*, query, constraints, trace_id, payload, pr_id=None
     _reqs = _buyer_requirements(constraints or {}, query=query)
     if _reqs:
         payload["sourcing_intent"]["requirements"] = _reqs  # carried to confirm-cart → onto the case
-    n_units = sum(int(l["requested_qty"]) for l in lines)
+    n_units = sum(int(line_item["requested_qty"]) for line_item in lines)
     unresolved_note = (f" We couldn't match {len(unresolved)} item(s) you asked for — tell us which products "
                        f"you mean so nothing is missed." if unresolved else "")
     if not lines:
@@ -468,7 +528,12 @@ def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
     Best-effort; only gathers substitutes (a DB read) when there's actually a gap to fill."""
     try:
         net = (avail or {}).get("network") or {}
-        shortfall = int((avail or {}).get("shortfall") or 0)
+        snapshot = (
+            (avail or {}).get("inventory_snapshot")
+            if isinstance((avail or {}).get("inventory_snapshot"), dict)
+            else _canonical_supply_snapshot(avail or {}, qty)
+        )
+        shortfall = int(snapshot.get("unconfirmed_shortfall") or 0)
         if shortfall <= 0 and not net.get("transfer_plan"):
             return  # fulfillable as-is at the preferred location → no alternatives needed
         primary = str((avail or {}).get("sku") or "")
@@ -482,7 +547,7 @@ def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
                                         budget_max=(constraints or {}).get("budget_max"), limit=3) or []
         from src.app.services.bulk_alternatives import build_alternatives
         alts = build_alternatives(sku=primary, requested_qty=qty,
-                                  in_stock=int((avail or {}).get("in_stock") or 0), shortfall=shortfall,
+                                  in_stock=int(snapshot.get("local_atp") or 0), shortfall=shortfall,
                                   network=net, substitutes=subs,
                                   horizon_days=_safe_int((constraints or {}).get("availability_horizon_days")))
         if alts:
@@ -507,8 +572,13 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
         threshold = int((flags or {}).get("FULFILLMENT_BULK_THRESHOLD") or 5)
     except Exception:
         threshold = 5
-    shortfall = int((avail or {}).get("shortfall") or 0)
-    in_stock = int((avail or {}).get("in_stock") or 0)
+    snapshot = (
+        (avail or {}).get("inventory_snapshot")
+        if isinstance((avail or {}).get("inventory_snapshot"), dict)
+        else _canonical_supply_snapshot(avail or {}, order_qty)
+    )
+    shortfall = int(snapshot.get("unconfirmed_shortfall") or 0)
+    in_stock = int(snapshot.get("confirmed_atp") or 0)
     bulk_ok = order_qty >= threshold
     # EXPLICIT reorder/source intent on a bulk request → source the FULL requested qty even if it's in stock
     # (a B2B replenishment is a procurement decision, not gated on current retail availability). This is the
@@ -547,8 +617,9 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
             if not cid:
                 return
             _avail_patch = {"requested_qty": order_qty,
-                            "in_stock": int((avail or {}).get("in_stock") or 0),
-                            "shortfall": shortfall, "item_ref": item_ref}
+                            "in_stock": in_stock,
+                            "shortfall": shortfall, "item_ref": item_ref,
+                            "inventory_snapshot": dict(snapshot)}
             if isinstance((avail or {}).get("network"), dict):
                 _avail_patch["network"] = avail["network"]  # per-location + transfer plan → on the case
             _patch = {"availability": _avail_patch}
