@@ -35,6 +35,11 @@ export function AllocationWorkbench() {
   }
   const summary = view.summary;
   const recoveryOptions = view.recovery_options || [];
+  const committed = Math.max(0, Number(summary.committed_quantity || 0));
+  const allocated = Math.max(0, Math.min(committed, Number(summary.allocated_quantity || 0)));
+  const shortfall = Math.max(0, committed - allocated);
+  const allocatedPct = committed > 0 ? (allocated / committed) * 100 : 0;
+  const evidence = Object.values(view.metric_evidence || {});
   return (
     <section data-testid="allocation-workbench"
              style={{ border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: 10, padding: 12, marginBottom: 12 }}>
@@ -55,6 +60,44 @@ export function AllocationWorkbench() {
         <Metric label="Allocation pressure" value={`${Math.round(summary.allocation_pressure * 100)}%`} concern={summary.allocation_pressure > 0} />
         <Metric label="Oldest queue" value={age(summary.oldest_queue_age_seconds)} concern={summary.oldest_queue_age_seconds > 3600} />
       </div>
+      <div style={{ marginTop: 10, background: '#fff', border: '1px solid #dbeafe', borderRadius: 8, padding: 9 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
+          <strong>Current allocation position</strong>
+          <span>{allocated} allocated · {shortfall} shortfall</span>
+        </div>
+        <div
+          data-testid="allocation-current-state-bar"
+          role="img"
+          aria-label={`${allocated} allocated, ${shortfall} shortfall from ${committed} committed units`}
+          style={{ height: 15, display: 'flex', overflow: 'hidden', borderRadius: 999, background: '#fed7aa' }}
+        >
+          <div style={{ width: `${allocatedPct}%`, background: '#22c55e' }} />
+        </div>
+        <div style={{ color: '#64748b', fontSize: 11, marginTop: 5 }}>
+          Current projection only · Historical trend unavailable until governed snapshots are materialized
+        </div>
+      </div>
+      {evidence.length > 0 && (
+        <section data-testid="allocation-metric-evidence" style={{ marginTop: 10 }}>
+          <div><strong>Metric evidence</strong> · formula, source, denominator and authority</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(245px,1fr))', gap: 7, marginTop: 7 }}>
+            {evidence.map((item) => (
+              <div key={item.metric} data-testid={`allocation-metric-evidence-${item.metric}`}
+                   style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8, padding: 8, fontSize: 11 }}>
+                <strong>{item.metric.replace(/_/g, ' ')}</strong>
+                <div>Formula: {item.formula}</div>
+                <div>Source: {item.source} · {item.source_record_count} record(s)</div>
+                <div>Denominator: {item.denominator == null ? 'not applicable' : item.denominator}</div>
+                <div>Authority: {item.authority} · {item.status}</div>
+                <div>Window: {item.window.kind}</div>
+                {item.trend_status !== 'available' && (
+                  <div style={{ color: '#b45309' }}>Trend: {item.trend_status} · {item.reason || 'no reason recorded'}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       {view.demands.length > 0 && (
         <div style={{ overflowX: 'auto', marginTop: 10 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
