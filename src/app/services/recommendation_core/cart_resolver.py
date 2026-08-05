@@ -178,6 +178,16 @@ def _resolver_model() -> str:
 
 
 def _default_llm_fn(prompt: str, timeout: float) -> str:
+    explicit_enabled = str(os.getenv("CART_RESOLVER_MODEL_ENABLED", "")).strip().lower()
+    mock_runtime = str(os.getenv("USE_MOCK_LLM", "")).strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    enabled = (
+        explicit_enabled in {"1", "true", "yes", "on"}
+        if explicit_enabled else not mock_runtime
+    )
+    if not enabled:
+        return ""
     try:
         import httpx
         url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")

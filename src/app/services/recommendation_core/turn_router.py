@@ -167,12 +167,16 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
     acquired = False
     try:
         explicit_enabled = str(os.getenv("ROUTER_MODEL_ENABLED", "")).strip().lower()
+        mock_runtime = str(os.getenv("USE_MOCK_LLM", "")).strip().lower() in {
+            "1", "true", "yes", "on",
+        }
         enabled = (
             explicit_enabled in {"1", "true", "yes", "on"}
-            if explicit_enabled else True
+            if explicit_enabled else not mock_runtime
         )
         if not enabled:
-            metrics["outcome"] = "disabled"
+            metrics["provider"] = "mock" if mock_runtime else "disabled"
+            metrics["outcome"] = "mock_disabled" if mock_runtime else "disabled"
             return ""
         import httpx
         url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
