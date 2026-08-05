@@ -22,12 +22,14 @@ from src.app.services.experiment_ops import canary_assignment, composite_guardra
 from src.app.services.market_analysis import persist_findings, run_analysis
 from src.app.services.market_intelligence_agent import gather_market_context
 from src.app.services.ranking_nudge import apply_experiment_nudge
+from tests.market_migration_helpers import apply_market_migration
 
 
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_market_migration(s)
     apply_experiment_migrations(s)
     try:
         yield s

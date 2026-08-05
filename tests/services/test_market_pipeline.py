@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from src.app.services import attribution
 from src.app.services import market_pipeline as mp
+from tests.market_migration_helpers import apply_market_migration
 
 
 def _anom(is_anom, conf=0.95, sev="warn", z=3.0):
@@ -28,6 +29,7 @@ def _flag_last_outlier(series, domain):
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_market_migration(s)
     # real source tables the backfill reads
     s.execute(text(
         "CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT, "

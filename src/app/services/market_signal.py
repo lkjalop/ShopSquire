@@ -22,40 +22,16 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-import weakref
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
 from sqlalchemy import inspect as _sa_inspect
 from sqlalchemy import text
 
-from src.app.services.schema_policy import runtime_ddl_allowed
-
 SCHEMA_VERSION = 1  # bump when the envelope shape changes; stored per row so old rows stay readable
 DEFAULT_TENANT = "default"  # single-tenant today; the column isolates a future multi-tenant deployment
 
-_DDL = """
-CREATE TABLE IF NOT EXISTS market_signal (
-    id TEXT PRIMARY KEY,
-    tenant_id TEXT DEFAULT 'default',
-    schema_version INTEGER DEFAULT 1,
-    signal_type TEXT,
-    source TEXT,
-    dedup_key TEXT,
-    trust_score REAL,
-    payload_json TEXT,
-    occurred_at TEXT,
-    ingested_at TEXT DEFAULT CURRENT_TIMESTAMP
-)
-"""
-
 # Columns added AFTER the table first shipped — applied to pre-existing tables on upgrade.
-_UPGRADE_COLS = (
-    ("tenant_id", "TEXT DEFAULT 'default'"),
-    ("schema_version", "INTEGER DEFAULT 1"),
-)
-
-
 @dataclass(frozen=True)
 class MarketSignal:
     signal_type: str          # demand | conversion | support_objection | competitor | ...
@@ -68,54 +44,18 @@ class MarketSignal:
     schema_version: int = SCHEMA_VERSION
 
 
-# Dedup is per-tenant (UNIQUE on tenant_id+dedup_key) so two tenants with identical payloads keep
-# distinct rows; the content hash stays tenant-blind. Plus query indexes for time/type/source scans.
-# NOTE: no DROP INDEX here — that ran on EVERY ingest, dropping+recreating the unique index per event
-# (table lock + a window with no dedup protection). The one-time conversion of a legacy single-column
-# ix_market_signal_dedup → the composite lives in the Alembic migration (20260626_market_autonomy),
-# which runs once. CREATE ... IF NOT EXISTS here is a cheap catalog no-op once the index exists.
-_INDEXES = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS ix_market_signal_dedup ON market_signal(tenant_id, dedup_key)",
-    "CREATE INDEX IF NOT EXISTS ix_market_signal_type ON market_signal(signal_type)",
-    "CREATE INDEX IF NOT EXISTS ix_market_signal_source ON market_signal(source)",
-    "CREATE INDEX IF NOT EXISTS ix_market_signal_occurred ON market_signal(occurred_at)",
-)
-
-
-_COLS_INTROSPECTED = weakref.WeakSet()  # engines whose column-upgrade check has already run
-
-
-def _ensure_columns(db, table: str, coldefs) -> None:
-    """Add missing columns to a pre-existing table (portable upgrade). Introspects first so the normal
-    path issues no failing DDL (a duplicate-column ALTER can poison a transaction on some backends).
-    The reflection is memoized per-engine — fresh tables already have every column, and a real upgrade
-    only needs to run once, so we don't pay get_columns() on every ingest/read."""
-    try:
-        bind = db.get_bind()
-    except Exception:
-        bind = None
-    if bind is not None and bind in _COLS_INTROSPECTED:
-        return  # already checked this engine — skip the reflection cost
-    try:
-        # introspect via the session's OWN connection — never the engine (a pooled checkout would be
-        # returned + rolled back, discarding the session's uncommitted inserts).
-        have = {c["name"] for c in _sa_inspect(db.connection()).get_columns(table)}
-    except Exception:
-        return  # table not present yet (CREATE above will include every column) → don't memoize, retry
-    for name, decl in coldefs:
-        if name not in have:
-            db.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
-    if bind is not None:
-        _COLS_INTROSPECTED.add(bind)
-
-
 def ensure_table(db) -> None:
-    if not runtime_ddl_allowed():
-        return
-    db.execute(text(_DDL))
-    _ensure_columns(db, "market_signal", _UPGRADE_COLS)  # before the composite index needs tenant_id
-    for stmt in _INDEXES:
-        db.execute(text(stmt))
+    """Assert Alembic-owned schema without mutating it at request time."""
+    inspector = _sa_inspect(db.connection())
+    if not inspector.has_table("market_signal"):
+        raise RuntimeError("market_signal schema missing; run Alembic migrations")
+    required = {"id", "tenant_id", "schema_version", "dedup_key", "payload_json"}
+    present = {column["name"] for column in inspector.get_columns("market_signal")}
+    missing = sorted(required - present)
+    if missing:
+        raise RuntimeError(
+            "market_signal schema incompatible; run Alembic migrations: " + ",".join(missing)
+        )
 
 
 def _norm_ts(value: Any) -> str:

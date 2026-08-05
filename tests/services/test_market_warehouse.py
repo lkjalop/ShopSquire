@@ -9,15 +9,15 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.app.services import market_signal as ms
 from src.app.services import market_warehouse as mw
+from tests.market_migration_helpers import apply_market_migration
 
 
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
-    ms.ensure_table(s)
+    apply_market_migration(s)
     try:
         yield s
     finally:
@@ -47,10 +47,12 @@ def test_roll_up_aggregates_by_day_type_source(db):
 def test_roll_up_is_idempotent(db):
     _ins(db, "demand", "orders", 0.5, "2026-06-25 10:00:00")
     db.commit()
-    mw.roll_up(db, tenant_id="default"); db.commit()
+    mw.roll_up(db, tenant_id="default")
+    db.commit()
     _ins(db, "demand", "orders", 0.9, "2026-06-25 12:00:00")  # same bucket, new signal
     db.commit()
-    mw.roll_up(db, tenant_id="default"); db.commit()  # re-run: bucket UPDATED, not duplicated
+    mw.roll_up(db, tenant_id="default")
+    db.commit()  # re-run: bucket UPDATED, not duplicated
     rows = db.execute(text("SELECT count(*), max(signal_count) FROM market_signal_rollup")).fetchone()
     assert rows[0] == 1 and rows[1] == 2  # one bucket row, count now 2
 
@@ -60,7 +62,8 @@ def test_prune_keeps_window_and_depth_survives(db):
     _ins(db, "demand", "orders", 0.7, "2026-06-25 11:00:00")
     _ins(db, "competitor", "price", 0.8, "2026-06-26 09:00:00")
     db.commit()
-    mw.roll_up(db, tenant_id="default"); db.commit()
+    mw.roll_up(db, tenant_id="default")
+    db.commit()
     pruned = mw.prune_signals(db, older_than_days=1, tenant_id="default", now_iso="2026-06-27 00:00:00")
     db.commit()
     assert pruned == 2  # the two 06-25 rows; the in-window 06-26 row stays
@@ -81,7 +84,8 @@ def test_query_depth_filters_by_type_and_window(db):
     _ins(db, "competitor", "price", 0.8, "2026-06-26 10:00:00")
     _ins(db, "demand", "orders", 0.9, "2026-01-01 10:00:00")  # outside a 30-day window
     db.commit()
-    mw.roll_up(db, tenant_id="default"); db.commit()
+    mw.roll_up(db, tenant_id="default")
+    db.commit()
     only_demand = mw.query_depth(db, tenant_id="default", signal_type="demand", now_iso="2026-06-27 00:00:00", days=30)
     assert {d["signal_type"] for d in only_demand} == {"demand"}
     assert all(d["bucket_date"] >= "2026-05-28" for d in only_demand)  # Jan row excluded by the 30-day window
@@ -101,7 +105,7 @@ def test_run_pipeline_reports_rolled_up_key():
     # the warehouse step is wired into the real pipeline (rollup runs; retention env-gated, default off)
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     db = sessionmaker(bind=eng, future=True)()
-    ms.ensure_table(db)
+    apply_market_migration(db)
     from datetime import datetime, timezone
     current_day = datetime.now(timezone.utc).date().isoformat()
     _ins(db, "demand", "orders", 0.9, f"{current_day} 10:00:00")

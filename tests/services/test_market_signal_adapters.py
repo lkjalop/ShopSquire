@@ -17,6 +17,7 @@ from src.app.services.market_signal_adapters import (
     from_search,
     from_support_objection,
 )
+from tests.market_migration_helpers import apply_market_migration
 
 
 # ── pure mappers ─────────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ def test_inline_mappers_reject_missing_fields():
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_market_migration(s)
     s.execute(text("CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT, "
                    "tenant_id TEXT DEFAULT 'default')"))
     s.execute(text("CREATE TABLE search_events (id TEXT, event_time TEXT, uid_hash TEXT, query TEXT, "

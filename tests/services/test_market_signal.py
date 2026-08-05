@@ -10,14 +10,15 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.app.services import market_signal as ms
 from src.app.services.market_signal import MarketSignal, ingest, is_fresh, normalize
+from tests.market_migration_helpers import apply_market_migration
 
 
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_market_migration(s)
     try:
         yield s
     finally:
@@ -90,7 +91,6 @@ def test_ingest_drops_stale_when_enforced(db):
 
 
 def test_dedup_unique_index_present(db):
-    ms.ensure_table(db)
     idx = db.execute(text(
         "SELECT name FROM sqlite_master WHERE type='index' AND name='ix_market_signal_dedup'")).fetchone()
     assert idx is not None  # race-safe dedup is enforced at the DB level

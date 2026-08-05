@@ -8,12 +8,14 @@ from sqlalchemy.pool import StaticPool
 
 from src.app.services import market_replay as mr
 from src.app.services.market_analysis import load_recent_findings
+from tests.market_migration_helpers import apply_market_migration
 
 
 @pytest.fixture()
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    apply_market_migration(s)
     try:
         yield s
     finally:
@@ -23,6 +25,7 @@ def db():
 def test_load_run_produces_findings():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     db = sessionmaker(bind=eng, future=True)()
+    apply_market_migration(db)
     mr.load_days(db, up_to_day=mr.TOTAL_DAYS)
     out = mr.run(db)
     assert out["persisted"] >= 1
