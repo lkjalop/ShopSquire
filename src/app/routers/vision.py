@@ -9,6 +9,7 @@ import re
 import uuid
 import hashlib
 import inspect
+import logging
 
 from src.app.models.event_log import ensure_event_log_table
 from src.app.models.db import db_session
@@ -29,6 +30,7 @@ from src.app.platform.tenant_context import current_tenant_id
 from src.app.services.faq_bank import match_faq
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
+logger = logging.getLogger("shopsquire.vision")
 
 _IMAGE_WORKERS = max(1, min(int(os.getenv("CV_IMAGE_WORKERS", "3") or 3), 8))
 _IMAGE_EXECUTOR = _futures.ThreadPoolExecutor(
@@ -1414,7 +1416,13 @@ async def triage(
         canonical_clean = artifact_state == "clean"
         analysis_state["artifact_state"] = artifact_state
         resp["artifact"]["authority"] = "read_only" if canonical_clean else "blocked"
-    except Exception:
+    except Exception as exc:
+        logger.error(
+            "artifact verdict persistence failed artifact_id=%s error_type=%s error=%s",
+            artifact_id,
+            type(exc).__name__,
+            str(exc)[:240],
+        )
         analysis_state["analysis_degraded"] = True
         analysis_state["degraded_reasons"].append("artifact_verdict_persistence_error")
         resp["artifact"].update({"state": "degraded", "authority": "blocked"})

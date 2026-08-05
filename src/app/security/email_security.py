@@ -1244,12 +1244,31 @@ def evaluate_email_security(
                 }
             )
         if int((ocr_sanitization_meta or {}).get("prompt_instruction_hits") or 0) > 0:
+            prompt_hits = int((ocr_sanitization_meta or {}).get("prompt_instruction_hits") or 0)
             extra_inds.append(
                 {
                     "type": "ocr_prompt_instruction_sanitized",
-                    "value": int((ocr_sanitization_meta or {}).get("prompt_instruction_hits") or 0),
+                    "value": prompt_hits,
                     "reason": "Untrusted OCR prompt-instruction text was sanitized",
                 }
+            )
+            # Sanitization is containment, not exoneration. Preserve the canonical
+            # threat classes after removing the hostile string so the verdict,
+            # SIEM event, and audit trail cannot downgrade a detected instruction
+            # to a generic anomaly merely because model context was protected.
+            extra_inds.extend(
+                [
+                    {
+                        "type": "prompt_injection",
+                        "value": prompt_hits,
+                        "reason": "Prompt-like instruction detected in untrusted OCR content",
+                    },
+                    {
+                        "type": "ocr_overlay_malicious_text",
+                        "value": prompt_hits,
+                        "reason": "OCR overlay contained an untrusted instruction",
+                    },
+                ]
             )
         if extra_inds:
             extracted["indicators"] = list(extracted.get("indicators") or []) + extra_inds
