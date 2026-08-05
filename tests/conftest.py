@@ -570,7 +570,13 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
         from src.app.services.recommend_narration_jobs import (
             shutdown_narration_resources,
         )
-        shutdown_narration_resources(wait=False)
+        # The leak assertion runs immediately below.  ``wait=False`` only
+        # initiates ThreadPoolExecutor shutdown, so an idle worker can still
+        # be visible for a scheduling tick and produce a false-positive
+        # ``narration_0`` leak after every test has passed.  Session teardown
+        # is the ownership boundary where waiting is both bounded and
+        # required; application lifespan remains non-blocking.
+        shutdown_narration_resources(wait=True)
     except Exception:
         pass
     leaked_threads = [
