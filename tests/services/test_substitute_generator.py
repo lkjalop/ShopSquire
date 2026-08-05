@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.app.services.substitute_generator import find_substitutes
+from src.app.services.substitute_generator import find_substitutes, find_substitutes_typed
 
 
 # profile_fn stub: the comparable attributes are ram_gb + storage_gb (vertical-blind — supplied here)
@@ -71,6 +71,27 @@ def test_price_delta_and_tradeoff_direction(db):
 
 def test_no_catalog_row_returns_empty(db):
     assert find_substitutes(db, "NOPE", profile_fn=_profile) == []
+
+
+def test_typed_missing_seed_is_not_a_source_failure(db):
+    assert find_substitutes_typed(db, "NOPE", profile_fn=_profile) == {
+        "status": "none_qualified",
+        "items": [],
+        "reason": "seed_not_found",
+    }
+
+
+def test_typed_schema_failure_does_not_poison_caller_transaction():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    session = sessionmaker(bind=engine, future=True)()
+    try:
+        result = find_substitutes_typed(session, "SEED", profile_fn=_profile)
+
+        assert result["status"] == "schema_incompatible"
+        assert result["items"] == []
+        assert session.execute(text("SELECT 1")).scalar_one() == 1
+    finally:
+        session.close()
 
 
 def test_no_profile_dims_still_returns_in_budget_same_category(db):
