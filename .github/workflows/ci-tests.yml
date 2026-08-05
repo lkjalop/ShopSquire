@@ -40,14 +40,18 @@ jobs:
       USE_MOCK_INVENTORY: "1"
       USE_MOCK_LLM: "1"
       USE_OLLAMA_INTENT: "0"
+      # Quota/rate policy has dedicated contract suites. General file shards
+      # must not share a daily counter whose ordering changes their semantics.
+      TOKEN_BUDGET_ENABLED: "0"
+      TENANT_QUOTAS_ENABLED: "0"
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
       - name: Install system deps
@@ -159,7 +163,7 @@ jobs:
           test "$failures" -eq 0
       - name: Upload general-suite diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: general-suite-diagnostics-${{ matrix.shard }}
           path: test-results/**
