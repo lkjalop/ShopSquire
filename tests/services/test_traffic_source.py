@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.app.services import traffic_source as ts
+from tests.market_migration_helpers import apply_market_migration
 
 
 @pytest.fixture()
@@ -14,6 +15,7 @@ def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
     try:
+        apply_market_migration(s)
         yield s
     finally:
         s.close()

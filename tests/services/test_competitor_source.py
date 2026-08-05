@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from src.app.services import commerce_catalog as cc
 from src.app.services import competitor_source as cs
 from src.app.services import market_pipeline as mp
+from tests.market_migration_helpers import apply_market_migration
 
 
 @pytest.fixture()
@@ -18,6 +19,7 @@ def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
     try:
+        apply_market_migration(s)
         yield s
     finally:
         s.close()
