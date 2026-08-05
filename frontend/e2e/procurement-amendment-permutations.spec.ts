@@ -38,7 +38,7 @@ test('relative bulk amendment preserves the cart line and exposes one confirmati
 
   await expect(page.locator('[data-testid^="qty-"]').first()).toHaveText('40', { timeout: 30_000 });
   await expect(page.getByText(/Done.*applied the change to your cart/i).last()).toBeVisible();
-  await expect(page.getByRole('button', { name: /Confirm delivery plan/i })).toBeVisible();
+  await expect(page.getByTestId('split-confirm')).toBeVisible();
   await expect(page.getByText(/Found \d+ products/i)).toHaveCount(0);
 });
 
