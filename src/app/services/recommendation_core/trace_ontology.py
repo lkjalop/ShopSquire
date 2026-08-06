@@ -56,6 +56,105 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
         },
     }]
 
+    intent = dict((getattr(core, "extras", {}) or {}).get("intent") or {})
+    title_requirements = dict(intent.get("title_requirements") or {})
+    workload_evidence = dict(
+        title_requirements.get("external_workload_evidence") or {}
+    )
+    workload_items = [
+        dict(item) for item in (workload_evidence.get("items") or [])
+        if isinstance(item, dict)
+    ]
+    if workload_items:
+        resolved = sum(
+            1 for item in workload_items if str(item.get("status") or "") == "resolved"
+        )
+        steps.append({
+            "id": "workload-evidence",
+            "kind": "connector",
+            "authority": "supplies_evidence",
+            "label": "Resolve named workload requirements",
+            "status": "resolved" if resolved == len(workload_items) else "incomplete",
+            "source": "workload_evidence_registry",
+            "output": {
+                "resolved": resolved,
+                "requested": len(workload_items),
+                "live_allowed": bool(workload_evidence.get("live_allowed")),
+                "consent_recorded": bool(workload_evidence.get("consent_recorded")),
+                "provider_coverage": [
+                    {
+                        "kind": item.get("kind"),
+                        "requested_name": item.get("requested_name"),
+                        "coverage": item.get("provider_coverage"),
+                        "attempts": item.get("provider_attempts") or [],
+                    }
+                    for item in workload_items
+                ],
+                "items": workload_items,
+            },
+        })
+
+    workload_authorization = dict(
+        (getattr(core, "extras", {}) or {}).get("workload_authorization") or {}
+    )
+    if workload_authorization:
+        steps.append({
+            "id": "workload-authorization",
+            "kind": "gate",
+            "authority": "authorizes",
+            "label": "Authorize workload-to-product fit",
+            "status": workload_authorization.get("status") or "unknown",
+            "source": "recommendation_core",
+            "output": workload_authorization,
+        })
+
+    research_plan = dict(
+        ((getattr(core, "extras", {}) or {}).get("plan") or {}).get("research_plan") or {}
+    )
+    if research_plan.get("evidence_needs") or research_plan.get("material_slots"):
+        steps.append({
+            "id": "research-plan",
+            "kind": "stage",
+            "authority": "plans",
+            "label": "Plan bounded evidence collection",
+            "status": "authorized" if research_plan.get("external_research_authorized") else "consent_required",
+            "source": "recommendation_core",
+            "output": research_plan,
+        })
+
+    semantic_evidence = dict(
+        (getattr(core, "extras", {}) or {}).get("semantic_evidence") or {}
+    )
+    if semantic_evidence:
+        steps.append({
+            "id": "semantic-evidence",
+            "kind": "connector",
+            "authority": "supplies_evidence",
+            "label": "Gather concept and requirement evidence",
+            "status": semantic_evidence.get("source_health") or "unknown",
+            "source": "evidence_orchestrator",
+            "latency_ms": semantic_evidence.get("ms"),
+            "output": semantic_evidence,
+        })
+
+    semantic_resolution = dict(
+        (getattr(core, "extras", {}) or {}).get("semantic_resolution") or {}
+    )
+    if semantic_resolution:
+        steps.append({
+            "id": "semantic-authorization",
+            "kind": "gate",
+            "authority": "authorizes",
+            "label": "Authorize concept-to-catalog fit",
+            "status": (
+                "accepted"
+                if semantic_resolution.get("catalog_authority") == "permitted"
+                else "blocked"
+            ),
+            "source": "semantic_resolution",
+            "output": semantic_resolution,
+        })
+
     for index, stage in enumerate(stages):
         name = str(stage.get("stage") or f"stage-{index}")
         if name == "route+intent":

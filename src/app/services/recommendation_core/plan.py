@@ -54,6 +54,7 @@ class Plan:
     needs_concept_resolution: bool = False
     semantic_proposal: Dict[str, Any] = field(default_factory=dict)
     external_research_authorized: bool = False
+    research_plan: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -63,11 +64,14 @@ class Plan:
             "needs_concept_resolution": self.needs_concept_resolution,
             "semantic_proposal": dict(self.semantic_proposal),
             "external_research_authorized": self.external_research_authorized,
+            "research_plan": dict(self.research_plan),
         }
 
 
 def derive_plan(decision: TurnDecision) -> Plan:
-    if decision.lane == "PROCUREMENT" and decision.case_operation in ("status", "summary"):
+    if decision.lane == "PROCUREMENT" and decision.case_operation in (
+        "status", "summary", "amendment",
+    ):
         return Plan(steps=["handoff_procurement"], source="derived")
     steps = list(_LANE_PLANS.get(decision.lane, ["retrieve"]))
     # honesty guard at derivation too: an ungranted refusal can never be planned

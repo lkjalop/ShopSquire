@@ -111,7 +111,9 @@ def test_unresolved_fit_blocks_procurement_before_catalog_retrieval(
     )
 
     assert response.products == []
-    assert response.clarify[0]["reason"] == "unresolved_material_concept"
+    assert response.clarify[0]["reason"] == "external_research_consent_required"
+    assert response.clarify[0]["id"] == "external_research_consent"
+    assert "approved official sources" in response.clarify[0]["text"]
     assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
     assert response.extras["case_anchor"]["case_id"].startswith("semantic-")
     assert response.extras["case_anchor"]["catalog_authority"] == "blocked"
@@ -119,6 +121,45 @@ def test_unresolved_fit_blocks_procurement_before_catalog_retrieval(
     assert "supplier_enquiry" in response.extras["semantic_resolution"]["state_prevented"]
     assert response.extras["requested_quantity"] == expected_quantity
     assert not any(item.stage.startswith("plan:") for item in response.stage_results)
+
+
+def test_authorized_research_that_cannot_resolve_concept_then_asks_material_question(db):
+    model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "confidence": 0.86,
+        "semantic_proposal": {
+            "desired_outcome": "find a suitable simulation workstation",
+            "concepts": [{
+                "text": "digital twin simulation",
+                "status": "unresolved",
+                "material": True,
+                "interpretations": [],
+            }],
+            "evidence_questions": [{
+                "question_id": "software_or_standard",
+                "question": "Which software, standard, or workflow version must be supported?",
+                "purpose": "resolve_compatibility",
+                "material": True,
+            }],
+            "proposed_action": "research_then_clarify",
+            "confidence": 0.75,
+        },
+    }
+
+    response = recommend_turn(
+        db,
+        _env(
+            "Recommend a laptop for digital twin simulation; check approved official sources.",
+            external_research_consent=True,
+        ),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.products == []
+    assert response.clarify[0]["reason"] == "unresolved_material_concept"
+    assert response.clarify[0]["id"] == "software_or_standard"
+    assert response.extras["semantic_resolution"]["residual_route"] == "ASK"
 
 
 def test_material_capability_relation_blocks_when_model_omits_semantic_proposal(db):
@@ -146,6 +187,45 @@ def test_material_capability_relation_blocks_when_model_omits_semantic_proposal(
     assert "catalog_recommendation" in response.extras["semantic_resolution"]["state_prevented"]
 
 
+def test_material_relation_reaches_model_before_deterministic_fallback(db):
+    calls = []
+
+    def interpret(_prompt, _timeout):
+        calls.append(True)
+        return json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-6",
+            "confidence": 0.84,
+            "semantic_proposal": {
+                "desired_outcome": "qualify a machine-maintenance simulation workstation",
+                "concepts": [{
+                    "text": "machine-maintenance simulation",
+                    "status": "unresolved",
+                    "material": True,
+                    "interpretations": [],
+                }],
+                "evidence_questions": [{
+                    "question_id": "model_scale",
+                    "question": "What simulation scale and time-to-result target is required?",
+                    "purpose": "resolve_performance_target",
+                    "material": True,
+                }],
+                "proposed_action": "research_then_clarify",
+                "confidence": 0.84,
+            },
+        })
+
+    decision = route_turn(
+        db,
+        _env("Recommend a laptop capable of machine-maintenance simulation."),
+        llm_fn=interpret,
+    )
+
+    assert calls == [True]
+    assert decision.source == "model"
+    assert decision.semantic_proposal["desired_outcome"].startswith("qualify")
+
+
 def test_model_outage_still_blocks_material_capability_fit(db):
     response = recommend_turn(
         db,
@@ -168,6 +248,53 @@ def test_model_outage_on_ordinary_query_is_typed_and_visibly_degraded(db):
     assert response.extras["router_outcome"]["status"] == "source_unavailable"
     assert response.extras["router_outcome"]["late_results_accepted"] is False
     assert response.extras["router_outcome"]["fallback_authority"] == "deterministic_only"
+
+
+def test_unresolved_named_software_cannot_fall_through_to_generic_profile(db):
+    model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "use_cases": ["engineering_student"],
+        "workload_entities": [{"kind": "software", "name": "Siemens NX 2025"}],
+        "clarification_relation": "answer",
+        "confidence": 0.92,
+    }
+
+    response = recommend_turn(
+        db,
+        _env(
+            "Use Siemens NX 2025 locally for maintenance simulation.",
+            external_research_consent=True,
+        ),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.products == []
+    assert response.clarify[0]["reason"] == "named_workload_evidence_unresolved"
+    assert response.extras["workload_authorization"]["status"] == "blocked"
+    assert "catalog_qualification" in response.extras["workload_authorization"]["state_prevented"]
+    assert not any(item.stage.startswith("plan:") for item in response.stage_results)
+    assert "generic profile" in response.message
+
+
+def test_named_workload_without_consent_requests_research_before_catalog(db):
+    model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "use_cases": ["engineering_student"],
+        "workload_entities": [{"kind": "software", "name": "Siemens NX 2025"}],
+        "confidence": 0.9,
+    }
+
+    response = recommend_turn(
+        db,
+        _env("A laptop for Siemens NX 2025."),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.products == []
+    assert response.clarify[0]["missing_slots"] == ["external_research_consent"]
+    assert "official sources" in response.message
 
 
 def test_plan_and_core_share_the_research_authority_contract(db):
@@ -487,6 +614,57 @@ def test_router_clamps_requirements(db):
         "SEARCH", None, {"refresh_hz": [">=", 144], "invented_key": [">=", 5],
                          "ram_gb": ["~=", 16], "gpu_vram_gb": [">=", 9999]}))
     assert d.requirements == {"refresh_hz": [(">=", 144.0)]}   # bad key/op/bounds all dropped
+
+
+def test_router_separates_delivery_window_from_product_fit_requirements(db):
+    raw = json.dumps({
+        "lane": "PROCUREMENT",
+        "handle": "el-6-11-2",
+        "requirements": {"delivery_days": "2"},
+        "operational_constraints": {
+            "delivery_window_days": 2,
+            "payment_plan": "balance_after_confirmation",
+        },
+        "quantity": 80,
+        "subject_action": "continue",
+        "procurement_context": "current_order",
+        "confidence": 0.9,
+    })
+
+    decision = route_turn(
+        db,
+        _env("Keep the order. Delivery within two business days; deposit now and balance later."),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.requirements == {}
+    assert decision.operational_constraints == {
+        "delivery_window_days": 2,
+        "payment_plan": "balance_after_confirmation",
+    }
+    assert decision.model_proposal["requirements"]["delivery_days"] == "2"
+
+
+def test_explicit_delivery_and_deposit_survive_a_model_that_omits_optional_fields(db):
+    raw = json.dumps({
+        "lane": "PROCUREMENT",
+        "handle": "el-6-11-2",
+        "requirements": {},
+        "subject_action": "continue",
+        "procurement_context": "current_order",
+        "confidence": 0.9,
+    })
+
+    decision = route_turn(
+        db,
+        _env("Keep this cart. Delivery within two business days; deposit now, balance later."),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.operational_constraints == {
+        "delivery_window_days": 2,
+        "payment_plan": "balance_after_confirmation",
+    }
 
 
 def test_core_uses_workload_as_primary_context_when_audience_is_also_present(db):
@@ -1856,6 +2034,43 @@ def test_active_procurement_status_is_deterministic_and_retrieval_free(db):
     assert decision.case_operation == "status"
     assert decision.exact_product_sku == "RGAM-0007"
     assert decision.quantity == 80
+    assert derive_plan(decision).steps == ["handoff_procurement"]
+
+
+def test_delivery_and_payment_amendment_is_deterministic_and_retrieval_free(db):
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "prior_node": "el-6-11-2",
+        "accepted_constraints": {
+            "exact_product_sku": "RGAM-0007",
+            "quantity": 80,
+            "product_selection_authority": "persisted_cart",
+        },
+    }
+    calls = {"model": 0}
+
+    def should_not_run(_prompt, _timeout):
+        calls["model"] += 1
+        raise AssertionError("a server-anchored operational amendment must not reopen routing")
+
+    decision = route_turn(
+        db,
+        _env_session(
+            "Keep this exact cart. Deliver within two business days; "
+            "deposit now and balance after confirmation.",
+            session,
+        ),
+        llm_fn=should_not_run,
+    )
+
+    assert calls["model"] == 0
+    assert decision.case_operation == "amendment"
+    assert decision.exact_product_sku == "RGAM-0007"
+    assert decision.quantity == 80
+    assert decision.operational_constraints == {
+        "delivery_window_days": 2,
+        "payment_plan": "balance_after_confirmation",
+    }
     assert derive_plan(decision).steps == ["handoff_procurement"]
 
 

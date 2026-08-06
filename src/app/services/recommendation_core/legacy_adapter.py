@@ -113,9 +113,15 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
             "authority": "proposes",
             "latency_ms": route_stage.get("latency_ms"),
         }
+    semantic_resolution = core.extras.get("semantic_resolution") or {}
+    workload_authorization = core.extras.get("workload_authorization") or {}
+    material_fit_blocked = (
+        str(semantic_resolution.get("catalog_authority") or "").lower() == "blocked"
+        or str(workload_authorization.get("status") or "").lower() == "blocked"
+    )
     slate_disposition = (
         "replace" if products
-        else "retain" if clarifying and subject_action != "reset"
+        else "retain" if clarifying and subject_action != "reset" and not material_fit_blocked
         else "clear"
     )
     payload: Dict[str, Any] = {

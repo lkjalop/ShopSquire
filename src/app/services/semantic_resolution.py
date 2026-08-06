@@ -32,6 +32,10 @@ class ConceptProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=2, max_length=120)
+    # query_span is the buyer-authored anchor. normalized_label is advisory model
+    # normalization only; neither field grants evidence or catalog authority.
+    query_span: str | None = Field(default=None, min_length=2, max_length=120)
+    normalized_label: str | None = Field(default=None, min_length=2, max_length=120)
     status: ConceptStatus = "unresolved"
     material: bool = True
     interpretations: list[str] = Field(default_factory=list, max_length=5)
@@ -60,6 +64,7 @@ class SemanticProposal(BaseModel):
     evidence_questions: list[EvidenceQuestion] = Field(default_factory=list, max_length=5)
     proposed_action: SemanticAction = "search_catalog"
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    proposal_origin: Literal["model", "deterministic_fallback", "persisted"] = "model"
 
 
 @dataclass(frozen=True)
@@ -260,13 +265,18 @@ def fallback_semantic_proposal(
         "desired_outcome": text[:240],
         "concepts": [{
             "text": concept[:120],
+            "query_span": concept[:120],
             "status": "unresolved",
             "material": True,
             "interpretations": [],
         }],
         "evidence_questions": questions,
         "proposed_action": "research_then_clarify",
-        "confidence": 1.0,
+        # This is a conservative parser fallback, not model certainty and not
+        # evidence authority.  Keep the confidence visibly below a model-backed
+        # interpretation so traces and harnesses can distinguish the two.
+        "confidence": 0.35,
+        "proposal_origin": "deterministic_fallback",
     }
 
 
@@ -279,8 +289,8 @@ def validate_semantic_proposal(raw: Any, *, query: str) -> SemanticValidation:
 
     query_tokens = _tokens(query)
     for concept in proposal.concepts:
-        concept_tokens = _tokens(concept.text)
-        if not concept_tokens or not concept_tokens <= query_tokens:
+        anchor_tokens = _tokens(concept.query_span or concept.text)
+        if not anchor_tokens or not anchor_tokens <= query_tokens:
             return SemanticValidation("rejected", ("concept_not_anchored_in_query",))
 
     question_ids = [item.question_id for item in proposal.evidence_questions]
@@ -395,6 +405,8 @@ def reduce_semantic_proposal(
     *,
     evidence: Sequence[ConceptEvidence] = (),
     authorization_requested: bool = False,
+    research_attempted: bool = False,
+    research_status: str | None = None,
 ) -> SemanticDecision:
     """Deterministically accept, research, clarify or reject a semantic proposal."""
     if validation.outcome != "valid" or validation.proposal is None:
@@ -439,7 +451,17 @@ def reduce_semantic_proposal(
             residual_reasons=("contradictory_evidence_requires_resolution",),
         )
     if unresolved:
-        outcome = "research" if proposal.proposed_action == "research" and not questions else "clarify"
+        wants_research = proposal.proposed_action in {"research", "research_then_clarify"}
+        outcome = "research" if wants_research and not research_attempted else "clarify"
+        residual_reason = (
+            "public_verifiable_evidence_required"
+            if outcome == "research"
+            else (
+                "external_research_consent_required"
+                if str(research_status or "").strip().lower() == "consent_required"
+                else "material_buyer_input_required"
+            )
+        )
         return SemanticDecision(
             outcome=outcome,
             catalog_authority="blocked",
@@ -452,10 +474,7 @@ def reduce_semantic_proposal(
                                    else "ask_material_clarification"),
             desired_outcome=proposal.desired_outcome,
             residual_route="SEARCH" if outcome == "research" else "ASK",
-            residual_reasons=(
-                "public_verifiable_evidence_required"
-                if outcome == "research" else "material_buyer_input_required",
-            ),
+            residual_reasons=(residual_reason,),
         )
     residual_route: ResidualRoute = "AUTHORIZE" if authorization_requested else "CONNECTOR"
     return SemanticDecision(

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('unfamiliar capability request clarifies before catalog, ATP or sourcing', async ({ page }) => {
+test('unfamiliar capability request plans research before buyer-specific clarification', async ({ page }) => {
   // A fresh enterprise-scoped identity gives this real-backend journey an isolated,
   // deterministic allowance. Shared guest quota state must not turn a semantic
   // contract test into an intermittent quota test.
@@ -17,7 +17,7 @@ test('unfamiliar capability request clarifies before catalog, ATP or sourcing', 
 
   await expect(page.getByTestId('stream-acknowledgement')).toBeVisible({ timeout: 1_500 });
   expect(Date.now() - started).toBeLessThan(1_500);
-  await expect(page.getByText(/Which exact software, standard, or workflow and version/i).last())
+  await expect(page.getByText(/needs current external requirements.*approved official sources/i).last())
     .toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
@@ -27,23 +27,21 @@ test('unfamiliar capability request clarifies before catalog, ATP or sourcing', 
   await input.press('Enter');
   await expect(page.getByText(/Choose a laptop and confirm the purchase order/i).last())
     .toBeVisible({ timeout: 5_000 });
-  await expect(page.getByText(/Which exact software, standard, or workflow and version/i).last())
+  await expect(page.getByText(/needs current external requirements.*approved official sources/i).last())
     .toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
   await page.getByTitle('Decision Trace').click();
   const modal = page.getByTestId('decision-trace-modal');
   await expect(modal).toBeVisible();
-  await modal.getByRole('button', { name: /^Reasoning/ }).click();
-  const semantic = modal.getByTestId('semantic-resolution-trace');
-  await expect(semantic).toBeVisible({ timeout: 30_000 });
-  await expect(semantic).toContainText(/digital twin/i);
-  await expect(semantic).toContainText(/software, standard, or workflow and version/i);
-  await expect(semantic).toContainText(/locally on each device, remotely, or in a hybrid setup/i);
-  await expect(semantic).toContainText(/time-to-result target/i);
-  await expect(semantic).toContainText(/Catalog authority\s*blocked/i);
-  await expect(semantic.getByTestId('semantic-residual-route')).toContainText(/ASK/i);
-  await expect(semantic).toContainText(/material buyer input required/i);
-  await expect(semantic).toContainText(/Inventory ATP:\s*withheld/i);
-  await expect(semantic).toContainText(/supplier enquiry.*commerce execution/i);
+  await modal.getByRole('button', { name: /^Research & Fit/ }).click();
+  await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
+  const research = modal.getByTestId('workload-research-trace');
+  await expect(research).toBeVisible({ timeout: 30_000 });
+  await expect(research).toContainText(/digital twin/i);
+  await expect(research).toContainText(/bounded research plan/i);
+  await expect(research).toContainText(/official requirements/i);
+  await expect(research).toContainText(/consent required/i);
+  await expect(research).toContainText(/Status:\s*blocked/i);
+  await expect(research).toContainText(/catalog recommendation.*supplier enquiry/i);
 });

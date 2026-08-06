@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { evidenceRows } from '../lib/evidenceDisplay';
 import styles from './DecisionTrace.module.css';
 import SemanticResolutionTrace from './SemanticResolutionTrace';
+import WorkloadResearchTrace from './WorkloadResearchTrace';
 import { procurementDraftPending, procurementGateDisplay } from '../lib/procurementGateDisplay';
 import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResult } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
@@ -62,14 +63,15 @@ type Trace = {
 
 export type TraceLeafTab =
   | 'summary' | 'events' | 'execution'
-  | 'why' | 'intent' | 'memory' | 'complexity'
+  | 'research' | 'why' | 'intent' | 'memory' | 'complexity'
   | 'evidence' | 'multimodal' | 'security'
   | 'market' | 'procurement'
   | 'audit' | 'raw';
 
 export const TRACE_SECTIONS = [
   { id: 'decision', label: 'Decision', leaves: ['summary', 'events', 'execution'] },
-  { id: 'reasoning', label: 'Reasoning', leaves: ['why', 'intent', 'memory', 'complexity'] },
+  { id: 'research-fit', label: 'Research & Fit', leaves: ['research', 'why'] },
+  { id: 'reasoning', label: 'Reasoning', leaves: ['intent', 'memory', 'complexity'] },
   { id: 'evidence-risk', label: 'Evidence & Risk', leaves: ['evidence', 'multimodal', 'security'] },
   { id: 'commercial', label: 'Commercial Journey', leaves: ['market', 'procurement'] },
   { id: 'audit-technical', label: 'Audit & Technical', leaves: ['audit', 'raw'] },
@@ -83,6 +85,7 @@ export const TRACE_LEAF_LABELS: Record<TraceLeafTab, string> = {
   summary: 'Summary',
   events: 'Events',
   execution: 'Execution',
+  research: 'Research Breakdown',
   why: 'Why',
   intent: 'Intent',
   memory: 'Memory',
@@ -1372,6 +1375,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       case 'summary':
       case 'events':
       case 'execution':
+      case 'research':
       case 'why':
       case 'intent':
         return true;
@@ -2237,6 +2241,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               <button {...traceLeafProps('events')} hidden={!leafIsVisible('events')} data-testid="trace-leaf-events" className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('events')}>Events</button>
               <button {...traceLeafProps('execution')} hidden={!leafIsVisible('execution')} data-testid="trace-leaf-execution" className={activeTab === 'execution' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('execution')}>Execution</button>
               <button {...traceLeafProps('summary')} hidden={!leafIsVisible('summary')} data-testid="trace-leaf-summary" className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('summary')}>Summary</button>
+              <button {...traceLeafProps('research')} hidden={!leafIsVisible('research')} data-testid="trace-leaf-research" className={activeTab === 'research' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('research')}>Research Breakdown</button>
               <button {...traceLeafProps('why')} hidden={!leafIsVisible('why')} data-testid="trace-leaf-why" className={activeTab === 'why' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('why')}>Why</button>
               <button {...traceLeafProps('intent')} hidden={!leafIsVisible('intent')} data-testid="trace-leaf-intent" className={activeTab === 'intent' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('intent')}>Intent</button>
               <button {...traceLeafProps('multimodal')} hidden={!leafIsVisible('multimodal')} data-testid="trace-leaf-multimodal" className={activeTab === 'multimodal' ? styles.activeTab : ''} onClick={() => selectTraceLeaf('multimodal')}>Multimodal</button>
@@ -2701,6 +2706,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                       </div>
                     );
                   })()}
+                </div>
+              )}
+              {activeTab === 'research' && (
+                <div style={{ padding: '12px 14px' }}>
+                  <WorkloadResearchTrace executionSteps={typedExecutionSteps} />
                 </div>
               )}
               {activeTab === 'why' && (

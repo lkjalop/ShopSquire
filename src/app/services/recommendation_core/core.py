@@ -504,9 +504,16 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             logger.warning("ignored invalid inherited quantity: %s", exc)
 
     plan = derive_plan(decision)   # model plan refinement arrives with the plan-proposal leg
+    from src.app.services.recommendation_core.research_planner import build_research_plan
+
+    research_plan = build_research_plan(
+        plan.semantic_proposal,
+        external_research_authorized=bool(envelope.external_research_consent),
+    )
     plan = dataclasses.replace(
         plan,
         external_research_authorized=bool(envelope.external_research_consent),
+        research_plan=research_plan.model_dump(),
     )
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
@@ -575,6 +582,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "budget_max_cents": envelope.budget_max_cents,
         "node_handle": decision.node_handle,
         "requirements": {k: [list(p) for p in v] for k, v in decision.requirements.items()},
+        "operational_constraints": dict(decision.operational_constraints),
         "use_cases": intent["use_cases"],
         "use_case_variants": intent.get("use_case_variants") or {},
         "brands": [decision.brand_filter] if decision.brand_filter else [],
@@ -588,6 +596,69 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         "budget_inherited": budget_inherited,
         "requirements_inherited": requirements_inherited,
     }
+
+    # A named workload is an obligation, not a hint.  The model may identify
+    # unfamiliar software or games, but a generic profile cannot silently stand
+    # in for current vendor requirements.  Stop before retrieval when no enrolled
+    # provider resolved the entity; this preserves honesty without adding
+    # title-specific orchestration rules.
+    workload_trace = (
+        (intent.get("title_requirements") or {}).get("external_workload_evidence")
+        if isinstance(intent.get("title_requirements"), dict) else None
+    )
+    workload_items = list((workload_trace or {}).get("items") or [])
+    unresolved_workloads = [
+        dict(item) for item in workload_items
+        if isinstance(item, dict) and str(item.get("status") or "") != "resolved"
+    ]
+    if decision.workload_entities and unresolved_workloads:
+        names = [
+            str(item.get("requested_name") or "").strip()
+            for item in unresolved_workloads
+            if str(item.get("requested_name") or "").strip()
+        ]
+        subject = ", ".join(names[:2]) or "the named workload"
+        if envelope.external_research_consent:
+            question_text = (
+                f"I identified {subject}, but no enrolled authoritative provider returned "
+                "current requirements. Provide an approved requirements document or the "
+                "minimum hardware and compatibility target; I will not substitute a generic "
+                "profile and claim it is qualified."
+            )
+            missing_slots = ["authoritative_workload_requirements"]
+        else:
+            question_text = (
+                f"I identified {subject}. May I check enrolled official sources for its "
+                "current hardware and compatibility requirements before recommending products?"
+            )
+            missing_slots = ["external_research_consent"]
+        resp.extras["workload_authorization"] = {
+            "status": "blocked",
+            "reason": "named_workload_evidence_unresolved",
+            "entities": [list(item) for item in decision.workload_entities],
+            "evidence": unresolved_workloads,
+            "state_prevented": [
+                "catalog_qualification", "buyer_commitment", "supplier_rfq",
+            ],
+            "next_permitted_action": "resolve_workload_requirements",
+        }
+        question = {
+            "id": "workload_requirements",
+            "goal": "resolve_named_workload",
+            "reason": "named_workload_evidence_unresolved",
+            "missing_slots": missing_slots,
+            "text": question_text,
+            "options": [],
+        }
+        resp.clarify.append(question)
+        resp.set_message(question_text, MsgPriority.BULK_SCOPE_CLARIFY)
+        resp.record_stage(
+            "workload_evidence:pre_catalog",
+            status="clarify",
+            won_message=True,
+            reason=question["reason"],
+        )
+        return resp.finalize()
 
     # MIXED-TURN AUTHORITY. Explicit money/quantity/date/identity grammar is only a
     # conservative fallback; every recognized obligation is still passed through the
@@ -768,7 +839,12 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         if isinstance(concept_data.get("normalized_evidence"), list):
             normalized_rows = concept_data["normalized_evidence"]
         normalized = normalize_concept_evidence(normalized_rows)
-        semantic_decision = reduce_semantic_proposal(validation, evidence=normalized)
+        semantic_decision = reduce_semantic_proposal(
+            validation,
+            evidence=normalized,
+            research_attempted=True,
+            research_status=str(concept_data.get("status") or ""),
+        )
         semantic_decision_for_alignment = semantic_decision
         semantic_catalog_qualifications = [
             dict(item) for item in (concept_data.get("catalog_qualifications") or [])
@@ -789,6 +865,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             approved_narration_evidence(normalized)
         )
         if semantic_decision.catalog_authority != "permitted":
+            # Typed clients must clear any prior slate without depending on the
+            # legacy adapter to infer this from an empty product list.
+            resp.extras["slate_disposition"] = "clear"
             prior_case_anchor = (
                 envelope.session.get("case_anchor")
                 if isinstance(envelope.session.get("case_anchor"), dict)
@@ -807,29 +886,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 "selected_sku": prior_case_anchor.get("selected_sku"),
                 "catalog_authority": "blocked",
             }
-            proposed = list(semantic_decision.questions or ())
-            if proposed:
-                first = proposed[0]
-                question = {
-                    "id": str(first.get("question_id") or "concept_resolution"),
-                    "goal": str(first.get("purpose") or "resolve_concept"),
-                    "reason": "unresolved_material_concept",
-                    "missing_slots": ["concept_resolution"],
-                    "text": str(first.get("question") or "").strip(),
-                    "options": [],
-                }
-            else:
-                question = {
-                    "id": "concept_resolution",
-                    "goal": "resolve_concept",
-                    "reason": "unresolved_material_concept",
-                    "missing_slots": ["concept_resolution"],
-                    "text": (
-                        "Which exact meaning, standard, software, material, compatibility target, "
-                        "or performance requirement should the product satisfy?"
-                    ),
-                    "options": [],
-                }
+            from src.app.services.recommendation_core.clarification_policy import (
+                select_semantic_clarification,
+            )
+
+            question = select_semantic_clarification(
+                research_status=str(concept_data.get("status") or ""),
+                proposed_questions=list(semantic_decision.questions or ()),
+            )
             resp.clarify.append(question)
             resp.set_message(question["text"], MsgPriority.BULK_SCOPE_CLARIFY)
             resp.record_stage(
@@ -1625,9 +1689,14 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
     # into the read-only fulfillment stage.
     from src.app.services.query_decomposer import decompose
 
-    horizon_days = decompose(envelope.query).availability_horizon_days
+    horizon_days = decision.operational_constraints.get("delivery_window_days")
+    if horizon_days is None:
+        horizon_days = decompose(envelope.query).availability_horizon_days
     if horizon_days is not None:
         constraints["availability_horizon_days"] = int(horizon_days)
+    payment_plan = decision.operational_constraints.get("payment_plan")
+    if payment_plan:
+        constraints["payment_plan"] = str(payment_plan)
     projection: Dict[str, Any] = {}
     availability_line = run_fulfillment_stage(
         results=[product.as_dict() for product in resp.products],
@@ -2084,7 +2153,7 @@ def _exec_handoff_support(db, envelope: TurnEnvelope, decision: TurnDecision,
 
 def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision,
                               resp: CoreResponse, limit: int) -> None:
-    if decision.case_operation in ("status", "summary"):
+    if decision.case_operation in ("status", "summary", "amendment"):
         session = envelope.session or {}
         accepted = session.get("accepted_constraints") if isinstance(
             session.get("accepted_constraints"), dict
@@ -2100,10 +2169,18 @@ def _exec_handoff_procurement(db, envelope: TurnEnvelope, decision: TurnDecision
                 f"case {case_id}" if case_id else None,
             ) if value
         )
-        message = "Your procurement case is still active"
+        message = (
+            "I kept the selected product and cart unchanged and recorded the "
+            "delivery/payment requirements for the next confirmation check"
+            if decision.case_operation == "amendment"
+            else "Your procurement case is still active"
+        )
         if anchor:
             message += f" for {anchor}"
-        message += ". I kept the existing product and case context; no new search or commercial action was started."
+        if decision.case_operation == "amendment":
+            message += ". No new product search or commercial execution was started."
+        else:
+            message += ". I kept the existing product and case context; no new search or commercial action was started."
         resp.extras.update({
             "case_operation": decision.case_operation,
             "preserve_current_view": True,

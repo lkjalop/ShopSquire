@@ -4,6 +4,7 @@ import pytest
 
 from src.app.services.semantic_resolution import (
     align_catalog,
+    fallback_semantic_proposal,
     normalize_concept_evidence,
     reduce_semantic_proposal,
     validate_semantic_proposal,
@@ -11,7 +12,17 @@ from src.app.services.semantic_resolution import (
 )
 
 
-def test_residual_route_asks_for_buyer_specific_material_details():
+def test_deterministic_relation_fallback_is_low_confidence_and_identified():
+    proposal = fallback_semantic_proposal(
+        query="Recommend a laptop capable of an unfamiliar simulation workflow.",
+    )
+
+    assert proposal["proposal_origin"] == "deterministic_fallback"
+    assert proposal["confidence"] < 0.5
+    assert proposal["proposed_action"] == "research_then_clarify"
+
+
+def test_research_then_clarify_runs_research_before_asking_buyer_details():
     proposal = validate_semantic_proposal(
         {
             "desired_outcome": "run a digital-twin simulation",
@@ -30,6 +41,35 @@ def test_residual_route_asks_for_buyer_specific_material_details():
 
     decision = reduce_semantic_proposal(proposal)
 
+    assert decision.outcome == "research"
+    assert decision.residual_route == "SEARCH"
+    assert decision.next_permitted_action == "run_bounded_concept_research"
+
+
+def test_research_then_clarify_asks_only_after_bounded_research_is_insufficient():
+    proposal = validate_semantic_proposal(
+        {
+            "desired_outcome": "run a digital-twin simulation",
+            "concepts": [{"text": "digital twin", "status": "unresolved", "material": True}],
+            "evidence_questions": [{
+                "question_id": "software",
+                "question": "Which software and version will run?",
+                "purpose": "resolve_compatibility",
+                "material": True,
+            }],
+            "proposed_action": "research_then_clarify",
+            "confidence": 0.8,
+        },
+        query="a laptop for a digital twin",
+    )
+
+    decision = reduce_semantic_proposal(
+        proposal,
+        research_attempted=True,
+        research_status="insufficient",
+    )
+
+    assert decision.outcome == "clarify"
     assert decision.residual_route == "ASK"
     assert "material_buyer_input_required" in decision.residual_reasons
 
@@ -101,7 +141,7 @@ def test_authorize_route_is_a_next_step_not_an_authorization_grant():
         ("a CPAP breathing machine", "CPAP breathing machine"),
     ],
 )
-def test_unresolved_material_concept_clarifies_without_domain_rules(query, concept):
+def test_unresolved_material_concept_researches_without_domain_rules(query, concept):
     proposal = validate_semantic_proposal(
         {
             "desired_outcome": "find a suitable product",
@@ -129,7 +169,7 @@ def test_unresolved_material_concept_clarifies_without_domain_rules(query, conce
 
     decision = reduce_semantic_proposal(proposal, evidence=[])
 
-    assert decision.outcome == "clarify"
+    assert decision.outcome == "research"
     assert decision.catalog_authority == "blocked"
     assert "unresolved_material_concept" in decision.reasons
     assert "catalog_recommendation" in decision.state_prevented
@@ -146,6 +186,51 @@ def test_concept_must_be_anchored_in_buyer_text():
         },
         query="find an iron birch chair",
     )
+    assert decision.outcome == "rejected"
+    assert decision.reasons == ("concept_not_anchored_in_query",)
+
+
+def test_advisory_normalization_is_allowed_only_with_buyer_anchored_span():
+    decision = validate_semantic_proposal(
+        {
+            "desired_outcome": "find a suitable workstation",
+            "concepts": [{
+                "text": "maintenance digital twin",
+                "query_span": "maintenance digital twin",
+                "normalized_label": "predictive maintenance simulation",
+                "status": "unresolved",
+                "material": True,
+            }],
+            "evidence_questions": [],
+            "proposed_action": "research",
+            "confidence": 0.8,
+        },
+        query="a laptop for a maintenance digital twin",
+    )
+
+    assert decision.outcome == "valid"
+    assert decision.proposal is not None
+    assert decision.proposal.concepts[0].normalized_label == "predictive maintenance simulation"
+
+
+def test_normalized_label_cannot_substitute_for_missing_query_anchor():
+    decision = validate_semantic_proposal(
+        {
+            "desired_outcome": "find a suitable workstation",
+            "concepts": [{
+                "text": "maintenance digital twin",
+                "query_span": "unmentioned secret workload",
+                "normalized_label": "predictive maintenance simulation",
+                "status": "unresolved",
+                "material": True,
+            }],
+            "evidence_questions": [],
+            "proposed_action": "research",
+            "confidence": 0.8,
+        },
+        query="a laptop for a maintenance digital twin",
+    )
+
     assert decision.outcome == "rejected"
     assert decision.reasons == ("concept_not_anchored_in_query",)
 

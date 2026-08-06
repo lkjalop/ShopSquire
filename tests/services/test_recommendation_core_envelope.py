@@ -124,6 +124,12 @@ def test_slate_disposition_clears_authoritative_empty_but_retains_for_clarify():
     assert to_legacy(_core(products=[]))["slate_disposition"] == "clear"
     clarifying = _core(products=[], clarify=[{"text": "Which product type?"}])
     assert to_legacy(clarifying)["slate_disposition"] == "retain"
+    clarifying.extras["semantic_resolution"] = {"catalog_authority": "blocked"}
+    assert to_legacy(clarifying)["slate_disposition"] == "clear"
+    clarifying.extras.pop("semantic_resolution")
+    clarifying.extras["workload_authorization"] = {"status": "blocked"}
+    assert to_legacy(clarifying)["slate_disposition"] == "clear"
+    clarifying.extras.pop("workload_authorization")
     clarifying.extras["decision"] = {"subject_action": "reset"}
     assert to_legacy(clarifying)["slate_disposition"] == "clear"
 
