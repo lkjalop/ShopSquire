@@ -13,12 +13,12 @@ import {
 } from '../DecisionTrace';
 
 describe('Decision Trace component ontology', () => {
-  it('keeps all 14 legacy leaves reachable through five sections', () => {
+  it('keeps all 15 leaves reachable through six sections', () => {
     const leaves = TRACE_SECTIONS.flatMap((section) => [...section.leaves]);
-    expect(TRACE_SECTIONS).toHaveLength(5);
-    expect(new Set(leaves).size).toBe(14);
+    expect(TRACE_SECTIONS).toHaveLength(6);
+    expect(new Set(leaves).size).toBe(15);
     expect(leaves).toEqual(expect.arrayContaining([
-      'summary', 'events', 'execution', 'why', 'intent', 'memory', 'complexity',
+      'summary', 'events', 'execution', 'research', 'why', 'intent', 'memory', 'complexity',
       'evidence', 'multimodal', 'security', 'market', 'procurement', 'audit', 'raw',
     ]));
   });
