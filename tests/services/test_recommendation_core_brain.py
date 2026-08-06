@@ -162,6 +162,114 @@ def test_authorized_research_that_cannot_resolve_concept_then_asks_material_ques
     assert response.extras["semantic_resolution"]["residual_route"] == "ASK"
 
 
+def test_five_turn_unfamiliar_workload_keeps_authority_consent_and_commercial_state(db):
+    from src.app.services.clarification_state import build_pending_clarification
+
+    initial_model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "confidence": 0.9,
+        "semantic_proposal": {
+            "desired_outcome": "qualify a portable workstation for a mechanical-maintenance digital twin",
+            "concepts": [{
+                "text": "mechanical-maintenance digital twin",
+                "status": "unresolved",
+                "material": True,
+                "interpretations": [],
+            }],
+            "evidence_questions": [{
+                "question_id": "software_or_standard",
+                "question": "Which software and version must be supported?",
+                "purpose": "resolve_compatibility",
+                "material": True,
+            }],
+            "proposed_action": "research_then_clarify",
+            "confidence": 0.88,
+        },
+    }
+    first = recommend_turn(
+        db,
+        _env("Please recommend a laptop for simulating a digital twin for maintenance of mechanical machines."),
+        llm_fn=lambda *_: json.dumps(initial_model),
+    )
+    assert first.products == []
+    assert first.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+
+    pending = build_pending_clarification(
+        first.clarify[0],
+        original_query=first.envelope.query,
+        trace_id="trace-1",
+        semantic_resolution=first.extras["semantic_resolution"],
+        case_anchor=first.extras["case_anchor"],
+        external_research_consent=True,
+    )
+    answer_model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "requirements": {},
+        "clarification_relation": "answer",
+        "confidence": 0.93,
+    }
+    third = recommend_turn(
+        db,
+        _env(
+            "Use the named engineering software running locally for maintenance simulation.",
+            external_research_consent=True,
+            clarification_answer={
+                "question_id": "software_or_standard",
+                "value": "Local engineering simulation with 3D visualisation.",
+                "authority": "buyer_authored_candidate",
+            },
+            session={"pending_clarification": pending},
+        ),
+        llm_fn=lambda *_: json.dumps(answer_model),
+    )
+    assert third.products == []
+    assert third.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    slot = third.extras["plan"]["research_plan"]["material_slots"][0]
+    assert slot["answer_status"] == "candidate"
+    assert "3D visualisation" in slot["answer_candidate"]
+
+    pending = build_pending_clarification(
+        third.clarify[0],
+        original_query=third.envelope.query,
+        trace_id="trace-3",
+        semantic_resolution=third.extras["semantic_resolution"],
+        external_research_consent=True,
+        commercial_state={
+            "quantity": 30,
+            "total_budget_cents": 7_500_000,
+            "currency": "AUD",
+            "selected_sku": None,
+        },
+    )
+    fifth = recommend_turn(
+        db,
+        _env(
+            "Actually reduce it by 10 units, but I do not think it is powerful enough.",
+            external_research_consent=True,
+            session={
+                "pending_clarification": pending,
+                # A stale accepted snapshot must not outrank the active blocker.
+                "semantic_resolution": {"catalog_authority": "permitted"},
+            },
+        ),
+        llm_fn=lambda *_: json.dumps({
+            **answer_model,
+            "quantity": 10,
+        }),
+    )
+
+    assert fifth.products == []
+    assert fifth.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    quantity_op = next(
+        item for item in fifth.extras["case_obligations"]
+        if item["kind"] == "quantity_amendment"
+    )
+    assert quantity_op["proposed_value"] == 20
+    assert quantity_op["authorization_granted"] is False
+
+
 def test_material_capability_relation_blocks_when_model_omits_semantic_proposal(db):
     """The live router may omit the optional proposal; omission must not grant fit."""
     model = {
@@ -235,6 +343,129 @@ def test_model_outage_still_blocks_material_capability_fit(db):
 
     assert response.products == []
     assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+
+
+def test_model_outage_cannot_reopen_catalog_behind_active_semantic_clarification(db):
+    """A stale sold node must not outrank the current unresolved workload."""
+    pending = {
+        "question_id": "software_or_standard",
+        "question": "Which software, standard, or workflow must be supported?",
+        "state": "pending",
+        "semantic_context": {
+            "desired_outcome": (
+                "qualify a portable workstation for a mechanical-maintenance digital twin"
+            ),
+            "catalog_authority": "blocked",
+            "outcome": "needs_clarification",
+            "concepts": [{
+                "text": "mechanical-maintenance digital twin",
+                "status": "unresolved",
+                "material": True,
+                "interpretations": [],
+            }],
+            "questions": [{
+                "question_id": "software_or_standard",
+                "question": "Which software, standard, or workflow must be supported?",
+                "purpose": "resolve_compatibility",
+                "material": True,
+            }],
+        },
+        "commercial_context": {
+            "quantity": 30,
+            "total_budget_cents": 7_500_000,
+            "currency": "AUD",
+        },
+    }
+    response = recommend_turn(
+        db,
+        _env(
+            "The workflow runs locally for maintenance simulation and 3D visualisation.",
+            external_research_consent=True,
+            session={
+                "pending_clarification": pending,
+                "prior_node": "el-6-6",
+                "accepted_constraints": {
+                    "requirements": {"ram_gb": ((">=", 16),)},
+                    "quantity": 30,
+                    "total_budget_cents": 7_500_000,
+                    "budget_scope": "total",
+                },
+                # This older permissive snapshot is intentionally stale.
+                "semantic_resolution": {"catalog_authority": "permitted"},
+            },
+        ),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert response.products == []
+    assert response.extras["slate_disposition"] == "clear"
+    assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert response.extras["semantic_resolution"]["desired_outcome"].startswith("qualify")
+    assert response.extras["decision"]["node_handle"] is None
+
+
+def test_model_product_route_cannot_omit_active_semantic_authorization_hold(db):
+    """Valid router JSON cannot erase a stricter server-held workload blocker."""
+    pending = {
+        "question_id": "software_or_standard",
+        "question": "Which software, standard, or workflow must be supported?",
+        "state": "active",
+        "semantic_context": {
+            "desired_outcome": (
+                "qualify a portable workstation for a mechanical-maintenance digital twin"
+            ),
+            "catalog_authority": "blocked",
+            "concepts": [{
+                "text": "mechanical-maintenance digital twin",
+                "query_span": "mechanical-maintenance digital twin",
+                "status": "unresolved",
+                "material": True,
+                "interpretations": [],
+            }],
+            "questions": [{
+                "question_id": "software_or_standard",
+                "question": "Which software, standard, or workflow must be supported?",
+                "purpose": "resolve_compatibility",
+                "material": True,
+            }],
+            "state_prevented": ["catalog_recommendation", "commerce_execution"],
+        },
+        "commercial_context": {
+            "quantity": 30,
+            "total_budget_cents": 7_500_000,
+            "currency": "AUD",
+        },
+    }
+    model = {
+        "lane": "PROCUREMENT",
+        "handle": "el-6-6",
+        "requirements": {},
+        "quantity": 30,
+        "total_budget": 75_000,
+        "budget_scope": "total",
+        "subject_action": "continue",
+        "confidence": 0.95,
+        # Deliberately omit semantic_proposal, reproducing the live leak.
+    }
+
+    response = recommend_turn(
+        db,
+        _env(
+            "I need about 30 of those and the total budget is AUD 75,000.",
+            external_research_consent=True,
+            session={
+                "pending_clarification": pending,
+                "prior_node": "el-6-6",
+                "semantic_resolution": {"catalog_authority": "permitted"},
+            },
+        ),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.products == []
+    assert response.extras["slate_disposition"] == "clear"
+    assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert response.extras["semantic_resolution"]["desired_outcome"].startswith("qualify")
 
 
 def test_model_outage_on_ordinary_query_is_typed_and_visibly_degraded(db):

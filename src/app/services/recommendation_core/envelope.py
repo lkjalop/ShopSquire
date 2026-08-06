@@ -94,6 +94,9 @@ class TurnEnvelope:
     image_observations: List[ImageObservation] = field(default_factory=list)
     source_ip: Optional[str] = None
     external_research_consent: bool = False
+    # Buyer-authored response to the active material question. It may refine an
+    # evidence query, but it is never itself an authoritative product requirement.
+    clarification_answer: Dict[str, Any] = field(default_factory=dict)
     session: Dict[str, Any] = field(default_factory=dict)   # prior shortlist/slots (read-only)
     # cart: the CURRENT cart lines [{sku,name,quantity}], read once at the facade ingress. The
     # cart-mutation resolver binds the shopper's named targets ('the ThinkPad') to a REAL line
@@ -114,6 +117,7 @@ class TurnEnvelope:
                             image_observations: Optional[List[ImageObservation]] = None,
                             source_ip: Optional[str] = None,
                             external_research_consent: bool = False,
+                            clarification_answer: Optional[Dict[str, Any]] = None,
                             intent_hint: Optional[str] = None,
                             session: Optional[Dict[str, Any]] = None,
                             cart: Optional[List[Dict[str, Any]]] = None,
@@ -154,6 +158,7 @@ class TurnEnvelope:
                    has_image=bool(has_image or image_observations),
                    image_observations=list(image_observations or []), source_ip=source_ip,
                    external_research_consent=bool(external_research_consent),
+                   clarification_answer=dict(clarification_answer or {}),
                    session=dict(session or {}),
                    cart=list(cart or []), pre_gate=pre_gate)
 
@@ -169,6 +174,7 @@ class TurnEnvelope:
                 "image_observations": [item.to_dict() for item in self.image_observations],
                 "source_ip": self.source_ip,
                 "external_research_consent": self.external_research_consent,
+                "clarification_answer": dict(self.clarification_answer),
                 "session": dict(self.session),
                 "cart": list(self.cart), "pre_gate": self.pre_gate}
 
@@ -191,6 +197,7 @@ class TurnEnvelope:
                                        (d.get("image_observations") or []) if isinstance(item, dict)],
                    source_ip=d.get("source_ip"),
                    external_research_consent=bool(d.get("external_research_consent")),
+                   clarification_answer=dict(d.get("clarification_answer") or {}),
                    session=dict(d.get("session") or {}), cart=list(d.get("cart") or []),
                    pre_gate=d.get("pre_gate"))
 

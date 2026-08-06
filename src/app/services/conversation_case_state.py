@@ -78,7 +78,7 @@ class CaseTurn:
 
 
 def decompose_case_obligations(
-    message: str, *, current_state: dict[str, Any]
+    message: str, *, current_state: dict[str, Any], allow_unselected_quantity: bool = False,
 ) -> tuple[dict[str, Any], ...]:
     """Return every bounded obligation in a mixed commerce turn.
 
@@ -120,7 +120,11 @@ def decompose_case_obligations(
         match = pattern.search(source)
         if not match:
             continue
-        operation = classify_case_turn(match.group(0), current_state=current_state)
+        operation = classify_case_turn(
+            match.group(0),
+            current_state=current_state,
+            allow_unselected_quantity=allow_unselected_quantity,
+        )
         append(kind, operation=operation)
 
     if _PRODUCT_SELECTION.search(source) or _SKU.search(source):
@@ -146,7 +150,12 @@ def reduce_case_obligations(
     owns ordering, case consistency and authority. Later obligations cannot leapfrog an
     amendment that still needs confirmation.
     """
-    proposed = decompose_case_obligations(message, current_state=current_state)
+    authority_permitted = str(catalog_authority or "").strip().lower() == "permitted"
+    proposed = decompose_case_obligations(
+        message,
+        current_state=current_state,
+        allow_unselected_quantity=not authority_permitted,
+    )
     if not proposed:
         return ()
     rows: list[dict[str, Any]] = []
@@ -157,7 +166,6 @@ def reduce_case_obligations(
         or current_state.get("product_sku")
         or ""
     ).strip()
-    authority_permitted = str(catalog_authority or "").strip().lower() == "permitted"
     atp = current_state.get("atp_snapshot")
     versioned_atp = bool(
         isinstance(atp, dict)
@@ -346,7 +354,12 @@ def _propagate_case_supersession(
     return temporal
 
 
-def classify_case_turn(message: str, *, current_state: dict[str, Any]) -> CaseTurn:
+def classify_case_turn(
+    message: str,
+    *,
+    current_state: dict[str, Any],
+    allow_unselected_quantity: bool = False,
+) -> CaseTurn:
     """Classify the bounded amendment vocabulary without mutating state."""
     source = re.sub(r"\s+", " ", str(message or "")).strip()
     if not source:
@@ -373,7 +386,10 @@ def classify_case_turn(message: str, *, current_state: dict[str, Any]) -> CaseTu
         )
     match = _QUANTITY_REDUCE_BY.search(source)
     if match:
-        if not str(current_state.get("sku") or current_state.get("product_sku") or "").strip():
+        if (
+            not allow_unselected_quantity
+            and not str(current_state.get("sku") or current_state.get("product_sku") or "").strip()
+        ):
             return CaseTurn(
                 "clarify", "quantity", None, 1.0, "medium", False,
                 "selected_product_anchor_required",
@@ -396,7 +412,10 @@ def classify_case_turn(message: str, *, current_state: dict[str, Any]) -> CaseTu
         )
     match = _QUANTITY_REDUCE_TO.search(source)
     if match:
-        if not str(current_state.get("sku") or current_state.get("product_sku") or "").strip():
+        if (
+            not allow_unselected_quantity
+            and not str(current_state.get("sku") or current_state.get("product_sku") or "").strip()
+        ):
             return CaseTurn(
                 "clarify", "quantity", None, 1.0, "medium", False,
                 "selected_product_anchor_required",

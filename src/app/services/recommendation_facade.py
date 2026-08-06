@@ -499,6 +499,7 @@ def _read_session_slice(
     proven end-to-end."""
     if redis is None or not uid or not memory_enabled:
         return {}
+    pending_clarification: Dict[str, Any] = {}
     try:
         from src.app.services.memory import Memory
 
@@ -507,6 +508,7 @@ def _read_session_slice(
             tenant_id=tenant_id,
             session_epoch=session_epoch,
         )
+        pending_clarification = memory.get_pending_clarification(uid)
         data = memory.get_structured_state(uid)
         legacy_from_context: Dict[str, Any] = {}
         if not isinstance(data, dict) or not data:
@@ -533,11 +535,13 @@ def _read_session_slice(
             # unsafe for named tenants, so only the single-tenant demo namespace may read it.
             # Delete this branch once all lane postflights write the canonical scoped slice.
             if tenant_id != "default" or session_epoch:
-                return {}
+                return ({"pending_clarification": pending_clarification}
+                        if pending_clarification else {})
             legacy_raw = redis.get(f"session:{uid}:kv_state")
             legacy = legacy_from_context or (json.loads(legacy_raw) if legacy_raw else {})
             if not isinstance(legacy, dict) or not legacy:
-                return {}
+                return ({"pending_clarification": pending_clarification}
+                        if pending_clarification else {})
             confirmed = legacy.get("confirmed_slots") or {}
             snapshot = (legacy.get("last_valid_constraints_snapshot")
                         or legacy.get("last_constraints_snapshot") or {})
@@ -566,7 +570,7 @@ def _read_session_slice(
             shortlist = (legacy.get("last_valid_shortlist_skus")
                          or legacy.get("last_shortlist_skus") or [])
             exact_product_sku = confirmed.get("exact_product_sku")
-            return {
+            bridged = {
                 "session_epoch": session_epoch,
                 "prior_node": _classified_subject(db, shortlist, tenant_id),
                 # The mature legacy procurement workflow remains the executor. Bridge only its
@@ -586,8 +590,11 @@ def _read_session_slice(
                 },
                 "legacy_bridge": True,
             }
+            if pending_clarification:
+                bridged["pending_clarification"] = pending_clarification
+            return bridged
         shortlist = data.get("last_shortlist_skus") or []
-        return {"session_epoch": session_epoch,
+        current = {"session_epoch": session_epoch,
                 "prior_node": (data.get("last_node_handle")
                                or _classified_subject(db, shortlist, tenant_id)),
                 "prior_lane": data.get("last_lane"),
@@ -602,8 +609,16 @@ def _read_session_slice(
                     data.get("case_anchor")
                     if isinstance(data.get("case_anchor"), dict) else None
                 )}
-    except Exception:
-        return {}
+        if pending_clarification:
+            current["pending_clarification"] = pending_clarification
+        return current
+    except Exception as exc:
+        logger.warning(
+            "session slice read degraded; preserving pending clarification: %s",
+            repr(exc)[:160],
+        )
+        return ({"pending_clarification": pending_clarification}
+                if pending_clarification else {})
 
 
 def _merge_session_overrides(
@@ -667,6 +682,51 @@ def _merge_session_overrides(
 
     if accepted:
         merged["accepted_constraints"] = accepted
+    return merged
+
+
+def _merge_authoritative_cart_anchor(
+    session: Optional[Dict[str, Any]], cart: List[Dict[str, Any]],
+    *, db: Any = None, tenant_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Bind a single persisted cart line to the conversation without trusting prose.
+
+    The storefront Add action is the explicit SKU selection.  Follow-up delivery,
+    payment, and status turns therefore inherit identity from the server-read cart,
+    not from a client-supplied SKU or a model guess.  Multi-line carts deliberately
+    abstain because a later turn must identify the affected line.
+    """
+    merged = dict(session or {})
+    lines = [line for line in (cart or []) if isinstance(line, dict) and line.get("sku")]
+    if len(lines) != 1:
+        return merged
+    sku = str(lines[0]["sku"]).strip()
+    if not sku:
+        return merged
+    accepted = merged.get("accepted_constraints")
+    accepted = dict(accepted) if isinstance(accepted, dict) else {}
+    accepted["exact_product_sku"] = sku
+    try:
+        quantity = int(lines[0].get("quantity") or 0)
+    except (TypeError, ValueError):
+        quantity = 0
+    if quantity > 0:
+        accepted["quantity"] = quantity
+    accepted["product_selection_authority"] = "persisted_cart"
+    merged["accepted_constraints"] = accepted
+    merged["selected_cart_sku"] = sku
+    # A persisted bulk/sourcing line is also authoritative evidence that the
+    # buyer has entered the procurement workflow.  Bind only the taxonomy
+    # subject derived from that server-side SKU; never infer it from prose.
+    # This lets delivery/payment amendments stay on the existing case instead
+    # of reopening catalog search and asking an unrelated budget question.
+    if bool(lines[0].get("sourcing_required")) or quantity >= 2:
+        merged["active_workflow_lane"] = "PROCUREMENT"
+        merged["prior_lane"] = "PROCUREMENT"
+        if db is not None:
+            subject = _classified_subject(db, [sku], str(tenant_id or "default"))
+            if subject:
+                merged["prior_node"] = subject
     return merged
 
 
@@ -794,6 +854,7 @@ def dispatch_recommendation_core_typed(
     image_intent: Optional[str] = None, image_product_identity: Optional[str] = None,
     image_cv_signals: Optional[str] = None,
     external_research_consent: bool = False,
+    clarification_answer: Optional[Dict[str, Any]] = None,
     intent_hint: Optional[str] = None,
     role: str = "",
     confirmed_slots: Optional[Dict[str, Any]] = None,
@@ -961,6 +1022,7 @@ def dispatch_recommendation_core_typed(
     # (empty plan / low confidence / ambiguity-ask / failure) falls through to the search ladder,
     # which the frontend regex still backstops (parallel-run). Image turns never cart-serve.
     _served_guard: Optional[Dict[str, Any]] = None
+    cart_slice: List[Dict[str, Any]] = []
     if cart_mode == "on" and not (image_labels or image_hash):
         try:
             _served_guard = _run_guard(query=query, uid=uid, image_labels=image_labels,
@@ -979,13 +1041,17 @@ def dispatch_recommendation_core_typed(
                         ),
                         confirmed_slots,
                     )
+                    session = _merge_authoritative_cart_anchor(
+                        session, cart_slice, db=db, tenant_id=tenant,
+                    )
                     envelope = TurnEnvelope.from_suggest_params(
                         query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                         budget_max=budget_max, trace_id=trace_id, has_image=False,
                         intent_hint=intent_hint,
                         source_ip=source_ip, session=session,
                         cart=cart_slice, pre_gate=_served_guard,
-                        external_research_consent=external_research_consent)
+                        external_research_consent=external_research_consent,
+                        clarification_answer=clarification_answer)
                     cart_payload = _serve_cart_mutation(envelope, role=role,
                                                         with_trace=with_trace, redis=redis)
                     if cart_payload is not None:
@@ -1025,6 +1091,7 @@ def dispatch_recommendation_core_typed(
                 has_image=bool(image_labels or image_hash), source_ip=source_ip,
                 image_observations=image_observations,
                 external_research_consent=external_research_consent,
+                clarification_answer=clarification_answer,
                 session=session, cart=cart_slice)
             _enqueue_shadow(redis, envelope=shadow_env, cart_only=(mode != "shadow"))
         if mode == "shadow":
@@ -1064,7 +1131,13 @@ def dispatch_recommendation_core_typed(
             ),
             confirmed_slots,
         )
-        # the search core is cart-blind; cart editing already ran above (parallel-run).
+        # Cart mutation already had first refusal.  If it abstained, a single
+        # persisted cart line is still authoritative product identity for bounded
+        # delivery/payment/status amendments; the search core may read that anchor
+        # but cannot mutate the cart.
+        session = _merge_authoritative_cart_anchor(
+            session, cart_slice, db=db, tenant_id=tenant,
+        )
         envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
             budget_max=budget_max, trace_id=trace_id,
@@ -1072,7 +1145,8 @@ def dispatch_recommendation_core_typed(
             has_image=bool(image_labels or image_hash), source_ip=source_ip,
             image_observations=image_observations,
             external_research_consent=external_research_consent,
-            session=session, pre_gate=guard)
+            clarification_answer=clarification_answer,
+            session=session, cart=cart_slice, pre_gate=guard)
 
         # ── DISPATCH ───────────────────────────────────────────────────────────
         from src.app.services.recommendation_core.core import recommend_turn
@@ -1102,12 +1176,21 @@ def dispatch_recommendation_core_typed(
         # (grounding error / retrieval failure) must NOT serve a 'try again' apology to a
         # canary buyer while a healthy legacy sits one return away. Honest degradation only
         # falls back when it produced nothing — an off-catalog refusal is a real answer, keep it.
-        if core.grounding in ("error", "empty") or (
+        semantic_resolution = (
+            core.extras.get("semantic_resolution")
+            if isinstance(core.extras.get("semantic_resolution"), dict) else {}
+        )
+        authoritative_hold = (
+            not core.products
+            and semantic_resolution.get("catalog_authority") == "blocked"
+            and core.extras.get("slate_disposition") == "clear"
+        )
+        if not authoritative_hold and (core.grounding in ("error", "empty") or (
             not compatibility_cutover
             and core.degraded
             and not core.products
             and not core.off_catalog
-        ):
+        )):
             logger.info("core degraded (grounding=%s reason=%s) — falling through to legacy",
                         core.grounding, (core.extras or {}).get("degraded_reason"))
             _fallback_metric(f"grounding:{core.grounding}")

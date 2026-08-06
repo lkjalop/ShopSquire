@@ -130,6 +130,49 @@ def test_compatibility_cutover_serves_grounded_bounded_fallback(monkeypatch, wit
     assert outcome.payload["router_outcome"]["status"] == "source_unavailable"
 
 
+def test_degraded_semantic_authorization_hold_cannot_delegate_to_less_strict_legacy(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
+
+    def blocked_semantic_turn(_db, envelope):
+        response = CoreResponse(
+            envelope=envelope,
+            lane="SEARCH",
+            message="I need authoritative workload requirements before selecting products.",
+            products=[],
+            grounding="grounded",
+            degraded=True,
+        )
+        response.clarify.append({
+            "id": "software_or_standard",
+            "reason": "unresolved_material_concept",
+            "text": "Which approved workload requirements should be used?",
+        })
+        response.extras.update({
+            "semantic_resolution": {
+                "catalog_authority": "blocked",
+                "state_prevented": ["catalog_recommendation", "supplier_enquiry"],
+            },
+            "slate_disposition": "clear",
+            "router_outcome": {"status": "timed_out"},
+        })
+        return response.finalize()
+
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.core.recommend_turn",
+        blocked_semantic_turn,
+    )
+    outcome = F.dispatch_recommendation_core_typed(
+        db=object(), redis=_Redis(), query="an unfamiliar engineering workload", uid="u1",
+        tenant_id="t1", budget_min=None, budget_max=None, trace_id="tr-semantic-hold",
+        with_trace=_wt, record_failure=lambda *a, **k: None,
+    )
+
+    assert outcome.status == "served"
+    assert outcome.payload["products"] == []
+    assert outcome.payload["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert outcome.payload["slate_disposition"] == "clear"
+
+
 def test_procurement_advice_requires_its_own_serve_flag(monkeypatch):
     monkeypatch.setenv("RECOMMEND_CORE_MODE", "primary")
     monkeypatch.delenv("RECOMMEND_PROCUREMENT_ADVICE_MODE", raising=False)
@@ -447,6 +490,31 @@ def test_session_slice_read_tenant_scoped():
     assert F._read_session_slice(None, "u1", "t1") == {}      # no redis → empty, never raises
 
 
+def test_session_slice_failure_preserves_pending_authorization_hold(monkeypatch):
+    from src.app.services.memory import Memory
+
+    r = _Redis()
+    pending = {
+        "question_id": "software_or_standard",
+        "semantic_context": {
+            "catalog_authority": "blocked",
+            "concepts": [{"text": "unresolved workload", "material": True}],
+        },
+    }
+    Memory(r, tenant_id="t1", session_epoch="epoch-1").set_pending_clarification(
+        "u1", pending,
+    )
+
+    def broken_structured_state(_self, _uid):
+        raise RuntimeError("structured state unavailable")
+
+    monkeypatch.setattr(Memory, "get_structured_state", broken_structured_state)
+
+    assert F._read_session_slice(
+        r, "u1", "t1", session_epoch="epoch-1",
+    ) == {"pending_clarification": pending}
+
+
 def test_explicit_confirmed_slots_override_stale_session_constraints():
     session = {
         "prior_node": "el-6-6",
@@ -493,6 +561,43 @@ def test_session_override_merge_discards_unknown_and_invalid_values():
         "quantity": 20,
     }
     assert "admin_override" not in merged
+
+
+def test_single_persisted_cart_line_is_the_authoritative_product_anchor():
+    merged = F._merge_authoritative_cart_anchor(
+        {"accepted_constraints": {"budget_scope": "total"}},
+        [{"sku": "RGAM-0007", "quantity": 80, "name": "HP OMEN"}],
+    )
+
+    assert merged["accepted_constraints"]["exact_product_sku"] == "RGAM-0007"
+    assert merged["accepted_constraints"]["quantity"] == 80
+    assert merged["accepted_constraints"]["product_selection_authority"] == "persisted_cart"
+
+
+def test_persisted_bulk_cart_anchors_procurement_context(monkeypatch):
+    monkeypatch.setattr(F, "_classified_subject", lambda _db, _skus, _tenant: "laptops")
+
+    merged = F._merge_authoritative_cart_anchor(
+        {},
+        [{"sku": "RGAM-0007", "quantity": 80, "sourcing_required": True}],
+        db=object(),
+        tenant_id="tenant-a",
+    )
+
+    assert merged["prior_node"] == "laptops"
+    assert merged["prior_lane"] == "PROCUREMENT"
+    assert merged["active_workflow_lane"] == "PROCUREMENT"
+
+
+def test_multi_line_cart_does_not_guess_which_product_a_follow_up_targets():
+    original = {"accepted_constraints": {"quantity": 30}}
+
+    merged = F._merge_authoritative_cart_anchor(
+        original,
+        [{"sku": "SKU-A", "quantity": 20}, {"sku": "SKU-B", "quantity": 10}],
+    )
+
+    assert merged == original
 
 
 def test_default_tenant_bridges_bounded_legacy_session_fields_only():

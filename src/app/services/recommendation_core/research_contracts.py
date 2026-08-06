@@ -65,6 +65,8 @@ class MaterialSlot(BaseModel):
         "resolve_safety_or_policy",
     ] = "resolve_concept"
     material: bool = True
+    answer_status: Literal["unresolved", "candidate"] = "unresolved"
+    answer_candidate: str | None = Field(default=None, max_length=500)
 
 
 class ResearchPlan(BaseModel):

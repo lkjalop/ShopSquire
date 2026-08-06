@@ -26,8 +26,11 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const evidence = executionSteps.find((step) => step?.id === 'workload-evidence') || {};
   const authorization = executionSteps.find((step) => step?.id === 'workload-authorization') || {};
   const researchPlan = executionSteps.find((step) => step?.id === 'research-plan') || {};
+  const buyerConsent = executionSteps.find((step) => step?.id === 'buyer-research-consent') || {};
+  const compiler = executionSteps.find((step) => step?.id === 'requirements-compiler') || {};
   const semanticEvidence = executionSteps.find((step) => step?.id === 'semantic-evidence') || {};
   const semanticAuthorization = executionSteps.find((step) => step?.id === 'semantic-authorization') || {};
+  const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
   const evidenceOutput = evidence?.output || {};
   const evidenceItems = Array.isArray(evidenceOutput.items) ? evidenceOutput.items : [];
   const entities = Array.isArray(proposal?.output?.workload_entities)
@@ -36,6 +39,13 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const evidenceNeeds = Array.isArray(planOutput?.evidence_needs) ? planOutput.evidence_needs : [];
   const materialSlots = Array.isArray(planOutput?.material_slots) ? planOutput.material_slots : [];
   const semanticLegs = semanticEvidence?.output?.legs || {};
+  const compiledRequirements = Array.isArray(compiler?.output?.compiled_requirements)
+    ? compiler.output.compiled_requirements : [];
+  const rejectedClaims = Array.isArray(compiler?.output?.rejected_claims)
+    ? compiler.output.rejected_claims : [];
+  const consentRecorded = evidence.id
+    ? Boolean(evidenceOutput.consent_recorded)
+    : buyerConsent?.status === 'recorded';
   const hasResearch = Boolean(
     evidence.id || authorization.id || entities.length || researchPlan.id
     || semanticEvidence.id || semanticAuthorization.id
@@ -83,7 +93,18 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
               </ul>
             )}
             {materialSlots.length > 0 && (
-              <div style={{ marginTop: 6 }}>Remaining material slots: {materialSlots.map((slot: any) => slot?.question).filter(Boolean).join(' | ')}</div>
+              <div style={{ marginTop: 6 }}>
+                <div>Material slots:</div>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                  {materialSlots.map((slot: any, index: number) => (
+                    <li key={slot?.slot_id || index}>
+                      {slot?.question || words(slot?.slot_id)} - <strong>{words(slot?.answer_status || 'unresolved')}</strong>
+                      {slot?.answer_candidate ? `: ${slot.answer_candidate}` : ''}
+                      {slot?.answer_status === 'candidate' ? ' (buyer-authored; awaiting authoritative evidence)' : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         )}
@@ -91,7 +112,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
         <div style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
           <strong>{researchPlan.id ? '3' : '2'}. Governed provider search</strong>
           <div style={{ marginTop: 5 }}>
-            Buyer consent recorded: <strong>{evidenceOutput.consent_recorded ? 'yes' : 'no'}</strong>
+            Buyer consent recorded: <strong>{consentRecorded ? 'yes' : 'no'}</strong>
           </div>
           {evidenceItems.length ? evidenceItems.map((item: any, index: number) => {
             const attempts = Array.isArray(item?.provider_attempts) ? item.provider_attempts : [];
@@ -138,6 +159,58 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
             </div>
           ))}
         </div>
+
+        {compiler.id && (
+          <div style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Evidence-to-requirement compilation</strong>
+            <div style={{ marginTop: 5 }}>Status: <strong>{words(compiler.status)}</strong></div>
+            {compiledRequirements.length > 0 && (
+              <ul data-testid="compiled-requirements" style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+                {compiledRequirements.map((item: any, index: number) => (
+                  <li key={`${item?.attribute_key || 'requirement'}-${index}`}>
+                    {words(item?.attribute_key)} {item?.operator} {String(item?.value)} {item?.unit || ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {rejectedClaims.length > 0 && (
+              <div style={{ marginTop: 5, color: '#b45309' }}>
+                Rejected evidence: {rejectedClaims.map((item: any) => words(item?.reason)).join(' | ')}
+              </div>
+            )}
+            <small style={{ color: '#64748b' }}>
+              Accepted official evidence may establish fit predicates; it never authorizes cart, RFQ, or payment actions.
+            </small>
+          </div>
+        )}
+
+        {commercialCase.id && (
+          <div data-testid="commercial-case-trace" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Commercial feasibility and amendments</strong>
+            <div style={{ marginTop: 5 }}>Status: <strong>{words(commercialCase.status)}</strong></div>
+            {(commercialCase?.output?.obligations || []).map((item: any, index: number) => (
+              <div key={`${item?.kind || 'obligation'}-${index}`} style={{ marginTop: 5 }}>
+                {words(item?.kind)}: {item?.field_name || 'action'}
+                {item?.proposed_value != null ? ` → ${String(item.proposed_value)}` : ''}
+                {' '}({words(item?.status)})
+              </div>
+            ))}
+            {(() => {
+              const pending = (commercialCase?.output?.obligations || []).find(
+                (item: any) => item?.proposed_value != null && item?.authorization_granted !== true,
+              );
+              return pending ? (
+                <div style={{ marginTop: 5 }}>
+                  Proposed value: <strong>{String(pending.proposed_value)}</strong>. This change requires buyer confirmation.
+                </div>
+              ) : null;
+            })()}
+            <div>Prior quantity: <strong>{commercialCase?.output?.prior_quantity ?? 'not recorded'}</strong></div>
+            <small style={{ color: '#64748b' }}>
+              Arithmetic and case consistency are deterministic. A pending amendment does not mutate the cart or authorize an order.
+            </small>
+          </div>
+        )}
 
         <div style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
           <strong>{researchPlan.id ? '4' : '3'}. Deterministic authorization</strong>

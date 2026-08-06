@@ -330,3 +330,39 @@ def test_web_leg_disabled_service_reports_not_silent(monkeypatch):
     import src.app.services.evidence_orchestrator as eo
     leg = eo._leg_web(_Plan(), "q", None)
     assert leg["found"] is False and leg["data"].get("disabled") is True
+
+
+def test_concept_research_uses_bounded_buyer_answer_candidate(monkeypatch):
+    from types import SimpleNamespace
+    import src.app.services.evidence_orchestrator as eo
+
+    captured = {}
+
+    def fake_stage(*, query, **_kwargs):
+        captured["query"] = query
+        return {"items": [], "run_status": "completed"}
+
+    monkeypatch.setattr(
+        "src.app.services.external_product_research_service.run_external_research_stage",
+        fake_stage,
+    )
+    plan = SimpleNamespace(
+        semantic_proposal={
+            "concepts": [{"text": "ferric lattice maintenance workflow", "material": True}],
+        },
+        external_research_authorized=True,
+        research_plan={
+            "material_slots": [{
+                "slot_id": "software_or_standard",
+                "answer_status": "candidate",
+                "answer_candidate": "Local engineering simulation with 3D visualisation.",
+            }],
+        },
+    )
+
+    leg = eo._leg_concept_resolution(plan, "ignored raw turn", None, tenant_id="tenant-a")
+
+    assert "ferric lattice maintenance workflow" in captured["query"]
+    assert "Local engineering simulation with 3D visualisation" in captured["query"]
+    assert leg["data"]["authority"] == "evidence_candidate_only"
+    assert leg["data"]["claims"] == []

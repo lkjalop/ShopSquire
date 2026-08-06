@@ -44,6 +44,26 @@ def _pending_session():
             "question": "Which software and version must be supported?",
             "original_query": "Recommend a laptop for a mechanical digital twin.",
             "desired_outcome": "resolve software compatibility",
+            "external_research_consent": True,
+            "semantic_context": {
+                "desired_outcome": "qualify a portable workstation for a mechanical digital twin",
+                "catalog_authority": "blocked",
+                "concepts": [
+                    {
+                        "concept_id": "digital-twin",
+                        "text": "mechanical digital twin",
+                        "status": "unresolved",
+                        "material": True,
+                    }
+                ],
+                "questions": [
+                    {
+                        "question_id": "software_or_standard",
+                        "question": "Which software and version must be supported?",
+                    }
+                ],
+                "state_prevented": ["catalog_recommendation", "supplier_rfq"],
+            },
         }
     }
 
@@ -74,6 +94,132 @@ def test_free_text_answer_is_classified_against_pending_material_question(db):
     assert decision.clarification_relation == "answer"
     assert decision.workload_entities == (("software", "Siemens NX 2025"),)
     assert decision.model_proposal["clarification_relation"] == "answer"
+
+
+def test_missing_pending_relation_gets_one_bounded_model_repair(db):
+    responses = iter([
+        json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-6",
+            "requirements": {},
+            "workload_entities": [
+                {"kind": "workflow", "name": "mechanical maintenance simulation"},
+            ],
+            "confidence": 0.91,
+        }),
+        json.dumps({"clarification_relation": "answer"}),
+    ])
+    calls = []
+
+    def model(prompt, _timeout):
+        calls.append(prompt)
+        return next(responses)
+
+    decision = route_turn(
+        db,
+        TurnEnvelope.from_suggest_params(
+            query=(
+                "Recommend a laptop for a mechanical digital twin. Buyer clarification "
+                "to 'Which software and version must be supported?': the workflow runs "
+                "locally for engineering simulation and 3D visualisation."
+            ),
+            uid="buyer-1",
+            tenant_id="default",
+            session=_pending_session(),
+            external_research_consent=True,
+        ),
+        llm_fn=model,
+    )
+
+    assert len(calls) == 2
+    assert "CLARIFICATION RELATION REPAIR" in calls[1]
+    assert decision.clarification_relation == "answer"
+
+
+def test_model_timeout_cannot_drop_pending_semantic_authority(db):
+    decision = route_turn(
+        db,
+        TurnEnvelope.from_suggest_params(
+            query=(
+                "Recommend a laptop for a mechanical digital twin. Buyer clarification "
+                "to 'Which software and version must be supported?': the workflow runs "
+                "locally for engineering simulation and 3D visualisation."
+            ),
+            uid="buyer-1",
+            tenant_id="default",
+            session=_pending_session(),
+            external_research_consent=True,
+        ),
+        llm_fn=lambda _prompt, _timeout: (_ for _ in ()).throw(TimeoutError()),
+    )
+
+    assert decision.source == "fallback:model_unavailable"
+    assert decision.node_handle is None
+    assert decision.semantic_proposal["persisted_case_blocker"] is True
+    assert decision.semantic_proposal["concepts"][0]["text"] == "mechanical digital twin"
+
+
+def test_answer_without_new_semantic_proposal_inherits_blocked_case_authority(db):
+    envelope = TurnEnvelope.from_suggest_params(
+        query="Siemens NX 2025 running locally",
+        uid="buyer-1",
+        tenant_id="default",
+        session=_pending_session(),
+        external_research_consent=True,
+    )
+
+    decision = route_turn(
+        db,
+        envelope,
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-6",
+            "requirements": {},
+            "clarification_relation": "answer",
+            "confidence": 0.94,
+        }),
+    )
+
+    assert decision.semantic_proposal["validation"] == "valid"
+    assert decision.semantic_proposal["desired_outcome"].startswith("qualify a portable workstation")
+    assert decision.semantic_proposal["concepts"][0]["text"] == "mechanical digital twin"
+    assert decision.semantic_proposal["persisted_case_blocker"] is True
+
+
+def test_sparse_pronoun_proposal_cannot_replace_active_blocked_concept(db):
+    envelope = TurnEnvelope.from_suggest_params(
+        query="Reduce it by 10, but it is not powerful enough for what I need.",
+        uid="buyer-1",
+        tenant_id="default",
+        session=_pending_session(),
+        external_research_consent=True,
+    )
+
+    decision = route_turn(
+        db,
+        envelope,
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "PROCUREMENT",
+            "handle": None,
+            "clarification_relation": "answer",
+            "semantic_proposal": {
+                "desired_outcome": "what I need",
+                "concepts": [{
+                    "text": "what I need",
+                    "status": "unresolved",
+                    "material": True,
+                    "interpretations": [],
+                }],
+                "evidence_questions": [],
+                "proposed_action": "research_then_clarify",
+                "confidence": 0.9,
+            },
+            "confidence": 0.9,
+        }),
+    )
+
+    assert decision.semantic_proposal["proposal_origin"] == "persisted"
+    assert decision.semantic_proposal["concepts"][0]["text"] == "mechanical digital twin"
 
 
 def test_replacement_objective_supersedes_pending_question(db):

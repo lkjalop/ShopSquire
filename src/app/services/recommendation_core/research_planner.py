@@ -33,6 +33,7 @@ def build_research_plan(
     semantic_proposal: Mapping[str, Any] | None,
     *,
     external_research_authorized: bool,
+    clarification_answer: Mapping[str, Any] | None = None,
 ) -> ResearchPlan:
     """Create an executable-shape plan without selecting a provider by name.
 
@@ -66,6 +67,9 @@ def build_research_plan(
             max_age_days=365,
         ))
 
+    answer = clarification_answer if isinstance(clarification_answer, Mapping) else {}
+    answer_qid = _identifier(answer.get("question_id"), "")
+    answer_value = " ".join(str(answer.get("value") or "").split())[:500]
     slots: list[MaterialSlot] = []
     for index, raw in enumerate(list(proposal.get("evidence_questions") or [])[:5]):
         if not isinstance(raw, Mapping) or not bool(raw.get("material", True)):
@@ -73,11 +77,15 @@ def build_research_plan(
         question = " ".join(str(raw.get("question") or "").split())[:240]
         if not question:
             continue
+        slot_id = _identifier(raw.get("question_id"), f"slot_{index + 1}")
+        is_candidate = bool(answer_value and answer_qid and answer_qid == slot_id)
         slots.append(MaterialSlot(
-            slot_id=_identifier(raw.get("question_id"), f"slot_{index + 1}"),
+            slot_id=slot_id,
             question=question,
             purpose=str(raw.get("purpose") or "resolve_concept"),
             material=True,
+            answer_status="candidate" if is_candidate else "unresolved",
+            answer_candidate=answer_value if is_candidate else None,
         ))
 
     origin = str(proposal.get("proposal_origin") or "model").strip().lower()

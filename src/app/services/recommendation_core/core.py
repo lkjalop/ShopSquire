@@ -509,6 +509,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     research_plan = build_research_plan(
         plan.semantic_proposal,
         external_research_authorized=bool(envelope.external_research_consent),
+        clarification_answer=envelope.clarification_answer,
     )
     plan = dataclasses.replace(
         plan,
@@ -517,6 +518,32 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     )
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
+    continuity_pending = (
+        envelope.session.get("pending_clarification")
+        if isinstance(envelope.session.get("pending_clarification"), dict) else {}
+    )
+    continuity_semantic = (
+        continuity_pending.get("semantic_context")
+        if isinstance(continuity_pending.get("semantic_context"), dict) else {}
+    )
+    # An inspectable receipt, not chain-of-thought: this records which authoritative
+    # server-held state reached the core before the model proposal was authorized.
+    resp.extras["continuity_input"] = {
+        "pending_present": bool(continuity_pending),
+        "question_id": str(continuity_pending.get("question_id") or "") or None,
+        "pending_state": str(continuity_pending.get("state") or "") or None,
+        "catalog_authority": str(continuity_semantic.get("catalog_authority") or "") or None,
+        "material_concept_count": sum(
+            1 for item in (continuity_semantic.get("concepts") or [])
+            if isinstance(item, dict) and bool(item.get("material"))
+        ),
+        "external_research_consent": bool(
+            envelope.external_research_consent
+            or continuity_pending.get("external_research_consent")
+        ),
+        "clarification_answer": dict(envelope.clarification_answer),
+        "session_epoch_present": bool(envelope.session.get("session_epoch")),
+    }
     resp.record_stage("route+intent", status="ok",
                       latency_ms=(time.perf_counter() - _t_route) * 1000.0,
                       won_message=False, source=decision.source)
@@ -674,9 +701,29 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         envelope.session.get("accepted_constraints")
         if isinstance(envelope.session.get("accepted_constraints"), dict) else {}
     )
-    prior_semantic = (
+    pending_case = (
+        envelope.session.get("pending_clarification")
+        if isinstance(envelope.session.get("pending_clarification"), dict) else {}
+    )
+    session_semantic = (
         envelope.session.get("semantic_resolution")
         if isinstance(envelope.session.get("semantic_resolution"), dict) else {}
+    )
+    pending_semantic = (
+        pending_case.get("semantic_context")
+        if isinstance(pending_case.get("semantic_context"), dict) else {}
+    )
+    # An active material blocker is newer and more restrictive than an older
+    # accepted session snapshot.  Letting the latter win reopens product and
+    # commercial authority while the buyer is still resolving the workload.
+    prior_semantic = (
+        pending_semantic
+        if pending_semantic.get("catalog_authority") == "blocked"
+        else session_semantic or pending_semantic
+    )
+    pending_commercial = (
+        pending_case.get("commercial_context")
+        if isinstance(pending_case.get("commercial_context"), dict) else {}
     )
     case_state = {
         **accepted_case,
@@ -686,8 +733,23 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             or session_anchor.get("sku")
             or accepted_case.get("exact_product_sku")
         ),
-        "quantity": requested_quantity or session_anchor.get("quantity") or accepted_case.get("quantity"),
-        "budget": session_anchor.get("budget") or accepted_case.get("budget"),
+        # Current accepted state precedes this turn's proposal. Relative operations
+        # must compute from 30, not mistake the delta 10 for an absolute quantity.
+        "quantity": (
+            session_anchor.get("quantity")
+            or accepted_case.get("quantity")
+            or pending_commercial.get("quantity")
+            or requested_quantity
+        ),
+        "budget": (
+            session_anchor.get("budget")
+            or accepted_case.get("budget")
+            or {
+                "scope": "total" if pending_commercial.get("total_budget_cents") else None,
+                "total_cents": pending_commercial.get("total_budget_cents"),
+                "currency": pending_commercial.get("currency"),
+            }
+        ),
         "atp_snapshot": session_anchor.get("atp_snapshot") or accepted_case.get("atp_snapshot"),
     }
     catalog_authority = str(
@@ -703,6 +765,13 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     )
     if case_obligations:
         resp.extras["case_obligations"] = list(case_obligations)
+        resp.extras["conversation_case_context"] = {
+            "prior_quantity": case_state.get("quantity"),
+            "budget": case_state.get("budget"),
+            "catalog_authority": catalog_authority,
+            "selected_sku": case_state.get("sku"),
+            "trace_lineage": pending_case.get("trace_id"),
+        }
         blocked_commitment = next(
             (
                 item for item in case_obligations

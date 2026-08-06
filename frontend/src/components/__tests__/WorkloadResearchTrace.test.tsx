@@ -76,4 +76,57 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.getByText(/Not attempted - buyer consent is required/i)).toBeInTheDocument();
     expect(screen.getByText(/^Status:/i)).toHaveTextContent('blocked');
   });
+
+  it('makes pending quantity arithmetic and its authorization boundary explicit', () => {
+    render(<WorkloadResearchTrace executionSteps={[
+      {
+        id: 'commercial-case-reducer', kind: 'stage', authority: 'proposes', status: 'pending_confirmation',
+        output: {
+          prior_quantity: 30,
+          obligations: [{
+            kind: 'quantity_amendment', field_name: 'quantity', proposed_value: 20,
+            status: 'pending_confirmation', authorization_granted: false,
+          }],
+        },
+      },
+      {
+        id: 'semantic-authorization', kind: 'gate', authority: 'authorizes', status: 'blocked',
+        output: { reasons: ['unresolved_material_concept'], state_prevented: ['catalog_recommendation'] },
+      },
+    ]} />);
+
+    const commercial = screen.getByTestId('commercial-case-trace');
+    expect(commercial).toHaveTextContent(/Prior quantity:\s*30/i);
+    expect(commercial).toHaveTextContent(/Proposed value:\s*20/i);
+    expect(commercial).toHaveTextContent(/requires buyer confirmation/i);
+  });
+
+  it('shows a buyer clarification as a non-authoritative research candidate', () => {
+    render(<WorkloadResearchTrace executionSteps={[
+      {
+        id: 'research-plan', kind: 'stage', authority: 'plans', status: 'authorized',
+        output: {
+          external_research_authorized: true,
+          material_slots: [{
+            slot_id: 'software_or_standard',
+            question: 'Which workflow and execution target must be supported?',
+            answer_status: 'candidate',
+            answer_candidate: 'Local engineering simulation with 3D visualisation.',
+          }],
+          evidence_needs: [{
+            need_id: 'requirements_1', claim_type: 'recommended_requirements',
+            subject_span: 'maintenance digital twin', provider_capability: 'official_requirements',
+          }],
+        },
+      },
+      {
+        id: 'semantic-authorization', kind: 'gate', authority: 'authorizes', status: 'blocked',
+        output: { reasons: ['authoritative_requirements_unavailable'], state_prevented: ['catalog_recommendation'] },
+      },
+    ]} />);
+
+    expect(screen.getByText(/Local engineering simulation with 3D visualisation/i))
+      .toHaveTextContent(/buyer-authored; awaiting authoritative evidence/i);
+    expect(screen.getAllByText(/Status:/i).some((node) => /blocked/i.test(node.textContent || ''))).toBe(true);
+  });
 });

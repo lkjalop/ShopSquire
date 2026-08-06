@@ -519,12 +519,39 @@ def _semantic_proposal_or_relation_fallback(
     query: str,
     exact_product_sku: str | None = None,
     requirements: Dict[str, Any] | None = None,
+    persisted_context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Use valid model semantics, otherwise fail closed on a material relation.
 
     The fallback recognizes only generic language relations.  It never supplies a product fact,
     a hardware floor, or catalog authority; the semantic reducer still owns the decision.
     """
+    persisted = persisted_context if isinstance(persisted_context, dict) else {}
+    relation = str(data.get("clarification_relation") or "").strip().lower()
+    if (
+        persisted.get("catalog_authority") == "blocked"
+        and persisted.get("concepts")
+        and relation != "supersede"
+    ):
+        return {
+            "validation": "valid",
+            "desired_outcome": str(
+                persisted.get("desired_outcome") or "resolve material requirements"
+            )[:240],
+            "concepts": [
+                dict(item) for item in list(persisted.get("concepts") or [])[:4]
+                if isinstance(item, dict)
+            ],
+            "evidence_questions": [
+                dict(item) for item in list(persisted.get("questions") or [])[:5]
+                if isinstance(item, dict)
+            ],
+            "proposed_action": "research_then_clarify",
+            "confidence": 1.0,
+            "state_prevented": list(persisted.get("state_prevented") or ())[:8],
+            "persisted_case_blocker": True,
+            "proposal_origin": "persisted",
+        }
     proposed = _validated_semantic_proposal(data, query)
     if proposed.get("validation") == "valid":
         return proposed
@@ -679,14 +706,30 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
     # this tenant's sold taxonomy. Ordinary fresh searches still degrade to an
     # empty decision instead of inheriting hidden context.
     session = envelope.session or {}
+    pending = (
+        session.get("pending_clarification")
+        if isinstance(session.get("pending_clarification"), dict) else {}
+    )
+    pending_semantic = (
+        pending.get("semantic_context")
+        if isinstance(pending.get("semantic_context"), dict) else {}
+    )
+    unresolved_case = bool(
+        pending_semantic.get("catalog_authority") == "blocked"
+        and pending_semantic.get("concepts")
+    )
+    if unresolved_case:
+        # A timeout cannot turn lexical similarity into catalog authority. Preserve
+        # explicit commercial facts below, but leave the product node unresolved.
+        node = None
     active_procurement = str(session.get("active_workflow_lane") or "").upper() == "PROCUREMENT"
-    if node is None and quantity is not None and active_procurement:
+    if node is None and quantity is not None and active_procurement and not unresolved_case:
         prior = get_node(str(session.get("prior_node") or ""))
         if (prior is not None
                 and sells_within(db, prior.handle, tenant_id=envelope.tenant_id) is True):
             node = prior
             subject_action = "continue"
-    if node is None and explicit_requirements:
+    if node is None and explicit_requirements and not unresolved_case:
         # A number+unit bound to a registry attribute is a verifiable filter,
         # not a new product identity. During model outage it may refine the
         # already accepted sold subject, but cannot create one on cold start.
@@ -699,7 +742,10 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             subject_action = "continue"
     if node is None:
         semantic = _semantic_proposal_or_relation_fallback(
-            {}, query=envelope.query, requirements={},
+            {},
+            query=envelope.query,
+            requirements={},
+            persisted_context=pending_semantic,
         )
         budget_scope = classify_budget_scope(envelope.query)
         total_budget_cents = None
@@ -731,7 +777,10 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
             total_budget_cents = int(parsed_budget.budget_max) * 100
 
     semantic = _semantic_proposal_or_relation_fallback(
-        {}, query=envelope.query, requirements={},
+        {},
+        query=envelope.query,
+        requirements={},
+        persisted_context=pending_semantic,
     )
     return TurnDecision(
         lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
@@ -1334,6 +1383,11 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
                 "question": str(pending.get("question") or "")[:240],
                 "original_query": str(pending.get("original_query") or "")[:400],
                 "desired_outcome": str(pending.get("desired_outcome") or "")[:240],
+                "semantic_context": pending.get("semantic_context") or {},
+                "commercial_context": pending.get("commercial_context") or {},
+                "external_research_consent": bool(
+                    pending.get("external_research_consent")
+                ),
             }, separators=(",", ":"))
             + ". Set clarification_relation=answer when MESSAGE answers it; interrupt for an "
             "independent read-only question; supersede for a replacement objective; ambiguous "
@@ -1357,6 +1411,47 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
             "request with no fitting handle, return OFF_CATALOG and a specific non-null "
             "wanted_category; avoid ambiguous umbrella nouns, coined phrases, and accessory "
             "categories.\nJSON:")
+
+
+def _repair_pending_clarification_relation(
+    fn,
+    *,
+    pending: Dict[str, Any],
+    message: str,
+    timeout: float,
+) -> str:
+    """Ask once for a missing relation without re-running product interpretation.
+
+    This closed-vocabulary result carries no commerce authority. It only controls
+    whether server-held clarification state is consumed, suspended, superseded, or
+    retained for another question.
+    """
+    prompt = (
+        "CLARIFICATION RELATION REPAIR. Classify how the untrusted BUYER MESSAGE "
+        "relates to the server-held material question. Return JSON only: "
+        '{"clarification_relation":"answer|interrupt|supersede|ambiguous"}. '
+        "answer means it attempts to answer or refine the question; interrupt means "
+        "an independent read-only question; supersede means a clearly replacement "
+        "shopping objective; ambiguous means none can be established. Do not infer "
+        "products, requirements, consent, or actions.\nSTATE:"
+        + json.dumps({
+            "question_id": str(pending.get("question_id") or "")[:80],
+            "question": str(pending.get("question") or "")[:300],
+            "original_query": str(pending.get("original_query") or "")[:500],
+        }, separators=(",", ":"))
+        + "\nBUYER MESSAGE:"
+        + json.dumps(str(message or "")[:1_000])
+        + "\nJSON:"
+    )
+    try:
+        raw = fn(prompt, min(float(timeout), 4.0))
+        value = json.loads(raw) if raw else {}
+        relation = str((value or {}).get("clarification_relation") or "").strip().lower()
+        if relation in {"answer", "interrupt", "supersede", "ambiguous"}:
+            return relation
+    except Exception as exc:
+        logger.info("clarification relation repair unavailable: %s", repr(exc)[:120])
+    return "ambiguous"
 
 
 def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
@@ -1511,6 +1606,19 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             logger.warning("router read-savepoint reset failed: %s", repr(exc)[:120])
     if not isinstance(data, dict):
         return _bounded_fallback_decision(db, envelope, cands, reason="model_unavailable")
+
+    # The full interpreter occasionally resolves the product/workload correctly but omits
+    # its relation to an active material question. One narrow repair is safer than guessing
+    # in transport code or replaying the entire recommendation turn.
+    if pending and str(data.get("clarification_relation") or "").strip().lower() not in {
+        "answer", "interrupt", "supersede", "ambiguous",
+    }:
+        data["clarification_relation"] = _repair_pending_clarification_relation(
+            fn,
+            pending=pending,
+            message=envelope.query,
+            timeout=timeout,
+        )
 
     # clamp 1: lane ∈ LANES
     lane = str(data.get("lane") or "").strip().upper()
@@ -2243,6 +2351,10 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         query=envelope.query,
         exact_product_sku=explicit_product_sku,
         requirements=requirements,
+        persisted_context=(
+            (pending.get("semantic_context") or {})
+            if isinstance(pending, dict) else {}
+        ),
     )
     accepted_audit = {
         "lane": lane,

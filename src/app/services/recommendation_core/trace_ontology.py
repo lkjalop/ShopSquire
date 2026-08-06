@@ -93,6 +93,34 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
                 "items": workload_items,
             },
         })
+        compiled = [
+            dict(requirement)
+            for item in workload_items
+            for requirement in list(item.get("compiled_requirements") or [])
+            if isinstance(requirement, dict)
+        ]
+        rejections = [
+            dict(rejection)
+            for item in workload_items
+            for rejection in list(item.get("claim_rejections") or [])
+            if isinstance(rejection, dict)
+        ]
+        steps.append({
+            "id": "requirements-compiler",
+            "kind": "gate",
+            "authority": "compiles_constraints",
+            "label": "Compile accepted evidence into capability predicates",
+            "status": "accepted" if compiled and not rejections else (
+                "partial" if compiled else "blocked"
+            ),
+            "source": "requirement_compiler",
+            "output": {
+                "compiled_requirements": compiled,
+                "rejected_claims": rejections,
+                "catalog_authority_granted": bool(compiled),
+                "commercial_authority_granted": False,
+            },
+        })
 
     workload_authorization = dict(
         (getattr(core, "extras", {}) or {}).get("workload_authorization") or {}
@@ -112,6 +140,24 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
         ((getattr(core, "extras", {}) or {}).get("plan") or {}).get("research_plan") or {}
     )
     if research_plan.get("evidence_needs") or research_plan.get("material_slots"):
+        steps.append({
+            "id": "buyer-research-consent",
+            "kind": "buyer_input",
+            "authority": "grants_research_scope",
+            "label": "Record buyer research consent",
+            "status": (
+                "recorded"
+                if research_plan.get("external_research_authorized")
+                else "not_recorded"
+            ),
+            "source": "conversation_case_state",
+            "output": {
+                "external_research_authorized": bool(
+                    research_plan.get("external_research_authorized")
+                ),
+                "commercial_authority_granted": False,
+            },
+        })
         steps.append({
             "id": "research-plan",
             "kind": "stage",
@@ -153,6 +199,34 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             ),
             "source": "semantic_resolution",
             "output": semantic_resolution,
+        })
+
+    case_obligations = [
+        dict(item) for item in list(
+            (getattr(core, "extras", {}) or {}).get("case_obligations") or []
+        ) if isinstance(item, dict)
+    ]
+    if case_obligations:
+        case_context = dict(
+            (getattr(core, "extras", {}) or {}).get("conversation_case_context") or {}
+        )
+        steps.append({
+            "id": "commercial-case-reducer",
+            "kind": "gate",
+            "authority": "validates_commercial_state",
+            "label": "Validate commercial amendments against case state",
+            "status": (
+                "blocked" if any(item.get("status") == "blocked" for item in case_obligations)
+                else "pending_confirmation" if any(
+                    item.get("status") == "pending_confirmation" for item in case_obligations
+                ) else "accepted"
+            ),
+            "source": "conversation_case_state",
+            "output": {
+                **case_context,
+                "obligations": case_obligations,
+                "commercial_authority_granted": False,
+            },
         })
 
     for index, stage in enumerate(stages):

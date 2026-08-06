@@ -88,3 +88,28 @@ def test_plan_preserves_degraded_interpretation_origin():
     )
 
     assert plan.interpretation_origin == "deterministic_fallback"
+
+
+def test_buyer_free_text_is_a_research_candidate_not_an_authorized_requirement():
+    plan = build_research_plan(
+        {
+            "concepts": [{"text": "maintenance digital twin", "material": True}],
+            "evidence_questions": [{
+                "question_id": "software_or_standard",
+                "question": "Which workflow and execution target must be supported?",
+                "purpose": "resolve_compatibility",
+                "material": True,
+            }],
+        },
+        external_research_authorized=True,
+        clarification_answer={
+            "question_id": "software_or_standard",
+            "value": "Local engineering simulation with 3D visualisation.",
+            "authority": "buyer_authored_candidate",
+        },
+    )
+
+    slot = plan.material_slots[0]
+    assert slot.answer_status == "candidate"
+    assert slot.answer_candidate == "Local engineering simulation with 3D visualisation."
+    assert "requirement" not in slot.model_dump()

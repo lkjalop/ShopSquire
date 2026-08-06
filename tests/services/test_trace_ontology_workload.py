@@ -96,7 +96,45 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
 
     assert by_id["research-plan"]["authority"] == "plans"
     assert by_id["research-plan"]["status"] == "consent_required"
+    assert by_id["buyer-research-consent"]["kind"] == "buyer_input"
+    assert by_id["buyer-research-consent"]["authority"] == "grants_research_scope"
+    assert by_id["buyer-research-consent"]["output"]["commercial_authority_granted"] is False
     assert by_id["semantic-evidence"]["kind"] == "connector"
     assert by_id["semantic-evidence"]["latency_ms"] == 12
     assert by_id["semantic-authorization"]["kind"] == "gate"
     assert by_id["semantic-authorization"]["status"] == "blocked"
+
+
+def test_trace_projects_relative_quantity_as_pending_commercial_authorization():
+    core = SimpleNamespace(
+        lane="SEARCH",
+        degraded=False,
+        products=[],
+        clarify=[],
+        extras={
+            "decision": {"source": "model", "model_proposal": {}, "authorization_changes": []},
+            "case_obligations": [{
+                "kind": "quantity_change",
+                "status": "pending_confirmation",
+                "operation": "decrease",
+                "amount": 10,
+                "prior_value": 30,
+                "proposed_value": 20,
+            }],
+            "conversation_case_context": {
+                "prior_quantity": 30,
+                "total_budget_cents": 7_500_000,
+                "currency": "AUD",
+            },
+            "stage_results": [],
+        },
+    )
+
+    by_id = {item["id"]: item for item in build_execution_steps(core)}
+
+    reducer = by_id["commercial-case-reducer"]
+    assert reducer["kind"] == "gate"
+    assert reducer["status"] == "pending_confirmation"
+    assert reducer["output"]["prior_quantity"] == 30
+    assert reducer["output"]["obligations"][0]["proposed_value"] == 20
+    assert reducer["output"]["commercial_authority_granted"] is False

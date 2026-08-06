@@ -517,6 +517,14 @@ def _cart_mutation_short_circuit(
         "case_operation": data.get("case_operation"),
         "case_anchor": data.get("case_anchor") if isinstance(data.get("case_anchor"), dict) else None,
         "state_changed": data.get("state_changed"),
+        # Bounded delivery/payment amendments are accepted by the recommendation
+        # reducer and then committed later by the cart sourcing boundary.  Keep
+        # the canonical constraints at the HTTP/SSE edge; dropping them here made
+        # the UI acknowledge the amendment while confirming the old requirements.
+        "constraints_used": (
+            data.get("constraints_used")
+            if isinstance(data.get("constraints_used"), dict) else {}
+        ),
         "decision_trace_id": tid,
         "trace_id": tid,
         "next_questions": [],
@@ -893,6 +901,42 @@ def _merge_material_nqe_answer(
     """
     selection = nqe_selection if isinstance(nqe_selection, dict) else {}
     pending = pending_clarification if isinstance(pending_clarification, dict) else {}
+    # Compatibility for older callers/tests that supplied only browser history.
+    # New runtime traffic persists this contract server-side for every material
+    # clarification; history is never authoritative when pending state exists.
+    if not pending and str(selection.get("question_id") or "").strip().lower() == "budget_scope":
+        prior_query = ""
+        for item in reversed(recent_messages or []):
+            if not isinstance(item, dict) or str(item.get("role") or "").strip().lower() != "user":
+                continue
+            candidate = str(item.get("content") or "").strip()
+            if candidate and candidate.casefold() != str(query or "").strip().casefold():
+                prior_query = candidate
+                break
+        if prior_query:
+            pending = {
+                "version": 1,
+                "state": "active",
+                "question_id": "budget_scope",
+                "question": "Is the stated budget total or per item?",
+                "options": [
+                    {"id": "total", "label": "Total budget"},
+                    {"id": "per_unit", "label": "Per item"},
+                ],
+                "original_query": prior_query,
+            }
+    try:
+        from src.app.services.clarification_state import reduce_clarification_turn
+
+        reduced = reduce_clarification_turn(
+            query=str(query or ""),
+            nqe_selection=selection,
+            pending=pending,
+        )
+        if reduced.relation in {"answer", "expired"}:
+            return reduced.effective_query
+    except Exception:
+        pass
     qid = str(selection.get("question_id") or "").strip().lower()
     oid = str(selection.get("option_id") or "").strip().lower()
     # A buyer can answer the rendered question by typing instead of clicking its
@@ -1622,6 +1666,10 @@ async def _call_recommend_in_process(
             image_cv_signals=params.get("image_cv_signals"),
             external_research_consent=(
                 str(params.get("external_research_consent") or "").lower() == "true"),
+            clarification_answer=(
+                params.get("clarification_answer")
+                if isinstance(params.get("clarification_answer"), dict) else None
+            ),
             intent_hint=params.get("turn_intent"), role=role, request=request,
             confirmed_slots=(
                 params.get("confirmed_slots")
@@ -2348,9 +2396,15 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         params["reorder_consent_intent"] = "true"  # emphasize the backorder-consent answer downstream
     if turn_intent and turn_intent != "SEARCH":
         params["turn_intent"] = turn_intent
-    # N3 Mode-B consent passthrough: the chip's explicit per-turn opt-in rides to the evidence
-    # orchestrator's web leg. Absent/falsy -> the leg can never fire.
-    if bool((payload or {}).get("external_research_consent")):
+    # Explicit chip and explicit free-text permission share one per-turn consent
+    # contract. The model decides what evidence is needed; it cannot grant
+    # permission on the buyer's behalf.
+    from src.app.services.clarification_state import external_research_consent_granted
+
+    if (
+        bool((payload or {}).get("external_research_consent"))
+        or external_research_consent_granted(submitted_query)
+    ):
         params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
     pending_clarification: Dict[str, Any] = {}
@@ -2362,14 +2416,51 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         ).get_pending_clarification(uid)
     except Exception:
         pending_clarification = {}
-    q = _merge_material_nqe_answer(
-        query=str(q or ""),
-        nqe_selection=nqe_selection if isinstance(nqe_selection, dict) else {},
-        recent_messages=(payload or {}).get("recent_messages")
-        if isinstance((payload or {}).get("recent_messages"), list) else [],
-        pending_clarification=pending_clarification,
+    # Research consent belongs to the active semantic case, not merely the click
+    # that granted it.  Reuse it only inside the same tenant/session-scoped,
+    # unexpired pending contract; a new or superseding objective must ask again.
+    if bool(pending_clarification.get("external_research_consent")):
+        params["external_research_consent"] = "true"
+    clarification_reduction = None
+    try:
+        from src.app.services.clarification_state import reduce_clarification_turn
+
+        clarification_reduction = reduce_clarification_turn(
+            query=str(q or ""),
+            nqe_selection=nqe_selection if isinstance(nqe_selection, dict) else {},
+            pending=pending_clarification,
+            intent_hint=turn_intent,
+        )
+        q = clarification_reduction.effective_query
+    except Exception:
+        q = _merge_material_nqe_answer(
+            query=str(q or ""),
+            nqe_selection=nqe_selection if isinstance(nqe_selection, dict) else {},
+            recent_messages=(payload or {}).get("recent_messages")
+            if isinstance((payload or {}).get("recent_messages"), list) else [],
+            pending_clarification=pending_clarification,
+        )
+    pending_clarification_consumed = bool(
+        clarification_reduction
+        and clarification_reduction.consume_pending
+        and pending_clarification
     )
-    pending_clarification_consumed = bool(q != submitted_query and pending_clarification)
+    pending_clarification_suspended = bool(
+        clarification_reduction
+        and clarification_reduction.suspend_pending
+        and pending_clarification
+    )
+    if (
+        clarification_reduction
+        and clarification_reduction.answer
+        and clarification_reduction.question_id
+    ):
+        params["clarification_answer"] = {
+            "question_id": str(clarification_reduction.question_id)[:80],
+            "value": str(clarification_reduction.answer)[:500],
+            "relation": str(clarification_reduction.relation)[:40],
+            "authority": "buyer_authored_candidate",
+        }
     params["query"] = q
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
     if not confirmed_slots:
@@ -3406,6 +3497,17 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             response=data if isinstance(data, dict) else {},
         )
     )
+    routed_decision = (
+        data.get("decision") if isinstance(data.get("decision"), dict) else {}
+    )
+    routed_clarification_relation = str(
+        routed_decision.get("clarification_relation") or "none"
+    ).strip().lower()
+    if pending_clarification and routed_clarification_relation in {"answer", "supersede"}:
+        pending_clarification_consumed = True
+    elif pending_clarification and routed_clarification_relation == "interrupt":
+        pending_clarification_suspended = True
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -3427,6 +3529,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "complexity": complexity_result,
         "intent_routing": intent_routing_result,
         "turn_intent": turn_intent,
+        "decision": routed_decision,
+        "clarification_relation": routed_clarification_relation,
         # Preserve typed facade ownership at the HTTP/SSE edge. Without these fields the
         # browser and trace cannot prove whether V2 served, legacy delegated, or the request
         # failed boundedly in a V2-only pilot.
@@ -3441,6 +3545,10 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "case_operation": data.get("case_operation"),
         "case_anchor": data.get("case_anchor") if isinstance(data.get("case_anchor"), dict) else None,
         "state_changed": data.get("state_changed"),
+        "constraints_used": (
+            data.get("constraints_used")
+            if isinstance(data.get("constraints_used"), dict) else {}
+        ),
         # N1/N6 forward-through: the evidence orchestrator's block (legs/citations) is produced in
         # recommend.suggest but was DROPPED here — so the frontend (which hits /chat/query, not
         # /suggest) never saw it and the Evidence tab + Source chips stayed empty. Forward it.
@@ -3628,17 +3736,80 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     try:
         if not persist_conversation:
             raise RuntimeError("temporary_chat")
-        material_question = next((item for item in (out.get("next_questions") or [])
-                                  if isinstance(item, dict) and item.get("id") == "budget_scope"), None)
-        if material_question and not nqe_selection:
-            option_ids = [str(item.get("id") or "").strip().lower()
-                          for item in (material_question.get("options") or []) if isinstance(item, dict)]
+        clarification_memory = Memory(
+            redis,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        )
+        # Apply the transition before persisting a replacement question. Otherwise
+        # an answered question that reveals a second material gap is written and
+        # then immediately deleted by the old question's cleanup.
+        if pending_clarification_consumed:
+            clarification_memory.clear_pending_clarification(uid)
+        elif pending_clarification_suspended:
+            suspended = dict(pending_clarification)
+            suspended["state"] = "suspended"
+            clarification_memory.set_pending_clarification(
+                uid,
+                suspended,
+                ttl_seconds=max(
+                    30,
+                    int(suspended.get("expires_at") or int(time.time()) + 30) - int(time.time()),
+                ),
+            )
+        semantic = (
+            out.get("semantic_resolution")
+            if isinstance(out.get("semantic_resolution"), dict) else {}
+        )
+        material_question = next((
+            item for item in (out.get("next_questions") or [])
+            if isinstance(item, dict) and (
+                item.get("id") == "budget_scope"
+                or bool(item.get("missing_slots"))
+                or str(item.get("reason") or "").startswith(("missing_", "unresolved_", "contradictory_"))
+                or semantic.get("catalog_authority") == "blocked"
+            )
+        ), None)
+        if material_question:
+            from src.app.services.clarification_state import (
+                build_pending_clarification,
+                replacement_root_query,
+            )
+
+            pending_record = build_pending_clarification(
+                material_question,
+                original_query=replacement_root_query(
+                    pending=pending_clarification,
+                    submitted_query=submitted_query,
+                    clarification_relation=routed_clarification_relation,
+                ),
+                trace_id=decision_trace_id,
+                semantic_resolution=semantic,
+                case_anchor=(
+                    out.get("case_anchor")
+                    if isinstance(out.get("case_anchor"), dict) else {}
+                ),
+                external_research_consent=(
+                    str(params.get("external_research_consent") or "").lower() == "true"
+                ),
+                commercial_state={
+                    "quantity": out.get("requested_quantity"),
+                    "total_budget_cents": (
+                        response_confirmed_slots.get("total_budget_cents")
+                        or (out.get("constraints_used") or {}).get("total_budget_cents")
+                    ),
+                    "currency": out.get("currency") or "AUD",
+                    "selected_sku": (
+                        (out.get("case_anchor") or {}).get("selected_sku")
+                        if isinstance(out.get("case_anchor"), dict) else None
+                    ),
+                },
+                original_intent=turn_intent,
+                ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
+            )
             Memory(redis).set_pending_clarification(
                 uid,
-                {"version": 1, "question_id": "budget_scope",
-                 "reason": material_question.get("reason") or "missing_material_budget_scope",
-                 "original_query": submitted_query[:1000], "trace_id": decision_trace_id,
-                 "allowed_option_ids": (option_ids or ["total", "per_unit"])[:8]},
+                pending_record,
                 tenant_id=tenant_id,
                 session_epoch=session_epoch,
                 ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
@@ -3807,12 +3978,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             tenant_id=tenant_id,
             session_epoch=session_epoch,
         )
-        if pending_clarification_consumed:
-            Memory(
-                redis,
-                tenant_id=tenant_id,
-                session_epoch=session_epoch,
-            ).clear_pending_clarification(uid)
     except Exception:
         if persist_conversation:
             logger.warning("chat structured-state persistence failed", exc_info=True)

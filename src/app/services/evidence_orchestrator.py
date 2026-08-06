@@ -324,7 +324,19 @@ def _leg_concept_resolution(
     from src.app.deps import scrub_pii
     from src.app.services.external_product_research_service import run_external_research_stage
 
-    outbound_query = scrub_pii(f"{concept} definition requirements compatibility")
+    research_plan = getattr(plan, "research_plan", None)
+    answer_candidates: list[str] = []
+    if isinstance(research_plan, dict):
+        for slot in list(research_plan.get("material_slots") or [])[:5]:
+            if not isinstance(slot, dict) or slot.get("answer_status") != "candidate":
+                continue
+            value = " ".join(str(slot.get("answer_candidate") or "").split())[:500]
+            if value:
+                answer_candidates.append(value)
+    buyer_context = " ".join(answer_candidates)[:800]
+    outbound_query = scrub_pii(
+        f"{concept} {buyer_context} official requirements compatibility".strip()
+    )
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     result = run_external_research_stage(

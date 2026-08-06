@@ -297,6 +297,19 @@ def test_relative_quantity_without_a_selected_line_fails_closed() -> None:
     assert parsed.proposed_value is None
 
 
+def test_unresolved_semantic_case_can_amend_requested_demand_without_selecting_sku() -> None:
+    obligations = reduce_case_obligations(
+        "Actually reduce it by 10 units.",
+        current_state={"quantity": 30},
+        catalog_authority="blocked",
+    )
+
+    assert obligations[0]["kind"] == "quantity_amendment"
+    assert obligations[0]["proposed_value"] == 20
+    assert obligations[0]["status"] == "pending_confirmation"
+    assert obligations[0]["authorization_granted"] is False
+
+
 def test_mixed_turn_decomposes_every_obligation_without_executing_any() -> None:
     obligations = decompose_case_obligations(
         "Reduce it by 10, deliver it by Friday, then confirm the purchase order and pay a deposit.",
