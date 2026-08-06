@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest';
 import WorkloadResearchTrace from '../WorkloadResearchTrace';
 
 describe('WorkloadResearchTrace', () => {
+  it('does not claim that missing research records prove research was unnecessary', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} />);
+
+    expect(screen.getByText(/No governed workload research record was produced/i)).toBeInTheDocument();
+    expect(screen.queryByText(/research was not required/i)).not.toBeInTheDocument();
+  });
+
   it('shows an unresolved provider search without fabricating evidence', () => {
     render(<WorkloadResearchTrace executionSteps={[
       {

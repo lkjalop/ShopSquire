@@ -782,6 +782,14 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         requirements={},
         persisted_context=pending_semantic,
     )
+    from src.app.services.recommendation_core.semantic_coverage import unresolved_purpose_proposal
+
+    if not explicit_requirements:
+        semantic = unresolved_purpose_proposal(
+            query=envelope.query,
+            node_path=node.full_path,
+            existing_semantic=semantic,
+        )
     return TurnDecision(
         lane="PROCUREMENT" if quantity is not None and quantity >= 2 else "SEARCH",
         node_handle=node.handle,
@@ -2356,6 +2364,18 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             if isinstance(pending, dict) else {}
         ),
     )
+    # A category match is not workload authority. If the buyer's purpose is outside the
+    # accepted data-owned use-case/evidence vocabulary, abstain before catalog retrieval.
+    from src.app.services.recommendation_core.semantic_coverage import unresolved_purpose_proposal
+
+    if not product_type_options and not requirements and not raw_requirements and relationship != "run_on":
+        semantic_proposal = unresolved_purpose_proposal(
+            query=envelope.query,
+            use_cases=use_cases,
+            workload_entities=workload_entities,
+            node_path=(node.full_path if node else None),
+            existing_semantic=semantic_proposal,
+        )
     accepted_audit = {
         "lane": lane,
         "node_handle": (node.handle if node else None),

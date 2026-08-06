@@ -1840,6 +1840,82 @@ def test_fresh_search_does_not_inherit_prior_bulk_quantity(db):
     assert resp.extras.get("requested_quantity") is None
 
 
+def test_uncovered_workload_abstains_and_does_not_inherit_stale_quantity(db):
+    """Screenshot 45: category recognition cannot launder workload identity or old quantity."""
+    payload = {
+        "lane": "SEARCH",
+        "handle": "el-6-11-2",
+        "use_cases": ["gaming"],
+        "quantity": None,
+        "subject_action": "continue",
+        "confidence": 0.91,
+    }
+    session = {
+        "prior_node": "el-6-11-2",
+        "accepted_constraints": {"quantity": 30},
+    }
+    response = recommend_turn(
+        db,
+        _env(
+            "I need help with a laptop for digital twin simulation? "
+            "I need it to simulate a cyber attack?",
+            session=session,
+        ),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert response.products == []
+    semantic = response.extras["semantic_resolution"]
+    assert semantic["catalog_authority"] == "blocked"
+    assert {item["text"] for item in semantic["concepts"]} == {
+        "digital twin simulation", "simulate a cyber attack",
+    }
+    assert response.extras.get("requested_quantity") is None
+    assert response.extras.get("quantity_inherited") is not True
+    assert "catalog_recommendation" in semantic["state_prevented"]
+
+
+def test_uncovered_workload_abstains_when_router_model_is_unavailable(db):
+    response = recommend_turn(
+        db,
+        _env(
+            "I need help with a laptop for digital twin simulation? "
+            "I need it to simulate a cyber attack?",
+        ),
+        llm_fn=lambda _prompt, _timeout: "",
+    )
+
+    assert response.products == []
+    semantic = response.extras["semantic_resolution"]
+    assert semantic["catalog_authority"] == "blocked"
+    assert {item["text"] for item in semantic["concepts"]} == {
+        "digital twin simulation", "simulate a cyber attack",
+    }
+    assert semantic["next_permitted_action"] == "ask_material_clarification"
+
+
+@pytest.mark.parametrize(
+    ("query", "use_case"),
+    [
+        ("I need a laptop for gaming", "gaming"),
+        ("I need a laptop for university study", "student"),
+    ],
+)
+def test_registry_covered_purpose_does_not_trigger_open_world_abstention(
+    db, query, use_case,
+):
+    payload = {
+        "lane": "SEARCH", "handle": "el-6-6", "use_cases": [use_case],
+        "subject_action": "switch", "confidence": 0.91,
+    }
+    response = recommend_turn(
+        db, _env(query), llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert response.extras.get("semantic_resolution") is None
+    assert response.products
+
+
 def test_complete_brand_excluded_search_does_not_reactivate_prior_bulk_quantity(db):
     payload = {
         "lane": "SEARCH", "handle": "el-6-6", "requirements": {},

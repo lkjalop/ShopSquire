@@ -64,7 +64,9 @@ class SemanticProposal(BaseModel):
     evidence_questions: list[EvidenceQuestion] = Field(default_factory=list, max_length=5)
     proposed_action: SemanticAction = "search_catalog"
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    proposal_origin: Literal["model", "deterministic_fallback", "persisted"] = "model"
+    proposal_origin: Literal[
+        "model", "deterministic_fallback", "coverage_abstention", "persisted"
+    ] = "model"
 
 
 @dataclass(frozen=True)

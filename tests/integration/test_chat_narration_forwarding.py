@@ -69,6 +69,49 @@ def test_chat_query_forwards_narration_job_id(monkeypatch):
     assert body["action_executed"] is False
 
 
+async def _fake_unresolved_workload(*args, **kwargs):
+    return 200, {
+        "results": [],
+        "assistant_message": "I need approved evidence before I can recommend products.",
+        "decision_trace_id": "trace-unresolved-current",
+        "requested_quantity": None,
+        "slate_disposition": "clear",
+        "semantic_resolution": {
+            "catalog_authority": "blocked",
+            "reasons": ["unresolved_material_concept"],
+        },
+        "next_questions": [{"id": "research_consent", "text": "Check approved sources?"}],
+    }
+
+
+def test_unresolved_subject_does_not_republish_prior_commercial_slots(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    monkeypatch.setattr(chat_router, "_call_recommend_in_process", _fake_unresolved_workload)
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/chat/query",
+        json={
+            "uid": "u-chat-unresolved-subject",
+            "query": "I need a laptop for an unfamiliar simulation workflow",
+            "confirmed_slots": {
+                "order_quantity": 30,
+                "budget_scope": "total",
+                "total_budget_cents": 7_500_000,
+                "budget_max": 75_000,
+            },
+        },
+        headers={"x-api-key": "local-merchant-key"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["decision_trace_id"] == "trace-unresolved-current"
+    assert body.get("requested_quantity") is None
+    assert "order_quantity" not in body.get("confirmed_slots", {})
+    assert "total_budget_cents" not in body.get("confirmed_slots", {})
+
+
 async def _fake_no_match_with_brand_exclusion(*args, **kwargs):
     return 200, {
         "results": [],

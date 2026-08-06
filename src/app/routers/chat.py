@@ -3508,6 +3508,26 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     elif pending_clarification and routed_clarification_relation == "interrupt":
         pending_clarification_suspended = True
 
+    semantic_resolution = (
+        data.get("semantic_resolution")
+        if isinstance(data.get("semantic_resolution"), dict)
+        else {}
+    )
+    semantic_catalog_blocked = (
+        str(semantic_resolution.get("catalog_authority") or "").strip().lower()
+        == "blocked"
+    )
+    response_slots_for_output = dict(response_confirmed_slots)
+    if semantic_catalog_blocked and data.get("requested_quantity") is None:
+        # Accepted commercial state belongs to the suspended prior subject. Do not project
+        # its quantity/budget into a new unresolved subject: the storefront uses these fields
+        # to pin procurement panels and trace identity to the current turn.
+        for key in (
+            "order_quantity", "budget_scope", "total_budget_cents",
+            "budget_min", "budget_max",
+        ):
+            response_slots_for_output.pop(key, None)
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -3523,7 +3543,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             data.get("needs_disambiguation") or (not products and next_questions)
         ),
         "nqe_selection_applied": data.get("nqe_selection_applied") or {},
-        "confirmed_slots": response_confirmed_slots,
+        "confirmed_slots": response_slots_for_output,
         "llm_model": data.get("llm_model"),
         "model_tier": data.get("model_tier"),
         "complexity": complexity_result,
@@ -3604,7 +3624,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "requested_quantity": (
             data.get("requested_quantity")
             if data.get("requested_quantity") is not None
-            else response_confirmed_slots.get("order_quantity")
+            else (
+                None
+                if semantic_catalog_blocked
+                else response_slots_for_output.get("order_quantity")
+            )
         ),
         # Whole-order sizing is consequential UI state too.  The storefront must be able to
         # reject a stale/stretch product whose requested quantity would exceed the accepted

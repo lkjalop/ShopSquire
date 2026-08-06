@@ -516,6 +516,10 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         external_research_authorized=bool(envelope.external_research_consent),
         research_plan=research_plan.model_dump(),
     )
+    # An unresolved purpose cannot inherit quantity from a different, older commercial subject.
+    if plan.needs_concept_resolution and quantity_inherited:
+        requested_quantity = None
+        quantity_inherited = False
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
     continuity_pending = (

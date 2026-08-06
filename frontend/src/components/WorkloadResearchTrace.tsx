@@ -52,7 +52,11 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   );
 
   if (!hasResearch) {
-    return <div style={{ color: '#64748b' }}>No named-workload research was required for this turn.</div>;
+    return (
+      <div style={{ color: '#64748b' }}>
+        No governed workload research record was produced. This does not establish that research was unnecessary.
+      </div>
+    );
   }
 
   return (
