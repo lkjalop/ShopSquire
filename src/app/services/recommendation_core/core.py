@@ -422,7 +422,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             decision = dataclasses.replace(
                 decision, node_handle=host, node_path=(hn.full_path if hn else None),
                 requested_product_node=host, relationship="run_on")
-            logger.info("ungrounded-workload reroute → host %s (reqs=%s)", host,
+            logger.info("ungrounded-workload reroute -> host %s (reqs=%s)", host,
                         sorted(decision.requirements))
     # R9.1 CONTINUATION INHERITANCE (screenshot 30 — the budget-loss bug): a refinement turn
     # ('show me cheaper ones') restates neither the budget nor the specs, so they vanished and

@@ -89,6 +89,14 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
                     },
                 },
             },
+            "semantic_requirement_compilation": {
+                "status": "accepted",
+                "accepted_claim_count": 2,
+                "compiled_requirements": {
+                    "ram_gb": {"op": ">=", "value": 32},
+                    "gpu_vram_gb": {"op": ">=", "value": 8},
+                },
+            },
             "semantic_resolution": {
                 "outcome": "clarify",
                 "catalog_authority": "blocked",
@@ -107,6 +115,11 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
     assert by_id["buyer-research-consent"]["output"]["commercial_authority_granted"] is False
     assert by_id["semantic-evidence"]["kind"] == "connector"
     assert by_id["semantic-evidence"]["latency_ms"] == 12
+    compiler = by_id["semantic-requirements-compiler"]
+    assert compiler["kind"] == "gate"
+    assert compiler["authority"] == "compiles_constraints"
+    assert compiler["status"] == "accepted"
+    assert compiler["output"]["compiled_requirements"]["ram_gb"]["value"] == 32
     assert by_id["semantic-authorization"]["kind"] == "gate"
     assert by_id["semantic-authorization"]["status"] == "blocked"
     assert by_id["material-clarification"]["authority"] == "requests_buyer_input"

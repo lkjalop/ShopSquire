@@ -1782,7 +1782,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 common += 1
             related = (h == p or h.startswith(p + "-") or p.startswith(h + "-") or common >= 2)
             if not related:
-                logger.info("continuation fragment drifted (%s → %s); keeping prior subject",
+                logger.info("continuation fragment drifted (%s -> %s); keeping prior subject",
                             lane, node.handle)
                 node = pn
                 subject_from_session = True
