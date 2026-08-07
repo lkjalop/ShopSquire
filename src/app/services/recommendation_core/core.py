@@ -1292,7 +1292,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     _run_stage(resp, "fulfillment_preview",
                lambda: _maybe_fulfillment_preview(envelope, decision, resp))
     _run_stage(resp, "secondary_explanation",
-               lambda: _apply_secondary_explanation(envelope, decision, resp))
+               lambda: _apply_secondary_explanation(db, envelope, decision, resp))
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
@@ -1977,13 +1977,19 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
             availability=projection["availability"],
         )
         resp.extras["delivery_feasibility"] = deadline
+        from src.app.services.bulk_alternatives import augment_deadline_alternatives
+
+        resp.extras["fulfillment_options"] = augment_deadline_alternatives(
+            list(resp.extras.get("fulfillment_options") or []),
+            promise=deadline,
+        )
         if deadline["feasibility"] != "met":
-            resp.extras["human_escalation"] = {
-                "status": "recommended",
-                "reason": "deadline_confirmation_required",
-                "action": "fulfillment_operator_review",
-                "external_action": "none",
-            }
+            from src.app.services.operator_escalation import build_operator_escalation
+
+            resp.extras["human_escalation"] = build_operator_escalation(
+                reason="deadline_confirmation_required",
+                calendar_expectation=(envelope.session or {}).get("operator_response_expectation"),
+            )
             deadline_text = (
                 f"I cannot confirm all {int(quantity)} within the {int(horizon_days)}-day "
                 "window: inventory location is known, but date-qualified transfer and carrier "
@@ -2004,10 +2010,16 @@ def _deadline_feasibility_from_preview(
         availability.get("inventory_snapshot")
         if isinstance(availability.get("inventory_snapshot"), dict) else {}
     )
+    explicit_lines = [
+        dict(item) for item in list(snapshot.get("supply_lines") or [])[:64]
+        if isinstance(item, dict)
+    ]
     local = max(0, int(snapshot.get("local_atp") or 0))
     transferable = max(0, int(snapshot.get("transferable") or 0))
     unconfirmed = max(0, int(snapshot.get("unconfirmed_shortfall") or 0))
-    supply_lines = []
+    supply_lines = explicit_lines
+    if explicit_lines:
+        local = transferable = unconfirmed = 0
     if local:
         supply_lines.append({
             "source_ref": "local_atp", "quantity": local,
@@ -2023,7 +2035,10 @@ def _deadline_feasibility_from_preview(
             "source_ref": "supplier_unconfirmed", "quantity": unconfirmed,
             "status": "unconfirmed", "authority": "supplier_enquiry",
         })
-    covered = local + transferable + unconfirmed
+    covered = (
+        sum(max(0, int(item.get("quantity") or 0)) for item in explicit_lines)
+        if explicit_lines else local + transferable + unconfirmed
+    )
     if covered < int(quantity):
         supply_lines.append({
             "source_ref": "uncovered", "quantity": int(quantity) - covered,
@@ -2405,6 +2420,7 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
 
 
 def _apply_secondary_explanation(
+    db,
     envelope: TurnEnvelope,
     decision: TurnDecision,
     resp: CoreResponse,
@@ -2450,11 +2466,34 @@ def _apply_secondary_explanation(
         build_product_fit_explanation,
     )
 
+    product_capability: Dict[str, Any] = {
+        "status": "not_requested",
+        "commercial_authority_granted": False,
+    }
+    if envelope.external_research_consent and decision.exact_product_sku and decision.requirements:
+        from src.app.services.catalog_read_model import get_variant
+        from src.app.services.connectors.product_capability_evidence import (
+            configured_product_capability_registry,
+            identity_from_catalog_variant,
+        )
+
+        variant = get_variant(db, top.sku, tenant_id=envelope.tenant_id)
+        if variant is not None:
+            identity = identity_from_catalog_variant(variant)
+            if identity.identifier:
+                product_capability = configured_product_capability_registry().resolve(
+                    identity,
+                    claim_keys=tuple(decision.requirements),
+                    allow_live=True,
+                    tenant_id=envelope.tenant_id,
+                ).to_dict()
+
     explanation_payload, explanation = build_product_fit_explanation(
         product=top,
         requirements=decision.requirements,
         semantic_resolution=semantic,
         requirement_compilation=compilation,
+        product_capability_evidence=product_capability,
     )
     resp.extras["explanation"] = explanation_payload
     current = str(resp.message or "").strip()

@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.app.services.product_identity import (
     rebuild_legacy_product_aliases,
+    register_product_aliases,
     resolve_product_alias,
 )
 from src.app.services.recommendation_core.envelope import TurnEnvelope
@@ -54,6 +55,43 @@ def test_ambiguous_alias_abstains(tmp_path):
             "VALUES ('tenant-a', 'shared model', 'model', :sku, 'test', 1)"
         ), {"sku": sku})
     assert resolve_product_alias(db, tenant_id="tenant-a", query="buy shared model") is None
+
+
+def test_strong_identifier_beats_conflicting_verbose_title(tmp_path):
+    db = _db(tmp_path)
+    register_product_aliases(
+        db, tenant_id="tenant-a", sku="SKU-MPN", name="Compact Workstation",
+        manufacturer_part_number="21KX0001AU",
+    )
+    register_product_aliases(
+        db, tenant_id="tenant-a", sku="SKU-TITLE",
+        name="Lenovo ThinkPad P16 Gen 3 Mobile Workstation",
+    )
+
+    assert resolve_product_alias(
+        db,
+        tenant_id="tenant-a",
+        query="compare 21KX0001AU with Lenovo ThinkPad P16 Gen 3 Mobile Workstation",
+    ) == ("SKU-MPN", "manufacturer_part_number")
+
+
+def test_gtin_then_family_identity_precedence_and_ambiguity(tmp_path):
+    db = _db(tmp_path)
+    register_product_aliases(
+        db, tenant_id="tenant-a", sku="SKU-A", name="Workstation Alpha",
+        gtin="09312345678901", family_identifier="ThinkPad P16 Gen 3",
+    )
+    register_product_aliases(
+        db, tenant_id="tenant-a", sku="SKU-B", name="Workstation Beta",
+        family_identifier="ThinkPad P16 Gen 3",
+    )
+
+    assert resolve_product_alias(
+        db, tenant_id="tenant-a", query="quote 09312345678901"
+    ) == ("SKU-A", "gtin")
+    assert resolve_product_alias(
+        db, tenant_id="tenant-a", query="quote ThinkPad P16 Gen 3"
+    ) is None
 
 
 def test_explicit_indexed_sku_bulk_request_bypasses_model(tmp_path, monkeypatch):

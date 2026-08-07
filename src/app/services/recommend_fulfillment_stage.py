@@ -74,6 +74,58 @@ def _canonical_supply_snapshot(avail: Dict[str, Any], requested_qty: int) -> Dic
         local = confirmed
         transfer = 0
         shortfall = max(0, requested - confirmed)
+    supplier_confirmations = [
+        row for row in list((avail or {}).get("supplier_confirmations") or [])[:16]
+        if isinstance(row, dict) and str(row.get("status") or "").lower() == "confirmed"
+    ]
+    supplier_confirmed = min(
+        shortfall,
+        sum(max(0, int(row.get("quantity") or 0)) for row in supplier_confirmations),
+    )
+    unconfirmed = max(0, shortfall - supplier_confirmed)
+    supply_lines: List[Dict[str, Any]] = []
+    if local:
+        supply_lines.append({
+            "source_ref": "local_atp", "quantity": local, "status": "confirmed",
+            "arrival_min": (avail or {}).get("local_arrival_min"),
+            "arrival_max": (avail or {}).get("local_arrival_max"),
+            "authority": "dated_atp" if (avail or {}).get("local_arrival_max") else "inventory_snapshot",
+        })
+    transfer_plan = list(network.get("transfer_plan") or []) if isinstance(network, dict) else []
+    if transfer:
+        if transfer_plan:
+            for index, row in enumerate(transfer_plan[:16]):
+                if not isinstance(row, dict):
+                    continue
+                supply_lines.append({
+                    "source_ref": f"transfer:{row.get('from_location') or index}",
+                    "quantity": max(0, int(row.get("qty") or 0)),
+                    "status": "confirmed",
+                    "arrival_min": row.get("arrival_min") or row.get("eta"),
+                    "arrival_max": row.get("arrival_max") or row.get("eta"),
+                    "authority": "dated_transfer" if (row.get("arrival_max") or row.get("eta")) else "network_atp",
+                })
+        else:
+            supply_lines.append({
+                "source_ref": "network_transfer", "quantity": transfer, "status": "confirmed",
+                "arrival_min": None, "arrival_max": None, "authority": "network_atp",
+            })
+    for row in supplier_confirmations:
+        supply_lines.append({
+            "source_ref": f"supplier:{row.get('supplier_id') or 'confirmed'}",
+            "quantity": max(0, int(row.get("quantity") or 0)),
+            "status": "confirmed",
+            "arrival_min": row.get("arrival_min"),
+            "arrival_max": row.get("arrival_max"),
+            "authority": "supplier_confirmation",
+            "source_version": row.get("source_version"),
+        })
+    if unconfirmed:
+        supply_lines.append({
+            "source_ref": "supplier_enquiry", "quantity": unconfirmed,
+            "status": "unconfirmed", "arrival_min": None, "arrival_max": None,
+            "authority": "supplier_enquiry",
+        })
     # The legacy inventory read does not yet expose a durable source revision.  Preserve that
     # limitation explicitly instead of inventing a fresh version.
     source_version = str((avail or {}).get("source_version") or "unversioned_inventory_read")
@@ -85,11 +137,14 @@ def _canonical_supply_snapshot(avail: Dict[str, Any], requested_qty: int) -> Dic
         "local_atp": local,
         "transferable": transfer,
         "confirmed_atp": confirmed,
-        "unconfirmed_shortfall": shortfall,
+        "supplier_confirmed_quantity": supplier_confirmed,
+        "total_confirmed_supply": confirmed + supplier_confirmed,
+        "unconfirmed_shortfall": unconfirmed,
+        "supply_lines": supply_lines,
         "source_version": source_version,
         "observed_at": observed_at,
         "freshness_status": freshness,
-        "conservation_ok": requested == confirmed + shortfall,
+        "conservation_ok": requested == confirmed + supplier_confirmed + unconfirmed,
     }
 
 

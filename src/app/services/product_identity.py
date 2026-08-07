@@ -396,12 +396,18 @@ def register_product_aliases(
     sku: str,
     name: str = "",
     manufacturer_part_number: str = "",
+    machine_type_model: str = "",
+    gtin: str = "",
+    family_identifier: str = "",
     model: str = "",
     source: str = "catalog",
 ) -> int:
     aliases: Dict[str, str] = {
         "sku": sku,
         "manufacturer_part_number": manufacturer_part_number,
+        "machine_type_model": machine_type_model,
+        "gtin": gtin,
+        "family_identifier": family_identifier,
         "model": model,
         "title": name,
     }
@@ -434,6 +440,11 @@ def rebuild_legacy_product_aliases(db, *, tenant_id: str) -> int:
         except (TypeError, ValueError):
             specs = {}
         mpn = specs.get("manufacturer_part_number") or specs.get("mpn") or ""
+        mtm = specs.get("machine_type_model") or specs.get("mtm") or ""
+        gtin = specs.get("gtin") or specs.get("barcode") or specs.get("ean") or specs.get("upc") or ""
+        family_identifier = (
+            specs.get("family_identifier") or specs.get("product_family") or specs.get("family") or ""
+        )
         model = specs.get("model") or specs.get("model_number") or ""
         written += register_product_aliases(
             db,
@@ -441,6 +452,9 @@ def rebuild_legacy_product_aliases(db, *, tenant_id: str) -> int:
             sku=str(sku),
             name=str(name or ""),
             manufacturer_part_number=str(mpn),
+            machine_type_model=str(mtm),
+            gtin=str(gtin),
+            family_identifier=str(family_identifier),
             model=str(model),
         )
     return written
@@ -469,16 +483,42 @@ def resolve_product_alias(db, *, tenant_id: str, query: str) -> Optional[Tuple[s
         ), params).fetchall()
     if not rows:
         return None
-    # Longest matching alias wins, but only if it identifies exactly one SKU.
+    # Strong identifiers outrank descriptive text. This prevents a verbose title
+    # from stealing identity from an exact MPN/MTM or GTIN in the same turn.
+    priority = {
+        "sku": 0,
+        "manufacturer_part_number": 1,
+        "machine_type_model": 1,
+        "gtin": 2,
+        "family_identifier": 3,
+        "model": 4,
+        "title": 5,
+    }
     by_alias: Dict[str, list[Tuple[str, str]]] = {}
     for alias, sku, alias_type in rows:
         by_alias.setdefault(str(alias), []).append((str(sku), str(alias_type)))
-    for alias in spans:
+    ranked_aliases = sorted(
+        (alias for alias in spans if alias in by_alias),
+        key=lambda alias: (
+            min(priority.get(kind, 99) for _sku, kind in by_alias[alias]),
+            -len(alias.split()),
+            -len(alias),
+        ),
+    )
+    for alias in ranked_aliases:
         matches = by_alias.get(alias, [])
-        skus = {sku for sku, _kind in matches}
+        best_priority = min(priority.get(kind, 99) for _sku, kind in matches)
+        strongest = [
+            (sku, kind) for sku, kind in matches
+            if priority.get(kind, 99) == best_priority
+        ]
+        skus = {sku for sku, _kind in strongest}
         if len(skus) == 1:
             sku = next(iter(skus))
-            kind = sorted(kind for found_sku, kind in matches if found_sku == sku)[0]
+            kind = sorted(
+                (kind for found_sku, kind in strongest if found_sku == sku),
+                key=lambda value: priority.get(value, 99),
+            )[0]
             return sku, kind
         if len(skus) > 1:
             return None

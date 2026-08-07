@@ -918,6 +918,32 @@ def test_deadline_preview_is_unknown_without_date_qualified_arrival_evidence():
     assert "arrival_evidence_missing" in result["reason_codes"]
 
 
+def test_deadline_preview_uses_only_explicit_dated_supply_lines():
+    from src.app.services.recommendation_core.core import _deadline_feasibility_from_preview
+
+    result = _deadline_feasibility_from_preview(
+        quantity=10,
+        horizon_days=2,
+        availability={
+            "inventory_snapshot": {
+                "source_version": "atp-43",
+                "supply_lines": [
+                    {"source_ref": "local_atp", "quantity": 4, "status": "confirmed",
+                     "arrival_max": "2026-08-09T00:00:00+00:00",
+                     "authority": "dated_atp"},
+                    {"source_ref": "supplier:SUP-1", "quantity": 6, "status": "unconfirmed",
+                     "arrival_max": "2026-08-09T00:00:00+00:00",
+                     "authority": "supplier_enquiry"},
+                ],
+            },
+        },
+    )
+
+    assert result["quantity_confirmed_by_deadline"] == 4
+    assert result["unknown_quantity"] == 6
+    assert result["feasibility"] == "unknown"
+
+
 # ── router clamps ─────────────────────────────────────────────────────────────
 
 def test_router_bounded_fallback_on_garbage_model(db):

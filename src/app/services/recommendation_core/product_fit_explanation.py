@@ -45,10 +45,17 @@ def build_product_fit_explanation(
     requirements: Mapping[str, Sequence[Sequence[Any]]],
     semantic_resolution: Mapping[str, Any] | None = None,
     requirement_compilation: Mapping[str, Any] | None = None,
+    product_capability_evidence: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Return the canonical explanation payload and concise grounded narration."""
     semantic = dict(semantic_resolution or {})
     compilation = dict(requirement_compilation or {})
+    product_evidence = dict(product_capability_evidence or {})
+    product_claims = {
+        str(item.get("attribute_key")): item
+        for item in list(product_evidence.get("accepted_claims") or [])[:64]
+        if isinstance(item, dict) and str(item.get("attribute_key") or "").strip()
+    }
     compiled = [
         item for item in list(compilation.get("compiled_requirements") or [])[:64]
         if isinstance(item, dict)
@@ -80,6 +87,15 @@ def build_product_fit_explanation(
             or None
         )
         value = observed.get(key)
+        product_claim = product_claims.get(str(key))
+        product_claim_value = product_claim.get("value") if product_claim else None
+        product_evidence_verdict = None
+        if product_claim:
+            product_evidence_verdict = (
+                "confirms_catalog"
+                if str(product_claim_value) == str(value)
+                else "conflicts_with_catalog"
+            )
         status = per_key.get(key)
         verdict = "meets" if status is True else "fails" if status is False else "unknown"
         required_text = _format_required(predicates, unit)
@@ -97,6 +113,11 @@ def build_product_fit_explanation(
             "observed": value,
             "observed_text": observed_text,
             "observed_source": "catalog_attribute",
+            "product_evidence_refs": (
+                [str(product_claim.get("source_record_id"))]
+                if product_claim and product_claim.get("source_record_id") else []
+            ),
+            "product_evidence_verdict": product_evidence_verdict,
             "verdict": verdict,
         })
         phrases.append(
@@ -126,6 +147,10 @@ def build_product_fit_explanation(
         "fit_ledger": ledger,
         "material_unknowns": list(semantic.get("material_unknowns") or [])[:8],
         "commercial_authority_granted": False,
+        "product_capability_evidence": product_evidence or {
+            "status": "not_requested",
+            "commercial_authority_granted": False,
+        },
     }
 
     title = payload["name"] or payload["sku"] or "This product"
@@ -137,6 +162,13 @@ def build_product_fit_explanation(
                 " This is a bounded qualification against the accepted checks above, not proof "
                 "of complete workflow performance or compatibility."
             )
+        if product_evidence.get("status") == "accepted":
+            confirmed = sum(
+                1 for row in ledger if row.get("product_evidence_verdict") == "confirms_catalog"
+            )
+            narration += f" Official product evidence confirms {confirmed} compared configuration fact(s)."
+        elif product_evidence.get("status") in {"conflict", "rejected", "blocked"}:
+            narration += " Product-source evidence did not clear validation, so it was not used as proof."
     else:
         narration = (
             f"Why {title} is shown: the authorized slate retained no capability comparison "

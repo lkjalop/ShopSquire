@@ -1,0 +1,35 @@
+{
+  "schema_version": "product-capability-sources-v1",
+  "sources": [
+    {
+      "provider_id": "lenovo_psref",
+      "enabled": true,
+      "source_types": ["manufacturer_product_spec"],
+      "identity_types": ["machine_type_model", "manufacturer_part_number", "family_identifier"],
+      "allowed_publishers": ["Lenovo"],
+      "allowed_domains": ["psref.lenovo.com", "psrefstuff.lenovo.com"],
+      "max_age_seconds": 2592000,
+      "operational_status": "endpoint_required"
+    },
+    {
+      "provider_id": "intel_ark",
+      "enabled": true,
+      "source_types": ["component_vendor_spec"],
+      "identity_types": ["manufacturer_part_number", "family_identifier"],
+      "allowed_publishers": ["Intel"],
+      "allowed_domains": ["intel.com", "ark.intel.com"],
+      "max_age_seconds": 2592000,
+      "operational_status": "endpoint_required"
+    },
+    {
+      "provider_id": "nvidia_product_specs",
+      "enabled": true,
+      "source_types": ["component_vendor_spec"],
+      "identity_types": ["manufacturer_part_number", "family_identifier"],
+      "allowed_publishers": ["NVIDIA"],
+      "allowed_domains": ["nvidia.com"],
+      "max_age_seconds": 2592000,
+      "operational_status": "endpoint_required"
+    }
+  ]
+}

@@ -215,7 +215,41 @@ def test_network_breakdown_merged_onto_availability(monkeypatch):
     assert snapshot["confirmed_atp"] == 10
     assert snapshot["unconfirmed_shortfall"] == 0
     assert snapshot["conservation_ok"] is True
+    assert snapshot["supply_lines"][0]["source_ref"] == "local_atp"
+    assert snapshot["supply_lines"][0]["arrival_max"] is None
     assert line == "On availability: 10 are available across the network; 5 at your preferred location now and 5 can transfer from other locations."
+
+
+def test_canonical_snapshot_preserves_dated_transfer_and_confirmed_supplier_arrival():
+    from src.app.services.recommend_fulfillment_stage import _canonical_supply_snapshot
+
+    snapshot = _canonical_supply_snapshot({
+        "sku": "SKU-1",
+        "in_stock": 3,
+        "network": {
+            "applicable": True,
+            "by_location": {"sydney": 3, "melbourne": 7},
+            "preferred_location": "sydney",
+            "transfer_plan": [{
+                "from_location": "melbourne", "qty": 7,
+                "status": "confirmed", "arrival_max": "2026-08-10T05:00:00+00:00",
+            }],
+            "fillable_from_network": False,
+        },
+        "supplier_confirmations": [{
+            "supplier_id": "SUP-1", "quantity": 5, "status": "confirmed",
+            "arrival_min": "2026-08-11T00:00:00+00:00",
+            "arrival_max": "2026-08-12T00:00:00+00:00",
+            "source_version": "quote-v3",
+        }],
+    }, 15)
+
+    assert snapshot["confirmed_atp"] == 10
+    assert snapshot["supplier_confirmed_quantity"] == 5
+    supplier = next(line for line in snapshot["supply_lines"] if line["source_ref"] == "supplier:SUP-1")
+    assert supplier["status"] == "confirmed"
+    assert supplier["arrival_max"] == "2026-08-12T00:00:00+00:00"
+    assert supplier["authority"] == "supplier_confirmation"
 
 
 def test_buyer_requirements_captures_explicit_query_deadline():

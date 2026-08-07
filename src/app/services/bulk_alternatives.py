@@ -17,6 +17,8 @@ OPT_TRANSFER = "transfer_from_network"
 OPT_SUBSTITUTE = "substitute"
 OPT_SOURCE_SHORTFALL = "source_shortfall"
 OPT_REDUCE = "reduce_to_available"
+OPT_SPLIT_DELIVERY = "split_delivery"
+OPT_LATER_DELIVERY = "later_delivery"
 
 
 def build_alternatives(*, sku: str, requested_qty: int, in_stock: int, shortfall: int,
@@ -82,3 +84,58 @@ def build_alternatives(*, sku: str, requested_qty: int, in_stock: int, shortfall
                      "detail": f"Proceed with {in_stock} units now and skip the rest.",
                      "available_now": in_stock})
     return opts
+
+
+def augment_deadline_alternatives(
+    options: List[Dict[str, Any]],
+    *,
+    promise: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Add only alternatives supported by a dated promise calculation.
+
+    Unknown supplier arrival never becomes a later-delivery promise. Existing
+    substitute and RFQ options are preserved; this function performs no I/O and
+    grants no cart, supplier, or payment authority.
+    """
+    output = [dict(item) for item in (options or []) if isinstance(item, dict)]
+    existing = {str(item.get("type") or "") for item in output}
+    requested = max(0, int(promise.get("requested_quantity") or 0))
+    confirmed = max(0, int(promise.get("quantity_confirmed_by_deadline") or 0))
+    remaining = max(0, int(promise.get("remaining_quantity") or requested - confirmed))
+    if requested > 0 and 0 < confirmed < requested and OPT_SPLIT_DELIVERY not in existing:
+        output.append({
+            "option_id": OPT_SPLIT_DELIVERY,
+            "type": OPT_SPLIT_DELIVERY,
+            "title": f"Split delivery: {confirmed} by the requested date",
+            "detail": (
+                f"Use the {confirmed} units confirmed by the requested date and keep the remaining "
+                f"{remaining} pending a separately confirmed arrival."
+            ),
+            "quantity_confirmed_by_deadline": confirmed,
+            "remaining_quantity": remaining,
+            "confirmation_required": True,
+            "external_action": "none",
+        })
+    requested_at = str(promise.get("requested_arrival_at") or "")
+    late_confirmed = [
+        line for line in list(promise.get("supply_lines") or [])
+        if isinstance(line, dict)
+        and str(line.get("status") or "").lower() == "confirmed"
+        and str(line.get("arrival_max") or "")
+        and requested_at
+        and str(line.get("arrival_max")) > requested_at
+    ]
+    if late_confirmed and OPT_LATER_DELIVERY not in existing:
+        latest = max(str(line["arrival_max"]) for line in late_confirmed)
+        quantity = sum(max(0, int(line.get("quantity") or 0)) for line in late_confirmed)
+        output.append({
+            "option_id": OPT_LATER_DELIVERY,
+            "type": OPT_LATER_DELIVERY,
+            "title": "Accept a later confirmed delivery",
+            "detail": f"{quantity} unit(s) have dated evidence with arrival no later than {latest}.",
+            "arrival_max": latest,
+            "arrival_status": "confirmed",
+            "confirmation_required": True,
+            "external_action": "none",
+        })
+    return output

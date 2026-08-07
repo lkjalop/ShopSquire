@@ -3,7 +3,9 @@ network, substitutes, source-the-shortfall, reduce — built from gathered facts
 from __future__ import annotations
 
 from src.app.services.bulk_alternatives import (
-    OPT_IN_STOCK, OPT_REDUCE, OPT_SOURCE_SHORTFALL, OPT_SUBSTITUTE, OPT_TRANSFER, build_alternatives,
+    OPT_IN_STOCK, OPT_LATER_DELIVERY, OPT_REDUCE, OPT_SOURCE_SHORTFALL,
+    OPT_SPLIT_DELIVERY, OPT_SUBSTITUTE, OPT_TRANSFER, augment_deadline_alternatives,
+    build_alternatives,
 )
 
 
@@ -52,3 +54,42 @@ def test_substitutes_capped():
 
 def test_no_requested_qty_returns_empty():
     assert build_alternatives(sku="X", requested_qty=0, in_stock=0, shortfall=0) == []
+
+
+def test_deadline_alternatives_add_split_and_known_later_date_without_claiming_supplier_atp():
+    existing = [{"option_id": OPT_SOURCE_SHORTFALL, "type": OPT_SOURCE_SHORTFALL}]
+    result = augment_deadline_alternatives(
+        existing,
+        promise={
+            "feasibility": "missed",
+            "requested_quantity": 30,
+            "quantity_confirmed_by_deadline": 7,
+            "remaining_quantity": 23,
+            "requested_arrival_at": "2026-08-10T00:00:00+00:00",
+            "supply_lines": [
+                {"source_ref": "SYD", "quantity": 7, "status": "confirmed",
+                 "arrival_max": "2026-08-09T00:00:00+00:00"},
+                {"source_ref": "MEL", "quantity": 23, "status": "confirmed",
+                 "arrival_max": "2026-08-13T00:00:00+00:00"},
+            ],
+        },
+    )
+    types = _types(result)
+    assert OPT_SPLIT_DELIVERY in types
+    assert OPT_LATER_DELIVERY in types
+    later = next(item for item in result if item["type"] == OPT_LATER_DELIVERY)
+    assert later["arrival_status"] == "confirmed"
+    assert later["external_action"] == "none"
+
+
+def test_unknown_arrival_never_becomes_later_delivery_option():
+    result = augment_deadline_alternatives(
+        [],
+        promise={
+            "feasibility": "unknown", "requested_quantity": 30,
+            "quantity_confirmed_by_deadline": 0, "remaining_quantity": 30,
+            "supply_lines": [{"source_ref": "supplier_enquiry", "quantity": 30,
+                              "status": "unconfirmed", "arrival_max": None}],
+        },
+    )
+    assert OPT_LATER_DELIVERY not in _types(result)

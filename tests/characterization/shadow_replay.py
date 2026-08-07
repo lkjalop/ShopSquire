@@ -237,7 +237,8 @@ def _merge_replay_session(prior: dict, core) -> dict:
 
 
 def _phase_telemetry(core, *, case_id: str, turn: int, total_latency_ms: float,
-                     timed_out: bool, fallback_used: bool, model_mode: str) -> dict:
+                     timed_out: bool, fallback_used: bool, model_mode: str,
+                     finalization_timing: dict | None = None) -> dict:
     """Expose non-overlapping attribution where the core can prove it.
 
     Retrieval is also included as a diagnostic sub-phase of the plan, so callers must not sum
@@ -278,6 +279,15 @@ def _phase_telemetry(core, *, case_id: str, turn: int, total_latency_ms: float,
         "post_stage_ms": round(post_ms, 1),
         "narration_ms": (round(float(narration_ms), 1) if narration_ms is not None else None),
         "narration_mode": narration_mode,
+        "sanitize_ms": (
+            round(float((finalization_timing or {}).get("sanitize_ms")), 1)
+            if (finalization_timing or {}).get("sanitize_ms") is not None else None
+        ),
+        "finalization_ms": (
+            round(float((finalization_timing or {}).get("finalization_ms")), 1)
+            if (finalization_timing or {}).get("finalization_ms") is not None else None
+        ),
+        "finalization_mode": "dry_run_without_trace_or_market_persistence",
         "timed_out": bool(timed_out),
         "fallback_used": bool(fallback_used),
         "model_mode": str(model_mode or "unknown"),
@@ -294,8 +304,10 @@ def _p95(values: list[float]) -> float | None:
 
 
 def _summarize_phase_telemetry(rows: list[dict]) -> dict:
-    phase_keys = ("total_ms", "route_intent_ms", "plan_ms", "retrieval_ms", "post_stage_ms",
-                  "narration_ms")
+    phase_keys = (
+        "total_ms", "route_intent_ms", "plan_ms", "retrieval_ms", "post_stage_ms",
+        "narration_ms", "sanitize_ms", "finalization_ms",
+    )
     narration_rows = [row for row in rows if row.get("narration_ms") is not None]
     return {
         "cases": len(rows),
@@ -330,7 +342,11 @@ def _summarize_phase_telemetry(rows: list[dict]) -> dict:
             },
             "p95_ms": _p95([row["narration_ms"] for row in narration_rows]),
         },
-        "note": "retrieval_ms is contained within plan_ms and must not be added to total",
+        "finalization_mode": "dry_run_without_trace_or_market_persistence",
+        "note": (
+            "retrieval_ms is contained within plan_ms and must not be added to total; "
+            "finalization excludes trace persistence and market projection"
+        ),
     }
 
 
@@ -556,14 +572,19 @@ def main() -> None:
                 core = recommend_turn(s, envelope, llm_fn=tracked_llm)
                 latency_ms = (time.monotonic() - t0) * 1000.0
                 dec = _decision_slice(core) or {}
-                used = {}
-                try:
-                    used = core.extras.get("constraints_used") or {}
-                except Exception:
-                    pass
                 session = _merge_replay_session(session, core)
                 shape = response_shape(v1)
                 v2 = to_legacy(core, shape=shape if shape in SHAPES else "full_pipeline")
+                from src.app.services.recommendation_response_finalizer import finalize_core_response
+
+                finalized_probe = finalize_core_response(
+                    v2,
+                    None,
+                    query=envelope.query,
+                    tenant_id=envelope.tenant_id,
+                    uid=envelope.uid,
+                )
+                finalization_timing = dict(finalized_probe.get("timing_breakdown") or {})
                 expect = expects.get(case["id"]) if t["turn"] == 0 else None
                 # M1.3: in facade-mode, a non-core lane is DELEGATED to legacy by the real
                 # facade — score it as intended (delegated), not as a V2 parity failure.
@@ -604,7 +625,8 @@ def main() -> None:
                     telemetry_rows.append(_phase_telemetry(
                         core, case_id=case["id"], turn=t["turn"],
                         total_latency_ms=latency_ms, timed_out=bool(model_call["timed_out"]),
-                        fallback_used=fallback_used, model_mode=decision_source))
+                        fallback_used=fallback_used, model_mode=decision_source,
+                        finalization_timing=finalization_timing))
                     research_rows.append(_research_observation(
                         core, case_id=case["id"], turn=t["turn"]
                     ))
