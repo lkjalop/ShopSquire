@@ -109,12 +109,13 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
   await expect(trace.getByText(/Canonical slate/i)).toBeVisible();
   await expect(trace.getByText(/Verified/i)).toBeVisible();
 
-  await trace.getByRole('button', { name: 'Reasoning', exact: true }).click();
+  await trace.getByRole('button', { name: /^Research & Fit/ }).click();
   await trace.getByRole('tab', { name: 'Why', exact: true }).click();
   await expect(trace.getByText('All Ranked Products')).toBeVisible();
   const whySku = (await trace.locator('text=/R?GAM-[A-Z0-9]+/').first().innerText()).trim();
   expect(whySku).toMatch(/^R?GAM-[A-Z0-9]+$/);
 
+  await trace.getByRole('button', { name: 'Reasoning', exact: true }).click();
   await trace.getByRole('tab', { name: 'Intent', exact: true }).click();
   await expect(trace.getByText(/Shopper Intent Profile|Lane/i).first()).toBeVisible();
 
@@ -135,7 +136,8 @@ test('spoken and typed input share the canonical V2 recommendation path', async 
 
   await trace.getByRole('button', { name: /^Commercial Journey/ }).click();
   await trace.getByRole('tab', { name: /Procurement/ }).click();
-  await expect(trace.getByText(/No procurement .* activity/i)).toBeVisible();
+  await expect(trace.getByText('Deal economics unavailable', { exact: true })).toBeVisible();
+  await expect(trace.getByText(/Drafted supplier RFQ/i)).toHaveCount(0);
 
   await trace.getByRole('button', { name: 'Advanced technical details', exact: true }).click();
   await trace.getByRole('tab', { name: 'Audit Trail', exact: true }).click();
