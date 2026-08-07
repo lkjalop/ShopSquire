@@ -12,7 +12,71 @@ from tests.characterization.shadow_replay import (
     _product_expectations,
     _quality_case,
     _summarize_phase_telemetry,
+    _research_observation,
+    _summarize_research_observations,
 )
+
+
+def test_research_observation_is_explicitly_observer_only():
+    core = SimpleNamespace(extras={
+        "semantic_belief_state": {
+            "hypotheses": [{"hypothesis_id": "h1", "confidence": 0.7}],
+            "material_unknowns": ["execution_location"],
+        },
+        "research_trigger_shadow": {
+            "state": "ambiguous_intent",
+            "recommendation": "research",
+        },
+        "research_plan": {
+            "query_bundle": [{"query": "buyer words requirements"}],
+            "prohibited_assumptions": ["invented product names"],
+        },
+        "evidence": {
+            "research_attempts": [{"status": "selected"}],
+            "accepted_research_claims": [{"claim_id": "c1"}],
+        },
+        "clarification": {
+            "question_id": "q1",
+            "reason": "material ambiguity",
+            "calibration_status": "heuristic_unsealed",
+            "bounded_expected_value": 0.61,
+        },
+    })
+
+    row = _research_observation(core, case_id="case", turn=2)
+
+    assert row["case_id"] == "case:2"
+    assert row["authority"] == "observer_only"
+    assert row["accepted_claim_count"] == 1
+    assert row["clarification"]["calibration_status"] == "heuristic_unsealed"
+
+
+def test_research_summary_requires_external_labels_before_scoring():
+    summary = _summarize_research_observations([
+        {
+            "research_trigger": {
+                "state": "unresolved_workload",
+                "recommendation": "research",
+            },
+            "research_attempts": [{"status": "selected"}],
+            "accepted_claim_count": 0,
+            "clarification": {"question_id": "q1"},
+        },
+        {
+            "research_trigger": {
+                "state": "catalog_sufficient",
+                "recommendation": "skip",
+            },
+            "research_attempts": [],
+            "accepted_claim_count": 2,
+            "clarification": {},
+        },
+    ])
+
+    assert summary["authority"] == "observer_only"
+    assert summary["research_attempted"] == 1
+    assert summary["accepted_claim_cases"] == 1
+    assert "expected_research" in summary["labels_required_for_scoring"]
 
 
 def test_replay_prewarm_records_shared_readiness(monkeypatch):

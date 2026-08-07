@@ -334,6 +334,73 @@ def _summarize_phase_telemetry(rows: list[dict]) -> dict:
     }
 
 
+def _research_observation(core, *, case_id: str, turn: int) -> dict:
+    """Export governed research decisions without turning them into a quality gate.
+
+    These fields need independently authored labels before precision, recall, calibration,
+    or regret can be scored.  The replay therefore records the observation and its authority
+    status, but does not infer ground truth from the system's own output.
+    """
+    extras = core.extras if isinstance(getattr(core, "extras", None), dict) else {}
+    belief = extras.get("semantic_belief_state") or {}
+    trigger = extras.get("research_trigger_shadow") or {}
+    plan = extras.get("research_plan") or {}
+    clarification = extras.get("clarification") or {}
+    evidence = extras.get("evidence") or {}
+    attempts = evidence.get("research_attempts") or []
+    accepted = evidence.get("accepted_research_claims") or []
+    return {
+        "case_id": f"{case_id}:{turn}",
+        "authority": "observer_only",
+        "hypotheses": belief.get("hypotheses") or [],
+        "material_unknowns": belief.get("material_unknowns") or [],
+        "research_trigger": trigger,
+        "query_bundle": plan.get("query_bundle") or [],
+        "prohibited_assumptions": plan.get("prohibited_assumptions") or [],
+        "research_attempts": attempts,
+        "accepted_claim_count": len(accepted),
+        "clarification": {
+            "reason": clarification.get("reason"),
+            "question_id": clarification.get("question_id"),
+            "calibration_status": clarification.get("calibration_status"),
+            "bounded_expected_value": clarification.get("bounded_expected_value"),
+        },
+    }
+
+
+def _summarize_research_observations(rows: list[dict]) -> dict:
+    trigger_states: dict[str, int] = {}
+    recommendations: dict[str, int] = {}
+    for row in rows:
+        trigger = row.get("research_trigger") or {}
+        state = str(trigger.get("state") or "not_observed")
+        recommendation = str(trigger.get("recommendation") or "not_observed")
+        trigger_states[state] = trigger_states.get(state, 0) + 1
+        recommendations[recommendation] = recommendations.get(recommendation, 0) + 1
+    return {
+        "cases": len(rows),
+        "authority": "observer_only",
+        "trigger_states": trigger_states,
+        "recommendations": recommendations,
+        "research_attempted": sum(
+            1 for row in rows if row.get("research_attempts")
+        ),
+        "accepted_claim_cases": sum(
+            1 for row in rows if int(row.get("accepted_claim_count") or 0) > 0
+        ),
+        "clarifications": sum(
+            1 for row in rows if (row.get("clarification") or {}).get("question_id")
+        ),
+        "labels_required_for_scoring": [
+            "expected_hypotheses",
+            "expected_research",
+            "material_clarification",
+            "accepted_claim_correctness",
+            "product_relation",
+        ],
+    }
+
+
 def _prewarm_models() -> dict:
     """Load local models before measurement and preserve setup as replay evidence."""
     started = time.monotonic()
@@ -377,7 +444,7 @@ def main() -> None:
 
     labels = load_labels()   # sealed relevance labels (empty until filled — gate stays honest-red)
     s = sessionmaker(bind=get_engine())()
-    results, rows, quality_rows, diag_rows, telemetry_rows = [], [], [], [], []
+    results, rows, quality_rows, diag_rows, telemetry_rows, research_rows = [], [], [], [], [], []
     t_start = time.monotonic()
     try:
         for f in sorted(CORPUS_DIR.glob("*.json")):
@@ -460,6 +527,9 @@ def main() -> None:
                         core, case_id=case["id"], turn=t["turn"],
                         total_latency_ms=latency_ms, timed_out=bool(model_call["timed_out"]),
                         fallback_used=fallback_used, model_mode=decision_source))
+                    research_rows.append(_research_observation(
+                        core, case_id=case["id"], turn=t["turn"]
+                    ))
                     if args.diagnose:
                         diag_rows.append(_diagnose_case(case["id"], t["turn"],
                                                         req.get("query", ""), core, v2))
@@ -530,6 +600,8 @@ def main() -> None:
             "divergences": results,
             "telemetry": _summarize_phase_telemetry(telemetry_rows),
             "telemetry_cases": telemetry_rows,
+            "research_observations": _summarize_research_observations(research_rows),
+            "research_cases": research_rows,
             "diagnosis": (_aggregate_diagnosis(diag_rows) if diag_rows else None),
             "prewarm": prewarm,
             "elapsed_seconds": round(time.monotonic() - t_start, 1),
