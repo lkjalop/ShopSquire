@@ -533,6 +533,18 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         quantity_inherited = False
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
+    from src.app.services.recommendation_core.research_routing import (
+        assess_research_trigger_shadow,
+    )
+
+    # Observer only: this records the features needed to calibrate a future QPP
+    # model. It cannot change the lane, authorize egress, or permit catalog results.
+    research_trigger = assess_research_trigger_shadow(
+        plan.semantic_proposal,
+        commercial_materiality=(1.0 if requested_quantity and requested_quantity > 1 else 0.0),
+    )
+    resp.extras["research_trigger_shadow"] = research_trigger.model_dump()
+    resp.extras["research_plan"] = research_plan.model_dump()
     if workload_interpretation_shadow is not None:
         resp.extras["workload_interpretation_shadow"] = dict(workload_interpretation_shadow)
     continuity_pending = (

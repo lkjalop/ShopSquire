@@ -10,6 +10,7 @@ from src.app.services.recommendation_core.research_contracts import (
     EvidenceNeed,
     MaterialSlot,
     ResearchPlan,
+    ResearchQuery,
 )
 
 
@@ -43,6 +44,12 @@ def build_research_plan(
     proposal = semantic_proposal if isinstance(semantic_proposal, Mapping) else {}
     subjects: list[str] = []
     needs: list[EvidenceNeed] = []
+    queries: list[ResearchQuery] = []
+    hypothesis_ids = [
+        _identifier(item.get("hypothesis_id"), f"hypothesis_{index + 1}")
+        for index, item in enumerate(list(proposal.get("workload_hypotheses") or [])[:5])
+        if isinstance(item, Mapping)
+    ]
     for index, raw in enumerate(list(proposal.get("concepts") or [])[:4]):
         if not isinstance(raw, Mapping) or not bool(raw.get("material", True)):
             continue
@@ -52,19 +59,46 @@ def build_research_plan(
         if not subject:
             continue
         subjects.append(subject)
-        needs.append(EvidenceNeed(
+        identity_need = EvidenceNeed(
             need_id=f"concept_{index + 1}",
             subject_span=subject,
             claim_type="concept_identity",
             provider_capability="concept_discovery",
             max_age_days=365,
-        ))
-        needs.append(EvidenceNeed(
+        )
+        requirements_need = EvidenceNeed(
             need_id=f"requirements_{index + 1}",
             subject_span=subject,
             claim_type="recommended_requirements",
             provider_capability="official_requirements",
             max_age_days=365,
+        )
+        needs.extend((identity_need, requirements_need))
+        # Hypothesis labels are metadata only. They are deliberately excluded from
+        # outbound text until an accepted source establishes the terminology.
+        queries.extend((
+            ResearchQuery(
+                query_id=f"identity_{index + 1}",
+                evidence_need_id=identity_need.need_id,
+                subject_span=subject,
+                text=f"{subject} official definition scope",
+                strategy="identity",
+                hypothesis_ids=hypothesis_ids,
+                prohibited_assumptions=[
+                    "unverified_vendor", "unverified_product", "invented_hardware_floor",
+                ],
+            ),
+            ResearchQuery(
+                query_id=f"requirements_{index + 1}",
+                evidence_need_id=requirements_need.need_id,
+                subject_span=subject,
+                text=f"{subject} official recommended system requirements compatibility",
+                strategy="requirements",
+                hypothesis_ids=hypothesis_ids,
+                prohibited_assumptions=[
+                    "unverified_vendor", "unverified_product", "invented_hardware_floor",
+                ],
+            ),
         ))
 
     answer = clarification_answer if isinstance(clarification_answer, Mapping) else {}
@@ -95,6 +129,7 @@ def build_research_plan(
         interpretation_origin=origin,
         subject_spans=subjects,
         evidence_needs=needs[:8],
+        query_bundle=queries[:8],
         material_slots=slots,
         per_provider_timeout_ms=_bounded_ms("RESEARCH_LANE_TIMEOUT_MS", 1800, 30_000),
         total_timeout_ms=_bounded_ms("RESEARCH_TOTAL_TIMEOUT_MS", 2000, 60_000),

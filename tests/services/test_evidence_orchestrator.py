@@ -428,3 +428,52 @@ def test_concept_research_accepts_only_enrolled_typed_provider_claims(monkeypatc
     assert leg["data"]["status"] == "resolved"
     assert leg["data"]["claims"][0]["status"] == "accepted"
     assert leg["data"]["normalized_evidence"][0]["status"] == "resolved"
+
+
+def test_concept_research_uses_one_bounded_rewrite_after_empty_result(monkeypatch):
+    from types import SimpleNamespace
+    import src.app.services.evidence_orchestrator as eo
+
+    queries = []
+
+    def fake_stage(*, query, **_kwargs):
+        queries.append(query)
+        return {"items": [], "run_status": "completed"}
+
+    monkeypatch.setattr(
+        "src.app.services.external_product_research_service.run_external_research_stage",
+        fake_stage,
+    )
+    plan = SimpleNamespace(
+        semantic_proposal={"concepts": [{"text": "buyer authored concept", "material": True}]},
+        external_research_authorized=True,
+        research_plan={
+            "material_slots": [],
+            "evidence_needs": [],
+            "query_bundle": [
+                {
+                    "subject_span": "buyer authored concept",
+                    "strategy": "identity",
+                    "text": "buyer authored concept official definition scope",
+                },
+                {
+                    "subject_span": "buyer authored concept",
+                    "strategy": "requirements",
+                    "text": "buyer authored concept official recommended system requirements",
+                },
+                {
+                    "subject_span": "buyer authored concept",
+                    "strategy": "rewrite",
+                    "text": "this third attempt must never run",
+                },
+            ],
+        },
+    )
+
+    leg = eo._leg_concept_resolution(plan, "ignored", None, tenant_id="tenant-a")
+
+    assert queries == [
+        "buyer authored concept official recommended system requirements",
+        "buyer authored concept official definition scope",
+    ]
+    assert len(leg["data"]["research_attempts"]) == 2

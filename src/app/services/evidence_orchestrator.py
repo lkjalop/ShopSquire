@@ -342,21 +342,53 @@ def _leg_concept_resolution(
         )[:8]
         if isinstance(item, dict) and str(item.get("provider_capability") or "").strip()
     ))[:3]
-    outbound_query = scrub_pii(
-        f"{concept} {buyer_context} official requirements compatibility".strip()
-    )
-    if cancellation is not None:
-        cancellation.raise_if_cancelled()
-    result = run_external_research_stage(
-        query=outbound_query,
-        results=None,
-        scrub=scrub_pii,
-        tenant_id=tenant_id,
-        cancellation=cancellation,
-        buyer_consent=bool(getattr(plan, "external_research_authorized", False)),
-        provider_capability="official_requirements",
-        provider_capabilities=provider_capabilities or None,
-    )
+    planned_queries = [
+        item for item in list(
+            (research_plan or {}).get("query_bundle") or []
+            if isinstance(research_plan, dict) else []
+        )[:4]
+        if isinstance(item, dict)
+        and str(item.get("subject_span") or "").strip() == concept
+    ]
+    # Requirements first; if it produces no evidence, one identity rewrite may
+    # clarify terminology. The orchestrator's lane/global deadline still bounds both.
+    planned_queries.sort(key=lambda item: 0 if item.get("strategy") == "requirements" else 1)
+    query_texts = [str(item.get("text") or "").strip() for item in planned_queries if item.get("text")]
+    if not query_texts:
+        query_texts = [f"{concept} official requirements compatibility"]
+    query_texts = [
+        scrub_pii(f"{value} {buyer_context}".strip())
+        for value in query_texts[:2]
+    ]
+    research_attempts: list[dict[str, Any]] = []
+    result = None
+    outbound_query = query_texts[0]
+    for attempt_index, candidate_query in enumerate(query_texts):
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
+        outbound_query = candidate_query
+        candidate = run_external_research_stage(
+            query=candidate_query,
+            results=None,
+            scrub=scrub_pii,
+            tenant_id=tenant_id,
+            cancellation=cancellation,
+            buyer_consent=bool(getattr(plan, "external_research_authorized", False)),
+            provider_capability="official_requirements",
+            provider_capabilities=provider_capabilities or None,
+        )
+        research_attempts.append({
+            "attempt": attempt_index + 1,
+            "query": candidate_query,
+            "status": "disabled" if candidate is None else str(candidate.get("run_status") or "unknown"),
+            "item_count": len(list((candidate or {}).get("items") or [])),
+        })
+        if candidate is None:
+            result = None
+            break
+        result = candidate
+        if list(candidate.get("items") or []):
+            break
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if result is None:
@@ -367,6 +399,7 @@ def _leg_concept_resolution(
             "data": {
                 "status": "disabled",
                 "query": outbound_query,
+                "research_attempts": research_attempts,
                 "claims": [],
                 "catalog_qualifications": [],
                 "authority": "evidence_candidate_only",
@@ -404,6 +437,7 @@ def _leg_concept_resolution(
             ),
             "concept": concept,
             "query": outbound_query,
+            "research_attempts": research_attempts,
             "query_hash": result.get("query_hash"),
             "provider_id": result.get("provider_id") or "external_research",
             "provider_ids": list(result.get("provider_ids") or []),

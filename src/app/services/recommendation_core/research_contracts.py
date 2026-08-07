@@ -45,6 +45,25 @@ ResearchStatus = Literal[
 ]
 
 
+class ResearchQuery(BaseModel):
+    """One bounded research attempt tied to an evidence need.
+
+    Query text may contain buyer-authored spans and closed claim-purpose language only.
+    Proposed hypothesis labels stay in trace metadata until evidence establishes them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    query_id: str = Field(min_length=1, max_length=64)
+    evidence_need_id: str = Field(min_length=1, max_length=64)
+    subject_span: str = Field(min_length=1, max_length=120)
+    text: str = Field(min_length=3, max_length=240)
+    strategy: Literal["identity", "requirements", "compatibility", "rewrite"]
+    hypothesis_ids: list[str] = Field(default_factory=list, max_length=5)
+    prohibited_assumptions: list[str] = Field(default_factory=list, max_length=8)
+    authority: Literal["research_query_only"] = "research_query_only"
+
+
 class EvidenceNeed(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +100,7 @@ class ResearchPlan(BaseModel):
     interpretation_origin: Literal["model", "deterministic_fallback", "persisted"] = "model"
     subject_spans: list[str] = Field(default_factory=list, max_length=4)
     evidence_needs: list[EvidenceNeed] = Field(default_factory=list, max_length=8)
+    query_bundle: list[ResearchQuery] = Field(default_factory=list, max_length=8)
     material_slots: list[MaterialSlot] = Field(default_factory=list, max_length=5)
     max_provider_fanout: int = Field(default=3, ge=1, le=4)
     per_provider_timeout_ms: int = Field(default=1800, ge=100, le=30_000)

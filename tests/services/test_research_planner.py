@@ -77,6 +77,26 @@ def test_plan_uses_buyer_span_not_advisory_model_normalization():
 
     assert plan.subject_spans == ["maintenance digital twin"]
     assert all(item.subject_span == "maintenance digital twin" for item in plan.evidence_needs)
+    assert all("predictive" not in item.text for item in plan.query_bundle)
+    assert {item.strategy for item in plan.query_bundle} == {"identity", "requirements"}
+    assert all(item.authority == "research_query_only" for item in plan.query_bundle)
+
+
+def test_query_bundle_records_hypotheses_without_putting_them_on_egress():
+    plan = build_research_plan(
+        {
+            "concepts": [{"query_span": "machine maintenance twin", "material": True}],
+            "workload_hypotheses": [
+                {"hypothesis_id": "cloud_process_twin", "label": "Invented Vendor Suite"},
+                {"hypothesis_id": "local_3d_twin", "label": "Local 3D simulation"},
+            ],
+        },
+        external_research_authorized=True,
+    )
+
+    assert all(item.hypothesis_ids == ["cloud_process_twin", "local_3d_twin"] for item in plan.query_bundle)
+    assert all("Invented Vendor" not in item.text for item in plan.query_bundle)
+    assert all("unverified_vendor" in item.prohibited_assumptions for item in plan.query_bundle)
 
 
 def test_plan_preserves_degraded_interpretation_origin():
