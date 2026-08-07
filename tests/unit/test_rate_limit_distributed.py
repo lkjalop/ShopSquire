@@ -4,7 +4,8 @@ from fastapi.testclient import TestClient
 from src.app.security import rate_limit as rl
 
 
-def test_consume_fixed_window_fallback_store():
+def test_consume_fixed_window_fallback_store(monkeypatch):
+    monkeypatch.setattr(rl, "_redis_client", lambda: None)
     store = {}
     key = "scope:ip:127.0.0.1"
     assert rl.consume_fixed_window_limit(key=key, limit=2, window_sec=60, fallback_store=store, now_ts=1000.0) is True
@@ -12,7 +13,8 @@ def test_consume_fixed_window_fallback_store():
     assert rl.consume_fixed_window_limit(key=key, limit=2, window_sec=60, fallback_store=store, now_ts=1000.2) is False
 
 
-def test_concurrency_slot_fallback_store_acquire_and_release():
+def test_concurrency_slot_fallback_store_acquire_and_release(monkeypatch):
+    monkeypatch.setattr(rl, "_redis_client", lambda: None)
     store = {}
     key = "tenant:acme"
     assert rl.acquire_concurrency_slot(key=key, limit=1, ttl_sec=60, fallback_store=store) is True
@@ -37,3 +39,21 @@ def test_middleware_limit_is_a_429_response_not_an_asgi_500(monkeypatch):
     response = client.get("/probe", headers=headers)
     assert response.status_code == 429
     assert response.json()["detail"].startswith("key_rate_limit_exceeded")
+
+
+def test_redis_socket_timeout_uses_bounded_local_fallback(monkeypatch):
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    class TimedOutRedis:
+        def incrby(self, *_args, **_kwargs):
+            raise RedisTimeoutError("bounded test timeout")
+
+    store = {}
+    monkeypatch.setattr(rl, "_redis_client", lambda: TimedOutRedis())
+
+    assert rl.consume_fixed_window_limit(
+        key="timeout-scope", limit=1, window_sec=60, fallback_store=store, now_ts=1000.0
+    ) is True
+    assert rl.consume_fixed_window_limit(
+        key="timeout-scope", limit=1, window_sec=60, fallback_store=store, now_ts=1000.1
+    ) is False

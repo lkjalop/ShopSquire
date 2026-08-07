@@ -12,6 +12,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.app.deps import get_redis
 
+try:
+    from redis.exceptions import RedisError
+except ImportError:  # pragma: no cover - Redis is optional in minimal local installs.
+    RedisError = OSError  # type: ignore[misc,assignment]
+
+_REDIS_OPERATION_ERRORS = (RedisError, AttributeError, TypeError, ValueError, RuntimeError)
+
 # Fallback local stores when Redis is unavailable (dev/test).
 _LOCK = threading.Lock()
 _STATE: Dict[str, Tuple[float, int]] = {}
@@ -61,7 +68,7 @@ def consume_fixed_window_limit(
             if cnt == 1:
                 r.expire(redis_key, win)
             return cnt <= int(limit)
-        except (AttributeError, TypeError, ValueError, RuntimeError):
+        except _REDIS_OPERATION_ERRORS:
             # Fall through to in-memory fallback.
             pass
 
@@ -108,7 +115,7 @@ def consume_sliding_window_limit(
                 r.zadd(redis_key, {member: now})
                 r.expire(redis_key, win)
                 return True
-        except (AttributeError, TypeError, ValueError, RuntimeError):
+        except _REDIS_OPERATION_ERRORS:
             pass
 
     store = fallback_store if isinstance(fallback_store, dict) else _SLIDING_STATE
@@ -152,7 +159,7 @@ def acquire_concurrency_slot(
                     pass
                 return False
             return True
-        except (AttributeError, TypeError, ValueError, RuntimeError):
+        except _REDIS_OPERATION_ERRORS:
             pass
 
     store = fallback_store if isinstance(fallback_store, dict) else _CONCURRENCY_STATE
@@ -173,7 +180,7 @@ def release_concurrency_slot(*, key: str, fallback_store: Optional[Dict[str, int
             if rem <= 0:
                 r.delete(redis_key)
             return
-        except (AttributeError, TypeError, ValueError, RuntimeError):
+        except _REDIS_OPERATION_ERRORS:
             pass
 
     store = fallback_store if isinstance(fallback_store, dict) else _CONCURRENCY_STATE
@@ -201,7 +208,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
             hdr_raw = request.headers.get("x-api-key") or request.cookies.get("shopsquire_api_key") or "anon"
             hdr_key = _hash_token(hdr_raw)
-            ip = request.client.host if request.client else "unknown"
+            from src.app.security.client_ip import client_ip
+
+            ip = client_ip(request)
             key_bucket = f"key:{hdr_key}"
             ip_bucket = f"ip:{ip}"
 
@@ -215,7 +224,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     status_code=429,
                     content={"detail": f"ip_rate_limit_exceeded ({self.per_min_ip}/min)"},
                 )
-        except (TypeError, ValueError, RuntimeError):
+        except _REDIS_OPERATION_ERRORS:
             # Fail-open by design for middleware stability; detailed limits are
             # still enforced by route-level backpressure middleware.
             pass
