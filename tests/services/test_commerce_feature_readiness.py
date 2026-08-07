@@ -62,5 +62,37 @@ def test_external_enabled_endpoint_but_no_allowlist(monkeypatch):
 def test_external_live_when_all_present(monkeypatch):
     monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
     monkeypatch.setenv("EXTERNAL_RESEARCH_SEARCH_URL", "https://search.example.com/api?q={query}")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", "tenant-a")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY", "reviewer@example.com")
     r = external_search_readiness({}, allowlist=["trusted.com", "techradar.com"])
     assert r["live"] is True and r["allowlist_size"] == 2 and r["reason"] == "live"
+    assert r["advisory_live"] is True
+    assert r["requirement_authority_ready"] is True
+
+
+def test_external_search_does_not_claim_requirement_authority_without_review(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_SEARCH_URL", "https://search.example.com/api?q={query}")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", "tenant-a")
+    monkeypatch.delenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY", raising=False)
+
+    r = external_search_readiness({}, allowlist=["trusted.com"])
+
+    assert r["advisory_live"] is True
+    assert r["requirement_authority_ready"] is False
+    assert r["live"] is True
+    assert r["reason"] == "live_advisory_only"
+    assert "review" in r["authority_reason"].lower()
+
+
+def test_external_search_requires_tenant_enrollment(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_SEARCH_URL", "https://search.example.com/api?q={query}")
+    monkeypatch.delenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", raising=False)
+    monkeypatch.setenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY", "reviewer@example.com")
+
+    r = external_search_readiness({}, allowlist=["trusted.com"])
+
+    assert r["live"] is False
+    assert r["requirement_authority_ready"] is False
+    assert "tenant" in r["reason"].lower()

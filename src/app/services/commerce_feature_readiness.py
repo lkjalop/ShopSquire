@@ -67,22 +67,47 @@ def external_search_readiness(
     endpoint = bool(str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip())
     allow = [a for a in (allowlist if allowlist is not None else (flags or {}).get("EXTERNAL_RESEARCH_ALLOWLIST") or []) if str(a or "").strip()]
     has_allowlist = len(allow) > 0
-    live = bool(enabled and endpoint and has_allowlist)
+    tenant_allowlist = [
+        value.strip()
+        for value in str(os.getenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST") or "").split(",")
+        if value.strip()
+    ]
+    tenant_enrollment = bool(tenant_allowlist)
+    source_policy_reviewed = bool(
+        str(os.getenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY") or "").strip()
+    )
+    advisory_live = bool(enabled and endpoint and has_allowlist and tenant_enrollment)
+    requirement_authority_ready = bool(advisory_live and source_policy_reviewed)
+    live = advisory_live
     if not enabled:
         reason = "EXTERNAL_RESEARCH_ENABLED is off"
     elif not endpoint:
         reason = "EXTERNAL_RESEARCH_SEARCH_URL not configured — without it the NullFetcher returns nothing"
     elif not has_allowlist:
         reason = "no domain allowlist — results would be dropped by the allowlist guard"
+    elif not tenant_enrollment:
+        reason = "no tenant enrollment; the provider registry remains empty"
+    elif not source_policy_reviewed:
+        reason = "live_advisory_only"
     else:
         reason = "live"
+    authority_reason = (
+        "ready"
+        if requirement_authority_ready
+        else "independent source-policy review is required before claims can authorize requirements"
+    )
     return {
         "feature": "external_search",
         "enabled": enabled,
         "live": live,
+        "advisory_live": advisory_live,
+        "requirement_authority_ready": requirement_authority_ready,
         "endpoint_configured": endpoint,
         "allowlist_size": len(allow),
+        "tenant_enrollment_count": len(tenant_allowlist),
+        "source_policy_reviewed": source_policy_reviewed,
         "reason": reason,
+        "authority_reason": authority_reason,
     }
 
 
