@@ -75,7 +75,11 @@ export default function MultiIntentCard({ plan, onAmendQty, onAddItem, onDismiss
         <div key={l.ref} data-testid={`multi-intent-amend-${l.ref}`}
              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '4px 0' }}>
           <span style={{ fontSize: 14 }}>
-            Change <strong>{l.name || l.ref}</strong> quantity to <strong>{l.requested_qty}</strong>
+            {plan.quantity_expression === 'approximate' ? (
+              <>You said about <strong>{l.requested_qty}</strong> for <strong>{l.name || l.ref}</strong>. Set it to exactly <strong>{l.requested_qty}</strong>?</>
+            ) : (
+              <>Change <strong>{l.name || l.ref}</strong> quantity to <strong>{l.requested_qty}</strong></>
+            )}
           </span>
           <button onClick={() => onAmendQty(l.ref as string, l.requested_qty as number)}
                   style={{ background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>
@@ -83,6 +87,11 @@ export default function MultiIntentCard({ plan, onAmendQty, onAddItem, onDismiss
           </button>
         </div>
       ))}
+      {amendments.length > 0 && (
+        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+          Your cart stays unchanged until you confirm.
+        </div>
+      )}
 
       {/* new scoped category lines — the buyer adds the pick they want, at the qty the turn asked for
           ("5 headsets" adds 5 of the chosen model, not 1 — the old hardcoded qty ignored the request). */}

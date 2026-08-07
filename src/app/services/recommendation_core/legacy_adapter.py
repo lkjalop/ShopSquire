@@ -155,6 +155,8 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "requested_quantity": core.extras.get("requested_quantity"),
         "bulk_budget": core.extras.get("bulk"),
         "availability": core.extras.get("availability"),
+        "delivery_feasibility": core.extras.get("delivery_feasibility"),
+        "human_escalation": core.extras.get("human_escalation"),
         "fulfillment_options": core.extras.get("fulfillment_options"),
         "sourcing_intent": core.extras.get("sourcing_intent"),
         "semantic_resolution": core.extras.get("semantic_resolution"),

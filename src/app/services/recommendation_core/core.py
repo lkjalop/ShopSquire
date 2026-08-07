@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional
 
 from src.app.services.recommendation_core.envelope import CoreResponse, MsgPriority, TurnEnvelope
@@ -1958,6 +1959,79 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
     for key in ("availability", "fulfillment_options", "sourcing_intent"):
         if projection.get(key) is not None:
             resp.extras[key] = projection[key]
+    if horizon_days is not None and projection.get("availability"):
+        deadline = _deadline_feasibility_from_preview(
+            quantity=int(quantity),
+            horizon_days=int(horizon_days),
+            availability=projection["availability"],
+        )
+        resp.extras["delivery_feasibility"] = deadline
+        if deadline["feasibility"] != "met":
+            resp.extras["human_escalation"] = {
+                "status": "recommended",
+                "reason": "deadline_confirmation_required",
+                "action": "fulfillment_operator_review",
+                "external_action": "none",
+            }
+            deadline_text = (
+                f"I cannot confirm all {int(quantity)} within the {int(horizon_days)}-day "
+                "window: inventory location is known, but date-qualified transfer and carrier "
+                "arrival evidence is missing. A fulfillment operator must verify the deadline "
+                "before any promise or supplier contact."
+            )
+            if deadline_text not in resp.message:
+                resp.message = f"{resp.message.strip()} {deadline_text}".strip()
+
+
+def _deadline_feasibility_from_preview(
+    *, quantity: int, horizon_days: int, availability: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Evaluate a preview without pretending stock location proves delivery time."""
+    from src.app.services.promise_feasibility import evaluate_promise_feasibility
+
+    snapshot = (
+        availability.get("inventory_snapshot")
+        if isinstance(availability.get("inventory_snapshot"), dict) else {}
+    )
+    local = max(0, int(snapshot.get("local_atp") or 0))
+    transferable = max(0, int(snapshot.get("transferable") or 0))
+    unconfirmed = max(0, int(snapshot.get("unconfirmed_shortfall") or 0))
+    supply_lines = []
+    if local:
+        supply_lines.append({
+            "source_ref": "local_atp", "quantity": local,
+            "status": "confirmed", "authority": "inventory_snapshot",
+        })
+    if transferable:
+        supply_lines.append({
+            "source_ref": "network_transfer", "quantity": transferable,
+            "status": "confirmed", "authority": "inventory_snapshot",
+        })
+    if unconfirmed:
+        supply_lines.append({
+            "source_ref": "supplier_unconfirmed", "quantity": unconfirmed,
+            "status": "unconfirmed", "authority": "supplier_enquiry",
+        })
+    covered = local + transferable + unconfirmed
+    if covered < int(quantity):
+        supply_lines.append({
+            "source_ref": "uncovered", "quantity": int(quantity) - covered,
+            "status": "unavailable", "authority": "calculated_gap",
+        })
+    evaluated_at = datetime.now(timezone.utc)
+    result = evaluate_promise_feasibility(
+        requested_quantity=int(quantity),
+        requested_arrival_at=evaluated_at + timedelta(days=int(horizon_days)),
+        evaluated_at=evaluated_at,
+        supply_lines=supply_lines,
+        dependency_versions={
+            "inventory": str(snapshot.get("source_version") or "unversioned"),
+            "arrival": "not_provided",
+        },
+    )
+    result["horizon_days"] = int(horizon_days)
+    result["human_review_required"] = result["feasibility"] != "met"
+    return result
 
 
 def _bind_compare_targets(variants, targets) -> Optional[list]:
@@ -2194,6 +2268,7 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
     # FAILING laptops (the source of the gpu_vram_gb/ram_gb replay 'failures' — a retrieval gap, not
     # a ranking bug). Budget stays applied (real envelope, not the free floor env).
     if (decision.requirements and not decision.exact_product_sku
+            and decision.lane != "EXPLAIN"
             and _is_workload_host_product(decision.node_handle)):
         _siblings = [n for n in _capability_scope_nodes(decision)
                      if n and n != decision.node_handle]
@@ -2322,7 +2397,22 @@ def _apply_secondary_explanation(decision: TurnDecision, resp: CoreResponse) -> 
     """Answer a compound EXPLAIN obligation from the authorized product verdict."""
     if "EXPLAIN" not in decision.secondary_lanes or not resp.products:
         return
-    top = resp.products[0]
+    selected_sku = str(decision.exact_product_sku or "").strip()
+    top = next((card for card in resp.products if card.sku == selected_sku), None)
+    if selected_sku and top is None:
+        resp.extras["explanation"] = {
+            "sku": selected_sku,
+            "status": "selected_product_not_in_authorized_slate",
+            "verdict": None,
+            "basis": [],
+            "fit_ledger": [],
+        }
+        resp.message = (
+            f"{resp.message.strip()} I cannot explain the selected product from this slate because "
+            "its authorized catalog record was not returned; I will not substitute another product."
+        ).strip()
+        return
+    top = top or resp.products[0]
     verdict = str((top.fit or {}).get("overall") or "")
     reasons = "; ".join(top.why[:3]) if top.why else "it ranks highest on the authorized slate"
     if verdict == "meets":
@@ -2333,10 +2423,36 @@ def _apply_secondary_explanation(decision: TurnDecision, resp: CoreResponse) -> 
         )
     else:
         explanation = f"Why {top.title} leads: {reasons}."
+    per_key = (top.fit or {}).get("per_key") or {}
+    observed = (top.fit or {}).get("observed") or {}
+    compiled = (
+        resp.extras.get("semantic_requirement_compilation", {}).get("compiled_requirements", [])
+        if isinstance(resp.extras.get("semantic_requirement_compilation"), dict) else []
+    )
+    sources_by_key = {
+        str(item.get("attribute_key")): list(item.get("source_claim_ids") or [])
+        for item in compiled if isinstance(item, dict) and item.get("attribute_key")
+    }
+    fit_ledger = []
+    for key, predicates in decision.requirements.items():
+        status = per_key.get(key)
+        fit_ledger.append({
+            "attribute": key,
+            "required": [list(predicate) for predicate in predicates],
+            "requirement_source": (
+                "authoritative_external_evidence" if sources_by_key.get(key)
+                else "buyer_or_authorized_workload_requirement"
+            ),
+            "requirement_evidence_refs": sources_by_key.get(key, []),
+            "observed": observed.get(key),
+            "observed_source": "catalog_attribute",
+            "verdict": "meets" if status is True else "fails" if status is False else "unknown",
+        })
     resp.extras["explanation"] = {
         "sku": top.sku,
         "verdict": verdict or None,
         "basis": list(top.why[:3]),
+        "fit_ledger": fit_ledger,
     }
     current = str(resp.message or "").strip()
     if explanation not in current:

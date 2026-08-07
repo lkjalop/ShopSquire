@@ -1840,6 +1840,42 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 existing.append((op, value))
         requirements[key] = existing
 
+    # Explanation and current-order follow-ups must evaluate the selected product
+    # against the same accepted predicates that authorized the prior slate. The
+    # values are re-clamped through the attribute registry; arbitrary session data
+    # cannot become a capability requirement. A material subject switch never
+    # inherits these predicates.
+    if not requirements and subject_action != "switch" and (
+        subject_action == "continue" or procurement_context == "current_order"
+    ):
+        prior_requirements = (session.get("accepted_constraints") or {}).get("requirements")
+        if isinstance(prior_requirements, dict):
+            for key, predicates in prior_requirements.items():
+                definition = defs.get(str(key))
+                if definition is None or definition.kind != "quantity":
+                    continue
+                if not isinstance(predicates, (list, tuple)):
+                    continue
+                accepted_predicates: List[Tuple[str, float]] = []
+                for predicate in list(predicates)[:4]:
+                    if not isinstance(predicate, (list, tuple)) or len(predicate) != 2:
+                        continue
+                    op, threshold = str(predicate[0]), predicate[1]
+                    if (
+                        op not in _ALLOWED_OPS
+                        or not isinstance(threshold, (int, float))
+                        or isinstance(threshold, bool)
+                    ):
+                        continue
+                    value = float(threshold)
+                    if definition.bounds and not (
+                        definition.bounds[0] <= value <= definition.bounds[1]
+                    ):
+                        continue
+                    accepted_predicates.append((op, value))
+                if accepted_predicates:
+                    requirements[definition.key] = accepted_predicates
+
     operational_constraints = _bounded_operational_constraints(data, envelope.query)
 
     from src.app.services.recommendation_core.intent_resolver import (audience_context_keys,
@@ -2449,10 +2485,31 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         "product_type_options": list(product_type_options),
     }
     anchored_product_sku = explicit_product_sku
-    if anchored_product_sku is None and subject_action == "continue":
-        accepted_product_sku = (session.get("accepted_constraints") or {}).get(
-            "exact_product_sku"
+    accepted_constraints = (
+        session.get("accepted_constraints")
+        if isinstance(session.get("accepted_constraints"), dict) else {}
+    )
+    accepted_product_sku = accepted_constraints.get("exact_product_sku")
+    persisted_cart_anchor = (
+        accepted_constraints.get("product_selection_authority") == "persisted_cart"
+    )
+    # A single server-read cart line is stronger identity evidence than an uncertain
+    # model continuation label. Keep it for explanation/current-order turns unless
+    # the model explicitly identifies a subject switch. This is product agnostic:
+    # the authority comes from persisted cart state, never title matching.
+    anchor_current_selection = (
+        subject_action == "continue"
+        or (
+            persisted_cart_anchor
+            and subject_action != "switch"
+            and (
+                procurement_context == "current_order"
+                or lane == "EXPLAIN"
+                or "EXPLAIN" in secondary_lanes
+            )
         )
+    )
+    if anchored_product_sku is None and anchor_current_selection:
         if accepted_product_sku:
             anchored_product_sku = str(accepted_product_sku)
     if anchored_product_sku is None and subject_action == "continue":

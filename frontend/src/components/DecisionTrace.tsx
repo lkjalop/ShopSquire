@@ -1359,9 +1359,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const hasProcurementSignal = !!procurementCaseId || (events.length > 0 ? events : displayEvents).some((e) => {
     const s = String((e as any).source_id || '').toLowerCase();
     const t = String(e.event_type || '').toLowerCase();
+    const payload: any = (e as any)?.payload || {};
+    const hasDeadlineDecision = Boolean(
+      payload?.delivery_feasibility
+      || payload?.human_escalation
+      || payload?.right_panel_contract?.delivery_feasibility
+      || payload?.right_panel_contract?.human_escalation
+    );
     return s.includes('procurement') || s.includes('split') || s.includes('supplier') || s.includes('sourcing')
       || t.includes('procurement') || t.includes('split') || t.includes('sourc') || t.includes('availability')
-      || t.includes('channel') || t.includes('return_claim');
+      || t.includes('channel') || t.includes('return_claim') || hasDeadlineDecision;
   });
   const eventCorpus = JSON.stringify(allDisplayEvents || []).toLowerCase();
   const hasSecuritySignal = /(security|quarantin|blocked|threat|risk|review_required)/.test(eventCorpus);
@@ -1488,6 +1495,32 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       : []);
   const canonicalIdentity: any = (recommendationEventPayload as any)?.canonical_identity
     || (recommendationEventPayload as any)?.right_panel_contract?.canonical_identity
+    || null;
+  const supplementalDecisionPayload: any = [...(allDisplayEvents || [])]
+    .reverse()
+    .map((event: any) => event?.payload || {})
+    .find((payload: any) => (
+      payload?.explanation
+      || payload?.delivery_feasibility
+      || payload?.human_escalation
+      || payload?.right_panel_contract?.explanation
+      || payload?.right_panel_contract?.delivery_feasibility
+      || payload?.right_panel_contract?.human_escalation
+    )) || {};
+  const fitExplanation: any = (recommendationEventPayload as any)?.explanation
+    || (recommendationEventPayload as any)?.right_panel_contract?.explanation
+    || supplementalDecisionPayload?.explanation
+    || supplementalDecisionPayload?.right_panel_contract?.explanation
+    || null;
+  const deliveryFeasibility: any = (recommendationEventPayload as any)?.delivery_feasibility
+    || (recommendationEventPayload as any)?.right_panel_contract?.delivery_feasibility
+    || supplementalDecisionPayload?.delivery_feasibility
+    || supplementalDecisionPayload?.right_panel_contract?.delivery_feasibility
+    || null;
+  const fulfillmentEscalation: any = (recommendationEventPayload as any)?.human_escalation
+    || (recommendationEventPayload as any)?.right_panel_contract?.human_escalation
+    || supplementalDecisionPayload?.human_escalation
+    || supplementalDecisionPayload?.right_panel_contract?.human_escalation
     || null;
   const visibleOrderedSkus = whyProducts.map((item: any) => String(item?.sku || '')).filter(Boolean);
   const canonicalOrderedSkus = Array.isArray(canonicalIdentity?.ordered_skus)
@@ -2722,6 +2755,40 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     caseObligations={caseObligations}
                   />
                   <HippographEvidenceSurface insights={hippographInsights} />
+                  {fitExplanation && (
+                    <div data-testid="trace-fit-ledger" className={styles.anchorBlock}>
+                      <div className={styles.sectionTitle}>Selected Product Fit Authorization</div>
+                      <div className={styles.kvRow}>
+                        <span>Selected SKU</span>
+                        <span>{fitExplanation.sku || 'Not recorded'}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Overall verdict</span>
+                        <span>{humanizeKey(String(fitExplanation.verdict || fitExplanation.status || 'unknown'))}</span>
+                      </div>
+                      {Array.isArray(fitExplanation.fit_ledger) && fitExplanation.fit_ledger.length > 0 ? (
+                        fitExplanation.fit_ledger.map((row: any, index: number) => (
+                          <div key={`fit-ledger-${row?.attribute || index}`} className={styles.productReasonRow}>
+                            <div className={styles.rowLeft}>
+                              <strong>{humanizeKey(String(row?.attribute || 'requirement'))}</strong>
+                              <span className={styles.sku}>
+                                Required {JSON.stringify(row?.required || [])} · observed {row?.observed ?? 'unknown'}
+                              </span>
+                            </div>
+                            <div className={styles.rowRight}>
+                              <span className={styles.scoreChip}>{humanizeKey(String(row?.verdict || 'unknown'))}</span>
+                            </div>
+                            <div className={styles.pillRow}>
+                              <span className={styles.pill}>{humanizeKey(String(row?.requirement_source || 'source unknown'))}</span>
+                              <span className={styles.pill}>{humanizeKey(String(row?.observed_source || 'source unknown'))}</span>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className={styles.muted}>No accepted requirement ledger was recorded for this product.</div>
+                      )}
+                    </div>
+                  )}
                   {Array.isArray(whyAnchorSections) && whyAnchorSections.length > 0 ? (
                     (whyAnchorSections || []).map((sec: any, idx: number) => (
                       <div key={`anchor-${idx}`} className={styles.anchorBlock}>
@@ -4218,6 +4285,32 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
               {activeTab === 'procurement' && (
                 <div className={styles.summaryPane}>
+                  {deliveryFeasibility && (
+                    <div data-testid="trace-delivery-feasibility" className={styles.anchorBlock}>
+                      <div className={styles.sectionTitle}>Deadline Feasibility</div>
+                      <div className={styles.kvRow}>
+                        <span>Requested window</span>
+                        <span>{deliveryFeasibility.horizon_days ?? '?'} day(s)</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Verdict</span>
+                        <span>{humanizeKey(String(deliveryFeasibility.feasibility || 'unknown'))}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Confirmed by deadline</span>
+                        <span>{deliveryFeasibility.quantity_confirmed_by_deadline ?? 0}</span>
+                      </div>
+                      <div className={styles.kvRow}>
+                        <span>Quantity lacking dated arrival evidence</span>
+                        <span>{deliveryFeasibility.unknown_quantity ?? 'Not recorded'}</span>
+                      </div>
+                      {fulfillmentEscalation && (
+                        <div className={styles.whyNarrative}>
+                          Human review: {humanizeKey(String(fulfillmentEscalation.reason || fulfillmentEscalation.status || 'required'))}. No supplier contact or delivery promise was executed.
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {(() => {
                     const src = events.length > 0 ? events : displayEvents;
                     const procEvents = (src || []).filter((e) => {

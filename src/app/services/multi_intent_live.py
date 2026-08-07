@@ -192,8 +192,18 @@ def plan_live(query: str, uid: str, *, limit: int = 6,
     if not probe.amendments and not probe.new_lines:
         return None
 
-    return plan_turn(query, prior_lines=prior, search_fn=_make_search_fn(catalog, limit),
-                     intents=probe, llm_fn=llm_fn)
+    planned = plan_turn(query, prior_lines=prior, search_fn=_make_search_fn(catalog, limit),
+                        intents=probe, llm_fn=llm_fn)
+    if planned and probe.amendments:
+        # Presentation metadata only: commerce authority still comes from the
+        # parsed numeric operation plus buyer confirmation. Approximate language
+        # must not look like an already-authorized exact cart quantity.
+        planned["quantity_expression"] = (
+            "approximate"
+            if re.search(r"\b(?:about|around|roughly|approximately|circa)\b|~\s*\d", query, re.I)
+            else "exact"
+        )
+    return planned
 
 
 def _binding_llm_fn() -> Optional[Callable[[str], str]]:

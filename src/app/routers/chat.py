@@ -3450,6 +3450,18 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         for p in (products or [])[:8]
                         if isinstance(p, dict)
                     ],
+                    "explanation": (
+                        data.get("explanation")
+                        if isinstance(data.get("explanation"), dict) else None
+                    ),
+                    "delivery_feasibility": (
+                        data.get("delivery_feasibility")
+                        if isinstance(data.get("delivery_feasibility"), dict) else None
+                    ),
+                    "human_escalation": (
+                        data.get("human_escalation")
+                        if isinstance(data.get("human_escalation"), dict) else None
+                    ),
                     "right_panel_contract": _right_panel_contract,
                 },
             )
@@ -3606,6 +3618,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         ),
         "explanation": (
             data.get("explanation") if isinstance(data.get("explanation"), dict) else None
+        ),
+        "delivery_feasibility": (
+            data.get("delivery_feasibility")
+            if isinstance(data.get("delivery_feasibility"), dict) else None
+        ),
+        "human_escalation": (
+            data.get("human_escalation")
+            if isinstance(data.get("human_escalation"), dict) else None
         ),
         "voice_used": bool(voice_transcript),
         "budget_viability": budget_viability,

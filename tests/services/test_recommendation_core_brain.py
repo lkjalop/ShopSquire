@@ -806,6 +806,76 @@ def test_compound_refine_and_explain_answers_from_authorized_fit(db):
     assert "meets all" in response.message
 
 
+def test_compound_explain_stays_anchored_to_persisted_cart_product(db):
+    """An uncertain model cannot replace the buyer's one persisted cart selection."""
+    model = {
+        "lane": "EXPLAIN",
+        "handle": "el-6-11-2",
+        "requirements": {
+            "gpu_vram_gb": [">=", 12],
+            "ram_gb": [">=", 32],
+        },
+        "quantity": 30,
+        "subject_action": "uncertain",
+        "procurement_context": "current_order",
+        "confidence": 0.9,
+    }
+    session = {
+        "prior_node": "el-6-11-2",
+        "shortlist_skus": ["LAP-1", "LAP-2"],
+        "accepted_constraints": {
+            "exact_product_sku": "LAP-2",
+            "product_selection_authority": "persisted_cart",
+            "quantity": 1,
+            "requirements": {
+                "gpu_vram_gb": [[">=", 12]],
+                "ram_gb": [[">=", 32]],
+            },
+        },
+    }
+
+    response = recommend_turn(
+        db,
+        dataclasses.replace(
+            _env_session(
+                "Why is this a good choice? I need about 30 of those in 2 days.",
+                session,
+            ),
+            currency="USD",
+        ),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert response.extras["decision"]["exact_product_sku"] == "LAP-2"
+    assert [card.sku for card in response.products] == ["LAP-2"]
+    assert response.extras["explanation"]["sku"] == "LAP-2"
+    assert response.extras["explanation"]["fit_ledger"]
+    assert all(row["observed_source"] == "catalog_attribute" for row in response.extras["explanation"]["fit_ledger"])
+
+
+def test_deadline_preview_is_unknown_without_date_qualified_arrival_evidence():
+    from src.app.services.recommendation_core.core import _deadline_feasibility_from_preview
+
+    result = _deadline_feasibility_from_preview(
+        quantity=30,
+        horizon_days=2,
+        availability={
+            "inventory_snapshot": {
+                "local_atp": 3,
+                "transferable": 27,
+                "unconfirmed_shortfall": 0,
+                "source_version": "atp-42",
+            },
+        },
+    )
+
+    assert result["feasibility"] == "unknown"
+    assert result["quantity_confirmed_by_deadline"] == 0
+    assert result["unknown_quantity"] == 30
+    assert result["human_review_required"] is True
+    assert "arrival_evidence_missing" in result["reason_codes"]
+
+
 # ── router clamps ─────────────────────────────────────────────────────────────
 
 def test_router_bounded_fallback_on_garbage_model(db):

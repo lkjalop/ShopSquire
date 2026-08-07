@@ -129,6 +129,14 @@ def build_cards(variants: List[VariantView],
                            stock=v.stock, stock_source=v.stock_source)
         if requirements:
             verdict = evaluate_requirements(attrs, requirements)
+            # Preserve the exact normalized catalog facts used by the evaluator.
+            # This makes explanations auditable without re-parsing product titles
+            # or asking a model to reconstruct hidden comparison inputs.
+            verdict["observed"] = {
+                key: attrs.get(key)
+                for key in requirements
+                if attrs.get(key) is not None
+            }
             verdict["exceeds"] = _exceeds_keys(attrs, requirements)   # capability headroom (Phase 1b)
             card.fit = verdict
             overall = verdict["overall"]

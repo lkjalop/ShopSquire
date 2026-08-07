@@ -23,7 +23,27 @@ async def _fake_recommend(*args, **kwargs):
             "capability": {"verdict": "below_budget"},
             "slate_disposition": "clear",
             "secondary_lanes": ["EXPLAIN"],
-            "explanation": {"sku": "GAM-0002", "verdict": "fails"},
+            "explanation": {
+                "sku": "GAM-0002",
+                "verdict": "fails",
+                "fit_ledger": [{
+                    "attribute": "ram_gb",
+                    "required": [[">=", 32]],
+                    "observed": 16,
+                    "verdict": "fails",
+                }],
+            },
+            "delivery_feasibility": {
+                "feasibility": "unknown",
+                "horizon_days": 2,
+                "quantity_confirmed_by_deadline": 0,
+                "unknown_quantity": 25,
+            },
+            "human_escalation": {
+                "status": "recommended",
+                "reason": "deadline_confirmation_required",
+                "external_action": "none",
+            },
             "timing_breakdown": {
                 "route_total_ms": 8123.4,
                 "router_decode_ms": 7300.0,
@@ -59,6 +79,10 @@ def test_chat_query_forwards_narration_job_id(monkeypatch):
     assert body["slate_disposition"] == "clear"
     assert body["secondary_lanes"] == ["EXPLAIN"]
     assert body["explanation"]["verdict"] == "fails"
+    assert body["explanation"]["fit_ledger"][0]["observed"] == 16
+    assert body["delivery_feasibility"]["feasibility"] == "unknown"
+    assert body["delivery_feasibility"]["unknown_quantity"] == 25
+    assert body["human_escalation"]["external_action"] == "none"
     assert body["timing_breakdown"] == {
         "route_total_ms": 8123.4,
         "router_decode_ms": 7300.0,

@@ -1957,6 +1957,37 @@ export default function App() {
             throw new Error(detailStr);
           }
         }
+        // A research-heavy turn may outlive the stream's synchronous wait while the
+        // backend single-flight continues safely under the same idempotency key. Poll
+        // that exact key for its cached completion; never resubmit with a new key.
+        if (data?.status === 'in_progress') {
+          const completionDeadline = Date.now() + 60_000;
+          while (data?.status === 'in_progress' && Date.now() < completionDeadline) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const qctl = new AbortController();
+            const qTimer = setTimeout(() => qctl.abort(), 10_000);
+            let completionResponse: Response;
+            try {
+              completionResponse = await fetch(apiUrl('/api/v1/chat/query'), {
+                method: 'POST',
+                credentials: 'include',
+                headers: apiHeaders,
+                body: JSON.stringify(chatPayload),
+                signal: qctl.signal,
+              });
+            } finally {
+              clearTimeout(qTimer);
+            }
+            const completion = await safeJson(completionResponse);
+            if (!completionResponse.ok || !completion) {
+              throw new Error(`chat_completion_poll_failed (${completionResponse.status})`);
+            }
+            data = completion;
+          }
+          if (data?.status === 'in_progress') {
+            throw new Error('chat_completion_poll_timeout');
+          }
+        }
         mergeTrustEvidence(data);
         // ── V2 CART LANE (C2): the backend resolved this turn as a CART MUTATION ──
         // Covers both transports (chat_stream forwards chat_query's result verbatim). Three

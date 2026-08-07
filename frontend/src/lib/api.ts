@@ -262,6 +262,7 @@ export interface MultiIntentPlan {
   plan: MultiIntentLine[];
   verdict?: { ok: boolean; violations: string[]; checked_lines?: number };
   needs_confirmation?: boolean;
+  quantity_expression?: 'exact' | 'approximate' | 'unknown';
   objection_angle?: string | null;
   warnings?: string[];
 }

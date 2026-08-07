@@ -31,6 +31,20 @@ describe('MultiIntentCard', () => {
     expect(onAmendQty).toHaveBeenCalledWith('LAP-1', 15);
   });
 
+  it('labels an approximate quantity as a proposal and leaves the cart unchanged until confirmation', () => {
+    const plan: MultiIntentPlan = {
+      plan: [{ scope: 'prior', ref: 'LAP-1', name: 'Asus VivoBook', requested_qty: 30, amended: true }],
+      quantity_expression: 'approximate',
+      needs_confirmation: true,
+    };
+    const onAmendQty = vi.fn();
+    render(<MultiIntentCard plan={plan} onAmendQty={onAmendQty} onAddItem={vi.fn()} onDismiss={vi.fn()} />);
+
+    expect(screen.getByTestId('multi-intent-amend-LAP-1').textContent).toContain('You said about 30');
+    expect(screen.getByText(/cart stays unchanged until you confirm/i)).toBeTruthy();
+    expect(onAmendQty).not.toHaveBeenCalled();
+  });
+
   it('adds a scoped pick at the REQUESTED qty (5 headsets → adds 5, not 1) and shows the value reframe', () => {
     const onAddItem = vi.fn();
     render(<MultiIntentCard plan={PLAN} onAmendQty={vi.fn()} onAddItem={onAddItem} onDismiss={vi.fn()} />);
