@@ -1001,6 +1001,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 research_status=str(concept_data.get("status") or ""),
                 proposed_questions=list(semantic_decision.questions or ()),
                 material_unknowns=list(semantic_decision.material_unknowns or ()),
+                workload_hypotheses=list(semantic_decision.workload_hypotheses or ()),
             )
             resp.clarify.append(question)
             resp.set_message(question["text"], MsgPriority.BULK_SCOPE_CLARIFY)

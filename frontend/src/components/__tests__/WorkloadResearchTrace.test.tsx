@@ -159,7 +159,10 @@ describe('WorkloadResearchTrace', () => {
         id: 'semantic-authorization', kind: 'gate', authority: 'authorizes', status: 'blocked',
         output: {
           workload_hypotheses: [
-            { hypothesis_id: 'local', label: 'Local execution', confidence: 0.61 },
+            {
+              hypothesis_id: 'local', label: 'Local execution', confidence: 0.61,
+              evidence_coverage: 'partial', matched_claim_types: ['compatibility'],
+            },
             { hypothesis_id: 'remote', label: 'Remote client', confidence: 0.32 },
           ],
           material_unknowns: [{
@@ -177,17 +180,21 @@ describe('WorkloadResearchTrace', () => {
           question: 'Will it run locally, remotely, or in a hybrid setup?',
           missing_slots: ['execution-location'],
           decision_impacts: ['architecture', 'product_set'],
-          selection_policy: 'expected_decision_impact',
+          selection_policy: 'bounded_information_gain',
+          hypotheses_discriminated: 2,
         },
       },
     ]} />);
 
     expect(screen.getByTestId('research-hypotheses')).toHaveTextContent(/proposed, not accepted/i);
+    expect(screen.getByTestId('research-hypotheses')).toHaveTextContent(/evidence coverage: partial/i);
+    expect(screen.getByTestId('research-hypotheses')).toHaveTextContent(/compatibility/i);
     expect(screen.getByTestId('research-material-unknowns')).toHaveTextContent(/resolved by buyer/i);
     expect(screen.getByTestId('semantic-provider-attempts')).toHaveTextContent(/No configured provider: not configured/i);
     const clarification = screen.getByTestId('material-clarification-trace');
     expect(clarification).toHaveTextContent(/execution location/i);
     expect(clarification).toHaveTextContent(/architecture \| product set/i);
+    expect(clarification).toHaveTextContent(/Hypotheses distinguished:\s*2/i);
     expect(clarification).toHaveTextContent(/does not itself authorize/i);
   });
 

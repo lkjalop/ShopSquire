@@ -88,6 +88,9 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
                   <li key={item?.hypothesis_id || index}>
                     {item?.label || 'Unnamed hypothesis'} - proposed, not accepted
                     {item?.confidence != null ? ` (${Math.round(Number(item.confidence) * 100)}% interpreter confidence)` : ''}
+                    {item?.evidence_coverage ? `; evidence coverage: ${words(item.evidence_coverage)}` : ''}
+                    {Array.isArray(item?.matched_claim_types) && item.matched_claim_types.length
+                      ? ` (${item.matched_claim_types.map(words).join(', ')})` : ''}
                   </li>
                 ))}
               </ul>
@@ -214,6 +217,9 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
             <div>Buyer-owned gap: <strong>{(materialClarification?.output?.missing_slots || []).map(words).join(' | ') || 'not recorded'}</strong></div>
             <div>Expected impact: <strong>{(materialClarification?.output?.decision_impacts || []).map(words).join(' | ') || 'not recorded'}</strong></div>
             <div>Selection policy: <strong>{words(materialClarification?.output?.selection_policy)}</strong></div>
+            {materialClarification?.output?.hypotheses_discriminated != null && (
+              <div>Hypotheses distinguished: <strong>{String(materialClarification.output.hypotheses_discriminated)}</strong></div>
+            )}
             <small style={{ color: '#64748b' }}>
               One material question is selected after bounded research. The answer does not itself authorize a product or action.
             </small>

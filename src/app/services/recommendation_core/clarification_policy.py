@@ -16,6 +16,7 @@ def select_semantic_clarification(
     research_status: str | None,
     proposed_questions: Sequence[Mapping[str, Any]] = (),
     material_unknowns: Sequence[Mapping[str, Any]] = (),
+    workload_hypotheses: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Return one buyer-owned question selected by expected decision impact.
 
@@ -53,7 +54,17 @@ def select_semantic_clarification(
         "affordable_quantity": 2,
         "product_set": 1,
     }
-    eligible: list[tuple[int, int, Mapping[str, Any], list[str], list[str]]] = []
+    hypothesis_unknowns = [
+        {
+            str(value).strip()
+            for value in list(item.get("discriminating_unknown_ids") or [])[:6]
+            if str(value).strip()
+        }
+        for item in workload_hypotheses
+        if isinstance(item, Mapping)
+        and str(item.get("evidence_coverage") or "unresolved") != "covered"
+    ]
+    eligible: list[tuple[int, int, int, Mapping[str, Any], list[str], list[str]]] = []
     for index, proposed in enumerate(proposed_questions):
         text = str(proposed.get("question") or "").strip()
         if not text:
@@ -76,10 +87,13 @@ def select_semantic_clarification(
             if str(value).strip().lower() in impact_weight
         ]
         score = sum(impact_weight[value] for value in set(impacts))
-        eligible.append((score, -index, proposed, unknown_ids, impacts))
+        discriminated = sum(1 for ids in hypothesis_unknowns if ids & set(unknown_ids))
+        eligible.append((discriminated, score, -index, proposed, unknown_ids, impacts))
 
     if eligible:
-        _, _, proposed, unknown_ids, impacts = max(eligible, key=lambda item: (item[0], item[1]))
+        discriminated, _, _, proposed, unknown_ids, impacts = max(
+            eligible, key=lambda item: (item[0], item[1], item[2]),
+        )
         return {
             "id": str(proposed.get("question_id") or "concept_resolution"),
             "goal": str(proposed.get("purpose") or "resolve_concept"),
@@ -87,8 +101,12 @@ def select_semantic_clarification(
             "missing_slots": unknown_ids or ["concept_resolution"],
             "text": str(proposed.get("question") or "").strip(),
             "options": [],
-            "selection_policy": "expected_decision_impact",
+            "selection_policy": (
+                "bounded_information_gain" if hypothesis_unknowns
+                else "expected_decision_impact"
+            ),
             "decision_impacts": impacts,
+            "hypotheses_discriminated": discriminated,
         }
 
     if unknown_sources and not any(

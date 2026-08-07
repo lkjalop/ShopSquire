@@ -3,6 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from src.app.services.semantic_resolution import (
+    ConceptEvidence,
+    WorkloadHypothesis,
+    compare_workload_hypotheses,
     align_catalog,
     fallback_semantic_proposal,
     normalize_concept_evidence,
@@ -10,6 +13,71 @@ from src.app.services.semantic_resolution import (
     validate_semantic_proposal,
     validate_semantic_source_policy,
 )
+
+
+def test_hypothesis_comparison_uses_only_verified_typed_claim_coverage():
+    hypotheses = [
+        WorkloadHypothesis(
+            hypothesis_id="local-workstation",
+            label="Local workstation",
+            required_claim_types=["recommended_requirements", "compatibility"],
+            discriminating_unknown_ids=["execution-location"],
+        ),
+        WorkloadHypothesis(
+            hypothesis_id="remote-client",
+            label="Remote client",
+            required_claim_types=["certification"],
+            discriminating_unknown_ids=["execution-location"],
+        ),
+    ]
+    evidence = [
+        ConceptEvidence(
+            concept="specialized workflow",
+            status="resolved",
+            claim="Official recommended requirements",
+            claim_status="verified",
+            claim_type="recommended_requirements",
+        ),
+        ConceptEvidence(
+            concept="specialized workflow",
+            status="insufficient",
+            claim="Unverified compatibility assertion",
+            claim_status="unverified",
+            claim_type="compatibility",
+        ),
+    ]
+
+    compared = compare_workload_hypotheses(hypotheses, evidence)
+
+    assert compared[0]["evidence_coverage"] == "partial"
+    assert compared[0]["matched_claim_types"] == ["recommended_requirements"]
+    assert compared[0]["missing_claim_types"] == ["compatibility"]
+    assert compared[0]["authority"] == "proposed"
+    assert compared[1]["evidence_coverage"] == "unresolved"
+
+
+def test_hypothesis_must_reference_a_declared_material_unknown():
+    result = validate_semantic_proposal(
+        {
+            "desired_outcome": "qualify a product",
+            "concepts": [{
+                "text": "specialized workflow",
+                "query_span": "specialized workflow",
+                "status": "unresolved",
+            }],
+            "workload_hypotheses": [{
+                "hypothesis_id": "local",
+                "label": "Local execution",
+                "discriminating_unknown_ids": ["missing-unknown"],
+            }],
+            "proposed_action": "research_then_clarify",
+        },
+        query="Find hardware for a specialized workflow",
+    )
+
+    assert result.outcome == "rejected"
+    assert result.reasons == ("hypothesis_unknown_reference_invalid",)
+
 
 
 def test_deterministic_relation_fallback_is_low_confidence_and_identified():

@@ -109,3 +109,45 @@ def test_missing_model_question_uses_vertical_neutral_fallback():
     assert question["id"] == "concept_resolution"
     assert "standard" in question["text"].lower()
     assert "software" not in question["text"].lower()
+
+
+def test_question_that_distinguishes_more_open_hypotheses_wins():
+    question = select_semantic_clarification(
+        research_status="insufficient",
+        proposed_questions=[
+            {
+                "question_id": "performance_target",
+                "question": "What result time is acceptable?",
+                "purpose": "resolve_performance_target",
+                "resolves_unknown_ids": ["performance"],
+                "decision_impacts": ["capability", "affordable_quantity"],
+            },
+            {
+                "question_id": "execution_location",
+                "question": "Will it run locally, remotely, or in a hybrid setup?",
+                "purpose": "resolve_compatibility",
+                "resolves_unknown_ids": ["deployment"],
+                "decision_impacts": ["product_set"],
+            },
+        ],
+        material_unknowns=[
+            {"unknown_id": "performance", "resolution_source": "buyer"},
+            {"unknown_id": "deployment", "resolution_source": "buyer"},
+        ],
+        workload_hypotheses=[
+            {
+                "hypothesis_id": "local",
+                "evidence_coverage": "partial",
+                "discriminating_unknown_ids": ["deployment"],
+            },
+            {
+                "hypothesis_id": "remote",
+                "evidence_coverage": "unresolved",
+                "discriminating_unknown_ids": ["deployment"],
+            },
+        ],
+    )
+
+    assert question["id"] == "execution_location"
+    assert question["selection_policy"] == "bounded_information_gain"
+    assert question["hypotheses_discriminated"] == 2

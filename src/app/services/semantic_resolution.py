@@ -15,6 +15,8 @@ from typing import Any, Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from src.app.services.recommendation_core.research_contracts import ClaimType
+
 
 ConceptStatus = Literal["resolved", "unresolved", "ambiguous"]
 SemanticAction = Literal[
@@ -79,6 +81,8 @@ class WorkloadHypothesis(BaseModel):
     hypothesis_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,59}$")
     label: str = Field(min_length=2, max_length=160)
     evidence_needed: list[str] = Field(default_factory=list, max_length=6)
+    required_claim_types: list[ClaimType] = Field(default_factory=list, max_length=6)
+    discriminating_unknown_ids: list[str] = Field(default_factory=list, max_length=6)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     authority: Literal["proposed"] = "proposed"
 
@@ -132,6 +136,7 @@ class ConceptEvidence:
     status: Literal["resolved", "insufficient", "contradictory", "unavailable"]
     claim: str
     claim_status: Literal["verified", "unverified", "contradictory"]
+    claim_type: str | None = None
     source_id: str | None = None
     source_record_id: str | None = None
     source_revision: str | None = None
@@ -377,6 +382,12 @@ def validate_semantic_proposal(raw: Any, *, query: str) -> SemanticValidation:
     unknown_ids = [item.unknown_id for item in proposal.material_unknowns]
     if len(unknown_ids) != len(set(unknown_ids)):
         return SemanticValidation("rejected", ("duplicate_material_unknown",))
+    known_unknown_ids = set(unknown_ids)
+    if any(
+        set(item.discriminating_unknown_ids) - known_unknown_ids
+        for item in proposal.workload_hypotheses
+    ):
+        return SemanticValidation("rejected", ("hypothesis_unknown_reference_invalid",))
     return SemanticValidation("valid", (), proposal)
 
 
@@ -471,6 +482,7 @@ def normalize_concept_evidence(items: Sequence[dict[str, Any]]) -> tuple[Concept
             status=status,
             claim=claim,
             claim_status=claim_status,
+            claim_type=claim_type,
             source_id=source_id,
             source_record_id=record_id,
             source_revision=revision,
@@ -479,6 +491,40 @@ def normalize_concept_evidence(items: Sequence[dict[str, Any]]) -> tuple[Concept
             source_policy_status=policy_status,
         ))
     return tuple(normalized)
+
+
+def compare_workload_hypotheses(
+    hypotheses: Sequence[WorkloadHypothesis],
+    evidence: Sequence[ConceptEvidence],
+) -> tuple[dict[str, Any], ...]:
+    """Measure typed evidence coverage without accepting a proposed hypothesis as fact."""
+    accepted_types = {
+        str(item.claim_type)
+        for item in evidence
+        if item.claim_status == "verified" and item.claim_type
+    }
+    compared: list[dict[str, Any]] = []
+    for hypothesis in hypotheses:
+        row = hypothesis.model_dump()
+        required = set(hypothesis.required_claim_types)
+        matched = sorted(required & accepted_types)
+        missing = sorted(required - accepted_types)
+        if not required:
+            status = "not_scored"
+        elif not missing:
+            status = "covered"
+        elif matched:
+            status = "partial"
+        else:
+            status = "unresolved"
+        row.update({
+            "evidence_coverage": status,
+            "matched_claim_types": matched,
+            "missing_claim_types": missing,
+            "authority": "proposed",
+        })
+        compared.append(row)
+    return tuple(compared)
 
 
 def reduce_semantic_proposal(
@@ -521,8 +567,8 @@ def reduce_semantic_proposal(
         "product_category_candidates": tuple(
             item.model_dump() for item in proposal.product_category_candidates
         ),
-        "workload_hypotheses": tuple(
-            item.model_dump() for item in proposal.workload_hypotheses
+        "workload_hypotheses": compare_workload_hypotheses(
+            proposal.workload_hypotheses, evidence,
         ),
         "material_unknowns": tuple(item.model_dump() for item in proposal.material_unknowns),
         "interpretation_confidence": proposal.confidence,
