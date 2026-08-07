@@ -104,14 +104,15 @@ class ResearchProviderRegistry:
 
 def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRegistry:
     """Build the operator-configured registry; incomplete config remains empty."""
-    endpoint = str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip()
+    search_endpoint = str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip()
+    requirements_endpoint = str(os.getenv("OFFICIAL_REQUIREMENTS_API_URL") or "").strip()
     tenant_ids = tuple(
         value.strip()
         for value in str(os.getenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST") or "").split(",")
         if value.strip()
     )
     domains = tuple(str(value).strip().lower() for value in allowed_domains if str(value).strip())
-    if not endpoint or not tenant_ids or not domains:
+    if not (search_endpoint or requirements_endpoint) or not tenant_ids or not domains:
         return ResearchProviderRegistry()
 
     try:
@@ -120,6 +121,7 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
         deadline_ms = 1800
 
     from src.app.adapters.external_research_httpx import HttpxResearchFetcher
+    from src.app.adapters.official_requirements_httpx import OfficialRequirementsHttpFetcher
 
     reviewed_by = str(os.getenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY") or "").strip()
     source_policy = None
@@ -140,15 +142,32 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
             "freshness_status": "fresh",
         }
 
-    return ResearchProviderRegistry([ResearchProvider(
-        provider_id=str(
-            os.getenv("EXTERNAL_RESEARCH_PROVIDER_ID") or "allowlisted_http_search"
-        ).strip()[:80],
-        capabilities=("concept_discovery", "official_requirements"),
-        allowed_tenants=tenant_ids,
-        allowed_domains=domains,
-        authority="official_source_index",
-        fetcher_factory=HttpxResearchFetcher,
-        deadline_ms=max(100, min(deadline_ms, 30_000)),
-        source_policy=source_policy,
-    )])
+    providers: list[ResearchProvider] = []
+    if search_endpoint:
+        providers.append(ResearchProvider(
+            provider_id=str(
+                os.getenv("EXTERNAL_RESEARCH_PROVIDER_ID") or "allowlisted_http_search"
+            ).strip()[:80],
+            capabilities=("concept_discovery",),
+            allowed_tenants=tenant_ids,
+            allowed_domains=domains,
+            authority="official_source_index",
+            fetcher_factory=HttpxResearchFetcher,
+            deadline_ms=max(100, min(deadline_ms, 30_000)),
+            source_policy=None,
+        ))
+    if requirements_endpoint:
+        providers.append(ResearchProvider(
+            provider_id=str(
+                os.getenv("OFFICIAL_REQUIREMENTS_PROVIDER_ID")
+                or "official_requirements_api"
+            ).strip()[:80],
+            capabilities=("official_requirements", "professional_software_requirements"),
+            allowed_tenants=tenant_ids,
+            allowed_domains=domains,
+            authority="official_source_index",
+            fetcher_factory=OfficialRequirementsHttpFetcher,
+            deadline_ms=max(100, min(deadline_ms, 30_000)),
+            source_policy=source_policy,
+        ))
+    return ResearchProviderRegistry(providers)

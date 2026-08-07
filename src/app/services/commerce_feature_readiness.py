@@ -65,6 +65,7 @@ def external_search_readiness(
     search endpoint (EXTERNAL_RESEARCH_SEARCH_URL) AND a non-empty domain allowlist."""
     enabled = _flag_on(flags, "EXTERNAL_RESEARCH_ENABLED", "EXTERNAL_RESEARCH_ENABLED")
     endpoint = bool(str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip())
+    requirements_endpoint = bool(str(os.getenv("OFFICIAL_REQUIREMENTS_API_URL") or "").strip())
     allow = [a for a in (allowlist if allowlist is not None else (flags or {}).get("EXTERNAL_RESEARCH_ALLOWLIST") or []) if str(a or "").strip()]
     has_allowlist = len(allow) > 0
     tenant_allowlist = [
@@ -77,17 +78,20 @@ def external_search_readiness(
         str(os.getenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY") or "").strip()
     )
     advisory_live = bool(enabled and endpoint and has_allowlist and tenant_enrollment)
-    requirement_authority_ready = bool(advisory_live and source_policy_reviewed)
-    live = advisory_live
+    requirement_authority_ready = bool(
+        enabled and requirements_endpoint and has_allowlist
+        and tenant_enrollment and source_policy_reviewed
+    )
+    live = bool(advisory_live or requirement_authority_ready)
     if not enabled:
         reason = "EXTERNAL_RESEARCH_ENABLED is off"
-    elif not endpoint:
+    elif not endpoint and not requirements_endpoint:
         reason = "EXTERNAL_RESEARCH_SEARCH_URL not configured — without it the NullFetcher returns nothing"
     elif not has_allowlist:
         reason = "no domain allowlist — results would be dropped by the allowlist guard"
     elif not tenant_enrollment:
         reason = "no tenant enrollment; the provider registry remains empty"
-    elif not source_policy_reviewed:
+    elif requirements_endpoint and not source_policy_reviewed:
         reason = "live_advisory_only"
     else:
         reason = "live"
@@ -103,6 +107,7 @@ def external_search_readiness(
         "advisory_live": advisory_live,
         "requirement_authority_ready": requirement_authority_ready,
         "endpoint_configured": endpoint,
+        "requirements_endpoint_configured": requirements_endpoint,
         "allowlist_size": len(allow),
         "tenant_enrollment_count": len(tenant_allowlist),
         "source_policy_reviewed": source_policy_reviewed,
