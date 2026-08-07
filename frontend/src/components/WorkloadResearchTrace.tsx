@@ -161,7 +161,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
                   <ul style={{ margin: '5px 0 0', paddingLeft: 20 }}>
                     {attempts.map((attempt: any, attemptIndex: number) => (
                       <li key={`${attempt?.provider_id || 'provider'}-${attemptIndex}`}>
-                        {attempt?.provider_id || 'unknown provider'}: {words(attempt?.status)}
+                        {words(attempt?.provider_id || 'unknown provider')}: {words(attempt?.status)}
                       </li>
                     ))}
                   </ul>
@@ -196,7 +196,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
                 <ul data-testid="semantic-provider-attempts" style={{ margin: '5px 0 0', paddingLeft: 20 }}>
                   {leg.data.provider_attempts.map((attempt: any, index: number) => (
                     <li key={`${attempt?.provider_id || 'unconfigured'}-${attempt?.capability || index}-${index}`}>
-                      {attempt?.provider_id || 'No configured provider'}: {words(attempt?.status)}
+                      {words(attempt?.provider_id || 'No configured provider')}: {words(attempt?.status)}
                       {attempt?.capability ? ` for ${words(attempt.capability)}` : ''}
                       {attempt?.deadline_ms ? ` (${attempt.deadline_ms}ms deadline)` : ''}
                     </li>
