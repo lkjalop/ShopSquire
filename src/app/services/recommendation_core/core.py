@@ -976,6 +976,66 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         resp.extras["approved_narration_evidence"] = list(
             approved_narration_evidence(normalized)
         )
+        prior_case_anchor = (
+            envelope.session.get("case_anchor")
+            if isinstance(envelope.session.get("case_anchor"), dict)
+            else {}
+        )
+        semantic_case_id = str(prior_case_anchor.get("case_id") or "").strip()
+        if not semantic_case_id:
+            session_epoch = str(envelope.session.get("session_epoch") or "current")
+            semantic_case_id = "semantic-" + hashlib.sha256(
+                f"{envelope.tenant_id}|{envelope.uid}|{session_epoch}".encode("utf-8")
+            ).hexdigest()[:24]
+        # Persist an inspectable semantic revision. This stores no chain-of-thought:
+        # model confidence, evidence support, deterministic constraints and authority
+        # remain separate. Persistence failure is visible in the trace and never
+        # silently grants catalog authority.
+        try:
+            from src.app.services.conversation_case_state import ensure_case_state
+            from src.app.services.semantic_belief_state import persist_semantic_belief
+
+            session_epoch = str(envelope.session.get("session_epoch") or "current")
+            ensure_case_state(
+                db,
+                tenant_id=envelope.tenant_id,
+                case_id=semantic_case_id,
+                session_epoch=session_epoch,
+                subject_ref=hashlib.sha256(
+                    f"{envelope.tenant_id}|{envelope.uid}".encode("utf-8")
+                ).hexdigest(),
+                authoritative_anchor={
+                    "kind": "semantic_qualification",
+                    "quantity": requested_quantity,
+                    "budget": {
+                        "scope": decision.budget_scope,
+                        "total_cents": decision.total_budget_cents,
+                        "currency": envelope.currency,
+                    },
+                },
+            )
+            belief_result = persist_semantic_belief(
+                db,
+                tenant_id=envelope.tenant_id,
+                case_id=semantic_case_id,
+                session_epoch=session_epoch,
+                semantic_decision=semantic_decision.as_dict(),
+                accepted_evidence=[item.as_dict() for item in normalized],
+                compiled_requirements=semantic_compiled_requirements,
+                trace_id=envelope.trace_id,
+            )
+            resp.extras["semantic_belief_state"] = belief_result
+        except Exception as exc:
+            logger.warning(
+                "semantic belief persistence failed for trace %s: %s",
+                envelope.trace_id,
+                type(exc).__name__,
+            )
+            resp.extras["semantic_belief_state"] = {
+                "status": "persistence_failed",
+                "persisted": False,
+                "error_type": type(exc).__name__,
+            }
         if semantic_decision.catalog_authority != "permitted":
             # A model can echo a quantity from prior prompt context even when the buyer
             # has switched to a new unresolved subject. Consequential commercial state
@@ -988,17 +1048,6 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             # Typed clients must clear any prior slate without depending on the
             # legacy adapter to infer this from an empty product list.
             resp.extras["slate_disposition"] = "clear"
-            prior_case_anchor = (
-                envelope.session.get("case_anchor")
-                if isinstance(envelope.session.get("case_anchor"), dict)
-                else {}
-            )
-            semantic_case_id = str(prior_case_anchor.get("case_id") or "").strip()
-            if not semantic_case_id:
-                session_epoch = str(envelope.session.get("session_epoch") or "current")
-                semantic_case_id = "semantic-" + hashlib.sha256(
-                    f"{envelope.tenant_id}|{envelope.uid}|{session_epoch}".encode("utf-8")
-                ).hexdigest()[:24]
             resp.extras["case_anchor"] = {
                 **prior_case_anchor,
                 "case_id": semantic_case_id,
