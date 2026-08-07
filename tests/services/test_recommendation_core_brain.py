@@ -1846,7 +1846,9 @@ def test_uncovered_workload_abstains_and_does_not_inherit_stale_quantity(db):
         "lane": "SEARCH",
         "handle": "el-6-11-2",
         "use_cases": ["gaming"],
-        "quantity": None,
+        # Reproduce the live weak-model failure: the model copied the previous
+        # quantity even though the current buyer turn did not state one.
+        "quantity": 30,
         "subject_action": "continue",
         "confidence": 0.91,
     }
@@ -1873,6 +1875,25 @@ def test_uncovered_workload_abstains_and_does_not_inherit_stale_quantity(db):
     assert response.extras.get("requested_quantity") is None
     assert response.extras.get("quantity_inherited") is not True
     assert "catalog_recommendation" in semantic["state_prevented"]
+
+
+def test_unresolved_workload_preserves_quantity_stated_in_current_turn(db):
+    payload = {
+        "lane": "SEARCH",
+        "handle": "el-6-11-2",
+        "quantity": 12,
+        "subject_action": "switch",
+        "confidence": 0.91,
+    }
+    response = recommend_turn(
+        db,
+        _env("I need 12 laptops for an unfamiliar vibration simulation workflow."),
+        llm_fn=lambda _prompt, _timeout: json.dumps(payload),
+    )
+
+    assert response.products == []
+    assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert response.extras["requested_quantity"] == 12
 
 
 def test_uncovered_workload_abstains_when_router_model_is_unavailable(db):

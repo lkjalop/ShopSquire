@@ -938,6 +938,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             approved_narration_evidence(normalized)
         )
         if semantic_decision.catalog_authority != "permitted":
+            # A model can echo a quantity from prior prompt context even when the buyer
+            # has switched to a new unresolved subject. Consequential commercial state
+            # requires buyer-authored evidence in this turn; bounded model output alone
+            # is not sufficient. Explicit quantities remain visible, while relative
+            # amendments stay in case_obligations until confirmation.
+            if not decision.quantity_explicit:
+                resp.extras.pop("requested_quantity", None)
+                resp.extras.pop("quantity_inherited", None)
             # Typed clients must clear any prior slate without depending on the
             # legacy adapter to infer this from an empty product list.
             resp.extras["slate_disposition"] = "clear"

@@ -341,6 +341,10 @@ class TurnDecision:
     # sane values. quantity is a count, not a fit predicate; total_budget is the whole-order budget
     # (distinct from the per-unit budget the platform already applies at retrieval).
     quantity: Optional[int] = None
+    # True only when the shared quantity grammar anchored the count in this buyer turn.
+    # Model output and inherited session values may aid interpretation, but cannot independently
+    # authorize consequential commercial state for a switched or unresolved subject.
+    quantity_explicit: bool = False
     total_budget_cents: Optional[int] = None
     # per_unit | total | unknown — whether a STATED budget is per-item or the whole-order total.
     # NEVER reinterpret a per-unit budget as a total (the arithmetic-safety invariant, review-10 P0).
@@ -400,7 +404,8 @@ class TurnDecision:
                 "brand_action": self.brand_action,
                 "subject_from_session": self.subject_from_session,
                 "compare_targets": list(self.compare_targets),
-                "quantity": self.quantity, "total_budget_cents": self.total_budget_cents,
+                "quantity": self.quantity, "quantity_explicit": self.quantity_explicit,
+                "total_budget_cents": self.total_budget_cents,
                 "budget_scope": self.budget_scope, "budget_cap_mode": self.budget_cap_mode,
                 "subject_action": self.subject_action,
                 "procurement_context": self.procurement_context,
@@ -2463,7 +2468,9 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         exclude_brand=exclude_brand, brand_action=brand_action,
                         subject_from_session=subject_from_session,
                         compare_targets=compare_targets,
-                        quantity=quantity, total_budget_cents=total_budget_cents,
+                        quantity=quantity,
+                        quantity_explicit=(explicit_quantity is not None),
+                        total_budget_cents=total_budget_cents,
                         budget_scope=budget_scope, budget_cap_mode=budget_cap_mode,
                         subject_action=subject_action,
                         procurement_context=procurement_context,
