@@ -24,8 +24,9 @@ def test_plan_is_vertical_neutral_and_does_not_choose_provider_ids():
     assert {item["claim_type"] for item in payload["evidence_needs"]} == {
         "concept_identity", "recommended_requirements",
     }
-    assert all(item["provider_capability"] == "official_requirements"
-               for item in payload["evidence_needs"])
+    assert {item["provider_capability"] for item in payload["evidence_needs"]} == {
+        "concept_discovery", "official_requirements",
+    }
     assert "provider_id" not in str(payload)
     assert payload["external_research_authorized"] is True
     assert payload["interpretation_origin"] == "model"

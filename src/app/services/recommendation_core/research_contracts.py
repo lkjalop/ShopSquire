@@ -22,10 +22,15 @@ ClaimType = Literal[
     "certification",
 ]
 ProviderCapability = Literal[
+    "concept_discovery",
     "official_requirements",
+    "standards_regulatory",
+    "professional_software_requirements",
+    "game_requirements",
     "approved_tenant_document",
     "catalog_specification",
     "visual_identity",
+    "visual_document_evidence",
 ]
 ResearchStatus = Literal[
     "planned",

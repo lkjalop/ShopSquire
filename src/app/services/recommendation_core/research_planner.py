@@ -56,7 +56,7 @@ def build_research_plan(
             need_id=f"concept_{index + 1}",
             subject_span=subject,
             claim_type="concept_identity",
-            provider_capability="official_requirements",
+            provider_capability="concept_discovery",
             max_age_days=365,
         ))
         needs.append(EvidenceNeed(

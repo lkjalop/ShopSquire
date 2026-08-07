@@ -334,6 +334,14 @@ def _leg_concept_resolution(
             if value:
                 answer_candidates.append(value)
     buyer_context = " ".join(answer_candidates)[:800]
+    provider_capabilities = list(dict.fromkeys(
+        str(item.get("provider_capability") or "").strip()
+        for item in list(
+            (research_plan or {}).get("evidence_needs") or []
+            if isinstance(research_plan, dict) else []
+        )[:8]
+        if isinstance(item, dict) and str(item.get("provider_capability") or "").strip()
+    ))[:3]
     outbound_query = scrub_pii(
         f"{concept} {buyer_context} official requirements compatibility".strip()
     )
@@ -345,6 +353,9 @@ def _leg_concept_resolution(
         scrub=scrub_pii,
         tenant_id=tenant_id,
         cancellation=cancellation,
+        buyer_consent=bool(getattr(plan, "external_research_authorized", False)),
+        provider_capability="official_requirements",
+        provider_capabilities=provider_capabilities or None,
     )
     if cancellation is not None:
         cancellation.raise_if_cancelled()
@@ -385,6 +396,8 @@ def _leg_concept_resolution(
             "query": outbound_query,
             "query_hash": result.get("query_hash"),
             "provider_id": result.get("provider_id") or "external_research",
+            "provider_ids": list(result.get("provider_ids") or []),
+            "provider_attempts": list(result.get("provider_attempts") or [])[:8],
             "provider_run_status": result.get("run_status") or "unknown",
             "cache_status": result.get("cache_status") or "not_recorded",
             "source_status": result.get("source_status") or {},

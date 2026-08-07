@@ -124,16 +124,60 @@ def test_stage_returns_none_when_disabled(monkeypatch):
     assert run_external_research_stage(query="laptop", results=[], flags={"EXTERNAL_RESEARCH_ENABLED": False}) is None
 
 
-def test_stage_uses_nullfetcher_when_no_endpoint(monkeypatch):
-    # Enabled but no EXTERNAL_RESEARCH_SEARCH_URL -> NullFetcher -> empty items (inert), not None.
+def test_stage_reports_not_configured_when_no_provider_endpoint(monkeypatch):
     from src.app.services.external_product_research_service import run_external_research_stage
     monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
     monkeypatch.delenv("EXTERNAL_RESEARCH_SEARCH_URL", raising=False)
-    out = run_external_research_stage(query="laptop", results=[{"sku": "A", "name": "Alpha"}],
-                                      flags={"EXTERNAL_RESEARCH_ALLOWLIST": ["trusted.com"]})
-    assert out is not None and out["items"] == []  # inert NullFetcher -> no items
-    assert out["source_status"]["source"] == "external_research"
-    assert out["provider_id"] == "null_fetcher"
-    assert out["run_status"] == "empty"
-    assert out["cache_status"] == "miss_or_disabled"
-    assert len(out["query_hash"]) == 16
+    out = run_external_research_stage(
+        query="laptop",
+        results=[{"sku": "A", "name": "Alpha"}],
+        flags={"EXTERNAL_RESEARCH_ALLOWLIST": ["trusted.com"]},
+        tenant_id="tenant-a",
+    )
+    assert out is not None and out["items"] == []
+    assert out["provider_id"] is None
+    assert out["run_status"] == "not_configured"
+    assert out["provider_attempts"][0]["status"] == "not_configured"
+
+
+def test_stage_executes_only_a_tenant_allowed_capability_provider(monkeypatch):
+    from src.app.services.external_product_research_service import run_external_research_stage
+    from src.app.services.research_provider_registry import (
+        ResearchProvider,
+        ResearchProviderRegistry,
+    )
+
+    class ProviderFetcher:
+        def fetch(self, _query, *, allowlist, timeout_s=4.0, cancellation=None):
+            assert allowlist == ["vendor.example"]
+            assert timeout_s == 1.2
+            return [{
+                "title": "Official requirements",
+                "snippet": "Published compatibility information",
+                "url": "https://vendor.example/requirements",
+                "source_domain": "vendor.example",
+            }]
+
+    registry = ResearchProviderRegistry([ResearchProvider(
+        provider_id="official-search",
+        capabilities=("official_requirements",),
+        allowed_tenants=("tenant-a",),
+        allowed_domains=("vendor.example",),
+        authority="official_source_index",
+        fetcher_factory=ProviderFetcher,
+        deadline_ms=1200,
+    )])
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+
+    out = run_external_research_stage(
+        query="unfamiliar workload official requirements",
+        tenant_id="tenant-a",
+        buyer_consent=True,
+        provider_registry=registry,
+    )
+
+    assert out is not None
+    assert out["run_status"] == "ok"
+    assert out["provider_id"] == "official-search"
+    assert out["items"][0]["source_domain"] == "vendor.example"
+    assert [item["status"] for item in out["provider_attempts"]] == ["selected", "ok"]

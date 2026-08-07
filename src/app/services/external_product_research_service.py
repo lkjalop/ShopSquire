@@ -171,6 +171,10 @@ def run_external_research_stage(
     redis: Any = None,
     tenant_id: Optional[str] = None,
     cancellation: Any = None,
+    buyer_consent: bool = True,
+    provider_capability: str = "official_requirements",
+    provider_capabilities: Optional[List[str]] = None,
+    provider_registry: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """Route wrapper for safe internet search. Resolves enabled (env EXTERNAL_RESEARCH_ENABLED >
     flag), picks the fetcher (SSRF-safe httpx adapter when EXTERNAL_RESEARCH_SEARCH_URL is set, else
@@ -188,40 +192,87 @@ def run_external_research_stage(
     if not enabled:
         return None
 
-    # Real SSRF-safe httpx adapter ONLY when an operator-configured search endpoint exists; otherwise
-    # the NullFetcher keeps external research inert (empty) even when the flag is on.
-    if os.getenv("EXTERNAL_RESEARCH_SEARCH_URL"):
-        from src.app.adapters.external_research_httpx import HttpxResearchFetcher as _fetcher
-        default_provider_id = "allowlisted_http_search"
-    else:
-        from src.app.ports.external_product_research import NullFetcher as _fetcher
-        default_provider_id = "null_fetcher"
     from src.app.platform.store_profile import active_profile_id as _active_pid, profile_slot as _profile_slot
+    from src.app.services.research_provider_registry import configured_registry
 
     # AGNOSTIC: allowlist comes from the ACTIVE profile, falling back to the global config.
     allow = _profile_slot("external_research_allowlist", default=None) or flags.get("EXTERNAL_RESEARCH_ALLOWLIST") or []
-    res = research(
-        query,
-        fetcher=_fetcher(),
-        allowlist=allow,
-        catalog_skus=[str(r.get("sku") or "") for r in (results or []) if isinstance(r, dict)],
-        catalog_names={
-            str(r.get("sku")): str(r.get("name") or "")
-            for r in (results or []) if isinstance(r, dict) and r.get("sku")
-        },
-        enabled=True,
-        scrub=scrub,
-        redis=redis,
-        cache_namespace=f"{tenant_id or ''}:{_active_pid()}",
-        cancellation=cancellation,
-    )
-    run_status = str(res.get("status") or "unknown")
+    registry = provider_registry or configured_registry(allowed_domains=allow)
+    requested_capabilities = list(dict.fromkeys(
+        str(value or "").strip()
+        for value in (provider_capabilities or [provider_capability])
+        if str(value or "").strip()
+    ))[:3]
+    selected_by_id: Dict[str, Any] = {}
+    attempts: list[Dict[str, Any]] = []
+    for capability in requested_capabilities:
+        selected_for_capability, capability_attempts = registry.select(
+            capability,
+            tenant_id=str(tenant_id or ""),
+            buyer_consent=bool(buyer_consent),
+            max_providers=3,
+        )
+        attempts.extend(capability_attempts)
+        for provider in selected_for_capability:
+            selected_by_id.setdefault(provider.provider_id, provider)
+    selected = tuple(selected_by_id.values())[:3]
+    if not selected:
+        status = str((attempts[0] if attempts else {}).get("status") or "not_configured")
+        return {
+            "items": [],
+            "source_status": SourceStatus(source=_SOURCE, status="unavailable").to_dict(),
+            "provider_id": None,
+            "provider_attempts": attempts,
+            "run_status": status,
+            "cache_status": "miss_or_disabled",
+            "query_hash": hashlib.sha256(str(query or "").encode("utf-8")).hexdigest()[:16],
+        }
+
+    aggregate: list[Dict[str, Any]] = []
+    run_status = "empty"
+    source_status: Dict[str, Any] = SourceStatus(source=_SOURCE, status="unavailable").to_dict()
+    provider_ids: list[str] = []
+    for provider in selected:
+        provider_ids.append(provider.provider_id)
+        res = research(
+            query,
+            fetcher=provider.fetcher_factory(),
+            allowlist=list(provider.allowed_domains),
+            catalog_skus=[str(r.get("sku") or "") for r in (results or []) if isinstance(r, dict)],
+            catalog_names={
+                str(r.get("sku")): str(r.get("name") or "")
+                for r in (results or []) if isinstance(r, dict) and r.get("sku")
+            },
+            enabled=True,
+            scrub=scrub,
+            redis=redis,
+            cache_namespace=f"{tenant_id or ''}:{_active_pid()}:{provider.provider_id}",
+            timeout_s=provider.deadline_ms / 1000.0,
+            cancellation=cancellation,
+        )
+        provider_status = str(res.get("status") or "unknown")
+        attempts.append({
+            "provider_id": provider.provider_id,
+            "status": provider_status,
+            "capabilities": [
+                value for value in requested_capabilities if value in provider.capabilities
+            ],
+            "authority": provider.authority,
+        })
+        aggregate.extend(item for item in list(res.get("items") or []) if isinstance(item, dict))
+        source_status = res.get("source_status") or source_status
+        if aggregate:
+            run_status = "ok"
+            break
+        if provider_status in {"error", "cancelled"}:
+            run_status = provider_status
+
     return {
-        "items": res.get("items") or [],
-        "source_status": res.get("source_status"),
-        "provider_id": str(
-            os.getenv("EXTERNAL_RESEARCH_PROVIDER_ID") or default_provider_id
-        ).strip()[:80],
+        "items": aggregate[:8],
+        "source_status": source_status,
+        "provider_id": provider_ids[0] if len(provider_ids) == 1 else None,
+        "provider_ids": provider_ids,
+        "provider_attempts": attempts,
         "run_status": run_status,
         "cache_status": "hit" if run_status == "cached" else "miss_or_disabled",
         # Proves which scrubbed query ran without exposing endpoint credentials or
