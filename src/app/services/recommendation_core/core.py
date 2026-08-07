@@ -966,6 +966,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             question = select_semantic_clarification(
                 research_status=str(concept_data.get("status") or ""),
                 proposed_questions=list(semantic_decision.questions or ()),
+                material_unknowns=list(semantic_decision.material_unknowns or ()),
             )
             resp.clarify.append(question)
             resp.set_message(question["text"], MsgPriority.BULK_SCOPE_CLARIFY)

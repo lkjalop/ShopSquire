@@ -53,6 +53,10 @@ class EvidenceQuestion(BaseModel):
         "resolve_product_identity",
         "resolve_safety_or_policy",
     ] = "resolve_concept"
+    resolves_unknown_ids: list[str] = Field(default_factory=list, max_length=4)
+    decision_impacts: list[
+        Literal["architecture", "capability", "affordable_quantity", "product_set"]
+    ] = Field(default_factory=list, max_length=4)
     material: bool = True
 
 
@@ -266,12 +270,16 @@ def fallback_semantic_proposal(
                 "question_id": "software_or_standard",
                 "question": "Which exact software, standard, or workflow and version must be supported?",
                 "purpose": "resolve_compatibility",
+                "resolves_unknown_ids": ["material-concept"],
+                "decision_impacts": ["capability", "product_set"],
                 "material": True,
             },
             {
                 "question_id": "execution_location",
                 "question": "Will the work run locally on each device, remotely, or in a hybrid setup?",
                 "purpose": "resolve_compatibility",
+                "resolves_unknown_ids": ["execution-location"],
+                "decision_impacts": ["architecture", "capability", "product_set"],
                 "material": True,
             },
             {
@@ -281,6 +289,8 @@ def fallback_semantic_proposal(
                     "performance?"
                 ),
                 "purpose": "resolve_performance_target",
+                "resolves_unknown_ids": ["performance-target"],
+                "decision_impacts": ["capability", "affordable_quantity", "product_set"],
                 "material": True,
             },
         ]
@@ -323,6 +333,16 @@ def fallback_semantic_proposal(
             "unknown_id": "material-concept",
             "description": f"Authoritative meaning and requirements for {concept[:120]}",
             "resolution_source": "research",
+            "material": True,
+        }, {
+            "unknown_id": "execution-location",
+            "description": "Whether execution is local, remote, or hybrid",
+            "resolution_source": "buyer",
+            "material": True,
+        }, {
+            "unknown_id": "performance-target",
+            "description": "Buyer-required scale and time-to-result target",
+            "resolution_source": "buyer",
             "material": True,
         }],
         "evidence_questions": questions,
