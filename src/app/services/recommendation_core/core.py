@@ -394,6 +394,17 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # capability prose and clarification.
     decision = dataclasses.replace(decision, use_cases=tuple(intent["use_cases"]),
                                    use_case_variants=dict(intent.get("use_case_variants") or {}))
+    # Observation only: measure the legacy title/decomposer paths against the
+    # canonical model-plus-registry interpretation before retiring them.  This
+    # result is attached after response construction and never influences the
+    # decision, requirements, retrieval, ranking, or authorization path.
+    from src.app.services.workload_interpretation_shadow import observe_workload_interpretations
+
+    workload_interpretation_shadow = observe_workload_interpretations(
+        envelope.query,
+        canonical_entities=decision.workload_entities,
+        canonical_use_cases=decision.use_cases,
+    )
     # review-8 #4 (accessory req-slot leak): a use-case/workload's device floors describe the
     # DEVICE, not an accessory bought FOR it. If the requested product is not a workload-host
     # device ('a mouse for gaming', 'a bag for my gaming laptop' route to accessory nodes), keep
@@ -522,6 +533,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         quantity_inherited = False
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
+    if workload_interpretation_shadow is not None:
+        resp.extras["workload_interpretation_shadow"] = dict(workload_interpretation_shadow)
     continuity_pending = (
         envelope.session.get("pending_clarification")
         if isinstance(envelope.session.get("pending_clarification"), dict) else {}
