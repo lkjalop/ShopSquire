@@ -17,8 +17,9 @@ _PURPOSE_PATTERNS = (
     re.compile(r"\bto\s+(?P<span>[^,.;?!]{2,160})", re.IGNORECASE),
 )
 _GRAMMAR_WORDS = frozenset({
-    "a", "an", "and", "for", "help", "i", "it", "me", "my", "need", "of", "please",
-    "that", "the", "this", "to", "with", "want", "use", "using", "work",
+    "a", "an", "and", "at", "for", "help", "i", "it", "me", "my", "need", "of",
+    "play", "please", "run", "that", "the", "this", "to", "with", "want", "use",
+    "using", "work",
 })
 _RESEARCH_META_WORDS = frozenset({
     "approved", "authorize", "authorized", "consent", "official", "permission",
@@ -28,7 +29,9 @@ _RESEARCH_META_WORDS = frozenset({
 
 def _tokens(value: Any) -> set[str]:
     return {token for token in _TOKEN_RE.findall(str(value or "").lower())
-            if token not in _GRAMMAR_WORDS and len(token) > 1}
+            if token not in _GRAMMAR_WORDS
+            and len(token) > 1
+            and not re.fullmatch(r"\d+(?:fps|hz|k)?", token)}
 
 
 def _registry_vocabulary(value: Any) -> set[str]:
@@ -121,6 +124,13 @@ def unresolved_purpose_proposal(
     )
     unresolved: list[str] = []
     for span in spans:
+        try:
+            from src.app.services.connectors.workload_evidence import default_registry
+
+            if default_registry().recognizes_offline(span):
+                continue
+        except Exception:
+            pass  # Provider failure cannot create coverage authority.
         span_tokens = _tokens(span)
         required = 1 if len(span_tokens) == 1 else min(2, len(span_tokens))
         best_overlap = max((len(span_tokens & item) for item in coverage_sets), default=0)

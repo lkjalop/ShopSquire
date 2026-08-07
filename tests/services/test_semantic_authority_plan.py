@@ -31,6 +31,39 @@ def test_product_category_does_not_authorize_an_uninterpreted_material_purpose()
     assert plan.semantic_proposal["proposal_origin"] == "coverage_abstention"
 
 
+def test_model_guessed_use_case_and_requirements_do_not_override_coverage_abstention():
+    decision = TurnDecision(
+        lane="SEARCH",
+        node_handle="el-6-6",
+        requirements={"ram_gb": ((">=", 16.0),)},
+        use_cases=("engineering_student",),
+        semantic_proposal={},
+        coverage_abstention_shadow=_coverage(
+            "I need a laptop for digital twin simulation of a cyber attack"
+        ),
+    )
+
+    plan = derive_plan(decision)
+
+    assert plan.semantic_authority_state == "uninterpreted_material"
+    assert plan.needs_concept_resolution is True
+
+
+def test_audience_only_context_does_not_become_a_workload_abstention():
+    decision = TurnDecision(
+        lane="SEARCH",
+        node_handle="el-6-6",
+        audience_contexts=("family_member",),
+        semantic_proposal={},
+        coverage_abstention_shadow=_coverage("I need a laptop for my daughter"),
+    )
+
+    plan = derive_plan(decision)
+
+    assert plan.semantic_authority_state == "not_material"
+    assert plan.needs_concept_resolution is False
+
+
 def test_same_material_purpose_has_same_authority_with_or_without_product_noun():
     with_product = _coverage(
         "I need a laptop for digital twin simulation of a cyber attack"
@@ -63,6 +96,12 @@ def test_ordinary_catalog_request_does_not_over_abstain():
 
     assert plan.semantic_authority_state == "not_material"
     assert plan.needs_concept_resolution is False
+
+
+def test_known_workload_with_performance_modifier_does_not_over_abstain():
+    coverage = _coverage("i want to play valorant at 144fps")
+
+    assert coverage == {}
 
 
 def test_research_consent_sentence_is_not_a_new_workload_concept():

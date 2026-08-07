@@ -107,6 +107,24 @@ class WorkloadEvidenceRegistry:
             if normalized in provider.supported_kinds
         )
 
+    def recognizes_offline(self, name: str) -> bool:
+        """Return whether an enrolled provider has bounded local evidence for a name.
+
+        This is a coverage check only. It never enables network access and never
+        returns requirements or authorizes a product.
+        """
+        candidate = str(name or "").strip()
+        if not candidate:
+            return False
+        for provider in self._providers:
+            for kind in provider.supported_kinds:
+                result, _attempts = self.resolve_with_trace(
+                    kind, candidate, allow_live=False,
+                )
+                if result is not None:
+                    return True
+        return False
+
     def resolve(
         self, kind: str, name: str, *, allow_live: bool,
         provider_allowed: Optional[Callable[[str], bool]] = None,

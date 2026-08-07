@@ -80,3 +80,18 @@ def test_registry_lists_kind_coverage_without_claiming_provider_readiness():
 
     assert registry.provider_ids_for("software") == ("official_vendor",)
     assert registry.provider_ids_for("game") == ()
+
+
+def test_offline_recognition_never_enables_live_provider_access():
+    calls = []
+
+    class _OfflineProvider(_Provider):
+        def resolve(self, name: str, *, allow_live: bool):
+            calls.append((name, allow_live))
+            return super().resolve(name, allow_live=allow_live) if name == "Renderer X" else None
+
+    registry = WorkloadEvidenceRegistry([_OfflineProvider()])
+
+    assert registry.recognizes_offline("Renderer X") is True
+    assert registry.recognizes_offline("unknown workload") is False
+    assert calls == [("Renderer X", False), ("unknown workload", False)]

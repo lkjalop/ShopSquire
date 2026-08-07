@@ -89,15 +89,18 @@ def derive_plan(decision: TurnDecision) -> Plan:
     model_material = _has_material_concept(semantic)
     coverage_material = _has_material_concept(coverage)
     subject_replaced = decision.clarification_relation in {"interrupt", "supersede"}
-    bounded_workload_grounding = bool(
+    # Audience context is not a workload, while registry-resolved workload entities,
+    # run-on relationships and product-type ambiguity already have bounded owners.
+    # Conversely, model-selected use cases or hardware floors are proposals, not
+    # proof that an unfamiliar buyer-authored purpose was understood.
+    independently_bounded_context = bool(
         decision.product_type_options
         or (
             not subject_replaced
             and (
-                decision.requirements
+                decision.audience_contexts
                 or decision.workload_entities
                 or decision.relationship == "run_on"
-                or decision.use_cases
             )
         )
     )
@@ -123,7 +126,7 @@ def derive_plan(decision: TurnDecision) -> Plan:
     elif (
         coverage.get("validation") == "valid"
         and coverage_material
-        and not bounded_workload_grounding
+        and not independently_bounded_context
     ):
         effective_semantic = coverage
         state = "uninterpreted_material"
