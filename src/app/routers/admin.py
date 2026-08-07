@@ -30,6 +30,7 @@ from src.app.services.checkout_upsell import upsell_performance_snapshot
 from src.app.services.trace_contracts import validate_incident_matrix_gate
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
 from src.app.security.dlp_export import dlp_sanitize_export_record
+from src.app.security.csv_safety import neutralize_mapping
 from src.app.security.safe_requests import safe_post
 from src.app.services.timescale_admin import detect_timescale_state, apply_timescale_phase_b, apply_timescale_phase_c
 from src.app.services.platform_regions import region_readiness
@@ -293,7 +294,7 @@ def powerbi_export_csv(
                             "path": "",
                         }
                         row = dlp_sanitize_export_record(row)
-                        w.writerow(row)
+                        w.writerow(neutralize_mapping(row, columns))
                         yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                 # orders
                 if dataset in ("all", "orders"):
@@ -332,7 +333,7 @@ def powerbi_export_csv(
                                 "path": "",
                             }
                             row = dlp_sanitize_export_record(row)
-                            w.writerow(row)
+                            w.writerow(neutralize_mapping(row, columns))
                             yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                     except Exception:
                         # orders table may be absent in dev
@@ -384,7 +385,7 @@ def powerbi_export_csv(
                                 "path": r.get("path"),
                             }
                             row = dlp_sanitize_export_record(row)
-                            w.writerow(row)
+                            w.writerow(neutralize_mapping(row, columns))
                             yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                     except Exception:
                         pass
@@ -594,7 +595,7 @@ def powerbi_export_decisions_csv(
                     out = {k: r.get(k) for k in cols if k not in ("tenant_id", "session_id", "channel")}
                     out["tenant_id"], out["session_id"], out["channel"] = tenant, sess, chan
                     out = dlp_sanitize_export_record(out)
-                    w.writerow(out); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+                    w.writerow(neutralize_mapping(out, cols)); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
         except Exception:
             status_code = 500
             raise
@@ -639,7 +640,7 @@ def powerbi_export_orders_csv(
                         out = {k: r.get(k) for k in cols if k not in ("tenant_id", "session_id", "channel")}
                         out["tenant_id"], out["session_id"], out["channel"] = "", "", ""
                         out = dlp_sanitize_export_record(out)
-                        w.writerow(out); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+                        w.writerow(neutralize_mapping(out, cols)); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                 except Exception:
                     pass
         except Exception:
@@ -696,7 +697,7 @@ def powerbi_export_security_csv(
                         out = {k: r.get(k) for k in cols if k not in ("tenant_id", "session_id", "channel")}
                         out["tenant_id"], out["session_id"], out["channel"] = "", "", chan
                         out = dlp_sanitize_export_record(out)
-                        w.writerow(out); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+                        w.writerow(neutralize_mapping(out, cols)); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                 except Exception:
                     pass
         except Exception:
@@ -729,7 +730,7 @@ def powerbi_export_zip(
     def _build_csv(rows, cols):
         sio = io.StringIO(); w = csv.DictWriter(sio, fieldnames=cols); w.writeheader()
         for r in rows:
-            w.writerow({k: r.get(k) for k in cols})
+            w.writerow(neutralize_mapping(r, cols))
         return sio.getvalue().encode("utf-8")
 
     def _gen():
@@ -3572,7 +3573,7 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
             skip_heavy = str(os.getenv("TEST_SKIP_ADMIN_HEAVY", "0")).lower() in ("1", "true", "yes")
             app_env = str(os.getenv("APP_ENV", "") or "").lower()
             if skip_heavy and app_env in ("test", "ci"):
-                return {"revenue_today": 0, "orders_today": 0, "autonomy_percent": 0, "security_status": "unknown", "critical_events_24h": 0, "approval_pending": 0, "decision_series": [], "approval_latency_p95_sec": 0.0, "policy_reject_rate": 0.0, "uptime_seconds": int(time.time() - _SERVER_START), "ragas_eval_enabled": False, "ragas_eval_counts": {}, "approval_pending": 0}
+                return {"revenue_today": 0, "orders_today": 0, "autonomy_percent": 0, "security_status": "unknown", "critical_events_24h": 0, "approval_pending": 0, "decision_series": [], "approval_latency_p95_sec": 0.0, "policy_reject_rate": 0.0, "uptime_seconds": int(time.time() - _SERVER_START), "ragas_eval_enabled": False, "ragas_eval_counts": {}}
         except Exception:
             pass
         with db_session() as db:

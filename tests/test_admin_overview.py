@@ -1,6 +1,7 @@
 import os
 import pathlib
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -10,6 +11,9 @@ import src.app.models.db as dbmod
 from src.app.main import create_app
 from tests.utils import default_headers
 
+
+_ORIGINAL_ENGINE = dbmod.engine
+_ORIGINAL_SESSION_LOCAL = dbmod.SessionLocal
 
 tmp_db = "test_sqlite_admin_overview.sqlite"
 os.environ.setdefault("DATABASE_URL", f"sqlite+pysqlite:///{tmp_db}")
@@ -28,6 +32,13 @@ dbmod.SessionLocal = SessionLocal
 app = create_app()
 
 client = TestClient(app, headers=default_headers())
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_database_bindings():
+    yield
+    dbmod.engine = _ORIGINAL_ENGINE
+    dbmod.SessionLocal = _ORIGINAL_SESSION_LOCAL
 
 
 def _apply_schema():
