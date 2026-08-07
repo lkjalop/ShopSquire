@@ -2905,3 +2905,63 @@ def test_expanded_search_slate_excludes_known_capability_failures_when_matches_e
 def test_core_never_raises_and_degrades_honestly():
     resp = recommend_turn(None, _env("anything"), llm_fn=lambda p, t: "")
     assert resp.degraded and resp.message and resp.products == []
+# Product-category recognition must not suppress open-world purpose coverage. These
+# two cases freeze the browser D/E regression independently of model availability.
+def test_product_noun_does_not_disable_material_purpose_abstention(db):
+    raw = json.dumps({
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "confidence": 0.92,
+    })
+
+    decision = route_turn(
+        db,
+        _env("I need a laptop for digital twin simulation of a cyber attack"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+    plan = derive_plan(decision)
+
+    assert decision.node_handle == "el-6-6"
+    assert decision.coverage_abstention_shadow["proposal_origin"] == "coverage_abstention"
+    assert plan.semantic_authority_state == "uninterpreted_material"
+    assert plan.needs_concept_resolution is True
+
+
+def test_product_noun_negative_battery_keeps_ordinary_search_authorized(db):
+    raw = json.dumps({
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "confidence": 0.92,
+    })
+
+    decision = route_turn(
+        db,
+        _env("show me a laptop under $1000"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+    plan = derive_plan(decision)
+
+    assert decision.coverage_abstention_shadow == {}
+    assert plan.semantic_authority_state == "not_material"
+    assert plan.needs_concept_resolution is False
+
+
+def test_product_noun_unresolved_purpose_cannot_emit_catalog_products(db):
+    raw = json.dumps({
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "confidence": 0.92,
+    })
+
+    response = recommend_turn(
+        db,
+        _env("I need a laptop for digital twin simulation of a cyber attack"),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert response.products == []
+    assert response.extras["slate_disposition"] == "clear"
+    assert response.extras["plan"]["semantic_authority_state"] == "uninterpreted_material"
+    trigger = response.extras["research_trigger_shadow"]
+    assert trigger["state"] == "uninterpreted_material"
+    assert trigger["recommendation"] == "research_candidate"

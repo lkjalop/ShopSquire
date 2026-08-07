@@ -2,6 +2,7 @@ from src.app.services.clarification_state import (
     build_pending_clarification,
     persist_clarification_transition,
     external_research_consent_granted,
+    request_text_without_research_meta,
     replacement_root_query,
     reduce_clarification_turn,
 )
@@ -352,6 +353,15 @@ def test_research_mention_or_denial_does_not_grant_consent():
     assert external_research_consent_granted(
         "Do you support external research?"
     ) is False
+
+
+def test_research_consent_is_removed_from_workload_request_projection():
+    projected = request_text_without_research_meta(
+        "Recommend a laptop for a mechanical digital twin. "
+        "You may research approved official sources."
+    )
+
+    assert projected == "Recommend a laptop for a mechanical digital twin."
     assert external_research_consent_granted(
         "Do not research this on external sources."
     ) is False

@@ -76,7 +76,24 @@ def test_research_summary_requires_external_labels_before_scoring():
     assert summary["authority"] == "observer_only"
     assert summary["research_attempted"] == 1
     assert summary["accepted_claim_cases"] == 1
+    assert summary["trigger_reachability"] == 1.0
+    assert summary["trigger_contradictions"] == 0
     assert "expected_research" in summary["labels_required_for_scoring"]
+
+
+def test_research_summary_exposes_unreachable_trigger_contradictions():
+    summary = _summarize_research_observations([{
+        "research_trigger": {
+            "state": "unresolved_workload",
+            "recommendation": "catalog_first",
+        },
+        "research_attempts": [],
+        "accepted_claim_count": 0,
+        "clarification": {},
+    }])
+
+    assert summary["trigger_reachability"] == 0.0
+    assert summary["trigger_contradictions"] == 1
 
 
 def test_replay_prewarm_records_shared_readiness(monkeypatch):

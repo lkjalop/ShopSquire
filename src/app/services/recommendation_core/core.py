@@ -541,6 +541,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # model. It cannot change the lane, authorize egress, or permit catalog results.
     research_trigger = assess_research_trigger_shadow(
         plan.semantic_proposal,
+        semantic_authority_state=plan.semantic_authority_state,
         commercial_materiality=(1.0 if requested_quantity and requested_quantity > 1 else 0.0),
     )
     resp.extras["research_trigger_shadow"] = research_trigger.model_dump()

@@ -380,6 +380,7 @@ class TurnDecision:
     # never live here: the model proposes ambiguity and evidence questions; the semantic
     # reducer decides whether catalog retrieval may proceed.
     semantic_proposal: Dict[str, Any] = field(default_factory=dict)
+    coverage_abstention_shadow: Dict[str, Any] = field(default_factory=dict)
     authorization_changes: Tuple[str, ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
@@ -415,6 +416,7 @@ class TurnDecision:
                 "product_type_options": list(self.product_type_options),
                 "model_proposal": dict(self.model_proposal),
                 "semantic_proposal": dict(self.semantic_proposal),
+                "coverage_abstention_shadow": dict(self.coverage_abstention_shadow),
                 "authorization_changes": list(self.authorization_changes)}
 
 
@@ -2420,14 +2422,13 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     # accepted data-owned use-case/evidence vocabulary, abstain before catalog retrieval.
     from src.app.services.recommendation_core.semantic_coverage import unresolved_purpose_proposal
 
-    if not product_type_options and not requirements and not raw_requirements and relationship != "run_on":
-        semantic_proposal = unresolved_purpose_proposal(
-            query=semantic_query,
-            use_cases=use_cases,
-            workload_entities=workload_entities,
-            node_path=(node.full_path if node else None),
-            existing_semantic=semantic_proposal,
-        )
+    coverage_abstention_shadow = unresolved_purpose_proposal(
+        query=semantic_query,
+        use_cases=use_cases,
+        workload_entities=workload_entities,
+        node_path=(node.full_path if node else None),
+        existing_semantic={},
+    )
     accepted_audit = {
         "lane": lane,
         "node_handle": (node.handle if node else None),
@@ -2491,4 +2492,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         product_type_options=product_type_options,
                         model_proposal=proposal,
                         semantic_proposal=semantic_proposal,
+                        coverage_abstention_shadow=coverage_abstention_shadow,
                         authorization_changes=_authorization_changes(proposal, accepted_audit))

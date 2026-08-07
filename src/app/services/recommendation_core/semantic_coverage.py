@@ -20,6 +20,10 @@ _GRAMMAR_WORDS = frozenset({
     "a", "an", "and", "for", "help", "i", "it", "me", "my", "need", "of", "please",
     "that", "the", "this", "to", "with", "want", "use", "using", "work",
 })
+_RESEARCH_META_WORDS = frozenset({
+    "approved", "authorize", "authorized", "consent", "official", "permission",
+    "research", "search", "source", "sources", "vendor", "vendors",
+})
 
 
 def _tokens(value: Any) -> set[str]:
@@ -48,11 +52,22 @@ def _registry_vocabulary(value: Any) -> set[str]:
 
 
 def _purpose_spans(query: str) -> list[str]:
+    from src.app.services.clarification_state import request_text_without_research_meta
+
+    request_text = request_text_without_research_meta(query)
     spans: list[str] = []
     for pattern in _PURPOSE_PATTERNS:
-        for match in pattern.finditer(str(query or "")):
+        for match in pattern.finditer(request_text):
             span = str(match.group("span") or "").strip()
             span_tokens = _tokens(span)
+            if span_tokens and span_tokens <= _RESEARCH_META_WORDS:
+                continue
+            if re.match(
+                r"^(?:that|the|approved|official)\s+(?:research|search|sources?)\b",
+                span,
+                re.IGNORECASE,
+            ):
+                continue
             if (span_tokens and any(any(char.isalpha() for char in token) for token in span_tokens)
                     and span not in spans):
                 spans.append(span[:160])

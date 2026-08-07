@@ -5,11 +5,22 @@ from src.app.services.recommendation_core.research_routing import (
 
 def test_ordinary_high_confidence_catalog_search_stays_catalog_first():
     result = assess_research_trigger_shadow(
-        {}, catalog_coverage=0.98, retrieval_confidence=0.95,
+        {}, semantic_authority_state="not_material",
+        catalog_coverage=0.98, retrieval_confidence=0.95,
     )
 
     assert result.state == "catalog_sufficient"
     assert result.recommendation == "catalog_first"
+    assert result.authoritative is False
+
+
+def test_empty_material_interpretation_has_a_null_state_not_catalog_authority():
+    result = assess_research_trigger_shadow(
+        {}, semantic_authority_state="uninterpreted_material",
+    )
+
+    assert result.state == "uninterpreted_material"
+    assert result.recommendation == "research_candidate"
     assert result.authoritative is False
 
 
@@ -42,9 +53,24 @@ def test_competing_hypotheses_are_distinct_from_missing_requirements():
 
 
 def test_commercial_materiality_can_raise_observation_but_not_authority():
-    low = assess_research_trigger_shadow({}, commercial_materiality=0.0)
-    high = assess_research_trigger_shadow({}, commercial_materiality=1.0)
+    low = assess_research_trigger_shadow(
+        {}, semantic_authority_state="not_material", commercial_materiality=0.0,
+    )
+    high = assess_research_trigger_shadow(
+        {}, semantic_authority_state="not_material", commercial_materiality=1.0,
+    )
 
     assert high.score > low.score
     assert high.authoritative is False
     assert high.recommendation == "catalog_first"
+
+
+def test_unresolved_state_is_reachable_independently_of_uncalibrated_score():
+    result = assess_research_trigger_shadow({
+        "concepts": [{"query_span": "digital twin", "material": True}],
+        "material_unknowns": [{"unknown_id": "requirements"}],
+    })
+
+    assert result.state == "unresolved_workload"
+    assert result.score == 0.425
+    assert result.recommendation == "research_candidate"

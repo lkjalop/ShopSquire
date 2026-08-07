@@ -64,6 +64,25 @@ def external_research_consent_granted(query: str) -> bool:
     return bool(_RESEARCH_CONSENT_GRANT.search(text))
 
 
+def request_text_without_research_meta(query: str) -> str:
+    """Remove consent/refusal clauses before workload concept extraction.
+
+    The existing consent regexes remain the sole authority. This projection only
+    prevents their matched conversational act from being reinterpreted as the
+    subject of research; it does not grant or revoke consent.
+    """
+    text = _short(query, 1_000)
+    if not text:
+        return ""
+    clauses = re.split(r"(?<=[.!?;])\s+", text)
+    retained = [
+        clause for clause in clauses
+        if not _RESEARCH_CONSENT_GRANT.search(clause)
+        and not _RESEARCH_CONSENT_DENIAL.search(clause)
+    ]
+    return " ".join(retained).strip()
+
+
 def replacement_root_query(
     *,
     pending: Mapping[str, Any] | None,

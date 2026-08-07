@@ -22,7 +22,7 @@ Tool vocabulary (executors in core.py — adding a tool means adding an executor
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from src.app.services.recommendation_core.turn_router import TurnDecision
 
@@ -53,6 +53,10 @@ class Plan:
     source: str = "derived"                # derived | model
     needs_concept_resolution: bool = False
     semantic_proposal: Dict[str, Any] = field(default_factory=dict)
+    semantic_authority_state: Literal[
+        "not_material", "covered", "unresolved", "ambiguous",
+        "uninterpreted_material", "invalid_proposal", "unsupported",
+    ] = "not_material"
     external_research_authorized: bool = False
     research_plan: Dict[str, Any] = field(default_factory=dict)
 
@@ -63,6 +67,7 @@ class Plan:
             "plan_version": "core-v2-semantic",
             "needs_concept_resolution": self.needs_concept_resolution,
             "semantic_proposal": dict(self.semantic_proposal),
+            "semantic_authority_state": self.semantic_authority_state,
             "external_research_authorized": self.external_research_authorized,
             "research_plan": dict(self.research_plan),
         }
@@ -80,18 +85,70 @@ def derive_plan(decision: TurnDecision) -> Plan:
     if "fit_check" in steps and not decision.requirements:
         steps.remove("fit_check")          # nothing to check — don't fabricate a verdict step
     semantic = dict(decision.semantic_proposal or {})
-    needs_concept = bool(
-        semantic.get("validation") == "valid"
-        and any(
-            isinstance(item, dict) and bool(item.get("material"))
-            for item in (semantic.get("concepts") or [])
+    coverage = dict(decision.coverage_abstention_shadow or {})
+    model_material = _has_material_concept(semantic)
+    coverage_material = _has_material_concept(coverage)
+    subject_replaced = decision.clarification_relation in {"interrupt", "supersede"}
+    bounded_workload_grounding = bool(
+        decision.product_type_options
+        or (
+            not subject_replaced
+            and (
+                decision.requirements
+                or decision.workload_entities
+                or decision.relationship == "run_on"
+                or decision.use_cases
+            )
         )
     )
+    if semantic.get("validation") == "valid" and model_material:
+        effective_semantic = semantic
+        hypotheses = [
+            item for item in (semantic.get("workload_hypotheses") or [])
+            if isinstance(item, dict)
+        ]
+        unknowns = [
+            item for item in (semantic.get("material_unknowns") or [])
+            if isinstance(item, dict) and bool(item.get("material", True))
+        ]
+        unresolved_concepts = any(
+            isinstance(item, dict)
+            and bool(item.get("material", True))
+            and str(item.get("status") or "unresolved") != "resolved"
+            for item in (semantic.get("concepts") or [])
+        )
+        state = "ambiguous" if len(hypotheses) > 1 else (
+            "unresolved" if unknowns or unresolved_concepts else "covered"
+        )
+    elif (
+        coverage.get("validation") == "valid"
+        and coverage_material
+        and not bounded_workload_grounding
+    ):
+        effective_semantic = coverage
+        state = "uninterpreted_material"
+    elif semantic.get("validation") == "rejected":
+        effective_semantic = semantic
+        state = "invalid_proposal"
+    else:
+        effective_semantic = semantic
+        state = "not_material"
+    needs_concept = state in {
+        "unresolved", "ambiguous", "uninterpreted_material", "unsupported",
+    }
     return Plan(
         steps=steps,
         source="derived",
         needs_concept_resolution=needs_concept,
-        semantic_proposal=semantic,
+        semantic_proposal=effective_semantic,
+        semantic_authority_state=state,
+    )
+
+
+def _has_material_concept(proposal: Dict[str, Any]) -> bool:
+    return any(
+        isinstance(item, dict) and bool(item.get("material"))
+        for item in (proposal.get("concepts") or [])
     )
 
 

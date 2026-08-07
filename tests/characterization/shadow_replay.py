@@ -377,11 +377,26 @@ def _summarize_research_observations(rows: list[dict]) -> dict:
         recommendation = str(trigger.get("recommendation") or "not_observed")
         trigger_states[state] = trigger_states.get(state, 0) + 1
         recommendations[recommendation] = recommendations.get(recommendation, 0) + 1
+    unresolved_states = {"unresolved_workload", "ambiguous_intent", "uninterpreted_material"}
+    unresolved_rows = [
+        row for row in rows
+        if str((row.get("research_trigger") or {}).get("state") or "")
+        in unresolved_states
+    ]
+    reached_rows = [
+        row for row in unresolved_rows
+        if str((row.get("research_trigger") or {}).get("recommendation") or "")
+        in {"research", "research_candidate"}
+    ]
     return {
         "cases": len(rows),
         "authority": "observer_only",
         "trigger_states": trigger_states,
         "recommendations": recommendations,
+        "trigger_reachability": round(
+            len(reached_rows) / len(unresolved_rows), 4
+        ) if unresolved_rows else None,
+        "trigger_contradictions": len(unresolved_rows) - len(reached_rows),
         "research_attempted": sum(
             1 for row in rows if row.get("research_attempts")
         ),

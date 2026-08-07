@@ -17,7 +17,10 @@ from pydantic import BaseModel, ConfigDict, Field
 class ResearchTriggerObservation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    state: Literal["catalog_sufficient", "ambiguous_intent", "unresolved_workload"]
+    state: Literal[
+        "catalog_sufficient", "ambiguous_intent", "unresolved_workload",
+        "uninterpreted_material",
+    ]
     score: float = Field(ge=0.0, le=1.0)
     recommendation: Literal["catalog_first", "research_candidate"]
     features: dict[str, float]
@@ -30,6 +33,7 @@ class ResearchTriggerObservation(BaseModel):
 def assess_research_trigger_shadow(
     semantic_proposal: Mapping[str, Any] | None,
     *,
+    semantic_authority_state: str | None = None,
     catalog_coverage: float | None = None,
     retrieval_confidence: float | None = None,
     unknown_attribute_ratio: float | None = None,
@@ -68,7 +72,10 @@ def assess_research_trigger_shadow(
         + 0.05 * attribute_gap
         + 0.05 * materiality
     ))
-    if len(hypotheses) > 1 and any(
+    authority_state = str(semantic_authority_state or "").strip().lower()
+    if authority_state == "uninterpreted_material":
+        state = "uninterpreted_material"
+    elif len(hypotheses) > 1 and any(
         str(item.get("resolution_source") or "").lower() in {"buyer", "either"}
         for item in unknowns
     ):
@@ -86,10 +93,16 @@ def assess_research_trigger_shadow(
         "unknown_catalog_attributes": attribute_gap,
         "commercial_materiality": materiality,
     }.items() if value > 0]
+    unresolved_state = state in {
+        "ambiguous_intent", "unresolved_workload", "uninterpreted_material",
+    }
     return ResearchTriggerObservation(
         state=state,
         score=round(score, 4),
-        recommendation="research_candidate" if score >= 0.45 else "catalog_first",
+        recommendation=(
+            "research_candidate" if unresolved_state or score >= 0.45
+            else "catalog_first"
+        ),
         features={
             "semantic_gap": semantic_gap,
             "unresolved_ratio": round(unresolved_ratio, 4),
