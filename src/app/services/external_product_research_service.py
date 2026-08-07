@@ -31,6 +31,23 @@ from src.app.services.commerce_source_status import SourceStatus
 
 _SOURCE = "external_research"
 _DOMAIN_RE = re.compile(r"^[a-z0-9.-]+$", re.IGNORECASE)
+_CLAIM_FIELDS = frozenset({
+    "need_id", "claim_type", "claim", "source_record_id", "source_revision",
+    "observed_at", "citation_id", "confidence", "attribute_key", "operator",
+    "value", "unit",
+})
+_CLAIM_TEXT_LIMITS = {
+    "need_id": 64,
+    "claim_type": 40,
+    "claim": 500,
+    "source_record_id": 240,
+    "source_revision": 120,
+    "observed_at": 80,
+    "citation_id": 200,
+    "attribute_key": 80,
+    "operator": 12,
+    "unit": 40,
+}
 
 
 def _disabled() -> Dict[str, Any]:
@@ -54,6 +71,32 @@ def _domain_ok(domain: Any, allowlist: List[str]) -> bool:
 
 def _norm(s: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(s or "").lower()).strip()
+
+
+def _bounded_claim_candidates(hit: Dict[str, Any]) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    for raw in list(hit.get("claim_candidates") or [])[:16]:
+        if not isinstance(raw, dict):
+            continue
+        candidate: Dict[str, Any] = {}
+        for key in _CLAIM_FIELDS:
+            if key not in raw:
+                continue
+            value = raw.get(key)
+            if key in _CLAIM_TEXT_LIMITS:
+                candidate[key] = str(value or "")[:_CLAIM_TEXT_LIMITS[key]]
+            elif key == "confidence":
+                try:
+                    candidate[key] = max(0.0, min(float(value), 1.0))
+                except (TypeError, ValueError):
+                    candidate[key] = 0.0
+            elif key == "value" and (
+                isinstance(value, (str, int, float, bool)) or value is None
+            ):
+                candidate[key] = value[:200] if isinstance(value, str) else value
+        if candidate:
+            candidates.append(candidate)
+    return candidates
 
 
 def _map_sku(hit: Dict[str, Any], catalog_skus: List[str], catalog_names: Dict[str, str]) -> Optional[str]:
@@ -147,6 +190,7 @@ def research(
             "sold_here": bool(sku),
             "label": None if sku else "not sold by this store",
             "fetched_ts": int(time.time()),
+            "claim_candidates": _bounded_claim_candidates(h),
         })
         if len(items) >= max_items:
             break
@@ -259,7 +303,15 @@ def run_external_research_stage(
             ],
             "authority": provider.authority,
         })
-        aggregate.extend(item for item in list(res.get("items") or []) if isinstance(item, dict))
+        aggregate.extend({
+            **item,
+            "provider_id": provider.provider_id,
+            "provider_authority": provider.authority,
+            "provider_capabilities": list(provider.capabilities),
+            "provider_source_policy": (
+                dict(provider.source_policy) if provider.source_policy else None
+            ),
+        } for item in list(res.get("items") or []) if isinstance(item, dict))
         source_status = res.get("source_status") or source_status
         if aggregate:
             run_status = "ok"

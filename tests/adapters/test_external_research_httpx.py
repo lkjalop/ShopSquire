@@ -52,7 +52,12 @@ def test_blank_query_returns_empty():
 # ── happy path + allowlist filtering ──
 def test_happy_path_parses_and_filters_to_allowlist():
     results = [
-        {"title": "Good Laptop", "url": "https://shop.trusted.com/p/1", "content": "spec text"},
+        {
+            "title": "Good Laptop",
+            "url": "https://shop.trusted.com/p/1",
+            "content": "spec text",
+            "claim_candidates": [{"attribute_key": "ram_gb", "value": 32}],
+        },
         {"title": "Evil", "url": "https://evil.com/x", "snippet": "nope"},
         {"title": "No domain", "url": "not-a-url"},
     ]
@@ -63,6 +68,7 @@ def test_happy_path_parses_and_filters_to_allowlist():
     assert hit["source_domain"] == "shop.trusted.com"  # subdomain of an allowlisted domain
     assert hit["title"] == "Good Laptop" and hit["snippet"] == "spec text"
     assert hit["url"] == "https://shop.trusted.com/p/1"
+    assert hit["claim_candidates"] == [{"attribute_key": "ram_gb", "value": 32}]
 
 
 def test_bare_list_payload_supported():

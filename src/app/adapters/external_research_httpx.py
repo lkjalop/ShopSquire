@@ -171,5 +171,10 @@ class HttpxResearchFetcher:
                 "snippet": str(r.get("snippet") or r.get("content") or r.get("description") or "")[:400],
                 "url": u[:500],
                 "source_domain": dom,
+                # The service layer applies the bounded typed allowlist and strips
+                # fetched authority/status fields. The adapter only transports the
+                # connector's structured candidates alongside the source record.
+                "claim_candidates": list(r.get("claim_candidates") or [])[:16]
+                if isinstance(r.get("claim_candidates"), list) else [],
             })
         return out

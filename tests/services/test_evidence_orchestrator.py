@@ -366,3 +366,65 @@ def test_concept_research_uses_bounded_buyer_answer_candidate(monkeypatch):
     assert "Local engineering simulation with 3D visualisation" in captured["query"]
     assert leg["data"]["authority"] == "evidence_candidate_only"
     assert leg["data"]["claims"] == []
+
+
+def test_concept_research_accepts_only_enrolled_typed_provider_claims(monkeypatch):
+    from types import SimpleNamespace
+    import src.app.services.evidence_orchestrator as eo
+
+    def fake_stage(**_kwargs):
+        return {
+            "items": [{
+                "title": "Official requirements",
+                "snippet": "Published minimum system requirements.",
+                "source_domain": "vendor.example",
+                "url": "https://vendor.example/requirements",
+                "provider_id": "official-provider",
+                "provider_authority": "official_source_index",
+                "provider_capabilities": ["official_requirements"],
+                "provider_source_policy": {
+                    "policy_version": "semantic-source-v1",
+                    "review_status": "approved",
+                    "reviewer_type": "independent_human",
+                    "reviewed_by": "tenant-source-owner",
+                    "licence": "tenant-authorized",
+                    "trust_tier": "authoritative",
+                    "allowed_claim_types": ["minimum_requirements"],
+                    "freshness_status": "fresh",
+                },
+                "claim_candidates": [{
+                    "need_id": "minimum-memory",
+                    "claim_type": "minimum_requirements",
+                    "claim": "At least 32 GB RAM.",
+                    "source_record_id": "requirements:ram",
+                    "source_revision": "2026.08",
+                    "observed_at": "2026-08-06T00:00:00Z",
+                    "citation_id": "cite:requirements:ram",
+                    "confidence": 0.94,
+                    "attribute_key": "ram_gb",
+                    "operator": ">=",
+                    "value": 32,
+                    "unit": "GB",
+                }],
+            }],
+            "run_status": "ok",
+            "provider_id": "official-provider",
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.external_product_research_service.run_external_research_stage",
+        fake_stage,
+    )
+    plan = SimpleNamespace(
+        semantic_proposal={
+            "concepts": [{"text": "unfamiliar simulation workload", "material": True}],
+        },
+        external_research_authorized=True,
+        research_plan={"material_slots": [], "evidence_needs": []},
+    )
+
+    leg = eo._leg_concept_resolution(plan, "ignored", None, tenant_id="tenant-a")
+
+    assert leg["data"]["status"] == "resolved"
+    assert leg["data"]["claims"][0]["status"] == "accepted"
+    assert leg["data"]["normalized_evidence"][0]["status"] == "resolved"

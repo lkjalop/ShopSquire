@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Callable, Iterable, Literal, Mapping
 
 
 ProviderCapability = Literal[
@@ -37,6 +37,7 @@ class ResearchProvider:
     authority: ProviderAuthority
     fetcher_factory: Callable[[], Any]
     deadline_ms: int = 1800
+    source_policy: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.provider_id.strip():
@@ -120,6 +121,25 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
 
     from src.app.adapters.external_research_httpx import HttpxResearchFetcher
 
+    reviewed_by = str(os.getenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY") or "").strip()
+    source_policy = None
+    if reviewed_by:
+        source_policy = {
+            "policy_version": "semantic-source-v1",
+            "review_status": "approved",
+            "reviewer_type": "independent_human",
+            "reviewed_by": reviewed_by[:120],
+            "licence": str(
+                os.getenv("EXTERNAL_RESEARCH_SOURCE_LICENCE") or "operator-authorized"
+            )[:120],
+            "trust_tier": "authoritative",
+            "allowed_claim_types": [
+                "concept_identity", "minimum_requirements", "recommended_requirements",
+                "target_requirements", "compatibility", "certification",
+            ],
+            "freshness_status": "fresh",
+        }
+
     return ResearchProviderRegistry([ResearchProvider(
         provider_id=str(
             os.getenv("EXTERNAL_RESEARCH_PROVIDER_ID") or "allowlisted_http_search"
@@ -130,4 +150,5 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
         authority="official_source_index",
         fetcher_factory=HttpxResearchFetcher,
         deadline_ms=max(100, min(deadline_ms, 30_000)),
+        source_policy=source_policy,
     )])

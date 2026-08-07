@@ -117,6 +117,60 @@ def test_no_item_is_sold_here_without_a_sku():
     assert out["items"][0]["sold_here"] is False
 
 
+def test_structured_claim_candidates_are_bounded_and_cannot_spoof_authority():
+    hit = {
+        "title": "Official requirements",
+        "source_domain": "shop-reviews.example",
+        "authority": "official_requirements",
+        "claim_candidates": [{
+            "need_id": "memory",
+            "claim_type": "minimum_requirements",
+            "claim": "At least 32 GB RAM.",
+            "source_record_id": "requirements:ram",
+            "source_revision": "2026.08",
+            "observed_at": "2026-08-06T00:00:00Z",
+            "citation_id": "cite:requirements:ram",
+            "confidence": 0.94,
+            "attribute_key": "ram_gb",
+            "operator": ">=",
+            "value": 32,
+            "unit": "GB",
+            "authority": "official_requirements",
+            "status": "accepted",
+            "unexpected": "drop me",
+        }],
+    }
+
+    out = research("requirements", fetcher=_Fetcher([hit]), allowlist=_ALLOW, enabled=True)
+
+    candidate = out["items"][0]["claim_candidates"][0]
+    assert candidate["attribute_key"] == "ram_gb"
+    assert "authority" not in candidate
+    assert "status" not in candidate
+    assert "unexpected" not in candidate
+
+
+def test_structured_claim_candidate_values_are_size_and_type_bounded():
+    hit = {
+        "title": "Official requirements",
+        "source_domain": "shop-reviews.example",
+        "claim_candidates": [{
+            "claim": "x" * 2_000,
+            "confidence": 4.0,
+            "attribute_key": "ram_gb",
+            "operator": ">=",
+            "value": {"nested": "not allowed"},
+        }],
+    }
+
+    out = research("requirements", fetcher=_Fetcher([hit]), allowlist=_ALLOW, enabled=True)
+
+    candidate = out["items"][0]["claim_candidates"][0]
+    assert len(candidate["claim"]) == 500
+    assert candidate["confidence"] == 1.0
+    assert "value" not in candidate
+
+
 # ── run_external_research_stage (Phase 3 extraction) ──
 def test_stage_returns_none_when_disabled(monkeypatch):
     from src.app.services.external_product_research_service import run_external_research_stage
@@ -156,6 +210,18 @@ def test_stage_executes_only_a_tenant_allowed_capability_provider(monkeypatch):
                 "snippet": "Published compatibility information",
                 "url": "https://vendor.example/requirements",
                 "source_domain": "vendor.example",
+                "claim_candidates": [{
+                    "claim_type": "minimum_requirements",
+                    "claim": "At least 32 GB RAM.",
+                    "source_record_id": "requirements:ram",
+                    "source_revision": "2026.08",
+                    "observed_at": "2026-08-06T00:00:00Z",
+                    "citation_id": "cite:requirements:ram",
+                    "confidence": 0.94,
+                    "attribute_key": "ram_gb",
+                    "operator": ">=",
+                    "value": 32,
+                }],
             }]
 
     registry = ResearchProviderRegistry([ResearchProvider(
@@ -166,6 +232,16 @@ def test_stage_executes_only_a_tenant_allowed_capability_provider(monkeypatch):
         authority="official_source_index",
         fetcher_factory=ProviderFetcher,
         deadline_ms=1200,
+        source_policy={
+            "policy_version": "semantic-source-v1",
+            "review_status": "approved",
+            "reviewer_type": "independent_human",
+            "reviewed_by": "tenant-source-owner",
+            "licence": "tenant-authorized",
+            "trust_tier": "authoritative",
+            "allowed_claim_types": ["minimum_requirements"],
+            "freshness_status": "fresh",
+        },
     )])
     monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
 
@@ -180,4 +256,7 @@ def test_stage_executes_only_a_tenant_allowed_capability_provider(monkeypatch):
     assert out["run_status"] == "ok"
     assert out["provider_id"] == "official-search"
     assert out["items"][0]["source_domain"] == "vendor.example"
+    assert out["items"][0]["provider_authority"] == "official_source_index"
+    assert out["items"][0]["provider_source_policy"]["review_status"] == "approved"
+    assert out["items"][0]["claim_candidates"][0]["attribute_key"] == "ram_gb"
     assert [item["status"] for item in out["provider_attempts"]] == ["selected", "ok"]

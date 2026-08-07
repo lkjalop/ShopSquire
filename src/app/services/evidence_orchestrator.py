@@ -380,18 +380,28 @@ def _leg_concept_resolution(
     except Exception:
         detect_ocr_prompt_injection = None
     for item in items:
-        content = f"{item.get('title') or ''} {item.get('snippet') or ''}"
+        claim_text = " ".join(
+            str(candidate.get("claim") or "")
+            for candidate in list(item.get("claim_candidates") or [])[:16]
+            if isinstance(candidate, dict)
+        )
+        content = f"{item.get('title') or ''} {item.get('snippet') or ''} {claim_text}"
         if detect_ocr_prompt_injection is not None and detect_ocr_prompt_injection(content):
             dropped += 1
             continue
         clean.append(item)
+    from src.app.services.external_evidence_claims import accept_provider_claim_candidates
+
+    accepted = accept_provider_claim_candidates(clean, concept=concept)
     summary = str((clean[0] if clean else {}).get("snippet") or "")[:300]
     return {
         "source": "concept_resolution",
         "found": bool(clean),
         "summary": summary,
         "data": {
-            "status": "evidence_candidates" if clean else "insufficient",
+            "status": accepted["status"] if accepted["status"] != "insufficient" else (
+                "evidence_candidates" if clean else "insufficient"
+            ),
             "concept": concept,
             "query": outbound_query,
             "query_hash": result.get("query_hash"),
@@ -402,7 +412,9 @@ def _leg_concept_resolution(
             "cache_status": result.get("cache_status") or "not_recorded",
             "source_status": result.get("source_status") or {},
             "items": clean,
-            "claims": [],
+            "claims": accepted["claims"],
+            "normalized_evidence": accepted["normalized_evidence"],
+            "claim_rejections": accepted["rejections"],
             "catalog_qualifications": [],
             "injection_scan": {"checked": len(items), "dropped": dropped},
             "authority": "evidence_candidate_only",
