@@ -27,7 +27,9 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const authorization = executionSteps.find((step) => step?.id === 'workload-authorization') || {};
   const researchPlan = executionSteps.find((step) => step?.id === 'research-plan') || {};
   const buyerConsent = executionSteps.find((step) => step?.id === 'buyer-research-consent') || {};
-  const compiler = executionSteps.find((step) => step?.id === 'requirements-compiler') || {};
+  const compiler = executionSteps.find(
+    (step) => step?.id === 'semantic-requirements-compiler' || step?.id === 'requirements-compiler',
+  ) || {};
   const semanticEvidence = executionSteps.find((step) => step?.id === 'semantic-evidence') || {};
   const semanticAuthorization = executionSteps.find((step) => step?.id === 'semantic-authorization') || {};
   const materialClarification = executionSteps.find((step) => step?.id === 'material-clarification') || {};

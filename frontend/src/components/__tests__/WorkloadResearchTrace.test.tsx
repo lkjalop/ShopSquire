@@ -190,4 +190,33 @@ describe('WorkloadResearchTrace', () => {
     expect(clarification).toHaveTextContent(/architecture \| product set/i);
     expect(clarification).toHaveTextContent(/does not itself authorize/i);
   });
+
+  it('shows accepted provider claims after deterministic requirement compilation', () => {
+    render(<WorkloadResearchTrace executionSteps={[
+      {
+        id: 'semantic-evidence', kind: 'connector', authority: 'supplies_evidence',
+        output: { legs: { concept_resolution: { found: true, data: { status: 'resolved' } } } },
+      },
+      {
+        id: 'semantic-requirements-compiler', kind: 'gate', authority: 'compiles_constraints',
+        status: 'accepted',
+        output: {
+          compiled_requirements: [
+            { attribute_key: 'ram_gb', operator: '>=', value: 32, unit: 'GB' },
+            { attribute_key: 'gpu_vram_gb', operator: '>=', value: 8, unit: 'GB' },
+          ],
+          rejected_claims: [],
+        },
+      },
+      {
+        id: 'semantic-authorization', kind: 'gate', authority: 'authorizes', status: 'accepted',
+        output: { reasons: [], state_prevented: [] },
+      },
+    ]} />);
+
+    expect(screen.getByTestId('compiled-requirements')).toHaveTextContent('ram gb >= 32 GB');
+    expect(screen.getByTestId('compiled-requirements')).toHaveTextContent('gpu vram gb >= 8 GB');
+    expect(screen.getByText(/Accepted official evidence may establish fit predicates/i))
+      .toBeInTheDocument();
+  });
 });
