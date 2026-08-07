@@ -2,6 +2,8 @@ from contextlib import contextmanager
 import types
 import os
 from sqlalchemy import create_engine
+import hashlib
+import logging
 import re
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text as sql_text
@@ -45,6 +47,26 @@ def _register_sqlite_now(engine):
         except Exception:
             pass
         return statement, parameters
+
+
+def _register_postgres_failure_observer(engine):
+    """Log bounded metadata for the first failing PostgreSQL statement."""
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "handle_error")
+    def _pg_observe_statement_failure(exception_context):
+        try:
+            statement = str(exception_context.statement or "")
+            fingerprint = hashlib.sha256(statement.encode("utf-8")).hexdigest()[:16]
+            original = exception_context.original_exception
+            logging.getLogger("shopsquire.db.statement").warning(
+                "postgres_statement_failed fingerprint=%s error_type=%s error=%s",
+                fingerprint,
+                type(original).__name__,
+                str(original).splitlines()[0][:240],
+            )
+        except Exception:
+            pass
 
 
 # Create engine using configured DATABASE_URL. If SQLite is explicitly requested,
@@ -114,6 +136,7 @@ def _create_engine_with_fallback(url: str):
                     pass
     except Exception:
         pass
+    _register_postgres_failure_observer(eng)
     return eng
 
 
@@ -498,6 +521,7 @@ def _ensure_minimal_sqlite_tables(bind):
                             "CREATE TABLE IF NOT EXISTS email_sender_trust (\n"
                             "  tenant_id TEXT NOT NULL,\n"
                             "  sender_domain_hash TEXT NOT NULL,\n"
+                            "  first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                             "  seen_count INTEGER NOT NULL DEFAULT 0,\n"
                             "  bank_change_count INTEGER NOT NULL DEFAULT 0,\n"
                             "  oob_verified_count INTEGER NOT NULL DEFAULT 0,\n"
@@ -505,6 +529,39 @@ def _ensure_minimal_sqlite_tables(bind):
                             "  last_reply_chain_hash TEXT,\n"
                             "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                             "  PRIMARY KEY (tenant_id, sender_domain_hash)\n"
+                            ")"
+                        )
+                    )
+                except Exception:
+                    pass
+                # SQLite-only compatibility for migration-less unit fixtures.
+                # PostgreSQL schema remains Alembic-owned.
+                try:
+                    sender_columns = {
+                        str(row[1])
+                        for row in conn.execute(
+                            sql_text("PRAGMA table_info(email_sender_trust)")
+                        ).fetchall()
+                    }
+                    if "first_seen_at" not in sender_columns:
+                        conn.execute(
+                            sql_text(
+                                "ALTER TABLE email_sender_trust "
+                                "ADD COLUMN first_seen_at TEXT"
+                            )
+                        )
+                    conn.execute(
+                        sql_text(
+                            "CREATE TABLE IF NOT EXISTS email_thread_graph_state (\n"
+                            "  tenant_id TEXT NOT NULL,\n"
+                            "  thread_key TEXT NOT NULL,\n"
+                            "  first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
+                            "  last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
+                            "  last_sender_domain TEXT,\n"
+                            "  sender_domains_json TEXT,\n"
+                            "  message_count INTEGER NOT NULL DEFAULT 0,\n"
+                            "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
+                            "  PRIMARY KEY (tenant_id, thread_key)\n"
                             ")"
                         )
                     )
