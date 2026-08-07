@@ -74,3 +74,20 @@ def test_unresolved_state_is_reachable_independently_of_uncalibrated_score():
     assert result.state == "unresolved_workload"
     assert result.score == 0.425
     assert result.recommendation == "research_candidate"
+
+
+def test_post_catalog_observer_records_real_retrieval_features_without_authority():
+    result = assess_research_trigger_shadow(
+        {},
+        semantic_authority_state="not_material",
+        catalog_coverage=0.5,
+        retrieval_confidence=0.75,
+        unknown_attribute_ratio=0.25,
+        qualified_product_count=3,
+    )
+
+    assert result.features["catalog_coverage_gap"] == 0.5
+    assert result.features["retrieval_confidence_gap"] == 0.25
+    assert result.features["unknown_attribute_ratio"] == 0.25
+    assert result.features["qualified_product_count"] == 3.0
+    assert result.authoritative is False

@@ -1160,6 +1160,25 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                       retrieval_count=int((resp.extras.get("evidence") or {}).get("count") or 0),
                       won_message=resp._msg_priority > _prio_before)
 
+    retrieval_count = int((resp.extras.get("evidence") or {}).get("count") or 0)
+    qualified_count = sum(
+        1 for product in resp.products
+        if not decision.requirements or (product.fit or {}).get("overall") == "meets"
+    )
+    unknown_requirement_count = sum(
+        len((product.fit or {}).get("unknown_keys") or []) for product in resp.products
+    )
+    possible_requirement_count = max(1, len(resp.products) * len(decision.requirements))
+    resp.extras["research_trigger_post_catalog_shadow"] = assess_research_trigger_shadow(
+        plan.semantic_proposal,
+        semantic_authority_state=plan.semantic_authority_state,
+        catalog_coverage=(qualified_count / max(1, retrieval_count)),
+        retrieval_confidence=(len(resp.products) / max(1, retrieval_count)),
+        unknown_attribute_ratio=(unknown_requirement_count / possible_requirement_count),
+        qualified_product_count=qualified_count,
+        commercial_materiality=(1.0 if requested_quantity and requested_quantity > 1 else 0.0),
+    ).model_dump()
+
     # Resolving a concept permits catalog alignment; it does not itself prove
     # that any SKU is suitable. A provider can supply an explicit SKU qualification,
     # or accepted claims can compile into registry predicates and the ordinary fit

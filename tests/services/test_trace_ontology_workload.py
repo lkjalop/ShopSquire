@@ -65,6 +65,8 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
         extras={
             "decision": {"source": "model", "model_proposal": {}, "authorization_changes": []},
             "plan": {
+                "semantic_authority_state": "uninterpreted_material",
+                "needs_concept_resolution": True,
                 "research_plan": {
                     "version": "research-plan-v1",
                     "subject_spans": ["predictive maintenance simulation"],
@@ -117,6 +119,9 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
     )
 
     by_id = {item["id"]: item for item in build_execution_steps(core)}
+
+    assert by_id["platform-authorization"]["output"]["semantic_authority_state"] == "uninterpreted_material"
+    assert by_id["platform-authorization"]["output"]["catalog_retrieval_blocked"] is True
 
     assert by_id["research-plan"]["authority"] == "plans"
     assert by_id["research-trigger-observer"]["kind"] == "observer"

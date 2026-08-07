@@ -477,3 +477,23 @@ def test_concept_research_uses_one_bounded_rewrite_after_empty_result(monkeypatc
         "buyer authored concept official definition scope",
     ]
     assert len(leg["data"]["research_attempts"]) == 2
+
+
+def test_empty_provider_result_is_no_authoritative_evidence_not_success(monkeypatch):
+    from types import SimpleNamespace
+    import src.app.services.evidence_orchestrator as eo
+
+    monkeypatch.setattr(
+        "src.app.services.external_product_research_service.run_external_research_stage",
+        lambda **_kwargs: {"items": [], "run_status": "empty"},
+    )
+    plan = SimpleNamespace(
+        semantic_proposal={"concepts": [{"text": "unfamiliar workload", "material": True}]},
+        external_research_authorized=True,
+        research_plan={"material_slots": [], "evidence_needs": []},
+    )
+
+    leg = eo._leg_concept_resolution(plan, "ignored", None, tenant_id="tenant-a")
+
+    assert leg["found"] is False
+    assert leg["data"]["status"] == "no_authoritative_evidence"

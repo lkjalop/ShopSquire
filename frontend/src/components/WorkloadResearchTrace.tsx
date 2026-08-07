@@ -27,6 +27,9 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const authorization = executionSteps.find((step) => step?.id === 'workload-authorization') || {};
   const researchPlan = executionSteps.find((step) => step?.id === 'research-plan') || {};
   const researchTrigger = executionSteps.find((step) => step?.id === 'research-trigger-observer') || {};
+  const postCatalogTrigger = executionSteps.find(
+    (step) => step?.id === 'research-trigger-post-catalog-observer',
+  ) || {};
   const buyerConsent = executionSteps.find((step) => step?.id === 'buyer-research-consent') || {};
   const compiler = executionSteps.find(
     (step) => step?.id === 'semantic-requirements-compiler' || step?.id === 'requirements-compiler',
@@ -57,6 +60,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
     : buyerConsent?.status === 'recorded';
   const hasResearch = Boolean(
     evidence.id || authorization.id || entities.length || researchPlan.id || researchTrigger.id
+    || postCatalogTrigger.id
     || semanticEvidence.id || semanticAuthorization.id
   );
 
@@ -122,6 +126,16 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
             <small style={{ color: '#64748b' }}>
               Uncalibrated observer. It cannot authorize research, requirements, products, or actions.
             </small>
+          </div>
+        )}
+
+        {postCatalogTrigger.id && (
+          <div data-testid="research-trigger-post-catalog-observer" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Post-catalog research assessment - shadow only</strong>
+            <div style={{ marginTop: 5 }}>Qualified products: <strong>{postCatalogTrigger?.output?.features?.qualified_product_count ?? 'not recorded'}</strong></div>
+            <div>Catalog coverage gap: <strong>{postCatalogTrigger?.output?.features?.catalog_coverage_gap ?? 'not recorded'}</strong></div>
+            <div>Unknown attribute ratio: <strong>{postCatalogTrigger?.output?.features?.unknown_attribute_ratio ?? 'not recorded'}</strong></div>
+            <small style={{ color: '#64748b' }}>Observed after retrieval; it cannot authorize research, products, or actions.</small>
           </div>
         )}
 
@@ -223,7 +237,15 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
           )}
           {semanticEvidence.id && Object.entries(semanticLegs).map(([name, leg]: [string, any]) => (
             <div key={name} style={{ marginTop: 8, paddingTop: 7, borderTop: '1px solid #e2e8f0' }}>
-              <strong>{words(name)}</strong>: {words(leg?.data?.status || (leg?.found ? 'accepted candidate' : 'attempted empty'))}
+              <strong>{words(name)}</strong>: {words(
+                leg?.data?.status
+                || (leg?.health === 'timed_out' ? 'provider timeout'
+                  : leg?.health === 'cancelled' ? 'research pending'
+                    : leg?.health === 'failed' || leg?.health === 'degraded'
+                      ? 'research degraded'
+                      : (leg?.found ? 'accepted candidate' : 'no authoritative evidence')),
+              )}
+              {leg?.error && <div style={{ marginTop: 3, color: '#b45309' }}>Provider status: {words(leg.error)}</div>}
               {leg?.summary && <div style={{ marginTop: 3 }}>{leg.summary}</div>}
               {Array.isArray(leg?.data?.provider_attempts) && leg.data.provider_attempts.length > 0 && (
                 <ul data-testid="semantic-provider-attempts" style={{ margin: '5px 0 0', paddingLeft: 20 }}>

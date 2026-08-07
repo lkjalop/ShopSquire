@@ -37,6 +37,7 @@ def assess_research_trigger_shadow(
     catalog_coverage: float | None = None,
     retrieval_confidence: float | None = None,
     unknown_attribute_ratio: float | None = None,
+    qualified_product_count: int | None = None,
     commercial_materiality: float = 0.0,
 ) -> ResearchTriggerObservation:
     """Return an inspectable heuristic observation, never an execution decision."""
@@ -61,6 +62,7 @@ def assess_research_trigger_shadow(
     retrieval_gap = 0.0 if retrieval_confidence is None else 1.0 - _unit(retrieval_confidence)
     attribute_gap = _unit(unknown_attribute_ratio or 0.0)
     materiality = _unit(commercial_materiality)
+    qualified_count = max(0, int(qualified_product_count or 0))
     semantic_gap = 1.0 if material_concepts else 0.0
 
     score = min(1.0, (
@@ -111,6 +113,7 @@ def assess_research_trigger_shadow(
             "retrieval_confidence_gap": round(retrieval_gap, 4),
             "unknown_attribute_ratio": round(attribute_gap, 4),
             "commercial_materiality": round(materiality, 4),
+            "qualified_product_count": float(qualified_count),
         },
         reasons=reasons,
     )

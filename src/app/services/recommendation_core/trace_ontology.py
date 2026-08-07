@@ -21,6 +21,7 @@ def _stage_kind(name: str) -> str:
 def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
     """Project a finalized core response into auditable authority boundaries."""
     decision = dict((getattr(core, "extras", {}) or {}).get("decision") or {})
+    plan = dict((getattr(core, "extras", {}) or {}).get("plan") or {})
     proposal = dict(decision.get("model_proposal") or {})
     changes = list(decision.get("authorization_changes") or [])
     clamped = [item for item in changes if str(item).endswith(":clamped")]
@@ -53,6 +54,8 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             "exclude_brand": decision.get("exclude_brand"),
             "quantity": decision.get("quantity"),
             "budget_scope": decision.get("budget_scope"),
+            "semantic_authority_state": plan.get("semantic_authority_state"),
+            "catalog_retrieval_blocked": bool(plan.get("needs_concept_resolution")),
         },
     }]
 
@@ -151,6 +154,19 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             "status": research_trigger.get("recommendation") or "unknown",
             "source": "research_routing_shadow",
             "output": research_trigger,
+        })
+    post_catalog_trigger = dict(
+        (getattr(core, "extras", {}) or {}).get("research_trigger_post_catalog_shadow") or {}
+    )
+    if post_catalog_trigger:
+        steps.append({
+            "id": "research-trigger-post-catalog-observer",
+            "kind": "observer",
+            "authority": "observes",
+            "label": "Assess catalog coverage after retrieval",
+            "status": post_catalog_trigger.get("recommendation") or "unknown",
+            "source": "research_routing_shadow",
+            "output": post_catalog_trigger,
         })
     if research_plan.get("evidence_needs") or research_plan.get("material_slots"):
         steps.append({

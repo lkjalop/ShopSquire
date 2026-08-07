@@ -397,7 +397,8 @@ def _leg_concept_resolution(
             "found": False,
             "summary": "External concept research is not enabled.",
             "data": {
-                "status": "disabled",
+                "status": "research_degraded",
+                "degraded_reason": "external_research_disabled",
                 "query": outbound_query,
                 "research_attempts": research_attempts,
                 "claims": [],
@@ -427,13 +428,23 @@ def _leg_concept_resolution(
 
     accepted = accept_provider_claim_candidates(clean, concept=concept)
     summary = str((clean[0] if clean else {}).get("snippet") or "")[:300]
+    run_status = str(result.get("run_status") or "unknown").lower()
+    unresolved_status = {
+        "cancelled": "research_pending",
+        "error": "research_degraded",
+        "not_configured": "no_authoritative_evidence",
+        "empty": "no_authoritative_evidence",
+        "completed": "no_authoritative_evidence",
+    }.get(run_status, "evidence_candidates" if clean else "no_authoritative_evidence")
     return {
         "source": "concept_resolution",
         "found": bool(clean),
         "summary": summary,
         "data": {
-            "status": accepted["status"] if accepted["status"] != "insufficient" else (
-                "evidence_candidates" if clean else "insufficient"
+            "status": (
+                accepted["status"]
+                if accepted["status"] != "insufficient"
+                else unresolved_status
             ),
             "concept": concept,
             "query": outbound_query,

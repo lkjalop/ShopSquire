@@ -55,6 +55,12 @@ describe('WorkloadResearchTrace', () => {
         },
       },
       {
+        id: 'research-trigger-post-catalog-observer', kind: 'observer', authority: 'observes',
+        output: { features: {
+          qualified_product_count: 0, catalog_coverage_gap: 1, unknown_attribute_ratio: 0,
+        } },
+      },
+      {
         id: 'research-plan', kind: 'stage', authority: 'plans', status: 'consent_required',
         output: {
           subject_spans: ['predictive maintenance simulation'],
@@ -94,6 +100,7 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.getByText(/Research status:/i)).toHaveTextContent('consent required');
     expect(screen.getByText(/Not attempted - buyer consent is required/i)).toBeInTheDocument();
     expect(screen.getByTestId('research-trigger-observer')).toHaveTextContent(/cannot authorize research/i);
+    expect(screen.getByTestId('research-trigger-post-catalog-observer')).toHaveTextContent(/Qualified products:\s*0/i);
     expect(screen.getByTestId('research-query-bundle')).toHaveTextContent(/planned only; no authority/i);
     expect(screen.getByTestId('research-query-bundle')).toHaveTextContent(/unverified vendor/i);
     expect(screen.getByText(/^Status:/i)).toHaveTextContent('blocked');
@@ -240,5 +247,18 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.getByTestId('compiled-requirements')).toHaveTextContent('gpu vram gb >= 8 GB');
     expect(screen.getByText(/Accepted official evidence may establish fit predicates/i))
       .toBeInTheDocument();
+  });
+
+  it('renders provider timeout as degraded research rather than empty success', () => {
+    render(<WorkloadResearchTrace executionSteps={[{
+      id: 'semantic-evidence', kind: 'connector', authority: 'supplies_evidence',
+      output: { legs: { concept_resolution: {
+        found: false, health: 'timed_out', error: 'leg_timeout>1800ms', data: {},
+      } } },
+    }]} />);
+
+    expect(screen.getByText(/provider timeout/i)).toBeInTheDocument();
+    expect(screen.getByText(/Provider status:/i)).toHaveTextContent(/leg timeout>1800ms/i);
+    expect(screen.queryByText(/attempted empty/i)).not.toBeInTheDocument();
   });
 });
