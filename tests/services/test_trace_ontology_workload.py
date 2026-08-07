@@ -78,6 +78,16 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
                     "external_research_authorized": False,
                 },
             },
+            "research_trigger_shadow": {
+                "state": "unresolved_workload",
+                "score": 0.72,
+                "recommendation": "research_candidate",
+                "features": {"semantic_gap": 1.0},
+                "reasons": ["material_semantic_concept"],
+                "mode": "observer",
+                "calibration_status": "uncalibrated_shadow",
+                "authoritative": False,
+            },
             "semantic_evidence": {
                 "selected": ["concept_resolution"],
                 "source_health": "degraded",
@@ -109,6 +119,9 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
     by_id = {item["id"]: item for item in build_execution_steps(core)}
 
     assert by_id["research-plan"]["authority"] == "plans"
+    assert by_id["research-trigger-observer"]["kind"] == "observer"
+    assert by_id["research-trigger-observer"]["authority"] == "observes"
+    assert by_id["research-trigger-observer"]["output"]["authoritative"] is False
     assert by_id["research-plan"]["status"] == "consent_required"
     assert by_id["buyer-research-consent"]["kind"] == "buyer_input"
     assert by_id["buyer-research-consent"]["authority"] == "grants_research_scope"

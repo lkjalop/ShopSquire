@@ -139,6 +139,19 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
     research_plan = dict(
         ((getattr(core, "extras", {}) or {}).get("plan") or {}).get("research_plan") or {}
     )
+    research_trigger = dict(
+        (getattr(core, "extras", {}) or {}).get("research_trigger_shadow") or {}
+    )
+    if research_trigger:
+        steps.append({
+            "id": "research-trigger-observer",
+            "kind": "observer",
+            "authority": "observes",
+            "label": "Estimate whether catalog-only retrieval may be insufficient",
+            "status": research_trigger.get("recommendation") or "unknown",
+            "source": "research_routing_shadow",
+            "output": research_trigger,
+        })
     if research_plan.get("evidence_needs") or research_plan.get("material_slots"):
         steps.append({
             "id": "buyer-research-consent",
@@ -236,7 +249,10 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
                     "question": clarification.get("text"),
                     "missing_slots": list(clarification.get("missing_slots") or []),
                     "selection_policy": clarification.get("selection_policy"),
+                    "selection_calibration": clarification.get("selection_calibration"),
+                    "bounded_value_score": clarification.get("bounded_value_score"),
                     "decision_impacts": list(clarification.get("decision_impacts") or []),
+                    "hypotheses_discriminated": clarification.get("hypotheses_discriminated"),
                     "commercial_authority_granted": False,
                 },
             })

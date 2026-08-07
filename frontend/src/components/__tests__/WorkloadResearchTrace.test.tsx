@@ -48,6 +48,13 @@ describe('WorkloadResearchTrace', () => {
         id: 'model-proposal', kind: 'model', authority: 'proposes', output: {},
       },
       {
+        id: 'research-trigger-observer', kind: 'observer', authority: 'observes',
+        status: 'research_candidate', output: {
+          state: 'unresolved_workload', recommendation: 'research_candidate', score: 0.72,
+          reasons: ['material_semantic_concept', 'material_unknowns'], authoritative: false,
+        },
+      },
+      {
         id: 'research-plan', kind: 'stage', authority: 'plans', status: 'consent_required',
         output: {
           subject_spans: ['predictive maintenance simulation'],
@@ -56,6 +63,11 @@ describe('WorkloadResearchTrace', () => {
             claim_type: 'recommended_requirements', provider_capability: 'official_requirements',
           }],
           material_slots: [], max_provider_fanout: 3, total_timeout_ms: 2000,
+          query_bundle: [{
+            query_id: 'requirements_1', strategy: 'requirements',
+            text: 'predictive maintenance simulation official recommended system requirements',
+            prohibited_assumptions: ['unverified_vendor'],
+          }],
           interpretation_origin: 'model',
           external_research_authorized: false,
         },
@@ -81,6 +93,9 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.getByText(/Interpretation source:/i)).toHaveTextContent('model');
     expect(screen.getByText(/Research status:/i)).toHaveTextContent('consent required');
     expect(screen.getByText(/Not attempted - buyer consent is required/i)).toBeInTheDocument();
+    expect(screen.getByTestId('research-trigger-observer')).toHaveTextContent(/cannot authorize research/i);
+    expect(screen.getByTestId('research-query-bundle')).toHaveTextContent(/planned only; no authority/i);
+    expect(screen.getByTestId('research-query-bundle')).toHaveTextContent(/unverified vendor/i);
     expect(screen.getByText(/^Status:/i)).toHaveTextContent('blocked');
   });
 

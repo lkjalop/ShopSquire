@@ -26,6 +26,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const evidence = executionSteps.find((step) => step?.id === 'workload-evidence') || {};
   const authorization = executionSteps.find((step) => step?.id === 'workload-authorization') || {};
   const researchPlan = executionSteps.find((step) => step?.id === 'research-plan') || {};
+  const researchTrigger = executionSteps.find((step) => step?.id === 'research-trigger-observer') || {};
   const buyerConsent = executionSteps.find((step) => step?.id === 'buyer-research-consent') || {};
   const compiler = executionSteps.find(
     (step) => step?.id === 'semantic-requirements-compiler' || step?.id === 'requirements-compiler',
@@ -41,6 +42,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const planOutput = researchPlan?.output || {};
   const evidenceNeeds = Array.isArray(planOutput?.evidence_needs) ? planOutput.evidence_needs : [];
   const materialSlots = Array.isArray(planOutput?.material_slots) ? planOutput.material_slots : [];
+  const queryBundle = Array.isArray(planOutput?.query_bundle) ? planOutput.query_bundle : [];
   const semanticLegs = semanticEvidence?.output?.legs || {};
   const hypotheses = Array.isArray(semanticAuthorization?.output?.workload_hypotheses)
     ? semanticAuthorization.output.workload_hypotheses : [];
@@ -54,7 +56,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
     ? Boolean(evidenceOutput.consent_recorded)
     : buyerConsent?.status === 'recorded';
   const hasResearch = Boolean(
-    evidence.id || authorization.id || entities.length || researchPlan.id
+    evidence.id || authorization.id || entities.length || researchPlan.id || researchTrigger.id
     || semanticEvidence.id || semanticAuthorization.id
   );
 
@@ -110,6 +112,19 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
           )}
         </div>
 
+        {researchTrigger.id && (
+          <div data-testid="research-trigger-observer" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Adaptive research assessment - shadow only</strong>
+            <div style={{ marginTop: 5 }}>State: <strong>{words(researchTrigger?.output?.state)}</strong></div>
+            <div>Recommendation: <strong>{words(researchTrigger?.output?.recommendation)}</strong></div>
+            <div>Score: <strong>{researchTrigger?.output?.score ?? 'not recorded'}</strong></div>
+            <div>Reasons: <strong>{(researchTrigger?.output?.reasons || []).map(words).join(' | ') || 'none recorded'}</strong></div>
+            <small style={{ color: '#64748b' }}>
+              Uncalibrated observer. It cannot authorize research, requirements, products, or actions.
+            </small>
+          </div>
+        )}
+
         {researchPlan.id && (
           <div style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
             <strong>2. Bounded research plan</strong>
@@ -130,6 +145,21 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
                   </li>
                 ))}
               </ul>
+            )}
+            {queryBundle.length > 0 && (
+              <div data-testid="research-query-bundle" style={{ marginTop: 7 }}>
+                <strong>Planned query bundle</strong>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                  {queryBundle.map((item: any, index: number) => (
+                    <li key={item?.query_id || index}>
+                      {words(item?.strategy)}: {item?.text || 'query text not recorded'}
+                      {' '}<em>(planned only; no authority)</em>
+                      {Array.isArray(item?.prohibited_assumptions) && item.prohibited_assumptions.length
+                        ? `; prohibited: ${item.prohibited_assumptions.map(words).join(', ')}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
             {materialSlots.length > 0 && (
               <div style={{ marginTop: 6 }}>
@@ -217,6 +247,12 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
             <div>Buyer-owned gap: <strong>{(materialClarification?.output?.missing_slots || []).map(words).join(' | ') || 'not recorded'}</strong></div>
             <div>Expected impact: <strong>{(materialClarification?.output?.decision_impacts || []).map(words).join(' | ') || 'not recorded'}</strong></div>
             <div>Selection policy: <strong>{words(materialClarification?.output?.selection_policy)}</strong></div>
+            {materialClarification?.output?.bounded_value_score != null && (
+              <div>
+                Bounded value score: <strong>{String(materialClarification.output.bounded_value_score)}</strong>
+                {' '}({words(materialClarification?.output?.selection_calibration || 'unsealed')})
+              </div>
+            )}
             {materialClarification?.output?.hypotheses_discriminated != null && (
               <div>Hypotheses distinguished: <strong>{String(materialClarification.output.hypotheses_discriminated)}</strong></div>
             )}
