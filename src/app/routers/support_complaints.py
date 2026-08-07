@@ -11,7 +11,10 @@ import logging
 import unicodedata
 import asyncio
 import hashlib
+import ipaddress
+import socket
 import time
+from urllib.parse import urljoin, urlparse
 
 from fastapi import APIRouter, Depends, UploadFile, File, Request, Form, HTTPException
 from pydantic import BaseModel
@@ -525,28 +528,67 @@ def _qr_redirect_cache_set(url: str, result: Dict[str, Any]) -> None:
         pass
 
 
-async def _probe_redirect_chain_now(url: str, *, timeout_s: float = 1.5, max_hops: int = 3) -> Dict[str, Any]:
+def _ensure_public_probe_url(url: str) -> None:
+    """Stricter-than-general egress validation for untrusted QR destinations."""
+    parsed = urlparse(str(url or ""))
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("unsafe_probe_url")
+    host = parsed.hostname
     try:
-        import httpx  # type: ignore
-    except Exception:
-        return {"enabled": True, "checked": False, "error": "httpx_unavailable", "chain": []}
+        literal = ipaddress.ip_address(host)
+        address_sets = [{str(literal)}, {str(literal)}]
+    except ValueError:
+        address_sets = []
+        for _ in range(2):
+            infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+            address_sets.append({str(info[4][0]) for info in infos if info and info[4]})
+    if not address_sets[0] or address_sets[0] != address_sets[1]:
+        raise ValueError("unsafe_probe_dns_changed")
+    for address in address_sets[0]:
+        ip = ipaddress.ip_address(address)
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                or ip.is_reserved or ip.is_unspecified):
+            raise ValueError("unsafe_probe_private_address")
 
+
+async def _probe_redirect_chain_now(url: str, *, timeout_s: float = 1.5, max_hops: int = 3) -> Dict[str, Any]:
     chain: List[str] = []
     current = str(url or "").strip()
     if not current:
         return {"enabled": True, "checked": False, "chain": []}
     try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout_s) as client:
-            for _ in range(max(1, int(max_hops))):
-                chain.append(current)
-                try:
-                    resp = await asyncio.wait_for(client.head(current), timeout=timeout_s)
-                except Exception:
-                    break
-                loc = str(resp.headers.get("location") or "").strip()
-                if not loc or not (300 <= int(resp.status_code) < 400):
-                    break
-                current = loc
+        from src.app.security.safe_requests import safe_request
+        for _ in range(max(1, int(max_hops))):
+            chain.append(current)
+            try:
+                _ensure_public_probe_url(current)
+                # safe_request validates the URL before I/O. Redirects remain
+                # manual so every hop is independently validated and recorded.
+                resp = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        safe_request,
+                        "HEAD",
+                        current,
+                        timeout=timeout_s,
+                        allow_redirects=False,
+                    ),
+                    timeout=timeout_s + 0.25,
+                )
+            except ValueError as exc:
+                return {
+                    "enabled": True,
+                    "checked": False,
+                    "blocked": True,
+                    "error": str(exc),
+                    "chain": chain,
+                    "policy_action": "block",
+                }
+            except Exception:
+                break
+            loc = str(resp.headers.get("location") or "").strip()
+            if not loc or not (300 <= int(resp.status_code) < 400):
+                break
+            current = urljoin(current, loc)
         out = {
             "enabled": True,
             "checked": True,
@@ -2379,15 +2421,12 @@ async def submit_complaint(
                 price = supplier_signals.get("price_cents")
             if not price and isinstance(risk_quant.get("inputs", {}).get("monetary_exposure"), (int, float)):
                 price = risk_quant.get("inputs", {}).get("monetary_exposure")
-            # fallback: try fetched order total
-            if not price and evidence.get("order"):
-                price = evidence.get("order").get("total_cents")
             likelihood_est = max((fraud_score or 0) / 100.0, float(conf_val or 0.0) * 0.8)
             exposure = quantify_exposure(price_cents=price or 0.0, likelihood=likelihood_est, dread_modifier=0.0, stride_modifier=0.0, control_maturity=(trust.get("score") if isinstance(trust, dict) else 0.0))
             risk_quant["exposure"] = exposure
             try:
                 log_trace_event(
-                    trace_id=decision_id if 'decision_id' in locals() else None,
+                    trace_id=case_id,
                     event_type="risk_summary",
                     source_type="agent",
                     source_id="RiskEngine",
@@ -3114,6 +3153,16 @@ async def submit_complaint_guest(
         order_id=None,
     )
 
+    geoip_trace = _build_geoip_trace(history.get("source_ip"))
+    try:
+        if geoip_trace.get("asn") is not None:
+            history["asn"] = geoip_trace.get("asn")
+        if geoip_trace.get("country"):
+            history["country"] = geoip_trace.get("country")
+        history["geo_risk"] = float(geoip_trace.get("risk") or 0.0)
+    except Exception:
+        pass
+
     # Security observer scan for CV/NLP evidence (guest flow)
     security_details = {}
     security_sev = None
@@ -3152,18 +3201,6 @@ async def submit_complaint_guest(
     except Exception:
         pass
     try:
-        if playbook_preview:
-            log_trace_event(
-                trace_id=case_id,
-                event_type="cv_playbook",
-                source_type="agent",
-                source_id="CV_Playbook_Agent",
-                target_type="system",
-                target_id=playbook_preview.get("playbook", {}).get("id"),
-                payload={"evidence_tags": evidence_tags, "playbook": playbook_preview},
-            )
-    except Exception:
-        pass
         risk_score = float(security_details.get("risk_adj") or 0.0)
         if risk_score > 1.0 and risk_score <= 100.0:
             risk_score = risk_score / 100.0
@@ -3204,16 +3241,6 @@ async def submit_complaint_guest(
         security_details = {}
         security_sev = None
 
-    geoip_trace = _build_geoip_trace(history.get("source_ip"))
-    try:
-        if geoip_trace.get("asn") is not None:
-            history["asn"] = geoip_trace.get("asn")
-        if geoip_trace.get("country"):
-            history["country"] = geoip_trace.get("country")
-        history["geo_risk"] = float(geoip_trace.get("risk") or 0.0)
-    except Exception:
-        pass
-
     recommended_route = "standard_queue"
     # Evaluate NLP compliance rules for guest flow (ensure variable defined)
     nlp_rules = _evaluate_nlp_rules(description)
@@ -3235,33 +3262,6 @@ async def submit_complaint_guest(
         recommended_route = "security_review"
     if bool(geoip_trace.get("force_security_review")):
         recommended_route = "security_review"
-    try:
-        trust_dec = route_from_trust(
-            trust_score=trust.get("score") if isinstance(trust, dict) else float(trust),
-            risk_band=risk_quant.get("risk_band"),
-            amount_usd=(risk_quant.get("exposure", {}) or {}).get("exposure_cents", 0) / 100.0 if isinstance(risk_quant, dict) else None,
-        )
-        recommended_route = trust_dec.route if trust_dec.route else recommended_route
-        try:
-            log_trace_event(
-                trace_id=case_id,
-                event_type="trust_routing",
-                source_type="agent",
-                source_id="Trust_Routing_Agent",
-                target_type="system",
-                target_id=None,
-                payload={
-                    "trust_score": trust_dec.trust_score,
-                    "tier": trust_dec.tier,
-                    "route": trust_dec.route,
-                    "reasons": trust_dec.reasons,
-                },
-            )
-        except Exception:
-            pass
-    except Exception:
-        pass
-
     # Determine tenant from request header if present
     tenant_id = None
     customer_tier = None
@@ -3294,6 +3294,33 @@ async def submit_complaint_guest(
         )
     except Exception:
         risk_quant = {}
+
+    try:
+        trust_dec = route_from_trust(
+            trust_score=trust.get("score") if isinstance(trust, dict) else float(trust),
+            risk_band=risk_quant.get("risk_band"),
+            amount_usd=(risk_quant.get("exposure", {}) or {}).get("exposure_cents", 0) / 100.0 if isinstance(risk_quant, dict) else None,
+        )
+        recommended_route = trust_dec.route if trust_dec.route else recommended_route
+        try:
+            log_trace_event(
+                trace_id=case_id,
+                event_type="trust_routing",
+                source_type="agent",
+                source_id="Trust_Routing_Agent",
+                target_type="system",
+                target_id=None,
+                payload={
+                    "trust_score": trust_dec.trust_score,
+                    "tier": trust_dec.tier,
+                    "route": trust_dec.route,
+                    "reasons": trust_dec.reasons,
+                },
+            )
+        except Exception:
+            pass
+    except Exception:
+        pass
 
     needs_human = False
     try:
@@ -3339,7 +3366,7 @@ async def submit_complaint_guest(
         fraud_level=fraud_level,
         supplier_signals=supplier_signals or {},
         tier2=cv_tiered_analysis if isinstance(cv_tiered_analysis, dict) else {},
-        expected_serial=expected_serial if "expected_serial" in locals() else None,
+        expected_serial=None,
         observed_serial=observed_serial if "observed_serial" in locals() else None,
     )
     playbook_preview = select_cv_playbook(evidence_tags, risk_quant.get("risk_band"))
@@ -3716,20 +3743,6 @@ async def add_images(case_id: str, images: list[UploadFile] = File(...), db=Depe
     except Exception:
         risk_quant = {}
 
-    needs_human = False
-    try:
-        if analysis.get("needs_human_review", False):
-            needs_human = True
-        if conf_val is not None and float(conf_val) < float(_get_support_thresholds()["cv_confidence_low_min"]):
-            needs_human = True
-        if analysis.get("severity") in ("major", "high", "critical"):
-            needs_human = True
-        if risk_quant.get("risk_band") == "high":
-            needs_human = True
-        if gate_force_review:
-            needs_human = True
-    except Exception:
-        pass
     # Trust routing for add-images flow (neutral trust score)
     try:
         trust_dec = route_from_trust(
@@ -3843,6 +3856,28 @@ async def add_images(case_id: str, images: list[UploadFile] = File(...), db=Depe
     except Exception:
         security_details = {}
         security_sev = None
+
+    try:
+        conf_raw = analysis.get("confidence_calibrated") if isinstance(analysis, dict) else None
+        conf_val = float(conf_raw) if conf_raw is not None else (
+            float(analysis.get("confidence")) if analysis.get("confidence") is not None else None
+        )
+    except Exception:
+        conf_val = None
+    needs_human = False
+    try:
+        if analysis.get("needs_human_review", False):
+            needs_human = True
+        if conf_val is not None and float(conf_val) < float(_get_support_thresholds()["cv_confidence_low_min"]):
+            needs_human = True
+        if analysis.get("severity") in ("major", "high", "critical"):
+            needs_human = True
+        if risk_quant.get("risk_band") == "high":
+            needs_human = True
+        if gate_force_review:
+            needs_human = True
+    except Exception:
+        pass
     # Populate forensic/ocr/supply-chain analysis for the new images (best-effort)
     forensics = {}
     serial_ocr = {}
