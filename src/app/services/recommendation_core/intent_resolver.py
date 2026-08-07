@@ -298,9 +298,9 @@ def resolve(use_cases: Optional[List[str]],
     if workload_entities:
         try:
             from src.app.services.recommendation_core.workload_grounding import (
-                resolve_named_games,
+                resolve_named_workloads,
             )
-            grounded = resolve_named_games(
+            grounded = resolve_named_workloads(
                 workload_entities, consent=external_research_consent)
             if grounded["requirements"]:
                 merged = merge_maps(

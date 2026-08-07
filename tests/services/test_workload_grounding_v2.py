@@ -101,7 +101,7 @@ def test_model_workload_entity_suppresses_legacy_title_detector(monkeypatch):
         lambda _query: (_ for _ in ()).throw(AssertionError("legacy detector ran")),
     )
     monkeypatch.setattr(
-        W, "resolve_named_games",
+        W, "resolve_named_workloads",
         lambda entities, consent: {
             "requirements": {"ram_gb": (">=", 24.0)},
             "evidence": [{"kind": "game", "status": "resolved"}],
@@ -116,3 +116,22 @@ def test_model_workload_entity_suppresses_legacy_title_detector(monkeypatch):
 
     assert result["requirements"]["ram_gb"] == [(">=", 24.0)]
     assert result["title_requirements"]["resolution_mode"] == "provider_registry"
+
+
+def test_unsupported_named_software_remains_explicitly_unresolved():
+    result = W.resolve_named_workloads(
+        [("software", "Siemens NX 2025")], consent=True,
+    )
+
+    assert result["requirements"] == {}
+    evidence = result["evidence"][0]
+    assert evidence == {
+        "kind": "software",
+        "requested_name": "Siemens NX 2025",
+        "status": "not_resolved",
+        "live_allowed": result["live_allowed"],
+        "reason": "no_enrolled_provider_result",
+            "provider_attempts": [],
+            "provider_coverage": "none_for_kind",
+            "enrolled_providers": [],
+        }

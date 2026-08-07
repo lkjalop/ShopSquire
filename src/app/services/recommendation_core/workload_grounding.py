@@ -65,39 +65,81 @@ def _minimum_constraints(requirements: Dict[str, Any]) -> Dict[str, Tuple[str, f
     return out
 
 
-def resolve_named_games(entities: Iterable[Tuple[str, str]], *, consent: bool) -> Dict[str, Any]:
-    """Resolve at most two clamped game names into minimum constraints and trace evidence."""
+def resolve_named_workloads(
+    entities: Iterable[Tuple[str, str]], *, consent: bool,
+) -> Dict[str, Any]:
+    """Resolve clamped workload entities into authorized minimum constraints.
+
+    The model identifies the entity kind and literal name.  An enrolled provider
+    must resolve that entity before its requirements can authorize catalog fit.
+    Unsupported or unavailable providers remain explicit unresolved evidence;
+    they never fall through to a generic workload profile silently.
+    """
     from src.app.services.connectors.workload_evidence import default_registry
 
-    allow_live = live_steam_allowed(consent=consent)
     registry = default_registry()
     requirements: Dict[str, Tuple[str, float]] = {}
     evidence = []
     seen = set()
-    for kind, name in list(entities)[:3]:
-        if kind != "game":
-            continue
-        key = str(name or "").strip().lower()
+    for raw_kind, name in list(entities)[:3]:
+        kind = str(raw_kind or "").strip().lower()
+        key = f"{kind}:{str(name or '').strip().lower()}"
         if not key or key in seen:
             continue
         seen.add(key)
-        typed = registry.resolve("game", name, allow_live=allow_live)
+        enrolled_providers = registry.provider_ids_for(kind)
+        # Steam readiness is game-specific. Software and other workloads must
+        # not inherit it just because the buyer consented to research.
+        allow_live = bool(kind == "game" and live_steam_allowed(consent=consent))
+        typed, provider_attempts = registry.resolve_with_trace(
+            kind, name, allow_live=allow_live,
+        )
         result = typed.to_dict() if typed is not None else None
         if not result:
             evidence.append({
-                "kind": "game", "requested_name": name, "status": "not_resolved",
+                "kind": kind, "requested_name": name, "status": "not_resolved",
                 "live_allowed": allow_live,
+                "reason": "no_enrolled_provider_result",
+                "provider_attempts": provider_attempts,
+                "provider_coverage": "none_for_kind" if not provider_attempts else "attempted",
+                "enrolled_providers": list(enrolled_providers),
             })
             continue
-        for attr, predicate in _minimum_constraints(result).items():
+        proposed_constraints = _minimum_constraints(result)
+        from src.app.services.recommendation_core.requirement_compiler import (
+            compile_authoritative_requirements,
+        )
+
+        claims = []
+        for attr, predicate in proposed_constraints.items():
+            claims.append({
+                "need_id": f"{kind}:{attr}",
+                "subject_span": str(name)[:120],
+                "claim_type": "minimum_requirements",
+                "status": "accepted",
+                "source_id": result.get("source"),
+                "source_record_id": result.get("source_record_id"),
+                "observed_at": result.get("retrieved_at"),
+                "confidence": result.get("confidence"),
+                "attribute_key": attr,
+                "operator": predicate[0],
+                "value": predicate[1],
+                "authority": "official_requirements",
+                "lineage_root": result.get("source"),
+            })
+        compilation = compile_authoritative_requirements(claims)
+        for compiled in compilation.requirements:
+            attr = compiled.attribute_key
+            predicate = (compiled.operator, float(compiled.value))
             current = requirements.get(attr)
             if current is None or predicate[1] > current[1]:
                 requirements[attr] = predicate
         evidence.append({
-            "kind": "game",
+            "kind": kind,
             "requested_name": name,
-            "resolved_name": result.get("title"),
+            "resolved_name": result.get("resolved_name"),
             "status": "resolved",
+            "live_allowed": allow_live,
             "source": result.get("source"),
             "source_url": result.get("source_url"),
             "retrieved_at": result.get("retrieved_at"),
@@ -107,8 +149,24 @@ def resolve_named_games(entities: Iterable[Tuple[str, str]], *, consent: bool) -
             "minimum": dict(result.get("minimum") or {}),
             "recommended": dict(result.get("recommended") or {}),
             "requested_target": dict(result.get("requested_target") or {}),
+            "provider_attempts": provider_attempts,
+            "provider_coverage": "resolved",
+            "enrolled_providers": list(enrolled_providers),
+            "compiled_requirements": [
+                item.model_dump() for item in compilation.requirements
+            ],
+            "claim_rejections": list(compilation.rejections),
         })
         if len(evidence) >= 2:
             break
-    return {"requirements": requirements, "evidence": evidence,
-            "live_allowed": allow_live}
+    return {
+        "requirements": requirements,
+        "evidence": evidence,
+        "consent_recorded": bool(consent),
+        "live_allowed": any(bool(item.get("live_allowed")) for item in evidence),
+    }
+
+
+def resolve_named_games(entities: Iterable[Tuple[str, str]], *, consent: bool) -> Dict[str, Any]:
+    """Compatibility alias for callers migrating to source-neutral workloads."""
+    return resolve_named_workloads(entities, consent=consent)

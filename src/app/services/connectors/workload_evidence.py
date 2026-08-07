@@ -98,19 +98,68 @@ class WorkloadEvidenceRegistry:
             raise ValueError(f"duplicate workload provider: {provider.provider_id}")
         self._providers.append(provider)
 
+    def provider_ids_for(self, kind: str) -> tuple[str, ...]:
+        """List enrolled providers for a workload kind without implying readiness."""
+        normalized = str(kind or "").strip().lower()
+        return tuple(
+            provider.provider_id
+            for provider in self._providers
+            if normalized in provider.supported_kinds
+        )
+
     def resolve(
         self, kind: str, name: str, *, allow_live: bool,
         provider_allowed: Optional[Callable[[str], bool]] = None,
     ) -> Optional[WorkloadEvidence]:
+        result, _attempts = self.resolve_with_trace(
+            kind, name, allow_live=allow_live, provider_allowed=provider_allowed,
+        )
+        return result
+
+    def resolve_with_trace(
+        self, kind: str, name: str, *, allow_live: bool,
+        provider_allowed: Optional[Callable[[str], bool]] = None,
+    ) -> tuple[Optional[WorkloadEvidence], list[Dict[str, Any]]]:
+        """Resolve evidence and retain a bounded provider-attempt record.
+
+        The record is safe to expose in Decision Trace: it contains provider IDs
+        and outcomes, not credentials, prompts, or private model reasoning.
+        """
+        attempts: list[Dict[str, Any]] = []
         for provider in self._providers:
             if kind not in provider.supported_kinds:
                 continue
             if provider_allowed is not None and not provider_allowed(provider.provider_id):
+                attempts.append({
+                    "provider_id": provider.provider_id,
+                    "status": "blocked_by_source_policy",
+                    "allow_live": bool(allow_live),
+                })
                 continue
-            result = provider.resolve(name, allow_live=allow_live)
+            try:
+                result = provider.resolve(name, allow_live=allow_live)
+            except Exception as exc:
+                attempts.append({
+                    "provider_id": provider.provider_id,
+                    "status": "provider_error",
+                    "allow_live": bool(allow_live),
+                    "error_type": type(exc).__name__,
+                })
+                continue
             if result is not None:
-                return result
-        return None
+                attempts.append({
+                    "provider_id": provider.provider_id,
+                    "status": "resolved",
+                    "allow_live": bool(allow_live),
+                    "source_record_id": result.source_record_id,
+                })
+                return result, attempts
+            attempts.append({
+                "provider_id": provider.provider_id,
+                "status": "no_authoritative_result",
+                "allow_live": bool(allow_live),
+            })
+        return None, attempts
 
 
 def default_registry() -> WorkloadEvidenceRegistry:

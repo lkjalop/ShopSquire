@@ -46,3 +46,37 @@ def test_registry_obeys_provider_allowlist():
     )
 
     assert result is None
+
+
+def test_registry_records_provider_coverage_without_exposing_internal_state():
+    registry = WorkloadEvidenceRegistry([_Provider()])
+
+    result, attempts = registry.resolve_with_trace(
+        "software", "Renderer X", allow_live=True,
+    )
+
+    assert result is not None
+    assert attempts == [{
+        "provider_id": "official_vendor",
+        "status": "resolved",
+        "allow_live": True,
+        "source_record_id": None,
+    }]
+
+
+def test_registry_reports_when_no_provider_supports_the_workload_kind():
+    registry = WorkloadEvidenceRegistry([_Provider()])
+
+    result, attempts = registry.resolve_with_trace(
+        "game", "Unknown Game", allow_live=True,
+    )
+
+    assert result is None
+    assert attempts == []
+
+
+def test_registry_lists_kind_coverage_without_claiming_provider_readiness():
+    registry = WorkloadEvidenceRegistry([_Provider()])
+
+    assert registry.provider_ids_for("software") == ("official_vendor",)
+    assert registry.provider_ids_for("game") == ()
