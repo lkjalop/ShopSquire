@@ -2433,13 +2433,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         )
         q = clarification_reduction.effective_query
     except Exception:
-        q = _merge_material_nqe_answer(
-            query=str(q or ""),
-            nqe_selection=nqe_selection if isinstance(nqe_selection, dict) else {},
-            recent_messages=(payload or {}).get("recent_messages")
-            if isinstance((payload or {}).get("recent_messages"), list) else [],
-            pending_clarification=pending_clarification,
-        )
+        logger.warning("typed clarification reduction failed; preserving buyer turn", exc_info=True)
+        clarification_reduction = None
     pending_clarification_consumed = bool(
         clarification_reduction
         and clarification_reduction.consume_pending
@@ -3765,22 +3760,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             tenant_id=tenant_id,
             session_epoch=session_epoch,
         )
-        # Apply the transition before persisting a replacement question. Otherwise
-        # an answered question that reveals a second material gap is written and
-        # then immediately deleted by the old question's cleanup.
-        if pending_clarification_consumed:
-            clarification_memory.clear_pending_clarification(uid)
-        elif pending_clarification_suspended:
-            suspended = dict(pending_clarification)
-            suspended["state"] = "suspended"
-            clarification_memory.set_pending_clarification(
-                uid,
-                suspended,
-                ttl_seconds=max(
-                    30,
-                    int(suspended.get("expires_at") or int(time.time()) + 30) - int(time.time()),
-                ),
-            )
         semantic = (
             out.get("semantic_resolution")
             if isinstance(out.get("semantic_resolution"), dict) else {}
@@ -3794,11 +3773,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 or semantic.get("catalog_authority") == "blocked"
             )
         ), None)
+        pending_record = None
         if material_question:
-            from src.app.services.clarification_state import (
-                build_pending_clarification,
-                replacement_root_query,
-            )
+            from src.app.services.clarification_state import build_pending_clarification, replacement_root_query
 
             pending_record = build_pending_clarification(
                 material_question,
@@ -3831,13 +3808,17 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 original_intent=turn_intent,
                 ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
             )
-            Memory(redis).set_pending_clarification(
-                uid,
-                pending_record,
-                tenant_id=tenant_id,
-                session_epoch=session_epoch,
-                ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
-            )
+        from src.app.services.clarification_state import persist_clarification_transition
+
+        persist_clarification_transition(
+            clarification_memory,
+            uid=uid,
+            prior=pending_clarification,
+            consume_prior=pending_clarification_consumed,
+            suspend_prior=pending_clarification_suspended,
+            replacement=pending_record,
+            ttl_seconds=int(os.getenv("CHAT_CLARIFICATION_TTL_SECONDS", "900") or 900),
+        )
     except Exception:
         if persist_conversation:
             logger.warning("pending chat clarification persistence failed", exc_info=True)

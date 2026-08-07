@@ -347,3 +347,45 @@ def reduce_clarification_turn(
         answer=current or None,
         question_id=question_id,
     )
+
+
+def persist_clarification_transition(
+    store: Any,
+    *,
+    uid: str,
+    prior: Mapping[str, Any] | None,
+    consume_prior: bool = False,
+    suspend_prior: bool = False,
+    replacement: Mapping[str, Any] | None = None,
+    ttl_seconds: int = 900,
+    now_epoch: int | None = None,
+) -> str:
+    """Apply one typed clarification transition through a tenant-scoped store.
+
+    Transport code supplies the already-scoped store and state inputs. This service
+    owns ordering: retire/suspend the prior question before writing a replacement.
+    """
+    state = prior if isinstance(prior, Mapping) else {}
+    now = int(time.time() if now_epoch is None else now_epoch)
+    bounded_ttl = max(30, min(int(ttl_seconds), 3_600))
+    transition = "unchanged"
+    if consume_prior and state:
+        store.clear_pending_clarification(uid)
+        transition = "consumed"
+    elif suspend_prior and state:
+        suspended = dict(state)
+        suspended["state"] = "suspended"
+        try:
+            remaining = int(suspended.get("expires_at") or now + bounded_ttl) - now
+        except (TypeError, ValueError):
+            remaining = bounded_ttl
+        store.set_pending_clarification(
+            uid, suspended, ttl_seconds=max(30, min(remaining, bounded_ttl)),
+        )
+        transition = "suspended"
+    if isinstance(replacement, Mapping) and replacement.get("question_id"):
+        store.set_pending_clarification(
+            uid, dict(replacement), ttl_seconds=bounded_ttl,
+        )
+        transition = "replaced" if transition != "unchanged" else "created"
+    return transition

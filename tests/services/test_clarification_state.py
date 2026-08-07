@@ -1,9 +1,55 @@
 from src.app.services.clarification_state import (
     build_pending_clarification,
+    persist_clarification_transition,
     external_research_consent_granted,
     replacement_root_query,
     reduce_clarification_turn,
 )
+
+
+class _PendingStore:
+    def __init__(self):
+        self.value = None
+
+    def clear_pending_clarification(self, _uid):
+        self.value = None
+
+    def set_pending_clarification(self, _uid, value, *, ttl_seconds):
+        self.value = {**value, "stored_ttl": ttl_seconds}
+
+
+def test_transition_retires_prior_before_persisting_replacement():
+    store = _PendingStore()
+    store.value = {"question_id": "old"}
+    transition = persist_clarification_transition(
+        store,
+        uid="buyer-1",
+        prior={"question_id": "old", "state": "active", "expires_at": 500},
+        consume_prior=True,
+        replacement={"question_id": "new", "state": "active"},
+        ttl_seconds=120,
+        now_epoch=100,
+    )
+
+    assert transition == "replaced"
+    assert store.value["question_id"] == "new"
+    assert store.value["stored_ttl"] == 120
+
+
+def test_transition_suspends_with_bounded_remaining_ttl():
+    store = _PendingStore()
+    transition = persist_clarification_transition(
+        store,
+        uid="buyer-1",
+        prior={"question_id": "old", "state": "active", "expires_at": 150},
+        suspend_prior=True,
+        ttl_seconds=900,
+        now_epoch=100,
+    )
+
+    assert transition == "suspended"
+    assert store.value["state"] == "suspended"
+    assert store.value["stored_ttl"] == 50
 
 
 def test_replacement_question_preserves_root_objective_until_explicit_supersede():
