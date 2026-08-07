@@ -56,11 +56,50 @@ class EvidenceQuestion(BaseModel):
     material: bool = True
 
 
+class ProductCategoryCandidate(BaseModel):
+    """A model-proposed category label with no sellability or retrieval authority."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=2, max_length=120)
+    taxonomy_handle: str | None = Field(default=None, min_length=2, max_length=160)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    authority: Literal["proposed"] = "proposed"
+
+
+class WorkloadHypothesis(BaseModel):
+    """One bounded interpretation to investigate, never an accepted workload fact."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hypothesis_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,59}$")
+    label: str = Field(min_length=2, max_length=160)
+    evidence_needed: list[str] = Field(default_factory=list, max_length=6)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    authority: Literal["proposed"] = "proposed"
+
+
+class MaterialUnknown(BaseModel):
+    """A material gap and the bounded authority capable of resolving it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unknown_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,59}$")
+    description: str = Field(min_length=2, max_length=200)
+    resolution_source: Literal["research", "buyer", "either"]
+    material: bool = True
+
+
 class SemanticProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     desired_outcome: str = Field(min_length=2, max_length=240)
+    product_category_candidates: list[ProductCategoryCandidate] = Field(
+        default_factory=list, max_length=5
+    )
     concepts: list[ConceptProposal] = Field(default_factory=list, max_length=4)
+    workload_hypotheses: list[WorkloadHypothesis] = Field(default_factory=list, max_length=5)
+    material_unknowns: list[MaterialUnknown] = Field(default_factory=list, max_length=8)
     evidence_questions: list[EvidenceQuestion] = Field(default_factory=list, max_length=5)
     proposed_action: SemanticAction = "search_catalog"
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -111,6 +150,10 @@ class SemanticDecision:
     state_prevented: tuple[str, ...] = ()
     next_permitted_action: str = ""
     desired_outcome: str = ""
+    product_category_candidates: tuple[dict[str, Any], ...] = ()
+    workload_hypotheses: tuple[dict[str, Any], ...] = ()
+    material_unknowns: tuple[dict[str, Any], ...] = ()
+    interpretation_confidence: float = 0.0
     residual_route: ResidualRoute = "ASK"
     residual_reasons: tuple[str, ...] = ()
     # This is deliberately false even when residual_route=AUTHORIZE. The semantic
@@ -265,12 +308,22 @@ def fallback_semantic_proposal(
     return {
         "validation": "valid",
         "desired_outcome": text[:240],
+        "product_category_candidates": [],
         "concepts": [{
             "text": concept[:120],
             "query_span": concept[:120],
             "status": "unresolved",
             "material": True,
             "interpretations": [],
+        }],
+        # A deterministic relation recognizer may detect uncertainty, but it must not
+        # invent competing domain interpretations. Those belong to the model proposal.
+        "workload_hypotheses": [],
+        "material_unknowns": [{
+            "unknown_id": "material-concept",
+            "description": f"Authoritative meaning and requirements for {concept[:120]}",
+            "resolution_source": "research",
+            "material": True,
         }],
         "evidence_questions": questions,
         "proposed_action": "research_then_clarify",
@@ -298,6 +351,12 @@ def validate_semantic_proposal(raw: Any, *, query: str) -> SemanticValidation:
     question_ids = [item.question_id for item in proposal.evidence_questions]
     if len(question_ids) != len(set(question_ids)):
         return SemanticValidation("rejected", ("duplicate_evidence_question",))
+    hypothesis_ids = [item.hypothesis_id for item in proposal.workload_hypotheses]
+    if len(hypothesis_ids) != len(set(hypothesis_ids)):
+        return SemanticValidation("rejected", ("duplicate_workload_hypothesis",))
+    unknown_ids = [item.unknown_id for item in proposal.material_unknowns]
+    if len(unknown_ids) != len(set(unknown_ids)):
+        return SemanticValidation("rejected", ("duplicate_material_unknown",))
     return SemanticValidation("valid", (), proposal)
 
 
@@ -438,6 +497,16 @@ def reduce_semantic_proposal(
     concepts = tuple(item.model_dump() for item in proposal.concepts)
     questions = tuple(item.model_dump() for item in proposal.evidence_questions if item.material)
     evidence_rows = tuple(item.as_dict() for item in evidence)
+    proposal_context = {
+        "product_category_candidates": tuple(
+            item.model_dump() for item in proposal.product_category_candidates
+        ),
+        "workload_hypotheses": tuple(
+            item.model_dump() for item in proposal.workload_hypotheses
+        ),
+        "material_unknowns": tuple(item.model_dump() for item in proposal.material_unknowns),
+        "interpretation_confidence": proposal.confidence,
+    }
     if contradictory:
         return SemanticDecision(
             outcome="clarify",
@@ -449,6 +518,7 @@ def reduce_semantic_proposal(
             state_prevented=("catalog_recommendation", "supplier_enquiry", "commerce_execution"),
             next_permitted_action="resolve_evidence_contradiction",
             desired_outcome=proposal.desired_outcome,
+            **proposal_context,
             residual_route="ASK",
             residual_reasons=("contradictory_evidence_requires_resolution",),
         )
@@ -475,6 +545,7 @@ def reduce_semantic_proposal(
             next_permitted_action=("run_bounded_concept_research" if outcome == "research"
                                    else "ask_material_clarification"),
             desired_outcome=proposal.desired_outcome,
+            **proposal_context,
             residual_route="SEARCH" if outcome == "research" else "ASK",
             residual_reasons=(residual_reason,),
         )
@@ -492,6 +563,7 @@ def reduce_semantic_proposal(
             if authorization_requested else "align_catalog"
         ),
         desired_outcome=proposal.desired_outcome,
+        **proposal_context,
         residual_route=residual_route,
         residual_reasons=(
             ("consequential_action_requires_policy",)

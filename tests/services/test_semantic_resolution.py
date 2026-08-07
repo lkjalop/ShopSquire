@@ -20,6 +20,113 @@ def test_deterministic_relation_fallback_is_low_confidence_and_identified():
     assert proposal["proposal_origin"] == "deterministic_fallback"
     assert proposal["confidence"] < 0.5
     assert proposal["proposed_action"] == "research_then_clarify"
+    assert proposal["workload_hypotheses"] == []
+    assert proposal["material_unknowns"][0]["resolution_source"] == "research"
+
+
+def test_model_can_propose_competing_open_world_hypotheses_without_authorizing_one():
+    result = validate_semantic_proposal(
+        {
+            "desired_outcome": "run a maintenance digital-twin workload",
+            "product_category_candidates": [
+                {"label": "portable computer", "confidence": 0.72},
+                {"label": "mobile workstation", "confidence": 0.66},
+            ],
+            "concepts": [
+                {
+                    "text": "digital twin",
+                    "query_span": "digital twin",
+                    "status": "ambiguous",
+                    "material": True,
+                }
+            ],
+            "workload_hypotheses": [
+                {
+                    "hypothesis_id": "physical-process-simulation",
+                    "label": "physical or process simulation",
+                    "evidence_needed": ["simulation software", "model scale"],
+                    "confidence": 0.54,
+                },
+                {
+                    "hypothesis_id": "security-range-simulation",
+                    "label": "security range simulation",
+                    "evidence_needed": ["guest count", "virtualization platform"],
+                    "confidence": 0.41,
+                },
+                {
+                    "hypothesis_id": "remote-simulation-client",
+                    "label": "remote simulation client",
+                    "evidence_needed": ["execution location", "visualization target"],
+                    "confidence": 0.38,
+                },
+            ],
+            "material_unknowns": [
+                {
+                    "unknown_id": "workload-definition",
+                    "description": "Which workload interpretation applies",
+                    "resolution_source": "research",
+                },
+                {
+                    "unknown_id": "execution-location",
+                    "description": "Whether execution is local, remote, or hybrid",
+                    "resolution_source": "buyer",
+                },
+            ],
+            "evidence_questions": [],
+            "proposed_action": "research_then_clarify",
+            "confidence": 0.61,
+        },
+        query="Recommend a laptop for a digital twin used in machine maintenance",
+    )
+
+    assert result.outcome == "valid"
+    assert result.proposal is not None
+    assert len(result.proposal.workload_hypotheses) == 3
+    assert {item.resolution_source for item in result.proposal.material_unknowns} == {
+        "buyer",
+        "research",
+    }
+    assert all(item.authority == "proposed" for item in result.proposal.workload_hypotheses)
+    assert result.proposal.proposed_action == "research_then_clarify"
+
+    reduced = reduce_semantic_proposal(result)
+    assert reduced.catalog_authority == "blocked"
+    assert reduced.product_category_candidates[0]["authority"] == "proposed"
+    assert reduced.workload_hypotheses[0]["authority"] == "proposed"
+    assert reduced.material_unknowns[1]["resolution_source"] == "buyer"
+    assert reduced.interpretation_confidence == pytest.approx(0.61)
+
+
+def test_open_world_hypotheses_are_bounded_and_cannot_claim_accepted_evidence():
+    result = validate_semantic_proposal(
+        {
+            "desired_outcome": "support an unfamiliar analysis workflow",
+            "concepts": [
+                {
+                    "text": "quantum lattice analysis",
+                    "query_span": "quantum lattice analysis",
+                    "status": "unresolved",
+                }
+            ],
+            "workload_hypotheses": [
+                {
+                    "hypothesis_id": "candidate-one",
+                    "label": "candidate interpretation",
+                    "authority": "accepted",
+                    "evidence_needed": ["official requirements"],
+                    "confidence": 0.5,
+                }
+            ],
+            "material_unknowns": [],
+            "evidence_questions": [],
+            "proposed_action": "research",
+            "confidence": 0.5,
+        },
+        query="a computer for quantum lattice analysis",
+    )
+
+    assert result.outcome == "rejected"
+    assert result.reasons == ("proposal_schema_invalid",)
 
 
 def test_research_then_clarify_runs_research_before_asking_buyer_details():

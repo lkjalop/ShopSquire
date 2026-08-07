@@ -538,8 +538,23 @@ def _semantic_proposal_or_relation_fallback(
             "desired_outcome": str(
                 persisted.get("desired_outcome") or "resolve material requirements"
             )[:240],
+            "product_category_candidates": [
+                dict(item)
+                for item in list(persisted.get("product_category_candidates") or [])[:5]
+                if isinstance(item, dict)
+            ],
             "concepts": [
                 dict(item) for item in list(persisted.get("concepts") or [])[:4]
+                if isinstance(item, dict)
+            ],
+            "workload_hypotheses": [
+                dict(item)
+                for item in list(persisted.get("workload_hypotheses") or [])[:5]
+                if isinstance(item, dict)
+            ],
+            "material_unknowns": [
+                dict(item)
+                for item in list(persisted.get("material_unknowns") or [])[:8]
                 if isinstance(item, dict)
             ],
             "evidence_questions": [
@@ -627,7 +642,22 @@ def persisted_semantic_blocker_decision(
     proposal = {
         "validation": "valid",
         "desired_outcome": str(resolution.get("desired_outcome") or "resolve material requirements")[:240],
+        "product_category_candidates": [
+            dict(item)
+            for item in list(resolution.get("product_category_candidates") or [])[:5]
+            if isinstance(item, dict)
+        ],
         "concepts": concepts[:4],
+        "workload_hypotheses": [
+            dict(item)
+            for item in list(resolution.get("workload_hypotheses") or [])[:5]
+            if isinstance(item, dict)
+        ],
+        "material_unknowns": [
+            dict(item)
+            for item in list(resolution.get("material_unknowns") or [])[:8]
+            if isinstance(item, dict)
+        ],
         "evidence_questions": questions[:5],
         "proposed_action": "research_then_clarify",
         "confidence": 1.0,
@@ -1297,8 +1327,12 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "SEMANTIC_PROPOSAL: when unfamiliar or materially ambiguous wording could change whether "
         "a product is suitable, emit one generic resolution record. Put the exact buyer wording "
         "in concepts.query_span and concepts.text. You may add an advisory normalized_label, but "
-        "do not invent product facts. Include desired_outcome, concepts (text, query_span, normalized_label, "
-        "status=unresolved|ambiguous, material, optional interpretations), evidence_questions "
+        "do not invent product facts. Include desired_outcome; zero to five product_category_candidates "
+        "as proposed labels; concepts (text, query_span, normalized_label, status=unresolved|ambiguous, "
+        "material, optional interpretations); zero to five competing workload_hypotheses with a stable "
+        "hypothesis_id, label, evidence_needed, confidence, and authority=proposed; and material_unknowns "
+        "classified by resolution_source=research|buyer|either. Hypotheses are alternatives to investigate, "
+        "never accepted facts. Include evidence_questions "
         "whose answers could change catalog fit, proposed_action, and confidence. Omit the entire "
         "object when the request is already specific enough for catalog search.\n"
         "REFINE: brand=hard-only, prefer_brand=soft, exclude_brand=negation, sort=price_asc, "

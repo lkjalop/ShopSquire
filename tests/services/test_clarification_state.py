@@ -62,8 +62,25 @@ def test_pending_contract_preserves_bounded_semantic_consent_and_commercial_stat
         semantic_resolution={
             "desired_outcome": "qualify a portable workstation for maintenance simulation",
             "catalog_authority": "blocked",
+            "product_category_candidates": [
+                {"label": "portable computer", "authority": "proposed"}
+            ],
             "concepts": [
                 {"concept_id": "c1", "text": "mechanical digital twin", "status": "unresolved"},
+            ],
+            "workload_hypotheses": [
+                {
+                    "hypothesis_id": "local-simulation",
+                    "label": "local simulation",
+                    "authority": "proposed",
+                }
+            ],
+            "material_unknowns": [
+                {
+                    "unknown_id": "execution-location",
+                    "description": "Where execution occurs",
+                    "resolution_source": "buyer",
+                }
             ],
             "questions": [{"question_id": "software_or_standard", "question": "Which software?"}],
             "state_prevented": ["catalog_recommendation", "supplier_rfq"],
@@ -82,6 +99,9 @@ def test_pending_contract_preserves_bounded_semantic_consent_and_commercial_stat
     assert pending["external_research_consent"] is True
     assert pending["semantic_context"]["catalog_authority"] == "blocked"
     assert pending["semantic_context"]["concepts"][0]["text"] == "mechanical digital twin"
+    assert pending["semantic_context"]["product_category_candidates"][0]["authority"] == "proposed"
+    assert pending["semantic_context"]["workload_hypotheses"][0]["hypothesis_id"] == "local-simulation"
+    assert pending["semantic_context"]["material_unknowns"][0]["resolution_source"] == "buyer"
     assert pending["commercial_context"] == {
         "quantity": 30,
         "total_budget_cents": 7_500_000,

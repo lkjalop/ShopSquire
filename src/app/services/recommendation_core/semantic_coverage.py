@@ -116,12 +116,26 @@ def unresolved_purpose_proposal(
     return {
         "validation": "valid",
         "desired_outcome": str(query or "").strip()[:240],
+        "product_category_candidates": [],
         "concepts": [
             {
                 "text": concept, "query_span": concept, "status": "unresolved",
                 "material": True, "interpretations": [],
             }
             for concept in unresolved[:3]
+        ],
+        # Coverage detection can identify an unsupported purpose span but has no
+        # authority to invent domain interpretations. Competing hypotheses are a
+        # bounded model proposal and remain empty in this deterministic abstention.
+        "workload_hypotheses": [],
+        "material_unknowns": [
+            {
+                "unknown_id": f"purpose-{index + 1}",
+                "description": f"Authoritative meaning and requirements for {concept}",
+                "resolution_source": "research",
+                "material": True,
+            }
+            for index, concept in enumerate(unresolved[:3])
         ],
         "evidence_questions": [{
             "question_id": "workload_architecture",

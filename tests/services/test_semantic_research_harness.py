@@ -55,6 +55,9 @@ def test_ambiguous_domains_share_one_research_first_contract(db, query, buyer_sp
             "confidence": 0.84,
             "semantic_proposal": {
                 "desired_outcome": "qualify a suitable product",
+                "product_category_candidates": [
+                    {"label": "portable computer", "confidence": 0.7}
+                ],
                 "concepts": [{
                     "text": buyer_span,
                     "query_span": buyer_span,
@@ -62,6 +65,32 @@ def test_ambiguous_domains_share_one_research_first_contract(db, query, buyer_sp
                     "status": "unresolved",
                     "material": True,
                 }],
+                "workload_hypotheses": [
+                    {
+                        "hypothesis_id": "specialized-local-compute",
+                        "label": "specialized local compute workload",
+                        "evidence_needed": ["official compatibility requirements"],
+                        "confidence": 0.52,
+                    },
+                    {
+                        "hypothesis_id": "remote-compute-client",
+                        "label": "remote compute client",
+                        "evidence_needed": ["execution location"],
+                        "confidence": 0.34,
+                    },
+                ],
+                "material_unknowns": [
+                    {
+                        "unknown_id": "workload-requirements",
+                        "description": "Official workload requirements",
+                        "resolution_source": "research",
+                    },
+                    {
+                        "unknown_id": "execution-location",
+                        "description": "Local, remote, or hybrid execution",
+                        "resolution_source": "buyer",
+                    },
+                ],
                 "evidence_questions": [{
                     "question_id": "performance_target",
                     "question": "What verified compatibility and performance target is required?",
@@ -83,6 +112,10 @@ def test_ambiguous_domains_share_one_research_first_contract(db, query, buyer_sp
     assert response.products == []
     assert response.extras["slate_disposition"] == "clear"
     assert response.clarify[0]["id"] == "external_research_consent"
+    resolution = response.extras["semantic_resolution"]
+    assert len(resolution["workload_hypotheses"]) == 2
+    assert resolution["workload_hypotheses"][0]["authority"] == "proposed"
+    assert resolution["material_unknowns"][1]["resolution_source"] == "buyer"
     plan = response.extras["plan"]["research_plan"]
     assert plan["subject_spans"] == [buyer_span]
     assert plan["interpretation_origin"] == "model"

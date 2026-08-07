@@ -125,6 +125,21 @@ def build_pending_clarification(
             dict(item) for item in list(semantic.get("concepts") or [])[:4]
             if isinstance(item, Mapping)
         ],
+        "product_category_candidates": [
+            dict(item)
+            for item in list(semantic.get("product_category_candidates") or [])[:5]
+            if isinstance(item, Mapping)
+        ],
+        "workload_hypotheses": [
+            dict(item)
+            for item in list(semantic.get("workload_hypotheses") or [])[:5]
+            if isinstance(item, Mapping)
+        ],
+        "material_unknowns": [
+            dict(item)
+            for item in list(semantic.get("material_unknowns") or [])[:8]
+            if isinstance(item, Mapping)
+        ],
         "questions": [
             dict(item) for item in list(semantic.get("questions") or [])[:5]
             if isinstance(item, Mapping)
