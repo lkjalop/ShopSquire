@@ -149,5 +149,39 @@ def test_question_that_distinguishes_more_open_hypotheses_wins():
     )
 
     assert question["id"] == "execution_location"
-    assert question["selection_policy"] == "bounded_information_gain"
+    assert question["selection_policy"] == "bounded_expected_value"
     assert question["hypotheses_discriminated"] == 2
+    assert question["selection_calibration"] == "heuristic_unsealed"
+
+
+def test_high_question_cost_can_select_lower_cost_material_question():
+    question = select_semantic_clarification(
+        research_status="insufficient",
+        proposed_questions=[
+            {
+                "question_id": "deployment",
+                "question": "Where will it run?",
+                "resolves_unknown_ids": ["deployment"],
+                "decision_impacts": ["architecture", "product_set"],
+            },
+            {
+                "question_id": "latency",
+                "question": "What response time is acceptable?",
+                "resolves_unknown_ids": ["latency"],
+                "decision_impacts": ["capability"],
+            },
+        ],
+        material_unknowns=[
+            {"unknown_id": "deployment", "resolution_source": "buyer"},
+            {"unknown_id": "latency", "resolution_source": "buyer"},
+        ],
+        workload_hypotheses=[
+            {"hypothesis_id": "a", "discriminating_unknown_ids": ["deployment", "latency"]},
+            {"hypothesis_id": "b", "discriminating_unknown_ids": ["deployment"]},
+        ],
+        question_costs={"deployment": 0.9, "latency": 0.0},
+        expected_answerability={"deployment": 0.5, "latency": 1.0},
+    )
+
+    assert question["id"] == "latency"
+    assert question["selection_policy"] == "bounded_expected_value"

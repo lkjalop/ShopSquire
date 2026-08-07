@@ -17,6 +17,9 @@ def select_semantic_clarification(
     proposed_questions: Sequence[Mapping[str, Any]] = (),
     material_unknowns: Sequence[Mapping[str, Any]] = (),
     workload_hypotheses: Sequence[Mapping[str, Any]] = (),
+    commercial_materiality: float = 0.0,
+    question_costs: Mapping[str, float] | None = None,
+    expected_answerability: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Return one buyer-owned question selected by expected decision impact.
 
@@ -64,7 +67,10 @@ def select_semantic_clarification(
         if isinstance(item, Mapping)
         and str(item.get("evidence_coverage") or "unresolved") != "covered"
     ]
-    eligible: list[tuple[int, int, int, Mapping[str, Any], list[str], list[str]]] = []
+    eligible: list[tuple[float, int, int, int, Mapping[str, Any], list[str], list[str]]] = []
+    costs = question_costs or {}
+    answerability = expected_answerability or {}
+    bounded_materiality = max(0.0, min(1.0, float(commercial_materiality or 0.0)))
     for index, proposed in enumerate(proposed_questions):
         text = str(proposed.get("question") or "").strip()
         if not text:
@@ -88,11 +94,21 @@ def select_semantic_clarification(
         ]
         score = sum(impact_weight[value] for value in set(impacts))
         discriminated = sum(1 for ids in hypothesis_unknowns if ids & set(unknown_ids))
-        eligible.append((discriminated, score, -index, proposed, unknown_ids, impacts))
+        question_id = str(proposed.get("question_id") or "concept_resolution")
+        discrimination_ratio = discriminated / max(1, len(hypothesis_unknowns))
+        impact_ratio = min(1.0, score / 12.0)
+        answer_probability = max(0.0, min(1.0, float(answerability.get(question_id, 0.75))))
+        question_cost = max(0.0, min(1.0, float(costs.get(question_id, 0.1))))
+        value_score = (
+            (0.50 * discrimination_ratio + 0.35 * impact_ratio + 0.15 * bounded_materiality)
+            * answer_probability
+            - question_cost
+        )
+        eligible.append((value_score, discriminated, score, -index, proposed, unknown_ids, impacts))
 
     if eligible:
-        discriminated, _, _, proposed, unknown_ids, impacts = max(
-            eligible, key=lambda item: (item[0], item[1], item[2]),
+        value_score, discriminated, _, _, proposed, unknown_ids, impacts = max(
+            eligible, key=lambda item: (item[0], item[1], item[2], item[3]),
         )
         return {
             "id": str(proposed.get("question_id") or "concept_resolution"),
@@ -102,9 +118,11 @@ def select_semantic_clarification(
             "text": str(proposed.get("question") or "").strip(),
             "options": [],
             "selection_policy": (
-                "bounded_information_gain" if hypothesis_unknowns
+                "bounded_expected_value" if hypothesis_unknowns
                 else "expected_decision_impact"
             ),
+            "selection_calibration": "heuristic_unsealed",
+            "bounded_value_score": round(value_score, 4),
             "decision_impacts": impacts,
             "hypotheses_discriminated": discriminated,
         }

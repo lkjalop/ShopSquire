@@ -563,13 +563,14 @@ def reduce_semantic_proposal(
     concepts = tuple(item.model_dump() for item in proposal.concepts)
     questions = tuple(item.model_dump() for item in proposal.evidence_questions if item.material)
     evidence_rows = tuple(item.as_dict() for item in evidence)
+    compared_hypotheses = compare_workload_hypotheses(
+        proposal.workload_hypotheses, evidence,
+    )
     proposal_context = {
         "product_category_candidates": tuple(
             item.model_dump() for item in proposal.product_category_candidates
         ),
-        "workload_hypotheses": compare_workload_hypotheses(
-            proposal.workload_hypotheses, evidence,
-        ),
+        "workload_hypotheses": compared_hypotheses,
         "material_unknowns": tuple(item.model_dump() for item in proposal.material_unknowns),
         "interpretation_confidence": proposal.confidence,
     }
@@ -614,6 +615,34 @@ def reduce_semantic_proposal(
             **proposal_context,
             residual_route="SEARCH" if outcome == "research" else "ASK",
             residual_reasons=(residual_reason,),
+        )
+    viable_hypotheses = [
+        item for item in compared_hypotheses
+        if item.get("evidence_coverage") in {"covered", "partial"}
+    ]
+    buyer_unknown_ids = {
+        item.unknown_id for item in proposal.material_unknowns
+        if item.resolution_source in {"buyer", "either"}
+    }
+    discriminating_ids = {
+        str(value)
+        for item in viable_hypotheses
+        for value in list(item.get("discriminating_unknown_ids") or [])
+    }
+    if len(viable_hypotheses) > 1 and buyer_unknown_ids & discriminating_ids:
+        return SemanticDecision(
+            outcome="clarify",
+            catalog_authority="blocked",
+            reasons=("research_discovered_material_ambiguity",),
+            questions=questions,
+            concepts=concepts,
+            evidence=evidence_rows,
+            state_prevented=("catalog_recommendation", "supplier_enquiry", "commerce_execution"),
+            next_permitted_action="ask_high_value_disambiguation",
+            desired_outcome=proposal.desired_outcome,
+            **proposal_context,
+            residual_route="ASK",
+            residual_reasons=("multiple_evidence_supported_hypotheses",),
         )
     residual_route: ResidualRoute = "AUTHORIZE" if authorization_requested else "CONNECTOR"
     return SemanticDecision(

@@ -1076,6 +1076,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 proposed_questions=list(semantic_decision.questions or ()),
                 material_unknowns=list(semantic_decision.material_unknowns or ()),
                 workload_hypotheses=list(semantic_decision.workload_hypotheses or ()),
+                commercial_materiality=(
+                    1.0 if requested_quantity and requested_quantity > 1 else 0.0
+                ),
             )
             resp.clarify.append(question)
             resp.set_message(question["text"], MsgPriority.BULK_SCOPE_CLARIFY)

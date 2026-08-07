@@ -221,6 +221,62 @@ def test_research_then_clarify_runs_research_before_asking_buyer_details():
     assert decision.next_permitted_action == "run_bounded_concept_research"
 
 
+def test_research_discovered_ambiguity_blocks_catalog_and_asks_buyer():
+    validation = validate_semantic_proposal(
+        {
+            "desired_outcome": "run an unfamiliar simulation",
+            "concepts": [{"text": "adaptive simulation", "status": "unresolved", "material": True}],
+            "workload_hypotheses": [
+                {
+                    "hypothesis_id": "local",
+                    "label": "Local execution",
+                    "required_claim_types": ["recommended_requirements"],
+                    "discriminating_unknown_ids": ["deployment"],
+                },
+                {
+                    "hypothesis_id": "remote",
+                    "label": "Remote execution",
+                    "required_claim_types": ["compatibility"],
+                    "discriminating_unknown_ids": ["deployment"],
+                },
+            ],
+            "material_unknowns": [{
+                "unknown_id": "deployment",
+                "description": "Where execution occurs",
+                "resolution_source": "buyer",
+            }],
+            "evidence_questions": [{
+                "question_id": "deployment",
+                "question": "Will this run locally, remotely, or in a hybrid setup?",
+                "purpose": "resolve_compatibility",
+                "resolves_unknown_ids": ["deployment"],
+                "decision_impacts": ["architecture", "product_set"],
+            }],
+            "proposed_action": "research_then_clarify",
+        },
+        query="hardware for an adaptive simulation",
+    )
+    evidence = [
+        ConceptEvidence(
+            concept="adaptive simulation", status="resolved", claim="requirements",
+            claim_status="verified", claim_type="recommended_requirements",
+        ),
+        ConceptEvidence(
+            concept="adaptive simulation", status="resolved", claim="compatibility",
+            claim_status="verified", claim_type="compatibility",
+        ),
+    ]
+
+    decision = reduce_semantic_proposal(
+        validation, evidence=evidence, research_attempted=True, research_status="resolved",
+    )
+
+    assert decision.outcome == "clarify"
+    assert decision.catalog_authority == "blocked"
+    assert decision.reasons == ("research_discovered_material_ambiguity",)
+    assert decision.next_permitted_action == "ask_high_value_disambiguation"
+
+
 def test_research_then_clarify_asks_only_after_bounded_research_is_insufficient():
     proposal = validate_semantic_proposal(
         {
