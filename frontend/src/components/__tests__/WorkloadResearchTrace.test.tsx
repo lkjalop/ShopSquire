@@ -136,4 +136,58 @@ describe('WorkloadResearchTrace', () => {
       .toHaveTextContent(/buyer-authored; awaiting authoritative evidence/i);
     expect(screen.getAllByText(/Status:/i).some((node) => /blocked/i.test(node.textContent || ''))).toBe(true);
   });
+
+  it('shows model hypotheses, provider attempts, and expected-impact clarification honestly', () => {
+    render(<WorkloadResearchTrace executionSteps={[
+      {
+        id: 'semantic-evidence', kind: 'connector', authority: 'supplies_evidence',
+        output: {
+          legs: {
+            concept_resolution: {
+              found: false,
+              data: {
+                status: 'not_configured',
+                provider_attempts: [{
+                  provider_id: null, status: 'not_configured', capability: 'official_requirements',
+                }],
+              },
+            },
+          },
+        },
+      },
+      {
+        id: 'semantic-authorization', kind: 'gate', authority: 'authorizes', status: 'blocked',
+        output: {
+          workload_hypotheses: [
+            { hypothesis_id: 'local', label: 'Local execution', confidence: 0.61 },
+            { hypothesis_id: 'remote', label: 'Remote client', confidence: 0.32 },
+          ],
+          material_unknowns: [{
+            unknown_id: 'execution-location', description: 'Execution location',
+            resolution_source: 'buyer',
+          }],
+          reasons: ['unresolved_material_concept'],
+          state_prevented: ['catalog_recommendation'],
+        },
+      },
+      {
+        id: 'material-clarification', kind: 'gate', authority: 'requests_buyer_input',
+        status: 'awaiting_buyer',
+        output: {
+          question: 'Will it run locally, remotely, or in a hybrid setup?',
+          missing_slots: ['execution-location'],
+          decision_impacts: ['architecture', 'product_set'],
+          selection_policy: 'expected_decision_impact',
+        },
+      },
+    ]} />);
+
+    expect(screen.getByTestId('research-hypotheses')).toHaveTextContent(/proposed, not accepted/i);
+    expect(screen.getByTestId('research-material-unknowns')).toHaveTextContent(/resolved by buyer/i);
+    expect(screen.getByTestId('semantic-provider-attempts')).toHaveTextContent(/No configured provider: not configured/i);
+    const clarification = screen.getByTestId('material-clarification-trace');
+    expect(clarification).toHaveTextContent(/execution location/i);
+    expect(clarification).toHaveTextContent(/architecture \| product set/i);
+    expect(clarification).toHaveTextContent(/does not itself authorize/i);
+  });
 });

@@ -200,6 +200,32 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             "source": "semantic_resolution",
             "output": semantic_resolution,
         })
+        clarification = next(
+            (
+                dict(item)
+                for item in list(getattr(core, "clarify", []) or [])
+                if isinstance(item, dict)
+                and item.get("selection_policy")
+            ),
+            None,
+        )
+        if clarification:
+            steps.append({
+                "id": "material-clarification",
+                "kind": "gate",
+                "authority": "requests_buyer_input",
+                "label": "Select one material buyer clarification",
+                "status": "awaiting_buyer",
+                "source": "clarification_policy",
+                "output": {
+                    "question_id": clarification.get("id"),
+                    "question": clarification.get("text"),
+                    "missing_slots": list(clarification.get("missing_slots") or []),
+                    "selection_policy": clarification.get("selection_policy"),
+                    "decision_impacts": list(clarification.get("decision_impacts") or []),
+                    "commercial_authority_granted": False,
+                },
+            })
 
     case_obligations = [
         dict(item) for item in list(

@@ -2,7 +2,7 @@ type Props = {
   executionSteps?: any[];
 };
 
-const words = (value: unknown) => String(value || 'not recorded').replace(/_/g, ' ');
+const words = (value: unknown) => String(value || 'not recorded').replace(/[_-]+/g, ' ');
 
 const RequirementRows = ({ title, value }: { title: string; value: any }) => {
   const rows = value && typeof value === 'object' ? Object.entries(value) : [];
@@ -30,6 +30,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const compiler = executionSteps.find((step) => step?.id === 'requirements-compiler') || {};
   const semanticEvidence = executionSteps.find((step) => step?.id === 'semantic-evidence') || {};
   const semanticAuthorization = executionSteps.find((step) => step?.id === 'semantic-authorization') || {};
+  const materialClarification = executionSteps.find((step) => step?.id === 'material-clarification') || {};
   const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
   const evidenceOutput = evidence?.output || {};
   const evidenceItems = Array.isArray(evidenceOutput.items) ? evidenceOutput.items : [];
@@ -39,6 +40,10 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const evidenceNeeds = Array.isArray(planOutput?.evidence_needs) ? planOutput.evidence_needs : [];
   const materialSlots = Array.isArray(planOutput?.material_slots) ? planOutput.material_slots : [];
   const semanticLegs = semanticEvidence?.output?.legs || {};
+  const hypotheses = Array.isArray(semanticAuthorization?.output?.workload_hypotheses)
+    ? semanticAuthorization.output.workload_hypotheses : [];
+  const unknowns = Array.isArray(semanticAuthorization?.output?.material_unknowns)
+    ? semanticAuthorization.output.material_unknowns : [];
   const compiledRequirements = Array.isArray(compiler?.output?.compiled_requirements)
     ? compiler.output.compiled_requirements : [];
   const rejectedClaims = Array.isArray(compiler?.output?.rejected_claims)
@@ -73,6 +78,31 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
                 : 'No bounded workload entity was proposed.')}
           </div>
           <small style={{ color: '#64748b' }}>The model proposes identity and evidence needs; it does not authorize product fit.</small>
+          {hypotheses.length > 0 && (
+            <div data-testid="research-hypotheses" style={{ marginTop: 7 }}>
+              <strong>Competing hypotheses to investigate</strong>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                {hypotheses.map((item: any, index: number) => (
+                  <li key={item?.hypothesis_id || index}>
+                    {item?.label || 'Unnamed hypothesis'} - proposed, not accepted
+                    {item?.confidence != null ? ` (${Math.round(Number(item.confidence) * 100)}% interpreter confidence)` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {unknowns.length > 0 && (
+            <div data-testid="research-material-unknowns" style={{ marginTop: 7 }}>
+              <strong>Material unknowns</strong>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                {unknowns.map((item: any, index: number) => (
+                  <li key={item?.unknown_id || index}>
+                    {item?.description || words(item?.unknown_id)} - resolved by {words(item?.resolution_source)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {researchPlan.id && (
@@ -160,9 +190,33 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
             <div key={name} style={{ marginTop: 8, paddingTop: 7, borderTop: '1px solid #e2e8f0' }}>
               <strong>{words(name)}</strong>: {words(leg?.data?.status || (leg?.found ? 'accepted candidate' : 'attempted empty'))}
               {leg?.summary && <div style={{ marginTop: 3 }}>{leg.summary}</div>}
+              {Array.isArray(leg?.data?.provider_attempts) && leg.data.provider_attempts.length > 0 && (
+                <ul data-testid="semantic-provider-attempts" style={{ margin: '5px 0 0', paddingLeft: 20 }}>
+                  {leg.data.provider_attempts.map((attempt: any, index: number) => (
+                    <li key={`${attempt?.provider_id || 'unconfigured'}-${attempt?.capability || index}-${index}`}>
+                      {attempt?.provider_id || 'No configured provider'}: {words(attempt?.status)}
+                      {attempt?.capability ? ` for ${words(attempt.capability)}` : ''}
+                      {attempt?.deadline_ms ? ` (${attempt.deadline_ms}ms deadline)` : ''}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ))}
         </div>
+
+        {materialClarification.id && (
+          <div data-testid="material-clarification-trace" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Material clarification decision</strong>
+            <div style={{ marginTop: 5 }}>{materialClarification?.output?.question || 'Question not recorded'}</div>
+            <div>Buyer-owned gap: <strong>{(materialClarification?.output?.missing_slots || []).map(words).join(' | ') || 'not recorded'}</strong></div>
+            <div>Expected impact: <strong>{(materialClarification?.output?.decision_impacts || []).map(words).join(' | ') || 'not recorded'}</strong></div>
+            <div>Selection policy: <strong>{words(materialClarification?.output?.selection_policy)}</strong></div>
+            <small style={{ color: '#64748b' }}>
+              One material question is selected after bounded research. The answer does not itself authorize a product or action.
+            </small>
+          </div>
+        )}
 
         {compiler.id && (
           <div style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>

@@ -55,7 +55,13 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
         lane="SEARCH",
         degraded=False,
         products=[],
-        clarify=[{"id": "external_research_consent"}],
+        clarify=[{
+            "id": "execution_location",
+            "text": "Will the workload run locally, remotely, or in a hybrid setup?",
+            "missing_slots": ["execution-location"],
+            "selection_policy": "expected_decision_impact",
+            "decision_impacts": ["architecture", "capability", "product_set"],
+        }],
         extras={
             "decision": {"source": "model", "model_proposal": {}, "authorization_changes": []},
             "plan": {
@@ -103,6 +109,11 @@ def test_trace_projects_generic_research_plan_evidence_and_authorization():
     assert by_id["semantic-evidence"]["latency_ms"] == 12
     assert by_id["semantic-authorization"]["kind"] == "gate"
     assert by_id["semantic-authorization"]["status"] == "blocked"
+    assert by_id["material-clarification"]["authority"] == "requests_buyer_input"
+    assert by_id["material-clarification"]["output"]["missing_slots"] == [
+        "execution-location"
+    ]
+    assert by_id["material-clarification"]["output"]["commercial_authority_granted"] is False
 
 
 def test_trace_projects_relative_quantity_as_pending_commercial_authorization():
