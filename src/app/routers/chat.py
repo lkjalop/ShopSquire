@@ -1529,15 +1529,12 @@ def _persist_chat_structured_state(
         out["last_shortlist_skus"] = skus
         out["last_valid_shortlist_skus"] = skus
 
-    # Material semantic blockers are case authority, not transient presentation. Preserve them
-    # across short follow-ups so "choose" and "confirm" cannot silently reopen retrieval. A
-    # later permitted resolution explicitly clears the blocker; an unrelated response leaves the
-    # prior state intact rather than losing it because one adapter omitted the field.
+    # Semantic decisions are case authority, not transient presentation. Preserve both blocked
+    # and permitted decisions: permitted evidence is what a later EXPLAIN turn needs to retain the
+    # workload and provenance. A later semantic decision supersedes the prior one explicitly.
     if isinstance(semantic_resolution, dict):
-        if semantic_resolution.get("catalog_authority") == "blocked":
+        if semantic_resolution.get("catalog_authority") in {"blocked", "permitted"}:
             out["semantic_resolution"] = dict(semantic_resolution)
-        elif semantic_resolution.get("catalog_authority") == "permitted":
-            out.pop("semantic_resolution", None)
     if isinstance(case_anchor, dict) and str(case_anchor.get("case_id") or "").strip():
         out["case_anchor"] = dict(case_anchor)
 

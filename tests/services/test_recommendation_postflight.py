@@ -129,6 +129,49 @@ def test_named_workload_entities_roundtrip_for_consent_retry():
     assert constraints["workload_entities"] == [["game", "Black Myth Wukong"]]
 
 
+def test_accepted_semantic_evidence_and_fit_explanation_roundtrip():
+    r = _Redis()
+    env = _env()
+    core = _core(env)
+    core.extras["semantic_resolution"] = {
+        "outcome": "proceed_catalog",
+        "catalog_authority": "permitted",
+        "desired_outcome": "simulate mechanical-machine maintenance",
+        "interpretation_confidence": 0.83,
+        "evidence": [{"source_id": "official-provider", "claim_status": "verified"}],
+    }
+    core.extras["semantic_requirement_compilation"] = {
+        "status": "accepted",
+        "compiled_requirements": [{
+            "attribute_key": "ram_gb",
+            "operator": ">=",
+            "value": 32,
+            "unit": "GB",
+            "source_claim_ids": ["official:ram"],
+        }],
+        "commercial_authority_granted": False,
+    }
+    core.extras["explanation"] = {
+        "sku": "LAP-1",
+        "workload_summary": "simulate mechanical-machine maintenance",
+        "fit_ledger": [],
+    }
+
+    assert write_session(r, env, core) is True
+    raw = _raw(r)
+    assert raw["semantic_resolution"]["catalog_authority"] == "permitted"
+    assert raw["semantic_requirement_compilation"]["compiled_requirements"][0][
+        "source_claim_ids"
+    ] == ["official:ram"]
+    assert raw["last_product_explanation"]["sku"] == "LAP-1"
+
+    slice_ = F._read_session_slice(r, "u1", "t1")
+    assert slice_["semantic_resolution"]["desired_outcome"] == (
+        "simulate mechanical-machine maintenance"
+    )
+    assert slice_["semantic_requirement_compilation"]["status"] == "accepted"
+
+
 def test_explicit_brand_clear_drops_all_prior_brand_constraints():
     import dataclasses
     r = _Redis()

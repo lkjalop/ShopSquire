@@ -101,6 +101,11 @@ def finalize_core_response(
     right_panel["semantic_evidence"] = out.get("semantic_evidence")
     right_panel["catalog_alignment"] = out.get("catalog_alignment")
     right_panel["case_obligations"] = out.get("case_obligations")
+    right_panel["explanation"] = (
+        dict(out.get("explanation") or {})
+        if isinstance(out.get("explanation"), dict)
+        else None
+    )
     out["right_panel"] = right_panel
     lane = str(out.get("turn_intent") or "").strip().upper() or None
     routing_source = str(out.get("routing_source") or "").strip() or None

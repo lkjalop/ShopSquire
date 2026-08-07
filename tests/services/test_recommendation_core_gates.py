@@ -20,6 +20,16 @@ def test_missing_use_case_and_requirements_still_clarifies():
     assert question and question["id"] == "ask_use_case"
 
 
+def test_explicit_explanation_obligation_defers_budget_question():
+    assert slot_gap_clarify(
+        has_products=True,
+        budget_known=False,
+        has_requirements=True,
+        has_use_case=False,
+        allow_budget_question=False,
+    ) is None
+
+
 def test_empty_retrieval_missing_budget_recovers_with_clarify():
     # The inversion fix: zero results + a missing slot is when clarify matters MOST.
     q = slot_gap_clarify(has_products=False, budget_known=False, has_requirements=False)

@@ -160,6 +160,7 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "fulfillment_options": core.extras.get("fulfillment_options"),
         "sourcing_intent": core.extras.get("sourcing_intent"),
         "semantic_resolution": core.extras.get("semantic_resolution"),
+        "semantic_requirement_compilation": core.extras.get("semantic_requirement_compilation"),
         "semantic_evidence": core.extras.get("semantic_evidence"),
         "approved_narration_evidence": core.extras.get("approved_narration_evidence", []),
         "catalog_alignment": core.extras.get("catalog_alignment"),

@@ -803,7 +803,9 @@ def test_compound_refine_and_explain_answers_from_authorized_fit(db):
     assert response.extras["secondary_lanes"] == ["EXPLAIN"]
     assert response.extras["explanation"]["sku"] == "LAP-2"
     assert "Why Asus TUF" in response.message
-    assert "meets all" in response.message
+    assert "32 GB" in response.message
+    assert "12 GB" in response.message
+    assert "meets all" not in response.message
 
 
 def test_compound_explain_stays_anchored_to_persisted_cart_product(db):
@@ -832,6 +834,33 @@ def test_compound_explain_stays_anchored_to_persisted_cart_product(db):
                 "ram_gb": [[">=", 32]],
             },
         },
+        "semantic_resolution": {
+            "outcome": "proceed_catalog",
+            "catalog_authority": "permitted",
+            "desired_outcome": "simulate mechanical-machine maintenance",
+            "interpretation_confidence": 0.83,
+            "material_unknowns": [],
+        },
+        "semantic_requirement_compilation": {
+            "status": "accepted",
+            "compiled_requirements": [
+                {
+                    "attribute_key": "gpu_vram_gb",
+                    "operator": ">=",
+                    "value": 12,
+                    "unit": "GB",
+                    "source_claim_ids": ["official:vram"],
+                },
+                {
+                    "attribute_key": "ram_gb",
+                    "operator": ">=",
+                    "value": 32,
+                    "unit": "GB",
+                    "source_claim_ids": ["official:ram"],
+                },
+            ],
+            "commercial_authority_granted": False,
+        },
     }
 
     response = recommend_turn(
@@ -851,6 +880,19 @@ def test_compound_explain_stays_anchored_to_persisted_cart_product(db):
     assert response.extras["explanation"]["sku"] == "LAP-2"
     assert response.extras["explanation"]["fit_ledger"]
     assert all(row["observed_source"] == "catalog_attribute" for row in response.extras["explanation"]["fit_ledger"])
+    assert response.extras["explanation"]["workload_summary"] == (
+        "simulate mechanical-machine maintenance"
+    )
+    assert response.extras["explanation"]["qualification_scope"] == "bounded_requirements"
+    assert {
+        ref
+        for row in response.extras["explanation"]["fit_ledger"]
+        for ref in row["requirement_evidence_refs"]
+    } == {"official:vram", "official:ram"}
+    assert "simulate mechanical-machine maintenance" in response.message
+    assert "32 GB" in response.message and "12 GB" in response.message
+    assert "meets all" not in response.message
+    assert not any(question.get("id") == "ask_budget" for question in response.clarify)
 
 
 def test_deadline_preview_is_unknown_without_date_qualified_arrival_evidence():

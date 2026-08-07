@@ -36,6 +36,7 @@ import StorefrontTrustBanner, {
   type TrustEvidence,
 } from './components/StorefrontTrustBanner';
 import ProductWhyEvidence, { type ProductWhyExplanation } from './components/ProductWhyEvidence';
+import InlineMessageText from './components/InlineMessageText';
 import {
   detectCVIssueType,
   detectPanelMode,
@@ -2540,7 +2541,7 @@ export default function App() {
                             const isWarn = /^\s*(⚠️|\[security\])/i.test(para);
                             return (
                               <div key={pi} className={isWarn ? styles.msgSecurity : styles.msgPara}>
-                                {para.trim()}
+                                <InlineMessageText text={para.trim()} />
                               </div>
                             );
                           })
@@ -2567,7 +2568,7 @@ export default function App() {
                           </ul>
                         </details>
                       )}
-                      {msg.nextQuestions && msg.nextQuestions.length > 0 && (
+                      {i === messages.length - 1 && msg.nextQuestions && msg.nextQuestions.length > 0 && (
                         /* ONE framed "narrow this down" card instead of a loose chip wall (demo
                            feedback: "looks clunky — maybe a separate output box"). Question text is a
                            heading, its options are compact chips beneath; capped at 2 questions. */

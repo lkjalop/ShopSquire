@@ -32,20 +32,38 @@ test('selected product explanation and two-day feasibility share one governed tr
 
   await send(
     page,
-    'Recommend a laptop for an unfamiliar industrial maintenance simulation. '
+    'Recommend a laptop for predicting mechanical-machine breakdown with an unfamiliar '
+      + 'industrial maintenance simulation. '
       + 'Use approved official requirements sources; I consent to that research.',
   );
-  const add = page.getByRole('button', { name: 'Add', exact: true }).first();
+  const lenovoCard = page.locator('[data-testid="recommendation-shelf"] article')
+    .filter({ hasText: 'Lenovo Legion Pro 7' }).first();
+  await expect(lenovoCard).toBeVisible({ timeout: 30_000 });
+  const add = lenovoCard.getByRole('button', { name: 'Add', exact: true });
   await expect(add).toBeVisible({ timeout: 30_000 });
   await add.click();
   await expect(page.getByText(/has been added to your cart/i)).toBeVisible({ timeout: 30_000 });
-
+  await expect(page.locator('strong').filter({ hasText: 'Lenovo Legion Pro 7 16IAX10H' }).last()).toBeVisible();
+  await expect(page.getByText(/\*\*Lenovo Legion Pro 7/)).toHaveCount(0);
   await send(
     page,
     'Actually, can you explain why this is a good choice? I need about 30 of those in 2 days.',
   );
   await expect(page.getByText(/cart stays unchanged until you confirm/i)).toBeVisible();
   await expect(page.getByText(/Set it to exactly 30/i)).toBeVisible();
+  await expect(page.getByText(/mechanical-machine breakdown|mechanical-machine maintenance/i).last()).toBeVisible();
+  await expect(page.getByText(/bounded qualification/i).last()).toBeVisible();
+  await expect(page.getByText(/RAM .*32 GB/i).last()).toBeVisible();
+  await expect(page.getByText(/GPU VRAM .*12 GB|GPU VRAM .*8 GB/i).last()).toBeVisible();
+  await expect(page.getByText('What budget range should I stay within?', { exact: true })).toHaveCount(0);
+
+  const currentLenovoCard = page.locator('[data-testid="recommendation-shelf"] article')
+    .filter({ hasText: 'Lenovo Legion Pro 7' }).first();
+  await currentLenovoCard.getByRole('button', { name: 'Why?' }).click();
+  const whyDrawer = page.getByText(/Why this product:/).locator('..').locator('..');
+  await expect(whyDrawer.getByText(/mechanical-machine breakdown|mechanical-machine maintenance/i)).toBeVisible();
+  await expect(whyDrawer.getByRole('region', { name: 'Product workload fit' })).toContainText(/RAM|GPU VRAM/i);
+  await whyDrawer.getByRole('button', { name: /close product explanation/i }).click();
 
   await page.getByTitle('Decision Trace').click();
   const modal = page.getByTestId('decision-trace-modal');

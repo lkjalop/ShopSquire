@@ -605,6 +605,14 @@ def _read_session_slice(
                     data.get("semantic_resolution")
                     if isinstance(data.get("semantic_resolution"), dict) else None
                 ),
+                "semantic_requirement_compilation": (
+                    data.get("semantic_requirement_compilation")
+                    if isinstance(data.get("semantic_requirement_compilation"), dict) else None
+                ),
+                "last_product_explanation": (
+                    data.get("last_product_explanation")
+                    if isinstance(data.get("last_product_explanation"), dict) else None
+                ),
                 "case_anchor": (
                     data.get("case_anchor")
                     if isinstance(data.get("case_anchor"), dict) else None

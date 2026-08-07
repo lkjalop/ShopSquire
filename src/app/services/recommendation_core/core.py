@@ -1292,7 +1292,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     _run_stage(resp, "fulfillment_preview",
                lambda: _maybe_fulfillment_preview(envelope, decision, resp))
     _run_stage(resp, "secondary_explanation",
-               lambda: _apply_secondary_explanation(decision, resp))
+               lambda: _apply_secondary_explanation(envelope, decision, resp))
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
@@ -1300,7 +1300,18 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             has_products=bool(resp.products),
             budget_known=envelope.budget_max_cents is not None or envelope.budget_min_cents is not None,
             has_requirements=bool(decision.requirements),
-            has_use_case=bool(decision.use_cases))
+            has_use_case=bool(decision.use_cases),
+            # A selected-product explanation, quantity proposal, or delivery check is already a
+            # material obligation. Do not let a generic budget-refinement chip preempt it.
+            allow_budget_question=not bool(
+                decision.exact_product_sku
+                and (
+                    "EXPLAIN" in decision.secondary_lanes
+                    or decision.lane == "EXPLAIN"
+                    or decision.quantity is not None
+                    or decision.operational_constraints
+                )
+            ))
         if q:
             resp.clarify.append(q)
     return resp.finalize()
@@ -2393,7 +2404,11 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
                                   f"options, ranked by how near they come."), MsgPriority.LANE_BASE)
 
 
-def _apply_secondary_explanation(decision: TurnDecision, resp: CoreResponse) -> None:
+def _apply_secondary_explanation(
+    envelope: TurnEnvelope,
+    decision: TurnDecision,
+    resp: CoreResponse,
+) -> None:
     """Answer a compound EXPLAIN obligation from the authorized product verdict."""
     if "EXPLAIN" not in decision.secondary_lanes or not resp.products:
         return
@@ -2413,47 +2428,35 @@ def _apply_secondary_explanation(decision: TurnDecision, resp: CoreResponse) -> 
         ).strip()
         return
     top = top or resp.products[0]
-    verdict = str((top.fit or {}).get("overall") or "")
-    reasons = "; ".join(top.why[:3]) if top.why else "it ranks highest on the authorized slate"
-    if verdict == "meets":
-        explanation = f"Why {top.title} leads: {reasons}."
-    elif verdict:
-        explanation = (
-            f"Why {top.title} is shown: {reasons}. It is an alternative, not a full match."
-        )
-    else:
-        explanation = f"Why {top.title} leads: {reasons}."
-    per_key = (top.fit or {}).get("per_key") or {}
-    observed = (top.fit or {}).get("observed") or {}
-    compiled = (
-        resp.extras.get("semantic_requirement_compilation", {}).get("compiled_requirements", [])
-        if isinstance(resp.extras.get("semantic_requirement_compilation"), dict) else []
+    semantic = (
+        resp.extras.get("semantic_resolution")
+        if isinstance(resp.extras.get("semantic_resolution"), dict)
+        else envelope.session.get("semantic_resolution")
+        if isinstance(envelope.session.get("semantic_resolution"), dict)
+        else {}
     )
-    sources_by_key = {
-        str(item.get("attribute_key")): list(item.get("source_claim_ids") or [])
-        for item in compiled if isinstance(item, dict) and item.get("attribute_key")
-    }
-    fit_ledger = []
-    for key, predicates in decision.requirements.items():
-        status = per_key.get(key)
-        fit_ledger.append({
-            "attribute": key,
-            "required": [list(predicate) for predicate in predicates],
-            "requirement_source": (
-                "authoritative_external_evidence" if sources_by_key.get(key)
-                else "buyer_or_authorized_workload_requirement"
-            ),
-            "requirement_evidence_refs": sources_by_key.get(key, []),
-            "observed": observed.get(key),
-            "observed_source": "catalog_attribute",
-            "verdict": "meets" if status is True else "fails" if status is False else "unknown",
-        })
-    resp.extras["explanation"] = {
-        "sku": top.sku,
-        "verdict": verdict or None,
-        "basis": list(top.why[:3]),
-        "fit_ledger": fit_ledger,
-    }
+    compilation = (
+        resp.extras.get("semantic_requirement_compilation")
+        if isinstance(resp.extras.get("semantic_requirement_compilation"), dict)
+        else envelope.session.get("semantic_requirement_compilation")
+        if isinstance(envelope.session.get("semantic_requirement_compilation"), dict)
+        else {}
+    )
+    if semantic:
+        resp.extras.setdefault("semantic_resolution", dict(semantic))
+    if compilation:
+        resp.extras.setdefault("semantic_requirement_compilation", dict(compilation))
+    from src.app.services.recommendation_core.product_fit_explanation import (
+        build_product_fit_explanation,
+    )
+
+    explanation_payload, explanation = build_product_fit_explanation(
+        product=top,
+        requirements=decision.requirements,
+        semantic_resolution=semantic,
+        requirement_compilation=compilation,
+    )
+    resp.extras["explanation"] = explanation_payload
     current = str(resp.message or "").strip()
     if explanation not in current:
         resp.message = f"{current} {explanation}".strip()

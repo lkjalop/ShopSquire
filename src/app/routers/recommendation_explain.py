@@ -18,7 +18,7 @@ from src.app.security.auth import (
     ROLE_OWNER,
     require_role,
 )
-from src.app.services.decision_log import log_trace_event
+from src.app.services.decision_log import get_cached_trace_events, log_trace_event
 from src.app.services.catalog_read_model import get_variant
 from src.app.services.memory import Memory
 from src.app.services.recommendations import RecommendationService
@@ -110,6 +110,45 @@ def build_sku_explanation(
     }
 
 
+def _canonical_fit_explanation(
+    structured_state: Dict[str, Any],
+    target_sku: str,
+) -> Dict[str, Any] | None:
+    explanation = structured_state.get("last_product_explanation")
+    if not isinstance(explanation, dict):
+        return None
+    if str(explanation.get("sku") or "").strip() != str(target_sku or "").strip():
+        return None
+    if not isinstance(explanation.get("fit_ledger"), list):
+        return None
+    return dict(explanation)
+
+
+def _canonical_fit_explanation_from_trace(
+    trace_id: str | None,
+    target_sku: str,
+) -> Dict[str, Any] | None:
+    if not trace_id:
+        return None
+    for event in reversed(get_cached_trace_events(str(trace_id))):
+        payload = event.get("payload") if isinstance(event, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        right_panel = payload.get("right_panel_contract")
+        candidates = [
+            payload.get("explanation"),
+            right_panel.get("explanation") if isinstance(right_panel, dict) else None,
+        ]
+        for explanation in candidates:
+            canonical = _canonical_fit_explanation(
+                {"last_product_explanation": explanation},
+                target_sku,
+            )
+            if canonical is not None:
+                return canonical
+    return None
+
+
 @router.get("/why_product")
 def explain_why_product(
     request: Request,
@@ -128,7 +167,32 @@ def explain_why_product(
     if not target_sku:
         raise HTTPException(status_code=400, detail="sku required")
 
-    state = Memory(redis).get_kv(uid) or {}
+    tenant_id = str(
+        request.headers.get("X-Tenant-Id")
+        or request.headers.get("x-tenant-id")
+        or "default"
+    ).strip()
+    canonical = _canonical_fit_explanation_from_trace(trace_id, target_sku)
+    if canonical is not None:
+        decision_trace_id = str(trace_id or _current_trace_id() or uuid.uuid4())
+        return {
+            "decision_trace_id": decision_trace_id,
+            "trace_id": decision_trace_id,
+            "explanation": canonical,
+        }
+
+    scoped_memory = Memory(redis, tenant_id=tenant_id)
+    structured_state = scoped_memory.get_structured_state(uid) or {}
+    canonical = _canonical_fit_explanation(structured_state, target_sku)
+    if canonical is not None:
+        decision_trace_id = str(trace_id or _current_trace_id() or uuid.uuid4())
+        return {
+            "decision_trace_id": decision_trace_id,
+            "trace_id": decision_trace_id,
+            "explanation": canonical,
+        }
+
+    state = scoped_memory.get_kv(uid) or {}
     snapshot = (
         state.get("last_constraints_snapshot")
         if isinstance(state.get("last_constraints_snapshot"), dict)
@@ -190,11 +254,6 @@ def explain_why_product(
                 "factors": {"positive": [], "negative": [], "checks": []},
             }
     if not row:
-        tenant_id = str(
-            request.headers.get("X-Tenant-Id")
-            or request.headers.get("x-tenant-id")
-            or "default"
-        ).strip()
         variant = get_variant(db, target_sku, tenant_id=tenant_id)
         if variant:
             row = {

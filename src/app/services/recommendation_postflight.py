@@ -106,6 +106,24 @@ def write_session(
             },
             "last_lane": core.lane,
             "active_workflow_lane": active_workflow,
+            # Accepted workload meaning and requirement provenance are case state, not prose.
+            # Persist them so an EXPLAIN/quantity/deadline follow-up compares the selected SKU
+            # against the same authorized predicates instead of degrading to generic ranking.
+            "semantic_resolution": (
+                dict(core.extras["semantic_resolution"])
+                if isinstance(core.extras.get("semantic_resolution"), dict)
+                else (envelope.session or {}).get("semantic_resolution")
+            ),
+            "semantic_requirement_compilation": (
+                dict(core.extras["semantic_requirement_compilation"])
+                if isinstance(core.extras.get("semantic_requirement_compilation"), dict)
+                else (envelope.session or {}).get("semantic_requirement_compilation")
+            ),
+            "last_product_explanation": (
+                dict(core.extras["explanation"])
+                if isinstance(core.extras.get("explanation"), dict)
+                else (envelope.session or {}).get("last_product_explanation")
+            ),
             "ts": int(time.time()),
         }
         from src.app.services.memory import Memory

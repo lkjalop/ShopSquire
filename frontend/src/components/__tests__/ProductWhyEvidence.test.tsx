@@ -36,5 +36,34 @@ describe('ProductWhyEvidence', () => {
     expect(screen.getByText(/Within the stated budget/)).toBeInTheDocument();
     expect(screen.queryByText(/Ranking evidence unavailable/)).not.toBeInTheDocument();
   });
-});
 
+  it('renders canonical workload fit before ranking evidence', () => {
+    render(
+      <ProductWhyEvidence
+        explanation={{
+          sku: 'LAP-2',
+          workload_summary: 'simulate mechanical-machine maintenance',
+          qualification_scope: 'bounded_requirements',
+          coverage_status: 'partial',
+          fit_ledger: [{
+            attribute: 'ram_gb',
+            required: [['>=', 32]],
+            observed: 64,
+            verdict: 'meets',
+            requirement_source: 'authoritative_external_evidence',
+            requirement_evidence_refs: ['official:ram'],
+          }],
+          matched_constraints: [],
+          rank_factors: [],
+          alternatives_not_selected: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/simulate mechanical-machine maintenance/i)).toBeInTheDocument();
+    expect(screen.getByText(/ram gb/i)).toBeInTheDocument();
+    expect(screen.getByText(/64/)).toBeInTheDocument();
+    expect(screen.getAllByText(/partial/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Ranking evidence unavailable/)).not.toBeInTheDocument();
+  });
+});
