@@ -1850,17 +1850,31 @@ def test_uncovered_workload_abstains_and_does_not_inherit_stale_quantity(db):
         # quantity even though the current buyer turn did not state one.
         "quantity": 30,
         "subject_action": "continue",
+        "clarification_relation": "interrupt",
         "confidence": 0.91,
     }
     session = {
         "prior_node": "el-6-11-2",
         "accepted_constraints": {"quantity": 30},
+        "pending_clarification": {
+            "version": 2,
+            "state": "active",
+            "question_id": "gaming_tier",
+            "question": "For gaming, which level fits?",
+            "original_query": "I need 30 gaming laptops under AUD 2500 each.",
+        },
     }
     response = recommend_turn(
         db,
         _env(
+            "I need 30 gaming laptops under AUD 2500 each. "
+            "Buyer clarification to 'For gaming, which level fits?': "
             "I need help with a laptop for digital twin simulation? "
-            "I need it to simulate a cyber attack?",
+            "I need it to simulate a cyber attack?.",
+            buyer_query=(
+                "I need help with a laptop for digital twin simulation? "
+                "I need it to simulate a cyber attack?"
+            ),
             session=session,
         ),
         llm_fn=lambda _prompt, _timeout: json.dumps(payload),
@@ -1875,6 +1889,7 @@ def test_uncovered_workload_abstains_and_does_not_inherit_stale_quantity(db):
     assert response.extras.get("requested_quantity") is None
     assert response.extras.get("quantity_inherited") is not True
     assert "catalog_recommendation" in semantic["state_prevented"]
+    assert "30 gaming laptops" not in semantic["desired_outcome"]
 
 
 def test_unresolved_workload_preserves_quantity_stated_in_current_turn(db):

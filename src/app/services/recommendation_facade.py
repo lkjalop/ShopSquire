@@ -905,6 +905,9 @@ def dispatch_recommendation_core_typed(
     if mode == "off" and cart_mode == "off":
         return outcome("delegate", reason="mode_off")
     tenant = tenant_id or "default"
+    literal_buyer_query = str(
+        (clarification_answer or {}).get("value") or query or ""
+    ).strip()
 
     # Universal quota admission belongs at the typed ingress. Legacy delegation retains its own
     # check during migration; checks are read-only, so delegation cannot double-charge usage.
@@ -1047,6 +1050,7 @@ def dispatch_recommendation_core_typed(
                     envelope = TurnEnvelope.from_suggest_params(
                         query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                         budget_max=budget_max, trace_id=trace_id, has_image=False,
+                        buyer_query=literal_buyer_query,
                         intent_hint=intent_hint,
                         source_ip=source_ip, session=session,
                         cart=cart_slice, pre_gate=_served_guard,
@@ -1087,6 +1091,7 @@ def dispatch_recommendation_core_typed(
             shadow_env = TurnEnvelope.from_suggest_params(
                 query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
                 budget_max=budget_max, trace_id=trace_id,
+                buyer_query=literal_buyer_query,
                 intent_hint=intent_hint,
                 has_image=bool(image_labels or image_hash), source_ip=source_ip,
                 image_observations=image_observations,
@@ -1141,6 +1146,7 @@ def dispatch_recommendation_core_typed(
         envelope = TurnEnvelope.from_suggest_params(
             query=query, uid=uid or "", tenant_id=tenant, budget_min=budget_min,
             budget_max=budget_max, trace_id=trace_id,
+            buyer_query=literal_buyer_query,
             intent_hint=intent_hint,
             has_image=bool(image_labels or image_hash), source_ip=source_ip,
             image_observations=image_observations,

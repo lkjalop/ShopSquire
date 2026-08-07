@@ -81,6 +81,10 @@ class TurnEnvelope:
     uid: str
     query: str
     trace_id: str
+    # Literal text authored in this buyer turn. ``query`` may include a bounded clarification
+    # annotation so the interpreter can classify answer vs interruption; consequential facts and
+    # a superseding semantic objective must remain anchored to the literal buyer utterance.
+    buyer_query: Optional[str] = None
     # Authoritative settlement currency for this tenant/store. Products in another currency
     # are not comparable until a bounded FX quote is attached at ingress.
     currency: str = "USD"
@@ -118,6 +122,7 @@ class TurnEnvelope:
                             source_ip: Optional[str] = None,
                             external_research_consent: bool = False,
                             clarification_answer: Optional[Dict[str, Any]] = None,
+                            buyer_query: Optional[str] = None,
                             intent_hint: Optional[str] = None,
                             session: Optional[Dict[str, Any]] = None,
                             cart: Optional[List[Dict[str, Any]]] = None,
@@ -152,6 +157,7 @@ class TurnEnvelope:
             normalized_currency = "USD"
         return cls(tenant_id=str(tenant_id or "default"), uid=str(uid or ""),
                    query=str(query or "").strip(), trace_id=trace_id or str(uuid.uuid4()),
+                   buyer_query=str(buyer_query or query or "").strip(),
                    currency=normalized_currency,
                    intent_hint=normalized_hint,
                    budget_min_cents=to_cents(budget_min), budget_max_cents=to_cents(budget_max),
@@ -167,6 +173,7 @@ class TurnEnvelope:
         A shadow job that drops budget/session/image measures a DIFFERENT turn than production
         served; this is the full-fidelity round-trip that closes that gap."""
         return {"tenant_id": self.tenant_id, "uid": self.uid, "query": self.query,
+                "buyer_query": self.buyer_query,
                 "trace_id": self.trace_id, "currency": self.currency,
                 "intent_hint": self.intent_hint,
                 "budget_min_cents": self.budget_min_cents,
@@ -187,6 +194,7 @@ class TurnEnvelope:
             hint = None
         return cls(tenant_id=str(d.get("tenant_id") or "default"), uid=str(d.get("uid") or ""),
                    query=str(d.get("query") or ""), trace_id=str(d.get("trace_id") or uuid.uuid4()),
+                   buyer_query=str(d.get("buyer_query") or d.get("query") or ""),
                    currency=(str(d.get("currency") or "USD").strip().upper()
                              if len(str(d.get("currency") or "USD").strip()) == 3 else "USD"),
                    intent_hint=hint,

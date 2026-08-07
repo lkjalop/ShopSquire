@@ -881,11 +881,18 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             key: value for key, value in plan.semantic_proposal.items()
             if key not in ("validation", "reasons")
         }
+        semantic_turn_query = (
+            envelope.buyer_query or envelope.query
+            if decision.clarification_relation in {"interrupt", "supersede"}
+            else envelope.query
+        )
         semantic_anchor = (
             str(raw_semantic.get("desired_outcome") or envelope.query)
             if raw_semantic.get("persisted_case_blocker")
-            else envelope.query
+            else semantic_turn_query
         )
+        if decision.clarification_relation in {"interrupt", "supersede"}:
+            raw_semantic["desired_outcome"] = semantic_turn_query
         raw_semantic.pop("persisted_case_blocker", None)
         raw_semantic.pop("state_prevented", None)
         validation = validate_semantic_proposal(raw_semantic, query=semantic_anchor)
@@ -896,7 +903,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             semantic_lane_ms, semantic_total_ms = 1800, 2000
         evidence_bundle = gather_semantic_evidence(
             plan,
-            query=envelope.query,
+            query=semantic_turn_query,
             uid=envelope.uid,
             tenant_id=envelope.tenant_id,
             web_consent=envelope.external_research_consent,

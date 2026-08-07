@@ -2002,7 +2002,10 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                 and isinstance(_cnt[1], (int, float)) and not isinstance(_cnt[1], bool)
                 and _math.isfinite(_cnt[1]) and 1 <= int(_cnt[1]) <= 100_000):
             quantity = int(_cnt[1])
-    explicit_quantity = extract_quantity_span(envelope.query, unit_nouns=unit_nouns)
+    explicit_quantity = extract_quantity_span(
+        envelope.buyer_query or envelope.query,
+        unit_nouns=unit_nouns,
+    )
     if explicit_quantity is not None:
         quantity = explicit_quantity[0]
     elif context_operation:
@@ -2395,9 +2398,14 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
             lane = "SEARCH"
 
     proposal = _bounded_model_proposal(data)
+    semantic_query = (
+        envelope.buyer_query or envelope.query
+        if clarification_relation in {"interrupt", "supersede"}
+        else envelope.query
+    )
     semantic_proposal = _semantic_proposal_or_relation_fallback(
         data,
-        query=envelope.query,
+        query=semantic_query,
         exact_product_sku=explicit_product_sku,
         requirements=requirements,
         persisted_context=(
@@ -2411,7 +2419,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
 
     if not product_type_options and not requirements and not raw_requirements and relationship != "run_on":
         semantic_proposal = unresolved_purpose_proposal(
-            query=envelope.query,
+            query=semantic_query,
             use_cases=use_cases,
             workload_entities=workload_entities,
             node_path=(node.full_path if node else None),

@@ -167,6 +167,19 @@ def test_envelope_currency_is_bounded_and_round_trips():
     env = TurnEnvelope.from_suggest_params(query="laptop", currency="aud")
     assert env.currency == "AUD"
     assert TurnEnvelope.from_dict(env.to_dict()).currency == "AUD"
+
+
+def test_envelope_preserves_literal_buyer_query_across_shadow_round_trip():
+    env = TurnEnvelope.from_suggest_params(
+        query="Prior objective. Buyer clarification: new objective.",
+        buyer_query="new objective",
+        uid="buyer-1",
+    )
+
+    restored = TurnEnvelope.from_dict(env.to_dict())
+
+    assert restored.query.startswith("Prior objective")
+    assert restored.buyer_query == "new objective"
     assert TurnEnvelope.from_suggest_params(query="laptop", currency="bitcoin").currency == "USD"
 
 
