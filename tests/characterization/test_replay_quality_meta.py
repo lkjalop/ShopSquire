@@ -27,7 +27,17 @@ def test_research_observation_is_explicitly_observer_only():
             "state": "ambiguous_intent",
             "recommendation": "research",
         },
+        "research_trigger_post_catalog_shadow": {
+            "state": "ambiguous_intent",
+            "recommendation": "research_candidate",
+        },
+        "plan": {
+            "semantic_authority_state": "ambiguous",
+            "needs_concept_resolution": True,
+        },
         "research_plan": {
+            "subject_spans": ["digital twin simulation"],
+            "external_research_authorized": True,
             "query_bundle": [{"query": "buyer words requirements"}],
             "prohibited_assumptions": ["invented product names"],
         },
@@ -48,6 +58,9 @@ def test_research_observation_is_explicitly_observer_only():
     assert row["case_id"] == "case:2"
     assert row["authority"] == "observer_only"
     assert row["accepted_claim_count"] == 1
+    assert row["semantic_authority_state"] == "ambiguous"
+    assert row["catalog_retrieval_blocked"] is True
+    assert row["consent_contamination"] is False
     assert row["clarification"]["calibration_status"] == "heuristic_unsealed"
 
 
@@ -58,6 +71,13 @@ def test_research_summary_requires_external_labels_before_scoring():
                 "state": "unresolved_workload",
                 "recommendation": "research",
             },
+            "research_trigger_post_catalog": {
+                "state": "unresolved_workload",
+                "recommendation": "research_candidate",
+            },
+            "semantic_authority_state": "unresolved",
+            "catalog_retrieval_blocked": True,
+            "product_count": 0,
             "research_attempts": [{"status": "selected"}],
             "accepted_claim_count": 0,
             "clarification": {"question_id": "q1"},
@@ -67,6 +87,13 @@ def test_research_summary_requires_external_labels_before_scoring():
                 "state": "catalog_sufficient",
                 "recommendation": "skip",
             },
+            "research_trigger_post_catalog": {
+                "state": "catalog_sufficient",
+                "recommendation": "catalog_first",
+            },
+            "semantic_authority_state": "covered",
+            "catalog_retrieval_blocked": False,
+            "product_count": 3,
             "research_attempts": [],
             "accepted_claim_count": 2,
             "clarification": {},
@@ -78,6 +105,10 @@ def test_research_summary_requires_external_labels_before_scoring():
     assert summary["accepted_claim_cases"] == 1
     assert summary["trigger_reachability"] == 1.0
     assert summary["trigger_contradictions"] == 0
+    assert summary["deterministic_research_path_reachability"] == 1.0
+    assert summary["silent_misroute_rate"] == 0.0
+    assert summary["observer_pre_post_contradictions"] == 0
+    assert summary["consent_contamination_count"] == 0
     assert "expected_research" in summary["labels_required_for_scoring"]
 
 

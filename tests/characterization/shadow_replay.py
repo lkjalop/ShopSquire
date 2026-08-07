@@ -344,7 +344,9 @@ def _research_observation(core, *, case_id: str, turn: int) -> dict:
     extras = core.extras if isinstance(getattr(core, "extras", None), dict) else {}
     belief = extras.get("semantic_belief_state") or {}
     trigger = extras.get("research_trigger_shadow") or {}
+    post_trigger = extras.get("research_trigger_post_catalog_shadow") or {}
     plan = extras.get("research_plan") or {}
+    execution_plan = extras.get("plan") or {}
     clarification = extras.get("clarification") or {}
     evidence = extras.get("evidence") or {}
     attempts = evidence.get("research_attempts") or []
@@ -355,9 +357,19 @@ def _research_observation(core, *, case_id: str, turn: int) -> dict:
         "hypotheses": belief.get("hypotheses") or [],
         "material_unknowns": belief.get("material_unknowns") or [],
         "research_trigger": trigger,
+        "research_trigger_post_catalog": post_trigger,
+        "semantic_authority_state": execution_plan.get("semantic_authority_state"),
+        "catalog_retrieval_blocked": bool(execution_plan.get("needs_concept_resolution")),
+        "product_count": len(list(getattr(core, "products", None) or [])),
         "query_bundle": plan.get("query_bundle") or [],
         "prohibited_assumptions": plan.get("prohibited_assumptions") or [],
         "research_attempts": attempts,
+        "external_research_authorized": bool(plan.get("external_research_authorized")),
+        "consent_contamination": any(
+            token in str(subject).lower()
+            for subject in plan.get("subject_spans") or []
+            for token in ("i consent", "you may research", "approved official sources")
+        ),
         "accepted_claim_count": len(accepted),
         "clarification": {
             "reason": clarification.get("reason"),
@@ -369,6 +381,14 @@ def _research_observation(core, *, case_id: str, turn: int) -> dict:
 
 
 def _summarize_research_observations(rows: list[dict]) -> dict:
+    def _recommendation_class(value: object) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"research", "research_candidate", "consent_required"}:
+            return "research"
+        if text in {"skip", "catalog_first", "catalog_sufficient"}:
+            return "catalog"
+        return text or "not_observed"
+
     trigger_states: dict[str, int] = {}
     recommendations: dict[str, int] = {}
     for row in rows:
@@ -388,6 +408,36 @@ def _summarize_research_observations(rows: list[dict]) -> dict:
         if str((row.get("research_trigger") or {}).get("recommendation") or "")
         in {"research", "research_candidate"}
     ]
+    deterministic_unresolved = [
+        row for row in rows
+        if str(row.get("semantic_authority_state") or "")
+        in {"unresolved", "ambiguous", "uninterpreted_material", "invalid_proposal"}
+    ]
+    deterministic_reached = [
+        row for row in deterministic_unresolved
+        if bool(row.get("catalog_retrieval_blocked"))
+        and (
+            bool(row.get("research_attempts"))
+            or bool((row.get("clarification") or {}).get("question_id"))
+        )
+    ]
+    post_contradictions = sum(
+        1 for row in rows
+        if _recommendation_class((row.get("research_trigger") or {}).get("recommendation"))
+        != _recommendation_class(
+            (row.get("research_trigger_post_catalog") or {}).get("recommendation")
+        )
+        and row.get("research_trigger_post_catalog")
+    )
+    silent_misroutes = sum(
+        1 for row in deterministic_unresolved
+        if int(row.get("product_count") or 0) > 0 or not row.get("catalog_retrieval_blocked")
+    )
+    unnecessary_research = sum(
+        1 for row in rows
+        if str(row.get("semantic_authority_state") or "") in {"not_material", "covered"}
+        and bool(row.get("research_attempts"))
+    )
     return {
         "cases": len(rows),
         "authority": "observer_only",
@@ -397,6 +447,19 @@ def _summarize_research_observations(rows: list[dict]) -> dict:
             len(reached_rows) / len(unresolved_rows), 4
         ) if unresolved_rows else None,
         "trigger_contradictions": len(unresolved_rows) - len(reached_rows),
+        "deterministic_research_path_reachability": round(
+            len(deterministic_reached) / len(deterministic_unresolved), 4
+        ) if deterministic_unresolved else None,
+        "silent_misroute_count": silent_misroutes,
+        "silent_misroute_rate": round(
+            silent_misroutes / len(deterministic_unresolved), 4
+        ) if deterministic_unresolved else None,
+        "observer_pre_post_contradictions": post_contradictions,
+        "consent_contamination_count": sum(
+            1 for row in rows if row.get("consent_contamination")
+        ),
+        "unnecessary_research_count": unnecessary_research,
+        "unnecessary_research_rate": round(unnecessary_research / len(rows), 4) if rows else None,
         "research_attempted": sum(
             1 for row in rows if row.get("research_attempts")
         ),

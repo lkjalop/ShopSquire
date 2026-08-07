@@ -261,6 +261,40 @@ def _leg_image(plan: Any, query: str, uid: Optional[str], image_identity: Option
             "summary": ("photo identified as " + " ".join(bits)) if bits else "", "data": dict(ident)}
 
 
+def _scan_research_items(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Drop provider content that looks like an instruction, before any projection."""
+    try:
+        from src.app.security.image_threat_signals import detect_ocr_prompt_injection
+    except Exception:
+        detect_ocr_prompt_injection = None
+    clean: list[dict[str, Any]] = []
+    dropped = 0
+    for item in items[:8]:
+        claim_text = " ".join(
+            str(candidate.get("claim") or "")
+            for candidate in list(item.get("claim_candidates") or [])[:16]
+            if isinstance(candidate, dict)
+        )
+        content = f"{item.get('title') or ''} {item.get('snippet') or ''} {claim_text}"
+        if detect_ocr_prompt_injection is not None and detect_ocr_prompt_injection(content):
+            dropped += 1
+            continue
+        clean.append(item)
+    return clean, dropped
+
+
+def _project_discovery_candidates(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose discovery as hypotheses only; it can never compile a product requirement."""
+    return [{
+        "provider_id": str(item.get("provider_id") or "")[:160] or None,
+        "title": str(item.get("title") or "")[:240],
+        "snippet": str(item.get("snippet") or "")[:500],
+        "url": str(item.get("url") or "")[:1000],
+        "source_domain": str(item.get("source_domain") or "")[:240],
+        "authority": "hypothesis_candidate_only",
+    } for item in items[:6]]
+
+
 def _leg_concept_resolution(
     plan: Any,
     query: str,
@@ -334,14 +368,6 @@ def _leg_concept_resolution(
             if value:
                 answer_candidates.append(value)
     buyer_context = " ".join(answer_candidates)[:800]
-    provider_capabilities = list(dict.fromkeys(
-        str(item.get("provider_capability") or "").strip()
-        for item in list(
-            (research_plan or {}).get("evidence_needs") or []
-            if isinstance(research_plan, dict) else []
-        )[:8]
-        if isinstance(item, dict) and str(item.get("provider_capability") or "").strip()
-    ))[:3]
     planned_queries = [
         item for item in list(
             (research_plan or {}).get("query_bundle") or []
@@ -350,48 +376,117 @@ def _leg_concept_resolution(
         if isinstance(item, dict)
         and str(item.get("subject_span") or "").strip() == concept
     ]
-    # Requirements first; if it produces no evidence, one identity rewrite may
-    # clarify terminology. The orchestrator's lane/global deadline still bounds both.
-    planned_queries.sort(key=lambda item: 0 if item.get("strategy") == "requirements" else 1)
-    query_texts = [str(item.get("text") or "").strip() for item in planned_queries if item.get("text")]
-    if not query_texts:
-        query_texts = [f"{concept} official requirements compatibility"]
-    query_texts = [
-        scrub_pii(f"{value} {buyer_context}".strip())
-        for value in query_texts[:2]
+    identity_query = next(
+        (str(item.get("text") or "").strip() for item in planned_queries
+         if item.get("strategy") == "identity" and item.get("text")),
+        f"{concept} official definition scope",
+    )
+    requirements_query = next(
+        (str(item.get("text") or "").strip() for item in planned_queries
+         if item.get("strategy") == "requirements" and item.get("text")),
+        f"{concept} official recommended system requirements compatibility",
+    )
+    identity_query = scrub_pii(f"{identity_query} {buyer_context}".strip())
+    requirements_query = scrub_pii(f"{requirements_query} {buyer_context}".strip())
+    proposal_hypotheses = [
+        item for item in list(semantic.get("workload_hypotheses") or [])[:3]
+        if isinstance(item, dict)
     ]
+    hypothesis_ids = [
+        str(item.get("hypothesis_id") or f"hypothesis_{index + 1}")[:64]
+        for index, item in enumerate(proposal_hypotheses)
+    ] or ["buyer_span"]
     research_attempts: list[dict[str, Any]] = []
-    result = None
-    outbound_query = query_texts[0]
-    for attempt_index, candidate_query in enumerate(query_texts):
+    provider_attempts: list[dict[str, Any]] = []
+    provider_ids: list[str] = []
+    source_status: dict[str, Any] = {}
+    query_hash = None
+    cache_status = "not_recorded"
+    dropped = 0
+
+    # Stage one can suggest meanings, but its output is never passed to the
+    # requirement compiler and never grants catalog authority.
+    discovery_result = run_external_research_stage(
+        query=identity_query,
+        results=None,
+        scrub=scrub_pii,
+        tenant_id=tenant_id,
+        cancellation=cancellation,
+        buyer_consent=True,
+        provider_capabilities=["concept_discovery"],
+    )
+    discovery_items, discovery_dropped = _scan_research_items([
+        item for item in list((discovery_result or {}).get("items") or [])
+        if isinstance(item, dict)
+    ])
+    dropped += discovery_dropped
+    discovery_status = (
+        "disabled" if discovery_result is None
+        else str(discovery_result.get("run_status") or "unknown")
+    )
+    research_attempts.append({
+        "attempt": 1,
+        "query": identity_query,
+        "provider_capability": "concept_discovery",
+        "hypothesis_id": None,
+        "status": discovery_status,
+        "item_count": len(discovery_items),
+    })
+    if discovery_result:
+        provider_attempts.extend(list(discovery_result.get("provider_attempts") or [])[:8])
+        provider_ids.extend(str(value) for value in discovery_result.get("provider_ids") or [] if value)
+        if discovery_result.get("provider_id"):
+            provider_ids.append(str(discovery_result["provider_id"]))
+        source_status = discovery_result.get("source_status") or source_status
+        cache_status = str(discovery_result.get("cache_status") or cache_status)
+
+    # Stage two is bounded per hypothesis. Hypothesis labels remain trace-only;
+    # outbound text contains buyer-authored spans and closed purpose language.
+    requirements_items: list[dict[str, Any]] = []
+    requirements_statuses: list[str] = []
+    for attempt_index, hypothesis_id in enumerate(hypothesis_ids[:3], start=2):
         if cancellation is not None:
             cancellation.raise_if_cancelled()
-        outbound_query = candidate_query
         candidate = run_external_research_stage(
-            query=candidate_query,
+            query=requirements_query,
             results=None,
             scrub=scrub_pii,
             tenant_id=tenant_id,
             cancellation=cancellation,
-            buyer_consent=bool(getattr(plan, "external_research_authorized", False)),
-            provider_capability="official_requirements",
-            provider_capabilities=provider_capabilities or None,
+            buyer_consent=True,
+            provider_capabilities=["official_requirements"],
         )
+        candidate_status = "disabled" if candidate is None else str(candidate.get("run_status") or "unknown")
+        requirements_statuses.append(candidate_status.lower())
+        candidate_items, candidate_dropped = _scan_research_items([
+            item for item in list((candidate or {}).get("items") or [])
+            if isinstance(item, dict)
+        ])
+        dropped += candidate_dropped
+        requirements_items.extend(candidate_items)
         research_attempts.append({
-            "attempt": attempt_index + 1,
-            "query": candidate_query,
-            "status": "disabled" if candidate is None else str(candidate.get("run_status") or "unknown"),
-            "item_count": len(list((candidate or {}).get("items") or [])),
+            "attempt": attempt_index,
+            "query": requirements_query,
+            "provider_capability": "official_requirements",
+            "hypothesis_id": hypothesis_id,
+            "status": candidate_status,
+            "item_count": len(candidate_items),
         })
-        if candidate is None:
-            result = None
-            break
-        result = candidate
-        if list(candidate.get("items") or []):
+        if candidate:
+            provider_attempts.extend(list(candidate.get("provider_attempts") or [])[:8])
+            provider_ids.extend(str(value) for value in candidate.get("provider_ids") or [] if value)
+            if candidate.get("provider_id"):
+                provider_ids.append(str(candidate["provider_id"]))
+            source_status = candidate.get("source_status") or source_status
+            query_hash = candidate.get("query_hash") or query_hash
+            cache_status = str(candidate.get("cache_status") or cache_status)
+        # Once an authoritative provider returns candidates, claim validation below
+        # decides whether another hypothesis attempt is useful.
+        if candidate_items:
             break
     if cancellation is not None:
         cancellation.raise_if_cancelled()
-    if result is None:
+    if discovery_result is None and all(status == "disabled" for status in requirements_statuses):
         return {
             "source": "concept_resolution",
             "found": False,
@@ -399,46 +494,31 @@ def _leg_concept_resolution(
             "data": {
                 "status": "research_degraded",
                 "degraded_reason": "external_research_disabled",
-                "query": outbound_query,
+                "query": requirements_query,
                 "research_attempts": research_attempts,
+                "discovery_candidates": _project_discovery_candidates(discovery_items),
                 "claims": [],
                 "catalog_qualifications": [],
                 "authority": "evidence_candidate_only",
             },
         }
-    items = [item for item in list(result.get("items") or [])[:4] if isinstance(item, dict)]
-    clean: list[dict[str, Any]] = []
-    dropped = 0
-    try:
-        from src.app.security.image_threat_signals import detect_ocr_prompt_injection
-    except Exception:
-        detect_ocr_prompt_injection = None
-    for item in items:
-        claim_text = " ".join(
-            str(candidate.get("claim") or "")
-            for candidate in list(item.get("claim_candidates") or [])[:16]
-            if isinstance(candidate, dict)
-        )
-        content = f"{item.get('title') or ''} {item.get('snippet') or ''} {claim_text}"
-        if detect_ocr_prompt_injection is not None and detect_ocr_prompt_injection(content):
-            dropped += 1
-            continue
-        clean.append(item)
     from src.app.services.external_evidence_claims import accept_provider_claim_candidates
 
-    accepted = accept_provider_claim_candidates(clean, concept=concept)
-    summary = str((clean[0] if clean else {}).get("snippet") or "")[:300]
-    run_status = str(result.get("run_status") or "unknown").lower()
+    accepted = accept_provider_claim_candidates(requirements_items, concept=concept)
+    summary_item = requirements_items[0] if requirements_items else (discovery_items[0] if discovery_items else {})
+    summary = str(summary_item.get("snippet") or "")[:300]
+    run_status = requirements_statuses[-1] if requirements_statuses else discovery_status.lower()
     unresolved_status = {
         "cancelled": "research_pending",
         "error": "research_degraded",
         "not_configured": "no_authoritative_evidence",
         "empty": "no_authoritative_evidence",
         "completed": "no_authoritative_evidence",
-    }.get(run_status, "evidence_candidates" if clean else "no_authoritative_evidence")
+        "empty": "no_authoritative_evidence",
+    }.get(run_status, "evidence_candidates" if requirements_items else "no_authoritative_evidence")
     return {
         "source": "concept_resolution",
-        "found": bool(clean),
+        "found": bool(requirements_items or discovery_items),
         "summary": summary,
         "data": {
             "status": (
@@ -447,21 +527,25 @@ def _leg_concept_resolution(
                 else unresolved_status
             ),
             "concept": concept,
-            "query": outbound_query,
+            "query": requirements_query,
             "research_attempts": research_attempts,
-            "query_hash": result.get("query_hash"),
-            "provider_id": result.get("provider_id") or "external_research",
-            "provider_ids": list(result.get("provider_ids") or []),
-            "provider_attempts": list(result.get("provider_attempts") or [])[:8],
-            "provider_run_status": result.get("run_status") or "unknown",
-            "cache_status": result.get("cache_status") or "not_recorded",
-            "source_status": result.get("source_status") or {},
-            "items": clean,
+            "query_hash": query_hash,
+            "provider_id": provider_ids[0] if len(set(provider_ids)) == 1 else None,
+            "provider_ids": list(dict.fromkeys(provider_ids))[:8],
+            "provider_attempts": provider_attempts[:16],
+            "provider_run_status": run_status,
+            "cache_status": cache_status,
+            "source_status": source_status,
+            "items": requirements_items[:8],
+            "discovery_candidates": _project_discovery_candidates(discovery_items),
             "claims": accepted["claims"],
             "normalized_evidence": accepted["normalized_evidence"],
             "claim_rejections": accepted["rejections"],
             "catalog_qualifications": [],
-            "injection_scan": {"checked": len(items), "dropped": dropped},
+            "injection_scan": {
+                "checked": len(discovery_items) + len(requirements_items) + dropped,
+                "dropped": dropped,
+            },
             "authority": "evidence_candidate_only",
         },
     }
