@@ -639,6 +639,96 @@ def test_resolved_concept_shows_only_evidence_qualified_catalog_alternative(db, 
     assert "qualified alternatives" in response.message.lower()
 
 
+def test_authoritative_semantic_claims_compile_before_catalog_fit(db, monkeypatch):
+    model = {
+        "lane": "SEARCH",
+        "handle": "el-6-6",
+        "confidence": 0.9,
+        "semantic_proposal": {
+            "desired_outcome": "find a laptop for an unfamiliar simulation workload",
+            "concepts": [{
+                "text": "unfamiliar simulation workload",
+                "status": "unresolved",
+                "material": True,
+                "interpretations": [],
+            }],
+            "evidence_questions": [],
+            "proposed_action": "research",
+            "confidence": 0.86,
+        },
+    }
+    source_policy = {
+        "policy_version": "semantic-source-v1",
+        "review_status": "approved",
+        "reviewer_type": "independent_human",
+        "reviewed_by": "tenant-engineering-reviewer",
+        "licence": "tenant-authorized",
+        "trust_tier": "authoritative",
+        "allowed_claim_types": ["minimum_requirements"],
+        "freshness_status": "fresh",
+    }
+    evidence = {
+        "selected": ["concept_resolution"],
+        "legs": {"concept_resolution": {"data": {
+            "status": "resolved",
+            "normalized_evidence": [{
+                "concept": "unfamiliar simulation workload",
+                "status": "resolved",
+                "claim": "The approved requirements specify at least 32 GB RAM.",
+                "claim_type": "minimum_requirements",
+                "source_id": "official-requirements-provider",
+                "source_record_id": "requirements-2026",
+                "source_revision": "2026.08",
+                "observed_at": "2026-08-06T00:00:00Z",
+                "citation_id": "cite:requirements-2026:2026.08",
+                "source_policy": source_policy,
+            }],
+            "claims": [{
+                "need_id": "minimum-memory",
+                "subject_span": "unfamiliar simulation workload",
+                "claim_type": "minimum_requirements",
+                "status": "accepted",
+                "source_id": "official-requirements-provider",
+                "source_record_id": "requirements-2026:ram",
+                "observed_at": "2026-08-06T00:00:00Z",
+                "confidence": 0.94,
+                "attribute_key": "ram_gb",
+                "operator": ">=",
+                "value": 32,
+                "unit": "GB",
+                "authority": "official_requirements",
+                "lineage_root": "official-requirements-provider",
+            }],
+            "catalog_qualifications": [],
+        }}},
+        "citations": [],
+        "source_health": "healthy",
+        "ms": 4,
+    }
+    monkeypatch.setattr(
+        "src.app.services.evidence_orchestrator.gather_evidence",
+        lambda *_args, **_kwargs: evidence,
+    )
+
+    response = recommend_turn(
+        db,
+        _env(
+            "Find a laptop for an unfamiliar simulation workload.",
+            external_research_consent=True,
+        ),
+        llm_fn=lambda _prompt, _timeout: json.dumps(model),
+    )
+
+    assert [item.sku for item in response.products] == ["LAP-2"]
+    assert response.products[0].fit["overall"] == "meets"
+    assert response.extras["decision"]["requirements"]["ram_gb"] == [[">=", 32.0]]
+    compilation = response.extras["semantic_requirement_compilation"]
+    assert compilation["status"] == "accepted"
+    assert compilation["compiled_requirements"][0]["attribute_key"] == "ram_gb"
+    assert compilation["rejected_claims"] == []
+    assert response.extras["catalog_alignment"]["status"] == "qualified_catalog_match"
+
+
 def test_ambiguous_workload_product_type_stops_before_retrieval(db):
     from src.app.services.taxonomy_registry import add_sold_node
 

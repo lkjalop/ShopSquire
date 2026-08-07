@@ -183,6 +183,20 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             "output": semantic_evidence,
         })
 
+    semantic_compilation = dict(
+        (getattr(core, "extras", {}) or {}).get("semantic_requirement_compilation") or {}
+    )
+    if semantic_compilation:
+        steps.append({
+            "id": "semantic-requirements-compiler",
+            "kind": "gate",
+            "authority": "compiles_constraints",
+            "label": "Compile accepted concept evidence into capability predicates",
+            "status": semantic_compilation.get("status") or "blocked",
+            "source": "requirement_compiler",
+            "output": semantic_compilation,
+        })
+
     semantic_resolution = dict(
         (getattr(core, "extras", {}) or {}).get("semantic_resolution") or {}
     )

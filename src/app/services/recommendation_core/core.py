@@ -865,6 +865,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # normalized, provenance-bearing claims can resolve a material concept.
     semantic_decision_for_alignment = None
     semantic_catalog_qualifications: list[dict[str, Any]] = []
+    semantic_compiled_requirements: list[dict[str, Any]] = []
     if plan.needs_concept_resolution:
         from src.app.services.evidence_orchestrator import (
             EvidenceBudget,
@@ -926,6 +927,24 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             research_status=str(concept_data.get("status") or ""),
         )
         semantic_decision_for_alignment = semantic_decision
+        from src.app.services.recommendation_core.requirement_compiler import (
+            compile_authoritative_requirements,
+        )
+
+        compilation = compile_authoritative_requirements(
+            item for item in list(concept_data.get("claims") or [])
+            if isinstance(item, dict)
+        )
+        semantic_compiled_requirements = [
+            item.model_dump() for item in compilation.requirements
+        ]
+        resp.extras["semantic_requirement_compilation"] = {
+            "status": "accepted" if semantic_compiled_requirements else "blocked",
+            "compiled_requirements": semantic_compiled_requirements,
+            "rejected_claims": [dict(item) for item in compilation.rejections],
+            "catalog_authority_granted": bool(semantic_compiled_requirements),
+            "commercial_authority_granted": False,
+        }
         semantic_catalog_qualifications = [
             dict(item) for item in (concept_data.get("catalog_qualifications") or [])
             if isinstance(item, dict)
@@ -992,6 +1011,31 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 reason=question["reason"],
             )
             return resp.finalize()
+        if compilation.requirements:
+            merged_requirements = {
+                key: list(predicates)
+                for key, predicates in decision.requirements.items()
+            }
+            for requirement in compilation.requirements:
+                predicate = (requirement.operator, requirement.value)
+                predicates = merged_requirements.setdefault(requirement.attribute_key, [])
+                if predicate not in predicates:
+                    predicates.append(predicate)
+            decision = dataclasses.replace(decision, requirements=merged_requirements)
+            # Evidence changed the executable fit contract, so derive the plan again.
+            # Preserve the already-authorized bounded research plan; no second model or
+            # provider call is introduced here.
+            plan = dataclasses.replace(
+                derive_plan(decision),
+                external_research_authorized=bool(envelope.external_research_consent),
+                research_plan=research_plan.model_dump(),
+            )
+            resp.extras["decision"] = decision.as_dict()
+            resp.extras["plan"] = plan.as_dict()
+            resp.extras["constraints_used"]["requirements"] = {
+                key: [list(predicate) for predicate in predicates]
+                for key, predicates in decision.requirements.items()
+            }
     if decision.product_type_options:
         choices = []
         for handle in decision.product_type_options:
@@ -1038,9 +1082,9 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                       won_message=resp._msg_priority > _prio_before)
 
     # Resolving a concept permits catalog alignment; it does not itself prove
-    # that any SKU is suitable. Only SKU qualifications emitted by an enrolled
-    # evidence provider are eligible. Similarity and product prose stay
-    # unverified and are withheld from the recommendation slate.
+    # that any SKU is suitable. A provider can supply an explicit SKU qualification,
+    # or accepted claims can compile into registry predicates and the ordinary fit
+    # evaluator can qualify a product. Similarity and product prose stay unverified.
     if semantic_decision_for_alignment is not None:
         from src.app.services.semantic_resolution import align_catalog
 
@@ -1054,7 +1098,15 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             [
                 {
                     "sku": product.sku,
-                    "alignment_status": qualification_by_sku.get(product.sku, "unverified"),
+                    "alignment_status": qualification_by_sku.get(
+                        product.sku,
+                        "qualified"
+                        if (
+                            semantic_compiled_requirements
+                            and (product.fit or {}).get("overall") == "meets"
+                        )
+                        else "unverified",
+                    ),
                 }
                 for product in resp.products
             ],

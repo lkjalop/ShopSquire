@@ -18,7 +18,7 @@ ProviderCapability = Literal[
     "standards_regulatory",
     "professional_software_requirements",
     "game_requirements",
-    "tenant_approved_documents",
+    "approved_tenant_document",
     "visual_document_evidence",
 ]
 ProviderAuthority = Literal[

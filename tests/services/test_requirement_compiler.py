@@ -1,6 +1,7 @@
 from src.app.services.recommendation_core.requirement_compiler import (
     compile_authoritative_requirements,
 )
+from src.app.services.research_provider_registry import ResearchProvider
 
 
 def test_advisory_search_snippet_cannot_authorize_hard_requirement():
@@ -50,3 +51,16 @@ def test_official_typed_claim_compiles_to_registry_backed_predicate():
     assert result.requirements[0].attribute_key == "ram_gb"
     assert result.requirements[0].value == 32
     assert result.requirements[0].authority == "accepted_evidence"
+
+
+def test_provider_registry_uses_the_canonical_approved_document_capability():
+    provider = ResearchProvider(
+        provider_id="tenant-docs",
+        capabilities=("approved_tenant_document",),
+        allowed_tenants=("tenant-a",),
+        allowed_domains=("docs.example",),
+        authority="tenant_approved_repository",
+        fetcher_factory=lambda: object(),
+    )
+
+    assert provider.capabilities == ("approved_tenant_document",)
