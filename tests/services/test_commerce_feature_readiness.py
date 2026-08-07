@@ -63,6 +63,7 @@ def test_external_live_when_all_present(monkeypatch):
     monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
     monkeypatch.setenv("EXTERNAL_RESEARCH_SEARCH_URL", "https://search.example.com/api?q={query}")
     monkeypatch.setenv("OFFICIAL_REQUIREMENTS_API_URL", "https://requirements.example.com/api?q={query}")
+    monkeypatch.setenv("OFFICIAL_REQUIREMENTS_DOMAIN_ALLOWLIST", "docs.vendor.example")
     monkeypatch.setenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", "tenant-a")
     monkeypatch.setenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY", "reviewer@example.com")
     r = external_search_readiness({}, allowlist=["trusted.com", "techradar.com"])
@@ -75,6 +76,7 @@ def test_external_search_does_not_claim_requirement_authority_without_review(mon
     monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
     monkeypatch.setenv("EXTERNAL_RESEARCH_SEARCH_URL", "https://search.example.com/api?q={query}")
     monkeypatch.setenv("OFFICIAL_REQUIREMENTS_API_URL", "https://requirements.example.com/api?q={query}")
+    monkeypatch.setenv("OFFICIAL_REQUIREMENTS_DOMAIN_ALLOWLIST", "docs.vendor.example")
     monkeypatch.setenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", "tenant-a")
     monkeypatch.delenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY", raising=False)
 

@@ -112,6 +112,11 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
         if value.strip()
     )
     domains = tuple(str(value).strip().lower() for value in allowed_domains if str(value).strip())
+    requirements_domains = tuple(
+        value.strip().lower()
+        for value in str(os.getenv("OFFICIAL_REQUIREMENTS_DOMAIN_ALLOWLIST") or "").split(",")
+        if value.strip()
+    )
     if not (search_endpoint or requirements_endpoint) or not tenant_ids or not domains:
         return ResearchProviderRegistry()
 
@@ -156,7 +161,7 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
             deadline_ms=max(100, min(deadline_ms, 30_000)),
             source_policy=None,
         ))
-    if requirements_endpoint:
+    if requirements_endpoint and requirements_domains:
         providers.append(ResearchProvider(
             provider_id=str(
                 os.getenv("OFFICIAL_REQUIREMENTS_PROVIDER_ID")
@@ -164,7 +169,7 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
             ).strip()[:80],
             capabilities=("official_requirements", "professional_software_requirements"),
             allowed_tenants=tenant_ids,
-            allowed_domains=domains,
+            allowed_domains=requirements_domains,
             authority="official_source_index",
             fetcher_factory=OfficialRequirementsHttpFetcher,
             deadline_ms=max(100, min(deadline_ms, 30_000)),

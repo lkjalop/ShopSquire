@@ -66,6 +66,11 @@ def external_search_readiness(
     enabled = _flag_on(flags, "EXTERNAL_RESEARCH_ENABLED", "EXTERNAL_RESEARCH_ENABLED")
     endpoint = bool(str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip())
     requirements_endpoint = bool(str(os.getenv("OFFICIAL_REQUIREMENTS_API_URL") or "").strip())
+    requirements_domains = [
+        value.strip().lower()
+        for value in str(os.getenv("OFFICIAL_REQUIREMENTS_DOMAIN_ALLOWLIST") or "").split(",")
+        if value.strip()
+    ]
     allow = [a for a in (allowlist if allowlist is not None else (flags or {}).get("EXTERNAL_RESEARCH_ALLOWLIST") or []) if str(a or "").strip()]
     has_allowlist = len(allow) > 0
     tenant_allowlist = [
@@ -79,7 +84,7 @@ def external_search_readiness(
     )
     advisory_live = bool(enabled and endpoint and has_allowlist and tenant_enrollment)
     requirement_authority_ready = bool(
-        enabled and requirements_endpoint and has_allowlist
+        enabled and requirements_endpoint and bool(requirements_domains)
         and tenant_enrollment and source_policy_reviewed
     )
     live = bool(advisory_live or requirement_authority_ready)
@@ -108,6 +113,7 @@ def external_search_readiness(
         "requirement_authority_ready": requirement_authority_ready,
         "endpoint_configured": endpoint,
         "requirements_endpoint_configured": requirements_endpoint,
+        "requirements_domain_allowlist_size": len(requirements_domains),
         "allowlist_size": len(allow),
         "tenant_enrollment_count": len(tenant_allowlist),
         "source_policy_reviewed": source_policy_reviewed,
