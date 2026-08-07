@@ -28,10 +28,17 @@ _RESEARCH_META_WORDS = frozenset({
 
 
 def _tokens(value: Any) -> set[str]:
-    return {token for token in _TOKEN_RE.findall(str(value or "").lower())
-            if token not in _GRAMMAR_WORDS
-            and len(token) > 1
-            and not re.fullmatch(r"\d+(?:fps|hz|k)?", token)}
+    out: set[str] = set()
+    for token in _TOKEN_RE.findall(str(value or "").lower()):
+        if (token in _GRAMMAR_WORDS or len(token) <= 1
+                or re.fullmatch(r"\d+(?:fps|hz|k)?", token)):
+            continue
+        # Taxonomy labels commonly use plurals while buyer turns use singulars.
+        # This is lexical normalization only; it creates no domain mapping.
+        if len(token) > 4 and token.endswith("s") and not token.endswith("ss"):
+            token = token[:-1]
+        out.add(token)
+    return out
 
 
 def _registry_vocabulary(value: Any) -> set[str]:
@@ -122,6 +129,11 @@ def unresolved_purpose_proposal(
     coverage_sets = _coverage_sets(
         use_cases=use_cases, workload_entities=workload_entities, node_path=node_path,
     )
+    # A familiar request can be covered jointly by the taxonomy ("laptop") and
+    # one enrolled use case ("gaming"). Never union unrelated use-case rows:
+    # vocabulary from two different profiles must not jointly authorize an
+    # unfamiliar purpose.
+    node_tokens = _tokens(node_path)
     unresolved: list[str] = []
     for span in spans:
         try:
@@ -133,7 +145,10 @@ def unresolved_purpose_proposal(
             pass  # Provider failure cannot create coverage authority.
         span_tokens = _tokens(span)
         required = 1 if len(span_tokens) == 1 else min(2, len(span_tokens))
-        best_overlap = max((len(span_tokens & item) for item in coverage_sets), default=0)
+        best_overlap = max(
+            (len(span_tokens & (item | node_tokens)) for item in coverage_sets),
+            default=len(span_tokens & node_tokens),
+        )
         if span_tokens and best_overlap < required:
             unresolved.append(span)
     if not unresolved:

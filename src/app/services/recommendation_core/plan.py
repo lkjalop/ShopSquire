@@ -89,8 +89,11 @@ def derive_plan(decision: TurnDecision) -> Plan:
     model_material = _has_material_concept(semantic)
     coverage_material = _has_material_concept(coverage)
     subject_replaced = decision.clarification_relation in {"interrupt", "supersede"}
-    # Audience context is not a workload, while registry-resolved workload entities,
-    # run-on relationships and product-type ambiguity already have bounded owners.
+    # Audience context is not a workload and product-type ambiguity already has a
+    # bounded clarification owner. Model-proposed relationships and workload
+    # entities are interpretation, not evidence that an unfamiliar workload is
+    # understood, so they cannot suppress coverage abstention. Known workloads are
+    # recognized by the offline provider registry inside semantic coverage.
     # Conversely, model-selected use cases or hardware floors are proposals, not
     # proof that an unfamiliar buyer-authored purpose was understood.
     independently_bounded_context = bool(
@@ -99,8 +102,6 @@ def derive_plan(decision: TurnDecision) -> Plan:
             not subject_replaced
             and (
                 decision.audience_contexts
-                or decision.workload_entities
-                or decision.relationship == "run_on"
             )
         )
     )

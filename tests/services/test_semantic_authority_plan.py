@@ -49,6 +49,40 @@ def test_model_guessed_use_case_and_requirements_do_not_override_coverage_absten
     assert plan.needs_concept_resolution is True
 
 
+def test_model_guessed_run_on_relationship_does_not_create_semantic_authority():
+    decision = TurnDecision(
+        lane="SEARCH",
+        node_handle="el-6-11-2",
+        relationship="run_on",
+        semantic_proposal={},
+        coverage_abstention_shadow=_coverage(
+            "I need something for digital twin simulation of a cyber attack"
+        ),
+    )
+
+    plan = derive_plan(decision)
+
+    assert plan.semantic_authority_state == "uninterpreted_material"
+    assert plan.needs_concept_resolution is True
+
+
+def test_model_guessed_workload_entity_does_not_create_semantic_authority():
+    decision = TurnDecision(
+        lane="SEARCH",
+        node_handle="el-6-11-2",
+        workload_entities=(("software", "cybersecurity simulation"),),
+        semantic_proposal={},
+        coverage_abstention_shadow=_coverage(
+            "I need something for digital twin simulation of a cyber attack"
+        ),
+    )
+
+    plan = derive_plan(decision)
+
+    assert plan.semantic_authority_state == "uninterpreted_material"
+    assert plan.needs_concept_resolution is True
+
+
 def test_audience_only_context_does_not_become_a_workload_abstention():
     decision = TurnDecision(
         lane="SEARCH",
@@ -100,6 +134,12 @@ def test_ordinary_catalog_request_does_not_over_abstain():
 
 def test_known_workload_with_performance_modifier_does_not_over_abstain():
     coverage = _coverage("i want to play valorant at 144fps")
+
+    assert coverage == {}
+
+
+def test_known_use_case_and_product_category_combine_for_coverage():
+    coverage = _coverage("is $1800 enough for a gaming laptop?")
 
     assert coverage == {}
 
