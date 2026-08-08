@@ -25,6 +25,7 @@ from src.app.routers import tickets as tickets_module
 from src.app.routers.auth import router as auth_router
 from src.app.routers.account import router as account_router
 from src.app.routers.cart import router as cart_router
+from src.app.routers.shopping_cases import router as shopping_cases_router
 from src.app.routers.privacy import router as privacy_router
 from src.app.routers.incident import router as incident_router
 from src.app.routers.payments_paypal import router as payments_paypal
@@ -468,6 +469,14 @@ def create_app() -> FastAPI:
                             # for stale local demo DBs without putting vertical logic in core scoring.
                             from scripts.seed_gaming_laptops import ensure_gaming_catalog
                             ensure_gaming_catalog(db)
+                            reviewed_seed_enabled = str(
+                                os.getenv("AUTO_SEED_REVIEWED_PRODUCT_EVIDENCE", "1" if local_default else "0")
+                            ).strip().lower() in ("1", "true", "yes", "on")
+                            if reviewed_seed_enabled:
+                                from src.app.services.catalog_evidence_seed import (
+                                    ingest_reviewed_configurations,
+                                )
+                                ingest_reviewed_configurations(db)
                         elif profile_id and profile_id != "electronics" and local_default:
                             # Non-electronics vertical (fashion/pharmacy/…): seed its OWN profile catalog
                             # into products+inventory so the switched store runs real DB retrieval, not
@@ -1530,12 +1539,24 @@ def create_app() -> FastAPI:
     def health():
         from src.app.services.runtime_modes import runtime_mode_snapshot
 
+        def _commerce_features() -> dict[str, Any]:
+            from src.app.config import get_settings, load_feature_flags
+            from src.app.platform.store_profile import profile_slot
+            from src.app.services.commerce_feature_readiness import commerce_feature_readiness
+
+            settings = get_settings()
+            flags = load_feature_flags(settings.feature_flags_path)
+            allowlist = profile_slot("external_research_allowlist", default=[]) or []
+            return commerce_feature_readiness(flags, allowlist=list(allowlist))
+
         runtime_modes = runtime_mode_snapshot()
+        commerce_features = _commerce_features()
         if str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on"):
             return {
                 "status": "ok",
                 "mode": "fast_test_health",
                 "runtime_modes": runtime_modes,
+                "commerce_features": commerce_features,
                 "dependencies": {
                     "backend": {"status": "healthy", "mode": "fast_test_health"},
                 },
@@ -1551,6 +1572,7 @@ def create_app() -> FastAPI:
         return {
             "status": status,
             "runtime_modes": runtime_modes,
+            "commerce_features": commerce_features,
             "dependencies": deps,
             "timestamp": snapshot.get("timestamp"),
         }
@@ -2418,6 +2440,7 @@ def create_app() -> FastAPI:
     except Exception:
         pass
     app.include_router(cart_router)
+    app.include_router(shopping_cases_router)
     from src.app.routers.cart_mutations import router as cart_mutations_router
     app.include_router(cart_mutations_router)   # C1: confirm-tier plan apply (V2 cart lane)
     app.include_router(privacy_router)
