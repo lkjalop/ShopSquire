@@ -52,4 +52,33 @@ describe('research truth panels', () => {
     expect(screen.getByRole('button', { name: 'Review option' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Propose cart change' })).toBeNull();
   });
+
+  it('separates hard misses from compromises and shows independent evidence clocks', () => {
+    render(<ProductShelvesPanel projection={{
+      schema_version: 'product-shelves-v1', evidence_status: 'researched',
+      official_claim_count: 3, context_claim_count: 1, research_delta: [],
+      shelves: [{
+        shelf_id: 'shared', scope_label: 'Shared fit', budget_band: 'best',
+        remaining_count: 0, next_page: [], initial: [{
+          identity_key: 'pc-2', title: 'Evidence-led workstation',
+          price_cents: 500000, currency: 'AUD', fit_status: 'conditional',
+          relevance_score: 0.8, product: { sku: 'WS-2', identifier: 'MPN-2' },
+          misses: ['hardware virtualization'], compromises: ['gpu vram gb'],
+          why_ranked: 'This option is strongest on the accepted shared requirements.',
+          evidence_freshness: {
+            specification: 'fresh', price: 'stale', availability: 'fresh',
+          },
+          availability: [{
+            location_id: 'sydney', status: 'in_stock', quantity: 12,
+            freshness_status: 'fresh',
+          }],
+        }],
+      }],
+    }} />);
+
+    expect(screen.getByText(/Minimum misses: hardware virtualization/i)).toBeTruthy();
+    expect(screen.getByText(/Recommendation compromises: gpu vram gb/i)).toBeTruthy();
+    expect(screen.getByText(/specification fresh.*price stale.*availability fresh/i)).toBeTruthy();
+    expect(screen.getByText(/sydney in_stock \(12\)/i)).toBeTruthy();
+  });
 });

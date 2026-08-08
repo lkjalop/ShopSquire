@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -65,3 +67,86 @@ def test_hypothesis_shelf_uses_only_claims_bound_to_that_research_scope():
         "gpu vram gb" in [*row.meets, *row.unknowns, *row.misses]
         for row in point_shelf.initial
     )
+
+
+def test_exact_observations_supply_claim_refs_independent_freshness_and_location_stock():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        projection = project_accepted_catalog(
+            db,
+            accepted_claims=[{
+                "claim_id": "official-ram",
+                "attribute": "ram_gb",
+                "operator": ">=",
+                "value": 64,
+                "requirement_class": "minimum",
+                "authority_status": "verified_official",
+            }],
+            desired_outcome="named exact workload",
+            now=datetime(2026, 8, 8, 12, tzinfo=timezone.utc),
+        )
+
+    shared = next(row for row in projection.shelves if row.scope_id == "shared")
+    titan = next(row for row in [*shared.initial, *shared.next_page] if row.product.sku == "SCORP-126982")
+    assert titan.fit_status == "qualified"
+    assert titan.requirement_claim_ids == ["official-ram"]
+    assert titan.capability_claim_ids
+    assert titan.evidence_freshness.specification == "fresh"
+    assert titan.evidence_freshness.price == "fresh"
+    assert titan.evidence_freshness.availability == "fresh"
+    assert {row.location_id for row in titan.availability} == {
+        "australia_delivery", "dandenong",
+    }
+    assert all(row.freshness_status == "fresh" for row in titan.availability)
+
+
+def test_conflicting_exact_configuration_observations_remain_contested():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        projection = project_accepted_catalog(
+            db,
+            accepted_claims=[{
+                "claim_id": "cpu-model",
+                "attribute": "cpu_model",
+                "operator": "=",
+                "value": "Ryzen 7 9800X3D",
+                "requirement_class": "minimum",
+                "authority_status": "verified_official",
+            }],
+            now=datetime(2026, 8, 8, 12, tzinfo=timezone.utc),
+        )
+
+    shared = next(row for row in projection.shelves if row.scope_id == "shared")
+    zephyr = next(row for row in [*shared.initial, *shared.next_page] if row.product.sku == "JW-818845")
+    assert zephyr.fit_status == "conditional"
+    assert "cpu model" in zephyr.unknowns
+    assert "cpu model" not in zephyr.misses
+    assert len(zephyr.capability_claim_ids) == 2
+
+
+def test_product_clocks_age_independently_and_workstation_identity_is_preserved():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        projection = project_accepted_catalog(
+            db, accepted_claims=[],
+            now=datetime(2026, 8, 10, 1, tzinfo=timezone.utc),
+        )
+
+    products = {
+        product.product.sku: product
+        for shelf in projection.shelves
+        for product in [*shelf.initial, *shelf.next_page]
+    }
+    zbook = products["JW-822962"]
+    z2 = products["SCORP-C07NXPT"]
+    assert zbook.product.form_factor == "mobile_workstation"
+    assert z2.product.form_factor == "fixed_workstation"
+    assert zbook.evidence_freshness.specification == "fresh"
+    assert zbook.evidence_freshness.price == "stale"
+    assert zbook.evidence_freshness.availability == "stale"

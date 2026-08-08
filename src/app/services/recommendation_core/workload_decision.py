@@ -62,7 +62,10 @@ class ProductConfigurationIdentity(BaseModel):
     identifier_type: str = Field(default="unresolved", max_length=80)
     identifier: str = Field(default="", max_length=240)
     configuration_hash: str | None = Field(default=None, max_length=128)
-    form_factor: Literal["laptop", "desktop", "server", "cloud", "unknown"] = "unknown"
+    form_factor: Literal[
+        "laptop", "mobile_workstation", "desktop", "fixed_workstation",
+        "server", "cloud", "unknown",
+    ] = "unknown"
 
     @property
     def exact(self) -> bool:

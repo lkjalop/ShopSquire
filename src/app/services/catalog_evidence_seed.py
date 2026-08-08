@@ -159,6 +159,51 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
 )
 
 
+def _configuration_claims(item: ReviewedConfiguration) -> dict[str, tuple[Any, str | None]]:
+    """Every material configuration field is an independently referenceable fact."""
+
+    return {
+        "form_factor": (item.form_factor, None),
+        "mobility": (item.mobility, None),
+        "device_class": (item.device_class, None),
+        "operating_system": (item.os_edition, None),
+        "gpu_class": (item.gpu_class, None),
+        "gpu_vram_gb": (item.gpu_vram_gb, "GB"),
+        "gpu_tgp_w": (item.gpu_tgp_w, "W"),
+        "ram_gb": (item.ram_installed_gb, "GB"),
+        "ram_ceiling_gb": (item.ram_ceiling_gb, "GB"),
+        "ram_upgradeable": (item.ram_upgradeable, None),
+        "storage_gb": (item.storage_gb, "GB"),
+        "warranty_type": (item.warranty_type, None),
+        "warranty_years": (item.warranty_years, "years"),
+    }
+
+
+def _ensure_configuration_observations(
+    db, config: ProductConfiguration, item: ReviewedConfiguration,
+) -> None:
+    existing = {
+        row.attribute_key
+        for row in db.execute(select(ProductEvidenceObservation).where(
+            ProductEvidenceObservation.configuration_id == config.id,
+        )).scalars()
+    }
+    for attribute, (value, unit) in _configuration_claims(item).items():
+        if attribute in existing or value is None:
+            continue
+        db.add(ProductEvidenceObservation(
+            configuration_id=config.id,
+            attribute_key=attribute,
+            value_json={"value": value},
+            unit=unit,
+            claim_class="attested",
+            evidence_status="observed",
+            source_id=item.retailer,
+            source_record_id=f"{item.source_url}#spec-{attribute}",
+            observed_at=SOURCE_DATE,
+        ))
+
+
 def configuration_hash(item: ReviewedConfiguration) -> str:
     material = item.model_dump(exclude={"claims", "availability"})
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
@@ -194,6 +239,7 @@ def ingest_reviewed_configurations(db, *, tenant_id: str = "default") -> list[st
         if existing is not None:
             if existing.product_id != product.id:
                 existing.product_id = product.id
+            _ensure_configuration_observations(db, existing, item)
             ids.append(existing.id)
             continue
         config = ProductConfiguration(
@@ -213,6 +259,8 @@ def ingest_reviewed_configurations(db, *, tenant_id: str = "default") -> list[st
                 source_record_id=f"{item.source_url}#{index}", source_excerpt=claim.excerpt,
                 observed_at=SOURCE_DATE,
             ))
+        db.flush()
+        _ensure_configuration_observations(db, config, item)
         for index, row in enumerate(item.availability):
             db.add(ProductAvailabilityObservation(
                 configuration_id=config.id, source_record_id=f"{item.source_url}#availability-{index}",

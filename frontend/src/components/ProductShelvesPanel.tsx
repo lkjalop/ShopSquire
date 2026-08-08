@@ -12,7 +12,19 @@ type ShelfProduct = {
   conditional?: string[];
   unknowns?: string[];
   misses?: string[];
+  compromises?: string[];
+  why_ranked?: string;
   freshness_status?: string;
+  evidence_freshness?: {
+    specification: string; specification_observed_at?: string | null;
+    price: string; price_observed_at?: string | null;
+    availability: string; availability_observed_at?: string | null;
+  };
+  availability?: {
+    location_id: string; status: string; quantity?: number | null;
+    lead_time_min_days?: number | null; lead_time_max_days?: number | null;
+    freshness_status?: string;
+  }[];
 };
 
 type ProductShelf = {
@@ -94,11 +106,26 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
             <div style={{ marginTop: 6 }}>{money(item.price_cents, item.currency)}</div>
             <div style={{ marginTop: 4, fontSize: 11 }}>Fit: {item.fit_status}</div>
             <div style={{ fontSize: 11 }}>MPN: {item.product.identifier || 'unknown'}</div>
+            <div style={{ marginTop: 5, fontSize: 11 }}>{item.why_ranked || 'Provisional catalog exploration.'}</div>
             {item.meets?.length ? <div style={{ fontSize: 11 }}>Meets: {item.meets.join(', ')}</div> : null}
             {item.conditional?.length ? <div style={{ fontSize: 11 }}>Conditional: {item.conditional.join(', ')}</div> : null}
             {item.unknowns?.length ? <div style={{ fontSize: 11 }}>Unknown: {item.unknowns.join(', ')}</div> : null}
-            {item.misses?.length ? <div style={{ fontSize: 11 }}>Misses: {item.misses.join(', ')}</div> : null}
-            <div style={{ fontSize: 11 }}>Evidence freshness: {item.freshness_status || 'unknown'}</div>
+            {item.misses?.length ? <div style={{ fontSize: 11, color: '#991b1b' }}>Minimum misses: {item.misses.join(', ')}</div> : null}
+            {item.compromises?.length ? <div style={{ fontSize: 11, color: '#92400e' }}>Recommendation compromises: {item.compromises.join(', ')}</div> : null}
+            {item.evidence_freshness ? (
+              <div style={{ fontSize: 11 }}>
+                Freshness: specification {item.evidence_freshness.specification}
+                {' · '}price {item.evidence_freshness.price}
+                {' · '}availability {item.evidence_freshness.availability}
+              </div>
+            ) : <div style={{ fontSize: 11 }}>Evidence freshness: {item.freshness_status || 'unknown'}</div>}
+            {item.availability?.length ? (
+              <div style={{ fontSize: 11 }}>
+                Availability: {item.availability.slice(0, 2).map((row) => (
+                  `${row.location_id} ${row.status}${row.quantity == null ? '' : ` (${row.quantity})`}`
+                )).join(' · ')}
+              </div>
+            ) : null}
             {projectionReady(item, onPropose) && (
               <div style={{ display: 'flex', gap: 5, marginTop: 7 }}>
                 <input

@@ -24,6 +24,32 @@ from src.app.services.recommendation_core.workload_decision import (
 
 FitStatus = Literal["qualified", "conditional", "failed"]
 BudgetBand = Literal["best", "within_budget", "stretch"]
+FreshnessStatus = Literal["fresh", "stale", "unknown"]
+
+
+class EvidenceFreshnessProjection(BaseModel):
+    """Independent clocks; a fresh specification never refreshes price or stock."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    specification: FreshnessStatus = "unknown"
+    specification_observed_at: str | None = None
+    price: FreshnessStatus = "unknown"
+    price_observed_at: str | None = None
+    availability: FreshnessStatus = "unknown"
+    availability_observed_at: str | None = None
+
+
+class AvailabilityProjection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    location_id: str
+    status: str
+    quantity: int | None = None
+    lead_time_min_days: int | None = None
+    lead_time_max_days: int | None = None
+    observed_at: str | None = None
+    freshness_status: FreshnessStatus = "unknown"
 
 
 def configuration_identity_key(product: ProductConfigurationIdentity) -> str:
@@ -61,6 +87,10 @@ class ShelfCandidateInput(BaseModel):
     price_cents: int = Field(ge=0)
     currency: str = Field(default="AUD", min_length=3, max_length=3)
     relevance_score: float = Field(default=0.0, ge=0.0)
+    evidence_freshness: EvidenceFreshnessProjection = Field(
+        default_factory=EvidenceFreshnessProjection,
+    )
+    availability: list[AvailabilityProjection] = Field(default_factory=list, max_length=64)
     fit_by_scope: dict[str, WorkloadDecision | None] = Field(
         default_factory=dict, max_length=8
     )
@@ -95,7 +125,15 @@ class ShelfProduct(BaseModel):
     conditional: list[str] = Field(default_factory=list, max_length=12)
     unknowns: list[str] = Field(default_factory=list, max_length=12)
     misses: list[str] = Field(default_factory=list, max_length=12)
+    compromises: list[str] = Field(default_factory=list, max_length=12)
+    why_ranked: str = Field(default="Provisional catalog exploration", max_length=500)
+    requirement_claim_ids: list[str] = Field(default_factory=list, max_length=64)
+    capability_claim_ids: list[str] = Field(default_factory=list, max_length=64)
     freshness_status: Literal["fresh", "stale", "unknown", "mixed"] = "unknown"
+    evidence_freshness: EvidenceFreshnessProjection = Field(
+        default_factory=EvidenceFreshnessProjection,
+    )
+    availability: list[AvailabilityProjection] = Field(default_factory=list, max_length=64)
 
 
 class ProductShelf(BaseModel):
@@ -261,14 +299,41 @@ def build_product_shelves(
                     ),
                     misses=(
                         [row.attribute_label for row in decision.fit_ledger
-                         if row.verdict == "below_minimum"]
+                         if row.verdict == "below_minimum"
+                         and row.requirement_class == "minimum"]
                         if decision else []
+                    ),
+                    compromises=(
+                        [row.attribute_label for row in decision.fit_ledger
+                         if row.verdict == "below_minimum"
+                         and row.requirement_class != "minimum"]
+                        if decision else []
+                    ),
+                    why_ranked=(
+                        "Verified evidence satisfies the accepted requirements for this shelf."
+                        if decision and status == "qualified"
+                        else "This option remains conditional because exact evidence is incomplete or contested."
+                        if decision else "No product fit ledger has been compiled for this option."
+                    ),
+                    requirement_claim_ids=(
+                        list(dict.fromkeys(
+                            claim_id for row in decision.fit_ledger
+                            for claim_id in row.requirement_claim_ids
+                        )) if decision else []
+                    ),
+                    capability_claim_ids=(
+                        list(dict.fromkeys(
+                            claim_id for row in decision.fit_ledger
+                            for claim_id in row.capability_claim_ids
+                        )) if decision else []
                     ),
                     freshness_status=(
                         "mixed" if decision and len({row.freshness_status for row in decision.fit_ledger}) > 1
                         else decision.fit_ledger[0].freshness_status
                         if decision and decision.fit_ledger else "unknown"
                     ),
+                    evidence_freshness=candidate.evidence_freshness,
+                    availability=candidate.availability,
                 )
             )
 
