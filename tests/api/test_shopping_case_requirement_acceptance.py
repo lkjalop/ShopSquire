@@ -28,6 +28,35 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def test_interpretation_is_immediate_case_bound_and_zero_network():
+    client = _client()
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-fast-lane",
+        "retained_purpose": "I need CAD for very large 3D models and point-cloud work.",
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "case-interpretation-v1"
+    assert payload["case_id"].startswith("sc-case-")
+    assert payload["ambiguity_exploration"]["case_id"] == payload["case_id"]
+    assert payload["ambiguity_exploration"]["research_plan_id"].startswith("crp-")
+    assert payload["ambiguity_exploration"]["provider_accounting"] == {
+        "external_calls": 0, "paid_calls": 0,
+    }
+    assert payload["product_shelves"]["schema_version"] == "product-shelves-v1"
+    assert payload["cart_mutation"] == "not_authorized"
+    assert payload["supplier_send"] == "not_authorized"
+
+
+def test_interpretation_defers_covered_catalog_request_to_normal_chat_lane():
+    client = _client()
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-local",
+        "retained_purpose": "show me a normal everyday laptop",
+    })
+    assert response.status_code == 204
+
+
 def test_acceptance_is_case_scoped_versioned_idempotent_and_never_mutates_cart():
     client = _client()
     claims = extract_buyer_requirement_claims(
@@ -132,13 +161,28 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
         "http://127.0.0.1:8888/search?q={query}&format=json",
     )
 
-    def fixture_research(purpose, *, search_url_template, workload):
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan("OT cyber range")
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+
+    def fixture_research(
+        purpose, *, search_url_template, sources, plan_id, hypothesis_ids,
+    ):
         assert purpose == "OT cyber range"
         assert "{query}" in search_url_template
-        assert workload == "ot_cyber_range"
+        assert sources
+        assert plan_id == plan.plan_id
+        assert set(hypothesis_ids) == {row.hypothesis_id for row in plan.hypotheses}
         return {
             "schema_version": "official-workload-research-v1",
-            "run_id": "fixture-run", "purpose": purpose, "workload": workload,
+            "run_id": "fixture-run", "purpose": purpose,
+            "research_plan_id": plan_id, "hypothesis_ids": hypothesis_ids,
+            "source_ids": [row["source_id"] for row in sources],
             "claims": [{
                 "claim_id": "official-os", "attribute": "operating_system",
                 "operator": "one_of", "value": ["Windows 11 Pro"],
@@ -153,12 +197,14 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
         }
 
     monkeypatch.setattr(
-        "src.app.services.official_workload_research.research_official_workload",
+        "src.app.services.official_workload_research.research_official_sources",
         fixture_research,
     )
     response = client.post("/api/v1/shopping-cases/sc-trace-1/research", json={
-        "uid": "buyer-1", "retained_purpose": "OT cyber range",
-        "workload": "ot_cyber_range",
+        "uid": "buyer-1", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
     })
     assert response.status_code == 200
     payload = response.json()
@@ -185,3 +231,29 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
     assert planned["cart_mutation"] == "not_applied"
     assert planned["supplier_send"] == "not_authorized"
     assert planned["ops"][0]["allow_sourcing"] is True
+
+
+def test_research_scope_cannot_be_changed_by_the_browser(monkeypatch):
+    client = _client()
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan("OT cyber range")
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    legacy = client.post("/api/v1/shopping-cases/sc-scope/research", json={
+        "uid": "buyer-1", "retained_purpose": "CAD point cloud",
+        "workload": "ot_cyber_range",
+    })
+    assert legacy.status_code == 422
+
+    tampered = client.post("/api/v1/shopping-cases/sc-scope/research", json={
+        "uid": "buyer-1", "research_plan_id": "crp-00000000000000000000",
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    })
+    assert tampered.status_code == 409
+    assert tampered.json()["detail"]["code"] == "case_research_plan_mismatch"

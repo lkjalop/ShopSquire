@@ -1766,6 +1766,49 @@ export default function App() {
 
     // Call backend
     try {
+      // Open-vocabulary ambiguous requests take a fast, deterministic lane first. This creates
+      // the durable shopping case, provisional shelves, high-information question, and zero-call
+      // trace without waiting for an LLM/provider. A 204 means the request belongs to the normal
+      // local catalogue/chat path below. The browser supplies only the buyer's words; research
+      // hypotheses and publisher scope are server-owned.
+      if (!hasImages && !complaintIntent && !explicitComplaintIntent && mode !== 'faq') {
+        const interpretationResponse = await fetch(apiUrl('/api/v1/shopping-cases/interpretations'), {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+            ...csrfHeaders(),
+          },
+          body: JSON.stringify({ uid, retained_purpose: q }),
+        });
+        if (interpretationResponse.status !== 204) {
+          const interpretation = await safeJson(interpretationResponse);
+          if (!interpretationResponse.ok || !interpretation) {
+            throw new Error(String(
+              interpretation?.detail?.message
+              || interpretation?.detail?.code
+              || interpretation?.detail
+              || `case_interpretation_failed (${interpretationResponse.status})`,
+            ));
+          }
+          if (interpretation?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
+            setAmbiguityExploration(interpretation.ambiguity_exploration as AmbiguityExploration);
+          }
+          if (interpretation?.product_shelves?.schema_version === 'product-shelves-v1') {
+            setProductShelves(interpretation.product_shelves as ProductShelfProjection);
+          }
+          setTraceId(normalizeTraceId(interpretation.trace_id || interpretation.case_id || null));
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: String(interpretation.assistant_message || 'I opened a provisional research case.'),
+            timestamp: new Date(),
+          }]);
+          switchRightPanelMode('grid');
+          return;
+        }
+      }
+
       // If images are attached, triage them first
       let imageTriageResults: any[] = [];
       if (hasImages) {
@@ -2675,6 +2718,9 @@ export default function App() {
     if (!ambiguityExploration?.case_id) {
       throw new Error('This exploration is missing its shopping-case identity.');
     }
+    if (!ambiguityExploration.research_plan_id) {
+      throw new Error('This case has no governed research plan. Upload requirements or continue provisionally.');
+    }
     setIsThinking(true);
     try {
       const response = await fetch(apiUrl(
@@ -2688,8 +2734,12 @@ export default function App() {
         },
         body: JSON.stringify({
           uid,
-          retained_purpose: ambiguityExploration.retained_purpose,
-          workload: 'ot_cyber_range',
+          research_plan_id: ambiguityExploration.research_plan_id,
+          ambiguity_object_ids: (ambiguityExploration.ambiguity_objects || []).map((item) => item.ambiguity_id),
+          hypothesis_ids: (ambiguityExploration.interpretations || [])
+            .map((item) => item.hypothesis_id)
+            .filter((value): value is string => Boolean(value)),
+          research_authorized: true,
         }),
       });
       const payload = await safeJson(response);

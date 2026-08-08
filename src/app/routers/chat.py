@@ -3661,6 +3661,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # exploration. This path calls no external provider and grants no cart authority.
     ambiguity_exploration: Dict[str, Any] | None = None
     ambiguous_product_shelves: Dict[str, Any] | None = None
+    _case_research_plan = None
+    try:
+        from src.app.services.case_research_plan import build_case_research_plan
+
+        _case_research_plan = build_case_research_plan(str(q or "")[:500])
+    except Exception as exc:
+        logger.debug("case research-plan projection skipped: %s", exc)
     provisional_exploration_needed = bool(
         semantic_catalog_blocked
         or (
@@ -3668,12 +3675,27 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             and not products
             and not bool(data.get("off_catalog"))
         )
+        or (
+            _case_research_plan is not None
+            and turn_intent not in {
+                "EXPLAIN", "SUPPORT_CLAIM", "POLICY_QUESTION", "CART_MUTATION",
+            }
+        )
     )
     if provisional_exploration_needed and not buyer_requirement_claims:
         try:
             from src.app.services.accepted_catalog_projection import project_accepted_catalog
 
             _semantic_hypotheses = list(semantic_resolution.get("workload_hypotheses") or [])[:3]
+            if not _semantic_hypotheses and _case_research_plan is not None:
+                _semantic_hypotheses = [
+                    {
+                        "hypothesis_id": item.hypothesis_id,
+                        "label": item.label,
+                        "authority": item.authority,
+                    }
+                    for item in _case_research_plan.hypotheses
+                ]
             _projection = project_accepted_catalog(
                 db, accepted_claims=[], desired_outcome=str(q or "")[:500],
                 tenant_id=_request_tenant_id(request),
@@ -3698,7 +3720,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 "retained_purpose": str(q or "")[:500],
                 "status": "provisional",
                 "interpretations": _semantic_hypotheses,
-                "next_question": _questions[0] if _questions else None,
+                "next_question": (
+                    _questions[0] if _questions
+                    else ({"id": "research_scope", "text": _case_research_plan.next_question}
+                          if _case_research_plan is not None else None)
+                ),
                 "research_choices": [
                     "research_approved_sources", "upload_requirements",
                     "enter_specifications", "continue_provisionally",
@@ -3708,6 +3734,21 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 "decision": "exploration_allowed",
                 "cart_authority": "none",
                 "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+                "research_plan_id": (
+                    _case_research_plan.plan_id if _case_research_plan is not None else None
+                ),
+                "ambiguity_objects": (
+                    [item.model_dump(mode="json") for item in _case_research_plan.ambiguities]
+                    if _case_research_plan is not None else []
+                ),
+                "research_obligations": (
+                    [item.model_dump(mode="json") for item in _case_research_plan.obligations]
+                    if _case_research_plan is not None else []
+                ),
+                "source_candidate_ids": (
+                    list(_case_research_plan.source_candidate_ids)
+                    if _case_research_plan is not None else []
+                ),
             }
             if decision_trace_id:
                 log_trace_event(

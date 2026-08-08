@@ -118,6 +118,7 @@ def project_accepted_catalog(
     budget_cents: int | None = None,
     tenant_id: str = "default",
     hypothesis_labels: Mapping[str, str] | None = None,
+    hypothesis_claims: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
 ) -> ProductShelfProjection:
     rows = db.execute(select(ProductConfiguration).where(
         ProductConfiguration.tenant_id == tenant_id,
@@ -129,6 +130,11 @@ def project_accepted_catalog(
         str(key).strip(): str(value).strip()
         for key, value in dict(hypothesis_labels or {}).items()
         if str(key).strip() and str(value).strip()
+    }
+    scoped_claims = {
+        str(scope_id): list(rows)
+        for scope_id, rows in dict(hypothesis_claims or {}).items()
+        if str(scope_id).strip()
     }
     architecture_ids = sorted({f"architecture:{row.device_class}" for row in rows})
     hypothesis_ids = (
@@ -165,8 +171,14 @@ def project_accepted_catalog(
             desired_outcome=desired_outcome, budget_cents=budget_cents,
         )
         for hypothesis_id in proposed_labels:
+            claims_for_hypothesis = list({
+                str(claim.get("claim_id") or index): claim
+                for index, claim in enumerate([
+                    *shared_claims, *scoped_claims.get(hypothesis_id, []),
+                ])
+            }.values())
             decisions[hypothesis_id] = _decision(
-                row, shared_claims, scope_id=hypothesis_id,
+                row, claims_for_hypothesis, scope_id=hypothesis_id,
                 desired_outcome=desired_outcome, budget_cents=budget_cents,
             )
         known = sum(

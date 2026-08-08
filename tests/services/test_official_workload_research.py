@@ -46,6 +46,56 @@ def test_nist_scope_never_becomes_a_hardware_floor() -> None:
     assert "does not establish a hardware floor" in context[0]["statement"]
 
 
+def test_application_parsers_do_not_share_claims_across_publishers() -> None:
+    observed_at = "2026-08-08T00:00:00Z"
+    blender, _ = compile_source_claims(
+        "blender_official_requirements", b"Recommended 32 GB RAM and 8 GB VRAM",
+        observed_at=observed_at, citation_url="https://www.blender.org/download/requirements/",
+    )
+    epic, _ = compile_source_claims(
+        "epic_unreal_engine_requirements",
+        b"Recommended hardware: 32 GB RAM, 8 GB or more Graphics RAM, DirectX 12",
+        observed_at=observed_at, citation_url="https://dev.epicgames.com/documentation/x",
+    )
+    autocad, _ = compile_source_claims(
+        "autodesk_autocad_requirements", b"Recommended 32 GB RAM; DirectX 12 capable GPU",
+        observed_at=observed_at, citation_url="https://help.autodesk.com/view/ACD/2026/ENU/",
+    )
+    assert {row["attribute"] for row in blender} == {"ram_gb", "gpu_vram_gb"}
+    assert {row["attribute"] for row in epic} == {"ram_gb", "gpu_vram_gb", "graphics_api"}
+    assert {row["attribute"] for row in autocad} == {"ram_gb", "graphics_api"}
+    assert all(row["source_id"] == "blender_official_requirements" for row in blender)
+    assert all(row["source_id"] == "epic_unreal_engine_requirements" for row in epic)
+    assert all(row["source_id"] == "autodesk_autocad_requirements" for row in autocad)
+
+
+def test_unregistered_source_parser_cannot_create_claims() -> None:
+    claims, context = compile_source_claims(
+        "search_snippet", b"32 GB RAM and 16 GB VRAM is perfect",
+        observed_at="2026-08-08T00:00:00Z", citation_url="https://search.invalid/",
+    )
+    assert claims == []
+    assert context == []
+
+
+def test_autocad_point_cloud_tier_keeps_scope_and_workstation_requirement() -> None:
+    claims, _ = compile_source_claims(
+        "autodesk_autocad_requirements",
+        b"Additional Requirements for large datasets, point clouds, and 3D modeling. "
+        b"Memory 32 GB RAM or more. Display Card 12 GB VRAM or greater; "
+        b"DirectX-capable workstation class graphics card.",
+        observed_at="2026-08-08T00:00:00Z",
+        citation_url="https://www.autodesk.com/support/technical/article/point-cloud",
+    )
+    by_attribute = {row["attribute"]: row for row in claims}
+    assert by_attribute["gpu_vram_gb"]["value"] == 12
+    assert by_attribute["gpu_vram_gb"]["condition"] == (
+        "large datasets, point clouds, or 3D modelling"
+    )
+    assert by_attribute["gpu_class"]["value"] == "workstation"
+    assert by_attribute["gpu_class"]["requirement_class"] == "target"
+
+
 def test_ranking_delta_reports_movement_without_inventing_a_reason() -> None:
     before = {"shelves": [{"shelf_id": "shared", "initial": [
         {"product": {"sku": "A"}}, {"product": {"sku": "B"}},

@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from src.app.models.db import get_db
 from src.app.models.orm import RequirementProposal, ShoppingCase
@@ -69,9 +69,19 @@ class FulfillmentOptionsRequest(BaseModel):
 class ResearchShoppingCaseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     uid: str = Field(min_length=1, max_length=200)
-    retained_purpose: str = Field(min_length=3, max_length=500)
     budget_cents: int | None = Field(default=None, ge=1, le=1_000_000_000)
-    workload: Literal["ot_cyber_range"] = "ot_cyber_range"
+    research_plan_id: str = Field(pattern=r"^crp-[a-f0-9]{20}$")
+    ambiguity_object_ids: list[str] = Field(min_length=1, max_length=8)
+    hypothesis_ids: list[str] = Field(min_length=1, max_length=3)
+    research_authorized: Literal[True]
+
+
+class CreateCaseInterpretationRequest(BaseModel):
+    """Buyer-authored outcome only; the server owns all research scope."""
+
+    model_config = ConfigDict(extra="forbid")
+    uid: str = Field(min_length=1, max_length=200)
+    retained_purpose: str = Field(min_length=3, max_length=500)
 
 
 class ProposeCaseCartMutationRequest(BaseModel):
@@ -91,6 +101,146 @@ def _now() -> datetime:
 
 def _trace_id(proposal_id: str, version: int) -> str:
     return "req-" + hashlib.sha256(f"{proposal_id}:{version}".encode()).hexdigest()[:20]
+
+
+def _payload_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
+def _case_research_plan_from_trace(
+    db, *, case_id: str, tenant_id: str,
+):
+    """Rebuild a plan only from the server-recorded ambiguity event."""
+
+    from src.app.services.case_research_plan import build_case_research_plan
+    from src.app.services.decision_log import get_cached_trace_events
+
+    trace_id = case_id.removeprefix("sc-")
+    events = list(get_cached_trace_events(trace_id))
+    if not events:
+        try:
+            rows = db.execute(text(
+                "SELECT event_type, payload FROM decision_trace_events "
+                "WHERE trace_id=:trace_id AND tenant_id=:tenant_id ORDER BY created_at ASC"
+            ), {"trace_id": trace_id, "tenant_id": tenant_id}).mappings().all()
+            events = [dict(row) for row in rows]
+        except Exception:
+            events = []
+    for event in reversed(events):
+        if str(event.get("event_type") or "") != "ambiguity_exploration_projected":
+            continue
+        payload = _payload_object(event.get("payload"))
+        purpose = str(payload.get("retained_purpose") or "").strip()
+        recorded_plan_id = str(payload.get("research_plan_id") or "").strip()
+        plan = build_case_research_plan(purpose) if purpose else None
+        if plan is None or plan.plan_id != recorded_plan_id:
+            return None
+        return plan
+    return None
+
+
+@router.post("/interpretations")
+def create_case_interpretation(
+    body: CreateCaseInterpretationRequest,
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Create the zero-network provisional case before any narration provider runs.
+
+    An empty match is a normal local-persona outcome, represented by 204 so the
+    existing chat route remains authoritative for covered catalogue requests.
+    """
+
+    from fastapi import Response
+
+    from src.app.services.case_research_plan import (
+        build_case_research_plan, plan_hypothesis_labels,
+    )
+
+    plan = build_case_research_plan(body.retained_purpose)
+    if plan is None:
+        return Response(status_code=204)
+
+    tenant_id = _tenant(x_tenant_id)
+    trace_id = "case-" + uuid.uuid4().hex[:20]
+    case_id = f"sc-{trace_id}"
+    case = ShoppingCase(
+        case_id=case_id, tenant_id=tenant_id, uid=body.uid, status="active",
+        retained_purpose=plan.retained_purpose, created_at=_now(), updated_at=_now(),
+    )
+    db.add(case)
+    db.commit()
+
+    projection = project_accepted_catalog(
+        db, accepted_claims=[], desired_outcome=plan.retained_purpose,
+        tenant_id=tenant_id, hypothesis_labels=plan_hypothesis_labels(plan),
+    )
+    exploration = {
+        "schema_version": "ambiguity-exploration-v1",
+        "case_id": case_id,
+        "trace_id": trace_id,
+        "retained_purpose": plan.retained_purpose,
+        "status": "provisional",
+        "interpretations": [
+            {
+                "hypothesis_id": row.hypothesis_id,
+                "label": row.label,
+                "authority": row.authority,
+            }
+            for row in plan.hypotheses
+        ],
+        "next_question": {"id": "research_scope", "text": plan.next_question},
+        "research_choices": [
+            "research_approved_sources", "upload_requirements",
+            "enter_specifications", "continue_provisionally",
+        ],
+        "execution": "local_exploration_completed",
+        "evidence": "material_gaps",
+        "decision": "exploration_allowed",
+        "cart_authority": "none",
+        "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+        "research_plan_id": plan.plan_id,
+        "ambiguity_objects": [row.model_dump(mode="json") for row in plan.ambiguities],
+        "research_obligations": [row.model_dump(mode="json") for row in plan.obligations],
+        "source_candidate_ids": list(plan.source_candidate_ids),
+    }
+    log_trace_event(
+        trace_id=trace_id,
+        event_type="ambiguity_exploration_projected",
+        source_type="stage",
+        source_id="Case_Bound_Interpretation",
+        target_type="ui",
+        target_id="research_fit_panel",
+        payload={
+            **exploration,
+            "shelf_ids": [shelf.shelf_id for shelf in projection.shelves],
+            "qualification_authority": "none",
+            "commercial_authority": "none",
+        },
+    )
+    return {
+        "schema_version": "case-interpretation-v1",
+        "case_id": case_id,
+        "trace_id": trace_id,
+        "ambiguity_exploration": exploration,
+        "product_shelves": projection.model_dump(mode="json"),
+        "assistant_message": (
+            "I created a provisional shopping case from your outcome. The shelves are local "
+            "catalog exploration, not verified fit. Answer the one material question or authorize "
+            "approved-source research to corroborate the requirements."
+        ),
+        "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+        "cart_mutation": "not_authorized",
+        "supplier_send": "not_authorized",
+    }
 
 
 @router.post("/{case_id}/requirement-proposals", status_code=201)
@@ -286,6 +436,23 @@ def research_shopping_case(
 ) -> dict[str, Any]:
     """Run buyer-authorized live research and rerank inside one durable case."""
     tenant_id = _tenant(x_tenant_id)
+    plan = _case_research_plan_from_trace(db, case_id=case_id, tenant_id=tenant_id)
+    if plan is None:
+        raise HTTPException(status_code=409, detail={
+            "code": "case_research_plan_not_found",
+            "message": "The case has no durable ambiguity proposal to authorize.",
+        })
+    expected_ambiguities = {row.ambiguity_id for row in plan.ambiguities}
+    expected_hypotheses = {row.hypothesis_id for row in plan.hypotheses}
+    if (
+        body.research_plan_id != plan.plan_id
+        or set(body.ambiguity_object_ids) != expected_ambiguities
+        or set(body.hypothesis_ids) != expected_hypotheses
+    ):
+        raise HTTPException(status_code=409, detail={
+            "code": "case_research_plan_mismatch",
+            "message": "The submitted interpretation does not match the retained case plan.",
+        })
     case = db.execute(select(ShoppingCase).where(
         ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
     )).scalar_one_or_none()
@@ -294,7 +461,7 @@ def research_shopping_case(
     if case is None:
         case = ShoppingCase(
             case_id=case_id, tenant_id=tenant_id, uid=body.uid, status="active",
-            retained_purpose=body.retained_purpose, created_at=_now(), updated_at=_now(),
+            retained_purpose=plan.retained_purpose, created_at=_now(), updated_at=_now(),
         )
         db.add(case)
         db.flush()
@@ -304,23 +471,40 @@ def research_shopping_case(
             "code": "local_discovery_not_enrolled",
             "message": "Start the enrolled local SearXNG profile or upload requirements.",
         })
+    from src.app.services.case_research_plan import (
+        approved_sources_for_plan, plan_hypothesis_labels,
+    )
     from src.app.services.official_workload_research import (
-        ranking_delta, research_official_workload,
+        ranking_delta, research_official_sources,
     )
 
+    approved_sources = approved_sources_for_plan(plan)
+    if not approved_sources:
+        raise HTTPException(status_code=409, detail={
+            "code": "publisher_policy_review_required",
+            "message": "Applicable publisher sources exist, but none is approved for this tenant.",
+            "source_candidate_ids": plan.source_candidate_ids,
+        })
+
     before = project_accepted_catalog(
-        db, accepted_claims=[], desired_outcome=body.retained_purpose,
+        db, accepted_claims=[], desired_outcome=plan.retained_purpose,
         budget_cents=body.budget_cents, tenant_id=tenant_id,
     ).model_dump(mode="json")
-    research = research_official_workload(
-        body.retained_purpose, search_url_template=search_url, workload=body.workload,
+    research = research_official_sources(
+        plan.retained_purpose, search_url_template=search_url,
+        sources=list(approved_sources), plan_id=plan.plan_id,
+        hypothesis_ids=body.hypothesis_ids,
     )
     after_projection = project_accepted_catalog(
-        db, accepted_claims=research["claims"], desired_outcome=body.retained_purpose,
+        db, accepted_claims=research["claims"], desired_outcome=plan.retained_purpose,
         budget_cents=body.budget_cents, tenant_id=tenant_id,
-        hypothesis_labels={
-            "vm_network": "VM and network appliance fit",
-            "factory_io": "Factory I/O and PLC simulation fit",
+        hypothesis_labels=plan_hypothesis_labels(plan),
+        hypothesis_claims={
+            hypothesis.hypothesis_id: [
+                claim for claim in research["claims"]
+                if str(claim.get("source_id") or "") in set(hypothesis.source_ids)
+            ]
+            for hypothesis in plan.hypotheses
         },
     ).model_dump(mode="json")
     delta = ranking_delta(before, after_projection)
@@ -332,12 +516,13 @@ def research_shopping_case(
     })
     result = {
         "schema_version": "shopping-case-research-v1", "case_id": case_id,
-        "status": "research_completed", "retained_purpose": body.retained_purpose,
+        "status": "research_completed", "retained_purpose": plan.retained_purpose,
+        "research_plan": plan.model_dump(mode="json"),
         "research": research, "product_shelves": after_projection,
         "research_delta": delta, "cart_mutation": "not_authorized",
         "supplier_send": "not_authorized", "trace_id": case_id.removeprefix("sc-"),
     }
-    case.retained_purpose = body.retained_purpose
+    case.retained_purpose = plan.retained_purpose
     case.updated_at = _now()
     db.commit()
     try:

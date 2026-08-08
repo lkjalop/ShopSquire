@@ -126,7 +126,10 @@
       "publisher_policy": {"authority": "government_publisher", "direct_origin_required": true, "discovery_snippets_accepted": false, "policy_ref": "operator:nist-web"},
       "cache_policy": {"permitted": true, "max_age_hours": 720, "revalidate_after_hours": 168},
       "tenant_allowlist": {"default": "deny", "ref": "env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST"},
-      "review_status": "pending_independent_human_review"
+      "review_status": "approved",
+      "reviewed_at": "2026-08-08",
+      "reviewed_by": "buyer_current_session",
+      "review_basis": "Buyer directed Phase 2 enrolment of NIST manufacturing digital-twin material in the corrected roadmap"
     },
     {
       "source_id": "blender_official_requirements",
@@ -142,13 +145,16 @@
       "publisher_policy": {"authority": "official_publisher", "direct_origin_required": true, "discovery_snippets_accepted": false, "policy_ref": "operator:blender-foundation"},
       "cache_policy": {"permitted": true, "max_age_hours": 168, "revalidate_after_hours": 24},
       "tenant_allowlist": {"default": "deny", "ref": "env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST"},
-      "review_status": "pending_independent_human_review"
+      "review_status": "approved",
+      "reviewed_at": "2026-08-08",
+      "reviewed_by": "buyer_current_session",
+      "review_basis": "Buyer directed Phase 2 enrolment of Blender official requirements in the corrected roadmap"
     },
     {
       "source_id": "autodesk_autocad_requirements",
       "publisher": "Autodesk",
-      "allowed_domains": ["help.autodesk.com"],
-      "canonical_entrypoints": ["https://help.autodesk.com/view/ACD/2026/ENU/?caas=caas%2Fsfdcarticles%2Fsfdcarticles%2FSystem-requirements-for-AutoCAD-2026-including-Specialized-Toolsets.html"],
+      "allowed_domains": ["help.autodesk.com", "www.autodesk.com"],
+      "canonical_entrypoints": ["https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/System-requirements-for-AutoCAD-2026-including-Specialized-Toolsets.html"],
       "allowed_claim_types": ["minimum_requirements", "recommended_requirements", "target_requirements", "compatibility", "certification"],
       "forbidden_claim_types": ["behavioral_performance", "benchmark_result", "exact_product_fit", "price", "availability"],
       "applicability": {"workloads": ["autocad", "large_3d_models", "point_cloud"], "scope": "Named AutoCAD version and large-dataset/point-cloud tiers", "resolution_owner": "research", "exclusions": ["other CAD applications", "interactive performance promises"]},
@@ -158,13 +164,16 @@
       "publisher_policy": {"authority": "official_publisher", "direct_origin_required": true, "discovery_snippets_accepted": false, "policy_ref": "operator:autodesk-help"},
       "cache_policy": {"permitted": true, "max_age_hours": 168, "revalidate_after_hours": 24},
       "tenant_allowlist": {"default": "deny", "ref": "env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST"},
-      "review_status": "pending_independent_human_review"
+      "review_status": "approved",
+      "reviewed_at": "2026-08-08",
+      "reviewed_by": "buyer_current_session",
+      "review_basis": "Buyer directed Phase 2 enrolment of Autodesk official CAD requirements in the corrected roadmap"
     },
     {
       "source_id": "autodesk_revit_requirements",
       "publisher": "Autodesk",
-      "allowed_domains": ["help.autodesk.com"],
-      "canonical_entrypoints": ["https://help.autodesk.com/view/RVT/2026/ENU/?caas=caas%2Fsfdcarticles%2Fsfdcarticles%2FSystem-requirements-for-Revit-2026-products.html"],
+      "allowed_domains": ["help.autodesk.com", "www.autodesk.com"],
+      "canonical_entrypoints": ["https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/System-requirements-for-Revit-2026-products.html"],
       "allowed_claim_types": ["minimum_requirements", "recommended_requirements", "target_requirements", "compatibility", "certification"],
       "forbidden_claim_types": ["behavioral_performance", "benchmark_result", "exact_product_fit", "price", "availability"],
       "applicability": {"workloads": ["revit", "bim", "large_bim_models"], "scope": "Named Revit version and published model-size tiers", "resolution_owner": "research", "exclusions": ["real-time renderer requirements", "walkthrough frame rate"]},
@@ -174,7 +183,10 @@
       "publisher_policy": {"authority": "official_publisher", "direct_origin_required": true, "discovery_snippets_accepted": false, "policy_ref": "operator:autodesk-help"},
       "cache_policy": {"permitted": true, "max_age_hours": 168, "revalidate_after_hours": 24},
       "tenant_allowlist": {"default": "deny", "ref": "env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST"},
-      "review_status": "pending_independent_human_review"
+      "review_status": "approved",
+      "reviewed_at": "2026-08-08",
+      "reviewed_by": "buyer_current_session",
+      "review_basis": "Buyer directed Phase 2 enrolment of Autodesk official BIM requirements in the corrected roadmap"
     },
     {
       "source_id": "epic_unreal_engine_requirements",
@@ -190,7 +202,10 @@
       "publisher_policy": {"authority": "official_publisher", "direct_origin_required": true, "discovery_snippets_accepted": false, "policy_ref": "operator:epic-developer-community"},
       "cache_policy": {"permitted": true, "max_age_hours": 168, "revalidate_after_hours": 24},
       "tenant_allowlist": {"default": "deny", "ref": "env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST"},
-      "review_status": "pending_independent_human_review"
+      "review_status": "approved",
+      "reviewed_at": "2026-08-08",
+      "reviewed_by": "buyer_current_session",
+      "review_basis": "Buyer directed Phase 2 enrolment of Epic official Unreal Engine requirements in the corrected roadmap"
     },
     {
       "source_id": "huggingface_official_docs_and_model_cards",

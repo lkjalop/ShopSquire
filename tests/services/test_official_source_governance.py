@@ -19,8 +19,8 @@ def test_official_source_manifest_is_valid_but_not_falsely_enrolled():
     assert "help.autodesk.com" in status["domain_allowlist"]
     assert "dev.epicgames.com" in status["domain_allowlist"]
     assert len(status["canonical_entrypoints"]) >= 17
-    assert status["approved_source_count"] == 5
-    assert status["pending_independent_human_review_count"] == 8
+    assert status["approved_source_count"] == 10
+    assert status["pending_independent_human_review_count"] == 3
     assert status["operationally_enrolled"] is False
 
 

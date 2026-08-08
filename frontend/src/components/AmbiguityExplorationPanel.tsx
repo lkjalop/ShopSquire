@@ -11,6 +11,14 @@ export type AmbiguityExploration = {
   decision: string;
   cart_authority: string;
   provider_accounting: { external_calls: number; paid_calls: number };
+  research_plan_id?: string | null;
+  ambiguity_objects?: { ambiguity_id: string }[];
+  research_obligations?: {
+    obligation_id: string;
+    resolution_owner: 'catalog' | 'research' | 'buyer' | 'computation' | 'supplier' | 'tenant_policy' | 'human';
+    status: string;
+  }[];
+  source_candidate_ids?: string[];
 };
 
 type Props = {
@@ -42,6 +50,13 @@ export default function AmbiguityExplorationPanel({
         </div>
       )}
       {question && <div data-testid="high-information-question" style={{ marginTop: 8 }}><strong>One question:</strong> {question}</div>}
+      {exploration.research_obligations?.length ? (
+        <div data-testid="research-resolution-owners" style={{ marginTop: 8, fontSize: 12 }}>
+          {exploration.research_obligations.map((item) => (
+            <div key={item.obligation_id}>{item.obligation_id}: {item.resolution_owner} ({item.status})</div>
+          ))}
+        </div>
+      ) : null}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>
         <button type="button" onClick={onResearch}>Research approved sources</button>
         <button type="button" onClick={onUpload}>Upload requirements</button>
