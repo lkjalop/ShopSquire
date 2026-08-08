@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import TIMESTAMP, JSON, Boolean, Integer, Text, ForeignKey
+from sqlalchemy import TIMESTAMP, JSON, Boolean, Integer, Text, ForeignKey, UniqueConstraint
 import uuid
 
 
@@ -26,6 +26,123 @@ class Product(Base):
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     specs: Mapped[dict | None] = mapped_column(JSON, default=None)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class ProductConfiguration(Base):
+    """Exact sellable configuration; additive to the legacy product projection."""
+
+    __tablename__ = "product_configurations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "sku", "configuration_hash", name="uq_product_configuration"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id: Mapped[str] = mapped_column(Text, default="default")
+    product_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("products.id", ondelete="SET NULL"), nullable=True,
+    )
+    sku: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
+    manufacturer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mpn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retailer_sku: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retailer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    configuration_hash: Mapped[str] = mapped_column(Text)
+    form_factor: Mapped[str] = mapped_column(Text, default="unknown")
+    mobility: Mapped[str] = mapped_column(Text, default="unknown")
+    device_class: Mapped[str] = mapped_column(Text, default="unknown")
+    os_edition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gpu_class: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gpu_vram_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gpu_tgp_w: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ram_installed_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ram_ceiling_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ram_upgradeable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    storage_gb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    warranty_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    warranty_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_cents: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(Text, default="AUD")
+    specification_observed_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    price_observed_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    availability_observed_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class ProductEvidenceObservation(Base):
+    """One provenance-bearing fact. Conflicting facts are retained as separate rows."""
+
+    __tablename__ = "product_evidence_observations"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    configuration_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("product_configurations.id", ondelete="CASCADE"),
+    )
+    attribute_key: Mapped[str] = mapped_column(Text)
+    value_json: Mapped[dict] = mapped_column(JSON)
+    unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claim_class: Mapped[str] = mapped_column(Text)
+    evidence_status: Mapped[str] = mapped_column(Text, default="observed")
+    conflict_group: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_id: Mapped[str] = mapped_column(Text)
+    source_record_id: Mapped[str] = mapped_column(Text)
+    source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observed_at: Mapped[str] = mapped_column(TIMESTAMP)
+    expires_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    supersedes_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("product_evidence_observations.id"), nullable=True,
+    )
+
+
+class ProductAvailabilityObservation(Base):
+    __tablename__ = "product_availability_observations"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    configuration_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("product_configurations.id", ondelete="CASCADE"),
+    )
+    location_id: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lead_time_min_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lead_time_max_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_record_id: Mapped[str] = mapped_column(Text)
+    observed_at: Mapped[str] = mapped_column(TIMESTAMP)
+    expires_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class ShoppingCase(Base):
+    __tablename__ = "shopping_cases"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "case_id", name="uq_shopping_case_tenant"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text, default="default")
+    uid: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="active")
+    retained_purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class RequirementProposal(Base):
+    __tablename__ = "requirement_proposals"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "proposal_id", name="uq_requirement_proposal_tenant"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    proposal_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text, default="default")
+    uid: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(Text, default="pending_review")
+    source_reference: Mapped[str] = mapped_column(Text)
+    claims_json: Mapped[list] = mapped_column(JSON)
+    acceptance_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    acceptance_idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
