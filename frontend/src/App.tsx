@@ -6,6 +6,7 @@ import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import SourcingIntentCard from './components/SourcingIntentCard';
 import MultiIntentCard from './components/MultiIntentCard';
+import PendingCartChangeCard, { type PendingCartPlan } from './components/PendingCartChangeCard';
 import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
 import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
 import DecisionTrace from './components/DecisionTrace';
@@ -15,12 +16,13 @@ import RecommendationShelf, { type RecommendationShelfContract } from './compone
 import AffordabilityResolutionCard, {
   type AffordabilityResolution,
 } from './components/AffordabilityResolutionCard';
-import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
+import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { nextSourcingTraceId, procurementAwareTraceId } from './lib/trace';
 import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
+import { nonRecommendationOutcome } from './lib/chatOutcome';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -37,6 +39,11 @@ import StorefrontTrustBanner, {
 } from './components/StorefrontTrustBanner';
 import ProductWhyEvidence, { type ProductWhyExplanation } from './components/ProductWhyEvidence';
 import InlineMessageText from './components/InlineMessageText';
+import BuyerRequirementReviewCard, {
+  type BuyerRequirementClaim,
+} from './components/BuyerRequirementReviewCard';
+import ProductShelvesPanel, { type ProductShelfProjection } from './components/ProductShelvesPanel';
+import AmbiguityExplorationPanel, { type AmbiguityExploration } from './components/AmbiguityExplorationPanel';
 import {
   detectCVIssueType,
   detectPanelMode,
@@ -107,10 +114,17 @@ type ChatMessage = {
   undoServer?: boolean;                  // V2 cart lane: undo via the server-side snapshot (POST /cart/undo)
   // V2 cart lane (C2): a CONFIRM-tier mutation plan — nothing has touched the cart yet; the
   // Confirm button applies it via POST /cart/mutations/{plan_id}/apply (idempotent, stale-guarded).
-  cartConfirm?: { planId: string; ops: { action: string; target_skus?: string[]; quantity?: number; replacement_sku?: string; replacement_name?: string; budget_max_cents?: number; unit_price_cents?: number; previous_quantity?: number; allow_sourcing?: boolean }[]; expiresAt?: string };
+  cartConfirm?: PendingCartPlan;
+  cartPlanStatus?: string;
   affordabilityResolution?: AffordabilityResolution;
   evidence?: any;                        // N1: evidence block from the orchestrator → source chips + Evidence tab
   webConsentPrompt?: { query: string };  // N3 Mode-B: consent chip — never auto-search on an imperative
+  buyerRequirementClaims?: BuyerRequirementClaim[];
+  buyerRequirementProposal?: {
+    case_id: string;
+    proposal_id: string;
+    proposal_version: number;
+  };
 };
 type PendingImageContext = {
   labels: string[];
@@ -398,11 +412,18 @@ export default function App() {
   const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
   const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
+  const [productShelves, setProductShelves] = useState<ProductShelfProjection | null>(null);
+  const [ambiguityExploration, setAmbiguityExploration] = useState<AmbiguityExploration | null>(null);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   // Safe-internet-search results (separate labeled source; never owned catalog items).
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
   const [fulfilmentCase, setFulfilmentCase] = useState<FulfilmentCaseSummary | null>(null);
   const [sourcingIntent, setSourcingIntent] = useState<SourcingIntent | null>(null);
+  // Operational amendments can arrive after a buyer selected a cart item even
+  // when the original recommendation did not emit a sourcing preview. Keep
+  // these bounded backend facts independently so CartPanel sends them at the
+  // commitment boundary instead of relying on a product-slate object.
+  const [procurementRequirements, setProcurementRequirements] = useState<Record<string, any>>({});
   // The decision trace of the TURN that produced the sourcing preview — pinned so a later turn's trace
   // doesn't advance past it. confirm-cart links the case to THIS trace, so the Decision-Trace procurement
   // badge resolves against the decision that actually opened the journey (not whatever turn is latest).
@@ -566,6 +587,13 @@ export default function App() {
           (typeof t?.security?.qr_redirect_probe === 'object' && t.security.qr_redirect_probe)
           ? t.security.qr_redirect_probe
           : {},
+        qr_policy_action: t?.qr_assessment?.policy_action || t?.security?.signals?.qr_policy_action || null,
+        qr_benign_detected: Boolean(t?.security?.signals?.qr_benign_detected),
+        analysis_pending: Boolean(t?.analysis_state?.analysis_pending || t?.artifact?.state === 'pending'),
+        analysis_degraded: Boolean(t?.analysis_state?.analysis_degraded || t?.artifact?.state === 'degraded'),
+        upload_rejected: Boolean(t?._upload_error),
+        upload_error: t?._upload_error || null,
+        artifact_state: t?.artifact?.state || t?.security?.artifact_state || null,
       },
       source_name: files[idx]?.name || `Image ${idx + 1}`,
       // Propagate damage/repair intent signals so ImageRecommendPanel can gate on them
@@ -602,11 +630,18 @@ export default function App() {
     };
   }, []);
 
-  const fetchImageTriages = useCallback(async (files: File[], fast = false) => {
+  const fetchImageTriages = useCallback(async (
+    files: File[], fast = false, extractTextEvidence = false,
+  ) => {
     const triagePromises = files.map(async (file) => {
+      const artifactId = String((file as any).__shopsquireArtifactId || crypto.randomUUID());
+      (file as any).__shopsquireArtifactId = artifactId;
       const fd = new FormData();
       fd.append('image', file);
-      const triagePath = fast ? '/api/v1/vision/triage?fast=1' : '/api/v1/vision/triage';
+      const triageParams = new URLSearchParams({ artifact_id: artifactId });
+      if (fast) triageParams.set('fast', '1');
+      if (extractTextEvidence) triageParams.set('extract_text', '1');
+      const triagePath = `/api/v1/vision/triage?${triageParams.toString()}`;
       const controller = new AbortController();
       const timeoutId = fast
         ? window.setTimeout(() => controller.abort(), IMAGE_FAST_TRIAGE_TIMEOUT_MS)
@@ -622,14 +657,70 @@ export default function App() {
             'x-skip-observer': '1',
           },
         });
-        if (!r.ok) return null;
         const data = await safeJson(r);
-        if (!data) return null;
+        if (!r.ok) {
+          const detail = data?.detail || {};
+          const error = typeof detail === 'string'
+            ? detail
+            : String(detail?.error || `upload_rejected_${r.status}`);
+          const message = typeof detail === 'object' && detail?.message
+            ? String(detail.message)
+            : 'This attachment was rejected and was not used.';
+          return {
+            _filename: file.name,
+            filename: file.name,
+            _upload_error: error,
+            _http_status: r.status,
+            labels: [],
+            extracted_text: '',
+            artifact: detail?.artifact || { artifact_id: artifactId, state: 'quarantined', authority: 'blocked' },
+            analysis_state: { analysis_pending: false, analysis_degraded: false, security_risk: true },
+            security: {
+              clean: false,
+              artifact_state: 'quarantined',
+              commercial_authority: 'blocked',
+              verdict: message,
+              reupload_needed: true,
+              signals: { upload_rejected: true, upload_error: error },
+            },
+          };
+        }
+        if (!data) {
+          return {
+            _filename: file.name,
+            filename: file.name,
+            _upload_error: 'invalid_triage_response',
+            labels: [],
+            artifact: { state: 'degraded', authority: 'blocked' },
+            analysis_state: { analysis_degraded: true, security_risk: false },
+            security: {
+              clean: false,
+              artifact_state: 'degraded',
+              commercial_authority: 'blocked',
+              verdict: 'Inspection did not return a valid result. The attachment was not used.',
+              signals: { analysis_degraded: true, invalid_triage_response: true },
+            },
+          };
+        }
         data._filename = file.name;
         return data;
       } catch {
-        if (!fast) return null;
-        return makeClientFastImageTriage(file);
+        if (fast) return makeClientFastImageTriage(file);
+        return {
+          _filename: file.name,
+          filename: file.name,
+          _upload_error: 'triage_unavailable',
+          labels: [],
+          artifact: { state: 'degraded', authority: 'blocked' },
+          analysis_state: { analysis_degraded: true, security_risk: false },
+          security: {
+            clean: false,
+            artifact_state: 'degraded',
+            commercial_authority: 'blocked',
+            verdict: 'Image inspection is unavailable. The attachment was not used.',
+            signals: { analysis_degraded: true, triage_unavailable: true },
+          },
+        };
       } finally {
         if (timeoutId != null) window.clearTimeout(timeoutId);
       }
@@ -865,6 +956,13 @@ export default function App() {
       const priorOther = (cart?.items || []).filter((i: any) => i.sku && i.sku !== sku);
       const priorUnits = priorOther.reduce((s: number, i: any) => s + (Number(i.quantity) || 1), 0);
       await setCartQty(sku, bulkQty, true);
+      setConfirmedSlots(prev => ({
+        ...prev,
+        exact_product_sku: sku,
+        order_quantity: bulkQty,
+        product_selection_authority: 'persisted_cart',
+      }));
+      setProcurementRequirements({});
       setSourcingIntent((intent) => sourcingIntentAfterSelection(intent, sku));
       switchRightPanelMode('cart');
       setChatOpen(true);
@@ -884,6 +982,13 @@ export default function App() {
     try {
       const j = await addCartItem(uid, sku, Math.max(1, Math.floor(qty)));
       setCart(j);
+      setConfirmedSlots(prev => ({
+        ...prev,
+        exact_product_sku: sku,
+        order_quantity: Math.max(1, Math.floor(qty)),
+        product_selection_authority: 'persisted_cart',
+      }));
+      setProcurementRequirements({});
       setSourcingIntent((intent) => sourcingIntentAfterSelection(intent, sku));
       // Track 2b — real conversion: add-to-cart is the demo storefront's terminal buy-intent action (no
       // separate checkout page), so it registers as a conversion for the session (de-duped per session →
@@ -952,7 +1057,10 @@ export default function App() {
         const nm = products.find((p) => p.sku === sku)?.name || sku;
         setChatOpen(true);
         setMessages((prev) => [...prev, { role: 'assistant' as const, timestamp: new Date(),
-          content: `Set **${nm}** to ${sf.requested}. ${sf.available_now} are available at the preferred location; check the delivery plan for network-transfer or supplier allocation of the remaining ${sf.shortfall}.` }]);
+          // The cart write sees an admission stock snapshot; the split-offer
+          // service owns location ATP, network transfers, and supplier
+          // shortfall. Do not mislabel the snapshot as preferred-location ATP.
+          content: `Set **${nm}** to ${sf.requested}. The delivery plan is recalculating the authoritative local, network-transfer, and supplier allocation; review and confirm that revised plan before checkout.` }]);
       }
     } catch (e: any) {
       // Never fail silently — surface WHY (out of stock / qty exceeds available), mirroring add-to-cart.
@@ -973,8 +1081,22 @@ export default function App() {
 
   const clearCartAll = async () => {
     try {
-      const j = await clearCart(uid);
+      const j = await clearCart(uid, conversationEpoch);
       setCart(j);
+      setPendingBulkQty(null);
+      setPendingBulkBudget(null);
+      setSourcingIntent(null);
+      setFulfilmentCase(null);
+      setBulkAlternatives([]);
+      setProcurementRequirements({});
+      setConfirmedSlots(prev => {
+        const next = { ...prev } as Record<string, any>;
+        for (const key of [
+          'exact_product_sku', 'order_quantity', 'quantity',
+          'total_budget_cents', 'budget_scope', 'product_selection_authority',
+        ]) delete next[key];
+        return next;
+      });
       // Once the buyer explicitly clears, they own the cart — suppress the "previous session" stale
       // notice for the rest of the session so items they add next are never mislabeled as carried over.
       staleCartNoticeShown.current = true;
@@ -1021,20 +1143,44 @@ export default function App() {
     // consume the card first so a double-click can't fire twice from the UI side either
     setMessages(prev => prev.map(m => m === msg ? { ...m, cartConfirm: undefined } : m));
     try {
-      const out = await applyCartMutation(plan.planId, uid);
+      const out = await applyCartMutation(plan.planId, uid, undefined, conversationEpoch);
       const status = String(out.status || '');
       if (status === 'applied' || status === 'already_applied') {
         const destructive = (out.applied || []).some((a) =>
           ['clear_all', 'keep_only', 'remove_items', 'clear_previous'].includes(String(a.action)));
+        const clearedAll = (out.applied || []).some((a) => String(a.action) === 'clear_all');
+        const quantityChanged = (out.applied || []).some((a) =>
+          String(a.action) === 'set_quantity');
         // The previous recommendation's fulfilment alternatives are quantity-specific. Once a
         // confirmed mutation changes the cart, only the refreshed delivery plan is authoritative.
         setBulkAlternatives([]);
+        if (clearedAll) {
+          setPendingBulkQty(null);
+          setPendingBulkBudget(null);
+          setSourcingIntent(null);
+          setFulfilmentCase(null);
+          setProcurementRequirements({});
+          setSourcingTraceId(null);
+          setConfirmedSourcingOrderId(null);
+          staleCartNoticeShown.current = true;
+          initialCartSkus.current = [];
+          setConfirmedSlots(prev => {
+            const next = { ...prev } as Record<string, any>;
+            for (const key of [
+              'exact_product_sku', 'order_quantity', 'quantity',
+              'total_budget_cents', 'budget_scope', 'product_selection_authority',
+            ]) delete next[key];
+            return next;
+          });
+        }
         const refreshed = await getCart(uid).catch(() => null);
         setCart(refreshed);
         switchRightPanelMode('cart');
         setMessages(prev => [...prev, { role: 'assistant' as const,
           content: status === 'applied'
-            ? '🧹 Done — applied the change to your cart.'
+            ? quantityChanged
+              ? 'Done — updated the cart quantity. Delivery and supplier allocations are quantity-specific, so review and confirm the revised plan; any earlier unsent RFQ draft will be superseded, not reused.'
+              : '🧹 Done — applied the change to your cart.'
             : 'That change was already applied — your cart is up to date.',
           ...(status === 'applied' && destructive ? { undoServer: true } : {}),
           timestamp: new Date() }]);
@@ -1045,6 +1191,10 @@ export default function App() {
       } else if (status === 'expired') {
         setMessages(prev => [...prev, { role: 'assistant' as const,
           content: 'That confirmation window expired, so nothing was changed. Ask again and I\'ll set it up fresh.',
+          timestamp: new Date() }]);
+      } else if (status === 'conflict' && out.current_status === 'superseded') {
+        setMessages(prev => [...prev, { role: 'assistant' as const,
+          content: 'That plan was replaced by your newer cart instruction, so it cannot be applied. Your cart was not changed by the older plan.',
           timestamp: new Date() }]);
       } else {
         const error = (out as any)?.error;
@@ -1062,6 +1212,24 @@ export default function App() {
     } catch (e: any) {
       setMessages(prev => [...prev, { role: 'assistant' as const,
         content: `I couldn't apply that change (${String(e?.message || e)}) — nothing in your cart was changed.`,
+        timestamp: new Date() }]);
+    }
+  };
+
+  const dismissCartPlan = async (msg: ChatMessage) => {
+    const plan = msg.cartConfirm;
+    if (!plan) return;
+    setMessages(prev => prev.map(m => m === msg ? { ...m, cartConfirm: undefined } : m));
+    try {
+      const out = await rejectCartMutation(plan.planId, uid);
+      const status = String(out.status || '');
+      const content = status === 'rejected' || status === 'already_rejected'
+        ? 'Okay — I discarded that plan and left your cart exactly as it was.'
+        : `That plan was already ${String(out.current_status || status || 'closed')}; no cart change was made.`;
+      setMessages(prev => [...prev, { role: 'assistant' as const, content, timestamp: new Date() }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant' as const,
+        content: 'I could not durably discard that plan. I left your cart unchanged; please retry or send a newer instruction to supersede it.',
         timestamp: new Date() }]);
     }
   };
@@ -1562,7 +1730,15 @@ export default function App() {
     const explicitVisualIntent = visualSearchHint(q);
     const explicitComplaintIntent = complaintTextHint(q);
     const requestImageContext = (Boolean(pendingImageContext) && !explicitComplaintIntent) ? pendingImageContext : null;
-    const imageRecommendationTurn = hasImages || Boolean(requestImageContext);
+      const imageRecommendationTurn = hasImages || Boolean(requestImageContext);
+      const textEvidenceIntent = hasImages && (
+        /\b(?:can\s+you\s+read|read\s+(?:this|it)|ocr|requirements?|spec(?:ification)?s?|document|screenshot)\b/i.test(q)
+        || currentAttachedFiles.some((file) =>
+          /\b(?:ocr|requirements?|specs?|document|screenshot)\b/i.test(
+            file.name.replace(/[-_]+/g, ' '),
+          )
+        )
+      );
     if (imageRecommendationTurn) {
       setCanonicalImageProducts(null);
       setCanonicalImageSummary('');
@@ -1622,12 +1798,28 @@ export default function App() {
           setIsThinking(false);
           return;
         }
-        const useFastImageTriage = !complaintIntent && !explicitComplaintIntent;
         setImageRoutingInFlight(true);
         try {
-          imageTriageResults = useFastImageTriage
-            ? currentAttachedFiles.map((file) => makeClientFastImageTriage(file))
-            : await fetchImageTriages(currentAttachedFiles, false);
+          // Return the admission verdict quickly, then run the deeper visual and
+          // security inspection independently. Pending evidence is never trusted
+          // for ranking or commercial authority; the server-side gate remains the
+          // enforcement boundary while the UI can continue read-only assistance.
+          if (textEvidenceIntent) {
+            // A requirements/document upload must wait for bounded OCR; sending the
+            // fast filename-only result would erase the very evidence the buyer asked
+            // us to read before /chat/query is constructed.
+            imageTriageResults = await fetchImageTriages(currentAttachedFiles, false, true);
+          } else {
+            imageTriageResults = await fetchImageTriages(currentAttachedFiles, true);
+            void fetchImageTriages(currentAttachedFiles, false).then((deepResults) => {
+              if (!Array.isArray(deepResults) || deepResults.length === 0) return;
+              setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
+              setImageTriageRaw(deepResults);
+            }).catch(() => {
+              // The typed fast result remains visible as pending/degraded. A deep
+              // inspection failure must not silently promote the attachment.
+            });
+          }
         } finally {
           setImageRoutingInFlight(false);
         }
@@ -1658,18 +1850,6 @@ export default function App() {
           switchRightPanelMode('visual_search');
           setVisualSearchQuery(q);
 
-          // Let the first recommendation render before starting heavyweight security enrichment.
-          window.setTimeout(() => void (async () => {
-            try {
-              const deepResults = await fetchImageTriages(currentAttachedFiles, false);
-              if (!Array.isArray(deepResults) || deepResults.length === 0) return;
-              setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
-              setImageTriageRaw(deepResults);
-            } catch {
-              // Keep the fast-path visual route even if deep enrichment fails.
-            }
-          })(), IMAGE_DEEP_TRIAGE_DELAY_MS);
-
           // Product selection always continues through /chat/query. The visual panel is a
           // renderer for that canonical slate; it no longer owns an independent /suggest call.
         }
@@ -1699,6 +1879,20 @@ export default function App() {
         const data = await safeJson(r);
         if (!r.ok || !data) {
           throw new Error((data && data.detail) ? data.detail : `orchestrate_failed (${r.status})`);
+        }
+
+        const unusableUploads = imageTriageResults.filter((t: any) =>
+          Boolean(t?._upload_error) || ['pending', 'degraded', 'quarantined', 'superseded'].includes(
+            String(t?.artifact?.state || t?.security?.artifact_state || '')
+          )
+        );
+        if (unusableUploads.length > 0) {
+          const names = unusableUploads.map((t: any) => String(t?._filename || t?.filename || 'attachment')).join(', ');
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `Attachment security notice: ${names} ${unusableUploads.length === 1 ? 'was' : 'were'} not used for image-derived recommendations. Read-only text assistance may continue, but commercial actions remain blocked for this evidence.`,
+            timestamp: new Date(),
+          }]);
         }
         mergeTrustEvidence(data);
         const proposal = data.proposal || {};
@@ -1779,12 +1973,19 @@ export default function App() {
         if (imageTriageResults.length > 0) {
           chatPayload.images = imageTriageResults.map((t: any) => {
             const productIdentity = t?.product_identity || null;
-            const trustedImageEvidence = t?.provider !== 'client_fast_boundary' && (t?.is_product_photo === true || Boolean(productIdentity));
+            const artifactState = String(t?.artifact?.state || t?.security?.artifact_state || '').toLowerCase();
+            const trustedImageEvidence = artifactState === 'clean'
+              && t?.provider !== 'client_fast_boundary'
+              && (t?.is_product_photo === true || Boolean(productIdentity));
+            const trustedOcrEvidence = artifactState === 'clean'
+              && t?.provider !== 'client_fast_boundary'
+              && typeof t?.extracted_text === 'string'
+              && t.extracted_text.trim().length > 0;
             return {
               // Do not pass filename-derived fast labels into /chat/query; names like
               // apple-red.jpg can otherwise look like product intent and bias ranking.
               labels: trustedImageEvidence && Array.isArray(t?.labels) ? t.labels : [],
-              ocr_text: trustedImageEvidence ? (t?.extracted_text || '') : '',
+              ocr_text: trustedOcrEvidence ? t.extracted_text : '',
               image_hash: t?.image_hash || null,
               product_identity: productIdentity,
               damage_score: t?.damage_score ?? 0,
@@ -1990,6 +2191,39 @@ export default function App() {
           }
         }
         mergeTrustEvidence(data);
+        const governedOutcome = nonRecommendationOutcome(data);
+        if (governedOutcome) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: governedOutcome.message,
+            timestamp: new Date(),
+          }]);
+          setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || null));
+          // Intentionally preserve products, cart, right-panel mode, sourcing
+          // intent, and the current fulfillment case. A refusal has no
+          // commercial authority and must not look like a fresh empty search.
+          return;
+        }
+        // Cart mutations may also preserve the current product/procurement panel, but they
+        // still have to reach the cart lane below so its confirmation authority is rendered.
+        // This guard is only for genuinely read-only case/status responses.
+        if (data?.preserve_current_view === true && !(data as any)?.cart_mutation) {
+          const operational = data?.constraints_used?.operational_constraints;
+          if (operational && typeof operational === 'object') {
+            setProcurementRequirements(current => ({ ...current, ...operational }));
+            setSourcingIntent(current => current ? {
+              ...current,
+              requirements: { ...(current.requirements || {}), ...operational },
+            } : current);
+          }
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: String(data.assistant_message || 'The current case is unchanged.'),
+            timestamp: new Date(),
+          }]);
+          setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || null));
+          return;
+        }
         // ── V2 CART LANE (C2): the backend resolved this turn as a CART MUTATION ──
         // Covers both transports (chat_stream forwards chat_query's result verbatim). Three
         // shapes: applied → refresh the cart panel (the stale-panel bug) + server-undo chip on
@@ -1998,18 +2232,31 @@ export default function App() {
         // guarded); needs_clarification → the ask IS the answer. Product machinery is skipped.
         if (data && (data as any).cart_mutation) {
           const cm = (data as any).cart_mutation;
-          const nextMultiIntent =
+          const multiIntentCandidate =
             data.multi_intent
             && Array.isArray((data.multi_intent as any).plan)
             && (data.multi_intent as any).plan.length > 0
               ? (data.multi_intent as MultiIntentPlan)
               : null;
+          // A pure amendment has one authority: the durable cart-mutation
+          // proposal. Treating its prior-line projection as a second
+          // "multi-intent" surface hid the canonical Confirm button and made
+          // buyers reselect the product. Keep MultiIntentCard only when this
+          // turn genuinely introduces a new scoped product/category line.
+          const nextMultiIntent = multiIntentCandidate?.plan.some((line) => line.scope === 'new')
+            ? multiIntentCandidate
+            : null;
           const cartConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
             ? data.confirmed_slots
             : null;
           const destructive = Array.isArray(cm.applied) && cm.applied.some((a: any) =>
             ['clear_all', 'keep_only', 'remove_items', 'clear_previous'].includes(String(a.action)));
-          setMessages(prev => [...prev, {
+          const supersededPlanIds = new Set(
+            Array.isArray(cm.superseded_plan_ids)
+              ? cm.superseded_plan_ids.map((value: any) => String(value))
+              : [],
+          );
+          const nextMessage: ChatMessage = {
             role: 'assistant',
             content: String(data.assistant_message || 'Cart update processed.'),
             timestamp: new Date(),
@@ -2017,11 +2264,37 @@ export default function App() {
               ? { cartConfirm: { planId: String(cm.plan_id), ops: Array.isArray(cm.ops) ? cm.ops : [], expiresAt: cm.expires_at } }
               : {}),
             ...(data.cart_updated && destructive ? { undoServer: true } : {}),
-          }]);
+          };
+          setMessages(prev => [
+            ...prev.map((message) => (
+              message.cartConfirm && supersededPlanIds.has(message.cartConfirm.planId)
+                ? {
+                    ...message,
+                    cartConfirm: undefined,
+                    cartPlanStatus: `Superseded by newer plan ${String(cm.plan_id)}; it can no longer be applied.`,
+                  }
+                : message
+            )),
+            nextMessage,
+          ]);
           setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || null));
           setMultiIntent(nextMultiIntent);
           if (cartConfirmedSlots && Object.keys(cartConfirmedSlots).length > 0) {
             setConfirmedSlots(prev => ({ ...prev, ...cartConfirmedSlots }));
+          }
+          if (data.explanation && typeof data.explanation === 'object') {
+            const explanation = data.explanation as ProductWhyExplanation;
+            const explanationSku = String((data.explanation as any).sku || '').trim();
+            if (explanationSku) setWhyDrawerSku(explanationSku);
+            setWhyDrawerData(explanation);
+            setWhyDrawerError(null);
+            setWhyDrawerLoading(false);
+          }
+          if (data.delivery_feasibility && typeof data.delivery_feasibility === 'object') {
+            setProcurementRequirements(current => ({
+              ...current,
+              delivery_feasibility: data.delivery_feasibility,
+            }));
           }
           if (data.cart_updated) {
             // Quantity-specific alternatives came from the recommendation turn before this
@@ -2060,9 +2333,29 @@ export default function App() {
         setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);
         // FLUID-procurement preview (FULFILLMENT_DEFER_TO_CART): a buyer-safe sourcing split with no durable
         // case — the buyer confirms it (GATE 1) via SourcingIntentCard to materialize the cases.
-        setSourcingIntent(
-          data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines)
-            ? (data.sourcing_intent as SourcingIntent) : null);
+        setSourcingIntent((current) => {
+          if (data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines)) {
+            return data.sourcing_intent as SourcingIntent;
+          }
+          const operational = data?.constraints_used?.operational_constraints;
+          if (current && operational && typeof operational === 'object') {
+            // A delivery/payment amendment may intentionally produce no new
+            // product slate. Preserve the selected sourcing lines and attach
+            // only the backend-clamped operational facts to the eventual
+            // buyer-commitment boundary.
+            return {
+              ...current,
+              requirements: { ...(current.requirements || {}), ...operational },
+            };
+          }
+          return current;
+        });
+        if (data?.sourcing_intent?.requirements && typeof data.sourcing_intent.requirements === 'object') {
+          setProcurementRequirements(current => ({
+            ...current,
+            ...data.sourcing_intent.requirements,
+          }));
+        }
         // P0 multi-intent: present only on a genuine mixed turn (amend + scoped new lines). Surface it so
         // the buyer confirms the qty change and adds the scoped picks — never silently applied.
         const nextMultiIntent =
@@ -2088,6 +2381,14 @@ export default function App() {
         const disambiguationOpts = Array.isArray(data.next_questions) ? data.next_questions.map((nq: any) => typeof nq === 'string' ? nq : nq?.text || '') : [];
         const complexity = data.complexity || null;
         const backendApplied = data.nqe_selection_applied || null;
+        const buyerRequirementClaims = Array.isArray(data.buyer_requirement_claims)
+          ? data.buyer_requirement_claims as BuyerRequirementClaim[]
+          : [];
+        const buyerRequirementProposal = data.buyer_requirement_proposal
+          && typeof data.buyer_requirement_proposal === 'object'
+          && data.buyer_requirement_proposal.proposal_id
+          ? data.buyer_requirement_proposal as ChatMessage['buyerRequirementProposal']
+          : undefined;
         const backendConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
           ? data.confirmed_slots
           : null;
@@ -2099,6 +2400,13 @@ export default function App() {
         const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
+        if (data?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
+          setAmbiguityExploration(data.ambiguity_exploration as AmbiguityExploration);
+          if (data?.product_shelves?.schema_version === 'product-shelves-v1') {
+            setProductShelves(data.product_shelves as ProductShelfProjection);
+          }
+          switchRightPanelMode('grid');
+        }
         setTraceEvidence(data.evidence || null);
         const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
         // Pin the sourcing trace to THIS turn when it produced a sourcing preview. If the turn carries NO
@@ -2169,6 +2477,8 @@ export default function App() {
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
             ...(data.evidence ? { evidence: data.evidence } : {}),
+            ...(buyerRequirementClaims.length > 0 ? { buyerRequirementClaims } : {}),
+            ...(buyerRequirementProposal ? { buyerRequirementProposal } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else if (prods.length > 0) {
@@ -2195,6 +2505,8 @@ export default function App() {
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
             ...(data.evidence ? { evidence: data.evidence } : {}),
+            ...(buyerRequirementClaims.length > 0 ? { buyerRequirementClaims } : {}),
+            ...(buyerRequirementProposal ? { buyerRequirementProposal } : {}),
             ...(narrationJobId ? { narrationJobId } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
@@ -2228,6 +2540,8 @@ export default function App() {
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
             ...(data.evidence ? { evidence: data.evidence } : {}),
+            ...(buyerRequirementClaims.length > 0 ? { buyerRequirementClaims } : {}),
+            ...(buyerRequirementProposal ? { buyerRequirementProposal } : {}),
             ...(narrationJobId ? { narrationJobId } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
@@ -2309,6 +2623,139 @@ export default function App() {
     setInputValue(query);
     setTimeout(() => handleSend({ queryOverride: query }), 100);
   };
+
+  const acceptBuyerRequirementProposal = useCallback(async (
+    message: ChatMessage,
+    acceptedClaimIds: string[],
+    researchChoice: 'local_only' | 'research_and_corroborate',
+  ) => {
+    const proposal = message.buyerRequirementProposal;
+    if (!proposal) throw new Error('This requirement proposal is missing its case identity.');
+    const allIds = (message.buyerRequirementClaims || []).map((claim) => claim.claim_id);
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(proposal.case_id)}`
+      + `/requirement-proposals/${encodeURIComponent(proposal.proposal_id)}/accept`,
+    ), {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `accept-${proposal.proposal_id}-${proposal.proposal_version}`,
+        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({
+        uid,
+        expected_proposal_version: proposal.proposal_version,
+        accepted_claim_ids: acceptedClaimIds,
+        rejected_claim_ids: allIds.filter((claimId) => !acceptedClaimIds.includes(claimId)),
+        corrections: [],
+        research_choice: researchChoice,
+      }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(String(payload?.detail?.code || payload?.detail || 'Requirement acceptance failed.'));
+    }
+    if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
+      setProductShelves(payload.product_shelves as ProductShelfProjection);
+      switchRightPanelMode('grid');
+    }
+    setTraceId(normalizeTraceId(payload?.trace_id || traceId));
+    setMessages((current) => [...current, {
+      role: 'assistant',
+      content: researchChoice === 'research_and_corroborate'
+        ? 'I accepted those as provisional constraints. Approved-source research is authorized; product fit remains conditional until corroboration completes.'
+        : 'I accepted those as provisional constraints and reranked the local catalog without calling an external provider.',
+      timestamp: new Date(),
+    }]);
+  }, [uid, traceId, switchRightPanelMode]);
+
+  const researchAmbiguousShoppingCase = useCallback(async () => {
+    if (!ambiguityExploration?.case_id) {
+      throw new Error('This exploration is missing its shopping-case identity.');
+    }
+    setIsThinking(true);
+    try {
+      const response = await fetch(apiUrl(
+        `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/research`,
+      ), {
+        method: 'POST', credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          ...csrfHeaders(),
+        },
+        body: JSON.stringify({
+          uid,
+          retained_purpose: ambiguityExploration.retained_purpose,
+          workload: 'ot_cyber_range',
+        }),
+      });
+      const payload = await safeJson(response);
+      if (!response.ok) {
+        throw new Error(String(payload?.detail?.message || payload?.detail?.code || payload?.detail || 'Approved-source research failed.'));
+      }
+      if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
+        setProductShelves(payload.product_shelves as ProductShelfProjection);
+      }
+      setAmbiguityExploration((current) => current ? {
+        ...current,
+        status: 'researched',
+        execution: 'live_discovery_and_official_fetch_completed',
+        evidence: 'scoped_official_claims_compiled',
+        provider_accounting: payload?.research?.provider_accounting || current.provider_accounting,
+      } : current);
+      setTraceId(normalizeTraceId(payload?.trace_id || ambiguityExploration.trace_id || traceId));
+      setMessages((current) => [...current, {
+        role: 'assistant',
+        content: `Approved-source research completed in the same shopping case. I compiled ${payload?.research?.claims?.length || 0} scoped product claims and kept ${payload?.research?.unresolved?.length || 0} source or capability gaps visible. No cart or supplier action was authorized.`,
+        timestamp: new Date(),
+      }]);
+    } catch (error: any) {
+      setMessages((current) => [...current, {
+        role: 'assistant',
+        content: `Approved-source research could not complete: ${error?.message || String(error)} You can upload requirements or continue provisionally.`,
+        timestamp: new Date(),
+      }]);
+    } finally {
+      setIsThinking(false);
+    }
+  }, [ambiguityExploration, uid, traceId]);
+
+  const proposeResearchedProduct = useCallback(async (sku: string, quantity: number) => {
+    if (!ambiguityExploration?.case_id) return;
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/cart-proposals`,
+    ), {
+      method: 'POST', credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({ uid, sku, quantity }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      setMessages((current) => [...current, {
+        role: 'assistant',
+        content: String(payload?.detail?.message || payload?.detail?.code || payload?.detail || 'Cart proposal failed.'),
+        timestamp: new Date(),
+      }]);
+      return;
+    }
+    setMessages((current) => [...current, {
+      role: 'assistant',
+      content: `I prepared a case-bound change for ${quantity} × ${sku}. Nothing has changed yet; confirm the plan below. Numeric availability is not attested, so any shortfall remains supplier-sourced.`,
+      timestamp: new Date(),
+      cartConfirm: {
+        planId: payload.plan_id,
+        ops: payload.ops,
+        expiresAt: payload.expires_at,
+      },
+    }]);
+  }, [ambiguityExploration, uid]);
 
   /** Disambiguation button click → re-send with the chosen intent */
   const handleDisambiguationSelect = (option: string) => {
@@ -2689,34 +3136,23 @@ export default function App() {
                       </div>
                     )}
                     {msg.cartConfirm && (
-                      /* V2 cart lane: CONFIRM-tier plan — nothing has touched the cart yet.
-                         Confirm applies via the idempotent, stale-guarded endpoint; Not now
-                         simply drops the card (the plan expires server-side on its own). */
-                      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className={styles.filterBtn}
-                          style={{ fontWeight: 600 }}
-                          onClick={() => { void confirmCartPlan(msg); }}
-                          title="Apply this cart change"
-                        >
-                          ✅ Confirm — apply to cart
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.filterBtn}
-                          onClick={() => {
-                            setMessages(prev => prev.map(m => m === msg
-                              ? { ...m, cartConfirm: undefined }
-                              : m));
-                            setMessages(prev => [...prev, { role: 'assistant' as const,
-                              content: 'Okay — I left your cart exactly as it was.', timestamp: new Date() }]);
-                          }}
-                          title="Don't apply — leave the cart unchanged"
-                        >
-                          ✋ Not now
-                        </button>
-                      </div>
+                      <PendingCartChangeCard
+                        plan={msg.cartConfirm}
+                        cartItems={(cart?.items || []) as any[]}
+                        onConfirm={() => { void confirmCartPlan(msg); }}
+                        onDismiss={() => { void dismissCartPlan(msg); }}
+                      />
+                    )}
+                    {msg.buyerRequirementClaims && (
+                      <BuyerRequirementReviewCard
+                        claims={msg.buyerRequirementClaims}
+                        onAccept={msg.buyerRequirementProposal
+                          ? (claimIds, choice) => acceptBuyerRequirementProposal(msg, claimIds, choice)
+                          : undefined}
+                      />
+                    )}
+                    {msg.cartPlanStatus && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: '#92400e' }}>{msg.cartPlanStatus}</div>
                     )}
                     {msg.affordabilityResolution && (
                       <AffordabilityResolutionCard
@@ -2902,6 +3338,18 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {ambiguityExploration && (
+                    <AmbiguityExplorationPanel
+                      exploration={ambiguityExploration}
+                      onResearch={() => { void researchAmbiguousShoppingCase(); }}
+                      onUpload={() => document.querySelector<HTMLInputElement>("input[type='file']:not([capture])")?.click()}
+                      onEnterSpecifications={() => document.querySelector<HTMLTextAreaElement>("textarea[placeholder='Type your message...']")?.focus()}
+                    />
+                  )}
+                  {productShelves && <ProductShelvesPanel
+                    projection={productShelves}
+                    onPropose={ambiguityExploration?.status === 'researched' ? proposeResearchedProduct : undefined}
+                  />}
                   {rightPanelContract?.emphasis?.applied && rightPanelContract.emphasis.text && (
                     <div
                       data-testid="right-panel-emphasis"
@@ -3287,7 +3735,10 @@ export default function App() {
                         onSourcingTraceId={(tid) => setSourcingTraceId(normalizeTraceId(tid))}
                         priorSkus={priorCartSkus}
                         onClearPrior={clearPriorCartItems}
-                        sourcingRequirements={sourcingIntent?.requirements}
+                        sourcingRequirements={{
+                          ...(sourcingIntent?.requirements || {}),
+                          ...procurementRequirements,
+                        }}
                         sourcingOrderId={sourcingIntent?.pr_id}
                         confirmedSourcingOrderId={confirmedSourcingOrderId}
                         onConfirmedSourcingOrderId={setConfirmedSourcingOrderId}
@@ -3298,7 +3749,7 @@ export default function App() {
                         onAdd={addToCart}
                         onWhy={handleWhyProduct}
                       />
-                    ) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
+                    ) : !productShelves && filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
                       <div className={styles.emptyProductState}>
                         <div className={styles.emptyProductIcon}>🔍</div>
                         <div className={styles.emptyProductTitle}>No products found</div>

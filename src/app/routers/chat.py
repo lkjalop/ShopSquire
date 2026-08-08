@@ -1082,15 +1082,16 @@ def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any
         or sec_signals.get("duplicate_image_detected")
         or ("manipulation_detected" in reasons)
     )
-    ocr_txt = str(img.get("ocr_text") or "")
     qr_data = img.get("qr_data")
     qr_data_present = bool((isinstance(qr_data, str) and qr_data.strip()) or (isinstance(qr_data, list) and len(qr_data) > 0))
-    ocr_url_like = bool(re.search(r"(https?://|www\.|payid|wallet|crypto|btc|eth|scan\s+to\s+pay)", ocr_txt.lower()))
     return {
         "qr_code_detected": bool(qr_detected or qr_data_present),
         "qr_prompt_injection": qr_injection,
         "qr_external_url_detected": qr_external,
-        "ocr_prompt_injection": bool(sec_signals.get("ocr_prompt_injection") or ocr_url_like),
+        # A URL in a requirements screenshot is provenance, not prompt
+        # injection. Only the security scanner's explicit injection signal may
+        # quarantine the OCR channel; URL retrieval remains separately gated.
+        "ocr_prompt_injection": bool(sec_signals.get("ocr_prompt_injection")),
         "manipulation_detected": manipulation,
         "adversarial_score": float(sec_signals.get("adversarial_score") or 0.0),
         "steg_suspicious": bool(sec_signals.get("steg_suspicious")),
@@ -3560,6 +3561,172 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         ):
             response_slots_for_output.pop(key, None)
 
+    # Buyer-provided OCR/text can propose requirement claims, but it is never
+    # qualification authority. Keep the proposal at the chat edge so the UI can
+    # ask the buyer to review it before any requirement compiler or cart path
+    # consumes it. Suspicious OCR remains quarantined by the image security gate.
+    buyer_requirement_claims: List[Dict[str, Any]] = []
+    buyer_requirement_review_required = False
+    buyer_requirement_proposal: Dict[str, Any] | None = None
+    if (
+        not bool(image_security_posture.get("image_untrusted"))
+        and isinstance(image_ocr_text_in, str)
+        and image_ocr_text_in.strip()
+    ):
+        try:
+            from src.app.services.buyer_requirement_evidence import (
+                extract_buyer_requirement_claims,
+            )
+
+            source_reference = str(image_hash_in or decision_trace_id or "buyer-upload")[:160]
+            extracted_claims = extract_buyer_requirement_claims(
+                image_ocr_text_in[:20000],
+                source_reference=source_reference,
+            )
+            buyer_requirement_claims = [claim.model_dump() for claim in extracted_claims]
+            buyer_requirement_review_required = bool(buyer_requirement_claims)
+            if buyer_requirement_claims:
+                # Persist the review boundary now so browser acceptance can be
+                # case-scoped and version checked. This records no qualification
+                # or cart authority.
+                from datetime import datetime, timezone
+                import uuid as _uuid
+                from sqlalchemy import select as _select
+                from src.app.models.orm import RequirementProposal, ShoppingCase
+
+                _case_id = str(decision_trace_id or f"case-{_uuid.uuid4().hex}")[:200]
+                _tenant_id = _request_tenant_id(request)
+                _uid = str((payload or {}).get("uid") or "guest")[:200]
+                _now = datetime.now(timezone.utc)
+                _case = db.execute(_select(ShoppingCase).where(
+                    ShoppingCase.tenant_id == _tenant_id,
+                    ShoppingCase.case_id == _case_id,
+                )).scalar_one_or_none()
+                if _case is None:
+                    _case = ShoppingCase(
+                        case_id=_case_id, tenant_id=_tenant_id, uid=_uid,
+                        status="active", retained_purpose=str(q or "")[:500],
+                        created_at=_now, updated_at=_now,
+                    )
+                    db.add(_case)
+                _proposal_id = "rp-" + _uuid.uuid4().hex
+                db.add(RequirementProposal(
+                    proposal_id=_proposal_id, case_id=_case_id,
+                    tenant_id=_tenant_id, uid=_uid, version=1,
+                    status="pending_review", source_reference=source_reference,
+                    claims_json=buyer_requirement_claims,
+                    created_at=_now, updated_at=_now,
+                ))
+                db.commit()
+                buyer_requirement_proposal = {
+                    "case_id": _case_id, "proposal_id": _proposal_id,
+                    "proposal_version": 1, "status": "pending_review",
+                    "cart_mutation": "not_authorized",
+                }
+            if decision_trace_id and buyer_requirement_claims:
+                log_trace_event(
+                    trace_id=decision_trace_id,
+                    event_type="buyer_requirement_claims_extracted",
+                    source_type="stage",
+                    source_id="Buyer_Requirement_Evidence",
+                    target_type="ui",
+                    target_id="requirement_review",
+                    payload={
+                        "status": "provisional",
+                        "authority_status": "unverified",
+                        "qualification_authority": "none",
+                        "claim_count": len(buyer_requirement_claims),
+                        "attributes": sorted({
+                            str(claim.get("attribute") or "")
+                            for claim in buyer_requirement_claims
+                            if claim.get("attribute")
+                        }),
+                    },
+                )
+        except Exception as exc:
+            logger.debug("buyer requirement extraction skipped: %s", exc)
+
+    if buyer_requirement_claims:
+        # The dominant obligation on an upload turn is claim review, not the
+        # pre-existing semantic refusal. Product fit remains conditional until
+        # the buyer accepts a subset and corroboration runs where needed.
+        assistant_message = (
+            f"I extracted {len(buyer_requirement_claims)} provisional requirement claims "
+            "from your upload. Review or correct them below. I have not qualified a product, "
+            "authorized external research, or changed your cart."
+        )
+        next_questions = []
+
+    # Unresolved workload semantics block qualification, not provisional catalog
+    # exploration. This path calls no external provider and grants no cart authority.
+    ambiguity_exploration: Dict[str, Any] | None = None
+    ambiguous_product_shelves: Dict[str, Any] | None = None
+    provisional_exploration_needed = bool(
+        semantic_catalog_blocked
+        or (
+            turn_intent == "SEARCH"
+            and not products
+            and not bool(data.get("off_catalog"))
+        )
+    )
+    if provisional_exploration_needed and not buyer_requirement_claims:
+        try:
+            from src.app.services.accepted_catalog_projection import project_accepted_catalog
+
+            _semantic_hypotheses = list(semantic_resolution.get("workload_hypotheses") or [])[:3]
+            _projection = project_accepted_catalog(
+                db, accepted_claims=[], desired_outcome=str(q or "")[:500],
+                tenant_id=_request_tenant_id(request),
+                hypothesis_labels={
+                    str(item.get("hypothesis_id") or f"hypothesis_{index + 1}"): str(
+                        item.get("label") or item.get("hypothesis_id") or f"Interpretation {index + 1}"
+                    )
+                    for index, item in enumerate(_semantic_hypotheses)
+                    if isinstance(item, dict)
+                },
+            )
+            ambiguous_product_shelves = _projection.model_dump(mode="json")
+            _questions = [
+                item for item in list(next_questions or [])
+                if isinstance(item, dict)
+                and str(item.get("text") or item.get("question") or "").strip()
+            ]
+            ambiguity_exploration = {
+                "schema_version": "ambiguity-exploration-v1",
+                "case_id": f"sc-{decision_trace_id}" if decision_trace_id else None,
+                "trace_id": decision_trace_id,
+                "retained_purpose": str(q or "")[:500],
+                "status": "provisional",
+                "interpretations": _semantic_hypotheses,
+                "next_question": _questions[0] if _questions else None,
+                "research_choices": [
+                    "research_approved_sources", "upload_requirements",
+                    "enter_specifications", "continue_provisionally",
+                ],
+                "execution": "local_exploration_completed",
+                "evidence": "material_gaps",
+                "decision": "exploration_allowed",
+                "cart_authority": "none",
+                "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+            }
+            if decision_trace_id:
+                log_trace_event(
+                    trace_id=decision_trace_id,
+                    event_type="ambiguity_exploration_projected",
+                    source_type="stage",
+                    source_id="Ambiguous_Catalog_Exploration",
+                    target_type="ui",
+                    target_id="research_fit_panel",
+                    payload={
+                        **ambiguity_exploration,
+                        "shelf_ids": [shelf.shelf_id for shelf in _projection.shelves],
+                        "qualification_authority": "none",
+                        "commercial_authority": "none",
+                    },
+                )
+        except Exception as exc:
+            logger.debug("provisional ambiguity projection skipped: %s", exc)
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -3707,6 +3874,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "chat_lockdown": bool(image_security_posture.get("chat_lockdown")),
         "needs_human_review": bool(image_security_posture.get("needs_human_review")),
         "security_route": str(image_security_posture.get("route") or "allow"),
+        "buyer_requirement_claims": buyer_requirement_claims,
+        "buyer_requirement_review_required": buyer_requirement_review_required,
+        "buyer_requirement_proposal": buyer_requirement_proposal,
+        "ambiguity_exploration": ambiguity_exploration,
+        "product_shelves": ambiguous_product_shelves,
     }
     # Adaptive fields are evidence that a governed lever actually ran. Omitting them when
     # disabled is part of the API contract; emitting null makes clients and audits infer an
