@@ -199,6 +199,11 @@ def research(
         "status": "ok" if items else "empty",
         "items": items,
         "source_status": SourceStatus.from_hits(_SOURCE, items, int((time.perf_counter() - t0) * 1000)).to_dict(),
+        "transport_receipt": (
+            dict(fetcher.last_receipt)
+            if isinstance(getattr(fetcher, "last_receipt", None), dict)
+            else None
+        ),
     }
     if redis is not None:
         with contextlib.suppress(Exception):
@@ -295,13 +300,25 @@ def run_external_research_stage(
             cancellation=cancellation,
         )
         provider_status = str(res.get("status") or "unknown")
+        external_call_dispatched = provider_status not in {"cached", "cancelled"}
         attempts.append({
             "provider_id": provider.provider_id,
             "status": provider_status,
+            "external_call_dispatched": external_call_dispatched,
             "capabilities": [
                 value for value in requested_capabilities if value in provider.capabilities
             ],
             "authority": provider.authority,
+            "billing_class": provider.billing_class,
+            "transport_receipt": (
+                {
+                    **dict(res.get("transport_receipt") or {}),
+                    "provider_id": provider.provider_id,
+                    "billing_class": provider.billing_class,
+                }
+                if isinstance(res.get("transport_receipt"), dict)
+                else None
+            ),
         })
         aggregate.extend({
             **item,
@@ -313,8 +330,11 @@ def run_external_research_stage(
             ),
         } for item in list(res.get("items") or []) if isinstance(item, dict))
         source_status = res.get("source_status") or source_status
+        if provider_status == "cached":
+            run_status = "cached"
         if aggregate:
-            run_status = "ok"
+            if provider_status != "cached":
+                run_status = "ok"
             break
         if provider_status in {"error", "cancelled"}:
             run_status = provider_status

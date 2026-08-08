@@ -23,10 +23,12 @@ fake `resolver`. CORE / vertical-blind.
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
 import os
 import socket
 import threading
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import quote_plus, urlparse
 
@@ -90,6 +92,7 @@ class HttpxResearchFetcher:
         allow_private: Optional[bool] = None,
         user_agent: str = _DEFAULT_UA,
         max_bytes: int = _DEFAULT_MAX_BYTES,
+        request_headers: Optional[Dict[str, str]] = None,
     ):
         self._client = client
         self._template = search_url_template or os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or ""
@@ -97,6 +100,21 @@ class HttpxResearchFetcher:
         self._allow_private = _truthy(os.getenv("EXTERNAL_RESEARCH_ALLOW_PRIVATE")) if allow_private is None else bool(allow_private)
         self._ua = user_agent
         self._max_bytes = int(max_bytes)
+        # Headers are transport configuration only. They are never copied into result rows or
+        # evidence traces, so connector credentials cannot leak into recommendation payloads.
+        self._request_headers = {
+            str(key): str(value)
+            for key, value in (request_headers or {}).items()
+            if str(key).strip() and str(value).strip()
+        }
+        self.last_receipt: Dict[str, Any] = {
+            "provider_capability": "WEB_DISCOVERY",
+            "provider_id": "searxng_compatible_discovery",
+            "fixture": False,
+            "network_execution": False,
+            "execution_status": "not_dispatched",
+            "external_call_dispatched": False,
+        }
 
     def fetch(
         self, scrubbed_query: str, *, allowlist: List[str], timeout_s: float = 4.0,
@@ -120,6 +138,19 @@ class HttpxResearchFetcher:
             return []
         url = self._template.replace("{query}", quote_plus(str(scrubbed_query)))
         parsed = urlparse(url)
+        self.last_receipt = {
+            "provider_capability": "WEB_DISCOVERY",
+            "provider_id": "searxng_compatible_discovery",
+            "provider_endpoint_host": parsed.hostname,
+            "query_hash": hashlib.sha256(str(scrubbed_query).encode("utf-8")).hexdigest()[:16],
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "fixture": False,
+            "network_execution": False,
+            "cache_status": "miss",
+            "billing_class": "unknown",
+            "execution_status": "not_dispatched",
+            "external_call_dispatched": False,
+        }
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
             return []
         if not _host_is_safe(parsed.hostname, resolver=self._resolver, allow_private=self._allow_private):
@@ -143,10 +174,33 @@ class HttpxResearchFetcher:
                 target=_cancel_transport, name="external-research-cancel", daemon=True,
             ).start()
         try:
-            resp = client.get(url, timeout=timeout_s)
+            resp = client.get(url, timeout=timeout_s, headers=self._request_headers or None)
+            raw_body = bytes(resp.content)
+            completed_at = datetime.now(timezone.utc).isoformat()
+            self.last_receipt.update({
+                "network_execution": True,
+                "external_call_dispatched": True,
+                "http_status": int(resp.status_code),
+                "completed_at": completed_at,
+                "observed_at": completed_at,
+                "response_body_hash": hashlib.sha256(raw_body[: self._max_bytes]).hexdigest(),
+                "response_bytes": len(raw_body),
+                "execution_status": (
+                    "completed" if 200 <= resp.status_code < 300 else "failed"
+                ),
+            })
             if not (200 <= resp.status_code < 300):  # 3xx (un-followed redirect) / 4xx / 5xx → no data
                 return []
             data = json.loads(resp.text[: self._max_bytes])
+        except Exception as exc:
+            self.last_receipt.update({
+                "network_execution": True,
+                "external_call_dispatched": True,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "execution_status": "failed",
+                "error": f"discovery_transport_error:{type(exc).__name__}",
+            })
+            raise
         finally:
             watch_done.set()
             if owns:

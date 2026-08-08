@@ -69,6 +69,35 @@ def test_happy_path_parses_and_filters_to_allowlist():
     assert hit["title"] == "Good Laptop" and hit["snippet"] == "spec text"
     assert hit["url"] == "https://shop.trusted.com/p/1"
     assert hit["claim_candidates"] == [{"attribute_key": "ram_gb", "value": 32}]
+    receipt = f.last_receipt
+    assert receipt["fixture"] is False
+    assert receipt["network_execution"] is True
+    assert receipt["execution_status"] == "completed"
+    assert receipt["provider_endpoint_host"] == "search.example.com"
+    assert receipt["http_status"] == 200
+    assert receipt["response_body_hash"]
+    assert receipt["external_call_dispatched"] is True
+
+
+def test_research_service_projects_discovery_transport_receipt():
+    from src.app.services.external_product_research_service import research
+
+    fetcher = HttpxResearchFetcher(
+        client=_client(_ok_results([{
+            "title": "Official requirements",
+            "url": "https://trusted.com/requirements",
+        }])),
+        search_url_template=_TEMPLATE,
+        resolver=_resolver_public,
+    )
+
+    result = research(
+        "bounded query", fetcher=fetcher, allowlist=["trusted.com"], enabled=True,
+    )
+
+    assert result["transport_receipt"]["network_execution"] is True
+    assert result["transport_receipt"]["fixture"] is False
+    assert result["transport_receipt"]["query_hash"]
 
 
 def test_bare_list_payload_supported():
