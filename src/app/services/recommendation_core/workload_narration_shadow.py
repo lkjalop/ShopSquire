@@ -63,6 +63,8 @@ def build_shadow_prompt(decision: Mapping[str, Any]) -> str:
         "budget_status": decision.get("budget_status"),
         "availability_status": decision.get("availability_status"),
         "authorized_narration_blocks": list(decision.get("authorized_narration_blocks") or [])[:12],
+        "material_preservation": list(decision.get("material_preservation") or [])[:24],
+        "supplier_choices": list(decision.get("supplier_choices") or [])[:12],
         "fit_ledger": list(decision.get("fit_ledger") or [])[:32],
         "critic": decision.get("critic"),
     }
@@ -139,6 +141,25 @@ def validate_shadow_narration(text: str, decision: Mapping[str, Any]) -> list[st
         if not _candidate_mentions_row(low, row):
             key = str(row.get("attribute_key") or "unknown")
             violations.append(f"ledger_gap_omitted:{key}")
+    for row in rows:
+        if str(row.get("verdict") or "") not in {
+            "fails_minimum", "failed", "misses", "incompatible",
+        }:
+            continue
+        key = str(row.get("attribute_key") or "unknown")
+        if not _candidate_mentions_row(low, row):
+            violations.append(f"ledger_miss_omitted:{key}")
+            continue
+        if not any(term in low for term in (
+            "miss", "does not meet", "below", "incompatible", "fails", "not supported",
+        )):
+            violations.append(f"ledger_miss_softened:{key}")
+    for requirement in list(decision.get("material_preservation") or [])[:24]:
+        requirement_id = str(requirement.get("requirement_id") or "material")
+        for term in list(requirement.get("required_terms") or [])[:12]:
+            normalized = str(term or "").strip().lower()
+            if normalized and normalized not in low:
+                violations.append(f"material_fact_omitted:{requirement_id}:{normalized}")
     if str(((decision.get("critic") or {}).get("status") or "")) == "blocked":
         if "critic" not in low and "evidence" not in low and "cannot" not in low:
             violations.append("critic_block_omitted")

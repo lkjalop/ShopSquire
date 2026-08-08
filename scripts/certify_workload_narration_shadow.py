@@ -24,6 +24,9 @@ from src.app.services.recommendation_core.workload_decision import (  # noqa: E4
 from src.app.services.recommendation_core.workload_narration_shadow import (  # noqa: E402
     run_shadow_narration,
 )
+from src.app.services.recommendation_core.workload_narration_evaluation import (  # noqa: E402
+    evaluate_shadow_corpus,
+)
 
 
 def _decision() -> dict:
@@ -96,24 +99,36 @@ def main() -> int:
     ).raise_for_status()
     warm_ms = int((time.perf_counter() - warm_started) * 1000)
 
-    results = []
+    fidelity = evaluate_shadow_corpus(generate=generate, model_id=args.model)
+    latency_results = []
     for index in range(max(3, args.runs)):
         result = run_shadow_narration(decision, generate=generate, model_id=args.model)
         result["run"] = index + 1
         result["under_limit"] = result["elapsed_ms"] < args.limit_ms
-        results.append(result)
-    passed = all(item["status"] == "accepted_shadow" and item["under_limit"] for item in results)
+        latency_results.append(result)
+    latency_passed = all(
+        item["status"] == "accepted_shadow" and item["under_limit"]
+        for item in latency_results
+    )
+    fidelity_passed = bool(fidelity["fidelity_passed"])
+    passed = fidelity_passed and latency_passed
     artifact = {
-        "schema_version": "workload-narration-shadow-cert-v1",
+        "schema_version": "workload-narration-shadow-cert-v2",
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "provider": "ollama",
         "model": args.model,
         "buyer_visible": False,
         "commercial_authority_granted": False,
         "warmup_ms_excluded": warm_ms,
-        "latency_limit_ms": args.limit_ms,
-        "runs": results,
-        "three_consecutive_under_limit": passed,
+        "fidelity_certification": fidelity,
+        "latency_certification": {
+            "latency_limit_ms": args.limit_ms,
+            "runs": latency_results,
+            "three_consecutive_under_limit": latency_passed,
+            "passed": latency_passed,
+        },
+        "fidelity_passed": fidelity_passed,
+        "latency_passed": latency_passed,
         "passed": passed,
     }
     output = Path(args.output)
@@ -121,9 +136,11 @@ def main() -> int:
     output.write_text(json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({
         "passed": passed,
+        "fidelity_passed": fidelity_passed,
+        "latency_passed": latency_passed,
         "warmup_ms_excluded": warm_ms,
-        "run_elapsed_ms": [item["elapsed_ms"] for item in results],
-        "run_statuses": [item["status"] for item in results],
+        "run_elapsed_ms": [item["elapsed_ms"] for item in latency_results],
+        "run_statuses": [item["status"] for item in latency_results],
         "output": str(output),
     }, indent=2))
     return 0 if passed else 2
