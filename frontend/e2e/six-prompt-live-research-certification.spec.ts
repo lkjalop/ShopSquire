@@ -111,7 +111,7 @@ for (const scenario of scenarios) {
     expect(result.case_id).toBe(caseId);
     expect(result.research.research_plan_id).toBe(requestBody.research_plan_id);
     expect(result.research.provider_accounting.paid_calls).toBe(0);
-    expect(result.research.provider_accounting.external_calls).toBeGreaterThanOrEqual(2);
+    expect(result.research.provider_accounting.external_calls).toBeGreaterThanOrEqual(0);
     for (const sourceId of scenario.expectedSources) {
       expect(result.research.source_ids).toContain(sourceId);
     }
@@ -127,9 +127,36 @@ for (const scenario of scenarios) {
       expect(acceptedEvidence.map((row: any) => row.source_id)).toContain(sourceId);
     }
     expect(result.research.claims.length).toBeGreaterThanOrEqual(scenario.minimumProductClaims);
+    const sourceExecution = result.research.source_execution || [];
+    for (const sourceId of scenario.expectedSources) {
+      const execution = sourceExecution.find((row: any) => row.source_id === sourceId);
+      expect(execution, `missing source execution for ${sourceId}`).toBeTruthy();
+      expect([
+        'canonical_direct',
+        'evidence_cache',
+        'canonical_fallback_discovered',
+      ]).toContain(execution.origin_selection_mode);
+      if (execution.origin_selection_mode === 'canonical_fallback_discovered') {
+        expect(execution.discovery_result_count).toBeGreaterThan(0);
+      }
+    }
+    // A future open-world case may select a genuinely novel origin. It cannot
+    // pass merely because SearXNG returned HTTP 200 with an empty result list.
+    for (const execution of sourceExecution.filter(
+      (row: any) => row.origin_selection_mode === 'discovered_novel',
+    )) {
+      expect(execution.discovery_result_count).toBeGreaterThan(0);
+      expect(execution.discovery_status).toBe('completed');
+      expect(execution.selected_origin_url).toMatch(/^https:\/\//);
+    }
     for (const receipt of result.research.receipts.filter((row: any) => row.execution_status === 'completed')) {
       expect(receipt.fixture).toBe(false);
-      expect(receipt.network_execution).toBe(true);
+      if (receipt.cache_status === 'fresh_hit') {
+        expect(receipt.external_call_dispatched).toBe(false);
+        expect(receipt.network_execution).toBe(false);
+      } else {
+        expect(receipt.network_execution).toBe(true);
+      }
       expect(receipt.query_id).toBeTruthy();
       expect(receipt.query_hash).toBeTruthy();
       expect(receipt.response_body_hash).toBeTruthy();

@@ -1,8 +1,43 @@
+from datetime import datetime, timezone
+
+from src.app.services.official_evidence_cache import OfficialEvidenceCache
 from src.app.services.official_workload_research import (
     compile_source_claims,
     ranking_delta,
     research_official_sources,
 )
+
+
+def _approved_source(
+    source_id: str = "nist_manufacturing_digital_twins",
+    *,
+    allowed_claim_types: list[str] | None = None,
+) -> dict:
+    allowed = allowed_claim_types or ["concept_identity", "workload_scope"]
+    return {
+        "source_id": source_id,
+        "publisher": "NIST",
+        "allowed_domains": ["nist.gov"],
+        "canonical_entrypoints": ["https://nist.gov/digital-twins"],
+        "allowed_claim_types": allowed,
+        "forbidden_claim_types": [
+            "minimum_requirements", "behavioral_performance", "benchmark_result",
+            "exact_product_fit", "price", "availability",
+        ],
+        "applicability": {
+            "workloads": ["manufacturing_digital_twin"],
+            "scope": "Manufacturing digital twin context only",
+            "resolution_owner": "research",
+        },
+        "publisher_policy": {
+            "direct_origin_required": True,
+            "policy_ref": "test:nist-v1",
+        },
+        "parser_type": "html",
+        "freshness_sla_hours": 720,
+        "review_status": "approved",
+        "artefact_patterns": ["Digital Twins"],
+    }
 
 
 def test_factory_io_parser_compiles_only_recognized_official_statements() -> None:
@@ -154,17 +189,248 @@ def test_context_only_research_is_not_reported_as_product_requirements(monkeypat
     )
     result = research_official_sources(
         "predicting factory breakdowns", search_url_template="http://search/?q={query}",
-        sources=[{
-            "source_id": "nist_manufacturing_digital_twins", "publisher": "NIST",
-            "allowed_domains": ["nist.gov"],
-            "canonical_entrypoints": ["https://nist.gov/digital-twins"],
-            "allowed_claim_types": ["concept_identity"],
-            "artefact_patterns": ["Digital Twins"],
-        }],
+        sources=[_approved_source()], evidence_cache=OfficialEvidenceCache(),
+        workload="manufacturing_digital_twin",
+        now=datetime(2026, 8, 8, 1, tzinfo=timezone.utc),
     )
     assert result["claims"] == []
     assert result["context_claims"]
     assert result["evidence_outcome"] == "context_only"
     assert {row["reason"] for row in result["unresolved"]} >= {
         "no_product_requirement_claims",
+    }
+    assert result["source_execution"] == [{
+        "source_id": "nist_manufacturing_digital_twins",
+        "parser_type": "html",
+        "parser_version": "official-source-parser-v2:nist_manufacturing_digital_twins",
+        "policy_version": "test:nist-v1",
+        "freshness_sla_hours": 720,
+        "origin_selection_mode": "canonical_direct",
+        "canonical_url": "https://nist.gov/digital-twins",
+        "selected_origin_url": "https://nist.gov/digital-twins",
+        "cache_status": "miss",
+        "canonical_fetch_status": "completed",
+        "discovery_status": "not_needed",
+        "discovery_reason": None,
+        "discovery_result_count": 0,
+    }]
+    assert all(row["provider_capability"] != "WEB_DISCOVERY" for row in result["receipts"])
+
+
+def test_fresh_cache_precedes_canonical_and_is_tenant_scoped(monkeypatch):
+    calls = {"origin": 0, "discovery": 0}
+
+    class Discovery:
+        def __init__(self, **kwargs):
+            calls["discovery"] += 1
+
+    class Origin:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, url, *, allowlist, timeout_s, certification_run_id):
+            calls["origin"] += 1
+            return {
+                "status": "completed", "content": b"Digital Twin context",
+                "content_type": "text/html",
+                "receipt": {
+                    "execution_status": "completed", "network_execution": True,
+                    "external_call_dispatched": True, "http_status": 200,
+                    "query_hash": "c" * 64, "response_body_hash": "d" * 64,
+                    "observed_at": "2026-08-08T00:00:00Z",
+                    "provider_endpoint_host": "nist.gov",
+                    "started_at": "2026-08-08T00:00:00Z",
+                    "completed_at": "2026-08-08T00:00:01Z",
+                },
+            }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.HttpxResearchFetcher", Discovery,
+    )
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    cache = OfficialEvidenceCache(max_entries=2)
+    kwargs = {
+        "purpose": "factory breakdowns", "search_url_template": "",
+        "sources": [_approved_source()], "evidence_cache": cache,
+        "workload": "manufacturing_digital_twin",
+        "now": datetime(2026, 8, 8, 2, tzinfo=timezone.utc),
+    }
+    first = research_official_sources(**kwargs, tenant_id="tenant-a")
+    second = research_official_sources(**kwargs, tenant_id="tenant-a")
+    third = research_official_sources(**kwargs, tenant_id="tenant-b")
+    assert first["source_execution"][0]["origin_selection_mode"] == "canonical_direct"
+    assert second["source_execution"][0]["origin_selection_mode"] == "evidence_cache"
+    assert second["provider_accounting"] == {
+        "external_calls": 0, "discovery_calls": 0,
+        "official_origin_fetches": 0, "cache_hits": 1, "paid_calls": 0,
+    }
+    assert second["execution_mode"] == "evidence_cache"
+    assert second["receipts"][0]["cache_status"] == "fresh_hit"
+    assert third["source_execution"][0]["origin_selection_mode"] == "canonical_direct"
+    assert calls == {"origin": 2, "discovery": 0}
+
+
+def test_failed_canonical_uses_discovery_as_an_honest_fallback(monkeypatch):
+    calls = {"origin": 0, "discovery": 0}
+
+    class Discovery:
+        def __init__(self, **kwargs):
+            self.last_receipt = {}
+
+        def fetch(self, query, *, allowlist, timeout_s):
+            calls["discovery"] += 1
+            self.last_receipt = {
+                "execution_status": "completed", "network_execution": True,
+                "external_call_dispatched": True, "http_status": 200,
+                "query_hash": "a" * 64, "response_body_hash": "b" * 64,
+                "provider_endpoint_host": "search.local",
+                "started_at": "2026-08-08T00:00:01Z",
+                "completed_at": "2026-08-08T00:00:02Z",
+            }
+            return [{"url": "https://nist.gov/digital-twins-moved"}]
+
+    class Origin:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, url, *, allowlist, timeout_s, certification_run_id):
+            calls["origin"] += 1
+            if calls["origin"] == 1:
+                return {
+                    "status": "failed", "content": b"", "error": "origin_http_status",
+                    "receipt": {
+                        "execution_status": "failed", "network_execution": True,
+                        "external_call_dispatched": True, "http_status": 404,
+                        "query_hash": "c" * 64, "provider_endpoint_host": "nist.gov",
+                        "started_at": "2026-08-08T00:00:00Z",
+                        "completed_at": "2026-08-08T00:00:01Z",
+                    },
+                }
+            return {
+                "status": "completed", "content": b"Digital Twin context",
+                "content_type": "text/html",
+                "receipt": {
+                    "execution_status": "completed", "network_execution": True,
+                    "external_call_dispatched": True, "http_status": 200,
+                    "query_hash": "d" * 64, "response_body_hash": "e" * 64,
+                    "observed_at": "2026-08-08T00:00:02Z",
+                    "provider_endpoint_host": "nist.gov",
+                    "started_at": "2026-08-08T00:00:02Z",
+                    "completed_at": "2026-08-08T00:00:03Z",
+                },
+            }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.HttpxResearchFetcher", Discovery,
+    )
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources(
+        "factory breakdowns", search_url_template="http://search/?q={query}",
+        sources=[_approved_source()], evidence_cache=OfficialEvidenceCache(),
+        workload="manufacturing_digital_twin",
+        now=datetime(2026, 8, 8, 3, tzinfo=timezone.utc),
+    )
+    execution = result["source_execution"][0]
+    assert execution["origin_selection_mode"] == "canonical_fallback_discovered"
+    assert execution["canonical_fetch_status"] == "failed"
+    assert execution["discovery_status"] == "completed"
+    assert execution["discovery_reason"] == "canonical_fetch_failed"
+    assert execution["discovery_result_count"] == 1
+    assert calls == {"origin": 2, "discovery": 1}
+    assert result["provider_accounting"] == {
+        "external_calls": 3, "discovery_calls": 1,
+        "official_origin_fetches": 2, "cache_hits": 0, "paid_calls": 0,
+    }
+
+
+def test_claims_outside_source_policy_are_rejected(monkeypatch):
+    class Origin:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, url, *, allowlist, timeout_s, certification_run_id):
+            return {
+                "status": "completed", "content": b"Digital Twin context",
+                "content_type": "text/html",
+                "receipt": {
+                    "execution_status": "completed", "network_execution": True,
+                    "external_call_dispatched": True, "http_status": 200,
+                    "query_hash": "c" * 64, "response_body_hash": "d" * 64,
+                    "observed_at": "2026-08-08T00:00:00Z",
+                    "provider_endpoint_host": "nist.gov",
+                    "started_at": "2026-08-08T00:00:00Z",
+                    "completed_at": "2026-08-08T00:00:01Z",
+                },
+            }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources(
+        "factory breakdowns", search_url_template="", sources=[_approved_source(
+            allowed_claim_types=["concept_identity"],
+        )], evidence_cache=OfficialEvidenceCache(), workload="manufacturing_digital_twin",
+        now=datetime(2026, 8, 8, 1, tzinfo=timezone.utc),
+    )
+    assert result["context_claims"] == []
+    assert {row["reason"] for row in result["unresolved"]} >= {
+        "emitted_claim_type_not_allowed:workload_scope",
+    }
+
+
+def test_wrong_workload_applicability_blocks_network_execution(monkeypatch):
+    class Origin:
+        def __init__(self, **kwargs):
+            raise AssertionError("inapplicable source must not be fetched")
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources(
+        "OT cyber range", search_url_template="", sources=[_approved_source()],
+        evidence_cache=OfficialEvidenceCache(), workload="ot_cyber_range",
+    )
+    assert result["execution_mode"] == "not_executed"
+    assert result["receipts"] == []
+    assert {row["reason"] for row in result["unresolved"]} >= {
+        "source_not_applicable_to_workload",
+    }
+
+
+def test_stale_origin_observation_cannot_emit_fresh_claims(monkeypatch):
+    class Origin:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, url, *, allowlist, timeout_s, certification_run_id):
+            return {
+                "status": "completed", "content": b"Digital Twin context",
+                "content_type": "text/html",
+                "receipt": {
+                    "execution_status": "completed", "network_execution": True,
+                    "external_call_dispatched": True, "http_status": 200,
+                    "query_hash": "c" * 64, "response_body_hash": "d" * 64,
+                    "observed_at": "2025-01-01T00:00:00Z",
+                    "provider_endpoint_host": "nist.gov",
+                    "started_at": "2026-08-08T00:00:00Z",
+                    "completed_at": "2026-08-08T00:00:01Z",
+                },
+            }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources(
+        "factory breakdowns", search_url_template="", sources=[_approved_source()],
+        evidence_cache=OfficialEvidenceCache(), workload="manufacturing_digital_twin",
+        now=datetime(2026, 8, 8, 1, tzinfo=timezone.utc),
+    )
+    assert result["claims"] == []
+    assert result["context_claims"] == []
+    assert {row["reason"] for row in result["unresolved"]} >= {
+        "origin_evidence_stale",
     }
