@@ -146,6 +146,37 @@ class RequirementProposal(Base):
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
+class ShoppingCaseFulfillmentSelection(Base):
+    """Revision-bound buyer selection bridging research to guarded cart execution."""
+
+    __tablename__ = "shopping_case_fulfillment_selections"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "case_id", "revision", name="uq_case_fulfillment_revision"),
+        UniqueConstraint(
+            "tenant_id", "case_id", "selection_idempotency_key",
+            name="uq_case_fulfillment_selection_idempotency",
+        ),
+    )
+    selection_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    uid: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(Text)
+    choice: Mapped[str] = mapped_column(Text)
+    preferred_sku: Mapped[str] = mapped_column(Text)
+    requested_quantity: Mapped[int] = mapped_column(Integer)
+    available_now: Mapped[int] = mapped_column(Integer)
+    offers_json: Mapped[list] = mapped_column(JSON)
+    selection_idempotency_key: Mapped[str] = mapped_column(Text)
+    selected_offer_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confirmation_idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cart_plan_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cart_result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[str] = mapped_column(TIMESTAMP)
+    updated_at: Mapped[str] = mapped_column(TIMESTAMP)
+
+
 class Inventory(Base):
     __tablename__ = "inventory"
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))

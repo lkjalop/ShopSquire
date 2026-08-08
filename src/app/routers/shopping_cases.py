@@ -20,6 +20,12 @@ from src.app.services.infrastructure_alternative_projection import project_infra
 from src.app.services.evidence_acquisition_ladder import choose_evidence_stage
 from src.app.services.fulfillment_choice_reducer import reduce_fulfillment_choices
 from src.app.services.decision_log import log_trace_event
+from src.app.services.commerce_feature_readiness import (
+    external_research_runtime_observation,
+    external_search_readiness,
+    record_external_research_runtime_observation,
+)
+from src.app.services.requirement_claim_reconciliation import reconcile_requirement_claims
 
 
 router = APIRouter(prefix="/api/v1/shopping-cases", tags=["shopping-cases"])
@@ -92,6 +98,27 @@ class ProposeCaseCartMutationRequest(BaseModel):
     quantity: int = Field(ge=1, le=500)
 
 
+class SelectFulfillmentContinuationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    uid: str = Field(min_length=1, max_length=200)
+    expected_revision: int = Field(ge=0)
+    choice: Literal[
+        "split_delivery", "wait_preferred", "next_best_now", "supplier_enquiry", "substitute",
+    ]
+    preferred_sku: str = Field(min_length=1, max_length=120)
+    substitute_sku: str | None = Field(default=None, min_length=1, max_length=120)
+    requested_quantity: int = Field(ge=1, le=500)
+    available_now: int = Field(ge=0, le=500)
+
+
+class ConfirmFulfillmentCartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    uid: str = Field(min_length=1, max_length=200)
+    expected_revision: int = Field(ge=1)
+    selected_offer_id: str | None = Field(default=None, max_length=120)
+    substitution_authorized: bool = False
+
+
 def _tenant(value: str | None) -> str:
     return str(value or "default").strip() or "default"
 
@@ -100,8 +127,49 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _external_research_runtime_status() -> dict[str, Any]:
+    """Read the latest probe observation without performing network I/O.
+
+    Deployments may project their health-probe observations into these values.
+    The explicit local proof enrollment is handled separately by readiness and
+    never appears here as a successful observation.
+    """
+
+    status = str(os.getenv("EXTERNAL_RESEARCH_RUNTIME_STATUS") or "").strip().lower()
+    reachable: bool | None = None
+    if status in {"healthy", "reachable", "effective", "degraded"}:
+        reachable = True
+    elif status in {"unreachable", "failed"}:
+        reachable = False
+    observed = external_research_runtime_observation()
+    configured = {
+        "status": status or None,
+        "reachable": reachable,
+        "degraded": (status == "degraded") if status else None,
+        "last_success_at": os.getenv("EXTERNAL_RESEARCH_LAST_SUCCESS_AT"),
+        "last_failure_at": os.getenv("EXTERNAL_RESEARCH_LAST_FAILURE_AT"),
+        "last_failure_code": os.getenv("EXTERNAL_RESEARCH_LAST_FAILURE_CODE"),
+    }
+    observed.update({key: value for key, value in configured.items() if value is not None})
+    return observed
+
+
 def _trace_id(proposal_id: str, version: int) -> str:
     return "req-" + hashlib.sha256(f"{proposal_id}:{version}".encode()).hexdigest()[:20]
+
+
+def _buyer_claim_reconciliation(
+    buyer_claims: list[dict[str, Any]], official_claims: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    rows = [
+        row.model_dump(mode="json")
+        for row in reconcile_requirement_claims(buyer_claims, official_claims)
+    ]
+    counts = {
+        status: sum(row["status"] == status for row in rows)
+        for status in ("corroborated", "contradicted", "unresolved", "preference_only")
+    }
+    return rows, counts
 
 
 def _payload_object(value: Any) -> dict[str, Any]:
@@ -411,6 +479,14 @@ def accept_requirement_proposal(
                     db=db,
                 )
                 result["corroboration"] = corroboration
+                official_claims = list(corroboration.get("research", {}).get("claims", []))
+                reconciliation, reconciliation_counts = _buyer_claim_reconciliation(
+                    accepted, official_claims,
+                )
+                result["buyer_claim_reconciliation"] = reconciliation
+                result["buyer_claim_reconciliation_status_counts"] = reconciliation_counts
+                corroboration["buyer_claim_reconciliation"] = reconciliation
+                corroboration["buyer_claim_reconciliation_status_counts"] = reconciliation_counts
                 if corroboration.get("evidence_outcome") == "context_only":
                     # Context-only publisher material must not erase the useful,
                     # explicitly accepted buyer constraints. Keep their shelf
@@ -424,7 +500,29 @@ def accept_requirement_proposal(
                     result["product_shelves"]["research_delta"] = []
                     corroboration["product_shelves"] = result["product_shelves"]
                 else:
-                    result["product_shelves"] = corroboration["product_shelves"]
+                    official_projection = corroboration["product_shelves"]
+                    combined_projection = project_accepted_catalog(
+                        db,
+                        accepted_claims=[*accepted, *official_claims],
+                        desired_outcome=case.retained_purpose or "Buyer accepted requirements",
+                        tenant_id=tenant_id,
+                        hypothesis_labels={
+                            row.hypothesis_id: row.label for row in plan.hypotheses
+                        },
+                    ).model_dump(mode="json")
+                    for key in (
+                        "evidence_status", "research_delta", "official_claim_count",
+                        "context_claim_count",
+                    ):
+                        if key in official_projection:
+                            combined_projection[key] = official_projection[key]
+                    combined_projection["buyer_accepted_claim_count"] = len(accepted)
+                    result["product_shelves"] = combined_projection
+                    corroboration["product_shelves"] = combined_projection
+                result["product_shelves"]["buyer_claim_reconciliation"] = reconciliation
+                result["product_shelves"][
+                    "buyer_claim_reconciliation_status_counts"
+                ] = reconciliation_counts
                 result["provider_accounting"] = corroboration["research"]["provider_accounting"]
             except HTTPException as exc:
                 detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
@@ -494,6 +592,150 @@ def fulfillment_options(
     }
 
 
+@router.post("/{case_id}/fulfillment-selections", status_code=201)
+def select_fulfillment_continuation(
+    case_id: str,
+    body: SelectFulfillmentContinuationRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=200),
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Persist a buyer choice and expose normalized, non-sent fixture offers."""
+    from src.app.services.shopping_case_supplier_continuation import (
+        certification_fixture_offers, select_fulfillment_option,
+    )
+
+    tenant_id = _tenant(x_tenant_id)
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
+    )).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="shopping_case_not_found")
+    if case.uid != body.uid:
+        raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+    if body.available_now > body.requested_quantity:
+        raise HTTPException(status_code=422, detail="available_now_exceeds_requested_quantity")
+    if body.choice in {"next_best_now", "substitute"} and not body.substitute_sku:
+        raise HTTPException(status_code=422, detail="explicit_substitute_sku_required")
+    offers = certification_fixture_offers(
+        case_id=case_id, preferred_sku=body.preferred_sku,
+        substitute_sku=body.substitute_sku,
+        requested_quantity=body.requested_quantity, available_now=body.available_now,
+    )
+    selected, error = select_fulfillment_option(
+        db, tenant_id=tenant_id, case_id=case_id, uid=body.uid,
+        expected_revision=body.expected_revision, choice=body.choice,
+        preferred_sku=body.preferred_sku,
+        requested_quantity=body.requested_quantity, available_now=body.available_now,
+        idempotency_key=idempotency_key, offers=offers,
+    )
+    if error:
+        raise HTTPException(status_code=409, detail={"code": error})
+    assert selected is not None
+    return {
+        **selected.model_dump(mode="json"),
+        "supplier_send": "not_performed",
+        "rfq_status": "deterministic_fixture_response_only",
+        "cart_mutation": "not_authorized",
+    }
+
+
+@router.post("/{case_id}/fulfillment-selections/{selection_id}/confirm-cart")
+def confirm_fulfillment_cart(
+    case_id: str,
+    selection_id: str,
+    body: ConfirmFulfillmentCartRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=200),
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Apply exactly one revision-bound cart set after explicit buyer confirmation."""
+    from src.app.domain.cart_mutation import CartMutationPlan, CartOp
+    from src.app.models.orm import Product
+    from src.app.routers.cart import _get_or_create_cart
+    from src.app.services.cart_mutation_service import apply_plan, propose_plan
+    from src.app.services.shopping_case_supplier_continuation import (
+        get_confirmation_replay, get_fulfillment_selection,
+        record_cart_confirmation, resolve_confirmed_cart_target,
+    )
+
+    tenant_id = _tenant(x_tenant_id)
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
+    )).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="shopping_case_not_found")
+    if case.uid != body.uid:
+        raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+    replay = get_confirmation_replay(
+        db, tenant_id=tenant_id, case_id=case_id, selection_id=selection_id,
+        uid=body.uid, idempotency_key=idempotency_key,
+    )
+    if replay is not None:
+        return {
+            **replay.model_dump(mode="json"), "idempotent_replay": True,
+            "supplier_send": "not_performed",
+        }
+    selection = get_fulfillment_selection(
+        db, tenant_id=tenant_id, case_id=case_id, selection_id=selection_id, uid=body.uid,
+    )
+    if selection is None:
+        raise HTTPException(status_code=404, detail="fulfillment_selection_not_found")
+    if selection.revision != body.expected_revision:
+        raise HTTPException(status_code=409, detail={
+            "code": "stale_fulfillment_revision", "current_revision": selection.revision,
+        })
+    try:
+        target_sku, quantity, offer = resolve_confirmed_cart_target(
+            selection, selected_offer_id=body.selected_offer_id,
+            substitution_authorized=body.substitution_authorized,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+    product = db.execute(select(Product).where(
+        Product.sku == target_sku, Product.active.is_(True),
+    )).scalar_one_or_none()
+    if product is None:
+        raise HTTPException(status_code=409, detail={
+            "code": "configuration_not_commercially_enrolled", "sku": target_sku,
+        })
+    _cart_id, items, _updated = _get_or_create_cart(body.uid, tenant_id=tenant_id)
+    previous = next((int(row.get("quantity") or 0) for row in items if row.get("sku") == target_sku), 0)
+    plan = CartMutationPlan(ops=(CartOp(
+        action="set_quantity", target_skus=(target_sku,), quantity=quantity,
+        previous_quantity=previous, unit_price_cents=product.price_cents,
+        allow_sourcing=selection.choice in {"split_delivery", "wait_preferred", "supplier_enquiry"},
+    ),), confidence=1.0, source="shopping_case_fulfillment_confirmation")
+    proposed = propose_plan(
+        tenant_id=tenant_id, uid=body.uid, plan=plan, cart_items=items,
+        query=(
+            f"case {case_id} selection {selection_id} revision {selection.revision}: "
+            f"set exact target {target_sku} to {quantity}"
+        ), trace_id=case_id.removeprefix("sc-"),
+    )
+    applied = apply_plan(proposed["plan_id"], tenant_id=tenant_id, uid=body.uid)
+    if applied.get("status") not in {"applied", "already_applied"}:
+        raise HTTPException(status_code=409, detail={
+            "code": "cart_confirmation_not_applied", "cart_result": applied,
+        })
+    recorded, error = record_cart_confirmation(
+        db, tenant_id=tenant_id, case_id=case_id, selection_id=selection_id,
+        uid=body.uid, expected_revision=selection.revision,
+        idempotency_key=idempotency_key, selected_offer_id=body.selected_offer_id,
+        cart_plan_id=proposed["plan_id"], cart_result=applied,
+    )
+    if error:
+        raise HTTPException(status_code=409, detail={"code": error})
+    assert recorded is not None
+    return {
+        **recorded.model_dump(mode="json"),
+        "confirmed_sku": target_sku, "confirmed_quantity": quantity,
+        "substitution_authorized": bool(offer and offer.relationship == "compatible_substitute"),
+        "supplier_offer_provenance": offer.provenance if offer else None,
+        "supplier_send": "not_performed", "idempotent_replay": False,
+    }
+
+
 @router.post("/{case_id}/research")
 def research_shopping_case(
     case_id: str,
@@ -543,17 +785,11 @@ def research_shopping_case(
         )
         db.add(case)
         db.flush()
-    search_url = str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip()
-    if not search_url:
-        raise HTTPException(status_code=503, detail={
-            "code": "local_discovery_not_enrolled",
-            "message": "Start the enrolled local SearXNG profile or upload requirements.",
-        })
     from src.app.services.case_research_plan import (
         approved_sources_for_plan, plan_hypothesis_labels,
     )
     from src.app.services.official_workload_research import (
-        ranking_delta, research_official_sources,
+        DEFAULT_OFFICIAL_EVIDENCE_CACHE, ranking_delta, research_official_sources,
     )
 
     approved_sources = approved_sources_for_plan(plan)
@@ -563,6 +799,83 @@ def research_shopping_case(
             "message": "Applicable publisher sources exist, but none is approved for this tenant.",
             "source_candidate_ids": plan.source_candidate_ids,
         })
+    invalid_source_policies = [
+        str(source.get("source_id") or "unknown")
+        for source in approved_sources
+        if (
+            source.get("review_status") != "approved"
+            or int(source.get("freshness_sla_hours") or 0) <= 0
+            or (source.get("publisher_policy") or {}).get("direct_origin_required") is not True
+        )
+    ]
+    if invalid_source_policies:
+        raise HTTPException(status_code=409, detail={
+            "code": "publisher_policy_or_freshness_not_enrolled",
+            "message": "Applicable sources lack an approved direct-origin policy or freshness SLA.",
+            "source_ids": invalid_source_policies,
+        })
+
+    source_domains = sorted({
+        str(domain).strip().lower()
+        for source in approved_sources
+        for domain in source.get("allowed_domains") or []
+        if str(domain).strip()
+    })
+    readiness = external_search_readiness(
+        allowlist=source_domains,
+        tenant_id=tenant_id,
+        runtime_status=_external_research_runtime_status(),
+    )
+    canonical_direct_ready = all(
+        bool(source.get("canonical_entrypoints")) for source in approved_sources
+    )
+    hard_readiness_errors = {
+        "external_research_disabled",
+        "external_research_tenant_not_enrolled",
+        "discovery_domain_allowlist_not_configured",
+    }
+    if not readiness["effective"] and (
+        readiness.get("error_code") in hard_readiness_errors
+        or not canonical_direct_ready
+    ):
+        code = str(readiness.get("error_code") or "external_research_degraded")
+        messages = {
+            "external_research_disabled": "Approved-source research is disabled by operator policy.",
+            "discovery_endpoint_not_configured": (
+                "The discovery endpoint is not configured. Upload requirements or ask an operator "
+                "to enroll a SearXNG-compatible endpoint."
+            ),
+            "discovery_endpoint_unreachable": (
+                "The configured discovery endpoint was observed as unreachable."
+            ),
+            "discovery_endpoint_degraded": (
+                "The configured discovery endpoint is degraded; no research call was dispatched."
+            ),
+            "discovery_reachability_not_observed": (
+                "Discovery is configured but has no successful reachability observation."
+            ),
+            "external_research_tenant_not_enrolled": (
+                "This tenant is not enrolled for approved-source research."
+            ),
+        }
+        raise HTTPException(
+            status_code=(403 if code == "external_research_tenant_not_enrolled" else 503),
+            detail={
+                "code": code,
+                "message": messages.get(code, readiness.get("reason") or "Research is unavailable."),
+                "readiness": {
+                    key: readiness.get(key) for key in (
+                        "configured", "reachable", "effective", "degraded",
+                        "capability_status", "last_success_at", "last_failure_at",
+                        "last_failure_code",
+                    )
+                },
+            },
+        )
+    search_url = (
+        str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip()
+        if readiness["effective"] else ""
+    )
 
     before = project_accepted_catalog(
         db, accepted_claims=[], desired_outcome=plan.retained_purpose,
@@ -572,7 +885,17 @@ def research_shopping_case(
         plan.retained_purpose, search_url_template=search_url,
         sources=list(approved_sources), plan_id=plan.plan_id,
         hypothesis_ids=body.hypothesis_ids,
+        tenant_id=tenant_id,
+        evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE,
     )
+    research["discovery_readiness"] = {
+        key: readiness.get(key) for key in (
+            "configured", "reachable", "effective", "degraded", "capability_status",
+            "error_code", "last_discovery_success_at", "last_discovery_result_count",
+        )
+    }
+    research["canonical_direct_ready"] = canonical_direct_ready
+    record_external_research_runtime_observation(research)
     after_projection = project_accepted_catalog(
         db, accepted_claims=research["claims"], desired_outcome=plan.retained_purpose,
         budget_cents=body.budget_cents, tenant_id=tenant_id,
@@ -622,6 +945,7 @@ def research_shopping_case(
         ),
         "cart_authority": "none",
         "provider_accounting": research["provider_accounting"],
+        "discovery_readiness": research["discovery_readiness"],
         "research_plan_id": plan.plan_id,
         "ambiguity_objects": [row.model_dump(mode="json") for row in plan.ambiguities],
         "research_obligations": [

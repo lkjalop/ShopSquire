@@ -28,6 +28,16 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def _enrol_local_research(monkeypatch, *, tenant_id: str = "default") -> None:
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    monkeypatch.setenv(
+        "EXTERNAL_RESEARCH_SEARCH_URL",
+        "http://127.0.0.1:8888/search?q={query}&format=json",
+    )
+    monkeypatch.setenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", tenant_id)
+    monkeypatch.setenv("EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED", "1")
+
+
 def test_interpretation_is_immediate_case_bound_and_zero_network():
     client = _client()
     response = client.post("/api/v1/shopping-cases/interpretations", json={
@@ -59,10 +69,7 @@ def test_interpretation_defers_covered_catalog_request_to_normal_chat_lane():
 
 def test_accepted_upload_runs_corroboration_in_the_same_interpreted_case(monkeypatch):
     client = _client()
-    monkeypatch.setenv(
-        "EXTERNAL_RESEARCH_SEARCH_URL",
-        "http://127.0.0.1:8888/search?q={query}&format=json",
-    )
+    _enrol_local_research(monkeypatch)
     interpreted = client.post("/api/v1/shopping-cases/interpretations", json={
         "uid": "buyer-same-case",
         "retained_purpose": "Digital-twin simulation of factory equipment and predicting breakdowns",
@@ -115,6 +122,14 @@ def test_accepted_upload_runs_corroboration_in_the_same_interpreted_case(monkeyp
     assert payload["product_shelves"]["evidence_status"] == "context_only"
     assert payload["product_shelves"]["context_claim_count"] == 1
     assert payload["product_shelves"]["buyer_accepted_claim_count"] == 1
+    assert payload["buyer_claim_reconciliation_status_counts"] == {
+        "corroborated": 0, "contradicted": 0,
+        "unresolved": 1, "preference_only": 0,
+    }
+    assert payload["buyer_claim_reconciliation"][0]["status"] == "unresolved"
+    assert payload["product_shelves"]["buyer_claim_reconciliation"] == payload[
+        "buyer_claim_reconciliation"
+    ]
 
 
 def test_acceptance_is_case_scoped_versioned_idempotent_and_never_mutates_cart():
@@ -216,10 +231,7 @@ def test_fulfillment_options_are_proposals_not_cart_or_supplier_actions():
 
 def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch):
     client = _client()
-    monkeypatch.setenv(
-        "EXTERNAL_RESEARCH_SEARCH_URL",
-        "http://127.0.0.1:8888/search?q={query}&format=json",
-    )
+    _enrol_local_research(monkeypatch)
 
     from src.app.services.case_research_plan import build_case_research_plan
 
@@ -231,13 +243,15 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
     )
 
     def fixture_research(
-        purpose, *, search_url_template, sources, plan_id, hypothesis_ids,
+        purpose, *, search_url_template, sources, plan_id, hypothesis_ids, **kwargs,
     ):
         assert purpose == "OT cyber range"
         assert "{query}" in search_url_template
         assert sources
         assert plan_id == plan.plan_id
         assert set(hypothesis_ids) == {row.hypothesis_id for row in plan.hypotheses}
+        assert kwargs["tenant_id"] == "default"
+        assert kwargs["evidence_cache"] is not None
         return {
             "schema_version": "official-workload-research-v1",
             "run_id": "fixture-run", "purpose": purpose,
@@ -301,10 +315,7 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
 
 def test_context_only_research_keeps_fit_provisional_and_blocks_silent_repeat(monkeypatch):
     client = _client()
-    monkeypatch.setenv(
-        "EXTERNAL_RESEARCH_SEARCH_URL",
-        "http://127.0.0.1:8888/search?q={query}&format=json",
-    )
+    _enrol_local_research(monkeypatch)
     from src.app.services.case_research_plan import build_case_research_plan
 
     plan = build_case_research_plan(
@@ -364,6 +375,103 @@ def test_context_only_research_keeps_fit_provisional_and_blocks_silent_repeat(mo
     assert repeated.json()["detail"]["code"] == "research_already_completed"
 
 
+def test_same_case_corroboration_reconciles_every_buyer_claim_without_promotion(monkeypatch):
+    client = _client()
+    _enrol_local_research(monkeypatch)
+    interpreted = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-reconciliation", "retained_purpose": "OT cyber range",
+    }).json()
+    case_id = interpreted["case_id"]
+
+    def buyer_claim(
+        claim_id, attribute, operator, value, requirement_class="minimum", unit=None,
+    ):
+        return {
+            "claim_id": claim_id, "subject": "buyer_workload_requirement",
+            "attribute": attribute, "operator": operator, "value": value, "unit": unit,
+            "requirement_class": requirement_class, "constraint_tier": "preferred",
+            "condition": None, "source_reference": "buyer-specification",
+            "evidence_class": "buyer_supplied", "extraction_confidence": 1.0,
+            "authority_status": "unverified", "freshness_status": "unknown",
+            "source_excerpt": f"{attribute} {operator} {value}",
+        }
+
+    claims = [
+        buyer_claim("ram-16", "ram_gb", ">=", 16, unit="GB"),
+        buyer_claim("ram-64", "ram_gb", ">=", 64, unit="GB"),
+        buyer_claim("os-linux", "operating_system", "=", "Linux"),
+        buyer_claim("storage", "storage_gb", ">=", 1024, unit="GB"),
+        buyer_claim(
+            "vram-preference", "gpu_vram_gb", ">=", 12,
+            requirement_class="recommended", unit="GB",
+        ),
+    ]
+    proposal = client.post(
+        f"/api/v1/shopping-cases/{case_id}/requirement-proposals",
+        json={
+            "uid": "buyer-reconciliation", "source_reference": "buyer-specification",
+            "claims": claims,
+        },
+    ).json()
+
+    def official_research(*args, **kwargs):
+        return {
+            "claims": [{
+                "claim_id": "official-ram-32", "attribute": "ram_gb",
+                "operator": ">=", "value": 32, "unit": "GB",
+                "requirement_class": "minimum", "authority_status": "verified_official",
+                "freshness_status": "fresh", "source_id": "microsoft_learn_hyperv",
+            }, {
+                "claim_id": "official-windows", "attribute": "operating_system",
+                "operator": "one_of", "value": ["Windows 11 Pro"],
+                "requirement_class": "minimum", "authority_status": "verified_official",
+                "freshness_status": "fresh", "source_id": "microsoft_learn_hyperv",
+            }],
+            "context_claims": [], "unresolved": [], "receipts": [],
+            "source_ids": ["microsoft_learn_hyperv"], "source_execution": [],
+            "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+            "evidence_outcome": "product_requirements",
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        official_research,
+    )
+    response = client.post(
+        f"/api/v1/shopping-cases/{case_id}/requirement-proposals/"
+        f"{proposal['proposal_id']}/accept",
+        headers={"Idempotency-Key": "reconcile-accepted-claims"},
+        json={
+            "uid": "buyer-reconciliation", "expected_proposal_version": 1,
+            "accepted_claim_ids": [row["claim_id"] for row in claims],
+            "rejected_claim_ids": [], "corrections": [],
+            "research_choice": "research_and_corroborate",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    statuses = {
+        row["buyer_claim_id"]: row["status"]
+        for row in payload["buyer_claim_reconciliation"]
+    }
+    assert statuses == {
+        "ram-16": "corroborated", "ram-64": "unresolved",
+        "os-linux": "contradicted", "storage": "unresolved",
+        "vram-preference": "preference_only",
+    }
+    assert payload["buyer_claim_reconciliation_status_counts"] == {
+        "corroborated": 1, "contradicted": 1,
+        "unresolved": 2, "preference_only": 1,
+    }
+    assert len(payload["accepted_claims"]) == len(claims)
+    assert all(row["authority_status"] == "unverified" for row in payload["accepted_claims"])
+    assert payload["product_shelves"]["buyer_accepted_claim_count"] == len(claims)
+    assert payload["product_shelves"][
+        "buyer_claim_reconciliation_status_counts"
+    ] == payload["buyer_claim_reconciliation_status_counts"]
+
+
 def test_research_scope_cannot_be_changed_by_the_browser(monkeypatch):
     client = _client()
     from src.app.services.case_research_plan import build_case_research_plan
@@ -388,3 +496,187 @@ def test_research_scope_cannot_be_changed_by_the_browser(monkeypatch):
     })
     assert tampered.status_code == 409
     assert tampered.json()["detail"]["code"] == "case_research_plan_mismatch"
+
+
+def test_canonical_research_bypasses_unavailable_discovery_but_not_disabled_policy(monkeypatch):
+    client = _client()
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan("OT cyber range")
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    body = {
+        "uid": "buyer-proof", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    }
+
+    _enrol_local_research(monkeypatch)
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "0")
+    disabled = client.post("/api/v1/shopping-cases/sc-disabled/research", json=body)
+    assert disabled.status_code == 503
+    assert disabled.json()["detail"]["code"] == "external_research_disabled"
+
+    search_templates = []
+
+    def canonical_research(*args, **kwargs):
+        search_templates.append(kwargs["search_url_template"])
+        return {
+            "claims": [], "context_claims": [], "unresolved": [],
+            "receipts": [], "source_ids": [],
+            "source_execution": [{
+                "origin_selection_mode": "canonical_direct",
+                "canonical_fetch_status": "completed",
+                "discovery_status": "not_needed", "discovery_result_count": 0,
+            }],
+            "provider_accounting": {"external_calls": 1, "paid_calls": 0},
+            "evidence_outcome": "unresolved",
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        canonical_research,
+    )
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    monkeypatch.delenv("EXTERNAL_RESEARCH_SEARCH_URL")
+    not_configured = client.post(
+        "/api/v1/shopping-cases/sc-not-configured/research", json=body,
+    )
+    assert not_configured.status_code == 200
+    assert not_configured.json()["research"]["canonical_direct_ready"] is True
+    assert not_configured.json()["research"]["discovery_readiness"]["error_code"] == (
+        "discovery_endpoint_not_configured"
+    )
+
+    monkeypatch.setenv(
+        "EXTERNAL_RESEARCH_SEARCH_URL",
+        "http://127.0.0.1:8888/search?q={query}&format=json",
+    )
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._external_research_runtime_status",
+        lambda: {"reachable": False, "last_failure_at": "2026-08-09T02:00:00Z"},
+    )
+    unreachable = client.post("/api/v1/shopping-cases/sc-unreachable/research", json=body)
+    assert unreachable.status_code == 200
+    assert unreachable.json()["research"]["discovery_readiness"]["error_code"] == (
+        "discovery_endpoint_unreachable"
+    )
+
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._external_research_runtime_status",
+        lambda: {
+            "reachable": True, "degraded": True,
+            "last_success_at": "2026-08-09T01:00:00Z",
+            "last_failure_code": "http_503",
+        },
+    )
+    degraded = client.post("/api/v1/shopping-cases/sc-degraded/research", json=body)
+    assert degraded.status_code == 200
+    assert degraded.json()["research"]["discovery_readiness"]["error_code"] == (
+        "discovery_endpoint_degraded"
+    )
+    assert search_templates == ["", "", ""]
+
+
+def test_research_route_requires_tenant_enrollment_and_buyer_authorization(monkeypatch):
+    client = _client()
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan("OT cyber range")
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    body = {
+        "uid": "buyer-proof", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    }
+    _enrol_local_research(monkeypatch, tenant_id="tenant-a")
+
+    tenant_denied = client.post(
+        "/api/v1/shopping-cases/sc-tenant-denied/research",
+        headers={"X-Tenant-Id": "tenant-b"}, json=body,
+    )
+    assert tenant_denied.status_code == 403
+    assert tenant_denied.json()["detail"]["code"] == "external_research_tenant_not_enrolled"
+
+    body["research_authorized"] = False
+    unauthorized = client.post(
+        "/api/v1/shopping-cases/sc-not-authorized/research",
+        headers={"X-Tenant-Id": "tenant-a"}, json=body,
+    )
+    assert unauthorized.status_code == 422
+
+
+def test_research_route_rejects_source_without_policy_or_freshness(monkeypatch):
+    client = _client()
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan("OT cyber range")
+    assert plan is not None
+    _enrol_local_research(monkeypatch)
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    monkeypatch.setattr(
+        "src.app.services.case_research_plan.approved_sources_for_plan",
+        lambda plan: ({
+            "source_id": "unfresh-source",
+            "review_status": "approved",
+            "freshness_sla_hours": 0,
+            "publisher_policy": {"direct_origin_required": False},
+            "allowed_domains": ["docs.example.test"],
+        },),
+    )
+
+    response = client.post("/api/v1/shopping-cases/sc-policy/research", json={
+        "uid": "buyer-proof", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    })
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "publisher_policy_or_freshness_not_enrolled"
+
+
+def test_novel_source_still_requires_effective_discovery(monkeypatch):
+    client = _client()
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan("OT cyber range")
+    assert plan is not None
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    monkeypatch.setenv("EXTERNAL_RESEARCH_TENANT_ALLOWLIST", "default")
+    monkeypatch.delenv("EXTERNAL_RESEARCH_SEARCH_URL", raising=False)
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    monkeypatch.setattr(
+        "src.app.services.case_research_plan.approved_sources_for_plan",
+        lambda plan: ({
+            "source_id": "reviewed-novel-source", "review_status": "approved",
+            "freshness_sla_hours": 24,
+            "publisher_policy": {"direct_origin_required": True},
+            "allowed_domains": ["docs.example.test"], "canonical_entrypoints": [],
+        },),
+    )
+
+    response = client.post("/api/v1/shopping-cases/sc-novel/research", json={
+        "uid": "buyer-proof", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    })
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "discovery_endpoint_not_configured"
