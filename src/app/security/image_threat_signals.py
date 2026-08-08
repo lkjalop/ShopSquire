@@ -60,7 +60,13 @@ def luhn_ok(num: str) -> bool:
 
 def sanitize_unicode_injection(text: str | None) -> str:
     t = unicodedata.normalize("NFKC", str(text or ""))
-    return "".join(ch for ch in t if unicodedata.category(ch) not in {"Cf", "Cc"})
+    # Newlines and tabs are ordinary document layout, not obfuscation. Removing
+    # them made every multi-line OCR/PDF/TXT payload look like a homoglyph attack.
+    return "".join(
+        ch for ch in t
+        if unicodedata.category(ch) != "Cf"
+        and (unicodedata.category(ch) != "Cc" or ch in {"\n", "\r", "\t"})
+    )
 
 
 def detect_ocr_encoded_payload(text: str | None) -> Dict[str, Any]:

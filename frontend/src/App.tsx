@@ -846,11 +846,18 @@ export default function App() {
 
   /** Add files from AttachmentButton / drop / paste */
   const handleAttach = useCallback((files: File[]) => {
-    const imgFiles = files.filter(f => f.type.startsWith('image/'));
+    const imgFiles = files.filter(f => (
+      f.type.startsWith('image/')
+      || f.type === 'application/pdf'
+      || f.type === 'text/plain'
+      || /\.(?:pdf|txt)$/i.test(f.name)
+    ));
     if (imgFiles.length === 0) return;
     setAttachedFiles(prev => [...prev, ...imgFiles]);
-    // Generate thumbnails as data URLs
+    // Generate thumbnails for images. Documents remain visible through their
+    // filename in the upload/review response instead of a broken image preview.
     imgFiles.forEach(f => {
+      if (!f.type.startsWith('image/')) return;
       const reader = new FileReader();
       reader.onload = () => setAttachedThumbs(prev => [...prev, reader.result as string]);
       reader.readAsDataURL(f);
@@ -1852,6 +1859,19 @@ export default function App() {
             // fast filename-only result would erase the very evidence the buyer asked
             // us to read before /chat/query is constructed.
             imageTriageResults = await fetchImageTriages(currentAttachedFiles, false, true);
+            if (!imageTriageResults.some((row: any) => (
+              typeof row?.extracted_text === 'string' && row.extracted_text.trim().length >= 12
+            ))) {
+              // OCR/provider startup can occasionally return a valid but empty
+              // first result. Retry this free local evidence step once; never
+              // turn an empty extraction into a knowledge or product-fit claim.
+              const retryResults = await fetchImageTriages(currentAttachedFiles, false, true);
+              if (retryResults.some((row: any) => (
+                typeof row?.extracted_text === 'string' && row.extracted_text.trim().length >= 12
+              ))) {
+                imageTriageResults = retryResults;
+              }
+            }
           } else {
             imageTriageResults = await fetchImageTriages(currentAttachedFiles, true);
             void fetchImageTriages(currentAttachedFiles, false).then((deepResults) => {

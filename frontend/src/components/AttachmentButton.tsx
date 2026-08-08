@@ -12,6 +12,7 @@ export default function AttachmentButton({ onFiles, disabled = false, className 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const acceptImages = 'image/*,.avif,image/avif';
+  const acceptFiles = `${acceptImages},.pdf,.txt,application/pdf,text/plain`;
 
   const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — matches backend ATTACHMENT_MAX_BYTES (12 MB) with margin
 
@@ -19,7 +20,7 @@ export default function AttachmentButton({ onFiles, disabled = false, className 
     const all = e.target.files ? Array.from(e.target.files) : [];
     const oversized = all.filter(f => f.size > MAX_FILE_BYTES);
     if (oversized.length > 0) {
-      alert(`Image too large: ${oversized.map(f => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Maximum is 10 MB.`);
+      alert(`File too large: ${oversized.map(f => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Maximum is 10 MB.`);
       e.target.value = '';
       setMenuOpen(false);
       return;
@@ -56,8 +57,8 @@ export default function AttachmentButton({ onFiles, disabled = false, className 
         onClick={() => setMenuOpen(prev => !prev)}
         disabled={disabled}
         type="button"
-        title="Attach image"
-        aria-label="Attach image"
+        title="Attach image or requirements document"
+        aria-label="Attach image or requirements document"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -90,7 +91,7 @@ export default function AttachmentButton({ onFiles, disabled = false, className 
         </div>
       )}
       <input ref={cameraInputRef} type="file" accept={acceptImages} capture="environment" multiple onChange={handleFileSelect} className={styles.hidden} />
-      <input ref={fileInputRef} type="file" accept={acceptImages} multiple onChange={handleFileSelect} className={styles.hidden} />
+      <input ref={fileInputRef} type="file" accept={acceptFiles} multiple onChange={handleFileSelect} className={styles.hidden} />
     </div>
   );
 }

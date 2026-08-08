@@ -10,6 +10,8 @@ import uuid
 import hashlib
 import inspect
 import logging
+import io
+import textwrap
 
 from src.app.models.event_log import ensure_event_log_table
 from src.app.models.db import db_session
@@ -462,10 +464,76 @@ def _derive_query_from_analysis(analysis: Dict) -> str:
     return "device"
 
 
+def _normalize_requirement_document(
+    *, filename: str | None, content_type: str | None, blob: bytes,
+) -> tuple[bytes, str | None, str, str]:
+    """Render PDF/TXT as a safe image while retaining bounded source text.
+
+    The existing image admission, sanitization and passive-payload controls then
+    remain the single upload security boundary. Returned text is buyer evidence;
+    it never gains product-fit or commerce authority here.
+    """
+    safe_name = str(filename or "upload")
+    lowered_name = safe_name.lower()
+    mime = str(content_type or "").lower().split(";", 1)[0].strip()
+    is_pdf = mime == "application/pdf" or lowered_name.endswith(".pdf")
+    is_text = mime == "text/plain" or lowered_name.endswith(".txt")
+    if not (is_pdf or is_text):
+        return blob, content_type, safe_name, ""
+    if len(blob) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail={
+            "error": "document_too_large", "message": "Requirements documents must be 10 MB or smaller.",
+        })
+
+    source_text = ""
+    try:
+        if is_pdf:
+            import pypdfium2 as pdfium
+
+            pdf = pdfium.PdfDocument(blob)
+            if len(pdf) < 1:
+                raise ValueError("empty_pdf")
+            chunks: list[str] = []
+            for page_index in range(min(len(pdf), 12)):
+                page = pdf[page_index]
+                text_page = page.get_textpage()
+                chunks.append(str(text_page.get_text_range() or ""))
+                if sum(len(chunk) for chunk in chunks) >= 4000:
+                    break
+            source_text = "\n".join(chunks)[:4000]
+            bitmap = pdf[0].render(scale=2.0)
+            rendered = bitmap.to_pil()
+        else:
+            source_text = blob.decode("utf-8-sig")[:4000]
+            if "\x00" in source_text:
+                raise ValueError("binary_text_document")
+            from PIL import Image, ImageDraw, ImageFont
+
+            lines: list[str] = []
+            for paragraph in source_text.splitlines() or [source_text]:
+                lines.extend(textwrap.wrap(paragraph, width=95) or [""])
+            rendered = Image.new("RGB", (1200, max(220, min(1600, 34 * (len(lines) + 2)))), "white")
+            ImageDraw.Draw(rendered).multiline_text(
+                (30, 25), "\n".join(lines[:44]), fill="black", font=ImageFont.load_default(), spacing=8,
+            )
+        out = io.BytesIO()
+        rendered.save(out, format="PNG")
+        normalized_name = f"{safe_name.rsplit('.', 1)[0]}_document.png"
+        return out.getvalue(), "image/png", normalized_name, source_text
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": "document_conversion_failed",
+            "message": "The PDF/TXT requirements document could not be decoded safely.",
+        }) from exc
+
+
 @router.post("/triage")
 async def triage(
     image: UploadFile = File(...),
     fast: bool = Query(False),
+    extract_text: bool = Query(False),
     artifact_id: Optional[str] = Query(None, min_length=8, max_length=128),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
@@ -483,8 +551,12 @@ async def triage(
     raw_content = await image.read()
     if not raw_content:
         raise HTTPException(status_code=400, detail="empty_image")
+    original_content = raw_content
+    raw_content, mime, name, document_text = _normalize_requirement_document(
+        filename=name, content_type=mime, blob=raw_content,
+    )
     artifact_id = str(artifact_id or uuid.uuid4())
-    artifact_sha256 = hashlib.sha256(raw_content).hexdigest()
+    artifact_sha256 = hashlib.sha256(original_content).hexdigest()
     gate = strict_image_ingest_gate(
         filename=str(name or "image.jpg"),
         content_type=mime,
@@ -626,16 +698,54 @@ async def triage(
         raise HTTPException(status_code=422, detail="image_decode_or_resize_failed")
 
     labels = []
-    extracted_text = ""
+    extracted_text = document_text[:4000]
     product_identity = None
-    ocr_meta: Dict[str, Any] = {}
+    ocr_meta: Dict[str, Any] = (
+        {
+            "ocr_confidence": 1.0,
+            "ocr_engine": "document_text_layer",
+            "ocr_word_count": len(extracted_text.split()),
+            "cv_extraction_method": "buyer_document_text",
+        }
+        if extracted_text else {}
+    )
     provider_name = "fast_local" if fast else "none"
+    buyer_text_ocr_attempted = False
     analysis_state: Dict[str, Any] = {
         "analysis_pending": bool(fast),
         "analysis_degraded": False,
         "degraded_reasons": [],
     }
-    if not fast:
+    if extract_text and not fast and not extracted_text:
+        buyer_text_ocr_attempted = True
+        try:
+            stage_a = await _run_bounded_image_work(
+                _functools.partial(
+                    extract_text_stage_a,
+                    analysis_content,
+                    provider=os.getenv("CV_SELECTIVE_OCR_PROVIDER", "tesseract"),
+                    fallback=None,
+                ),
+                timeout=float(os.getenv("CV_SELECTIVE_OCR_TIMEOUT_S", "6.0") or 6.0),
+            )
+            recovered_text = str(stage_a.get("text") or "").strip()
+            if recovered_text:
+                extracted_text = recovered_text[:4000]
+                provider_name = str(stage_a.get("provider") or "tesseract")
+                ocr_meta.update({
+                    "ocr_confidence": float(stage_a.get("confidence") or 0.0),
+                    "ocr_engine": provider_name,
+                    "ocr_word_count": len(recovered_text.split()),
+                    "cv_extraction_method": "buyer_text_evidence_ocr",
+                })
+        except _asyncio.TimeoutError:
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("buyer_text_ocr_timeout")
+        except Exception:
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("buyer_text_ocr_error")
+
+    if not fast and not extracted_text:
         try:
             provider = ManagedCVProvider()
             provider_name = provider.provider
@@ -660,6 +770,40 @@ async def triage(
             ocr_meta = {}
             analysis_state["analysis_degraded"] = True
             analysis_state["degraded_reasons"].append("vision_provider_error")
+
+    # A buyer may upload a requirements screenshot rather than a product photo.
+    # In that explicit mode, recover visible text with bounded local OCR when the
+    # vision provider returned no useful text. OCR remains read-only buyer evidence;
+    # it does not grant product identity or commercial authority.
+    if (
+        extract_text and not fast and not buyer_text_ocr_attempted
+        and len(str(extracted_text or "").strip()) < 12
+    ):
+        try:
+            stage_a = await _run_bounded_image_work(
+                _functools.partial(
+                    extract_text_stage_a,
+                    analysis_content,
+                    provider=os.getenv("CV_SELECTIVE_OCR_PROVIDER", "tesseract"),
+                    fallback=None,
+                ),
+                timeout=float(os.getenv("CV_SELECTIVE_OCR_TIMEOUT_S", "4.0") or 4.0),
+            )
+            recovered_text = str(stage_a.get("text") or "").strip()
+            if recovered_text:
+                extracted_text = recovered_text[:4000]
+                ocr_meta.update({
+                    "ocr_confidence": float(stage_a.get("confidence") or 0.0),
+                    "ocr_engine": str(stage_a.get("provider") or "tesseract"),
+                    "ocr_word_count": len(recovered_text.split()),
+                    "cv_extraction_method": "buyer_text_evidence_ocr",
+                })
+        except _asyncio.TimeoutError:
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("buyer_text_ocr_timeout")
+        except Exception:
+            analysis_state["analysis_degraded"] = True
+            analysis_state["degraded_reasons"].append("buyer_text_ocr_error")
 
     # P3: Always append sanitized filename as a weak hint (not just when labels empty)
     if name:
@@ -705,7 +849,7 @@ async def triage(
         "filename": name,
         "provider": provider_name,
         "labels": labels[:20],
-        "extracted_text": (extracted_text or "")[:500],
+        "extracted_text": (extracted_text or "")[:4000],
         "ocr_confidence": ocr_meta.get("ocr_confidence"),
         "ocr_engine": ocr_meta.get("ocr_engine"),
         "ocr_word_count": ocr_meta.get("ocr_word_count"),
@@ -717,6 +861,7 @@ async def triage(
         "ingest_gate": gate,
         "vlm_input": downscale_meta,  # {megapixels, bytes, downscaled, downscaled_to?} — the model saw this
         "analysis_state": analysis_state,
+        "text_evidence_requested": bool(extract_text),
     }
 
     # P4: Always surface product identity — decoupled from security flags.
@@ -1124,7 +1269,7 @@ async def triage(
         pass
 
     # Product identity rescue for weak/flagged product-like images.
-    if not fast and not product_identity:
+    if not fast and not product_identity and not (extract_text and extracted_text):
         try:
             weak_labels = _labels_are_weak(labels)
             flagged = bool(security_signals)
@@ -1451,7 +1596,7 @@ async def triage(
         "signals": security_signals,
         "reupload_needed": detected_security_risk,
         # Surface the OCR/extracted text here so the UI Security Matrix can show it
-        "extracted_text": (extracted_text or "")[:500],
+        "extracted_text": (extracted_text or "")[:4000],
         "ocr_confidence": ocr_meta.get("ocr_confidence"),
         "ocr_engine": ocr_meta.get("ocr_engine"),
         "ocr_word_count": ocr_meta.get("ocr_word_count"),
