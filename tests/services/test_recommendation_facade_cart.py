@@ -131,6 +131,105 @@ def test_serve_compound_edit_confirms_then_applies(wired):
     assert {it["sku"]: it["quantity"] for it in items} == {"SKU-IDEA": 20}
 
 
+def test_compound_explain_relative_quantity_and_deadline_preserve_case_state(wired):
+    """A cart mutation must not swallow read-only obligations from the same buyer turn."""
+    uid = "u-compound-explain-relative"
+    add_item(CartItemPayload(uid=uid, sku="SKU-TPAD", quantity=1), role=ROLE_OWNER)
+    cart = [{
+        "sku": "SKU-TPAD",
+        "name": "Lenovo ThinkPad L13",
+        "quantity": 1,
+        "available_now": 7,
+    }]
+    explanation = {
+        "sku": "SKU-TPAD",
+        "name": "Lenovo ThinkPad L13",
+        "workload_summary": "industrial maintenance simulation",
+        "coverage_status": "partial",
+        "fit_ledger": [
+            {"attribute_label": "CPU cores", "required_text": ">= 12", "observed_text": "16", "verdict": "meets"},
+            {"attribute_label": "RAM", "required_text": ">= 32 GB", "observed_text": "64 GB", "verdict": "meets"},
+            {"attribute_label": "GPU VRAM", "required_text": ">= 12 GB", "observed_text": "24 GB", "verdict": "meets"},
+            {"attribute_label": "storage", "required_text": ">= 1000 GB", "observed_text": "1000 GB", "verdict": "meets"},
+            {"attribute_label": "virtualization", "required_text": "required", "observed_text": "not recorded", "verdict": "unknown"},
+        ],
+        "material_unknowns": ["ISV certification", "model scale", "local or cloud execution"],
+    }
+    payload = F._serve_cart_mutation(
+        _env(
+            uid,
+            "Why is the Lenovo ThinkPad L13 a good choice for this workload? "
+            "Can you add 30 more? I need it in 4 days.",
+            cart,
+            intent_hint="EXPLAIN",
+            session={
+                "last_product_explanation": {"sku": "SKU-OTHER", "fit_ledger": []},
+                "product_explanations": {"SKU-TPAD": explanation},
+                "semantic_resolution": {"desired_outcome": "industrial maintenance simulation"},
+            },
+        ),
+        role=ROLE_OWNER,
+        with_trace=_IDENTITY_TRACE,
+        llm_fn=_fixed_llm({"ops": [], "confidence": 0.0}),
+    )
+
+    assert payload is not None
+    assert payload["cart_updated"] is False
+    op = payload["cart_mutation"]["ops"][0]
+    assert op["previous_quantity"] == 1
+    assert op["quantity"] == 31
+    assert payload["requested_quantity"] == 31
+    assert payload["explanation"]["sku"] == "SKU-TPAD"
+    assert {row["attribute_label"] for row in payload["explanation"]["fit_ledger"]} >= {
+        "CPU cores", "RAM", "GPU VRAM", "storage", "virtualization",
+    }
+    assert payload["delivery_feasibility"]["requested_quantity"] == 31
+    assert payload["delivery_feasibility"]["delivery_window_days"] == 4
+    assert payload["delivery_feasibility"]["feasibility"] == "unknown"
+    assert "budget range" not in payload["message"].lower()
+    assert "industrial maintenance simulation" in payload["message"].lower()
+    assert "31" in payload["message"]
+    from src.app.routers.cart import _get_or_create_cart
+    _, items, _ = _get_or_create_cart(uid)
+    assert items[0]["quantity"] == 1
+
+
+def test_compound_mutation_cofires_policy_support_and_supplier_status_without_actions(wired):
+    uid = "u-compound-read-only"
+    add_item(CartItemPayload(uid=uid, sku="SKU-TPAD", quantity=20), role=ROLE_OWNER)
+    cart = [{"sku": "SKU-TPAD", "name": "Lenovo ThinkPad L13", "quantity": 20}]
+    payload = F._serve_cart_mutation(
+        _env(
+            uid,
+            "Add 5 more. What is the return policy? Can I file a warranty claim for this "
+            "laptop, and has the supplier replied to the RFQ?",
+            cart,
+            session={
+                "case_id": "FC-7",
+                "rfq_ref": "RFQ-7",
+                "last_sourcing_intent": {
+                    "rfq_ref": "RFQ-7",
+                    "lines": [{"item_ref": "SKU-TPAD", "quantity": 5}],
+                },
+            },
+        ),
+        role=ROLE_OWNER,
+        with_trace=_IDENTITY_TRACE,
+    )
+
+    assert payload["cart_updated"] is False
+    assert payload["cart_mutation"]["ops"][0]["quantity"] == 25
+    assert payload["policy_answer"]["action_executed"] is False
+    assert payload["support_handoff"]["case_id"] is None
+    assert payload["support_handoff"]["action_executed"] is False
+    assert payload["supplier_status"]["status"] == "awaiting_supplier_response"
+    assert payload["supplier_status"]["availability_confirmed"] is False
+    kinds = {item["kind"] for item in payload["case_obligations"]}
+    assert {"quantity_amendment", "policy_question", "support_question", "supplier_status"} <= kinds
+    from src.app.routers.cart import _get_or_create_cart
+    _, items, _ = _get_or_create_cart(uid)
+    assert items[0]["quantity"] == 20
+
 # ── non-cart intent falls through ────────────────────────────────────────────────
 
 def test_non_cart_intent_returns_none(wired):

@@ -379,6 +379,26 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
     if plan.is_empty:
         return None
 
+    from src.app.services.recommendation_core.cart_compound_response import (
+        project_cart_compound_context,
+    )
+    compound = project_cart_compound_context(envelope, plan)
+
+    def attach_compound(payload: Dict[str, Any]) -> Dict[str, Any]:
+        suffix = str(compound.get("message_suffix") or "").strip()
+        if suffix:
+            current = str(payload.get("message") or payload.get("assistant_message") or "").strip()
+            combined = f"{current} {suffix}".strip()
+            payload["message"] = combined
+            payload["assistant_message"] = combined
+        for key in (
+            "requested_quantity", "explanation", "delivery_feasibility", "case_obligations",
+            "policy_answer", "support_handoff", "supplier_status",
+        ):
+            if compound.get(key) is not None:
+                payload[key] = compound[key]
+        return payload
+
     # ANY AMBIGUITY SUSPENDS THE WHOLE PLAN (review-5 #2): 'remove A and B' with B ambiguous
     # must NOT remove A and then ask — partial application of a compound instruction is a
     # mutation the shopper never approved. Ask about the unresolved names; execute nothing.
@@ -389,7 +409,7 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
         payload["cart_mutation"] = {"applied": [], "rejected": [], "ambiguous": list(plan.ambiguous),
                                     "needs_clarification": True}
         payload["cart_updated"] = False
-        return with_trace(payload, envelope.trace_id)
+        return with_trace(attach_compound(payload), envelope.trace_id)
 
     # CONFIDENCE FLOOR (review-5 #9): a low-confidence plan with executable ops is not served —
     # fall through to legacy/frontend (parallel-run net catches it; shadow measures it).
@@ -424,7 +444,7 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
                                     "ops": [o.as_dict() for o in plan.ops],
                                     "expires_at": prop["expires_at"]}
         payload["cart_updated"] = False
-        return with_trace(payload, envelope.trace_id)
+        return with_trace(attach_compound(payload), envelope.trace_id)
 
     outcome = apply_plan(prop["plan_id"], tenant_id=envelope.tenant_id, uid=envelope.uid,
                          redis=redis)
@@ -445,7 +465,7 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
     # applied now OR was already applied by an earlier (idempotent-replayed) submit
     # (defect-hunt #7 — already_applied is a success, not a no-change).
     payload["cart_updated"] = status in ("applied", "already_applied") and bool(applied)
-    return with_trace(payload, envelope.trace_id)
+    return with_trace(attach_compound(payload), envelope.trace_id)
 
 
 def _classified_subject(db, skus: List[str], tenant_id: str) -> Optional[str]:
@@ -612,6 +632,10 @@ def _read_session_slice(
                 "last_product_explanation": (
                     data.get("last_product_explanation")
                     if isinstance(data.get("last_product_explanation"), dict) else None
+                ),
+                "product_explanations": (
+                    data.get("product_explanations")
+                    if isinstance(data.get("product_explanations"), dict) else None
                 ),
                 "case_anchor": (
                     data.get("case_anchor")

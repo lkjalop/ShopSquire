@@ -63,6 +63,26 @@ _PRODUCT_SELECTION = re.compile(
     r"\b(?:choose|select|pick)\b(?:\s+(?:this|that|the|it))?",
     re.I,
 )
+_POLICY_QUESTION = re.compile(
+    r"\b(?:return|refund|exchange|warrant(?:y|ies)|repair)\b.*\b(?:policy|terms?|window|"
+    r"eligible|eligibility|covered|coverage|fee|fees|how long)\b|"
+    r"\b(?:policy|terms?|window|eligible|eligibility|covered|coverage|fee|fees|how long)\b.*"
+    r"\b(?:return|refund|exchange|warrant(?:y|ies)|repair)\b",
+    re.I,
+)
+_SUPPORT_QUESTION = re.compile(
+    r"\b(?:my|this|the)\s+(?:order|laptop|product|item|device)\b.*"
+    r"\b(?:broken|damaged|faulty|return|refund|repair|warrant(?:y|ies)|claim|support)\b|"
+    r"\b(?:file|submit|start|open|make)\b.*\b(?:return|refund|repair|warranty|claim|case)\b",
+    re.I,
+)
+_SUPPLIER_STATUS = re.compile(
+    r"\b(?:supplier|vendor|rfq|quote|sourcing)\b.*\b(?:status|respond(?:ed)?|reply|replied|"
+    r"heard back|eta|arrival|confirmed|confirmation|waiting|pending|update)\b|"
+    r"\b(?:status|respond(?:ed)?|reply|replied|heard back|eta|arrival|confirmed|confirmation|"
+    r"waiting|pending|update)\b.*\b(?:supplier|vendor|rfq|quote|sourcing)\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -133,6 +153,12 @@ def decompose_case_obligations(
         append("buyer_commitment")
     if _PAYMENT.search(source):
         append("payment_request")
+    if _POLICY_QUESTION.search(source):
+        append("policy_question")
+    if _SUPPORT_QUESTION.search(source):
+        append("support_question")
+    if _SUPPLIER_STATUS.search(source):
+        append("supplier_status")
     return tuple(obligations)
 
 
@@ -248,6 +274,30 @@ def reduce_case_obligations(
                 status="authorization_required",
                 reason="payment_terms_require_policy_and_provider",
                 residual_route="AUTHORIZE",
+            )
+            rows.append(row)
+            continue
+        if kind in {"policy_question", "support_question"}:
+            row.update(
+                status="read_only",
+                reason="approved_facts_or_handoff_only",
+                residual_route="POLICY" if kind == "policy_question" else "SUPPORT",
+            )
+            rows.append(row)
+            continue
+        if kind == "supplier_status":
+            has_anchor = bool(
+                current_state.get("rfq_ref")
+                or current_state.get("case_id")
+                or current_state.get("last_sourcing_intent")
+            )
+            row.update(
+                status="read_only" if has_anchor else "clarify",
+                reason=(
+                    "persisted_sourcing_status_required"
+                    if has_anchor else "sourcing_case_anchor_required"
+                ),
+                residual_route="CONNECTOR" if has_anchor else "ASK",
             )
             rows.append(row)
             continue

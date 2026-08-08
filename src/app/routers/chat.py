@@ -495,6 +495,13 @@ def _cart_mutation_short_circuit(
             "plan": [],
         }
     response_slots = _extract_confirmed_slots(query=q, response=data)
+    persisted_slots = dict(response_slots)
+    mutation = data.get("cart_mutation") if isinstance(data.get("cart_mutation"), dict) else {}
+    if mutation.get("needs_confirmation"):
+        # A proposal is not accepted case state. The authoritative quantity
+        # remains the persisted cart line until the apply endpoint commits.
+        persisted_slots.pop("order_quantity", None)
+        persisted_slots.pop("quantity", None)
     out = {
         "products": [],
         "view_mode": "cards",
@@ -534,6 +541,27 @@ def _cart_mutation_short_circuit(
             if data.get("requested_quantity") is not None
             else response_slots.get("order_quantity")
         ),
+        "explanation": (
+            data.get("explanation")
+            if isinstance(data.get("explanation"), dict) else None
+        ),
+        "delivery_feasibility": (
+            data.get("delivery_feasibility")
+            if isinstance(data.get("delivery_feasibility"), dict) else None
+        ),
+        "case_obligations": (
+            data.get("case_obligations")
+            if isinstance(data.get("case_obligations"), list) else []
+        ),
+        "policy_answer": (
+            data.get("policy_answer") if isinstance(data.get("policy_answer"), dict) else None
+        ),
+        "support_handoff": (
+            data.get("support_handoff") if isinstance(data.get("support_handoff"), dict) else None
+        ),
+        "supplier_status": (
+            data.get("supplier_status") if isinstance(data.get("supplier_status"), dict) else None
+        ),
         "timing_breakdown": (
             data.get("timing_breakdown")
             if isinstance(data.get("timing_breakdown"), dict)
@@ -553,7 +581,7 @@ def _cart_mutation_short_circuit(
             products=[],
             trace_id=str(tid or "") or None,
             assistant_message=msg,
-            confirmed_slots=response_slots,
+            confirmed_slots=persisted_slots,
             tenant_id=tenant_id,
             session_epoch=session_epoch,
         )

@@ -327,6 +327,50 @@ def test_mixed_turn_decomposes_every_obligation_without_executing_any() -> None:
     assert all(item["requires_reducer"] is True for item in obligations)
 
 
+def test_mixed_turn_keeps_policy_support_and_supplier_status_as_read_only_obligations() -> None:
+    message = (
+        "Add 5 more, what is the return policy, can I file a warranty claim for this laptop, "
+        "and has the supplier replied to the RFQ?"
+    )
+    proposed = decompose_case_obligations(
+        message,
+        current_state={"sku": "RGAM-0007", "quantity": 20},
+    )
+    kinds = {item["kind"] for item in proposed}
+    assert {
+        "policy_question", "support_question", "supplier_status",
+    }.issubset(kinds)
+
+    reduced = reduce_case_obligations(
+        message,
+        current_state={
+            "sku": "RGAM-0007",
+            "quantity": 20,
+            "case_id": "FC-7",
+            "rfq_ref": "RFQ-7",
+        },
+        catalog_authority="permitted",
+    )
+    by_kind = {item["kind"]: item for item in reduced}
+    assert by_kind["policy_question"]["residual_route"] == "POLICY"
+    assert by_kind["support_question"]["residual_route"] == "SUPPORT"
+    assert by_kind["supplier_status"]["residual_route"] == "CONNECTOR"
+    assert all(by_kind[kind]["authorization_granted"] is False for kind in (
+        "policy_question", "support_question", "supplier_status",
+    ))
+
+
+def test_supplier_status_without_case_anchor_asks_for_reference() -> None:
+    result = reduce_case_obligations(
+        "Has the supplier replied to the RFQ?",
+        current_state={},
+        catalog_authority="permitted",
+    )
+    assert result[0]["kind"] == "supplier_status"
+    assert result[0]["status"] == "clarify"
+    assert result[0]["reason"] == "sourcing_case_anchor_required"
+
+
 def test_place_noun_is_not_misread_as_order_commitment() -> None:
     assert decompose_case_obligations(
         "Find a pizza place near me.", current_state={}
