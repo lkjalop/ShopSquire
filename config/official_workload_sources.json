@@ -66,6 +66,7 @@
       "allowed_claim_types": ["concept_identity", "workload_scope", "security_topology"],
       "forbidden_claim_types": ["hardware_floor", "minimum_requirements", "recommended_requirements", "capacity_sizing", "behavioral_performance", "benchmark_result", "exact_product_fit", "price", "availability"],
       "applicability": {"workloads": ["digital_twin", "ot_cyber_range"], "scope": "Digital-twin concept and cybersecurity context", "resolution_owner": "research", "exclusions": ["hardware requirements", "product qualification"]},
+      "activation_policy": {"required_any_terms": ["cyber", "cybersecurity", "security", "attack", "threat"]},
       "artefact_patterns": ["NIST IR 8356", "Digital Twin Technology"],
       "parser_type": "html_pdf",
       "freshness_sla_hours": 720,

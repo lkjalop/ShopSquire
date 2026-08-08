@@ -64,3 +64,35 @@ def test_plan_id_is_stable_and_case_content_bound():
     assert first is not None and second is not None and changed is not None
     assert first.plan_id == second.plan_id
     assert first.plan_id != changed.plan_id
+
+
+def test_source_activation_policy_prevents_digital_twin_from_inventing_cyber_scope():
+    manifest = {"sources": [
+        {
+            **_source("context", ["digital_twin", "ot_cyber_range"], ["Digital Twins"]),
+            "applicability": {
+                "workloads": ["digital_twin", "ot_cyber_range"],
+                "scope": "Digital-twin concept and cybersecurity context",
+                "resolution_owner": "research",
+            },
+            "activation_policy": {
+                "required_any_terms": ["cyber", "cybersecurity", "security", "attack"],
+            },
+        },
+        _source(
+            "manufacturing", ["manufacturing_digital_twin", "predictive_maintenance"],
+            ["Digital Twins", "predictive maintenance"],
+        ),
+    ]}
+    predictive = build_case_research_plan(
+        "Digital-twin simulation of factory equipment and predicting breakdowns",
+        manifest=manifest,
+    )
+    assert predictive is not None
+    assert predictive.source_candidate_ids == ["manufacturing"]
+
+    cyber = build_case_research_plan(
+        "Digital-twin OT cyber attack simulation", manifest=manifest,
+    )
+    assert cyber is not None
+    assert "context" in cyber.source_candidate_ids

@@ -3,7 +3,7 @@ export type AmbiguityExploration = {
   case_id?: string;
   trace_id?: string;
   retained_purpose: string;
-  status: 'provisional' | 'researched';
+  status: 'provisional' | 'researched' | 'context_only' | 'unresolved';
   interpretations: { hypothesis_id?: string; label?: string; confidence?: number }[];
   next_question?: { text?: string; question?: string } | null;
   execution: string;
@@ -38,8 +38,12 @@ export default function AmbiguityExplorationPanel({
       <div>{exploration.retained_purpose}</div>
       <div style={{ marginTop: 7, fontSize: 12 }}>
         Status: {exploration.status === 'researched'
-          ? 'Researched — scoped official claims compiled; remaining gaps stay conditional'
-          : 'Provisional — external research not yet authorized'}
+          ? 'Researched — scoped product requirements compiled; remaining gaps stay conditional'
+          : exploration.status === 'context_only'
+            ? 'Context researched — no authoritative product requirements were established'
+            : exploration.status === 'unresolved'
+              ? 'Research completed — no accepted scoped claims were found'
+              : 'Provisional — external research not yet authorized'}
       </div>
       {exploration.interpretations?.length > 0 && (
         <div style={{ marginTop: 9 }}>
@@ -58,9 +62,11 @@ export default function AmbiguityExplorationPanel({
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>
-        <button type="button" onClick={onResearch}>Research approved sources</button>
-        <button type="button" onClick={onUpload}>Upload requirements</button>
-        <button type="button" onClick={onEnterSpecifications}>Enter specifications</button>
+        {exploration.status === 'provisional' && (
+          <button type="button" onClick={onResearch} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Research approved sources</button>
+        )}
+        <button type="button" onClick={onUpload} style={{ background: '#fff', color: '#173b64', border: '1px solid #173b64', borderRadius: 6, padding: '7px 11px' }}>Upload requirements</button>
+        <button type="button" onClick={onEnterSpecifications} style={{ background: '#fff', color: '#173b64', border: '1px solid #173b64', borderRadius: 6, padding: '7px 11px' }}>Enter specifications</button>
         <span style={{ fontSize: 12, alignSelf: 'center' }}>Continue provisionally below</span>
       </div>
       <div data-testid="ambiguity-accounting" style={{ marginTop: 8, fontSize: 11 }}>

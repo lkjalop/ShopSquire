@@ -3594,14 +3594,21 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 from sqlalchemy import select as _select
                 from src.app.models.orm import RequirementProposal, ShoppingCase
 
-                _case_id = str(decision_trace_id or f"case-{_uuid.uuid4().hex}")[:200]
                 _tenant_id = _request_tenant_id(request)
                 _uid = str((payload or {}).get("uid") or "guest")[:200]
+                _requested_case_id = str((payload or {}).get("shopping_case_id") or "").strip()[:200]
+                _case_id = _requested_case_id or str(
+                    decision_trace_id or f"case-{_uuid.uuid4().hex}"
+                )[:200]
                 _now = datetime.now(timezone.utc)
                 _case = db.execute(_select(ShoppingCase).where(
                     ShoppingCase.tenant_id == _tenant_id,
                     ShoppingCase.case_id == _case_id,
                 )).scalar_one_or_none()
+                if _requested_case_id and _case is None:
+                    raise HTTPException(status_code=409, detail="shopping_case_not_found")
+                if _case is not None and _case.uid != _uid:
+                    raise HTTPException(status_code=403, detail="shopping_case_not_owned")
                 if _case is None:
                     _case = ShoppingCase(
                         case_id=_case_id, tenant_id=_tenant_id, uid=_uid,
@@ -3623,9 +3630,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     "proposal_version": 1, "status": "pending_review",
                     "cart_mutation": "not_authorized",
                 }
-            if decision_trace_id and buyer_requirement_claims:
+            _requirement_trace_id = (
+                str(buyer_requirement_proposal.get("case_id") or "").removeprefix("sc-")
+                if buyer_requirement_proposal else str(decision_trace_id or "")
+            )
+            if _requirement_trace_id and buyer_requirement_claims:
                 log_trace_event(
-                    trace_id=decision_trace_id,
+                    trace_id=_requirement_trace_id,
                     event_type="buyer_requirement_claims_extracted",
                     source_type="stage",
                     source_id="Buyer_Requirement_Evidence",

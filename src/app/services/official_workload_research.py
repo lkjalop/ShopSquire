@@ -356,6 +356,16 @@ def research_official_sources(
         if not product_rows and not context_rows:
             unresolved.append({"source_id": source_id, "reason": "no_recognized_scoped_claims"})
     deduped = list({row["claim_id"]: row for row in claims}.values())
+    evidence_outcome = (
+        "product_requirements" if deduped
+        else "context_only" if context_claims
+        else "unresolved"
+    )
+    if evidence_outcome == "context_only":
+        unresolved.append({
+            "source_id": None,
+            "reason": "no_product_requirement_claims",
+        })
     return {
         "schema_version": "official-workload-research-v1",
         "run_id": run_id, "purpose": purpose,
@@ -364,6 +374,7 @@ def research_official_sources(
         "source_ids": [str(source.get("source_id") or "") for source in sources],
         "claims": deduped, "context_claims": context_claims,
         "unresolved": unresolved, "receipts": receipts,
+        "evidence_outcome": evidence_outcome,
         "provider_accounting": {
             "external_calls": sum(1 for row in receipts if row["external_call_dispatched"]),
             "paid_calls": 0,

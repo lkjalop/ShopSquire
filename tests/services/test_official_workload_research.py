@@ -1,6 +1,7 @@
 from src.app.services.official_workload_research import (
     compile_source_claims,
     ranking_delta,
+    research_official_sources,
 )
 
 
@@ -106,4 +107,64 @@ def test_ranking_delta_reports_movement_without_inventing_a_reason() -> None:
     rows = ranking_delta(before, after)
     assert {(row["sku"], row["before"], row["after"]) for row in rows} == {
         ("A", 1, 2), ("B", 2, 1),
+    }
+
+
+def test_context_only_research_is_not_reported_as_product_requirements(monkeypatch):
+    class Discovery:
+        def __init__(self, **kwargs):
+            self.last_receipt = {}
+
+        def fetch(self, query, *, allowlist, timeout_s):
+            self.last_receipt = {
+                "execution_status": "completed", "network_execution": True,
+                "external_call_dispatched": True, "http_status": 200,
+                "query_hash": "a" * 64, "response_body_hash": "b" * 64,
+                "provider_endpoint_host": "search.local",
+                "started_at": "2026-08-08T00:00:00Z",
+                "completed_at": "2026-08-08T00:00:01Z",
+            }
+            return []
+
+    class Origin:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, url, *, allowlist, timeout_s, certification_run_id):
+            return {
+                "status": "completed",
+                "content": b"NIST manufacturing digital twin predictive maintenance context",
+                "content_type": "text/html",
+                "receipt": {
+                    "execution_status": "completed", "network_execution": True,
+                    "external_call_dispatched": True, "http_status": 200,
+                    "query_hash": "c" * 64, "response_body_hash": "d" * 64,
+                    "observed_at": "2026-08-08T00:00:00Z",
+                    "provider_endpoint_host": "nist.gov",
+                    "started_at": "2026-08-08T00:00:01Z",
+                    "completed_at": "2026-08-08T00:00:02Z",
+                },
+            }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.HttpxResearchFetcher", Discovery,
+    )
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources(
+        "predicting factory breakdowns", search_url_template="http://search/?q={query}",
+        sources=[{
+            "source_id": "nist_manufacturing_digital_twins", "publisher": "NIST",
+            "allowed_domains": ["nist.gov"],
+            "canonical_entrypoints": ["https://nist.gov/digital-twins"],
+            "allowed_claim_types": ["concept_identity"],
+            "artefact_patterns": ["Digital Twins"],
+        }],
+    )
+    assert result["claims"] == []
+    assert result["context_claims"]
+    assert result["evidence_outcome"] == "context_only"
+    assert {row["reason"] for row in result["unresolved"]} >= {
+        "no_product_requirement_claims",
     }

@@ -27,7 +27,7 @@ type ProductShelf = {
 export type ProductShelfProjection = {
   schema_version: 'product-shelves-v1';
   shelves: ProductShelf[];
-  evidence_status?: 'provisional' | 'researched';
+  evidence_status?: 'provisional' | 'researched' | 'context_only' | 'unresolved';
   official_claim_count?: number;
   context_claim_count?: number;
   research_delta?: {
@@ -50,16 +50,24 @@ export default function ProductShelvesPanel({ projection, onPropose }: {
       <div style={{ fontSize: 12, marginBottom: 10, color: projection.evidence_status === 'researched' ? '#065f46' : '#92400e' }}>
         {projection.evidence_status === 'researched'
           ? `Official research compiled ${projection.official_claim_count || 0} scoped product claims and ${projection.context_claim_count || 0} context claims.`
-          : 'Provisional exploration — buyer constraints are accepted but not independently verified.'}
+          : projection.evidence_status === 'context_only'
+            ? `Official research found ${projection.context_claim_count || 0} context claims but no authoritative product requirements. These shelves remain provisional.`
+            : projection.evidence_status === 'unresolved'
+              ? 'Approved-source research completed without accepted scoped claims. These shelves remain provisional.'
+              : 'Provisional exploration — accepted buyer constraints are not independently verified.'}
       </div>
-      {projection.evidence_status === 'researched' && (
-        <section data-testid="research-reranking-delta" style={{ border: '1px solid #86efac', background: '#f0fdf4', borderRadius: 8, padding: 9, marginBottom: 12 }}>
-          <strong>What changed after approved-source research</strong>
+      {['researched', 'context_only', 'unresolved'].includes(String(projection.evidence_status)) && (
+        <section data-testid="research-reranking-delta" style={{ border: `1px solid ${projection.evidence_status === 'researched' ? '#86efac' : '#fbbf24'}`, background: projection.evidence_status === 'researched' ? '#f0fdf4' : '#fffbeb', borderRadius: 8, padding: 9, marginBottom: 12 }}>
+          <strong>{projection.evidence_status === 'researched'
+            ? 'What changed after approved-source research'
+            : 'Why the shortlist remains provisional'}</strong>
           {projection.research_delta?.length ? projection.research_delta.map((row) => (
             <div key={row.sku} style={{ fontSize: 12, marginTop: 4 }}>
               {row.sku}: {row.before ?? 'not ranked'} → {row.after ?? 'not ranked'} — {row.reason}
             </div>
-          )) : <div style={{ fontSize: 12, marginTop: 4 }}>Ranking order did not change; evidence status and visible gaps were updated.</div>}
+          )) : <div style={{ fontSize: 12, marginTop: 4 }}>{projection.evidence_status === 'researched'
+            ? 'Ranking order did not change; evidence status and visible gaps were updated.'
+            : 'No product requirements were established, so research did not authorize a verified rerank.'}</div>}
         </section>
       )}
       {projection.shelves.map((shelf) => (
@@ -103,8 +111,8 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
                   }))}
                   style={{ width: 58 }}
                 />
-                <button type="button" onClick={() => onPropose?.(item.product.sku, quantities[item.product.sku] || 1)}>
-                  Propose cart change
+                <button type="button" onClick={() => onPropose?.(item.product.sku, quantities[item.product.sku] || 1)} style={{ background: item.fit_status === 'qualified' ? '#f15a0a' : '#fff', color: item.fit_status === 'qualified' ? '#fff' : '#173b64', border: `1px solid ${item.fit_status === 'qualified' ? '#f15a0a' : '#173b64'}`, borderRadius: 6, padding: '6px 9px' }}>
+                  {item.fit_status === 'qualified' ? 'Propose cart change' : 'Review option'}
                 </button>
               </div>
             )}
@@ -112,7 +120,7 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
         ))}
       </div>
       {!expanded && shelf.next_page.length > 0 && (
-        <button type="button" style={{ marginTop: 8 }} onClick={() => setExpanded(true)}>
+        <button type="button" style={{ marginTop: 8, background: 'transparent', color: '#173b64', border: '1px solid #94a3b8', borderRadius: 6, padding: '5px 9px' }} onClick={() => setExpanded(true)}>
           + Show next {shelf.next_page.length}
         </button>
       )}

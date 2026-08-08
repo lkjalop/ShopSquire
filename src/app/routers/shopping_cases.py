@@ -74,6 +74,7 @@ class ResearchShoppingCaseRequest(BaseModel):
     ambiguity_object_ids: list[str] = Field(min_length=1, max_length=8)
     hypothesis_ids: list[str] = Field(min_length=1, max_length=3)
     research_authorized: Literal[True]
+    refresh_authorized: bool = False
 
 
 class CreateCaseInterpretationRequest(BaseModel):
@@ -145,6 +146,23 @@ def _case_research_plan_from_trace(
             return None
         return plan
     return None
+
+
+def _case_trace_has_event(db, *, case_id: str, tenant_id: str, event_type: str) -> bool:
+    from src.app.services.decision_log import get_cached_trace_events
+
+    trace_id = case_id.removeprefix("sc-")
+    if any(str(row.get("event_type") or "") == event_type for row in get_cached_trace_events(trace_id)):
+        return True
+    try:
+        return db.execute(text(
+            "SELECT 1 FROM decision_trace_events "
+            "WHERE trace_id=:trace_id AND tenant_id=:tenant_id AND event_type=:event_type LIMIT 1"
+        ), {
+            "trace_id": trace_id, "tenant_id": tenant_id, "event_type": event_type,
+        }).first() is not None
+    except Exception:
+        return False
 
 
 @router.post("/interpretations")
@@ -341,7 +359,7 @@ def accept_requirement_proposal(
         "research_authorized": body.research_choice == "research_and_corroborate",
         "qualification_authority": "none",
         "cart_mutation": "not_authorized",
-        "trace_id": _trace_id(proposal_id, proposal.version + 1),
+        "trace_id": case_id.removeprefix("sc-"),
         "provider_accounting": {"external_calls": 0, "paid_calls": 0},
     }
     case = db.execute(select(ShoppingCase).where(
@@ -365,6 +383,55 @@ def accept_requirement_proposal(
         authoritative_origin_enrolled=bool(os.getenv("OFFICIAL_REQUIREMENTS_API_URL")),
         paid_discovery_allowed=False,
     ).model_dump(mode="json")
+    if body.research_choice == "research_and_corroborate":
+        plan = _case_research_plan_from_trace(db, case_id=case_id, tenant_id=tenant_id)
+        if plan is None:
+            result["corroboration"] = {
+                "status": "blocked", "reason": "case_research_plan_not_found",
+                "message": "The accepted claims remain provisional because this case has no governed research plan.",
+            }
+        elif not str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip():
+            result["corroboration"] = {
+                "status": "blocked", "reason": "local_discovery_not_enrolled",
+                "message": "The accepted claims remain provisional because local discovery is not enrolled.",
+            }
+        else:
+            try:
+                corroboration = research_shopping_case(
+                    case_id,
+                    ResearchShoppingCaseRequest(
+                        uid=body.uid, research_plan_id=plan.plan_id,
+                        ambiguity_object_ids=[row.ambiguity_id for row in plan.ambiguities],
+                        hypothesis_ids=[row.hypothesis_id for row in plan.hypotheses],
+                        # The buyer explicitly asked to corroborate newly accepted
+                        # evidence, so this is an authorized refresh of the same case.
+                        research_authorized=True, refresh_authorized=True,
+                    ),
+                    x_tenant_id=tenant_id,
+                    db=db,
+                )
+                result["corroboration"] = corroboration
+                if corroboration.get("evidence_outcome") == "context_only":
+                    # Context-only publisher material must not erase the useful,
+                    # explicitly accepted buyer constraints. Keep their shelf
+                    # provisional and expose the research outcome separately.
+                    result["product_shelves"]["evidence_status"] = "context_only"
+                    result["product_shelves"]["official_claim_count"] = 0
+                    result["product_shelves"]["buyer_accepted_claim_count"] = len(accepted)
+                    result["product_shelves"]["context_claim_count"] = len(
+                        corroboration.get("research", {}).get("context_claims", [])
+                    )
+                    result["product_shelves"]["research_delta"] = []
+                    corroboration["product_shelves"] = result["product_shelves"]
+                else:
+                    result["product_shelves"] = corroboration["product_shelves"]
+                result["provider_accounting"] = corroboration["research"]["provider_accounting"]
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                result["corroboration"] = {
+                    "status": "blocked", "reason": detail.get("code", "research_failed"),
+                    "message": detail.get("message", "The accepted claims remain provisional."),
+                }
     # Ensure the JSON remains serializable before making the state transition durable.
     json.dumps(result, sort_keys=True)
     proposal.version += 1
@@ -453,6 +520,17 @@ def research_shopping_case(
             "code": "case_research_plan_mismatch",
             "message": "The submitted interpretation does not match the retained case plan.",
         })
+    if (
+        _case_trace_has_event(
+            db, case_id=case_id, tenant_id=tenant_id,
+            event_type="official_research_rerank_completed",
+        )
+        and not body.refresh_authorized
+    ):
+        raise HTTPException(status_code=409, detail={
+            "code": "research_already_completed",
+            "message": "Research already completed for this case. Explicitly authorize a refresh to run it again.",
+        })
     case = db.execute(select(ShoppingCase).where(
         ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
     )).scalar_one_or_none()
@@ -508,17 +586,65 @@ def research_shopping_case(
         },
     ).model_dump(mode="json")
     delta = ranking_delta(before, after_projection)
+    evidence_outcome = str(research.get("evidence_outcome") or (
+        "product_requirements" if research["claims"]
+        else "context_only" if research["context_claims"]
+        else "unresolved"
+    ))
+    evidence_status = (
+        "researched" if evidence_outcome == "product_requirements" else evidence_outcome
+    )
     after_projection.update({
-        "evidence_status": "researched",
+        "evidence_status": evidence_status,
         "research_delta": delta,
         "official_claim_count": len(research["claims"]),
         "context_claim_count": len(research["context_claims"]),
     })
+    exploration = {
+        "schema_version": "ambiguity-exploration-v1",
+        "case_id": case_id, "trace_id": case_id.removeprefix("sc-"),
+        "retained_purpose": plan.retained_purpose,
+        "status": evidence_status,
+        "interpretations": [row.model_dump(mode="json") for row in plan.hypotheses],
+        "next_question": {"id": "research_scope", "text": plan.next_question},
+        "execution": "live_discovery_and_official_fetch_completed",
+        "evidence": (
+            "scoped_product_requirements_compiled"
+            if evidence_outcome == "product_requirements"
+            else "authoritative_context_only"
+            if evidence_outcome == "context_only"
+            else "no_accepted_claims"
+        ),
+        "decision": (
+            "conditional_fit_allowed"
+            if evidence_outcome == "product_requirements"
+            else "provisional_exploration_only"
+        ),
+        "cart_authority": "none",
+        "provider_accounting": research["provider_accounting"],
+        "research_plan_id": plan.plan_id,
+        "ambiguity_objects": [row.model_dump(mode="json") for row in plan.ambiguities],
+        "research_obligations": [
+            {
+                **row.model_dump(mode="json"),
+                "status": (
+                    "resolved" if row.obligation_id == "official_requirements"
+                    else "blocked" if row.obligation_id == "exact_product_identity"
+                    and evidence_outcome != "product_requirements"
+                    else row.status
+                ),
+            }
+            for row in plan.obligations
+        ],
+        "source_candidate_ids": list(plan.source_candidate_ids),
+    }
     result = {
         "schema_version": "shopping-case-research-v1", "case_id": case_id,
         "status": "research_completed", "retained_purpose": plan.retained_purpose,
         "research_plan": plan.model_dump(mode="json"),
         "research": research, "product_shelves": after_projection,
+        "ambiguity_exploration": exploration,
+        "evidence_outcome": evidence_outcome,
         "research_delta": delta, "cart_mutation": "not_authorized",
         "supplier_send": "not_authorized", "trace_id": case_id.removeprefix("sc-"),
     }
@@ -536,6 +662,7 @@ def research_shopping_case(
                 "receipts": research["receipts"], "research_delta": delta,
                 "official_claims": research["claims"],
                 "context_claims": research["context_claims"],
+                "evidence_outcome": evidence_outcome,
                 "cart_authority": "none", "supplier_authority": "none",
             },
         )

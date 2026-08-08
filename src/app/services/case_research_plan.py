@@ -125,6 +125,16 @@ def candidate_sources_for_purpose(
     ranked: list[tuple[int, str, dict[str, Any]]] = []
     for raw in source_manifest.get("sources") or []:
         source = dict(raw)
+        activation = source.get("activation_policy") or {}
+        required_any_terms = {
+            _normalized_phrase(value)
+            for value in activation.get("required_any_terms") or []
+            if _normalized_phrase(value)
+        }
+        if required_any_terms and not any(
+            f" {term} " in normalized_purpose for term in required_any_terms
+        ):
+            continue
         phrases = _source_phrases(source)
         exact_phrases = {
             phrase for phrase in phrases

@@ -57,6 +57,66 @@ def test_interpretation_defers_covered_catalog_request_to_normal_chat_lane():
     assert response.status_code == 204
 
 
+def test_accepted_upload_runs_corroboration_in_the_same_interpreted_case(monkeypatch):
+    client = _client()
+    monkeypatch.setenv(
+        "EXTERNAL_RESEARCH_SEARCH_URL",
+        "http://127.0.0.1:8888/search?q={query}&format=json",
+    )
+    interpreted = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-same-case",
+        "retained_purpose": "Digital-twin simulation of factory equipment and predicting breakdowns",
+    }).json()
+    case_id = interpreted["case_id"]
+    claim = extract_buyer_requirement_claims(
+        "RAM 32GB minimum", source_reference="upload-same-case",
+    )[0]
+    proposal = client.post(
+        f"/api/v1/shopping-cases/{case_id}/requirement-proposals",
+        json={
+            "uid": "buyer-same-case", "source_reference": "upload-same-case",
+            "claims": [claim.model_dump(mode="json")],
+        },
+    ).json()
+
+    def context_research(*args, **kwargs):
+        return {
+            "claims": [], "context_claims": [{
+                "claim_id": "context-same-case",
+                "source_id": "nist_manufacturing_digital_twins",
+                "claim_type": "workload_scope", "statement": "context only",
+            }],
+            "unresolved": [{"source_id": None, "reason": "no_product_requirement_claims"}],
+            "receipts": [], "source_ids": ["nist_manufacturing_digital_twins"],
+            "provider_accounting": {"external_calls": 2, "paid_calls": 0},
+            "evidence_outcome": "context_only",
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        context_research,
+    )
+    accepted = client.post(
+        f"/api/v1/shopping-cases/{case_id}/requirement-proposals/{proposal['proposal_id']}/accept",
+        headers={"Idempotency-Key": "same-case-accept-1"},
+        json={
+            "uid": "buyer-same-case", "expected_proposal_version": 1,
+            "accepted_claim_ids": [claim.claim_id], "rejected_claim_ids": [],
+            "corrections": [], "research_choice": "research_and_corroborate",
+        },
+    )
+    assert accepted.status_code == 200
+    payload = accepted.json()
+    assert payload["case_id"] == case_id
+    assert payload["trace_id"] == case_id.removeprefix("sc-")
+    assert payload["corroboration"]["case_id"] == case_id
+    assert payload["corroboration"]["evidence_outcome"] == "context_only"
+    assert payload["provider_accounting"] == {"external_calls": 2, "paid_calls": 0}
+    assert payload["product_shelves"]["evidence_status"] == "context_only"
+    assert payload["product_shelves"]["context_claim_count"] == 1
+    assert payload["product_shelves"]["buyer_accepted_claim_count"] == 1
+
+
 def test_acceptance_is_case_scoped_versioned_idempotent_and_never_mutates_cart():
     client = _client()
     claims = extract_buyer_requirement_claims(
@@ -212,6 +272,12 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
     assert payload["trace_id"] == "trace-1"
     assert payload["status"] == "research_completed"
     assert payload["research"]["claims"][0]["authority_status"] == "verified_official"
+    assert payload["evidence_outcome"] == "product_requirements"
+    assert payload["ambiguity_exploration"]["status"] == "researched"
+    assert next(
+        row for row in payload["ambiguity_exploration"]["research_obligations"]
+        if row["obligation_id"] == "official_requirements"
+    )["status"] == "resolved"
     assert payload["cart_mutation"] == "not_authorized"
     assert payload["supplier_send"] == "not_authorized"
 
@@ -231,6 +297,71 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
     assert planned["cart_mutation"] == "not_applied"
     assert planned["supplier_send"] == "not_authorized"
     assert planned["ops"][0]["allow_sourcing"] is True
+
+
+def test_context_only_research_keeps_fit_provisional_and_blocks_silent_repeat(monkeypatch):
+    client = _client()
+    monkeypatch.setenv(
+        "EXTERNAL_RESEARCH_SEARCH_URL",
+        "http://127.0.0.1:8888/search?q={query}&format=json",
+    )
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan(
+        "Digital-twin simulation of factory equipment and predicting breakdowns",
+    )
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    observed = {"completed": False}
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_trace_has_event",
+        lambda db, *, case_id, tenant_id, event_type: observed["completed"],
+    )
+
+    def context_research(*args, **kwargs):
+        observed["completed"] = True
+        return {
+            "claims": [],
+            "context_claims": [{
+                "claim_id": "context-1", "source_id": "nist_manufacturing_digital_twins",
+                "claim_type": "workload_scope", "statement": "context only",
+            }],
+            "unresolved": [{"source_id": None, "reason": "no_product_requirement_claims"}],
+            "receipts": [], "source_ids": ["nist_manufacturing_digital_twins"],
+            "provider_accounting": {"external_calls": 2, "paid_calls": 0},
+            "evidence_outcome": "context_only",
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        context_research,
+    )
+    body = {
+        "uid": "buyer-context", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    }
+    first = client.post("/api/v1/shopping-cases/sc-context-only/research", json=body)
+    assert first.status_code == 200
+    payload = first.json()
+    assert payload["evidence_outcome"] == "context_only"
+    assert payload["product_shelves"]["evidence_status"] == "context_only"
+    assert payload["ambiguity_exploration"]["status"] == "context_only"
+    assert payload["ambiguity_exploration"]["decision"] == "provisional_exploration_only"
+    obligations = {
+        row["obligation_id"]: row["status"]
+        for row in payload["ambiguity_exploration"]["research_obligations"]
+    }
+    assert obligations["official_requirements"] == "resolved"
+    assert obligations["exact_product_identity"] == "blocked"
+
+    repeated = client.post("/api/v1/shopping-cases/sc-context-only/research", json=body)
+    assert repeated.status_code == 409
+    assert repeated.json()["detail"]["code"] == "research_already_completed"
 
 
 def test_research_scope_cannot_be_changed_by_the_browser(monkeypatch):

@@ -1994,6 +1994,9 @@ export default function App() {
           session_id: conversationEpoch,
           memory_mode: temporaryChat ? 'temporary' : 'standard',
         };
+        if (ambiguityExploration?.case_id) {
+          chatPayload.shopping_case_id = ambiguityExploration.case_id;
+        }
         const copyProfileId = String(localStorage.getItem('shopsquire_copy_profile_id') || (import.meta as any).env?.VITE_COPY_PROFILE_ID || '').trim();
         const copyBrandName = String(localStorage.getItem('shopsquire_brand_name') || (import.meta as any).env?.VITE_BRAND_NAME || '').trim();
         const copyEnabled =
@@ -2443,6 +2446,11 @@ export default function App() {
         const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
+        if (buyerRequirementClaims.length > 0) {
+          // An upload is a pending evidence proposal, not permission to keep presenting
+          // an earlier case's shelves as if they reflect the newly extracted claims.
+          setProductShelves(null);
+        }
         if (data?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
           setAmbiguityExploration(data.ambiguity_exploration as AmbiguityExploration);
           if (data?.product_shelves?.schema_version === 'product-shelves-v1') {
@@ -2671,6 +2679,7 @@ export default function App() {
     message: ChatMessage,
     acceptedClaimIds: string[],
     researchChoice: 'local_only' | 'research_and_corroborate',
+    corrections: Record<string, unknown>[] = [],
   ) => {
     const proposal = message.buyerRequirementProposal;
     if (!proposal) throw new Error('This requirement proposal is missing its case identity.');
@@ -2692,7 +2701,7 @@ export default function App() {
         expected_proposal_version: proposal.proposal_version,
         accepted_claim_ids: acceptedClaimIds,
         rejected_claim_ids: allIds.filter((claimId) => !acceptedClaimIds.includes(claimId)),
-        corrections: [],
+        corrections,
         research_choice: researchChoice,
       }),
     });
@@ -2704,11 +2713,18 @@ export default function App() {
       setProductShelves(payload.product_shelves as ProductShelfProjection);
       switchRightPanelMode('grid');
     }
+    if (payload?.corroboration?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
+      setAmbiguityExploration(payload.corroboration.ambiguity_exploration as AmbiguityExploration);
+    }
     setTraceId(normalizeTraceId(payload?.trace_id || traceId));
     setMessages((current) => [...current, {
       role: 'assistant',
       content: researchChoice === 'research_and_corroborate'
-        ? 'I accepted those as provisional constraints. Approved-source research is authorized; product fit remains conditional until corroboration completes.'
+        ? payload?.corroboration?.status === 'blocked'
+          ? `I accepted those as provisional constraints, but corroboration is blocked: ${payload.corroboration.message || payload.corroboration.reason}. Product fit remains provisional.`
+          : payload?.corroboration?.evidence_outcome === 'context_only'
+            ? 'I accepted those as provisional constraints and completed approved-source research in the same case. It found authoritative context but no matching product requirements, so these constraints and product fit remain provisional.'
+            : 'I accepted those as provisional constraints and completed approved-source corroboration in the same case. Remaining unknowns stay conditional.'
         : 'I accepted those as provisional constraints and reranked the local catalog without calling an external provider.',
       timestamp: new Date(),
     }]);
@@ -2740,6 +2756,7 @@ export default function App() {
             .map((item) => item.hypothesis_id)
             .filter((value): value is string => Boolean(value)),
           research_authorized: true,
+          refresh_authorized: false,
         }),
       });
       const payload = await safeJson(response);
@@ -2749,17 +2766,15 @@ export default function App() {
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
         setProductShelves(payload.product_shelves as ProductShelfProjection);
       }
-      setAmbiguityExploration((current) => current ? {
-        ...current,
-        status: 'researched',
-        execution: 'live_discovery_and_official_fetch_completed',
-        evidence: 'scoped_official_claims_compiled',
-        provider_accounting: payload?.research?.provider_accounting || current.provider_accounting,
-      } : current);
+      if (payload?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
+        setAmbiguityExploration(payload.ambiguity_exploration as AmbiguityExploration);
+      }
       setTraceId(normalizeTraceId(payload?.trace_id || ambiguityExploration.trace_id || traceId));
       setMessages((current) => [...current, {
         role: 'assistant',
-        content: `Approved-source research completed in the same shopping case. I compiled ${payload?.research?.claims?.length || 0} scoped product claims and kept ${payload?.research?.unresolved?.length || 0} source or capability gaps visible. No cart or supplier action was authorized.`,
+        content: payload?.evidence_outcome === 'context_only'
+          ? `Approved-source research completed in the same shopping case. It established ${payload?.research?.context_claims?.length || 0} context claims but no authoritative product requirements, so the shortlist remains provisional. Tell me the named software/version or accept uploaded requirements to continue. No cart or supplier action was authorized.`
+          : `Approved-source research completed in the same shopping case. I compiled ${payload?.research?.claims?.length || 0} scoped product claims and kept ${payload?.research?.unresolved?.length || 0} source or capability gaps visible. No cart or supplier action was authorized.`,
         timestamp: new Date(),
       }]);
     } catch (error: any) {
@@ -3197,7 +3212,7 @@ export default function App() {
                       <BuyerRequirementReviewCard
                         claims={msg.buyerRequirementClaims}
                         onAccept={msg.buyerRequirementProposal
-                          ? (claimIds, choice) => acceptBuyerRequirementProposal(msg, claimIds, choice)
+                          ? (claimIds, choice, corrections) => acceptBuyerRequirementProposal(msg, claimIds, choice, corrections)
                           : undefined}
                       />
                     )}
@@ -3324,9 +3339,11 @@ export default function App() {
                             ? 'Cart & Upsell'
                             : rightPanelMode === 'visual_search'
                               ? 'Visual Search'
-                              : rightPanelMode === 'image_context'
+                          : rightPanelMode === 'image_context'
                                 ? 'Image Context'
-                                : `Found ${filteredDisplayProducts.length} products`}
+                                : productShelves?.shelves?.length
+                                  ? `${productShelves.evidence_status === 'researched' ? 'Researched shortlist' : 'Provisional shortlist'} — ${new Set(productShelves.shelves.flatMap((shelf) => [...shelf.initial, ...shelf.next_page].map((item) => item.identity_key))).size} configurations`
+                                  : `Found ${filteredDisplayProducts.length} products`}
                     </span>
                   </div>
                   {rightPanelMode !== 'none' && (

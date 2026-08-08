@@ -87,6 +87,8 @@ test('ambiguous workload explores locally before optional research without cart 
 
   const shelves = page.getByTestId('product-shelves');
   await expect(shelves).toBeVisible();
+  await expect(page.getByText(/Provisional shortlist.*configuration/i)).toBeVisible();
+  await expect(page.getByText(/^Found 0 products$/i)).toHaveCount(0);
   await expect(shelves).toContainText(/best across accepted shared needs/i);
   await expect(shelves).toContainText(/mobile workstation/i);
   await expect(shelves).toContainText(/desktop workstation/i);
