@@ -14,6 +14,29 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    table_name = "shopping_case_fulfillment_selections"
+    if table_name in inspector.get_table_names():
+        required = {
+            "selection_id", "tenant_id", "case_id", "uid", "revision", "status",
+            "choice", "preferred_sku", "requested_quantity", "available_now",
+            "offers_json", "selection_idempotency_key", "created_at", "updated_at",
+        }
+        actual = {column["name"] for column in inspector.get_columns(table_name)}
+        missing = sorted(required - actual)
+        if missing:
+            raise RuntimeError(
+                "incompatible pre-Alembic fulfillment table; missing columns: "
+                + ", ".join(missing)
+            )
+        index_name = "ix_case_fulfillment_owner"
+        if index_name not in {row["name"] for row in inspector.get_indexes(table_name)}:
+            op.create_index(
+                index_name, table_name, ["tenant_id", "case_id", "uid", "status"],
+            )
+        return
+
     op.create_table(
         "shopping_case_fulfillment_selections",
         sa.Column("selection_id", sa.Text(), primary_key=True),

@@ -14,6 +14,68 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Local demo databases may have these tables already because older startup
+    # code called ``Base.metadata.create_all`` before Alembic owned the schema.
+    # Adopt only a complete, structurally compatible set; partial or mismatched
+    # state fails loudly instead of pretending the migration succeeded.
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    required_columns = {
+        "product_configurations": {
+            "id", "tenant_id", "product_id", "sku", "title", "configuration_hash",
+            "form_factor", "mobility", "device_class", "price_cents", "currency",
+        },
+        "product_evidence_observations": {
+            "id", "configuration_id", "attribute_key", "value_json", "claim_class",
+            "evidence_status", "source_id", "source_record_id", "observed_at",
+        },
+        "product_availability_observations": {
+            "id", "configuration_id", "location_id", "status", "source_record_id",
+            "observed_at",
+        },
+        "shopping_cases": {"id", "case_id", "tenant_id", "uid", "status"},
+        "requirement_proposals": {
+            "id", "proposal_id", "case_id", "tenant_id", "uid", "version", "status",
+            "source_reference", "claims_json",
+        },
+    }
+    existing = set(inspector.get_table_names()) & set(required_columns)
+    if existing:
+        if existing != set(required_columns):
+            missing = sorted(set(required_columns) - existing)
+            raise RuntimeError(
+                "partial pre-Alembic product-evidence schema; missing tables: "
+                + ", ".join(missing)
+            )
+        for table_name, required in required_columns.items():
+            actual = {column["name"] for column in inspector.get_columns(table_name)}
+            missing_columns = sorted(required - actual)
+            if missing_columns:
+                raise RuntimeError(
+                    f"incompatible pre-Alembic table {table_name}; missing columns: "
+                    + ", ".join(missing_columns)
+                )
+        required_indexes = {
+            "product_configurations": (
+                "ix_product_configuration_mpn", ["tenant_id", "mpn"],
+            ),
+            "product_evidence_observations": (
+                "ix_product_evidence_attribute", ["configuration_id", "attribute_key"],
+            ),
+            "product_availability_observations": (
+                "ix_product_availability_location",
+                ["configuration_id", "location_id", "observed_at"],
+            ),
+            "requirement_proposals": (
+                "ix_requirement_proposal_case", ["tenant_id", "case_id", "status"],
+            ),
+        }
+        for table_name, (index_name, columns) in required_indexes.items():
+            names = {row["name"] for row in inspector.get_indexes(table_name)}
+            if index_name not in names:
+                op.create_index(index_name, table_name, columns)
+        return
+
     op.create_table(
         "product_configurations",
         sa.Column("id", sa.Text(), primary_key=True),
