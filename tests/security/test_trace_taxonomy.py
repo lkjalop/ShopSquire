@@ -15,3 +15,13 @@ def test_normalize_alias_and_unknown():
     ev2, orig2 = normalize_trace_event_type("custom_weird_event")
     assert ev2 == "feedback_loop"
     assert orig2 == "custom_weird_event"
+
+
+def test_evidence_led_shopping_case_events_are_not_collapsed_to_feedback():
+    for name in (
+        "ambiguity_exploration_projected",
+        "buyer_requirement_proposal_accepted",
+    ):
+        event, original = normalize_trace_event_type(name)
+        assert event == name
+        assert original is None

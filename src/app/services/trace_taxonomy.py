@@ -48,6 +48,11 @@ CANONICAL_TRACE_EVENTS = {
     "answer_coverage_scored",
     "copywriting",
     "copy_policy_gate",
+    # Evidence-led shopping-case events must remain explicit. Collapsing these
+    # into ``feedback_loop`` makes an execution/audit state look like generic
+    # conversational follow-up in Decision Trace.
+    "ambiguity_exploration_projected",
+    "buyer_requirement_proposal_accepted",
 }
 
 
