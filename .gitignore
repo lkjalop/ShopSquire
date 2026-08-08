@@ -16,6 +16,9 @@ tmp/
 .tmp_*.log
 .tmp_*.txt
 .tmp_*.db
+# Hyphen-prefixed certification/browser/CI work directories. Curated proof
+# belongs under docs/evidence with a manifest; raw rerunnable trees do not.
+/.tmp-*
 
 # Local runtime artifacts / recordings (keep only the compact summary JSON)
 runs/**
@@ -49,6 +52,10 @@ config/security/versions/risk_correlation_policy_*.json
 *.sqlite
 *.db
 *.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.db-shm
+*.db-wal
 /*.sqlite
 /*.db
 test.sqlite*
@@ -56,6 +63,7 @@ test.sqlite*
 node_modules/
 dist/
 build/
+terraform/.terraform/
 
 .venv/
 venv/
@@ -88,6 +96,12 @@ frontend-*.log
 frontend-*.err.log
 frontend-*.out.log
 debug.log
+celerybeat-schedule.*
+
+# Scratchpad source/evidence may be curated; ignore runtime streams only.
+scratchpad/*.log
+scratchpad/*.out
+scratchpad/*.err
 
 # Temporary probe/keeper scripts and their outputs (generated during dev sessions)
 tmp_*.log
