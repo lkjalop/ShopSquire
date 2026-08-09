@@ -13,3 +13,20 @@ search:
 outgoing:
   request_timeout: 8.0
   max_request_timeout: 12.0
+
+# The local certification profile deliberately uses engines that currently
+# return server-side results without browser CAPTCHA challenges. Discovery is
+# still best-effort; official-origin fetches remain the authority boundary.
+engines:
+  - name: mojeek
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: brave
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+  - name: qwant
+    disabled: true

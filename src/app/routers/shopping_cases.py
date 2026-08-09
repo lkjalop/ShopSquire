@@ -984,6 +984,8 @@ def research_shopping_case(
                 "case_id": case_id, "status": result["status"],
                 "provider_accounting": research["provider_accounting"],
                 "receipts": research["receipts"], "research_delta": delta,
+                "evidence_ladder": research.get("evidence_ladder", []),
+                "source_execution": research.get("source_execution", []),
                 "official_claims": research["claims"],
                 "context_claims": research["context_claims"],
                 "evidence_outcome": evidence_outcome,

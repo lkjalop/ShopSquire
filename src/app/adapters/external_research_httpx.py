@@ -30,7 +30,7 @@ import socket
 import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 try:
     import httpx
@@ -78,6 +78,23 @@ def _domain_allowed(domain: str, allowlist: List[str]) -> bool:
         if a and (d == a or d.endswith("." + a)):
             return True
     return False
+
+
+def _engine_failure_rows(value: Any) -> List[Dict[str, str]]:
+    """Normalize SearXNG's list/tuple engine failures for a UI-safe receipt."""
+
+    rows: List[Dict[str, str]] = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, (list, tuple)) and item:
+            engine = str(item[0] or "unknown")[:80]
+            reason = str(item[1] if len(item) > 1 else "unresponsive")[:160]
+        elif isinstance(item, dict):
+            engine = str(item.get("engine") or item.get("name") or "unknown")[:80]
+            reason = str(item.get("reason") or item.get("error") or "unresponsive")[:160]
+        else:
+            continue
+        rows.append({"engine": engine, "reason": reason})
+    return rows
 
 
 class HttpxResearchFetcher:
@@ -212,10 +229,22 @@ class HttpxResearchFetcher:
         results = data.get("results") if isinstance(data, dict) else data
         if not isinstance(results, list):
             return []
+        configured_engines = [
+            value.strip() for value in parse_qs(parsed.query).get("engines", [""])[0].split(",")
+            if value.strip()
+        ]
+        engine_failures = _engine_failure_rows(
+            data.get("unresponsive_engines") if isinstance(data, dict) else None
+        )
+        responded_engines: set[str] = set()
         out: List[Dict[str, Any]] = []
         for r in results:
             if not isinstance(r, dict):
                 continue
+            result_engines = r.get("engines") if isinstance(r.get("engines"), list) else []
+            for engine in [r.get("engine"), *result_engines]:
+                if str(engine or "").strip():
+                    responded_engines.add(str(engine).strip())
             u = str(r.get("url") or "")
             dom = (urlparse(u).hostname or "").lower()
             if not _domain_allowed(dom, allowlist):  # adapter-side allowlist (defense in depth)
@@ -231,4 +260,24 @@ class HttpxResearchFetcher:
                 "claim_candidates": list(r.get("claim_candidates") or [])[:16]
                 if isinstance(r.get("claim_candidates"), list) else [],
             })
+        degradation_reasons: list[str] = []
+        failure_text = " ".join(row["reason"].lower() for row in engine_failures)
+        if "captcha" in failure_text:
+            degradation_reasons.append("engines_captcha")
+        if "too many requests" in failure_text or "rate" in failure_text:
+            degradation_reasons.append("engines_rate_limited")
+        if engine_failures and not degradation_reasons:
+            degradation_reasons.append("engines_unresponsive")
+        if not out:
+            degradation_reasons.append("zero_allowlisted_results")
+        self.last_receipt.update({
+            "raw_result_count": len(results),
+            "result_count": len(results),
+            "allowlisted_result_count": len(out),
+            "engines_queried": configured_engines,
+            "engines_responded": sorted(responded_engines),
+            "engine_failures": engine_failures,
+            "degradation_reasons": degradation_reasons,
+            "provider_status": "degraded" if degradation_reasons else "completed",
+        })
         return out

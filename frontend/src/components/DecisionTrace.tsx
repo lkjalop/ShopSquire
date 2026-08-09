@@ -320,6 +320,14 @@ export function deriveTraceTrustStrip({
   marketProjections?: any[];
   hippographInsights?: any[];
 }): TraceTrustStrip {
+  const officialResearchEvents = (events || []).filter((event) => (
+    String(event?.event_type || event?.payload?._original_event_type || '').toLowerCase()
+      .includes('official_research_rerank_completed')
+  ));
+  const officialClaims = officialResearchEvents.flatMap((event) => [
+    ...(Array.isArray(event?.payload?.official_claims) ? event.payload.official_claims : []),
+    ...(Array.isArray(event?.payload?.context_claims) ? event.payload.context_claims : []),
+  ]);
   const authorities = executionSteps.map((step) => String(step?.authority || '').toLowerCase());
   const eventText = JSON.stringify(events || []).toLowerCase();
   const humanApproved = /human.{0,24}(approved|authorized)|approved.{0,24}human/.test(eventText);
@@ -339,13 +347,19 @@ export function deriveTraceTrustStrip({
       event?.created_at,
       event?.payload?.as_of,
       event?.payload?.observed_at,
+      ...(Array.isArray(event?.payload?.official_claims)
+        ? event.payload.official_claims.map((claim: any) => claim?.observed_at) : []),
+      ...(Array.isArray(event?.payload?.context_claims)
+        ? event.payload.context_claims.map((claim: any) => claim?.observed_at) : []),
     ])
     .map((value) => Date.parse(String(value || '')))
     .filter((value) => Number.isFinite(value));
   const newest = observedTimes.length ? Math.max(...observedTimes) : NaN;
   const ageHours = Number.isFinite(newest) ? Math.max(0, (nowMs - newest) / 3_600_000) : null;
   const freshness: TrustCue = ageHours == null
-    ? { label: 'Freshness unknown', detail: 'No observation time was recorded.', status: 'neutral' }
+    ? officialResearchEvents.length > 0
+      ? { label: 'Not assessed', detail: 'Research was recorded but no accepted evidence observation time exists.', status: 'neutral' }
+      : { label: 'Freshness unknown', detail: 'No observation time was recorded.', status: 'neutral' }
     : ageHours <= 24
       ? { label: 'Current', detail: `Newest evidence is ${Math.max(0, Math.round(ageHours))}h old.`, status: 'good' }
       : ageHours <= 168
@@ -360,15 +374,21 @@ export function deriveTraceTrustStrip({
   ).map((value) => String(value || '').toLowerCase());
   const hasEvidence = Boolean(
     (Array.isArray(evidence?.citations) && evidence.citations.length)
-    || marketProjections.length
+    || marketProjections.length || officialClaims.length
     || hippographInsights.length,
   );
   const sourceIncomplete = degradedSources.length > 0 || sourceStatuses.some(
     (status) => !['complete', 'connected', 'authoritative', 'healthy'].includes(status),
   );
+  const officialEvidenceIncomplete = officialResearchEvents.some((event) => (
+    ['context_only', 'unresolved'].includes(String(event?.payload?.evidence_outcome || ''))
+    || (event?.payload?.evidence_ladder || []).some((tier: any) => (
+      ['degraded', 'failed', 'activated'].includes(String(tier?.execution_status || ''))
+    ))
+  ));
   const completeness: TrustCue = !hasEvidence
     ? { label: 'Not recorded', detail: 'No evidence completeness claim is available.', status: 'neutral' }
-    : sourceIncomplete
+    : sourceIncomplete || officialEvidenceIncomplete
       ? { label: 'Partial', detail: 'At least one evidence source is degraded, missing, or incomparable.', status: 'warn' }
       : { label: 'Complete', detail: 'Recorded evidence sources report complete coverage.', status: 'good' };
 
@@ -377,10 +397,17 @@ export function deriveTraceTrustStrip({
   ).filter((metric) => ['undefined', 'insufficient', 'unavailable'].includes(
     String(metric?.status || '').toLowerCase(),
   ));
-  const uncertaintyCount = degradedSources.length + undefinedMetrics.length;
+  const materialResearchUncertainty = officialResearchEvents.some((event) => (
+    String(event?.payload?.evidence_outcome || '') !== 'product_requirements'
+    || (event?.payload?.evidence_ladder || []).some((tier: any) => (
+      ['degraded', 'failed', 'activated'].includes(String(tier?.execution_status || ''))
+    ))
+  ));
+  const uncertaintyCount = degradedSources.length + undefinedMetrics.length
+    + (materialResearchUncertainty ? 1 : 0);
   const uncertainty: TrustCue = uncertaintyCount
     ? {
-        label: `${uncertaintyCount} concern${uncertaintyCount === 1 ? '' : 's'}`,
+        label: materialResearchUncertainty ? 'Material' : `${uncertaintyCount} concern${uncertaintyCount === 1 ? '' : 's'}`,
         detail: 'Review degraded sources or undefined measurements before acting.',
         status: 'warn',
       }
@@ -2743,7 +2770,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
               {activeTab === 'research' && (
                 <div style={{ padding: '12px 14px' }}>
-                  <WorkloadResearchTrace executionSteps={typedExecutionSteps} />
+                  <WorkloadResearchTrace executionSteps={typedExecutionSteps} events={allDisplayEvents} />
                 </div>
               )}
               {activeTab === 'why' && (

@@ -1,5 +1,6 @@
 type Props = {
   executionSteps?: any[];
+  events?: any[];
 };
 
 const words = (value: unknown) => String(value || 'not recorded').replace(/[_-]+/g, ' ');
@@ -21,7 +22,7 @@ const RequirementRows = ({ title, value }: { title: string; value: any }) => {
   );
 };
 
-export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
+export default function WorkloadResearchTrace({ executionSteps = [], events = [] }: Props) {
   const proposal = executionSteps.find((step) => step?.id === 'model-proposal') || {};
   const evidence = executionSteps.find((step) => step?.id === 'workload-evidence') || {};
   const authorization = executionSteps.find((step) => step?.id === 'workload-authorization') || {};
@@ -38,6 +39,12 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const semanticAuthorization = executionSteps.find((step) => step?.id === 'semantic-authorization') || {};
   const materialClarification = executionSteps.find((step) => step?.id === 'material-clarification') || {};
   const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
+  const officialResearch = [...events].reverse().find((event) => (
+    String(event?.event_type || event?.payload?._original_event_type || '').toLowerCase()
+      .includes('official_research_rerank_completed')
+  ))?.payload || {};
+  const evidenceLadder = Array.isArray(officialResearch?.evidence_ladder)
+    ? officialResearch.evidence_ladder : [];
   const evidenceOutput = evidence?.output || {};
   const evidenceItems = Array.isArray(evidenceOutput.items) ? evidenceOutput.items : [];
   const entities = Array.isArray(proposal?.output?.workload_entities)
@@ -47,6 +54,8 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const materialSlots = Array.isArray(planOutput?.material_slots) ? planOutput.material_slots : [];
   const queryBundle = Array.isArray(planOutput?.query_bundle) ? planOutput.query_bundle : [];
   const semanticLegs = semanticEvidence?.output?.legs || {};
+  const providerUsage = semanticEvidence?.output?.provider_usage || {};
+  const effort = semanticEvidence?.output?.effort || {};
   const hypotheses = Array.isArray(semanticAuthorization?.output?.workload_hypotheses)
     ? semanticAuthorization.output.workload_hypotheses : [];
   const unknowns = Array.isArray(semanticAuthorization?.output?.material_unknowns)
@@ -61,7 +70,7 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
   const hasResearch = Boolean(
     evidence.id || authorization.id || entities.length || researchPlan.id || researchTrigger.id
     || postCatalogTrigger.id
-    || semanticEvidence.id || semanticAuthorization.id
+    || semanticEvidence.id || semanticAuthorization.id || evidenceLadder.length
   );
 
   if (!hasResearch) {
@@ -115,6 +124,48 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
             </div>
           )}
         </div>
+
+        {evidenceLadder.length > 0 && (
+          <div data-testid="governed-evidence-ladder" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Governed evidence ladder</strong>
+            <div style={{ marginTop: 5, color: '#475569' }}>
+              Each rung reports execution truth. An infrastructure failure is not an evidence conclusion.
+            </div>
+            <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+              {evidenceLadder.map((tier: any) => (
+                <div key={`${tier.tier}-${tier.mechanism}`} style={{ borderTop: '1px solid #e2e8f0', paddingTop: 6 }}>
+                  <strong>Tier {tier.tier}: {words(tier.mechanism)}</strong>
+                  {' — '}{words(tier.execution_status)}
+                  {tier.rejection_reason ? ` (${words(tier.rejection_reason)})` : ''}
+                  <div style={{ fontSize: 12, color: '#475569' }}>
+                    Billing: {words(tier.billing_class)}
+                    {tier.dispatch_count != null ? ` · dispatched: ${tier.dispatch_count}` : ''}
+                    {tier.allowlisted_result_count != null
+                      ? ` · allowlisted hits: ${tier.allowlisted_result_count}` : ''}
+                  </div>
+                  {Array.isArray(tier.engines_queried) && tier.engines_queried.length > 0 && (
+                    <div style={{ fontSize: 12 }}>
+                      Queried: {tier.engines_queried.join(', ')}
+                      {' · '}Responded: {(tier.engines_responded || []).join(', ') || 'none'}
+                    </div>
+                  )}
+                  {Array.isArray(tier.engine_failures) && tier.engine_failures.length > 0 && (
+                    <ul style={{ margin: '3px 0 0', paddingLeft: 20, color: '#b45309' }}>
+                      {tier.engine_failures.map((failure: any, index: number) => (
+                        <li key={`${failure.engine || 'engine'}-${index}`}>
+                          {failure.engine || 'unknown engine'}: {failure.reason || 'unresponsive'}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+            <small style={{ color: '#64748b' }}>
+              Missing evidence remains not verified. No unavailable source establishes safety, compatibility, or fit.
+            </small>
+          </div>
+        )}
 
         {researchTrigger.id && (
           <div data-testid="research-trigger-observer" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
@@ -239,13 +290,19 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
             <div key={name} style={{ marginTop: 8, paddingTop: 7, borderTop: '1px solid #e2e8f0' }}>
               <strong>{words(name)}</strong>: {words(
                 leg?.data?.status
-                || (leg?.health === 'timed_out' ? 'provider timeout'
+                || (leg?.execution_status === 'rejected_admission' ? 'not started - internal effort admission rejected'
+                  : leg?.health === 'timed_out' ? 'provider timeout'
                   : leg?.health === 'cancelled' ? 'research pending'
                     : leg?.health === 'failed' || leg?.health === 'degraded'
                       ? 'research degraded'
                       : (leg?.found ? 'accepted candidate' : 'no authoritative evidence')),
               )}
-              {leg?.error && <div style={{ marginTop: 3, color: '#b45309' }}>Provider status: {words(leg.error)}</div>}
+              {leg?.error && (
+                <div style={{ marginTop: 3, color: '#b45309' }}>
+                  {leg?.execution_status === 'rejected_admission' ? 'Internal scheduler status' : 'Provider status'}:
+                  {' '}{words(leg.error)}
+                </div>
+              )}
               {leg?.summary && <div style={{ marginTop: 3 }}>{leg.summary}</div>}
               {Array.isArray(leg?.data?.provider_attempts) && leg.data.provider_attempts.length > 0 && (
                 <ul data-testid="semantic-provider-attempts" style={{ margin: '5px 0 0', paddingLeft: 20 }}>
@@ -260,6 +317,14 @@ export default function WorkloadResearchTrace({ executionSteps = [] }: Props) {
               )}
             </div>
           ))}
+          {semanticEvidence.id && (
+            <div data-testid="research-provider-usage" style={{ marginTop: 8, paddingTop: 7, borderTop: '1px solid #e2e8f0' }}>
+              External provider calls: <strong>{String(providerUsage?.external_provider_call_count ?? 0)}</strong>
+              {' · '}Paid calls: <strong>{providerUsage?.paid_provider_call_count_status === 'recorded'
+                ? String(providerUsage?.paid_provider_call_count ?? 0) : 'not recorded'}</strong>
+              {' · '}Internal effort: <strong>{String(effort?.used_effort_units ?? 0)} / {String(effort?.max_effort_units ?? 'not recorded')}</strong>
+            </div>
+          )}
         </div>
 
         {materialClarification.id && (

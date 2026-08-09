@@ -178,6 +178,13 @@ ExecutionStatus = Literal[
 ]
 
 
+class DiscoveryEngineFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=160)
+
+
 class ProviderExecutionReceipt(BaseModel):
     """Auditable truth about discovery or authoritative-origin execution.
 
@@ -209,6 +216,14 @@ class ProviderExecutionReceipt(BaseModel):
     http_status: int | None = Field(default=None, ge=100, le=599)
     result_count: int | None = Field(default=None, ge=0)
     allowlisted_result_count: int | None = Field(default=None, ge=0)
+    engines_queried: list[str] = Field(default_factory=list, max_length=16)
+    engines_responded: list[str] = Field(default_factory=list, max_length=16)
+    engine_failures: list[DiscoveryEngineFailure] = Field(default_factory=list, max_length=16)
+    degradation_reasons: list[Literal[
+        "engines_captcha", "engines_rate_limited", "engines_unresponsive",
+        "zero_allowlisted_results",
+    ]] = Field(default_factory=list, max_length=8)
+    provider_status: Literal["completed", "degraded", "failed", "not_executed"] | None = None
     response_body_hash: str | None = Field(default=None, min_length=8, max_length=128)
     selected_origin_urls: list[str] = Field(default_factory=list, max_length=12)
     origin_content_type: str | None = Field(default=None, max_length=160)
@@ -304,6 +319,11 @@ class ProviderExecutionReceipt(BaseModel):
             "http_status": self.http_status,
             "result_count": self.result_count,
             "allowlisted_result_count": self.allowlisted_result_count,
+            "engines_queried": self.engines_queried,
+            "engines_responded": self.engines_responded,
+            "engine_failures": [row.model_dump(mode="json") for row in self.engine_failures],
+            "degradation_reasons": self.degradation_reasons,
+            "provider_status": self.provider_status,
             "rejection_reason": self.rejection_reason,
         }
 

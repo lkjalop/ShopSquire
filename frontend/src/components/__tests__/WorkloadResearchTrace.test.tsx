@@ -11,6 +11,29 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.queryByText(/research was not required/i)).not.toBeInTheDocument();
   });
 
+  it('renders every governed ladder rung and engine-level degradation truth', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[{
+      event_type: 'official_research_rerank_completed',
+      payload: {
+        evidence_ladder: [
+          { tier: 0, mechanism: 'evidence_cache', execution_status: 'miss', rejection_reason: 'cache_miss', billing_class: 'free' },
+          { tier: 4, mechanism: 'self_hosted_discovery', execution_status: 'degraded', rejection_reason: 'engines_captcha', billing_class: 'free', dispatch_count: 1, allowlisted_result_count: 0, engines_queried: ['mojeek', 'bing'], engines_responded: ['bing'], engine_failures: [{ engine: 'startpage', reason: 'CAPTCHA' }] },
+          { tier: 5, mechanism: 'paid_discovery', execution_status: 'not_attempted', rejection_reason: 'provider_not_enrolled', billing_class: 'paid' },
+          { tier: 6, mechanism: 'governed_abstention', execution_status: 'activated', rejection_reason: 'material_evidence_unresolved', billing_class: 'not_applicable' },
+        ],
+      },
+    }]} />);
+
+    const ladder = screen.getByTestId('governed-evidence-ladder');
+    expect(ladder).toHaveTextContent(/Tier 0: evidence cache.*miss.*cache miss/i);
+    expect(ladder).toHaveTextContent(/Tier 4: self hosted discovery.*degraded.*engines captcha/i);
+    expect(ladder).toHaveTextContent(/Queried: mojeek, bing.*Responded: bing/i);
+    expect(ladder).toHaveTextContent(/startpage: CAPTCHA/i);
+    expect(ladder).toHaveTextContent(/Tier 5: paid discovery.*not attempted/i);
+    expect(ladder).toHaveTextContent(/Tier 6: governed abstention.*activated/i);
+    expect(ladder).toHaveTextContent(/infrastructure failure is not an evidence conclusion/i);
+  });
+
   it('shows an unresolved provider search without fabricating evidence', () => {
     render(<WorkloadResearchTrace executionSteps={[
       {
@@ -260,5 +283,32 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.getByText(/provider timeout/i)).toBeInTheDocument();
     expect(screen.getByText(/Provider status:/i)).toHaveTextContent(/leg timeout>1800ms/i);
     expect(screen.queryByText(/attempted empty/i)).not.toBeInTheDocument();
+  });
+
+  it('renders admission rejection as internal effort state and never provider spend', () => {
+    render(<WorkloadResearchTrace executionSteps={[{
+      id: 'semantic-evidence', kind: 'connector', authority: 'supplies_evidence',
+      output: {
+        effort: { used_effort_units: 3, max_effort_units: 3 },
+        provider_usage: {
+          external_provider_call_count: 0,
+          paid_provider_call_count: null,
+          paid_provider_call_count_status: 'not_recorded',
+        },
+        legs: { web: {
+          found: false,
+          health: 'rejected',
+          execution_status: 'rejected_admission',
+          error: 'effort_allowance_exceeded',
+          data: {},
+        } },
+      },
+    }]} />);
+
+    expect(screen.getByText(/not started\s+internal effort admission rejected/i)).toBeInTheDocument();
+    expect(screen.getByText(/Internal scheduler status/i)).toHaveTextContent(/effort allowance exceeded/i);
+    expect(screen.queryByText(/Provider status:/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('research-provider-usage')).toHaveTextContent(/External provider calls:\s*0/i);
+    expect(screen.getByTestId('research-provider-usage')).toHaveTextContent(/Paid calls:\s*not recorded/i);
   });
 });

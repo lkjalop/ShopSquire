@@ -23,6 +23,7 @@ import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
 import { nonRecommendationOutcome } from './lib/chatOutcome';
+import { isActionableBuyerQuestion } from './lib/buyerQuestion';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -3100,7 +3101,8 @@ export default function App() {
                           </ul>
                         </details>
                       )}
-                      {i === messages.length - 1 && msg.nextQuestions && msg.nextQuestions.length > 0 && (
+                      {i === messages.length - 1 && msg.nextQuestions
+                        && msg.nextQuestions.some(isActionableBuyerQuestion) && (
                         /* ONE framed "narrow this down" card instead of a loose chip wall (demo
                            feedback: "looks clunky — maybe a separate output box"). Question text is a
                            heading, its options are compact chips beneath; capped at 2 questions. */
@@ -3111,7 +3113,7 @@ export default function App() {
                           <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
                             Help me narrow this down
                           </div>
-                          {msg.nextQuestions.slice(0, 2).map((nq, qi) => (
+                          {msg.nextQuestions.filter(isActionableBuyerQuestion).slice(0, 2).map((nq, qi) => (
                             <div key={nq.id} style={{ marginTop: qi > 0 ? 8 : 0 }}>
                               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
                                 <button

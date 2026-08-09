@@ -144,6 +144,44 @@ describe('Decision Trace component ontology', () => {
     expect(strip.simulation.label).toBe('Simulation only');
   });
 
+  it('labels blocked research as not assessed and materially uncertain', () => {
+    const strip = deriveTraceTrustStrip({
+      nowMs: Date.parse('2026-08-09T00:00:00Z'),
+      events: [{
+        event_type: 'official_research_rerank_completed',
+        payload: {
+          evidence_outcome: 'unresolved',
+          official_claims: [], context_claims: [],
+          evidence_ladder: [{ tier: 4, execution_status: 'degraded' }],
+        },
+      }],
+      executionSteps: [], evidence: null, marketProjections: [], hippographInsights: [],
+    });
+
+    expect(strip.freshness.label).toBe('Not assessed');
+    expect(strip.completeness.label).toBe('Not recorded');
+    expect(strip.uncertainty.label).toBe('Material');
+  });
+
+  it('uses nested official claim observations for freshness', () => {
+    const strip = deriveTraceTrustStrip({
+      nowMs: Date.parse('2026-08-09T00:00:00Z'),
+      events: [{
+        event_type: 'official_research_rerank_completed',
+        payload: {
+          evidence_outcome: 'product_requirements',
+          official_claims: [{ observed_at: '2026-08-08T23:00:00Z' }],
+          context_claims: [], evidence_ladder: [],
+        },
+      }],
+      executionSteps: [], evidence: null, marketProjections: [], hippographInsights: [],
+    });
+
+    expect(strip.freshness.label).toBe('Current');
+    expect(strip.completeness.label).toBe('Complete');
+    expect(strip.uncertainty.label).toBe('No material concern');
+  });
+
   it('compacts raw event volume into state changed, prevented, and observed milestones', () => {
     const timeline = compactStateTimeline([
       { event_type: 'query_received', payload: { summary: 'Buyer request received' } },

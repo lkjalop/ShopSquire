@@ -279,6 +279,11 @@ def _receipt(raw: dict[str, Any], *, run_id: str, capability: str, index: int) -
         started_at=raw.get("started_at"), completed_at=raw.get("completed_at"),
         http_status=raw.get("http_status"), result_count=raw.get("result_count"),
         allowlisted_result_count=raw.get("allowlisted_result_count"),
+        engines_queried=list(raw.get("engines_queried") or []),
+        engines_responded=list(raw.get("engines_responded") or []),
+        engine_failures=list(raw.get("engine_failures") or []),
+        degradation_reasons=list(raw.get("degradation_reasons") or []),
+        provider_status=raw.get("provider_status"),
         response_body_hash=raw.get("response_body_hash"),
         origin_content_type=raw.get("origin_content_type"),
         selected_origin_urls=list(raw.get("selected_origin_urls") or []),
@@ -290,7 +295,6 @@ def _receipt(raw: dict[str, Any], *, run_id: str, capability: str, index: int) -
 def _source_query(source: dict[str, Any]) -> str:
     """Build a bounded discovery query from governed manifest data only."""
 
-    domain = str((source.get("allowed_domains") or [""])[0])
     publisher = str(source.get("publisher") or "official publisher")
     artefact = str((source.get("artefact_patterns") or [publisher])[0])
     claim_types = set(source.get("allowed_claim_types") or [])
@@ -299,7 +303,10 @@ def _source_query(source: dict[str, Any]) -> str:
         if claim_types.intersection({"minimum_requirements", "recommended_requirements", "compatibility"})
         else "workload scope"
     )
-    return f"site:{domain} {artefact} {publisher} official {purpose}"[:240]
+    # Domain filtering is applied to structured results after retrieval. The
+    # `site:` operator couples queries to engines that currently challenge or
+    # silently return zero results, so it is deliberately not used here.
+    return f"{artefact} {publisher} official {purpose}"[:240]
 
 
 def _domain_allowed(url: str, domains: list[str]) -> bool:
@@ -309,6 +316,49 @@ def _domain_allowed(url: str, domains: list[str]) -> bool:
         for raw in domains
         if (domain := str(raw or "").strip().lower().rstrip("."))
     )
+
+
+def _normalized_origin(value: str) -> tuple[str, str]:
+    parsed = urlparse(str(value or ""))
+    host = str(parsed.hostname or "").lower().rstrip(".")
+    path = "/" + str(parsed.path or "/").strip("/")
+    return host, path.rstrip("/") or "/"
+
+
+def _discovered_origin_for_source(
+    results: list[dict[str, Any]], source: dict[str, Any],
+) -> tuple[str, str | None]:
+    """Select only an applicable official page for an enrolled source.
+
+    For sources with canonical entrypoints, an arbitrary page on the same
+    hostname is insufficient. Prefer an exact canonical page, then a child of
+    a canonical directory. Open-domain selection is reserved for a future
+    vendor-resolution source that genuinely has no canonical entrypoint.
+    """
+
+    domains = list(source.get("allowed_domains") or [])
+    candidates = [
+        str(row.get("url") or "") for row in results
+        if _domain_allowed(str(row.get("url") or ""), domains)
+    ]
+    canonicals = [
+        str(value) for value in source.get("canonical_entrypoints") or [] if str(value).strip()
+    ]
+    if not canonicals:
+        return (candidates[0], None) if candidates else ("", "official_origin_not_discovered")
+    canonical_keys = {_normalized_origin(value): value for value in canonicals}
+    for candidate in candidates:
+        if _normalized_origin(candidate) in canonical_keys:
+            return candidate, None
+    for candidate in candidates:
+        candidate_host, candidate_path = _normalized_origin(candidate)
+        for canonical in canonicals:
+            canonical_host, canonical_path = _normalized_origin(canonical)
+            if candidate_host == canonical_host and (
+                candidate_path.startswith(canonical_path.rstrip("/") + "/")
+            ):
+                return candidate, None
+    return "", "discovered_origin_outside_canonical_family"
 
 
 def _policy_version(source: dict[str, Any]) -> str:
@@ -396,6 +446,101 @@ def _compiled_claims_allowed(
         reasons.append("origin_evidence_stale")
         return [], [], reasons
     return product_rows, context_rows, reasons
+
+
+def _evidence_ladder_projection(
+    *, receipts: list[dict[str, Any]], source_execution: list[dict[str, Any]],
+    evidence_outcome: str, search_configured: bool,
+) -> list[dict[str, Any]]:
+    discovery = [row for row in receipts if row["provider_capability"] == "WEB_DISCOVERY"]
+    origins = [row for row in receipts if row["provider_capability"] == "OFFICIAL_ORIGIN_FETCH"]
+    canonical_origins = [
+        row for row in origins
+        if row.get("query_purpose") in {
+            "canonical_official_origin_fetch", "official_evidence_cache",
+        }
+    ]
+    engine_failures = [
+        failure for row in discovery for failure in row.get("engine_failures") or []
+    ]
+    degradation_reasons = sorted({
+        reason for row in discovery for reason in row.get("degradation_reasons") or []
+    })
+    allowlisted_hits = sum(int(row.get("allowlisted_result_count") or 0) for row in discovery)
+    discovery_status = (
+        "degraded" if degradation_reasons
+        else "completed" if discovery
+        else "not_needed" if not any(
+            row.get("discovery_status") in {"failed", "attempted_empty"}
+            for row in source_execution
+        )
+        else "not_configured" if not search_configured
+        else "failed"
+    )
+    return [
+        {
+            "tier": 0, "mechanism": "evidence_cache",
+            "execution_status": "completed" if any(row["cache_status"] == "fresh_hit" for row in origins) else "miss",
+            "rejection_reason": None if any(row["cache_status"] == "fresh_hit" for row in origins) else "cache_miss",
+            "billing_class": "free",
+        },
+        {
+            "tier": 1, "mechanism": "enrolled_canonical_origin",
+            "execution_status": "completed" if any(
+                row["execution_status"] == "completed" for row in canonical_origins
+            ) else "failed" if canonical_origins else "not_attempted",
+            "rejection_reason": (
+                None if canonical_origins
+                else "explicit_novel_discovery_requested" if discovery
+                else "canonical_origin_not_attempted"
+            ),
+            "completed_count": sum(
+                row["execution_status"] == "completed" for row in canonical_origins
+            ),
+            "attempted_count": len(canonical_origins), "billing_class": "free",
+        },
+        {
+            "tier": 2, "mechanism": "buyer_upload_or_link",
+            "execution_status": "not_attempted", "rejection_reason": "no_upload_provided",
+            "billing_class": "free",
+        },
+        {
+            "tier": 3, "mechanism": "vendor_resolution",
+            "execution_status": "not_attempted",
+            "rejection_reason": "named_vendor_resolution_not_requested",
+            "billing_class": "free",
+        },
+        {
+            "tier": 4, "mechanism": "self_hosted_discovery",
+            "execution_status": discovery_status,
+            "rejection_reason": degradation_reasons[0] if degradation_reasons else None,
+            "engines_queried": sorted({
+                engine for row in discovery for engine in row.get("engines_queried") or []
+            }),
+            "engines_responded": sorted({
+                engine for row in discovery for engine in row.get("engines_responded") or []
+            }),
+            "engine_failures": engine_failures,
+            "allowlisted_result_count": allowlisted_hits,
+            "dispatch_count": sum(bool(row.get("external_call_dispatched")) for row in discovery),
+            "billing_class": "free",
+        },
+        {
+            "tier": 5, "mechanism": "paid_discovery",
+            "execution_status": "not_attempted", "rejection_reason": "provider_not_enrolled",
+            "billing_class": "paid", "paid_calls": 0,
+        },
+        {
+            "tier": 6, "mechanism": "governed_abstention",
+            "execution_status": "activated" if evidence_outcome != "product_requirements" else "not_needed",
+            "rejection_reason": (
+                "material_evidence_unresolved" if evidence_outcome == "unresolved"
+                else "product_requirements_not_established" if evidence_outcome == "context_only"
+                else None
+            ),
+            "billing_class": "not_applicable",
+        },
+    ]
 
 
 def research_official_sources(
@@ -539,7 +684,8 @@ def research_official_sources(
                 else "failed"
             )
             discovery.last_receipt.update({
-                "result_count": len(results), "allowlisted_result_count": len(results),
+                "result_count": discovery.last_receipt.get("result_count", len(results)),
+                "allowlisted_result_count": len(results),
                 "billing_class": "free", "query_id": source_id,
                 "query_purpose": "official_origin_discovery",
             })
@@ -547,12 +693,12 @@ def research_official_sources(
                 discovery.last_receipt, run_id=run_id,
                 capability="WEB_DISCOVERY", index=len(receipts) + 1,
             ))
-            selected = next(
-                (str(row.get("url")) for row in results if _domain_allowed(str(row.get("url") or ""), domains)),
-                "",
-            )
+            selected, selection_error = _discovered_origin_for_source(results, source)
             if not selected:
-                unresolved.append({"source_id": source_id, "reason": "official_origin_not_discovered"})
+                unresolved.append({
+                    "source_id": source_id,
+                    "reason": selection_error or "official_origin_not_discovered",
+                })
                 source_execution.append(execution)
                 continue
             origin = GovernedOfficialOriginFetcher(max_bytes=8 * 1024 * 1024).fetch(
@@ -643,6 +789,10 @@ def research_official_sources(
         else "evidence_cache" if cache_hits
         else "not_executed"
     )
+    evidence_ladder = _evidence_ladder_projection(
+        receipts=receipts, source_execution=source_execution,
+        evidence_outcome=evidence_outcome, search_configured=bool(search_url_template),
+    )
     return {
         "schema_version": "official-workload-research-v1",
         "run_id": run_id, "purpose": purpose,
@@ -652,6 +802,7 @@ def research_official_sources(
         "claims": deduped, "context_claims": context_claims,
         "unresolved": unresolved, "receipts": receipts,
         "source_execution": source_execution,
+        "evidence_ladder": evidence_ladder,
         "evidence_outcome": evidence_outcome,
         "provider_accounting": {
             "external_calls": external_calls, "discovery_calls": discovery_calls,

@@ -274,6 +274,7 @@ def test_fresh_cache_precedes_canonical_and_is_tenant_scoped(monkeypatch):
 
 def test_failed_canonical_uses_discovery_as_an_honest_fallback(monkeypatch):
     calls = {"origin": 0, "discovery": 0}
+    queries = []
 
     class Discovery:
         def __init__(self, **kwargs):
@@ -281,6 +282,7 @@ def test_failed_canonical_uses_discovery_as_an_honest_fallback(monkeypatch):
 
         def fetch(self, query, *, allowlist, timeout_s):
             calls["discovery"] += 1
+            queries.append(query)
             self.last_receipt = {
                 "execution_status": "completed", "network_execution": True,
                 "external_call_dispatched": True, "http_status": 200,
@@ -289,7 +291,7 @@ def test_failed_canonical_uses_discovery_as_an_honest_fallback(monkeypatch):
                 "started_at": "2026-08-08T00:00:01Z",
                 "completed_at": "2026-08-08T00:00:02Z",
             }
-            return [{"url": "https://nist.gov/digital-twins-moved"}]
+            return [{"url": "https://nist.gov/digital-twins"}]
 
     class Origin:
         def __init__(self, **kwargs):
@@ -341,9 +343,63 @@ def test_failed_canonical_uses_discovery_as_an_honest_fallback(monkeypatch):
     assert execution["discovery_reason"] == "canonical_fetch_failed"
     assert execution["discovery_result_count"] == 1
     assert calls == {"origin": 2, "discovery": 1}
+    assert queries and "site:" not in queries[0]
     assert result["provider_accounting"] == {
         "external_calls": 3, "discovery_calls": 1,
         "official_origin_fetches": 2, "cache_hits": 0, "paid_calls": 0,
+    }
+    ladder = {row["tier"]: row for row in result["evidence_ladder"]}
+    assert ladder[0]["execution_status"] == "miss"
+    assert ladder[1]["execution_status"] == "failed"
+    assert ladder[4]["execution_status"] == "completed"
+    assert ladder[5]["execution_status"] == "not_attempted"
+    assert ladder[6] == {
+        "tier": 6, "mechanism": "governed_abstention",
+        "execution_status": "activated",
+        "rejection_reason": "product_requirements_not_established",
+        "billing_class": "not_applicable",
+    }
+
+
+def test_discovery_rejects_irrelevant_page_on_an_approved_domain(monkeypatch):
+    class Discovery:
+        def __init__(self, **kwargs):
+            self.last_receipt = {}
+
+        def fetch(self, query, *, allowlist, timeout_s):
+            self.last_receipt = {
+                "execution_status": "completed", "network_execution": True,
+                "external_call_dispatched": True, "http_status": 200,
+                "query_hash": "a" * 64, "response_body_hash": "b" * 64,
+                "provider_endpoint_host": "search.local",
+                "started_at": "2026-08-08T00:00:01Z",
+                "completed_at": "2026-08-08T00:00:02Z",
+            }
+            return [{"url": "https://nist.gov/news/unrelated-page"}]
+
+    class Origin:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch(self, url, *, allowlist, timeout_s, certification_run_id):
+            raise AssertionError("an out-of-family page must not be fetched")
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.HttpxResearchFetcher", Discovery,
+    )
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources(
+        "factory breakdowns", search_url_template="http://search/?q={query}",
+        sources=[_approved_source()], evidence_cache=OfficialEvidenceCache(),
+        workload="manufacturing_digital_twin", novel_source_ids={"nist_manufacturing_digital_twins"},
+        now=datetime(2026, 8, 8, 3, tzinfo=timezone.utc),
+    )
+    assert result["claims"] == []
+    assert result["context_claims"] == []
+    assert {row["reason"] for row in result["unresolved"]} == {
+        "discovered_origin_outside_canonical_family",
     }
 
 

@@ -79,6 +79,54 @@ def test_happy_path_parses_and_filters_to_allowlist():
     assert receipt["external_call_dispatched"] is True
 
 
+def test_searxng_engine_degradation_is_recorded_separately_from_results():
+    def handler(request):
+        assert request.url.params["engines"] == "mojeek,bing"
+        return httpx.Response(200, json={
+            "results": [
+                {"title": "Official", "url": "https://trusted.com/requirements", "engine": "bing"},
+                {"title": "Other", "url": "https://other.example/page", "engine": "mojeek"},
+            ],
+            "unresponsive_engines": [
+                ["brave", "too many requests"], ["startpage", "Suspended: CAPTCHA"],
+            ],
+        })
+
+    fetcher = HttpxResearchFetcher(
+        client=_client(handler),
+        search_url_template="https://search.example.com/api?q={query}&engines=mojeek,bing",
+        resolver=_resolver_public,
+    )
+    assert len(fetcher.fetch("requirements", allowlist=["trusted.com"])) == 1
+    receipt = fetcher.last_receipt
+    assert receipt["raw_result_count"] == 2
+    assert receipt["allowlisted_result_count"] == 1
+    assert receipt["engines_queried"] == ["mojeek", "bing"]
+    assert receipt["engines_responded"] == ["bing", "mojeek"]
+    assert receipt["engine_failures"] == [
+        {"engine": "brave", "reason": "too many requests"},
+        {"engine": "startpage", "reason": "Suspended: CAPTCHA"},
+    ]
+    assert set(receipt["degradation_reasons"]) == {
+        "engines_captcha", "engines_rate_limited",
+    }
+    assert receipt["provider_status"] == "degraded"
+
+
+def test_zero_allowlisted_results_is_not_reported_as_successful_evidence():
+    fetcher = HttpxResearchFetcher(
+        client=_client(_ok_results([{
+            "title": "Off-domain", "url": "https://other.example/page", "engine": "bing",
+        }])),
+        search_url_template="https://search.example.com/api?q={query}&engines=mojeek,bing",
+        resolver=_resolver_public,
+    )
+    assert fetcher.fetch("requirements", allowlist=["trusted.com"]) == []
+    assert fetcher.last_receipt["execution_status"] == "completed"
+    assert fetcher.last_receipt["provider_status"] == "degraded"
+    assert fetcher.last_receipt["degradation_reasons"] == ["zero_allowlisted_results"]
+
+
 def test_research_service_projects_discovery_transport_receipt():
     from src.app.services.external_product_research_service import research
 
