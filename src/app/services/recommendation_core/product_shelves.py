@@ -147,6 +147,10 @@ class ShelfProduct(BaseModel):
         default_factory=EvidenceFreshnessProjection,
     )
     availability: list[AvailabilityProjection] = Field(default_factory=list, max_length=64)
+    requested_quantity: int | None = Field(default=None, ge=1, le=1_000_000)
+    available_now: int | None = Field(default=None, ge=0, le=1_000_000)
+    shortfall: int | None = Field(default=None, ge=0, le=1_000_000)
+    quantity_fit: Literal["enough_now", "partial", "unavailable", "unknown"] = "unknown"
 
 
 class ProductShelf(BaseModel):
@@ -307,6 +311,7 @@ def build_product_shelves(
     hypothesis_ids: Sequence[str] = (),
     scope_labels: Mapping[str, str] | None = None,
     budget_cents: int | None = None,
+    requested_quantity: int | None = None,
 ) -> ProductShelfProjection:
     """Build shared and hypothesis shelves with deterministic 3+5 paging.
 
@@ -316,6 +321,8 @@ def build_product_shelves(
     """
     if budget_cents is not None and budget_cents < 0:
         raise ValueError("budget_cents_must_be_non_negative")
+    if requested_quantity is not None and requested_quantity < 1:
+        raise ValueError("requested_quantity_must_be_positive")
     labels = dict(scope_labels or {})
     scope_ids = ["shared"]
     for hypothesis_id in hypothesis_ids:
@@ -353,6 +360,28 @@ def build_product_shelves(
                 )
                 continue
             explanation = _card_explanation(decision, status)
+            fresh_quantities = [
+                int(row.quantity) for row in candidate.availability
+                if row.freshness_status == "fresh" and row.quantity is not None
+                and row.status in {"in_stock", "available"}
+            ]
+            available_now = sum(fresh_quantities) if fresh_quantities else (
+                0 if candidate.availability and all(
+                    row.freshness_status == "fresh"
+                    and (row.quantity == 0 or row.status in {"sold_out", "built_to_order", "at_supplier"})
+                    for row in candidate.availability
+                ) else None
+            )
+            shortfall = (
+                max(0, requested_quantity - available_now)
+                if requested_quantity is not None and available_now is not None else None
+            )
+            quantity_fit: Literal["enough_now", "partial", "unavailable", "unknown"] = "unknown"
+            if requested_quantity is not None and available_now is not None:
+                quantity_fit = (
+                    "enough_now" if available_now >= requested_quantity else
+                    "partial" if available_now > 0 else "unavailable"
+                )
             eligible.append(
                 ShelfProduct(
                     identity_key=identity_key,
@@ -410,6 +439,10 @@ def build_product_shelves(
                     ),
                     evidence_freshness=candidate.evidence_freshness,
                     availability=candidate.availability,
+                    requested_quantity=requested_quantity,
+                    available_now=available_now,
+                    shortfall=shortfall,
+                    quantity_fit=quantity_fit,
                 )
             )
 

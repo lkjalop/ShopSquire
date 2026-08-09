@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -159,6 +160,28 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
 )
 
 
+PORTFOLIO_DEMO_AVAILABILITY: dict[str, tuple[SeedAvailability, ...]] = {
+    "SCORP-126982": (
+        SeedAvailability(location_id="portfolio_network", status="in_stock", quantity=3),
+    ),
+    "SCORP-125638": (
+        SeedAvailability(location_id="portfolio_network", status="sold_out", quantity=0),
+    ),
+    "JW-822962": (
+        SeedAvailability(location_id="portfolio_network", status="available", quantity=2),
+    ),
+    "SCORP-C07NXPT": (
+        SeedAvailability(location_id="portfolio_network", status="at_supplier", quantity=0),
+    ),
+    "JW-818845": (
+        SeedAvailability(
+            location_id="portfolio_network", status="built_to_order", quantity=0,
+            lead_time_min_days=6, lead_time_max_days=8,
+        ),
+    ),
+}
+
+
 def _configuration_claims(item: ReviewedConfiguration) -> dict[str, tuple[Any, str | None]]:
     """Every material configuration field is an independently referenceable fact."""
 
@@ -204,13 +227,56 @@ def _ensure_configuration_observations(
         ))
 
 
+def _ensure_availability_observations(
+    db, config: ProductConfiguration, item: ReviewedConfiguration, *,
+    inventory_profile: str | None = None,
+) -> None:
+    """Upsert deterministic portfolio stock without multiplying observations."""
+
+    existing = {
+        row.source_record_id: row
+        for row in db.execute(select(ProductAvailabilityObservation).where(
+            ProductAvailabilityObservation.configuration_id == config.id,
+        )).scalars()
+    }
+    observations = [
+        (f"{item.source_url}#availability-{index}", availability, SOURCE_DATE)
+        for index, availability in enumerate(item.availability)
+    ]
+    if inventory_profile == "realistic":
+        observed_at = datetime.now(timezone.utc)
+        observations.extend(
+            (
+                f"portfolio-demo://inventory/{item.sku}/{index}",
+                availability,
+                observed_at,
+            )
+            for index, availability in enumerate(PORTFOLIO_DEMO_AVAILABILITY.get(item.sku, ()))
+        )
+    for source_record_id, availability, observed_at in observations:
+        row = existing.get(source_record_id)
+        values = availability.model_dump()
+        if row is None:
+            db.add(ProductAvailabilityObservation(
+                configuration_id=config.id, source_record_id=source_record_id,
+                observed_at=observed_at, **values,
+            ))
+            continue
+        for key, value in values.items():
+            setattr(row, key, value)
+        row.observed_at = observed_at
+
+
 def configuration_hash(item: ReviewedConfiguration) -> str:
     material = item.model_dump(exclude={"claims", "availability"})
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
 
 
-def ingest_reviewed_configurations(db, *, tenant_id: str = "default") -> list[str]:
+def ingest_reviewed_configurations(
+    db, *, tenant_id: str = "default", inventory_profile: str | None = None,
+) -> list[str]:
     """Idempotently ingest the reviewed five-record fixture."""
+    inventory_profile = inventory_profile or os.getenv("PORTFOLIO_DEMO_INVENTORY_PROFILE") or None
     ids: list[str] = []
     for item in REVIEWED_CONFIGURATIONS:
         digest = configuration_hash(item)
@@ -240,6 +306,9 @@ def ingest_reviewed_configurations(db, *, tenant_id: str = "default") -> list[st
             if existing.product_id != product.id:
                 existing.product_id = product.id
             _ensure_configuration_observations(db, existing, item)
+            _ensure_availability_observations(
+                db, existing, item, inventory_profile=inventory_profile,
+            )
             ids.append(existing.id)
             continue
         config = ProductConfiguration(
@@ -261,14 +330,15 @@ def ingest_reviewed_configurations(db, *, tenant_id: str = "default") -> list[st
             ))
         db.flush()
         _ensure_configuration_observations(db, config, item)
-        for index, row in enumerate(item.availability):
-            db.add(ProductAvailabilityObservation(
-                configuration_id=config.id, source_record_id=f"{item.source_url}#availability-{index}",
-                observed_at=SOURCE_DATE, **row.model_dump(),
-            ))
+        _ensure_availability_observations(
+            db, config, item, inventory_profile=inventory_profile,
+        )
         ids.append(config.id)
     db.commit()
     return ids
 
 
-__all__ = ["REVIEWED_CONFIGURATIONS", "configuration_hash", "ingest_reviewed_configurations"]
+__all__ = [
+    "PORTFOLIO_DEMO_AVAILABILITY", "REVIEWED_CONFIGURATIONS",
+    "configuration_hash", "ingest_reviewed_configurations",
+]

@@ -12,8 +12,8 @@ def test_reviewed_fixture_preserves_identity_conflicts_and_form_factor_specific_
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)
     with Session(engine) as db:
-        first = ingest_reviewed_configurations(db)
-        second = ingest_reviewed_configurations(db)
+        first = ingest_reviewed_configurations(db, inventory_profile="realistic")
+        second = ingest_reviewed_configurations(db, inventory_profile="realistic")
         assert first == second
         configs = db.execute(select(ProductConfiguration)).scalars().all()
         assert len(configs) == 5
@@ -36,7 +36,25 @@ def test_reviewed_fixture_preserves_identity_conflicts_and_form_factor_specific_
 
         built = db.execute(select(ProductAvailabilityObservation).where(
             ProductAvailabilityObservation.configuration_id == zephyr.id,
+            ProductAvailabilityObservation.source_record_id.like("https://%"),
         )).scalar_one()
         assert (built.status, built.lead_time_min_days, built.lead_time_max_days) == (
             "built_to_order", 6, 8,
         )
+
+        inventory = {
+            row.sku: sum(
+                int(observation.quantity or 0)
+                for observation in db.execute(select(ProductAvailabilityObservation).where(
+                    ProductAvailabilityObservation.configuration_id == row.id,
+                )).scalars()
+            )
+            for row in configs
+        }
+        assert inventory == {
+            "SCORP-126982": 3,
+            "SCORP-125638": 0,
+            "JW-822962": 2,
+            "SCORP-C07NXPT": 0,
+            "JW-818845": 0,
+        }

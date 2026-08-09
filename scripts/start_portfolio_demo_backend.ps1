@@ -28,6 +28,7 @@ $environment = @{
     FULFILLMENT_SUPPLIER_TRANSPORT = 'sandbox'
     FULFILLMENT_AUTONOMOUS_RFQ = '0'
     AUTO_SEED_REVIEWED_PRODUCT_EVIDENCE = '1'
+    PORTFOLIO_DEMO_INVENTORY_PROFILE = 'realistic'
 }
 
 foreach ($entry in $environment.GetEnumerator()) {

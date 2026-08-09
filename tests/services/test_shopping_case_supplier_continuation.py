@@ -5,10 +5,22 @@ from sqlalchemy.pool import StaticPool
 from src.app.models.orm import Base
 from src.app.services.shopping_case_supplier_continuation import (
     SupplierOfferInput,
+    certification_fixture_offers,
     normalize_supplier_offers,
     resolve_confirmed_cart_target,
     select_fulfillment_option,
 )
+
+
+def test_certification_fixture_contains_positive_and_negative_responses() -> None:
+    rows = certification_fixture_offers(
+        case_id="sc-demo", preferred_sku="PREFERRED", substitute_sku="SUBSTITUTE",
+        requested_quantity=30, available_now=12,
+    )
+
+    assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 18 and row.lead_time_days == 8 for row in rows)
+    assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 0 for row in rows)
+    assert any(row.offered_sku == "SUBSTITUTE" and row.quantity_available == 30 for row in rows)
 
 
 def _db() -> Session:

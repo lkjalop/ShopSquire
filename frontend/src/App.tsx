@@ -46,7 +46,10 @@ import BuyerRequirementReviewCard, {
 import BuyerClaimReconciliationCard, {
   type BuyerClaimReconciliation,
 } from './components/BuyerClaimReconciliationCard';
-import ProductShelvesPanel, { type ProductShelfProjection } from './components/ProductShelvesPanel';
+import ProductShelvesPanel, { type ProductShelfProjection, type ShelfProduct } from './components/ProductShelvesPanel';
+import SupplierContinuationCard, {
+  type SupplierContinuation,
+} from './components/SupplierContinuationCard';
 import AmbiguityExplorationPanel, { type AmbiguityExploration } from './components/AmbiguityExplorationPanel';
 import {
   detectCVIssueType,
@@ -418,6 +421,7 @@ export default function App() {
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
   const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
   const [productShelves, setProductShelves] = useState<ProductShelfProjection | null>(null);
+  const [supplierContinuation, setSupplierContinuation] = useState<SupplierContinuation | null>(null);
   const [ambiguityExploration, setAmbiguityExploration] = useState<AmbiguityExploration | null>(null);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   // Safe-internet-search results (separate labeled source; never owned catalog items).
@@ -2839,7 +2843,13 @@ export default function App() {
     }
     if (researchAuthorized && payload?.research_status === 'completed') {
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
-        setProductShelves(payload.product_shelves as ProductShelfProjection);
+        setProductShelves({
+          ...payload.product_shelves,
+          evidence_status: payload?.evidence_outcome === 'product_requirements'
+            ? 'researched' : payload?.evidence_outcome === 'context_only' ? 'context_only' : 'unresolved',
+          official_claim_count: Array.isArray(payload?.research?.claims) ? payload.research.claims.length : 0,
+          context_claim_count: Array.isArray(payload?.research?.context_claims) ? payload.research.context_claims.length : 0,
+        } as ProductShelfProjection);
       }
       setAmbiguityExploration((current) => current ? {
         ...current,
@@ -2861,8 +2871,42 @@ export default function App() {
     return payload?.resolution || { status: 'unresolved', reason: 'resolution_not_recorded' };
   }, [ambiguityExploration, uid, traceId]);
 
-  const proposeResearchedProduct = useCallback(async (sku: string, quantity: number) => {
+  const proposeResearchedProduct = useCallback(async (item: ShelfProduct, quantity: number) => {
     if (!ambiguityExploration?.case_id) return;
+    const freshQuantities = (item.availability || [])
+      .filter((row) => row.freshness_status === 'fresh' && row.quantity != null && ['in_stock', 'available'].includes(row.status))
+      .map((row) => Number(row.quantity || 0));
+    const availabilityKnown = freshQuantities.length > 0 || (item.availability || []).some(
+      (row) => row.freshness_status === 'fresh' && (row.quantity === 0 || ['sold_out', 'built_to_order', 'at_supplier'].includes(row.status)),
+    );
+    const availableNow = availabilityKnown ? freshQuantities.reduce((sum, value) => sum + value, 0) : null;
+    if (availableNow == null || quantity > availableNow) {
+      const alternatives = productShelves?.shelves.flatMap((shelf) => [...shelf.initial, ...shelf.next_page]) || [];
+      const substitute = alternatives.find((candidate) => (
+        candidate.product.sku !== item.product.sku
+        && candidate.fit_status !== 'failed'
+        && candidate.product.form_factor === item.product.form_factor
+        && !(candidate.misses || []).length
+        && candidate.price_cents <= item.price_cents
+      ));
+      setSupplierContinuation({
+        caseId: ambiguityExploration.case_id,
+        preferredSku: item.product.sku,
+        preferredTitle: item.title,
+        substituteSku: substitute?.product.sku,
+        requestedQuantity: quantity,
+        unitPriceCents: item.price_cents,
+        currency: item.currency || 'AUD',
+        availableNow,
+        deadlineDays: 10,
+        choices: [],
+        selectionKey: `portfolio-select-${crypto.randomUUID()}`,
+        confirmationKey: `portfolio-confirm-${crypto.randomUUID()}`,
+        status: 'review',
+      });
+      return;
+    }
+    const sku = item.product.sku;
     const response = await fetch(apiUrl(
       `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/cart-proposals`,
     ), {
@@ -2893,7 +2937,101 @@ export default function App() {
         expiresAt: payload.expires_at,
       },
     }]);
-  }, [ambiguityExploration, uid]);
+  }, [ambiguityExploration, productShelves, uid]);
+
+  const assessSupplierContinuation = useCallback(async (deadlineDays: number) => {
+    if (!supplierContinuation) return;
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(supplierContinuation.caseId)}/fulfillment-options`,
+    ), {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders() },
+      body: JSON.stringify({
+        uid, requested_quantity: supplierContinuation.requestedQuantity,
+        available_now: supplierContinuation.availableNow ?? 0,
+        known_lead_time_days: 8, deadline_days: deadlineDays,
+        has_next_best: Boolean(supplierContinuation.substituteSku),
+        has_architecture_alternative: true,
+      }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      setSupplierContinuation((current) => current ? { ...current, error: String(payload?.detail || 'Fulfilment assessment failed.') } : current);
+      return;
+    }
+    setSupplierContinuation((current) => current ? {
+      ...current, deadlineDays, choices: payload?.choices || [], error: undefined,
+    } : current);
+  }, [supplierContinuation, uid]);
+
+  const selectSupplierContinuation = useCallback(async (choiceId: string) => {
+    if (!supplierContinuation) return;
+    if (choiceId === 'alternative_architecture') {
+      setMessages((current) => [...current, { role: 'assistant', content: 'I kept the preferred laptop visible and expanded the architecture-specific shelves. Compare fixed workstation, mobile workstation and hosted alternatives before selecting a commercial path.', timestamp: new Date() }]);
+      return;
+    }
+    if (choiceId === 'relax_constraint') {
+      setMessages((current) => [...current, { role: 'assistant', content: 'Tell me which degree of freedom to change: quantity, delivery date, budget or a workload requirement. Nothing has changed yet.', timestamp: new Date() }]);
+      return;
+    }
+    const choice = choiceId === 'next_best_now' ? 'next_best_now' : choiceId;
+    setSupplierContinuation((current) => current ? { ...current, status: 'selecting' } : current);
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(supplierContinuation.caseId)}/fulfillment-selections`,
+    ), {
+      method: 'POST', credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json', 'Idempotency-Key': supplierContinuation.selectionKey,
+        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders(),
+      },
+      body: JSON.stringify({
+        uid, expected_revision: 0, choice,
+        preferred_sku: supplierContinuation.preferredSku,
+        substitute_sku: supplierContinuation.substituteSku,
+        requested_quantity: supplierContinuation.requestedQuantity,
+        available_now: supplierContinuation.availableNow ?? 0,
+      }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      setSupplierContinuation((current) => current ? { ...current, status: 'review', error: String(payload?.detail?.code || payload?.detail || 'Supplier fixture failed.') } : current);
+      return;
+    }
+    setSupplierContinuation((current) => current ? {
+      ...current, selectedChoice: choice, selectionId: payload.selection_id,
+      revision: payload.revision, offers: payload.offers || [], status: 'offers', error: undefined,
+    } : current);
+  }, [supplierContinuation, uid]);
+
+  const confirmSupplierContinuation = useCallback(async () => {
+    if (!supplierContinuation?.selectionId || supplierContinuation.revision == null) return;
+    const offer = supplierContinuation.offers?.find((row) => row.offer_id === supplierContinuation.selectedOfferId);
+    setSupplierContinuation((current) => current ? { ...current, status: 'confirming' } : current);
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(supplierContinuation.caseId)}/fulfillment-selections/${encodeURIComponent(supplierContinuation.selectionId)}/confirm-cart`,
+    ), {
+      method: 'POST', credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json', 'Idempotency-Key': supplierContinuation.confirmationKey,
+        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders(),
+      },
+      body: JSON.stringify({
+        uid, expected_revision: supplierContinuation.revision,
+        selected_offer_id: supplierContinuation.selectedOfferId || null,
+        substitution_authorized: offer?.relationship === 'compatible_substitute',
+      }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      setSupplierContinuation((current) => current ? { ...current, status: 'offers', error: String(payload?.detail?.code || payload?.detail || 'Cart confirmation failed.') } : current);
+      return;
+    }
+    await refreshCart();
+    setSupplierContinuation((current) => current ? { ...current, status: 'applied', error: undefined } : current);
+    setMessages((current) => [...current, {
+      role: 'assistant', content: `Applied the explicitly confirmed fulfilment selection: ${payload.confirmed_quantity} × ${payload.confirmed_sku}. No real supplier was contacted.`, timestamp: new Date(),
+    }]);
+  }, [supplierContinuation, uid]);
 
   /** Disambiguation button click → re-send with the chosen intent */
   const handleDisambiguationSelect = (option: string) => {
@@ -3494,6 +3632,16 @@ export default function App() {
                   {productShelves && <ProductShelvesPanel
                     projection={productShelves}
                     onPropose={ambiguityExploration?.status === 'researched' ? proposeResearchedProduct : undefined}
+                  />}
+                  {supplierContinuation && <SupplierContinuationCard
+                    journey={supplierContinuation}
+                    onAssess={(deadlineDays) => { void assessSupplierContinuation(deadlineDays); }}
+                    onSelectChoice={(choiceId) => { void selectSupplierContinuation(choiceId); }}
+                    onSelectOffer={(offerId) => setSupplierContinuation((current) => current ? {
+                      ...current, selectedOfferId: offerId,
+                    } : current)}
+                    onConfirm={() => { void confirmSupplierContinuation(); }}
+                    onDismiss={() => setSupplierContinuation(null)}
                   />}
                   {rightPanelContract?.emphasis?.applied && rightPanelContract.emphasis.text && (
                     <div

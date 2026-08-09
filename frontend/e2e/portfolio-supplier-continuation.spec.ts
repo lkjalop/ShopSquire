@@ -1,0 +1,62 @@
+import { expect, test } from '@playwright/test';
+
+test.skip(
+  process.env.RUN_PORTFOLIO_SUPPLIER_CERTIFICATION !== '1',
+  'Set RUN_PORTFOLIO_SUPPLIER_CERTIFICATION=1 against the portfolio-demo stack.',
+);
+
+test('high-value bulk request shows governed fulfilment choices and explicit exact confirmation', async ({ page }) => {
+  test.setTimeout(150_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+  await page.addInitScript(
+    (uid) => sessionStorage.setItem('uid', uid),
+    `portfolio-supplier-${suffix}`,
+  );
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
+  const input = page.getByPlaceholder('Type your message...');
+  await input.fill('I need to simulate a PLC-controlled factory and cyberattacks against the OT network.');
+  await input.press('Enter');
+
+  const interpretation = page.getByTestId('ambiguity-exploration');
+  await expect(interpretation).toBeVisible({ timeout: 45_000 });
+  await interpretation.getByRole('button', { name: 'Use official link or vendor' }).click();
+  await interpretation.getByLabel('Official requirements URL or named vendor').fill(
+    'https://docs.factoryio.com/manual/system-requirements/',
+  );
+  await interpretation.getByRole('button', { name: 'Check source' }).click();
+  await interpretation.getByRole('button', { name: 'Research matched canonical source' }).click();
+  await expect(page.getByText(/fetched the reviewed canonical publisher page/i)).toBeVisible({ timeout: 60_000 });
+
+  const titan = page.getByTestId('product-shelves').locator('article')
+    .filter({ hasText: 'MSI Titan 18 HX A2WJ RTX 5090 Laptop' }).first();
+  await expect(titan).toBeVisible();
+  await titan.getByRole('spinbutton').fill('30');
+  await titan.getByRole('button', { name: /Review option|Propose cart change/i }).click();
+
+  const continuation = page.getByTestId('supplier-continuation');
+  await expect(continuation).toBeVisible();
+  await expect(continuation).toContainText(/3 verified now · 27 require another fulfilment path/i);
+  await continuation.getByLabel('Needed within days').fill('2');
+  await continuation.getByRole('button', { name: 'Assess fulfilment' }).click();
+  const choices = continuation.getByTestId('fulfillment-choices');
+  await expect(choices).toContainText(/Take 3 now and source 27/i);
+  await expect(choices).toContainText(/Wait 8 days.*misses requested deadline/i);
+  await expect(choices).toContainText(/Ask suppliers for 27 compatible units/i);
+
+  await choices.getByRole('button', { name: /Ask suppliers for 27 compatible units/i }).click();
+  const offers = continuation.getByTestId('supplier-offers');
+  await expect(offers).toContainText(/27 × SCORP-126982 in 8 days/i);
+  await expect(offers).toContainText(/SCORP-126982: unable to fulfil/i);
+  await expect(offers).not.toContainText(/proposed substitute/i);
+  await offers.getByLabel(/27 × SCORP-126982.*exact configuration/i).check();
+  await expect(continuation.getByTestId('high-value-order-warning')).toContainText(/review the quantity/i);
+  await expect(continuation.getByTestId('real-supplier-locked')).toContainText(/explicit send authorization/i);
+  if (process.env.PORTFOLIO_SUPPLIER_SCREENSHOT_PATH) {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.screenshot({ path: process.env.PORTFOLIO_SUPPLIER_SCREENSHOT_PATH });
+  }
+  await continuation.getByRole('button', { name: 'Confirm exact cart change' }).click();
+  await expect(continuation.getByRole('button', { name: 'Cart updated' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Applied the explicitly confirmed fulfilment selection: 30 ×/i)).toBeVisible();
+});

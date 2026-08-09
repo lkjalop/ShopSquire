@@ -1,6 +1,6 @@
 import React from 'react';
 
-type ShelfProduct = {
+export type ShelfProduct = {
   identity_key: string;
   title: string;
   price_cents: number;
@@ -66,7 +66,7 @@ const secondaryCommerceStyle = {
 
 export default function ProductShelvesPanel({ projection, onPropose }: {
   projection: ProductShelfProjection;
-  onPropose?: (sku: string, quantity: number) => void;
+  onPropose?: (product: ShelfProduct, quantity: number) => void;
 }) {
   if (!projection?.shelves?.length) return null;
   return (
@@ -101,7 +101,7 @@ export default function ProductShelvesPanel({ projection, onPropose }: {
   );
 }
 
-function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: string, quantity: number) => void }) {
+function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (product: ShelfProduct, quantity: number) => void }) {
   const [expanded, setExpanded] = React.useState(false);
   const [quantities, setQuantities] = React.useState<Record<string, number>>({});
   const products = expanded ? [...shelf.initial, ...shelf.next_page] : shelf.initial;
@@ -116,11 +116,18 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
           <article key={item.identity_key} style={{ border: '1px solid #cbd5e1', borderRadius: 8, padding: 8 }}>
             <strong style={{ fontSize: 12 }}>{item.title}</strong>
             <div style={{ marginTop: 6 }}>{money(item.price_cents, item.currency)}</div>
-            <div style={{ marginTop: 4, fontSize: 11 }}>Fit: {item.fit_status}</div>
-            <div style={{ fontSize: 11 }}>MPN: {item.product.identifier || 'unknown'}</div>
+            <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: item.fit_status === 'qualified' ? '#047857' : '#92400e' }}>
+              {item.fit_status === 'qualified' ? 'Verified fit' : 'Conditional fit'}
+            </div>
             <div style={{ marginTop: 5, fontSize: 11 }}>{item.why_ranked || 'Provisional catalog exploration.'}</div>
             {item.explanation?.budget_note ? <div style={{ fontSize: 11 }}>{item.explanation.budget_note}</div> : null}
             {item.explanation?.availability_note ? <div style={{ fontSize: 11 }}>{item.explanation.availability_note}</div> : null}
+            {freshAvailableQuantity(item) != null ? (
+              <div style={{ fontSize: 11 }}>Verified portfolio-network stock: {freshAvailableQuantity(item)}</div>
+            ) : null}
+            <details style={{ marginTop: 6, fontSize: 11 }}>
+              <summary>Why this recommendation</summary>
+              <div>Exact configuration: {item.product.identifier || 'not verified'}</div>
             {item.meets?.length ? <div style={{ fontSize: 11 }}>Meets: {item.meets.join(', ')}</div> : null}
             {item.conditional?.length ? <div style={{ fontSize: 11 }}>Conditional: {item.conditional.join(', ')}</div> : null}
             {item.unknowns?.length ? <div style={{ fontSize: 11 }}>Unknown: {item.unknowns.join(', ')}</div> : null}
@@ -140,6 +147,7 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
                 )).join(' · ')}
               </div>
             ) : null}
+            </details>
             {projectionReady(item, onPropose) && (
               <div style={{ display: 'flex', gap: 5, marginTop: 7 }}>
                 <input
@@ -152,7 +160,7 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
                   }))}
                   style={{ width: 58 }}
                 />
-                <button type="button" onClick={() => onPropose?.(item.product.sku, quantities[item.product.sku] || 1)} style={item.fit_status === 'qualified' ? { ...secondaryCommerceStyle, background: '#f15a0a', color: '#fff' } : secondaryCommerceStyle}>
+                <button type="button" onClick={() => onPropose?.(item, quantities[item.product.sku] || 1)} style={item.fit_status === 'qualified' ? { ...secondaryCommerceStyle, background: '#f15a0a', color: '#fff' } : secondaryCommerceStyle}>
                   {item.fit_status === 'qualified' ? 'Propose cart change' : 'Review option'}
                 </button>
               </div>
@@ -169,6 +177,18 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
   );
 }
 
-function projectionReady(item: ShelfProduct, onPropose?: (sku: string, quantity: number) => void) {
+function projectionReady(item: ShelfProduct, onPropose?: (product: ShelfProduct, quantity: number) => void) {
   return Boolean(onPropose && item.product?.sku && item.fit_status !== 'failed');
+}
+
+function freshAvailableQuantity(item: ShelfProduct): number | null {
+  const rows = (item.availability || []).filter((row) => (
+    row.freshness_status === 'fresh' && row.quantity != null
+    && ['in_stock', 'available'].includes(row.status)
+  ));
+  if (rows.length) return rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+  return (item.availability || []).some((row) => (
+    row.freshness_status === 'fresh'
+    && (row.quantity === 0 || ['sold_out', 'built_to_order', 'at_supplier'].includes(row.status))
+  )) ? 0 : null;
 }

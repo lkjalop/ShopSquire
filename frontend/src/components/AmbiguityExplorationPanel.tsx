@@ -84,13 +84,6 @@ export default function AmbiguityExplorationPanel({
         </div>
       )}
       {question && <div data-testid="high-information-question" style={{ marginTop: 8 }}><strong>One question:</strong> {question}</div>}
-      {exploration.research_obligations?.length ? (
-        <div data-testid="research-resolution-owners" style={{ marginTop: 8, fontSize: 12 }}>
-          {exploration.research_obligations.map((item) => (
-            <div key={item.obligation_id}>{item.obligation_id}: {item.resolution_owner} ({item.status})</div>
-          ))}
-        </div>
-      ) : null}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>
         {exploration.status === 'provisional' && (
           <button type="button" onClick={onResearch} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Research approved sources</button>
@@ -142,12 +135,22 @@ export default function AmbiguityExplorationPanel({
           )}
         </div>
       )}
-      <div data-testid="ambiguity-accounting" style={{ marginTop: 8, fontSize: 11 }}>
+      <details style={{ marginTop: 9, fontSize: 11 }}>
+        <summary>Research proof</summary>
+        {exploration.research_obligations?.length ? (
+          <div data-testid="research-resolution-owners" style={{ marginTop: 5 }}>
+            {exploration.research_obligations.map((item) => (
+              <div key={item.obligation_id}>{item.obligation_id}: {item.resolution_owner} ({item.status})</div>
+            ))}
+          </div>
+        ) : null}
+        <div data-testid="ambiguity-accounting" style={{ marginTop: 5 }}>
         Execution: {exploration.execution} · Evidence: {exploration.evidence} · Decision: {exploration.decision}
         {' · '}External calls: {exploration.provider_accounting.external_calls}
         {' · '}Paid calls: {exploration.provider_accounting.paid_calls}
         {' · '}Cart authority: {exploration.cart_authority}
-      </div>
+        </div>
+      </details>
     </section>
   );
 }

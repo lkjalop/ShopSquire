@@ -111,6 +111,15 @@ def certification_fixture_offers(
         quantity_available=remaining,
         lead_time_days=8,
         unit_price_cents=None,
+    ), SupplierOfferInput(
+        source_type="deterministic_certification_fixture",
+        source_reference=f"{case_id}:fixture-rfq-response:unavailable",
+        supplier_reference="fixture-supplier-unavailable",
+        offered_sku=preferred_sku,
+        relationship="exact",
+        quantity_available=0,
+        lead_time_days=None,
+        unit_price_cents=None,
     )]
     if substitute_sku:
         rows.append(SupplierOfferInput(

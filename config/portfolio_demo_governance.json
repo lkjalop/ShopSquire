@@ -32,14 +32,22 @@
   },
   "stale_evidence_policy": "visible_conditional_refresh_offered",
   "supplier": {
-    "mode": "deterministic_synthetic_fixture",
+    "mode": "synthetic_default_real_human_gated",
     "real_send_authorized": false,
+    "real_send_requires": [
+      "verified_supplier_identity",
+      "approved_credentials",
+      "human_rfq_preview",
+      "explicit_send_authorization"
+    ],
     "human_preview_required": true,
     "substitution_requires_separate_confirmation": true,
     "enquiry_is_purchase_commitment": false
   },
   "commercial": {
-    "currency": "AUD",
+    "default_currency": "AUD",
+    "supported_display_currencies": ["AUD", "USD", "EUR", "GBP"],
+    "exchange_rate_authority": "not_enrolled",
     "stretch_shelf_visible": true,
     "finance_eligibility_authority": "none",
     "cart_mutation_requires_explicit_confirmation": true
@@ -52,6 +60,11 @@
     "latency_limit_ms": 8000,
     "consecutive_latency_runs": 3,
     "commercial_authority": false
+  },
+  "buyer_experience": {
+    "technical_execution_details": "decision_trace_or_drill_down",
+    "product_card_density": "concise_summary_with_evidence_drill_down",
+    "supplier_choice_count": {"minimum": 4, "maximum": 6}
   },
   "relevance": {
     "review_type": "owner_non_independent",

@@ -2,14 +2,14 @@
 
 This is a local developer certification profile, not production enrollment. It makes the demo's authority boundaries explicit while real tenants, supplier credentials and hosted voice remain absent.
 
-The executable policy is [`config/portfolio_demo_governance.json`](../config/portfolio_demo_governance.json). The local launcher enrolls only `default` and `portfolio-demo`, uses canonical official origins plus local SearXNG discovery, disables paid discovery, retains hashes/normalized claims/receipts rather than source bodies, and never lets research or narration authorize commerce.
+The executable policy is [`config/portfolio_demo_governance.json`](../config/portfolio_demo_governance.json). The local launcher enrolls only `default` and `portfolio-demo`, uses canonical official origins plus local SearXNG discovery, disables paid discovery, retains hashes/normalized claims/receipts rather than source bodies, and never lets research or narration authorize commerce. AUD is the default display currency; USD, EUR and GBP are supported display currencies, but conversion must remain unavailable until an exchange-rate authority is enrolled.
 
 ## Portfolio claims that are allowed
 
 - Governed external discovery and official-origin retrieval can be demonstrated locally with real network receipts and zero paid calls.
 - Buyer PNG, PDF and TXT evidence can be corrected, accepted provisionally, corroborated and reranked in the same shopping case.
 - Exact-configuration fit remains conditional wherever evidence is missing, stale or contradictory.
-- Synthetic supplier offers can demonstrate split, wait, next-best and explicit substitution without contacting a supplier.
+- Synthetic supplier offers can demonstrate split, wait, next-best, a supplier unable to fulfil, and explicit substitution without contacting a supplier. Real supplier mode is represented but locked behind verified identity, approved credentials, human preview and explicit send authorization.
 - Every cart mutation requires a revision-bound buyer confirmation.
 
 ## Claims that are not allowed

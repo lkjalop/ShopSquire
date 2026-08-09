@@ -1,0 +1,29 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
+import SupplierContinuationCard from '../SupplierContinuationCard';
+
+describe('SupplierContinuationCard', () => {
+  it('shows concise fulfilment truth and keeps provenance in drill-down', () => {
+    const confirm = vi.fn();
+    render(<SupplierContinuationCard journey={{
+      caseId: 'sc-1', preferredSku: 'PREFERRED', preferredTitle: 'Preferred laptop',
+      substituteSku: 'SUBSTITUTE', requestedQuantity: 30, availableNow: 12,
+      unitPriceCents: 899_900, currency: 'AUD',
+      selectionKey: 'select-1', confirmationKey: 'confirm-1',
+      deadlineDays: 2, choices: [], selectedChoice: 'substitute', selectionId: 'fs-1',
+      revision: 1, selectedOfferId: 'offer-sub', status: 'offers', offers: [
+        { offer_id: 'offer-no', offered_sku: 'PREFERRED', relationship: 'exact', quantity_available: 0 },
+        { offer_id: 'offer-sub', offered_sku: 'SUBSTITUTE', relationship: 'compatible_substitute', quantity_available: 30, lead_time_days: 2, provenance: { supplier_reference: 'fixture-b' } },
+      ],
+    }} onAssess={vi.fn()} onSelectChoice={vi.fn()} onSelectOffer={vi.fn()}
+      onConfirm={confirm} onDismiss={vi.fn()} />);
+
+    expect(screen.getByText(/12 verified now · 18 require/i)).toBeTruthy();
+    expect(screen.getByTestId('high-value-order-warning')).toHaveTextContent(/review the quantity/i);
+    expect(screen.getByText(/unable to fulfil/i)).toBeTruthy();
+    expect(screen.getByTestId('real-supplier-locked')).toHaveTextContent(/human RFQ preview/i);
+    fireEvent.click(screen.getByRole('button', { name: /confirm exact cart change/i }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+});

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from src.app.services.recommendation_core.product_shelves import (
+    AvailabilityProjection,
     ShelfCandidateInput,
     build_product_shelves,
 )
@@ -63,6 +64,7 @@ def _candidate(
     shared=True,
     hypotheses=(),
     product=None,
+    available_now: int | None = None,
 ):
     product = product or _product(index)
     scopes = {}
@@ -75,6 +77,10 @@ def _candidate(
         title=f"Product {index}",
         price_cents=price,
         relevance_score=float(20 - index if score is None else score),
+        availability=([] if available_now is None else [AvailabilityProjection(
+            location_id="network", status="in_stock" if available_now else "sold_out",
+            quantity=available_now, freshness_status="fresh",
+        )]),
         fit_by_scope=scopes,
     )
 
@@ -161,6 +167,25 @@ def test_no_budget_uses_relevance_before_price():
     assert [item.product.sku for item in _shelf(projection, "shared").initial] == [
         "SKU-2", "SKU-1"
     ]
+
+
+def test_quantity_fit_is_visible_without_displacing_the_better_workload_fit():
+    projection = build_product_shelves(
+        [
+            _candidate(1, score=0.95, available_now=3),
+            _candidate(2, score=0.80, available_now=30),
+            _candidate(3, score=0.70, available_now=0),
+        ],
+        requested_quantity=30,
+    )
+    products = _shelf(projection, "shared").initial
+
+    assert [item.product.sku for item in products] == ["SKU-1", "SKU-2", "SKU-3"]
+    assert products[0].quantity_fit == "partial"
+    assert products[0].available_now == 3
+    assert products[0].shortfall == 27
+    assert products[1].quantity_fit == "enough_now"
+    assert products[2].quantity_fit == "unavailable"
 
 
 def test_verified_hard_failure_is_excluded_but_unknown_is_conditional():
