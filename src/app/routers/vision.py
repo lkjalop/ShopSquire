@@ -21,7 +21,7 @@ from src.app.services.cv_triage_basic import BasicCVTriage
 from src.app.services.cv_provider import ManagedCVProvider, VisionProviderBusy
 from src.app.services.cv_ocr import extract_text as extract_text_stage_a
 from src.app.services.image_intent_router import classify_image_intent
-from src.app.services.intake_gate import strict_image_ingest_gate
+from src.app.services.intake_gate import strict_binary_ingest_gate, strict_image_ingest_gate
 from src.app.services.image_intake import sanitize_image
 from src.app.routers.support_complaints import _normalize_ocr_and_detect, _probe_redirect_chain
 from src.app.security import linked_artifact_analysis
@@ -552,11 +552,33 @@ async def triage(
     if not raw_content:
         raise HTTPException(status_code=400, detail="empty_image")
     original_content = raw_content
-    raw_content, mime, name, document_text = _normalize_requirement_document(
-        filename=name, content_type=mime, blob=raw_content,
+    original_name = str(name or "upload")
+    original_mime = str(mime or "").lower().split(";", 1)[0].strip()
+    is_requirement_document = (
+        original_mime in {"application/pdf", "text/plain"}
+        or original_name.lower().endswith((".pdf", ".txt"))
     )
     artifact_id = str(artifact_id or uuid.uuid4())
     artifact_sha256 = hashlib.sha256(original_content).hexdigest()
+    if is_requirement_document:
+        document_gate = strict_binary_ingest_gate(
+            filename=original_name, content_type=original_mime,
+            blob=original_content, size_bytes=len(original_content),
+            allowed_mime_override={"application/pdf", "text/plain"},
+        )
+        if bool(document_gate.get("blocked")):
+            raise HTTPException(status_code=400, detail={
+                "error": "ingest_gate_blocked",
+                "message": "Requirements document blocked by strict binary ingest policy.",
+                "ingest_gate": document_gate,
+                "artifact": {
+                    "artifact_id": artifact_id, "sha256": artifact_sha256,
+                    "state": "quarantined", "authority": "blocked",
+                },
+            })
+    raw_content, mime, name, document_text = _normalize_requirement_document(
+        filename=name, content_type=mime, blob=raw_content,
+    )
     gate = strict_image_ingest_gate(
         filename=str(name or "image.jpg"),
         content_type=mime,
@@ -1110,7 +1132,7 @@ async def triage(
             qr_risk_levels = ["malicious"]
         resp["qr_assessment"] = _canonical_qr_assessment(security_signals)
 
-    if not fast:
+    if not fast and not is_requirement_document:
         try:
             from src.app.security.adversarial_image_detector import detect_adversarial
             adv = await _run_bounded_image_work(
@@ -1128,7 +1150,7 @@ async def triage(
             pass
 
     # ── Fix 3: steganography detection ──
-    if not fast:
+    if not fast and not is_requirement_document:
         try:
             from src.app.security.steg_detector import detect_steganography
             steg = await _run_bounded_image_work(
@@ -1517,6 +1539,11 @@ async def triage(
         return "pass"
     inspection_coverage = [
         {"check": "strict_admission", "status": "pass", "authority_effect": "admitted"},
+        {
+            "check": "document_binary_admission",
+            "status": "pass" if is_requirement_document else "not_applicable",
+            "authority_effect": "admitted" if is_requirement_document else "none",
+        },
         {"check": "safe_image_decode", "status": "pass", "authority_effect": "decoded"},
         {"check": "vision_provider", "status": _coverage_status(prefixes=("provider_", "managed_cv_", "identity_")), "authority_effect": artifact_state},
         {
@@ -1530,14 +1557,14 @@ async def triage(
         },
         {
             "check": "adversarial_image",
-            "status": "skipped" if fast else _coverage_status(
+            "status": "not_applicable" if is_requirement_document else "skipped" if fast else _coverage_status(
                 fail=bool(security_signals.get("adversarial_detected")), prefixes=("adversarial_",)
             ),
             "authority_effect": "blocked" if bool(security_signals.get("adversarial_detected")) else "none",
         },
         {
             "check": "steganography",
-            "status": "skipped" if fast else _coverage_status(
+            "status": "not_applicable" if is_requirement_document else "skipped" if fast else _coverage_status(
                 fail=bool(security_signals.get("steg_suspicious")), prefixes=("steg_",)
             ),
             "authority_effect": "blocked" if bool(security_signals.get("steg_suspicious")) else "none",

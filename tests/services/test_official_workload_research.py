@@ -143,6 +143,34 @@ def test_ranking_delta_reports_movement_without_inventing_a_reason() -> None:
     assert {(row["sku"], row["before"], row["after"]) for row in rows} == {
         ("A", 1, 2), ("B", 2, 1),
     }
+    assert all(
+        row["reason"] == "relative order changed after deterministic evidence reduction"
+        for row in rows
+    )
+
+
+def test_ranking_delta_names_only_observed_fit_and_gap_changes() -> None:
+    before = {"shelves": [{"scope_id": "shared", "initial": [{
+        "product": {"sku": "A"}, "fit_status": "conditional",
+        "unknowns": ["operating system"], "meets": [], "misses": [],
+    }, {
+        "product": {"sku": "B"}, "fit_status": "conditional",
+        "unknowns": ["ram"], "meets": [], "misses": [],
+    }], "next_page": []}]}
+    after = {"shelves": [{"scope_id": "shared", "initial": [{
+        "product": {"sku": "B"}, "fit_status": "qualified",
+        "unknowns": [], "meets": ["ram"], "misses": [],
+    }, {
+        "product": {"sku": "A"}, "fit_status": "conditional",
+        "unknowns": ["operating system"], "meets": [], "misses": [],
+    }], "next_page": []}]}
+
+    rows = {row["sku"]: row for row in ranking_delta(before, after)}
+    assert rows["B"]["reason"] == (
+        "fit changed from conditional to qualified; resolved evidence gaps: ram; "
+        "newly evidenced meets: ram"
+    )
+    assert rows["A"]["reason"] == "relative order changed after deterministic evidence reduction"
 
 
 def test_context_only_research_is_not_reported_as_product_requirements(monkeypatch):

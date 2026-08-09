@@ -110,6 +110,18 @@ class ShelfCandidateInput(BaseModel):
         return self
 
 
+class ProductCardExplanation(BaseModel):
+    """Buyer-visible deterministic copy backed only by the reduced fit ledger."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(max_length=700)
+    evidence_basis: Literal["verified_exact", "conditional", "provisional"]
+    budget_note: str | None = Field(default=None, max_length=240)
+    availability_note: str | None = Field(default=None, max_length=240)
+    claim_refs: list[str] = Field(default_factory=list, max_length=128)
+
+
 class ShelfProduct(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -127,6 +139,7 @@ class ShelfProduct(BaseModel):
     misses: list[str] = Field(default_factory=list, max_length=12)
     compromises: list[str] = Field(default_factory=list, max_length=12)
     why_ranked: str = Field(default="Provisional catalog exploration", max_length=500)
+    explanation: ProductCardExplanation | None = None
     requirement_claim_ids: list[str] = Field(default_factory=list, max_length=64)
     capability_claim_ids: list[str] = Field(default_factory=list, max_length=64)
     freshness_status: Literal["fresh", "stale", "unknown", "mixed"] = "unknown"
@@ -197,6 +210,72 @@ def _ordered(products: Sequence[ShelfProduct]) -> list[ShelfProduct]:
             item.price_cents,
             item.identity_key,
         ),
+    )
+
+
+def _card_explanation(
+    decision: WorkloadDecision | None, status: FitStatus,
+) -> ProductCardExplanation:
+    if decision is None:
+        return ProductCardExplanation(
+            summary="This configuration is shown for provisional catalog exploration; no fit ledger has been compiled.",
+            evidence_basis="provisional",
+        )
+    meets = [
+        row.attribute_label for row in decision.fit_ledger
+        if row.verdict in {"meets_minimum", "meets_recommended"}
+    ]
+    gaps = [
+        row.attribute_label for row in decision.fit_ledger
+        if row.verdict in {"unknown", "contested"}
+    ]
+    misses = [
+        row.attribute_label for row in decision.fit_ledger
+        if row.verdict == "below_minimum" and row.requirement_class == "minimum"
+    ]
+    compromises = [
+        row.attribute_label for row in decision.fit_ledger
+        if row.verdict == "below_minimum" and row.requirement_class != "minimum"
+    ]
+    if status == "qualified":
+        summary = (
+            f"Exact-configuration evidence meets {len(meets)} accepted requirement"
+            f"{'s' if len(meets) != 1 else ''}."
+        )
+        evidence_basis: Literal["verified_exact", "conditional", "provisional"] = "verified_exact"
+    else:
+        reasons: list[str] = []
+        if gaps:
+            reasons.append("not verified: " + ", ".join(dict.fromkeys(gaps)))
+        if misses:
+            reasons.append("minimum misses: " + ", ".join(dict.fromkeys(misses)))
+        if compromises:
+            reasons.append("recommended compromises: " + ", ".join(dict.fromkeys(compromises)))
+        summary = "Conditional fit because " + "; ".join(reasons) + "." if reasons else (
+            "Conditional fit because the accepted scope or exact-configuration evidence is incomplete."
+        )
+        evidence_basis = "conditional"
+    budget_note = (
+        "Outside the buyer's stated budget ceiling."
+        if decision.budget_status == "over" else
+        "Within the buyer's stated budget ceiling."
+        if decision.budget_status == "within" else None
+    )
+    availability_note = (
+        "Fresh availability evidence reports this configuration available."
+        if decision.availability_status == "available" else
+        "Fresh availability evidence reports this configuration unavailable."
+        if decision.availability_status == "unavailable" else
+        "Current availability is not verified."
+    )
+    claim_refs = list(dict.fromkeys(
+        claim_id for row in decision.fit_ledger
+        for claim_id in [*row.requirement_claim_ids, *row.capability_claim_ids]
+    ))
+    return ProductCardExplanation(
+        summary=summary, evidence_basis=evidence_basis,
+        budget_note=budget_note, availability_note=availability_note,
+        claim_refs=claim_refs,
     )
 
 
@@ -273,6 +352,7 @@ def build_product_shelves(
                     )
                 )
                 continue
+            explanation = _card_explanation(decision, status)
             eligible.append(
                 ShelfProduct(
                     identity_key=identity_key,
@@ -309,12 +389,8 @@ def build_product_shelves(
                          and row.requirement_class != "minimum"]
                         if decision else []
                     ),
-                    why_ranked=(
-                        "Verified evidence satisfies the accepted requirements for this shelf."
-                        if decision and status == "qualified"
-                        else "This option remains conditional because exact evidence is incomplete or contested."
-                        if decision else "No product fit ledger has been compiled for this option."
-                    ),
+                    why_ranked=explanation.summary,
+                    explanation=explanation,
                     requirement_claim_ids=(
                         list(dict.fromkeys(
                             claim_id for row in decision.fit_ledger

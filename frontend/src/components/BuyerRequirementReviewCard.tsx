@@ -33,6 +33,7 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
     ]),
   ));
   const [busy, setBusy] = React.useState(false);
+  const [completed, setCompleted] = React.useState(false);
   const [status, setStatus] = React.useState('');
   if (!Array.isArray(claims) || claims.length === 0) return null;
   const accept = async (choice: 'local_only' | 'research_and_corroborate') => {
@@ -58,6 +59,7 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
         }];
       });
       await onAccept([...selected], choice, corrections);
+      setCompleted(true);
       setStatus(choice === 'local_only' ? 'Accepted for provisional browsing.' : 'Accepted; approved-source research requested.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not accept these requirements.');
@@ -116,10 +118,10 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
       </div>
       {onAccept && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-          <button type="button" disabled={busy || selected.size === 0} onClick={() => { void accept('local_only'); }}>
+          <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('local_only'); }}>
             Use provisionally
           </button>
-          <button type="button" disabled={busy || selected.size === 0} onClick={() => { void accept('research_and_corroborate'); }}>
+          <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('research_and_corroborate'); }}>
             Research and corroborate
           </button>
         </div>

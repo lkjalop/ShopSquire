@@ -837,6 +837,42 @@ def positions(projection: dict[str, Any]) -> dict[str, int]:
 
 def ranking_delta(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
     old, new = positions(before), positions(after)
+    def indexed(projection: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for shelf in projection.get("shelves") or []:
+            if str(shelf.get("scope_id") or shelf.get("shelf_id") or "") != "shared":
+                continue
+            for product in [*(shelf.get("initial") or []), *(shelf.get("next_page") or [])]:
+                sku = str((product.get("product") or {}).get("sku") or "")
+                if sku and sku not in result:
+                    result[sku] = product
+        return result
+
+    old_products, new_products = indexed(before), indexed(after)
+
+    def reason_for(sku: str) -> str:
+        previous, current = old_products.get(sku), new_products.get(sku)
+        if previous is None:
+            return "entered the shared shortlist after accepted official evidence was compiled"
+        if current is None:
+            return "left the shared shortlist after accepted official evidence was compiled"
+        reasons: list[str] = []
+        if previous.get("fit_status") != current.get("fit_status"):
+            reasons.append(
+                f"fit changed from {previous.get('fit_status') or 'unknown'} "
+                f"to {current.get('fit_status') or 'unknown'}"
+            )
+        resolved = sorted(set(previous.get("unknowns") or []) - set(current.get("unknowns") or []))
+        if resolved:
+            reasons.append("resolved evidence gaps: " + ", ".join(resolved))
+        added_meets = sorted(set(current.get("meets") or []) - set(previous.get("meets") or []))
+        if added_meets:
+            reasons.append("newly evidenced meets: " + ", ".join(added_meets))
+        added_misses = sorted(set(current.get("misses") or []) - set(previous.get("misses") or []))
+        if added_misses:
+            reasons.append("newly verified minimum misses: " + ", ".join(added_misses))
+        return "; ".join(reasons) or "relative order changed after deterministic evidence reduction"
+
     rows = []
     for sku in sorted(set(old) | set(new)):
         if old.get(sku) == new.get(sku):
@@ -844,7 +880,7 @@ def ranking_delta(before: dict[str, Any], after: dict[str, Any]) -> list[dict[st
         rows.append({
             "sku": sku, "before": old.get(sku), "after": new.get(sku),
             "movement": (old.get(sku) or 999) - (new.get(sku) or 999),
-            "reason": "official evidence changed verified fit, gaps, or operating-system compatibility",
+            "reason": reason_for(sku),
         })
     return sorted(rows, key=lambda row: (-abs(row["movement"]), row["sku"]))
 

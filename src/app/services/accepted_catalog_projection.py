@@ -273,8 +273,18 @@ def _decision(
 
 
 def _configuration_freshness(
-    row: ProductConfiguration, *, now: datetime,
+    row: ProductConfiguration,
+    availability: Sequence[ProductAvailabilityObservation],
+    *,
+    now: datetime,
 ) -> EvidenceFreshnessProjection:
+    availability_times = [
+        parsed for item in availability
+        if (parsed := _as_utc(item.observed_at)) is not None
+    ]
+    latest_availability = max(availability_times) if availability_times else _as_utc(
+        row.availability_observed_at,
+    )
     return EvidenceFreshnessProjection(
         specification=_freshness(
             row.specification_observed_at, now=now,
@@ -292,12 +302,11 @@ def _configuration_freshness(
             if _as_utc(row.price_observed_at) else None
         ),
         availability=_freshness(
-            row.availability_observed_at, now=now,
+            latest_availability, now=now,
             max_age_hours=_FRESHNESS_HOURS["availability"],
         ),
         availability_observed_at=(
-            _as_utc(row.availability_observed_at).isoformat()
-            if _as_utc(row.availability_observed_at) else None
+            latest_availability.isoformat() if latest_availability else None
         ),
     )
 
@@ -444,7 +453,9 @@ def project_accepted_catalog(
             product=identity, title=row.title, price_cents=row.price_cents,
             relevance_score=_weighted_relevance(decisions["shared"]),
             fit_by_scope=decisions,
-            evidence_freshness=_configuration_freshness(row, now=observed_now),
+            evidence_freshness=_configuration_freshness(
+                row, availability_by_configuration[row.id], now=observed_now,
+            ),
             availability=availability,
         ))
     return build_product_shelves(

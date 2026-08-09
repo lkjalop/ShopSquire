@@ -91,6 +91,12 @@ def test_exact_observations_supply_claim_refs_independent_freshness_and_location
     shared = next(row for row in projection.shelves if row.scope_id == "shared")
     titan = next(row for row in [*shared.initial, *shared.next_page] if row.product.sku == "SCORP-126982")
     assert titan.fit_status == "qualified"
+    assert titan.explanation is not None
+    assert titan.explanation.evidence_basis == "verified_exact"
+    assert "Exact-configuration evidence meets 1 accepted requirement" in titan.explanation.summary
+    assert titan.explanation.availability_note == (
+        "Fresh availability evidence reports this configuration available."
+    )
     assert titan.requirement_claim_ids == ["official-ram"]
     assert titan.capability_claim_ids
     assert titan.evidence_freshness.specification == "fresh"
@@ -123,6 +129,9 @@ def test_conflicting_exact_configuration_observations_remain_contested():
     shared = next(row for row in projection.shelves if row.scope_id == "shared")
     zephyr = next(row for row in [*shared.initial, *shared.next_page] if row.product.sku == "JW-818845")
     assert zephyr.fit_status == "conditional"
+    assert zephyr.explanation is not None
+    assert "not verified: cpu model" in zephyr.explanation.summary
+    assert zephyr.explanation.claim_refs
     assert "cpu model" in zephyr.unknowns
     assert "cpu model" not in zephyr.misses
     assert len(zephyr.capability_claim_ids) == 2

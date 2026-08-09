@@ -43,6 +43,9 @@ import InlineMessageText from './components/InlineMessageText';
 import BuyerRequirementReviewCard, {
   type BuyerRequirementClaim,
 } from './components/BuyerRequirementReviewCard';
+import BuyerClaimReconciliationCard, {
+  type BuyerClaimReconciliation,
+} from './components/BuyerClaimReconciliationCard';
 import ProductShelvesPanel, { type ProductShelfProjection } from './components/ProductShelvesPanel';
 import AmbiguityExplorationPanel, { type AmbiguityExploration } from './components/AmbiguityExplorationPanel';
 import {
@@ -126,6 +129,7 @@ type ChatMessage = {
     proposal_id: string;
     proposal_version: number;
   };
+  buyerClaimReconciliation?: BuyerClaimReconciliation[];
 };
 type PendingImageContext = {
   labels: string[];
@@ -2748,6 +2752,8 @@ export default function App() {
             : 'I accepted those as provisional constraints and completed approved-source corroboration in the same case. Remaining unknowns stay conditional.'
         : 'I accepted those as provisional constraints and reranked the local catalog without calling an external provider.',
       timestamp: new Date(),
+      buyerClaimReconciliation: Array.isArray(payload?.buyer_claim_reconciliation)
+        ? payload.buyer_claim_reconciliation as BuyerClaimReconciliation[] : undefined,
     }]);
   }, [uid, traceId, switchRightPanelMode]);
 
@@ -3283,6 +3289,9 @@ export default function App() {
                           ? (claimIds, choice, corrections) => acceptBuyerRequirementProposal(msg, claimIds, choice, corrections)
                           : undefined}
                       />
+                    )}
+                    {msg.buyerClaimReconciliation && (
+                      <BuyerClaimReconciliationCard rows={msg.buyerClaimReconciliation} />
                     )}
                     {msg.cartPlanStatus && (
                       <div style={{ marginTop: 8, fontSize: 12, color: '#92400e' }}>{msg.cartPlanStatus}</div>

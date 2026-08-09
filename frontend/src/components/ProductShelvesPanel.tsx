@@ -14,6 +14,13 @@ type ShelfProduct = {
   misses?: string[];
   compromises?: string[];
   why_ranked?: string;
+  explanation?: {
+    summary: string;
+    evidence_basis: 'verified_exact' | 'conditional' | 'provisional';
+    budget_note?: string | null;
+    availability_note?: string | null;
+    claim_refs?: string[];
+  } | null;
   freshness_status?: string;
   evidence_freshness?: {
     specification: string; specification_observed_at?: string | null;
@@ -112,6 +119,8 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
             <div style={{ marginTop: 4, fontSize: 11 }}>Fit: {item.fit_status}</div>
             <div style={{ fontSize: 11 }}>MPN: {item.product.identifier || 'unknown'}</div>
             <div style={{ marginTop: 5, fontSize: 11 }}>{item.why_ranked || 'Provisional catalog exploration.'}</div>
+            {item.explanation?.budget_note ? <div style={{ fontSize: 11 }}>{item.explanation.budget_note}</div> : null}
+            {item.explanation?.availability_note ? <div style={{ fontSize: 11 }}>{item.explanation.availability_note}</div> : null}
             {item.meets?.length ? <div style={{ fontSize: 11 }}>Meets: {item.meets.join(', ')}</div> : null}
             {item.conditional?.length ? <div style={{ fontSize: 11 }}>Conditional: {item.conditional.join(', ')}</div> : null}
             {item.unknowns?.length ? <div style={{ fontSize: 11 }}>Unknown: {item.unknowns.join(', ')}</div> : null}
