@@ -460,9 +460,10 @@ export async function undoCartClear(uid: string) {
   return j;
 }
 
-export async function clearCart(uid: string) {
+export async function clearCart(uid: string, sessionEpoch?: string) {
   const u = new URL(apiUrl('/api/v1/cart/clear'), window.location.href);
   u.searchParams.set('uid', uid || 'demo-user');
+  if (sessionEpoch) u.searchParams.set('session_epoch', sessionEpoch);
   const r = await fetch(u.toString(), {
     method: 'POST',
     credentials: 'include',
@@ -476,7 +477,7 @@ export async function clearCart(uid: string) {
 // V2 cart lane (C1/C2): apply a CONFIRM-tier mutation plan the assistant proposed. The backend
 // is idempotent (a double-submit returns already_applied) and stale-guarded (a cart that changed
 // since the proposal returns stale_cart) — every outcome is an honest 200-level status.
-export async function applyCartMutation(planId: string, uid: string, tenantId?: string) {
+export async function applyCartMutation(planId: string, uid: string, tenantId?: string, sessionEpoch?: string) {
   // tenant travels in the X-Tenant-Id HEADER (app-wide convention), never the body (review-6 #5).
   const headers: Record<string, string> = { ...authHeaders({}, true) };
   if (tenantId) headers['X-Tenant-Id'] = tenantId;
@@ -484,7 +485,10 @@ export async function applyCartMutation(planId: string, uid: string, tenantId?: 
     method: 'POST',
     credentials: 'include',
     headers,
-    body: JSON.stringify({ uid: uid || 'demo-user' }),
+    body: JSON.stringify({
+      uid: uid || 'demo-user',
+      session_epoch: sessionEpoch || undefined,
+    }),
   });
   const j = await safeJson(r);
   if (!r.ok || !j) {
@@ -492,5 +496,19 @@ export async function applyCartMutation(planId: string, uid: string, tenantId?: 
     const msg = typeof d === 'string' ? d : (d && (d.error || JSON.stringify(d))) || `cart_mutation_apply_failed (${r.status})`;
     throw new Error(msg);
   }
-  return j as { status: string; applied?: { action: string; sku?: string; skus?: string[]; quantity?: number }[]; cart?: any; error?: any };
+  return j as { status: string; current_status?: string; applied?: { action: string; sku?: string; skus?: string[]; quantity?: number }[]; cart?: any; error?: any };
+}
+
+export async function rejectCartMutation(planId: string, uid: string, tenantId?: string) {
+  const headers: Record<string, string> = { ...authHeaders({}, true) };
+  if (tenantId) headers['X-Tenant-Id'] = tenantId;
+  const r = await fetch(apiUrl(`/api/v1/cart/mutations/${encodeURIComponent(planId)}/reject`), {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({ uid: uid || 'demo-user' }),
+  });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error(`cart_mutation_reject_failed (${r.status})`);
+  return j as { status: string; current_status?: string };
 }
