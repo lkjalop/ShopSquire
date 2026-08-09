@@ -23,6 +23,7 @@ import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
 import { nonRecommendationOutcome } from './lib/chatOutcome';
+import { selectProportionateAlternatives } from './lib/proportionateAlternatives';
 import { isActionableBuyerQuestion } from './lib/buyerQuestion';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
@@ -2903,6 +2904,7 @@ export default function App() {
         selectionKey: `portfolio-select-${crypto.randomUUID()}`,
         confirmationKey: `portfolio-confirm-${crypto.randomUUID()}`,
         status: 'review',
+        proportionateAlternatives: selectProportionateAlternatives(item, alternatives),
       });
       return;
     }

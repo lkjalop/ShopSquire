@@ -39,6 +39,7 @@ export type SupplierContinuation = {
   confirmationKey: string;
   status?: 'review' | 'selecting' | 'offers' | 'confirming' | 'applied';
   error?: string;
+  proportionateAlternatives?: import('../lib/proportionateAlternatives').ProportionateAlternative[];
 };
 
 const actionStyle = {
@@ -108,6 +109,26 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
           <div>Purchase authority: unchanged</div>
         </div>
       )}
+      {commercialReview.length > 0 && journey.proportionateAlternatives?.length ? (
+        <section data-testid="proportionate-alternatives" style={{ marginTop: 9 }}>
+          <strong>Commercially proportionate alternatives</strong>
+          <div style={{ fontSize: 12, marginTop: 2 }}>
+            The preferred technical fit remains selected. These options reduce unit cost by at least 20% without a verified minimum failure.
+          </div>
+          <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+            {journey.proportionateAlternatives.map((alternative) => (
+              <div key={alternative.sku} style={{ border: '1px solid #fed7aa', borderRadius: 7, background: '#fff', padding: 7 }}>
+                <strong>{alternative.title}</strong>
+                <div style={{ fontSize: 12 }}>
+                  {new Intl.NumberFormat('en-AU', { style: 'currency', currency: alternative.currency, maximumFractionDigits: 0 }).format(alternative.priceCents / 100)}
+                  {' · '}{alternative.savingsPercent}% lower ({new Intl.NumberFormat('en-AU', { style: 'currency', currency: alternative.currency, maximumFractionDigits: 0 }).format(alternative.savingsCents / 100)} saved per unit)
+                </div>
+                <div style={{ fontSize: 11 }}>{alternative.compromise}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <div style={{ fontSize: 12, marginTop: 4 }}>
         {journey.availableNow == null
           ? 'Verified numeric availability is unknown.'

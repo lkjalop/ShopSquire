@@ -111,6 +111,12 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (product
     <section data-testid={`product-shelf-${shelf.shelf_id}`} style={{ marginBottom: 16 }}>
       <h3 style={{ margin: '0 0 3px', fontSize: 15 }}>{shelf.scope_label}</h3>
       <div style={{ fontSize: 12, marginBottom: 7 }}>{band}</div>
+      <div data-testid={`shelf-summary-${shelf.shelf_id}`} style={{ fontSize: 12, marginBottom: 7, color: '#475569' }}>
+        {shelf.initial.length} leading option{shelf.initial.length === 1 ? '' : 's'} ranked for this scope;{' '}
+        {shelf.initial.filter((item) => item.fit_status === 'qualified').length
+          ? `${shelf.initial.filter((item) => item.fit_status === 'qualified').length} have verified exact-configuration fit.`
+          : 'all remain conditional where exact evidence or accepted requirements are incomplete.'}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 7 }}>
         {products.map((item) => (
           <article key={item.identity_key} style={{ border: '1px solid #cbd5e1', borderRadius: 8, padding: 8 }}>

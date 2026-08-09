@@ -82,6 +82,7 @@ describe('research truth panels', () => {
     }} />);
 
     expect(screen.getByText(/Minimum misses: hardware virtualization/i)).toBeTruthy();
+    expect(screen.getByTestId('shelf-summary-shared')).toHaveTextContent(/all remain conditional/i);
     expect(screen.getByText(/Recommendation compromises: gpu vram gb/i)).toBeTruthy();
     expect(screen.getByText(/specification fresh.*price stale.*availability fresh/i)).toBeTruthy();
     expect(screen.getByText(/sydney in_stock \(12\)/i)).toBeTruthy();

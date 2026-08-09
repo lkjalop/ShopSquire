@@ -15,7 +15,11 @@ describe('SupplierContinuationCard', () => {
       revision: 1, selectedOfferId: 'offer-sub', status: 'offers', offers: [
         { offer_id: 'offer-no', offered_sku: 'PREFERRED', relationship: 'exact', quantity_available: 0 },
         { offer_id: 'offer-sub', offered_sku: 'SUBSTITUTE', relationship: 'compatible_substitute', quantity_available: 30, lead_time_days: 2, provenance: { supplier_reference: 'fixture-b' } },
-      ],
+      ], proportionateAlternatives: [{
+        sku: 'VALUE', title: 'Value laptop', priceCents: 699_900, currency: 'AUD',
+        savingsCents: 200_000, savingsPercent: 22, fitStatus: 'conditional',
+        compromise: 'Trade-off or unverified area: warranty.',
+      }],
     }} onAssess={vi.fn()} onSelectChoice={vi.fn()} onSelectOffer={vi.fn()}
       onConfirm={confirm} onDismiss={vi.fn()} />);
 
@@ -25,6 +29,8 @@ describe('SupplierContinuationCard', () => {
     expect(commercialReview).toHaveTextContent(/quantity is over 10 and unit price is at least AUD 4,000/i);
     expect(commercialReview).toHaveTextContent(/portfolio enforcement: advisory only/i);
     expect(commercialReview).toHaveTextContent(/purchase authority: unchanged/i);
+    expect(screen.getByTestId('proportionate-alternatives')).toHaveTextContent(/preferred technical fit remains selected/i);
+    expect(screen.getByTestId('proportionate-alternatives')).toHaveTextContent(/22% lower/i);
     expect(screen.getByText(/unable to fulfil/i)).toBeTruthy();
     expect(screen.getByTestId('real-supplier-locked')).toHaveTextContent(/human RFQ preview/i);
     fireEvent.click(screen.getByRole('button', { name: /confirm exact cart change/i }));
