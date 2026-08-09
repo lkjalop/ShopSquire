@@ -5,6 +5,16 @@ type Props = {
 
 const words = (value: unknown) => String(value || 'not recorded').replace(/[_-]+/g, ' ');
 
+const isOfficialResearchEvent = (event: any) => {
+  const payload = event?.payload || {};
+  if (Array.isArray(payload.evidence_ladder) && payload.evidence_ladder.length > 0) return true;
+  return [event?.event_type, payload?._original_event_type, payload?._event_type].some((value) => {
+    const eventType = String(value || '').toLowerCase();
+    return eventType.includes('official_research_rerank_completed')
+      || eventType.includes('buyer_evidence_source_researched');
+  });
+};
+
 const RequirementRows = ({ title, value }: { title: string; value: any }) => {
   const rows = value && typeof value === 'object' ? Object.entries(value) : [];
   if (!rows.length) return null;
@@ -39,10 +49,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const semanticAuthorization = executionSteps.find((step) => step?.id === 'semantic-authorization') || {};
   const materialClarification = executionSteps.find((step) => step?.id === 'material-clarification') || {};
   const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
-  const officialResearch = [...events].reverse().find((event) => (
-    String(event?.event_type || event?.payload?._original_event_type || '').toLowerCase()
-      .includes('official_research_rerank_completed')
-  ))?.payload || {};
+  const officialResearch = [...events].reverse().find(isOfficialResearchEvent)?.payload || {};
   const evidenceLadder = Array.isArray(officialResearch?.evidence_ladder)
     ? officialResearch.evidence_ladder : [];
   const evidenceOutput = evidence?.output || {};

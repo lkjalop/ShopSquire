@@ -32,4 +32,12 @@ test('buyer checks an official URL locally then explicitly authorizes canonical 
   await expect(page.getByText(/fetched the reviewed canonical publisher page/i)).toBeVisible({ timeout: 60_000 });
   await expect(panel).toContainText(/Status: Researched|Status: Context researched|Status: Research completed/i);
   await expect(page.getByText(/no cart or supplier action was authorized/i)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Decision Trace' }).click();
+  const trace = page.getByTestId('decision-trace-modal');
+  await expect(trace).toBeVisible();
+  await trace.getByRole('button', { name: 'Research & Fit' }).click();
+  await expect(trace).not.toContainText(/No governed workload research record was produced/i);
+  await expect(trace.getByTestId('governed-evidence-ladder')).toBeVisible();
+  await expect(trace.getByTestId('governed-evidence-ladder')).toContainText(/canonical origin/i);
 });

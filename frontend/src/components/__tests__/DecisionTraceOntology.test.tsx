@@ -163,6 +163,26 @@ describe('Decision Trace component ontology', () => {
     expect(strip.uncertainty.label).toBe('Material');
   });
 
+  it('uses the retained original research event name after taxonomy normalization', () => {
+    const strip = deriveTraceTrustStrip({
+      nowMs: Date.parse('2026-08-09T00:00:00Z'),
+      events: [{
+        event_type: 'feedback_loop',
+        payload: {
+          _original_event_type: 'official_research_rerank_completed',
+          evidence_outcome: 'context_only', official_claims: [],
+          context_claims: [{ observed_at: '2026-08-08T23:00:00Z' }],
+          evidence_ladder: [{ tier: 6, execution_status: 'activated' }],
+        },
+      }],
+      executionSteps: [], evidence: null, marketProjections: [], hippographInsights: [],
+    });
+
+    expect(strip.freshness.label).toBe('Current');
+    expect(strip.completeness.label).toBe('Partial');
+    expect(strip.uncertainty.label).toBe('Material');
+  });
+
   it('uses nested official claim observations for freshness', () => {
     const strip = deriveTraceTrustStrip({
       nowMs: Date.parse('2026-08-09T00:00:00Z'),

@@ -34,6 +34,38 @@ describe('WorkloadResearchTrace', () => {
     expect(ladder).toHaveTextContent(/infrastructure failure is not an evidence conclusion/i);
   });
 
+  it('finds governed research after trace taxonomy normalizes the event type', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[{
+      event_type: 'feedback_loop',
+      payload: {
+        _original_event_type: 'official_research_rerank_completed',
+        evidence_ladder: [
+          { tier: 0, mechanism: 'evidence_cache', execution_status: 'completed', billing_class: 'free' },
+          { tier: 1, mechanism: 'enrolled_canonical_origin', execution_status: 'completed', billing_class: 'free' },
+        ],
+      },
+    }]} />);
+
+    expect(screen.getByTestId('governed-evidence-ladder')).toHaveTextContent(/Tier 0: evidence cache/i);
+    expect(screen.getByTestId('governed-evidence-ladder')).toHaveTextContent(/Tier 1: enrolled canonical origin/i);
+    expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
+  });
+
+  it('finds canonical research initiated from a buyer-provided official source', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[{
+      event_type: 'feedback_loop',
+      payload: {
+        _original_event_type: 'buyer_evidence_source_researched',
+        evidence_ladder: [
+          { tier: 1, mechanism: 'enrolled_canonical_origin', execution_status: 'completed', billing_class: 'free' },
+        ],
+      },
+    }]} />);
+
+    expect(screen.getByTestId('governed-evidence-ladder')).toHaveTextContent(/enrolled canonical origin/i);
+    expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
+  });
+
   it('shows an unresolved provider search without fabricating evidence', () => {
     render(<WorkloadResearchTrace executionSteps={[
       {

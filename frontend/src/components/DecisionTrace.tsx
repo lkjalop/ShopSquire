@@ -320,10 +320,15 @@ export function deriveTraceTrustStrip({
   marketProjections?: any[];
   hippographInsights?: any[];
 }): TraceTrustStrip {
-  const officialResearchEvents = (events || []).filter((event) => (
-    String(event?.event_type || event?.payload?._original_event_type || '').toLowerCase()
-      .includes('official_research_rerank_completed')
-  ));
+  const officialResearchEvents = (events || []).filter((event) => {
+    const payload = event?.payload || {};
+    if (Array.isArray(payload.evidence_ladder) && payload.evidence_ladder.length > 0) return true;
+    return [event?.event_type, payload?._original_event_type, payload?._event_type].some((value) => {
+      const eventType = String(value || '').toLowerCase();
+      return eventType.includes('official_research_rerank_completed')
+        || eventType.includes('buyer_evidence_source_researched');
+    });
+  });
   const officialClaims = officialResearchEvents.flatMap((event) => [
     ...(Array.isArray(event?.payload?.official_claims) ? event.payload.official_claims : []),
     ...(Array.isArray(event?.payload?.context_claims) ? event.payload.context_claims : []),

@@ -1,5 +1,10 @@
 import { useState } from 'react';
 
+const secondaryActionStyle = {
+  background: '#fff', color: '#c2410c', border: '1px solid #f15a0a',
+  borderRadius: 6, padding: '7px 11px', fontWeight: 700,
+} as const;
+
 export type AmbiguityExploration = {
   schema_version: 'ambiguity-exploration-v1';
   case_id?: string;
@@ -90,11 +95,11 @@ export default function AmbiguityExplorationPanel({
         {exploration.status === 'provisional' && (
           <button type="button" onClick={onResearch} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Research approved sources</button>
         )}
-        <button type="button" onClick={onUpload} style={{ background: '#fff', color: '#173b64', border: '1px solid #173b64', borderRadius: 6, padding: '7px 11px' }}>Upload requirements</button>
+        <button type="button" onClick={onUpload} style={secondaryActionStyle}>Upload requirements</button>
         {onResolveEvidenceSource && (
-          <button type="button" onClick={() => setShowSourceResolver((value) => !value)} style={{ background: '#fff', color: '#173b64', border: '1px solid #173b64', borderRadius: 6, padding: '7px 11px' }}>Use official link or vendor</button>
+          <button type="button" onClick={() => setShowSourceResolver((value) => !value)} style={secondaryActionStyle}>Use official link or vendor</button>
         )}
-        <button type="button" onClick={onEnterSpecifications} style={{ background: '#fff', color: '#173b64', border: '1px solid #173b64', borderRadius: 6, padding: '7px 11px' }}>Enter specifications</button>
+        <button type="button" onClick={onEnterSpecifications} style={secondaryActionStyle}>Enter specifications</button>
         <span style={{ fontSize: 12, alignSelf: 'center' }}>Continue provisionally below</span>
       </div>
       {showSourceResolver && onResolveEvidenceSource && (
@@ -113,7 +118,7 @@ export default function AmbiguityExplorationPanel({
               placeholder="https://docs.vendor.example/... or Autodesk"
               style={{ flex: '1 1 300px', minWidth: 220, padding: 7, border: '1px solid #94a3b8', borderRadius: 6 }}
             />
-            <button type="button" disabled={sourceBusy || !sourceHint.trim()} onClick={() => { void resolveSource(false); }}>
+            <button type="button" disabled={sourceBusy || !sourceHint.trim()} onClick={() => { void resolveSource(false); }} style={secondaryActionStyle}>
               Check source
             </button>
           </div>

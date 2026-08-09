@@ -52,6 +52,11 @@ const money = (value: number, currency: string) => new Intl.NumberFormat('en-AU'
   style: 'currency', currency: currency || 'AUD', maximumFractionDigits: 0,
 }).format(value / 100);
 
+const secondaryCommerceStyle = {
+  background: '#fff', color: '#c2410c', border: '1px solid #f15a0a',
+  borderRadius: 6, padding: '6px 9px', fontWeight: 700,
+} as const;
+
 export default function ProductShelvesPanel({ projection, onPropose }: {
   projection: ProductShelfProjection;
   onPropose?: (sku: string, quantity: number) => void;
@@ -138,7 +143,7 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
                   }))}
                   style={{ width: 58 }}
                 />
-                <button type="button" onClick={() => onPropose?.(item.product.sku, quantities[item.product.sku] || 1)} style={{ background: item.fit_status === 'qualified' ? '#f15a0a' : '#fff', color: item.fit_status === 'qualified' ? '#fff' : '#173b64', border: `1px solid ${item.fit_status === 'qualified' ? '#f15a0a' : '#173b64'}`, borderRadius: 6, padding: '6px 9px' }}>
+                <button type="button" onClick={() => onPropose?.(item.product.sku, quantities[item.product.sku] || 1)} style={item.fit_status === 'qualified' ? { ...secondaryCommerceStyle, background: '#f15a0a', color: '#fff' } : secondaryCommerceStyle}>
                   {item.fit_status === 'qualified' ? 'Propose cart change' : 'Review option'}
                 </button>
               </div>
@@ -147,7 +152,7 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (sku: st
         ))}
       </div>
       {!expanded && shelf.next_page.length > 0 && (
-        <button type="button" style={{ marginTop: 8, background: 'transparent', color: '#173b64', border: '1px solid #94a3b8', borderRadius: 6, padding: '5px 9px' }} onClick={() => setExpanded(true)}>
+        <button type="button" style={{ ...secondaryCommerceStyle, marginTop: 8, padding: '5px 9px' }} onClick={() => setExpanded(true)}>
           + Show next {shelf.next_page.length}
         </button>
       )}

@@ -27,6 +27,9 @@ describe('research truth panels', () => {
     expect(screen.getByText(/no authoritative product requirements/i)).toBeTruthy();
     expect(screen.getByText(/Which named simulator/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Research approved sources' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Upload requirements' })).toHaveStyle({
+      background: '#fff', color: '#c2410c', border: '1px solid #f15a0a',
+    });
   });
 
   it('keeps context-only shelves provisional and labels conditional actions for review', () => {
@@ -49,7 +52,9 @@ describe('research truth panels', () => {
 
     expect(screen.getByText(/no authoritative product requirements/i)).toBeTruthy();
     expect(screen.getByText(/did not authorize a verified rerank/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Review option' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Review option' })).toHaveStyle({
+      background: '#fff', color: '#c2410c', border: '1px solid #f15a0a',
+    });
     expect(screen.queryByRole('button', { name: 'Propose cart change' })).toBeNull();
   });
 
