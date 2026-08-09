@@ -288,6 +288,7 @@ def test_live_research_is_case_scoped_and_never_authorizes_commerce(monkeypatch)
     assert payload["research"]["claims"][0]["authority_status"] == "verified_official"
     assert payload["evidence_outcome"] == "product_requirements"
     assert payload["ambiguity_exploration"]["status"] == "researched"
+    assert payload["ambiguity_exploration"]["execution"] == "live_official_research_completed"
     assert next(
         row for row in payload["ambiguity_exploration"]["research_obligations"]
         if row["obligation_id"] == "official_requirements"
@@ -342,7 +343,10 @@ def test_context_only_research_keeps_fit_provisional_and_blocks_silent_repeat(mo
             }],
             "unresolved": [{"source_id": None, "reason": "no_product_requirement_claims"}],
             "receipts": [], "source_ids": ["nist_manufacturing_digital_twins"],
-            "provider_accounting": {"external_calls": 2, "paid_calls": 0},
+            "provider_accounting": {
+                "external_calls": 0, "cache_hits": 1, "paid_calls": 0,
+            },
+            "execution_mode": "evidence_cache",
             "evidence_outcome": "context_only",
         }
 
@@ -362,6 +366,7 @@ def test_context_only_research_keeps_fit_provisional_and_blocks_silent_repeat(mo
     assert payload["evidence_outcome"] == "context_only"
     assert payload["product_shelves"]["evidence_status"] == "context_only"
     assert payload["ambiguity_exploration"]["status"] == "context_only"
+    assert payload["ambiguity_exploration"]["execution"] == "governed_evidence_cache_hit"
     assert payload["ambiguity_exploration"]["decision"] == "provisional_exploration_only"
     obligations = {
         row["obligation_id"]: row["status"]

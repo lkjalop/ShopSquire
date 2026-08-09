@@ -1035,6 +1035,21 @@ def research_shopping_case(
         "official_claim_count": len(research["claims"]),
         "context_claim_count": len(research["context_claims"]),
     })
+    research_execution_mode = str(research.get("execution_mode") or "").strip().lower()
+    provider_accounting = research.get("provider_accounting") or {}
+    if research_execution_mode == "evidence_cache" or (
+        int(provider_accounting.get("cache_hits") or 0) > 0
+        and int(provider_accounting.get("external_calls") or 0) == 0
+    ):
+        research_execution = "governed_evidence_cache_hit"
+    elif research_execution_mode == "live_network" or int(
+        provider_accounting.get("external_calls") or 0
+    ) > 0:
+        research_execution = "live_official_research_completed"
+    elif research_execution_mode == "not_executed":
+        research_execution = "official_research_not_executed"
+    else:
+        research_execution = "governed_official_research_completed"
     exploration = {
         "schema_version": "ambiguity-exploration-v1",
         "case_id": case_id, "trace_id": case_id.removeprefix("sc-"),
@@ -1042,7 +1057,7 @@ def research_shopping_case(
         "status": evidence_status,
         "interpretations": [row.model_dump(mode="json") for row in plan.hypotheses],
         "next_question": {"id": "research_scope", "text": plan.next_question},
-        "execution": "live_discovery_and_official_fetch_completed",
+        "execution": research_execution,
         "evidence": (
             "scoped_product_requirements_compiled"
             if evidence_outcome == "product_requirements"
