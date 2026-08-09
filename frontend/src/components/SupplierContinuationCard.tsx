@@ -46,6 +46,24 @@ const actionStyle = {
   background: '#fff', color: '#c2410c', fontWeight: 700, cursor: 'pointer',
 } as const;
 
+const HIGH_VALUE_TOTAL_CENTS = 3_000_000;
+const HIGH_VALUE_QUANTITY = 10;
+const HIGH_VALUE_UNIT_PRICE_CENTS = 400_000;
+
+export function commercialReviewReasons(journey: Pick<SupplierContinuation,
+  'requestedQuantity' | 'unitPriceCents' | 'currency'>): string[] {
+  if ((journey.currency || 'AUD').toUpperCase() !== 'AUD') return [];
+  const reasons: string[] = [];
+  if (journey.unitPriceCents * journey.requestedQuantity >= HIGH_VALUE_TOTAL_CENTS) {
+    reasons.push('Total value is at least AUD 30,000.');
+  }
+  if (journey.requestedQuantity > HIGH_VALUE_QUANTITY
+    && journey.unitPriceCents >= HIGH_VALUE_UNIT_PRICE_CENTS) {
+    reasons.push('Quantity is over 10 and unit price is at least AUD 4,000.');
+  }
+  return reasons;
+}
+
 export default function SupplierContinuationCard({ journey, onAssess, onSelectChoice, onSelectOffer, onConfirm, onDismiss }: {
   journey: SupplierContinuation;
   onAssess: (deadlineDays: number) => void;
@@ -59,6 +77,7 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
   const chosenOffer = journey.offers?.find((offer) => offer.offer_id === journey.selectedOfferId);
   const needsOffer = ['supplier_enquiry', 'substitute', 'next_best_now'].includes(String(journey.selectedChoice));
   const readyToConfirm = Boolean(journey.selectionId && (!needsOffer || chosenOffer));
+  const commercialReview = commercialReviewReasons(journey);
 
   return (
     <section data-testid="supplier-continuation" style={{
@@ -74,9 +93,19 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
           style: 'currency', currency: journey.currency || 'AUD', maximumFractionDigits: 0,
         }).format((journey.unitPriceCents * journey.requestedQuantity) / 100)}
       </div>
-      {journey.unitPriceCents * journey.requestedQuantity >= 5_000_000 && (
-        <div data-testid="high-value-order-warning" style={{ color: '#9a3412', fontSize: 12, marginTop: 3 }}>
-          High-value order — review the quantity, budget and approval path before proceeding.
+      {commercialReview.length > 0 && (
+        <div data-testid="high-value-order-warning" style={{
+          color: '#9a3412', fontSize: 12, marginTop: 6, borderLeft: '3px solid #f15a0a', paddingLeft: 8,
+        }}>
+          <strong>Commercial review</strong>
+          <div>Threshold: triggered</div>
+          <div>Reason:</div>
+          <ul style={{ margin: '2px 0 2px 18px', padding: 0 }}>
+            {commercialReview.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+          <div>Resolution owner: tenant policy / human</div>
+          <div>Portfolio enforcement: advisory only</div>
+          <div>Purchase authority: unchanged</div>
         </div>
       )}
       <div style={{ fontSize: 12, marginTop: 4 }}>

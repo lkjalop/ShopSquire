@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import SupplierContinuationCard from '../SupplierContinuationCard';
+import SupplierContinuationCard, { commercialReviewReasons } from '../SupplierContinuationCard';
 
 describe('SupplierContinuationCard', () => {
   it('shows concise fulfilment truth and keeps provenance in drill-down', () => {
@@ -20,10 +20,26 @@ describe('SupplierContinuationCard', () => {
       onConfirm={confirm} onDismiss={vi.fn()} />);
 
     expect(screen.getByText(/12 verified now · 18 require/i)).toBeTruthy();
-    expect(screen.getByTestId('high-value-order-warning')).toHaveTextContent(/review the quantity/i);
+    const commercialReview = screen.getByTestId('high-value-order-warning');
+    expect(commercialReview).toHaveTextContent(/total value is at least AUD 30,000/i);
+    expect(commercialReview).toHaveTextContent(/quantity is over 10 and unit price is at least AUD 4,000/i);
+    expect(commercialReview).toHaveTextContent(/portfolio enforcement: advisory only/i);
+    expect(commercialReview).toHaveTextContent(/purchase authority: unchanged/i);
     expect(screen.getByText(/unable to fulfil/i)).toBeTruthy();
     expect(screen.getByTestId('real-supplier-locked')).toHaveTextContent(/human RFQ preview/i);
     fireEvent.click(screen.getByRole('button', { name: /confirm exact cart change/i }));
     expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not trigger commercial review below the portfolio thresholds', () => {
+    expect(commercialReviewReasons({
+      requestedQuantity: 5, unitPriceCents: 399_900, currency: 'AUD',
+    })).toEqual([]);
+  });
+
+  it('does not apply AUD thresholds to an unconverted native currency', () => {
+    expect(commercialReviewReasons({
+      requestedQuantity: 30, unitPriceCents: 899_900, currency: 'USD',
+    })).toEqual([]);
   });
 });

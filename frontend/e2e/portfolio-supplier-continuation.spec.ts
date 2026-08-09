@@ -50,7 +50,11 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   await expect(offers).toContainText(/SCORP-126982: unable to fulfil/i);
   await expect(offers).not.toContainText(/proposed substitute/i);
   await offers.getByLabel(/27 × SCORP-126982.*exact configuration/i).check();
-  await expect(continuation.getByTestId('high-value-order-warning')).toContainText(/review the quantity/i);
+  const commercialReview = continuation.getByTestId('high-value-order-warning');
+  await expect(commercialReview).toContainText(/total value is at least AUD 30,000/i);
+  await expect(commercialReview).toContainText(/quantity is over 10 and unit price is at least AUD 4,000/i);
+  await expect(commercialReview).toContainText(/portfolio enforcement: advisory only/i);
+  await expect(commercialReview).toContainText(/purchase authority: unchanged/i);
   await expect(continuation.getByTestId('real-supplier-locked')).toContainText(/explicit send authorization/i);
   if (process.env.PORTFOLIO_SUPPLIER_SCREENSHOT_PATH) {
     await page.setViewportSize({ width: 1920, height: 1080 });
