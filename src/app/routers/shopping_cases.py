@@ -83,6 +83,17 @@ class ResearchShoppingCaseRequest(BaseModel):
     refresh_authorized: bool = False
 
 
+class ResolveBuyerEvidenceSourceRequest(BaseModel):
+    """Resolve one buyer-supplied official source hint inside an active case."""
+
+    model_config = ConfigDict(extra="forbid")
+    uid: str = Field(min_length=1, max_length=200)
+    source_url: str | None = Field(default=None, min_length=8, max_length=2000)
+    vendor_name: str | None = Field(default=None, min_length=2, max_length=200)
+    research_authorized: bool = False
+    refresh_authorized: bool = False
+
+
 class CreateCaseInterpretationRequest(BaseModel):
     """Buyer-authored outcome only; the server owns all research scope."""
 
@@ -734,6 +745,107 @@ def confirm_fulfillment_cart(
         "supplier_offer_provenance": offer.provenance if offer else None,
         "supplier_send": "not_performed", "idempotent_replay": False,
     }
+
+
+@router.post("/{case_id}/evidence-source-resolutions")
+def resolve_case_evidence_source(
+    case_id: str,
+    body: ResolveBuyerEvidenceSourceRequest,
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Resolve, and optionally research, one buyer-provided official-source hint.
+
+    Resolution itself is local and free. Network retrieval only occurs when the
+    buyer explicitly authorizes it, and then only against the registry's
+    reviewed canonical origin. An arbitrary same-domain page never gains
+    authority merely because the buyer pasted it.
+    """
+
+    from src.app.services.buyer_evidence_source_resolution import (
+        resolve_buyer_evidence_source,
+    )
+    from src.app.services.official_source_governance import load_official_source_manifest
+
+    tenant_id = _tenant(x_tenant_id)
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
+    )).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="shopping_case_not_found")
+    if case.uid != body.uid:
+        raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+    sources = list(load_official_source_manifest().get("sources") or [])
+    resolution = resolve_buyer_evidence_source(
+        source_url=body.source_url, vendor_name=body.vendor_name, sources=sources,
+    )
+    base = {
+        "schema_version": "buyer-evidence-source-resolution-v1",
+        "case_id": case_id, "trace_id": case_id.removeprefix("sc-"),
+        "resolution": resolution.model_dump(mode="json"),
+        "research_status": "not_authorized",
+        "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+        "cart_mutation": "not_authorized", "supplier_send": "not_authorized",
+    }
+    if resolution.status != "resolved" or not body.research_authorized:
+        return base
+    if (
+        _case_trace_has_event(
+            db, case_id=case_id, tenant_id=tenant_id,
+            event_type="buyer_evidence_source_researched",
+        )
+        and not body.refresh_authorized
+    ):
+        raise HTTPException(status_code=409, detail={
+            "code": "buyer_evidence_source_already_researched",
+            "message": "This case already researched a buyer-provided source. Explicitly authorize refresh to run it again.",
+        })
+    selected = next(
+        source for source in sources if source.get("source_id") == resolution.selected_source_id
+    )
+    from src.app.services.official_workload_research import (
+        DEFAULT_OFFICIAL_EVIDENCE_CACHE, research_official_sources,
+    )
+
+    research = research_official_sources(
+        case.retained_purpose or "Buyer supplied evidence source",
+        search_url_template="", sources=[selected], tenant_id=tenant_id,
+        evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE,
+    )
+    shelves = project_accepted_catalog(
+        db, accepted_claims=list(research.get("claims") or []),
+        desired_outcome=case.retained_purpose or "Buyer supplied evidence source",
+        tenant_id=tenant_id,
+    ).model_dump(mode="json")
+    evidence_outcome = str(research.get("evidence_outcome") or "unresolved")
+    result = {
+        **base, "research_status": "completed",
+        "provider_accounting": research.get("provider_accounting") or {
+            "external_calls": 0, "paid_calls": 0,
+        },
+        "research": research, "evidence_outcome": evidence_outcome,
+        "product_shelves": shelves,
+    }
+    try:
+        log_trace_event(
+            trace_id=result["trace_id"], event_type="buyer_evidence_source_researched",
+            source_type="stage", source_id="Buyer_Evidence_Source_Resolution",
+            target_type="shopping_case", target_id=case_id,
+            payload={
+                "case_id": case_id, "resolution": result["resolution"],
+                "evidence_outcome": evidence_outcome,
+                "official_claims": research.get("claims") or [],
+                "context_claims": research.get("context_claims") or [],
+                "receipts": research.get("receipts") or [],
+                "evidence_ladder": research.get("evidence_ladder") or [],
+                "provider_accounting": result["provider_accounting"],
+                "cart_authority": "none", "supplier_authority": "none",
+            },
+        )
+    except Exception:
+        # Evidence and cart truth must not depend on optional trace transport.
+        pass
+    return result
 
 
 @router.post("/{case_id}/research")

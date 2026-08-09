@@ -2809,6 +2809,52 @@ export default function App() {
     }
   }, [ambiguityExploration, uid, traceId]);
 
+  const resolveBuyerEvidenceSource = useCallback(async (
+    hint: { source_url?: string; vendor_name?: string },
+    researchAuthorized: boolean,
+  ) => {
+    if (!ambiguityExploration?.case_id) {
+      throw new Error('This exploration is missing its shopping-case identity.');
+    }
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/evidence-source-resolutions`,
+    ), {
+      method: 'POST', credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({ uid, ...hint, research_authorized: researchAuthorized }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(String(payload?.detail?.message || payload?.detail?.code || payload?.detail || 'Evidence-source resolution failed.'));
+    }
+    if (researchAuthorized && payload?.research_status === 'completed') {
+      if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
+        setProductShelves(payload.product_shelves as ProductShelfProjection);
+      }
+      setAmbiguityExploration((current) => current ? {
+        ...current,
+        status: payload?.evidence_outcome === 'product_requirements'
+          ? 'researched' : payload?.evidence_outcome === 'context_only' ? 'context_only' : 'unresolved',
+        execution: 'buyer_authorized_canonical_fetch_completed',
+        evidence: payload?.evidence_outcome || 'unresolved',
+        provider_accounting: payload?.provider_accounting || current.provider_accounting,
+      } : current);
+      setTraceId(normalizeTraceId(payload?.trace_id || traceId));
+      setMessages((current) => [...current, {
+        role: 'assistant',
+        content: payload?.evidence_outcome === 'product_requirements'
+          ? 'I fetched the reviewed canonical publisher page you selected, compiled scoped requirements, and reranked this same case. Unknowns remain visible; no cart or supplier action was authorized.'
+          : 'I fetched the reviewed canonical publisher page, but it did not establish product requirements for this case. The shortlist remains provisional and no cart or supplier action was authorized.',
+        timestamp: new Date(),
+      }]);
+    }
+    return payload?.resolution || { status: 'unresolved', reason: 'resolution_not_recorded' };
+  }, [ambiguityExploration, uid, traceId]);
+
   const proposeResearchedProduct = useCallback(async (sku: string, quantity: number) => {
     if (!ambiguityExploration?.case_id) return;
     const response = await fetch(apiUrl(
@@ -3432,6 +3478,7 @@ export default function App() {
                       exploration={ambiguityExploration}
                       onResearch={() => { void researchAmbiguousShoppingCase(); }}
                       onUpload={() => document.querySelector<HTMLInputElement>("input[type='file']:not([capture])")?.click()}
+                      onResolveEvidenceSource={resolveBuyerEvidenceSource}
                       onEnterSpecifications={() => document.querySelector<HTMLTextAreaElement>("textarea[placeholder='Type your message...']")?.focus()}
                     />
                   )}

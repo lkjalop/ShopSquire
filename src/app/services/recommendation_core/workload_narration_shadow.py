@@ -72,7 +72,10 @@ def build_shadow_prompt(decision: Mapping[str, Any]) -> str:
         "Render a concise shopping explanation from this authorized decision JSON only. "
         "Do not add facts, prices, requirements, performance promises, or product identities. "
         "State material unknowns. Never say qualified if the decision is conditional, unresolved, "
-        "or not qualified. Return prose only.\nDECISION_JSON:\n"
+        "or not qualified. Preserve every material_preservation.required_terms string verbatim "
+        "(case differences are acceptable), and preserve every supplier_choices entry verbatim. "
+        "The authorized_narration_blocks are the preferred safe wording; join or lightly connect "
+        "them instead of paraphrasing away decision-material details. Return prose only.\nDECISION_JSON:\n"
         + json.dumps(bounded, sort_keys=True, ensure_ascii=False, default=str)
     )
 

@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 export type AmbiguityExploration = {
   schema_version: 'ambiguity-exploration-v1';
   case_id?: string;
@@ -26,12 +28,35 @@ type Props = {
   onResearch: () => void;
   onUpload: () => void;
   onEnterSpecifications: () => void;
+  onResolveEvidenceSource?: (
+    hint: { source_url?: string; vendor_name?: string },
+    researchAuthorized: boolean,
+  ) => Promise<any>;
 };
 
 export default function AmbiguityExplorationPanel({
-  exploration, onResearch, onUpload, onEnterSpecifications,
+  exploration, onResearch, onUpload, onEnterSpecifications, onResolveEvidenceSource,
 }: Props) {
+  const [showSourceResolver, setShowSourceResolver] = useState(false);
+  const [sourceHint, setSourceHint] = useState('');
+  const [sourceResolution, setSourceResolution] = useState<any>(null);
+  const [sourceBusy, setSourceBusy] = useState(false);
   const question = exploration.next_question?.text || exploration.next_question?.question;
+  const resolveSource = async (researchAuthorized: boolean) => {
+    if (!onResolveEvidenceSource || !sourceHint.trim() || sourceBusy) return;
+    setSourceBusy(true);
+    try {
+      const value = sourceHint.trim();
+      const hint = /^https:\/\//i.test(value) ? { source_url: value } : { vendor_name: value };
+      setSourceResolution(await onResolveEvidenceSource(hint, researchAuthorized));
+    } catch (error) {
+      setSourceResolution({
+        status: 'error', reason: error instanceof Error ? error.message : 'Source resolution failed.',
+      });
+    } finally {
+      setSourceBusy(false);
+    }
+  };
   return (
     <section data-testid="ambiguity-exploration" style={{ margin: 12, padding: 12, border: '1px solid #93c5fd', borderRadius: 10 }}>
       <strong>Purpose</strong>
@@ -66,9 +91,52 @@ export default function AmbiguityExplorationPanel({
           <button type="button" onClick={onResearch} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Research approved sources</button>
         )}
         <button type="button" onClick={onUpload} style={{ background: '#fff', color: '#173b64', border: '1px solid #173b64', borderRadius: 6, padding: '7px 11px' }}>Upload requirements</button>
+        {onResolveEvidenceSource && (
+          <button type="button" onClick={() => setShowSourceResolver((value) => !value)} style={{ background: '#fff', color: '#173b64', border: '1px solid #173b64', borderRadius: 6, padding: '7px 11px' }}>Use official link or vendor</button>
+        )}
         <button type="button" onClick={onEnterSpecifications} style={{ background: '#fff', color: '#173b64', border: '1px solid #173b64', borderRadius: 6, padding: '7px 11px' }}>Enter specifications</button>
         <span style={{ fontSize: 12, alignSelf: 'center' }}>Continue provisionally below</span>
       </div>
+      {showSourceResolver && onResolveEvidenceSource && (
+        <div data-testid="buyer-evidence-source-resolver" style={{ marginTop: 10, border: '1px solid #cbd5e1', borderRadius: 8, padding: 9 }}>
+          <label htmlFor="buyer-evidence-source" style={{ display: 'block', fontWeight: 700 }}>
+            Official requirements URL or named vendor
+          </label>
+          <div style={{ fontSize: 12, color: '#475569', margin: '3px 0 7px' }}>
+            Checking the registry is local and free. Fetching the reviewed canonical page requires your next confirmation.
+          </div>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            <input
+              id="buyer-evidence-source"
+              value={sourceHint}
+              onChange={(event) => { setSourceHint(event.target.value); setSourceResolution(null); }}
+              placeholder="https://docs.vendor.example/... or Autodesk"
+              style={{ flex: '1 1 300px', minWidth: 220, padding: 7, border: '1px solid #94a3b8', borderRadius: 6 }}
+            />
+            <button type="button" disabled={sourceBusy || !sourceHint.trim()} onClick={() => { void resolveSource(false); }}>
+              Check source
+            </button>
+          </div>
+          {sourceResolution && (
+            <div role="status" style={{ marginTop: 8, fontSize: 12 }}>
+              <strong>{String(sourceResolution.status || 'unknown').replaceAll('_', ' ')}</strong>
+              {sourceResolution.reason ? ` — ${String(sourceResolution.reason).replaceAll('_', ' ')}` : ''}
+              {Array.isArray(sourceResolution.candidates) && sourceResolution.candidates.length > 0 && (
+                <ul style={{ margin: '5px 0', paddingLeft: 20 }}>
+                  {sourceResolution.candidates.map((candidate: any) => (
+                    <li key={candidate.source_id}>{candidate.publisher}: {candidate.canonical_url}</li>
+                  ))}
+                </ul>
+              )}
+              {sourceResolution.status === 'resolved' && (
+                <button type="button" disabled={sourceBusy} onClick={() => { void resolveSource(true); }} style={{ marginTop: 5, background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>
+                  Research matched canonical source
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div data-testid="ambiguity-accounting" style={{ marginTop: 8, fontSize: 11 }}>
         Execution: {exploration.execution} · Evidence: {exploration.evidence} · Decision: {exploration.decision}
         {' · '}External calls: {exploration.provider_accounting.external_calls}
