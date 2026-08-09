@@ -1,0 +1,422 @@
+{
+  "schema_version": "workload-narration-shadow-cert-v2",
+  "observed_at": "2026-08-09T09:08:55.328766+00:00",
+  "provider": "ollama",
+  "model": "qwen3:14b",
+  "buyer_visible": false,
+  "commercial_authority_granted": false,
+  "warmup_ms_excluded": 5895,
+  "fidelity_certification": {
+    "schema_version": "workload-narration-shadow-evaluation-v1",
+    "model_id": "qwen3:14b",
+    "case_count": 10,
+    "results": [
+      {
+        "case_id": "research-predictive_digital_twin",
+        "category": "research_prompt",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "The current result for predictive digital twin is conditional. Still unresolved or not verified: CPU, RAM and GPU values remain unresolved until a named local application and scale are supplied; digital_twin_scope.",
+          "candidate_retained_for_audit": "The current result for predictive digital twin is conditional. Still unresolved or not verified: CPU, RAM and GPU values remain unresolved until a named local application and scale are supplied; digital_twin_scope.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1315
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 94,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "The current result for predictive digital twin is conditional.",
+            "Still unresolved or not verified: CPU, RAM and GPU values remain unresolved until a named local application and scale are supplied; digital_twin_scope."
+          ]
+        }
+      },
+      {
+        "case_id": "research-cgi_rendering",
+        "category": "research_prompt",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "The current result for cgi rendering is conditional. Verified meets: ram gb, gpu vram gb. Still unresolved or not verified: render duration is not verified for an exact scene and configuration.",
+          "candidate_retained_for_audit": "The current result for cgi rendering is conditional. Verified meets: ram gb, gpu vram gb. Still unresolved or not verified: render duration is not verified for an exact scene and configuration.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1385
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 10,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "The current result for cgi rendering is conditional.",
+            "Verified meets: ram gb, gpu vram gb.",
+            "Still unresolved or not verified: render duration is not verified for an exact scene and configuration."
+          ]
+        }
+      },
+      {
+        "case_id": "research-large_cad_point_cloud",
+        "category": "research_prompt",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "The current result for large cad point cloud is qualified. Verified meets: ram gb, gpu vram gb, gpu class.",
+          "candidate_retained_for_audit": "The current result for large cad point cloud is qualified. Verified meets: ram gb, gpu vram gb, gpu class.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1044
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 91,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "The current result for large cad point cloud is qualified.",
+            "Verified meets: ram gb, gpu vram gb, gpu class."
+          ]
+        }
+      },
+      {
+        "case_id": "research-ot_plc_cyber_range",
+        "category": "research_prompt",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "The current result for ot plc cyber range is conditional. Verified meets: hardware virtualisation, factory io compatible, ot network scenarios. Still unresolved or not verified: RAM and CPU capacity depend on simultaneous node count.",
+          "candidate_retained_for_audit": "The current result for ot plc cyber range is conditional. Verified meets: hardware virtualisation, factory io compatible, ot network scenarios. Still unresolved or not verified: RAM and CPU capacity depend on simultaneous node count.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1424
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 31,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "The current result for ot plc cyber range is conditional.",
+            "Verified meets: hardware virtualisation, factory io compatible, ot network scenarios.",
+            "Still unresolved or not verified: RAM and CPU capacity depend on simultaneous node count."
+          ]
+        }
+      },
+      {
+        "case_id": "research-bim_walkthrough",
+        "category": "research_prompt",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "The current result for bim walkthrough is conditional. Verified meets: ram gb, gpu vram gb. Still unresolved or not verified: walkthrough renderer remains unnamed.",
+          "candidate_retained_for_audit": "The current result for bim walkthrough is conditional. Verified meets: ram gb, gpu vram gb. Still unresolved or not verified: walkthrough renderer remains unnamed.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1145
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 68,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "The current result for bim walkthrough is conditional.",
+            "Verified meets: ram gb, gpu vram gb.",
+            "Still unresolved or not verified: walkthrough renderer remains unnamed."
+          ]
+        }
+      },
+      {
+        "case_id": "research-unreal_nanite_lumen",
+        "category": "research_prompt",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "The current result for unreal nanite lumen is conditional. Verified meets: ram gb, gpu vram gb, directx 12. Still unresolved or not verified: compile time and frame rate are not verified for the exact project.",
+          "candidate_retained_for_audit": "The current result for unreal nanite lumen is conditional. Verified meets: ram gb, gpu vram gb, directx 12. Still unresolved or not verified: compile time and frame rate are not verified for the exact project.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1602
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 67,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "The current result for unreal nanite lumen is conditional.",
+            "Verified meets: ram gb, gpu vram gb, directx 12.",
+            "Still unresolved or not verified: compile time and frame rate are not verified for the exact project."
+          ]
+        }
+      },
+      {
+        "case_id": "uploaded-requirements-provisional",
+        "category": "uploaded_requirements",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "The buyer-uploaded 64 GB RAM and 2 TB NVMe requirements are accepted provisionally, not independently verified. The exact product RAM ceiling and GPU power limit remain unresolved.",
+          "candidate_retained_for_audit": "The buyer-uploaded 64 GB RAM and 2 TB NVMe requirements are accepted provisionally, not independently verified. The exact product RAM ceiling and GPU power limit remain unresolved.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1298
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 6,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "The buyer-uploaded 64 GB RAM and 2 TB NVMe requirements are accepted provisionally, not independently verified.",
+            "The exact product RAM ceiling and GPU power limit remain unresolved."
+          ]
+        }
+      },
+      {
+        "case_id": "budget-conflict",
+        "category": "budget_conflict",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "This option is over the AUD 2,500 budget ceiling by AUD 999. Keep the verified floor, relax budget, or choose a lower-cost compromise.",
+          "candidate_retained_for_audit": "This option is over the AUD 2,500 budget ceiling by AUD 999. Keep the verified floor, relax budget, or choose a lower-cost compromise.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1238
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 41,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "This option is over the AUD 2,500 budget ceiling by AUD 999.",
+            "Keep the verified floor, relax budget, or choose a lower-cost compromise."
+          ]
+        }
+      },
+      {
+        "case_id": "exact-product-gaps",
+        "category": "exact_product_gaps",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "The OS edition does not meet the accepted Windows 11 Pro requirement. The exact configuration remains conditional: GPU power limit and warranty duration are unresolved or contested.",
+          "candidate_retained_for_audit": "The OS edition does not meet the accepted Windows 11 Pro requirement. The exact configuration remains conditional: GPU power limit and warranty duration are unresolved or contested.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 1191
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 55,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "The OS edition does not meet the accepted Windows 11 Pro requirement.",
+            "The exact configuration remains conditional: GPU power limit and warranty duration are unresolved or contested."
+          ]
+        }
+      },
+      {
+        "case_id": "supplier-choice",
+        "category": "supplier_choice",
+        "shadow": {
+          "mode": "shadow",
+          "model_id": "qwen3:14b",
+          "status": "accepted_shadow",
+          "candidate": "Only 12 units are confirmed now; supplier confirmation for 18 units remains unresolved. Choices: split 12 now and 18 later; wait for preferred fit; take the next-best verified option now; or ask suppliers for all 30. Supplier enquiry and cart change are not authorized yet. Material unknowns include supplier confirmation for 18 units.",
+          "candidate_retained_for_audit": "Only 12 units are confirmed now; supplier confirmation for 18 units remains unresolved. Choices: split 12 now and 18 later; wait for preferred fit; take the next-best verified option now; or ask suppliers for all 30. Supplier enquiry and cart change are not authorized yet. Material unknowns include supplier confirmation for 18 units.",
+          "violations": [],
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "elapsed_ms": 2082
+        },
+        "unsupported_claim_violations": [],
+        "preservation_failures": [],
+        "rollout": {
+          "schema_version": "workload-narration-rollout-decision-v1",
+          "policy_version": "workload-narration-rollout-v1",
+          "requested_mode": "shadow",
+          "cohort_bucket": 50,
+          "shadow_evaluation_selected": true,
+          "shadow_status": "accepted_shadow",
+          "buyer_visible": false,
+          "commercial_authority_granted": false,
+          "buyer_renderer": "deterministic_authorized_blocks",
+          "fallback_reason": "accepted_shadow_audit_only",
+          "deterministic_blocks": [
+            "Only 12 units are confirmed now; supplier confirmation for 18 units remains unresolved.",
+            "Choices: split 12 now and 18 later; wait for preferred fit; take the next-best verified option now; or ask suppliers for all 30.",
+            "Supplier enquiry and cart change are not authorized yet."
+          ]
+        }
+      }
+    ],
+    "unsupported_claim_count": 0,
+    "preservation_failure_count": 0,
+    "fidelity_passed": true,
+    "buyer_visible": false,
+    "commercial_authority_granted": false,
+    "latency_observation": {
+      "samples_ms": [
+        1315,
+        1385,
+        1044,
+        1424,
+        1145,
+        1602,
+        1298,
+        1238,
+        1191,
+        2082
+      ],
+      "median_ms": 1306,
+      "max_ms": 2082,
+      "certification_status": "observed_separately_not_a_fidelity_gate"
+    }
+  },
+  "latency_certification": {
+    "latency_limit_ms": 8000,
+    "runs": [
+      {
+        "mode": "shadow",
+        "model_id": "qwen3:14b",
+        "status": "accepted_shadow",
+        "candidate": "Qualified for the stated scope. Run the named simulation in its documented supported configuration.",
+        "candidate_retained_for_audit": "Qualified for the stated scope. Run the named simulation in its documented supported configuration.",
+        "violations": [],
+        "buyer_visible": false,
+        "commercial_authority_granted": false,
+        "elapsed_ms": 1109,
+        "run": 1,
+        "under_limit": true
+      },
+      {
+        "mode": "shadow",
+        "model_id": "qwen3:14b",
+        "status": "accepted_shadow",
+        "candidate": "Qualified for the stated scope. Run the named simulation in its documented supported configuration.",
+        "candidate_retained_for_audit": "Qualified for the stated scope. Run the named simulation in its documented supported configuration.",
+        "violations": [],
+        "buyer_visible": false,
+        "commercial_authority_granted": false,
+        "elapsed_ms": 784,
+        "run": 2,
+        "under_limit": true
+      },
+      {
+        "mode": "shadow",
+        "model_id": "qwen3:14b",
+        "status": "accepted_shadow",
+        "candidate": "Qualified for the stated scope. Run the named simulation in its documented supported configuration.",
+        "candidate_retained_for_audit": "Qualified for the stated scope. Run the named simulation in its documented supported configuration.",
+        "violations": [],
+        "buyer_visible": false,
+        "commercial_authority_granted": false,
+        "elapsed_ms": 763,
+        "run": 3,
+        "under_limit": true
+      }
+    ],
+    "three_consecutive_under_limit": true,
+    "passed": true
+  },
+  "fidelity_passed": true,
+  "latency_passed": true,
+  "passed": true
+}

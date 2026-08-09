@@ -1,0 +1,446 @@
+{
+  "schema_version": "relevance-human-review-v1",
+  "labels_sha256": "706520e36e24015bf23261dcc16e858aa376c1053b71e25e0c7f6cc692a4fba1",
+  "candidates_sha256": "1b664bbb112ec0d61ae63c25167cef9b6b548eb03ed967a5cb4bd1db39f12ba3",
+  "reviewer": null,
+  "reviewer_id": "leoma-owner-review-v1",
+  "review_type": "owner",
+  "independent": false,
+  "status": "pending_human_review",
+  "reviewed_at": null,
+  "attestation": null,
+  "rubric": {
+    "2": "highly relevant",
+    "1": "acceptable",
+    "0": "explicitly irrelevant"
+  },
+  "cases": {
+    "brand_negation:0": {
+      "query": "a good laptop but not Apple",
+      "products": [
+        {
+          "sku": "HDD-A9AE2F06",
+          "name": "Lenovo IdeaPad 5 14\" 2K OLED 2-in-1",
+          "price": 1999.0,
+          "currency": "AUD",
+          "current_ai_draft": null,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-031E526F",
+          "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+          "price": 1399.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-04C4955F",
+          "name": "Lenovo IdeaPad Slim 3x 15.3\" 2K Copilot+ AI PC Laptop (Snapdragon X)[512GB]",
+          "price": 899.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-10BFA3F6",
+          "name": "Microsoft Surface Laptop (7th Edition) Copilot+ AI PC 15\" Snapdragon X Elite 12 core/16GB/1TB (Black)",
+          "price": 2199.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-1886C355",
+          "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 7) [1TB]",
+          "price": 1499.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-234E845E",
+          "name": "HP Laptop 15-fc0433AU 15.6\" FHD Laptop (Ryzen 5)[512GB]",
+          "price": 649.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-29EA2785",
+          "name": "HP OmniBook Ultra 14\" 2.2K Laptop (Ryzen 9 AI HX 375)[1TB]",
+          "price": 3699.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-343A37BC",
+          "name": "ASUS ProArt 16 16\" 3K 120Hz OLED Copilot+ AI PC Laptop (Ryzen AI 9)[GeForce RTX 5070]",
+          "price": 4894.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-37144522",
+          "name": "Dell 15 DC15255 15.6\" FHD 120Hz Laptop (Ryzen 3)[512GB]",
+          "price": 629.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-38C5278D",
+          "name": "Lenovo IdeaPad S3i 15.6\" FHD Laptop (Intel Core i3)[512GB]",
+          "price": 699.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        }
+      ]
+    },
+    "budget_band:0": {
+      "query": "laptop between $1200 and $1800",
+      "products": [
+        {
+          "sku": "LAP-031E526F",
+          "name": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+          "price": 1399.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-1886C355",
+          "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 7) [1TB]",
+          "price": 1499.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-433AB371",
+          "name": "Lenovo IdeaPad Slim 3i 15.3\" 2K Laptop (Intel Core i7)[1TB]",
+          "price": 1599.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-4743EFFF",
+          "name": "Apple MacBook Air 13-inch with M5 Chip, 512GB/16GB (Midnight)",
+          "price": 1799.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-4A0017C0",
+          "name": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]",
+          "price": 1278.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-5DEB73EF",
+          "name": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]",
+          "price": 1274.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-75988087",
+          "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+          "price": 1299.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-89863C58",
+          "name": "HP Laptop 15-fd2080TU 15.6\" FHD Copilot+ AI PC Laptop (Intel Core Ultra 5-225U)[512GB/16GB]",
+          "price": 1499.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-B8D8576C",
+          "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 9) [1TB]",
+          "price": 1499.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        }
+      ]
+    },
+    "persona_creator:0": {
+      "query": "laptop for video editing and streaming on twitch",
+      "products": [
+        {
+          "sku": "LAP-343A37BC",
+          "name": "ASUS ProArt 16 16\" 3K 120Hz OLED Copilot+ AI PC Laptop (Ryzen AI 9)[GeForce RTX 5070]",
+          "price": 4894.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-0A1191AB",
+          "name": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]",
+          "price": 3499.0,
+          "currency": "AUD",
+          "current_ai_draft": null,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-647D08E6",
+          "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+          "price": 2899.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-69763798",
+          "name": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]",
+          "price": 1919.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-788760E4",
+          "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+          "price": 3899.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-858DC749",
+          "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+          "price": 5999.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-BCBAFE20",
+          "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+          "price": 4499.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        }
+      ]
+    },
+    "search_budget:0": {
+      "query": "gaming laptop under $2000",
+      "products": [
+        {
+          "sku": "LAP-69763798",
+          "name": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]",
+          "price": 1919.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        }
+      ]
+    },
+    "search_university:0": {
+      "query": "recommend a laptop for university",
+      "products": [
+        {
+          "sku": "LAP-22527D92",
+          "name": "Apple MacBook Neo 13-inch with A18 Pro Chip, 512GB/8GB (Blush)",
+          "price": 1099.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-2A0308CA",
+          "name": "Apple MacBook Neo 13-inch with A18 Pro Chip, 256GB/8GB (Indigo)",
+          "price": 899.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-4743EFFF",
+          "name": "Apple MacBook Air 13-inch with M5 Chip, 512GB/16GB (Midnight)",
+          "price": 1799.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        }
+      ]
+    },
+    "workload_ai_finetune:0": {
+      "query": "laptop for fine-tuning small language models locally",
+      "products": [
+        {
+          "sku": "LAP-343A37BC",
+          "name": "ASUS ProArt 16 16\" 3K 120Hz OLED Copilot+ AI PC Laptop (Ryzen AI 9)[GeForce RTX 5070]",
+          "price": 4894.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-0A1191AB",
+          "name": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]",
+          "price": 3499.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-858DC749",
+          "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+          "price": 5999.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-BCBAFE20",
+          "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+          "price": 4499.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        }
+      ]
+    },
+    "workload_cyberpunk:0": {
+      "query": "laptop that can run cyberpunk 2077",
+      "products": [
+        {
+          "sku": "LAP-647D08E6",
+          "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+          "price": 2899.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-788760E4",
+          "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+          "price": 3899.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-858DC749",
+          "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+          "price": 5999.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-BCBAFE20",
+          "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+          "price": 4499.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        }
+      ]
+    },
+    "workload_valorant_fps:0": {
+      "query": "i want to play valorant at 144fps",
+      "products": [
+        {
+          "sku": "LAP-647D08E6",
+          "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+          "price": 2899.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-69763798",
+          "name": "Asus TUF Gaming F16 16\" FHD+ 144Hz Gaming Laptop (Intel Core i7)[GeForce RTX 4050]",
+          "price": 1919.0,
+          "currency": "AUD",
+          "current_ai_draft": 2,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-788760E4",
+          "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+          "price": 3899.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-858DC749",
+          "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+          "price": 5999.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        },
+        {
+          "sku": "LAP-BCBAFE20",
+          "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+          "price": 4499.0,
+          "currency": "AUD",
+          "current_ai_draft": 1,
+          "human_grade": null,
+          "notes": null
+        }
+      ]
+    }
+  }
+}

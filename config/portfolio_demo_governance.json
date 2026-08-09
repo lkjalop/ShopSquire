@@ -1,0 +1,74 @@
+{
+  "schema_version": "portfolio-demo-governance-v1",
+  "profile_id": "shopsquire-portfolio-demo",
+  "environment_class": "local_developer_certification",
+  "production_claim": false,
+  "tenants": {
+    "mode": "deny_by_default",
+    "enrolled_ids": ["default", "portfolio-demo"],
+    "real_identity_enrollment": false
+  },
+  "research": {
+    "discovery": "local_searxng",
+    "canonical_origin_first": true,
+    "paid_discovery": "disabled",
+    "repeat_research_requires_refresh_authorization": true,
+    "source_text_retention": "none",
+    "retained_evidence": ["content_hash", "normalized_claim", "execution_receipt"],
+    "publisher_policy_owner": "leoma-project-owner",
+    "publisher_policy_id": "leoma-publisher-policy-v1"
+  },
+  "freshness_sla_hours": {
+    "product_specification": 720,
+    "product_identity_mpn": 720,
+    "price": 24,
+    "retail_availability": 24,
+    "supplier_availability": 24,
+    "supplier_lead_time": 24,
+    "warranty": 720,
+    "os_support_compatibility": 720,
+    "workload_software_requirements": 720,
+    "behavioral_benchmark": 2160
+  },
+  "stale_evidence_policy": "visible_conditional_refresh_offered",
+  "supplier": {
+    "mode": "deterministic_synthetic_fixture",
+    "real_send_authorized": false,
+    "human_preview_required": true,
+    "substitution_requires_separate_confirmation": true,
+    "enquiry_is_purchase_commitment": false
+  },
+  "commercial": {
+    "currency": "AUD",
+    "stretch_shelf_visible": true,
+    "finance_eligibility_authority": "none",
+    "cart_mutation_requires_explicit_confirmation": true
+  },
+  "narration": {
+    "mode": "shadow_only",
+    "buyer_renderer": "deterministic_authorized_blocks",
+    "unsupported_claim_tolerance": 0,
+    "material_omission_tolerance": 0,
+    "latency_limit_ms": 8000,
+    "consecutive_latency_runs": 3,
+    "commercial_authority": false
+  },
+  "relevance": {
+    "review_type": "owner_non_independent",
+    "reviewer_id": "leoma-owner-review-v1",
+    "rubric": {"2": "direct fit", "1": "useful compromise", "0": "irrelevant or materially unsuitable"},
+    "price_in_pure_relevance": false,
+    "availability_scored_separately": true,
+    "status": "pending_owner_judgments"
+  },
+  "voice": {
+    "certification_required_for_portfolio_demo": false,
+    "may_propose_commercial_action": true,
+    "may_confirm_commercial_action": false,
+    "text_confirmation_required": true
+  },
+  "compatibility_v2": {
+    "retirement_eligible": false,
+    "review_order": "last"
+  }
+}

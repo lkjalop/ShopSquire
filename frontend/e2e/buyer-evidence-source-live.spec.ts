@@ -40,4 +40,8 @@ test('buyer checks an official URL locally then explicitly authorizes canonical 
   await expect(trace).not.toContainText(/No governed workload research record was produced/i);
   await expect(trace.getByTestId('governed-evidence-ladder')).toBeVisible();
   await expect(trace.getByTestId('governed-evidence-ladder')).toContainText(/canonical origin/i);
+  if (process.env.PORTFOLIO_SCREENSHOT_PATH) {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.screenshot({ path: process.env.PORTFOLIO_SCREENSHOT_PATH });
+  }
 });

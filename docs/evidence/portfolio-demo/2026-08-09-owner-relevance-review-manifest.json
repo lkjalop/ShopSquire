@@ -1,0 +1,27 @@
+{
+  "schema_version": "owner-relevance-review-manifest-v1",
+  "reviewer_id": "leoma-owner-review-v1",
+  "reviewer_role": "project_owner_portfolio_evaluator",
+  "organization": "independent_portfolio_project",
+  "review_type": "owner_reviewed",
+  "independent": false,
+  "status": "pending_owner_judgments",
+  "review_date": "2026-08-09",
+  "rubric": {
+    "2": "directly satisfies the workload intent",
+    "1": "useful but materially compromised",
+    "0": "irrelevant, wrong architecture, or fails a hard requirement"
+  },
+  "price_in_relevance": false,
+  "availability_scored_separately": true,
+  "case_count": 8,
+  "candidate_count": 43,
+  "input_hashes": {
+    "draft_labels_sha256": "706520e36e24015bf23261dcc16e858aa376c1053b71e25e0c7f6cc692a4fba1",
+    "candidate_slates_sha256": "1b664bbb112ec0d61ae63c25167cef9b6b548eb03ed967a5cb4bd1db39f12ba3",
+    "owner_review_template_sha256": "c62cafe58f74eebfe9907fcc9e92a1138fb5bcbdf378d4eb02d9b2516bd12157"
+  },
+  "seal_status": "not_sealed_until_all_43_owner_grades_are_entered",
+  "production_human_seal_eligible": false,
+  "attestation": "This is owner-reviewed development evidence and is not an independent human relevance seal."
+}
