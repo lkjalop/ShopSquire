@@ -74,7 +74,7 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
           style: 'currency', currency: journey.currency || 'AUD', maximumFractionDigits: 0,
         }).format((journey.unitPriceCents * journey.requestedQuantity) / 100)}
       </div>
-      {journey.unitPriceCents * journey.requestedQuantity >= 10_000_000 && (
+      {journey.unitPriceCents * journey.requestedQuantity >= 5_000_000 && (
         <div data-testid="high-value-order-warning" style={{ color: '#9a3412', fontSize: 12, marginTop: 3 }}>
           High-value order — review the quantity, budget and approval path before proceeding.
         </div>

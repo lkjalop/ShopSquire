@@ -48,6 +48,7 @@
     "default_currency": "AUD",
     "supported_display_currencies": ["AUD", "USD", "EUR", "GBP"],
     "exchange_rate_authority": "not_enrolled",
+    "high_value_order_review_threshold_cents": 5000000,
     "stretch_shelf_visible": true,
     "finance_eligibility_authority": "none",
     "cart_mutation_requires_explicit_confirmation": true
