@@ -9,5 +9,6 @@ $env:OFFICIAL_REQUIREMENTS_DOMAIN_ALLOWLIST = "docs.vendor.example"
 $env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST = "default"
 $env:EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY = "e2e-source-policy-reviewer"
 $env:EXTERNAL_RESEARCH_SOURCE_LICENCE = "test-fixture"
+$env:PORTFOLIO_DEMO_INVENTORY_PROFILE = "realistic"
 
 & (Join-Path $PSScriptRoot "..\start_demo.ps1")
