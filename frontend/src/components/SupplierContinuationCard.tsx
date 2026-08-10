@@ -67,12 +67,13 @@ export function commercialReviewReasons(journey: Pick<SupplierContinuation,
   return reasons;
 }
 
-export default function SupplierContinuationCard({ journey, onAssess, onSelectChoice, onSelectOffer, onConfirm, onDismiss }: {
+export default function SupplierContinuationCard({ journey, onAssess, onSelectChoice, onSelectOffer, onConfirm, onBack, onDismiss }: {
   journey: SupplierContinuation;
   onAssess: (deadlineDays: number) => void;
   onSelectChoice: (choiceId: string) => void;
   onSelectOffer: (offerId: string) => void;
   onConfirm: () => void;
+  onBack: () => void;
   onDismiss: () => void;
 }) {
   const shortfall = journey.availableNow == null
@@ -209,13 +210,27 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
           <div style={{ fontSize: 12, margin: '4px 0 8px' }}>
             {chosenOffer?.relationship === 'compatible_substitute'
               ? `Use ${chosenOffer.offered_sku} as an explicitly accepted, conditional-fit substitute for all ${journey.requestedQuantity} units.`
-              : `Keep ${journey.preferredSku} for all ${journey.requestedQuantity} units using the selected fulfilment path.`}
+              : chosenOffer && journey.availableNow != null
+                ? `${journey.availableNow} × ${journey.preferredSku} available now + ${chosenOffer.quantity_available} supplier-confirmed${chosenOffer.lead_time_days == null ? '' : ` in ${chosenOffer.lead_time_days} days`}.`
+                : `Keep ${journey.preferredSku} for all ${journey.requestedQuantity} units using the selected fulfilment path.`}
+          </div>
+          <div style={{ fontSize: 12, marginBottom: 8 }}>
+            Total at catalogue price: {new Intl.NumberFormat('en-AU', {
+              style: 'currency', currency: journey.currency || 'AUD', maximumFractionDigits: 0,
+            }).format((journey.unitPriceCents * journey.requestedQuantity) / 100)}
+            {' · '}Commercial review: advisory
+            {' · '}Supplier enquiry: not a purchase commitment
           </div>
           <button type="button" style={{ ...actionStyle, background: '#f15a0a', color: '#fff' }}
             disabled={!readyToConfirm || journey.status === 'confirming' || journey.status === 'applied'}
             onClick={onConfirm}>
             {journey.status === 'applied' ? 'Cart updated' : 'Confirm exact cart change'}
           </button>
+          {journey.status !== 'applied' && (
+            <button type="button" style={{ ...actionStyle, marginLeft: 7 }} onClick={onBack}>
+              Change fulfilment choice
+            </button>
+          )}
         </div>
       )}
       {journey.error && <div role="alert" style={{ color: '#991b1b', marginTop: 8 }}>{journey.error}</div>}

@@ -645,6 +645,29 @@ def select_fulfillment_continuation(
     if error:
         raise HTTPException(status_code=409, detail={"code": error})
     assert selected is not None
+    try:
+        counts: dict[str, int] = {}
+        for offer in selected.offers:
+            counts[offer.response_status] = counts.get(offer.response_status, 0) + 1
+        log_trace_event(
+            trace_id=case_id.removeprefix("sc-"),
+            event_type="supplier_responses_normalized",
+            source_type="deterministic_reducer",
+            source_id=selected.selection_id,
+            target_type="shopping_case",
+            target_id=case_id,
+            payload={
+                "execution": "deterministic_fixture_responses_normalized",
+                "evidence": {"response_status_counts": counts},
+                "decision": "buyer_choice_required",
+                "resolution_owner": "buyer",
+                "supplier_send": "not_performed",
+                "purchase_commitment": False,
+                "cart_authority": "none",
+            },
+        )
+    except Exception:
+        pass
     return {
         **selected.model_dump(mode="json"),
         "supplier_send": "not_performed",
@@ -740,6 +763,33 @@ def confirm_fulfillment_cart(
     if error:
         raise HTTPException(status_code=409, detail={"code": error})
     assert recorded is not None
+    try:
+        log_trace_event(
+            trace_id=case_id.removeprefix("sc-"),
+            event_type="fulfillment_cart_change_confirmed",
+            source_type="buyer",
+            source_id=body.uid,
+            target_type="shopping_case",
+            target_id=case_id,
+            payload={
+                "execution": "revision_bound_cart_plan_applied",
+                "evidence": {
+                    "selected_offer_id": body.selected_offer_id,
+                    "supplier_offer_provenance": offer.provenance if offer else None,
+                },
+                "decision": "explicit_cart_change_confirmed",
+                "confirmed_sku": target_sku,
+                "confirmed_quantity": quantity,
+                "substitution_authorized": bool(
+                    offer and offer.relationship == "compatible_substitute"
+                ),
+                "supplier_send": "not_performed",
+                "purchase_commitment": False,
+                "resolution_owner": "buyer",
+            },
+        )
+    except Exception:
+        pass
     return {
         **recorded.model_dump(mode="json"),
         "confirmed_sku": target_sku, "confirmed_quantity": quantity,

@@ -2988,7 +2988,7 @@ export default function App() {
         'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders(),
       },
       body: JSON.stringify({
-        uid, expected_revision: 0, choice,
+        uid, expected_revision: supplierContinuation.revision ?? 0, choice,
         preferred_sku: supplierContinuation.preferredSku,
         substitute_sku: supplierContinuation.substituteSku,
         requested_quantity: supplierContinuation.requestedQuantity,
@@ -3645,6 +3645,12 @@ export default function App() {
                       ...current, selectedOfferId: offerId,
                     } : current)}
                     onConfirm={() => { void confirmSupplierContinuation(); }}
+                    onBack={() => setSupplierContinuation((current) => current ? {
+                      ...current, selectedChoice: undefined, selectionId: undefined,
+                      offers: undefined, selectedOfferId: undefined, status: 'review', error: undefined,
+                      selectionKey: `portfolio-select-${crypto.randomUUID()}`,
+                      confirmationKey: `portfolio-confirm-${crypto.randomUUID()}`,
+                    } : current)}
                     onDismiss={() => setSupplierContinuation(null)}
                   />}
                   {rightPanelContract?.emphasis?.applied && rightPanelContract.emphasis.text && (
