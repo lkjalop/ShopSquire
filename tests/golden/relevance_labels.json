@@ -1,6 +1,6 @@
 {
   "_README": [
-    "SEALED relevance labels for the M2-B2 quality gate (recommendation_core/quality.py).",
+    "DRAFT relevance labels for the M2-B2 quality gate (recommendation_core/quality.py); not sealed.",
     "Grades: 2 = highly relevant, 1 = acceptable, 0 = explicitly irrelevant.",
     "These labels are an independent-judge draft produced outside the evaluated Qwen model.",
     "A human second pass is required before production promotion; do not describe this draft as human-sealed.",
