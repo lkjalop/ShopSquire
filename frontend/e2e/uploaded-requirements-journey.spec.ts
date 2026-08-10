@@ -1,12 +1,22 @@
-import { test, expect } from '@playwright/test';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
+import { test, expect, type Page } from '@playwright/test';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const requirementScreenshot = resolve(
-  here,
-  '../../dump/ecommerce/New -screenies/55 - product specs ocr.png',
-);
+async function requirementScreenshot(page: Page): Promise<Buffer> {
+  await page.setViewportSize({ width: 760, height: 760 });
+  await page.setContent(`
+    <main data-testid="requirements" style="width:680px;padding:28px;background:#172033;color:#fff;font:18px/1.45 Arial,sans-serif">
+      <h1 style="font-size:24px">Recommended Hardware Specifications</h1>
+      <ul>
+        <li><b>Processor (CPU):</b> Intel Core i7/i9 or AMD Ryzen 7/9; 8+ physical cores and hardware virtualisation.</li>
+        <li><b>Memory (RAM):</b> 32GB minimum; 64GB recommended for a full digital twin and multiple virtual machines.</li>
+        <li><b>Storage:</b> 1TB to 2TB NVMe PCIe SSD.</li>
+        <li><b>Graphics (GPU):</b> Dedicated NVIDIA RTX is conditional when 3D/visual simulation runs locally.</li>
+        <li><b>Networking:</b> Gigabit RJ45 Ethernet or a high-performance USB-C Ethernet adapter.</li>
+        <li><b>OS setup:</b> Windows 11 Pro recommended.</li>
+      </ul>
+    </main>
+  `);
+  return page.getByTestId('requirements').screenshot();
+}
 
 function pdfWithText(text: string): Buffer {
   const escaped = text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
@@ -34,6 +44,7 @@ function pdfWithText(text: string): Buffer {
 test('requirements screenshot becomes reviewable provisional claims', async ({ page }) => {
   test.setTimeout(180_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+  const screenshot = await requirementScreenshot(page);
   await page.addInitScript(
     (uid) => sessionStorage.setItem('uid', uid),
     `enterprise-e2e-upload-${suffix}`,
@@ -46,7 +57,11 @@ test('requirements screenshot becomes reviewable provisional claims', async ({ p
   await input.press('Enter');
   await expect(page.getByTestId('ambiguity-exploration')).toBeVisible({ timeout: 45_000 });
 
-  await page.locator("input[type='file']").last().setInputFiles(requirementScreenshot);
+  await page.locator("input[type='file']").last().setInputFiles({
+    name: 'buyer-requirements.png',
+    mimeType: 'image/png',
+    buffer: screenshot,
+  });
   await input.fill('Can you read these specifications?');
   await input.press('Enter');
 
