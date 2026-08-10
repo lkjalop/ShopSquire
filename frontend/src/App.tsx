@@ -26,6 +26,7 @@ import { nonRecommendationOutcome } from './lib/chatOutcome';
 import { apiErrorMessage } from './lib/apiError';
 import { selectProportionateAlternatives } from './lib/proportionateAlternatives';
 import { isActionableBuyerQuestion } from './lib/buyerQuestion';
+import { isUnsupportedPostPurchaseTracking } from './lib/postPurchaseIntent';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -1673,7 +1674,7 @@ export default function App() {
       // "money back", "cancel it/my purchase/subscription", "return this")
       /\b(?:cancel|refund|return)\b.{0,24}\b(?:order|purchase|subscription|it|this)\b|\b(?:refund|money\s+back)\b|\bcancel\s+(?:it|this|that|my)\b/i.exec(q)
       // order status / tracking ("where is my order", "order status", "has it shipped", "when will it arrive")
-      || /\b(?:track|where('?s| is)|status of)\b.{0,24}\b(?:order|package|delivery|shipment|parcel)\b|\border\s+status\b|\b(?:has|have)\b.{0,20}\b(?:shipped|arrived|delivered|dispatched)\b|\bwhen\b.{0,24}\b(?:arrive|delivered|ship|get\s+here)\b/i.exec(q)
+      || (isUnsupportedPostPurchaseTracking(q) ? [q] : null)
       // change/update address, payment, or contact info
       || /\b(?:change|update|edit)\b.{0,24}\b(?:address|shipping|delivery\s+address|payment|card|email|phone)\b/i.exec(q)
       // vouchers / promo / gift cards ("apply/use/redeem/enter my coupon", "promo code", "gift card")

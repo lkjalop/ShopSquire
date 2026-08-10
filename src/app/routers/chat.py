@@ -2433,6 +2433,25 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     ):
         params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
+    active_shopping_case_id = str(
+        (payload or {}).get("shopping_case_id") or ""
+    ).strip()[:200]
+    active_shopping_case_purpose = ""
+    if active_shopping_case_id:
+        active_case = db.execute(sql_text(
+            "SELECT uid, retained_purpose FROM shopping_cases "
+            "WHERE tenant_id=:tenant_id AND case_id=:case_id LIMIT 1"
+        ), {
+            "tenant_id": tenant_id,
+            "case_id": active_shopping_case_id,
+        }).mappings().first()
+        if active_case is None:
+            raise HTTPException(status_code=409, detail="shopping_case_not_found")
+        if str(active_case.get("uid") or "") != str(uid or ""):
+            raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+        active_shopping_case_purpose = str(
+            active_case.get("retained_purpose") or ""
+        ).strip()[:500]
     pending_clarification: Dict[str, Any] = {}
     try:
         pending_clarification = Memory(
@@ -2471,6 +2490,41 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         and clarification_reduction.suspend_pending
         and pending_clarification
     )
+    from src.app.services.clarification_state import commercial_obligations
+
+    case_commercial_obligations = list(
+        clarification_reduction.interrupting_obligations
+        if clarification_reduction and clarification_reduction.interrupting_obligations
+        else commercial_obligations(str(submitted_query or ""))
+        if active_shopping_case_id else ()
+    )
+    if active_shopping_case_id and case_commercial_obligations:
+        log_trace_event(
+            trace_id=active_shopping_case_id.removeprefix("sc-"),
+            event_type="shopping_case_obligations_retained",
+            source_type="stage",
+            source_id="Clarification_State",
+            target_type="shopping_case",
+            target_id=active_shopping_case_id,
+            tenant_id=tenant_id,
+            payload={
+                "case_id": active_shopping_case_id,
+                "status": "retained",
+                "pending_question_status": (
+                    "suspended" if pending_clarification_suspended else "not_present"
+                ),
+                "obligations": [
+                    {
+                        "kind": obligation,
+                        "resolution_owner": (
+                            "supplier" if obligation == "supplier_enquiry" else "buyer"
+                        ),
+                        "buyer_text": str(submitted_query or "")[:500],
+                    }
+                    for obligation in case_commercial_obligations
+                ],
+            },
+        )
     if (
         clarification_reduction
         and clarification_reduction.answer
@@ -3676,7 +3730,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     try:
         from src.app.services.case_research_plan import build_case_research_plan
 
-        _case_research_plan = build_case_research_plan(str(q or "")[:500])
+        _case_research_plan = build_case_research_plan(
+            active_shopping_case_purpose or str(q or "")[:500]
+        )
     except Exception as exc:
         logger.debug("case research-plan projection skipped: %s", exc)
     provisional_exploration_needed = bool(
@@ -3707,8 +3763,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     }
                     for item in _case_research_plan.hypotheses
                 ]
+            _retained_case_purpose = active_shopping_case_purpose or str(q or "")[:500]
             _projection = project_accepted_catalog(
-                db, accepted_claims=[], desired_outcome=str(q or "")[:500],
+                db, accepted_claims=[], desired_outcome=_retained_case_purpose,
                 tenant_id=_request_tenant_id(request),
                 hypothesis_labels={
                     str(item.get("hypothesis_id") or f"hypothesis_{index + 1}"): str(
@@ -3726,9 +3783,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             ]
             ambiguity_exploration = {
                 "schema_version": "ambiguity-exploration-v1",
-                "case_id": f"sc-{decision_trace_id}" if decision_trace_id else None,
+                "case_id": (
+                    active_shopping_case_id
+                    or (f"sc-{decision_trace_id}" if decision_trace_id else None)
+                ),
                 "trace_id": decision_trace_id,
-                "retained_purpose": str(q or "")[:500],
+                "retained_purpose": _retained_case_purpose,
                 "status": "provisional",
                 "interpretations": _semantic_hypotheses,
                 "next_question": (
@@ -3761,6 +3821,34 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     if _case_research_plan is not None else []
                 ),
             }
+            if not active_shopping_case_id and ambiguity_exploration.get("case_id"):
+                # The legacy chat path can discover ambiguity after the fast
+                # interpretation endpoint returned 204. Materialize the same
+                # durable case boundary before the next buyer turn so follow-up
+                # quantity/deadline/supplier acts cannot float free of purpose.
+                from datetime import datetime, timezone
+                from src.app.models.orm import ShoppingCase
+
+                generated_case_id = str(ambiguity_exploration["case_id"])[:200]
+                existing_case = db.execute(sql_text(
+                    "SELECT 1 FROM shopping_cases "
+                    "WHERE tenant_id=:tenant_id AND case_id=:case_id LIMIT 1"
+                ), {
+                    "tenant_id": tenant_id,
+                    "case_id": generated_case_id,
+                }).first()
+                if existing_case is None:
+                    now = datetime.now(timezone.utc)
+                    db.add(ShoppingCase(
+                        case_id=generated_case_id,
+                        tenant_id=tenant_id,
+                        uid=str(uid or "guest")[:200],
+                        status="active",
+                        retained_purpose=_retained_case_purpose,
+                        created_at=now,
+                        updated_at=now,
+                    ))
+                    db.commit()
             if decision_trace_id:
                 log_trace_event(
                     trace_id=decision_trace_id,
@@ -3790,6 +3878,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # P0 multi-intent plan (present only on a genuine mixed turn; None otherwise). Carries the scoped
         # new-line picks + adversarial verdict + needs_confirmation so the UI confirms qty/budget, not guesses.
         "multi_intent": multi_intent,
+        "shopping_case_obligations": case_commercial_obligations,
+        "shopping_case_retained_purpose": active_shopping_case_purpose or None,
         "needs_disambiguation": False if turn_intent == "POLICY_QUESTION" else bool(
             data.get("needs_disambiguation") or (not products and next_questions)
         ),

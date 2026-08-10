@@ -33,6 +33,42 @@ _RESEARCH_CONSENT_GRANT = re.compile(
     re.IGNORECASE,
 )
 
+_COMMERCIAL_OBLIGATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("quantity", re.compile(
+        r"\b(?:quantity|qty)\s*(?:is|of|to|=|:)?\s*\d{1,5}\b|"
+        r"\b\d{1,5}\s*(?:x|units?|items?|laptops?|workstations?|desktops?|of\s+the)\b",
+        re.IGNORECASE,
+    )),
+    ("deadline", re.compile(
+        r"\b(?:within|in)\s+\d{1,3}\s+(?:business\s+)?days?\b|"
+        r"\b(?:needed|required|deliver(?:ed)?|arriv(?:e|al))\s+(?:by|within)\b|"
+        r"\bwhen\b.{0,40}\b(?:arrive|deliver(?:ed)?|ship|get\s+here)\b",
+        re.IGNORECASE,
+    )),
+    ("budget", re.compile(
+        r"\bbudget\b|(?:AUD|USD|EUR|GBP|\$|â‚¬|Â£)\s*\d[\d,.]*",
+        re.IGNORECASE,
+    )),
+    ("selected_product", re.compile(
+        r"\b(?:top|first|second|third|preferred|selected|most\s+expensive|cheapest)\s+(?:one|option|product|workstation|laptop|desktop)\b|"
+        r"\b(?:workstation|laptop|desktop)\s+(?:one|option)\b",
+        re.IGNORECASE,
+    )),
+    ("supplier_enquiry", re.compile(
+        r"\b(?:supplier|vendor)\s+(?:enquiry|inquiry|quote|rfq|request)\b|"
+        r"\b(?:raise|send|draft|start|request|ask)\b.{0,35}\b(?:supplier|vendor|rfq|quote|shortfall)\b",
+        re.IGNORECASE,
+    )),
+    ("cart_mutation", re.compile(
+        r"\b(?:add|remove|clear|swap|replace|change|set)\b.{0,30}\b(?:cart|quantity|qty|units?|items?|one|option)\b",
+        re.IGNORECASE,
+    )),
+    ("fulfilment_choice", re.compile(
+        r"\b(?:split\s+delivery|split\s+shipment|wait\s+for|next[- ]best|substitut(?:e|ion)|take\s+.*\s+now)\b",
+        re.IGNORECASE,
+    )),
+)
+
 
 @dataclass(frozen=True)
 class ClarificationTurnResult:
@@ -42,6 +78,7 @@ class ClarificationTurnResult:
     suspend_pending: bool = False
     answer: str | None = None
     question_id: str | None = None
+    interrupting_obligations: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,6 +99,16 @@ def external_research_consent_granted(query: str) -> bool:
     if not text or _RESEARCH_CONSENT_DENIAL.search(text):
         return False
     return bool(_RESEARCH_CONSENT_GRANT.search(text))
+
+
+def commercial_obligations(query: str) -> tuple[str, ...]:
+    """Return independently addressable commercial acts in one buyer turn."""
+    text = _short(query, 1_000)
+    return tuple(
+        obligation
+        for obligation, pattern in _COMMERCIAL_OBLIGATION_PATTERNS
+        if pattern.search(text)
+    )
 
 
 def request_text_without_research_meta(query: str) -> str:
@@ -351,6 +398,16 @@ def reduce_clarification_turn(
                 answer=scope,
                 question_id=question_id,
             )
+
+    obligations = commercial_obligations(current)
+    if obligations:
+        return ClarificationTurnResult(
+            current,
+            "interrupt",
+            suspend_pending=True,
+            question_id=question_id,
+            interrupting_obligations=obligations,
+        )
 
     # Open-text material answers remain model-interpreted, but the interpreter must
     # see the objective and question they are answering. This is context transport,

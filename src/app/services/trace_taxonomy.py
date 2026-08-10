@@ -53,6 +53,7 @@ CANONICAL_TRACE_EVENTS = {
     # conversational follow-up in Decision Trace.
     "ambiguity_exploration_projected",
     "buyer_requirement_proposal_accepted",
+    "shopping_case_obligations_retained",
 }
 
 
