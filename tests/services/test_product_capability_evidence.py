@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+
+from src.app.models.orm import Base, ProductConfiguration, ProductEvidenceObservation
 from src.app.services.connectors.product_capability_evidence import (
+    AsusOfficialHtmlProductProvider,
     ProductCapabilityEvidence,
     ProductCapabilityEvidenceRegistry,
     ProductIdentity,
@@ -10,6 +15,7 @@ from src.app.services.connectors.product_capability_evidence import (
     identity_from_catalog_variant,
     load_product_source_policies,
 )
+from src.app.services.product_capability_refresh import refresh_exact_configuration_capabilities
 
 
 class _Provider:
@@ -185,3 +191,131 @@ def test_title_fallback_cannot_authorize_configuration_claims():
     )
     assert result.status == "rejected"
     assert result.attempts[0]["reason"] == "identity_type_not_allowed"
+
+
+def test_asus_official_parser_binds_claims_to_the_exact_sku_column(monkeypatch):
+    html = b"""
+      <p class='ProductSpec__specProductName__x'>GX651AR-SR002W</p>
+      <p class='ProductSpec__specProductName__x'>GX651AX-SR004W</p>
+      <div class='ProductSpec__row__x'><h2>Operating System</h2><div>
+        <div class='ProductSpec__rowItem__x'>Windows 11 Home</div>
+        <div class='ProductSpec__rowItem__x'>Windows 11 Pro</div>
+      </div></div>
+      <div class='ProductSpec__row__x'><h2>Graphics</h2><div>
+        <div class='ProductSpec__rowItem__x'>NVIDIA GeForce RTX 5070 Ti Laptop GPU 12GB GDDR7</div>
+        <div class='ProductSpec__rowItem__x'>NVIDIA GeForce RTX 5090 Laptop GPU 24GB GDDR7</div>
+      </div></div>
+      <div class='ProductSpec__row__x'><h2>Memory</h2><div>
+        <div class='ProductSpec__rowItem__x'>32GB LPDDR5X - Max Capacity : 64GB Memory Slot: No expansion possible</div>
+        <div class='ProductSpec__rowItem__x'>64GB LPDDR5X - Max Capacity : 64GB Memory Slot: No expansion possible</div>
+      </div></div>
+      <div class='ProductSpec__row__x'><h2>Storage</h2><div>
+        <div class='ProductSpec__rowItem__x'>1TB PCIe NVMe SSD</div>
+        <div class='ProductSpec__rowItem__x'>2TB PCIe NVMe SSD</div>
+      </div></div>
+    """
+
+    class _Response:
+        content = html
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+    class _Client:
+        @staticmethod
+        def get(*args, **kwargs):
+            return _Response()
+
+    monkeypatch.setattr(
+        "src.app.security.url_guard.validate_outbound_url",
+        lambda _url: (True, "allowed"),
+    )
+    identity = ProductIdentity(
+        sku="SCORP-125638", identifier_type="manufacturer_part_number",
+        identifier="GX651AX-SR004W", configuration_hash="a" * 64, form_factor="laptop",
+    )
+    provider = AsusOfficialHtmlProductProvider(
+        "asus_official_specs", endpoint="https://rog.asus.com/au/example/spec/", client=_Client,
+    )
+    evidence = provider.resolve(
+        identity,
+        claim_keys=("operating_system", "gpu_vram_gb", "ram_gb", "storage_gb"),
+        allow_live=True,
+    )
+
+    assert evidence is not None
+    claims = {row["attribute_key"]: row["value"] for row in evidence.claims}
+    assert claims == {
+        "operating_system": "Windows 11 Pro",
+        "gpu_vram_gb": 24,
+        "ram_gb": 64,
+        "storage_gb": 2000,
+    }
+    assert evidence.parser_id == "asus_official_spec_columns_v1"
+    assert evidence.http_status == 200
+    assert len(evidence.response_body_sha256) == 64
+
+
+def test_live_spec_refresh_appends_conflict_without_refreshing_price_or_availability():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    old = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    retrieved = datetime.now(timezone.utc).isoformat()
+    with Session(engine) as db:
+        configuration = ProductConfiguration(
+            tenant_id="default", sku="SCORP-125638", title="ASUS Duo",
+            manufacturer="ASUS", mpn="GX651AX-SR004W", retailer="Scorptec",
+            configuration_hash="a" * 64, form_factor="laptop", mobility="mobile",
+            device_class="consumer_gaming_flagship", price_cents=1_299_900,
+            currency="AUD", specification_observed_at=old, price_observed_at=old,
+            availability_observed_at=old, active=True,
+        )
+        db.add(configuration)
+        db.flush()
+        db.add(ProductEvidenceObservation(
+            configuration_id=configuration.id, attribute_key="operating_system",
+            value_json={"value": "Windows 11 Pro"}, claim_class="attested",
+            evidence_status="observed", source_id="retailer",
+            source_record_id="retailer:os", observed_at=old,
+        ))
+        evidence = ProductCapabilityEvidence(
+            provider_id="asus_official_specs", source_type="manufacturer_product_spec",
+            publisher="Republic of Gamers", source_url="https://rog.asus.com/au/example/spec/",
+            source_record_id="GX651AX-SR004W:hash", retrieved_at=retrieved,
+            identity=ProductIdentity(
+                configuration.sku, "manufacturer_part_number", configuration.mpn,
+                configuration.configuration_hash, "laptop",
+            ),
+            claims=({
+                "attribute_key": "operating_system", "value": "Windows 11 Home",
+                "confidence": 1.0, "claim_class": "attested",
+            },),
+        )
+        provider = _Provider(evidence)
+        provider.provider_id = "asus_official_specs"
+        registry = ProductCapabilityEvidenceRegistry(
+            providers=(provider,),
+            policies=(ProductSourcePolicy(
+                "asus_official_specs", ("Republic of Gamers",), ("rog.asus.com",),
+                allowed_identity_types=("manufacturer_part_number",),
+            ),),
+            allowed_tenants=("default",),
+        )
+
+        report = refresh_exact_configuration_capabilities(
+            db, configuration, registry=registry, claim_keys=("operating_system",),
+        )
+        observations = db.execute(select(ProductEvidenceObservation).where(
+            ProductEvidenceObservation.configuration_id == configuration.id,
+            ProductEvidenceObservation.attribute_key == "operating_system",
+        )).scalars().all()
+
+    assert report["observations_inserted"] == 1
+    assert {row.value_json["value"] for row in observations} == {
+        "Windows 11 Home", "Windows 11 Pro",
+    }
+    assert report["specification_observed_at"] != old.isoformat()
+    assert report["price_observed_at"] == old.replace(tzinfo=None).isoformat()
+    assert report["availability_observed_at"] == old.replace(tzinfo=None).isoformat()

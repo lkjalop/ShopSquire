@@ -8,7 +8,9 @@ configuration facts from a product family or marketing title.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +49,9 @@ class ProductCapabilityEvidence:
     identity: ProductIdentity
     claims: tuple[Mapping[str, Any], ...] = ()
     provenance_chain: tuple[str, ...] = ()
+    parser_id: str = ""
+    http_status: int | None = None
+    response_body_sha256: str = ""
 
 
 class ProductCapabilityEvidenceProvider(Protocol):
@@ -383,6 +388,135 @@ class OfficialJsonProductProvider:
             ),
             claims=tuple(item for item in list(raw.get("claims") or [])[:64] if isinstance(item, Mapping)),
             provenance_chain=tuple(str(item) for item in list(raw.get("provenance_chain") or [])[:16]),
+            parser_id=str(raw.get("parser_id") or "operator_json_v1"),
+            http_status=int(getattr(response, "status_code", 200)),
+            response_body_sha256=hashlib.sha256(body).hexdigest(),
+        )
+
+
+class AsusOfficialHtmlProductProvider:
+    """Source-specific parser for an exact SKU column on an ASUS/ROG spec page."""
+
+    source_types = ("manufacturer_product_spec",)
+
+    def __init__(self, provider_id: str, *, endpoint: str, client: Any = None) -> None:
+        self.provider_id = str(provider_id)
+        self.endpoint = str(endpoint or "").strip()
+        self._client = client
+
+    @staticmethod
+    def _claim(attribute_key: str, value: Any, unit: str | None = None) -> dict[str, Any]:
+        return {
+            "attribute_key": attribute_key,
+            "value": value,
+            "unit": unit,
+            "confidence": 1.0,
+            "claim_class": "attested",
+            "scope_caveat": "Exact ASUS SKU column on the official regional specification page.",
+        }
+
+    def resolve(
+        self,
+        identity: ProductIdentity,
+        *,
+        claim_keys: tuple[str, ...],
+        allow_live: bool,
+    ) -> Optional[ProductCapabilityEvidence]:
+        if not allow_live or not self.endpoint:
+            return None
+        if identity.identifier_type != "manufacturer_part_number" or not identity.identifier:
+            return None
+        from src.app.security.url_guard import validate_outbound_url
+
+        allowed, reason = validate_outbound_url(self.endpoint)
+        if not allowed:
+            raise ValueError(f"product_capability_endpoint_blocked:{reason}")
+        client = self._client
+        if client is None:
+            import httpx
+            client = httpx
+        response = client.get(
+            self.endpoint,
+            timeout=6.0,
+            follow_redirects=False,
+            headers={"User-Agent": "ShopSquire-Product-Capability/1.0"},
+        )
+        response.raise_for_status()
+        body = bytes(response.content)
+        if len(body) > 1024 * 1024:
+            raise ValueError("product_capability_response_too_large")
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(body.decode("utf-8", errors="replace"), "html.parser")
+        sku_nodes = [
+            node.get_text(" ", strip=True)
+            for node in soup.find_all("p", class_=lambda value: value and "specProductName" in str(value))
+        ]
+        sku_values = [value for value in sku_nodes if "-" in value and " " not in value]
+        try:
+            sku_index = sku_values.index(identity.identifier)
+        except ValueError:
+            return None
+
+        sections: dict[str, str] = {}
+        for row in soup.find_all("div", class_=lambda value: value and re.search(r"ProductSpec__row__", str(value))):
+            heading = row.find("h2")
+            if heading is None:
+                continue
+            items = row.find_all("div", class_=lambda value: value and "ProductSpec__rowItem__" in str(value))
+            if sku_index < len(items):
+                sections[heading.get_text(" ", strip=True).lower()] = items[sku_index].get_text(" ", strip=True)
+
+        parsed: dict[str, tuple[Any, str | None]] = {}
+        operating_system = sections.get("operating system", "")
+        if operating_system:
+            parsed["operating_system"] = (operating_system, None)
+        processor = sections.get("processor", "")
+        if processor:
+            parsed["cpu_model"] = (processor, None)
+        graphics = sections.get("graphics", "")
+        if "GeForce RTX" in graphics:
+            parsed["gpu_class"] = ("consumer_geforce", None)
+        vram_match = re.search(r"\b(\d{1,3})\s*GB\s+GDDR", graphics, re.IGNORECASE)
+        if vram_match:
+            parsed["gpu_vram_gb"] = (int(vram_match.group(1)), "GB")
+        memory = sections.get("memory", "")
+        ram_match = re.search(r"\b(\d{1,3})\s*GB\b", memory, re.IGNORECASE)
+        if ram_match:
+            parsed["ram_gb"] = (int(ram_match.group(1)), "GB")
+        ceiling_match = re.search(r"Max Capacity\s*:\s*(\d{1,3})\s*GB", memory, re.IGNORECASE)
+        if ceiling_match:
+            parsed["ram_ceiling_gb"] = (int(ceiling_match.group(1)), "GB")
+        if re.search(r"no expansion possible", memory, re.IGNORECASE):
+            parsed["ram_upgradeable"] = (False, None)
+        storage = sections.get("storage", "")
+        storage_match = re.search(r"\b(\d+(?:\.\d+)?)\s*(TB|GB)\b", storage, re.IGNORECASE)
+        if storage_match:
+            amount = float(storage_match.group(1))
+            parsed["storage_gb"] = (int(amount * 1000) if storage_match.group(2).upper() == "TB" else int(amount), "GB")
+
+        requested = set(claim_keys)
+        claims = tuple(
+            self._claim(key, value, unit)
+            for key, (value, unit) in parsed.items()
+            if key in requested
+        )
+        if not claims:
+            return None
+        digest = hashlib.sha256(body).hexdigest()
+        return ProductCapabilityEvidence(
+            provider_id=self.provider_id,
+            source_type="manufacturer_product_spec",
+            publisher="Republic of Gamers",
+            source_url=self.endpoint,
+            source_record_id=f"{identity.identifier}:{digest}",
+            retrieved_at=datetime.now(timezone.utc).isoformat(),
+            identity=identity,
+            claims=claims,
+            provenance_chain=(f"https_get_sha256:{digest}", f"exact_sku_column:{identity.identifier}"),
+            parser_id="asus_official_spec_columns_v1",
+            http_status=int(getattr(response, "status_code", 200)),
+            response_body_sha256=digest,
         )
 
 
@@ -400,7 +534,11 @@ def configured_product_capability_registry() -> ProductCapabilityEvidenceRegistr
         ) + "_URL"
         endpoint = str(os.getenv(env_key) or "").strip()
         if endpoint and allowed_tenants:
-            providers.append(OfficialJsonProductProvider(policy.provider_id, endpoint=endpoint))
+            source_format = str(os.getenv(env_key.removesuffix("_URL") + "_FORMAT") or "json").strip().lower()
+            if source_format == "asus_html":
+                providers.append(AsusOfficialHtmlProductProvider(policy.provider_id, endpoint=endpoint))
+            else:
+                providers.append(OfficialJsonProductProvider(policy.provider_id, endpoint=endpoint))
     return ProductCapabilityEvidenceRegistry(
         providers=providers,
         policies=policies,

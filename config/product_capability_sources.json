@@ -41,9 +41,10 @@
       "identity_types": ["manufacturer_part_number"],
       "allowed_publishers": ["ASUS", "Republic of Gamers"],
       "allowed_domains": ["asus.com", "rog.asus.com"],
-      "canonical_entrypoints": ["https://rog.asus.com/au/laptops/"],
+      "canonical_entrypoints": ["https://rog.asus.com/au/laptops/rog-zephyrus/rog-zephyrus-duo-2026/spec/"],
       "max_age_seconds": 2592000,
-      "operational_status": "endpoint_required"
+      "parser_type": "asus_official_spec_columns_v1",
+      "operational_status": "local_proof_direct_origin_observed"
     },
     {
       "provider_id": "msi_official_specs",

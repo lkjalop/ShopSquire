@@ -10,6 +10,9 @@ $env:EXTERNAL_RESEARCH_TENANT_ALLOWLIST = "default"
 $env:EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY = "e2e-source-policy-reviewer"
 $env:EXTERNAL_RESEARCH_SOURCE_LICENCE = "test-fixture"
 $env:PORTFOLIO_DEMO_INVENTORY_PROFILE = "realistic"
+$env:PRODUCT_CAPABILITY_TENANT_ALLOWLIST = "default"
+$env:PRODUCT_CAPABILITY_ASUS_OFFICIAL_SPECS_URL = "https://rog.asus.com/au/laptops/rog-zephyrus/rog-zephyrus-duo-2026/spec/"
+$env:PRODUCT_CAPABILITY_ASUS_OFFICIAL_SPECS_FORMAT = "asus_html"
 
 # The upload lane persists an append-only artifact-security verdict before
 # extracted buyer text can enter a shopping case.  A legacy demo database can
