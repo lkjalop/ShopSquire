@@ -15,6 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, update
 
 from src.app.models.orm import ShoppingCaseFulfillmentSelection
+from src.app.services.commercial_decision_reducer import (
+    CommercialCandidate,
+    CommercialDecision,
+    reduce_commercial_candidate,
+)
 
 
 Choice = Literal[
@@ -53,6 +58,7 @@ class BuyerSafeSupplierOffer(BaseModel):
     purchase_commitment: Literal[False] = False
     response_status: Literal["accepted", "rejected", "conditional", "late", "unverified"] = "unverified"
     response_reason: str = "Legacy response was not normalized against quantity and deadline."
+    commercial_decision: CommercialDecision | None = None
 
 
 class FulfillmentSelection(BaseModel):
@@ -99,6 +105,25 @@ def normalize_supplier_offers(
         else:
             response_status = "accepted"
             response_reason = "Supplier response covers the required exact-configuration quantity within the stated window."
+        commercial_decision = reduce_commercial_candidate(CommercialCandidate(
+            sku=row.offered_sku,
+            exact_identity=row.relationship == "exact",
+            material_unknowns=(
+                ["substitute workload fit"]
+                if row.relationship == "compatible_substitute" else []
+            ),
+            specification_freshness=(
+                "fresh" if row.relationship == "exact" else "unknown"
+            ),
+            unit_price_cents=row.unit_price_cents,
+            currency=row.currency,
+            requested_quantity=requested_quantity or max(1, row.quantity_available),
+            local_available_now=available_now,
+            supplier_quantity=row.quantity_available,
+            supplier_lead_time_days=row.lead_time_days,
+            deadline_days=deadline_days,
+            relationship=row.relationship,
+        ))
         offers.append(BuyerSafeSupplierOffer(
             offer_id="offer-" + hashlib.sha256(material.encode()).hexdigest()[:20],
             offered_sku=row.offered_sku,
@@ -115,6 +140,7 @@ def normalize_supplier_offers(
             },
             response_status=response_status,
             response_reason=response_reason,
+            commercial_decision=commercial_decision,
         ))
     return offers
 

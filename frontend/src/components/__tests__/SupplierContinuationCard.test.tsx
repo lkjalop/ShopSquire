@@ -15,7 +15,7 @@ describe('SupplierContinuationCard', () => {
       deadlineDays: 2, choices: [], selectedChoice: 'substitute', selectionId: 'fs-1',
       revision: 1, selectedOfferId: 'offer-exact', status: 'offers', offers: [
         { offer_id: 'offer-no', offered_sku: 'PREFERRED', relationship: 'exact', quantity_available: 0, response_status: 'rejected', response_reason: 'Supplier reported no available quantity.' },
-        { offer_id: 'offer-exact', offered_sku: 'PREFERRED', relationship: 'exact', quantity_available: 18, lead_time_days: 8, response_status: 'accepted', response_reason: 'Exact balance supplied.' },
+        { offer_id: 'offer-exact', offered_sku: 'PREFERRED', relationship: 'exact', quantity_available: 18, lead_time_days: 8, response_status: 'accepted', response_reason: 'Exact balance supplied.', commercial_decision: { status: 'QUALIFIED_NOW', fit_tier: 'qualified', quantity_outcome: 'complete_by_deadline', budget_outcome: 'not_stated', resolution_owner: 'catalog' } },
         { offer_id: 'offer-sub', offered_sku: 'SUBSTITUTE', relationship: 'compatible_substitute', quantity_available: 30, lead_time_days: 2, provenance: { supplier_reference: 'fixture-b' }, response_status: 'conditional', response_reason: 'Buyer acceptance required.' },
       ], proportionateAlternatives: [{
         sku: 'VALUE', title: 'Value laptop', priceCents: 699_900, currency: 'AUD',
@@ -38,6 +38,7 @@ describe('SupplierContinuationCard', () => {
     expect(screen.getByText(/CONDITIONAL.*buyer acceptance required/i)).toBeTruthy();
     expect(screen.getByText(/Preferred fit.*completes the requested quantity/i)).toBeTruthy();
     expect(screen.getByText(/Next-best complete order.*conditional substitute/i)).toBeTruthy();
+    expect(screen.getAllByText(/Commercial status:/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/12 × PREFERRED available now.*18 supplier-confirmed in 8 days/i)).toBeTruthy();
     expect(screen.getByText(/Supplier enquiry: not a purchase commitment/i)).toBeTruthy();
     expect(screen.getByTestId('real-supplier-locked')).toHaveTextContent(/human RFQ preview/i);

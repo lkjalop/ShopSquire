@@ -32,6 +32,14 @@ export type ShelfProduct = {
     lead_time_min_days?: number | null; lead_time_max_days?: number | null;
     freshness_status?: string;
   }[];
+  commercial_decision?: {
+    status: string;
+    fit_tier: string;
+    quantity_outcome: string;
+    budget_outcome: string;
+    resolution_owner: string;
+    reasons?: string[];
+  };
 };
 
 type ProductShelf = {
@@ -134,6 +142,14 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (product
             <details style={{ marginTop: 6, fontSize: 11 }}>
               <summary>Why this recommendation</summary>
               <div>Exact configuration: {item.product.identifier || 'not verified'}</div>
+            {item.commercial_decision ? (
+              <div>
+                Commercial status: {item.commercial_decision.status}
+                {' · '}quantity {item.commercial_decision.quantity_outcome}
+                {' · '}budget {item.commercial_decision.budget_outcome}
+                {' · '}owner {item.commercial_decision.resolution_owner}
+              </div>
+            ) : null}
             {item.meets?.length ? <div style={{ fontSize: 11 }}>Meets: {item.meets.join(', ')}</div> : null}
             {item.conditional?.length ? <div style={{ fontSize: 11 }}>Conditional: {item.conditional.join(', ')}</div> : null}
             {item.unknowns?.length ? <div style={{ fontSize: 11 }}>Unknown: {item.unknowns.join(', ')}</div> : null}

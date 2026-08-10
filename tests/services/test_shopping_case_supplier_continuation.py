@@ -64,6 +64,10 @@ def test_supplier_responses_normalize_accept_reject_substitute_and_late() -> Non
     assert by_supplier["fixture-supplier-unavailable"].response_status == "rejected"
     assert by_supplier["fixture-supplier-substitute"].response_status == "conditional"
     assert by_supplier["fixture-supplier-late"].response_status == "late"
+    assert by_supplier["fixture-supplier-preferred"].commercial_decision.status == "QUALIFIED_NOW"
+    assert by_supplier["fixture-supplier-unavailable"].commercial_decision.status == "QUALIFIED_PARTIAL"
+    assert by_supplier["fixture-supplier-substitute"].commercial_decision.status == "UNVERIFIED"
+    assert by_supplier["fixture-supplier-late"].commercial_decision.status == "QUALIFIED_LATE"
 
 
 def test_selection_is_revision_bound_and_idempotent() -> None:

@@ -19,6 +19,14 @@ export type SupplierOffer = {
   purchase_commitment?: boolean;
   response_status?: 'accepted' | 'rejected' | 'conditional' | 'late' | 'unverified';
   response_reason?: string;
+  commercial_decision?: {
+    status: string;
+    fit_tier: string;
+    quantity_outcome: string;
+    budget_outcome: string;
+    resolution_owner: string;
+    reasons?: string[];
+  } | null;
 };
 
 export type SupplierContinuation = {
@@ -201,6 +209,13 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
                 <div>Fixture only — no supplier was contacted and this is not a purchase commitment.</div>
                 <div>Source: {offer.provenance?.supplier_reference || 'not recorded'}</div>
                 <div>Validity: {offer.validity_expires_at || 'not recorded'}</div>
+                {offer.commercial_decision ? (
+                  <div>
+                    Commercial status: {offer.commercial_decision.status}
+                    {' · '}quantity {offer.commercial_decision.quantity_outcome}
+                    {' · '}owner {offer.commercial_decision.resolution_owner}
+                  </div>
+                ) : null}
               </details>
             </label>
           ))}

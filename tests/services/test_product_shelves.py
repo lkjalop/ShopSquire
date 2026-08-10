@@ -155,6 +155,10 @@ def test_budget_creates_explicit_within_and_stretch_shelves():
     assert [item.product.sku for item in stretch.initial] == ["SKU-3", "SKU-4"]
     assert stretch.budget_band == "stretch"
     assert all(item.price_cents > 250_000 for item in stretch.initial)
+    assert all(item.commercial_decision.status == "OVER_BUDGET" for item in stretch.initial)
+    assert all(item.commercial_decision.budget_outcome == "within" for item in _shelf(
+        projection, "shared:within_budget"
+    ).initial)
 
 
 def test_no_budget_uses_relevance_before_price():
@@ -186,6 +190,8 @@ def test_quantity_fit_is_visible_without_displacing_the_better_workload_fit():
     assert products[0].shortfall == 27
     assert products[1].quantity_fit == "enough_now"
     assert products[2].quantity_fit == "unavailable"
+    assert products[0].commercial_decision.status == "QUALIFIED_PARTIAL"
+    assert products[1].commercial_decision.status == "QUALIFIED_NOW"
 
 
 def test_verified_hard_failure_is_excluded_but_unknown_is_conditional():

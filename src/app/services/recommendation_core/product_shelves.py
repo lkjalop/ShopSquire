@@ -16,6 +16,12 @@ from typing import Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.app.services.commercial_decision_reducer import (
+    CommercialCandidate,
+    CommercialDecision,
+    reduce_commercial_candidate,
+)
+
 from src.app.services.recommendation_core.workload_decision import (
     ProductConfigurationIdentity,
     WorkloadDecision,
@@ -151,6 +157,7 @@ class ShelfProduct(BaseModel):
     available_now: int | None = Field(default=None, ge=0, le=1_000_000)
     shortfall: int | None = Field(default=None, ge=0, le=1_000_000)
     quantity_fit: Literal["enough_now", "partial", "unavailable", "unknown"] = "unknown"
+    commercial_decision: CommercialDecision
 
 
 class ProductShelf(BaseModel):
@@ -206,11 +213,14 @@ def _fit_status(decision: WorkloadDecision | None) -> FitStatus:
 
 
 def _ordered(products: Sequence[ShelfProduct]) -> list[ShelfProduct]:
+    fit_priority = {"qualified": 0, "conditional": 1, "unverified": 2, "failed": 3}
+    quantity_priority = {"complete_by_deadline": 0, "partial": 1, "late": 2, "unknown": 3}
     return sorted(
         products,
         key=lambda item: (
-            0 if item.fit_status == "qualified" else 1,
+            fit_priority[item.commercial_decision.fit_tier],
             -item.relevance_score,
+            quantity_priority[item.commercial_decision.quantity_outcome],
             item.price_cents,
             item.identity_key,
         ),
@@ -382,6 +392,44 @@ def build_product_shelves(
                     "enough_now" if available_now >= requested_quantity else
                     "partial" if available_now > 0 else "unavailable"
                 )
+            ledger = list(decision.fit_ledger) if decision else []
+            freshness_values = {row.freshness_status for row in ledger}
+            specification_freshness: Literal["fresh", "stale", "unknown"] = (
+                "unknown" if not ledger or "unknown" in freshness_values
+                else "stale" if "stale" in freshness_values
+                else "fresh"
+            )
+            mandatory_form_factor = None
+            if decision:
+                raw_form = decision.workload.constraints.get("form_factor")
+                mandatory_form_factor = str(raw_form) if isinstance(raw_form, str) and raw_form else None
+            commercial_decision = reduce_commercial_candidate(CommercialCandidate(
+                sku=candidate.product.sku,
+                exact_identity=candidate.product.exact,
+                actual_form_factor=candidate.product.form_factor,
+                mandatory_form_factor=mandatory_form_factor,
+                verified_minimum_misses=[
+                    row.attribute_label for row in ledger
+                    if row.verdict == "below_minimum"
+                    and row.requirement_class == "minimum"
+                    and row.verification_status == "verified"
+                ],
+                recommendation_compromises=[
+                    row.attribute_label for row in ledger
+                    if row.verdict == "below_minimum" and row.requirement_class != "minimum"
+                ],
+                material_unknowns=[
+                    row.attribute_label for row in ledger
+                    if row.verdict in {"unknown", "contested"}
+                ] + ([] if decision else ["fit ledger not recorded"]),
+                specification_freshness=specification_freshness,
+                unit_price_cents=candidate.price_cents,
+                currency=candidate.currency,
+                budget_per_unit_cents=budget_cents,
+                requested_quantity=requested_quantity or 1,
+                local_available_now=available_now,
+                deadline_days=decision.workload.deadline_days if decision else None,
+            ))
             eligible.append(
                 ShelfProduct(
                     identity_key=identity_key,
@@ -443,6 +491,7 @@ def build_product_shelves(
                     available_now=available_now,
                     shortfall=shortfall,
                     quantity_fit=quantity_fit,
+                    commercial_decision=commercial_decision,
                 )
             )
 
@@ -463,8 +512,8 @@ def build_product_shelves(
                 )
             continue
 
-        within = [item for item in eligible if item.price_cents <= budget_cents]
-        stretch = [item for item in eligible if item.price_cents > budget_cents]
+        within = [item for item in eligible if item.commercial_decision.budget_outcome == "within"]
+        stretch = [item for item in eligible if item.commercial_decision.budget_outcome == "over"]
         if within:
             shelves.append(
                 _page(
