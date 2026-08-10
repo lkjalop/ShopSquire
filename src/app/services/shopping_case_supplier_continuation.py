@@ -51,6 +51,8 @@ class BuyerSafeSupplierOffer(BaseModel):
     provenance: dict[str, str]
     supplier_send: Literal["not_performed"] = "not_performed"
     purchase_commitment: Literal[False] = False
+    response_status: Literal["accepted", "rejected", "conditional", "late", "unverified"] = "unverified"
+    response_reason: str = "Legacy response was not normalized against quantity and deadline."
 
 
 class FulfillmentSelection(BaseModel):
@@ -70,13 +72,33 @@ class FulfillmentSelection(BaseModel):
     cart_result: dict[str, Any] | None = None
 
 
-def normalize_supplier_offers(rows: Sequence[SupplierOfferInput]) -> list[BuyerSafeSupplierOffer]:
+def normalize_supplier_offers(
+    rows: Sequence[SupplierOfferInput], *, requested_quantity: int | None = None,
+    available_now: int = 0, deadline_days: int | None = None,
+) -> list[BuyerSafeSupplierOffer]:
     offers: list[BuyerSafeSupplierOffer] = []
     for row in rows:
         material = (
             f"{row.source_type}|{row.source_reference}|{row.supplier_reference}|"
             f"{row.offered_sku}|{row.relationship}|{row.quantity_available}|{row.lead_time_days}"
         )
+        if row.quantity_available == 0:
+            response_status = "rejected"
+            response_reason = "Supplier reported no available quantity."
+        elif row.relationship == "compatible_substitute":
+            response_status = "conditional"
+            response_reason = "Supplier proposed a substitute; workload fit and buyer acceptance are required."
+        elif deadline_days is not None and row.lead_time_days is not None \
+                and row.lead_time_days > deadline_days:
+            response_status = "late"
+            response_reason = f"Supplier lead time of {row.lead_time_days} days misses the {deadline_days}-day window."
+        elif requested_quantity is not None \
+                and available_now + row.quantity_available < requested_quantity:
+            response_status = "conditional"
+            response_reason = "Supplier quantity does not close the full verified shortfall."
+        else:
+            response_status = "accepted"
+            response_reason = "Supplier response covers the required exact-configuration quantity within the stated window."
         offers.append(BuyerSafeSupplierOffer(
             offer_id="offer-" + hashlib.sha256(material.encode()).hexdigest()[:20],
             offered_sku=row.offered_sku,
@@ -91,6 +113,8 @@ def normalize_supplier_offers(rows: Sequence[SupplierOfferInput]) -> list[BuyerS
                 "source_reference": row.source_reference,
                 "supplier_reference": row.supplier_reference,
             },
+            response_status=response_status,
+            response_reason=response_reason,
         ))
     return offers
 
@@ -110,7 +134,7 @@ def certification_fixture_offers(
         relationship="exact",
         quantity_available=remaining,
         lead_time_days=8,
-        unit_price_cents=None,
+        unit_price_cents=585_000,
     ), SupplierOfferInput(
         source_type="deterministic_certification_fixture",
         source_reference=f"{case_id}:fixture-rfq-response:unavailable",
@@ -130,8 +154,18 @@ def certification_fixture_offers(
             relationship="compatible_substitute",
             quantity_available=requested_quantity,
             lead_time_days=2,
-            unit_price_cents=None,
+            unit_price_cents=530_000,
         ))
+    rows.append(SupplierOfferInput(
+        source_type="deterministic_certification_fixture",
+        source_reference=f"{case_id}:fixture-rfq-response:late",
+        supplier_reference="fixture-supplier-late",
+        offered_sku=preferred_sku,
+        relationship="exact",
+        quantity_available=requested_quantity,
+        lead_time_days=21,
+        unit_price_cents=590_000,
+    ))
     return rows
 
 
@@ -179,6 +213,7 @@ def select_fulfillment_option(
     db, *, tenant_id: str, case_id: str, uid: str, expected_revision: int,
     choice: Choice, preferred_sku: str, requested_quantity: int, available_now: int,
     idempotency_key: str, offers: Sequence[SupplierOfferInput],
+    deadline_days: int | None = None,
 ) -> tuple[FulfillmentSelection | None, str | None]:
     replay = db.execute(select(ShoppingCaseFulfillmentSelection).where(
         ShoppingCaseFulfillmentSelection.tenant_id == tenant_id,
@@ -195,7 +230,10 @@ def select_fulfillment_option(
     )).scalar_one()
     if int(current) != expected_revision:
         return None, f"stale_fulfillment_revision:{current}"
-    normalized = normalize_supplier_offers(offers)
+    normalized = normalize_supplier_offers(
+        offers, requested_quantity=requested_quantity,
+        available_now=available_now, deadline_days=deadline_days,
+    )
     selection_id = "fs-" + hashlib.sha256(
         f"{tenant_id}|{case_id}|{expected_revision + 1}|{idempotency_key}".encode()
     ).hexdigest()[:24]

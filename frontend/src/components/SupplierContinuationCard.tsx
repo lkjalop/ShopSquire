@@ -17,6 +17,8 @@ export type SupplierOffer = {
   provenance?: Record<string, string>;
   supplier_send?: string;
   purchase_commitment?: boolean;
+  response_status?: 'accepted' | 'rejected' | 'conditional' | 'late' | 'unverified';
+  response_reason?: string;
 };
 
 export type SupplierContinuation = {
@@ -174,6 +176,14 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
                 : `${offer.offered_sku}: unable to fulfil`}
               {offer.relationship === 'compatible_substitute' ? ' · proposed substitute' : ' · exact configuration'}
               {offer.relationship === 'compatible_substitute' ? ' · workload fit remains conditional until all unknowns are resolved' : ''}
+              <div style={{
+                marginTop: 3, fontSize: 11, fontWeight: 700,
+                color: offer.response_status === 'accepted' ? '#047857'
+                  : offer.response_status === 'rejected' ? '#991b1b' : '#92400e',
+              }}>
+                {String(offer.response_status || 'unverified').toUpperCase()}
+                {offer.response_reason ? ` — ${offer.response_reason}` : ''}
+              </div>
               <details style={{ marginTop: 4, fontSize: 11 }}>
                 <summary>Evidence and supplier-response details</summary>
                 <div>Fixture only — no supplier was contacted and this is not a purchase commitment.</div>

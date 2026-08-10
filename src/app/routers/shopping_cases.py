@@ -120,6 +120,7 @@ class SelectFulfillmentContinuationRequest(BaseModel):
     substitute_sku: str | None = Field(default=None, min_length=1, max_length=120)
     requested_quantity: int = Field(ge=1, le=500)
     available_now: int = Field(ge=0, le=500)
+    deadline_days: int | None = Field(default=None, ge=0, le=3650)
 
 
 class ConfirmFulfillmentCartRequest(BaseModel):
@@ -639,6 +640,7 @@ def select_fulfillment_continuation(
         preferred_sku=body.preferred_sku,
         requested_quantity=body.requested_quantity, available_now=body.available_now,
         idempotency_key=idempotency_key, offers=offers,
+        deadline_days=body.deadline_days,
     )
     if error:
         raise HTTPException(status_code=409, detail={"code": error})

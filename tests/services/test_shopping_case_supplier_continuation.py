@@ -21,6 +21,7 @@ def test_certification_fixture_contains_positive_and_negative_responses() -> Non
     assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 18 and row.lead_time_days == 8 for row in rows)
     assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 0 for row in rows)
     assert any(row.offered_sku == "SUBSTITUTE" and row.quantity_available == 30 for row in rows)
+    assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 30 and row.lead_time_days == 21 for row in rows)
 
 
 def _db() -> Session:
@@ -47,6 +48,22 @@ def test_existing_procurement_offer_is_buyer_safe_and_retains_provenance() -> No
         "source_reference": "case-17/rfq-2",
         "supplier_reference": "supplier-approved-3",
     }
+    assert offers[0].response_status == "accepted"
+
+
+def test_supplier_responses_normalize_accept_reject_substitute_and_late() -> None:
+    rows = certification_fixture_offers(
+        case_id="sc-demo", preferred_sku="PREFERRED", substitute_sku="SUBSTITUTE",
+        requested_quantity=30, available_now=12,
+    )
+    offers = normalize_supplier_offers(
+        rows, requested_quantity=30, available_now=12, deadline_days=10,
+    )
+    by_supplier = {row.provenance["supplier_reference"]: row for row in offers}
+    assert by_supplier["fixture-supplier-preferred"].response_status == "accepted"
+    assert by_supplier["fixture-supplier-unavailable"].response_status == "rejected"
+    assert by_supplier["fixture-supplier-substitute"].response_status == "conditional"
+    assert by_supplier["fixture-supplier-late"].response_status == "late"
 
 
 def test_selection_is_revision_bound_and_idempotent() -> None:

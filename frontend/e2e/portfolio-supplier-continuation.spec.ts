@@ -37,17 +37,21 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   const continuation = page.getByTestId('supplier-continuation');
   await expect(continuation).toBeVisible();
   await expect(continuation).toContainText(/3 verified now · 27 require another fulfilment path/i);
-  await continuation.getByLabel('Needed within days').fill('2');
+  await continuation.getByLabel('Needed within days').fill('10');
   await continuation.getByRole('button', { name: 'Assess fulfilment' }).click();
   const choices = continuation.getByTestId('fulfillment-choices');
   await expect(choices).toContainText(/Take 3 now and source 27/i);
-  await expect(choices).toContainText(/Wait 8 days.*misses requested deadline/i);
+  await expect(choices).toContainText(/Wait 8 days for the preferred fit/i);
+  await expect(choices).not.toContainText(/Wait 8 days.*misses requested deadline/i);
   await expect(choices).toContainText(/Ask suppliers for 27 compatible units/i);
 
   await choices.getByRole('button', { name: /Ask suppliers for 27 compatible units/i }).click();
   const offers = continuation.getByTestId('supplier-offers');
   await expect(offers).toContainText(/27 × SCORP-126982 in 8 days/i);
   await expect(offers).toContainText(/SCORP-126982: unable to fulfil/i);
+  await expect(offers).toContainText(/ACCEPTED.*covers the required exact-configuration quantity/i);
+  await expect(offers).toContainText(/REJECTED.*no available quantity/i);
+  await expect(offers).toContainText(/LATE.*21 days misses the 10-day window/i);
   await expect(offers).not.toContainText(/proposed substitute/i);
   await offers.getByLabel(/27 × SCORP-126982.*exact configuration/i).check();
   const commercialReview = continuation.getByTestId('high-value-order-warning');

@@ -23,6 +23,7 @@ import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
 import { nonRecommendationOutcome } from './lib/chatOutcome';
+import { apiErrorMessage } from './lib/apiError';
 import { selectProportionateAlternatives } from './lib/proportionateAlternatives';
 import { isActionableBuyerQuestion } from './lib/buyerQuestion';
 import AttachmentButton from './components/AttachmentButton';
@@ -2958,7 +2959,7 @@ export default function App() {
     });
     const payload = await safeJson(response);
     if (!response.ok) {
-      setSupplierContinuation((current) => current ? { ...current, error: String(payload?.detail || 'Fulfilment assessment failed.') } : current);
+      setSupplierContinuation((current) => current ? { ...current, error: apiErrorMessage(payload, 'Fulfilment assessment failed.') } : current);
       return;
     }
     setSupplierContinuation((current) => current ? {
@@ -2992,11 +2993,12 @@ export default function App() {
         substitute_sku: supplierContinuation.substituteSku,
         requested_quantity: supplierContinuation.requestedQuantity,
         available_now: supplierContinuation.availableNow ?? 0,
+        deadline_days: supplierContinuation.deadlineDays,
       }),
     });
     const payload = await safeJson(response);
     if (!response.ok) {
-      setSupplierContinuation((current) => current ? { ...current, status: 'review', error: String(payload?.detail?.code || payload?.detail || 'Supplier fixture failed.') } : current);
+      setSupplierContinuation((current) => current ? { ...current, status: 'review', error: apiErrorMessage(payload, 'Supplier fixture failed.') } : current);
       return;
     }
     setSupplierContinuation((current) => current ? {
@@ -3025,7 +3027,7 @@ export default function App() {
     });
     const payload = await safeJson(response);
     if (!response.ok) {
-      setSupplierContinuation((current) => current ? { ...current, status: 'offers', error: String(payload?.detail?.code || payload?.detail || 'Cart confirmation failed.') } : current);
+      setSupplierContinuation((current) => current ? { ...current, status: 'offers', error: apiErrorMessage(payload, 'Cart confirmation failed.') } : current);
       return;
     }
     await refreshCart();

@@ -13,8 +13,8 @@ describe('SupplierContinuationCard', () => {
       selectionKey: 'select-1', confirmationKey: 'confirm-1',
       deadlineDays: 2, choices: [], selectedChoice: 'substitute', selectionId: 'fs-1',
       revision: 1, selectedOfferId: 'offer-sub', status: 'offers', offers: [
-        { offer_id: 'offer-no', offered_sku: 'PREFERRED', relationship: 'exact', quantity_available: 0 },
-        { offer_id: 'offer-sub', offered_sku: 'SUBSTITUTE', relationship: 'compatible_substitute', quantity_available: 30, lead_time_days: 2, provenance: { supplier_reference: 'fixture-b' } },
+        { offer_id: 'offer-no', offered_sku: 'PREFERRED', relationship: 'exact', quantity_available: 0, response_status: 'rejected', response_reason: 'Supplier reported no available quantity.' },
+        { offer_id: 'offer-sub', offered_sku: 'SUBSTITUTE', relationship: 'compatible_substitute', quantity_available: 30, lead_time_days: 2, provenance: { supplier_reference: 'fixture-b' }, response_status: 'conditional', response_reason: 'Buyer acceptance required.' },
       ], proportionateAlternatives: [{
         sku: 'VALUE', title: 'Value laptop', priceCents: 699_900, currency: 'AUD',
         savingsCents: 200_000, savingsPercent: 22, fitStatus: 'conditional',
@@ -32,6 +32,8 @@ describe('SupplierContinuationCard', () => {
     expect(screen.getByTestId('proportionate-alternatives')).toHaveTextContent(/preferred technical fit remains selected/i);
     expect(screen.getByTestId('proportionate-alternatives')).toHaveTextContent(/22% lower/i);
     expect(screen.getByText(/unable to fulfil/i)).toBeTruthy();
+    expect(screen.getByText(/REJECTED.*no available quantity/i)).toBeTruthy();
+    expect(screen.getByText(/CONDITIONAL.*buyer acceptance required/i)).toBeTruthy();
     expect(screen.getByTestId('real-supplier-locked')).toHaveTextContent(/human RFQ preview/i);
     fireEvent.click(screen.getByRole('button', { name: /confirm exact cart change/i }));
     expect(confirm).toHaveBeenCalledTimes(1);
