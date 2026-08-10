@@ -57,6 +57,20 @@ def test_unrelated_normal_persona_does_not_open_external_research():
     ) is None
 
 
+def test_generic_requirements_phrase_cannot_invent_an_unrelated_workload():
+    manifest = {"sources": [
+        _source("factory", ["factory_io", "plc_simulation"], ["Factory I/O", "System Requirements"]),
+        _source("blender", ["cgi", "blender_rendering"], ["Blender", "System Requirements"]),
+    ]}
+    plan = build_case_research_plan(
+        "I need a laptop that meets Factory I/O system requirements",
+        manifest=manifest,
+    )
+    assert plan is not None
+    assert plan.source_candidate_ids == ["factory"]
+    assert [row.source_ids for row in plan.hypotheses] == [["factory"]]
+
+
 def test_plan_id_is_stable_and_case_content_bound():
     first = build_case_research_plan("Unreal Engine Nanite", manifest=_manifest())
     second = build_case_research_plan("Unreal Engine Nanite", manifest=_manifest())

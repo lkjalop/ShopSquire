@@ -25,6 +25,10 @@ _STOP = {
     "local", "named", "of", "official", "only", "or", "requirements", "scope",
     "software", "system", "the", "to", "use", "with", "workload",
 }
+_GENERIC_ACTIVATION_PHRASES = {
+    "requirement", "system requirement", "hardware requirement",
+    "software requirement", "minimum requirement", "recommended requirement",
+}
 
 
 class CaseResearchHypothesis(BaseModel):
@@ -105,7 +109,7 @@ def _source_phrases(source: Mapping[str, Any]) -> set[str]:
             *[_normalized_phrase(item) for item in applicability.get("workloads") or []],
             *[_normalized_phrase(item) for item in source.get("artefact_patterns") or []],
         )
-        if phrase
+        if phrase and phrase not in _GENERIC_ACTIVATION_PHRASES
     }
 
 
