@@ -185,6 +185,17 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
                 {String(offer.response_status || 'unverified').toUpperCase()}
                 {offer.response_reason ? ` — ${offer.response_reason}` : ''}
               </div>
+              {offer.response_status === 'accepted'
+                && offer.relationship === 'exact'
+                && (journey.availableNow || 0) + offer.quantity_available >= journey.requestedQuantity ? (
+                  <div style={{ fontSize: 11 }}>Preferred fit — completes the requested quantity by the deadline.</div>
+                ) : offer.response_status === 'conditional'
+                  && offer.relationship === 'compatible_substitute'
+                  && offer.quantity_available >= journey.requestedQuantity ? (
+                    <div style={{ fontSize: 11 }}>Next-best complete order — conditional substitute.</div>
+                  ) : offer.response_status === 'late' ? (
+                    <div style={{ fontSize: 11 }}>Preferred fit — misses the requested deadline.</div>
+                  ) : null}
               <details style={{ marginTop: 4, fontSize: 11 }}>
                 <summary>Evidence and supplier-response details</summary>
                 <div>Fixture only — no supplier was contacted and this is not a purchase commitment.</div>

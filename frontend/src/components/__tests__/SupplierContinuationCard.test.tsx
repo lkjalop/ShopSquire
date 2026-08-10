@@ -36,6 +36,8 @@ describe('SupplierContinuationCard', () => {
     expect(screen.getByText(/unable to fulfil/i)).toBeTruthy();
     expect(screen.getByText(/REJECTED.*no available quantity/i)).toBeTruthy();
     expect(screen.getByText(/CONDITIONAL.*buyer acceptance required/i)).toBeTruthy();
+    expect(screen.getByText(/Preferred fit.*completes the requested quantity/i)).toBeTruthy();
+    expect(screen.getByText(/Next-best complete order.*conditional substitute/i)).toBeTruthy();
     expect(screen.getByText(/12 × PREFERRED available now.*18 supplier-confirmed in 8 days/i)).toBeTruthy();
     expect(screen.getByText(/Supplier enquiry: not a purchase commitment/i)).toBeTruthy();
     expect(screen.getByTestId('real-supplier-locked')).toHaveTextContent(/human RFQ preview/i);
