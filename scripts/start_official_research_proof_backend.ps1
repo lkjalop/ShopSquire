@@ -1,5 +1,5 @@
 $env:EXTERNAL_RESEARCH_ENABLED = "1"
-$env:EXTERNAL_RESEARCH_SEARCH_URL = "http://127.0.0.1:8888/search?q={query}&format=json&engines=mojeek,bing"
+$env:EXTERNAL_RESEARCH_SEARCH_URL = "http://127.0.0.1:8888/search?q={query}&format=json"
 $env:EXTERNAL_RESEARCH_ALLOW_PRIVATE = "1"
 $env:EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED = "1"
 $env:EXTERNAL_RESEARCH_PROVIDER_ID = "local_searxng"
