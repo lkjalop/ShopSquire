@@ -3495,6 +3495,23 @@ export default function App() {
                     ))}
                   </div>
                 )}
+                {attachedFiles.some((file) => !file.type.startsWith('image/')) && (
+                  <div className={styles.thumbStrip} data-testid="attached-requirement-documents">
+                    {attachedFiles.map((file, index) => !file.type.startsWith('image/') ? (
+                      <div key={`${file.name}-${file.lastModified}-${index}`} className={styles.thumbWrap}>
+                        <span aria-label={`Attached requirements document ${file.name}`}>{file.name}</span>
+                        <button
+                          className={styles.thumbRemove}
+                          onClick={() => removeAttachment(index)}
+                          title={`Remove ${file.name}`}
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ) : null)}
+                  </div>
+                )}
                 <div className={styles.composerRow}>
                   <AttachmentButton onFiles={handleAttach} className={styles.inputIconBtn} />
                   <textarea

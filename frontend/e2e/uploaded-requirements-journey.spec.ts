@@ -76,7 +76,7 @@ test('requirements screenshot becomes reviewable provisional claims', async ({ p
 });
 
 test('PDF requirements use the same review and correction contract', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
   await page.addInitScript(
     (uid) => sessionStorage.setItem('uid', uid),
@@ -84,12 +84,16 @@ test('PDF requirements use the same review and correction contract', async ({ pa
   );
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
-  await page.locator("input[type='file']:not([capture])").setInputFiles({
+  const input = page.getByPlaceholder('Type your message...');
+  await input.fill('I need to simulate a PLC-controlled factory using Factory I/O.');
+  await input.press('Enter');
+  await expect(page.getByTestId('ambiguity-exploration')).toBeVisible({ timeout: 45_000 });
+  await page.locator("input[type='file'][accept*='.pdf']").setInputFiles({
     name: 'buyer-requirements.pdf',
     mimeType: 'application/pdf',
     buffer: pdfWithText('RAM 32GB minimum Storage 1TB NVMe Windows 11 Pro recommended'),
   });
-  const input = page.getByPlaceholder('Type your message...');
+  await expect(page.getByTestId('attached-requirement-documents')).toContainText('buyer-requirements.pdf');
   await input.fill('Use this PDF for laptop recommendations.');
   await input.press('Enter');
 
@@ -99,10 +103,24 @@ test('PDF requirements use the same review and correction contract', async ({ pa
   await review.getByRole('textbox', { name: 'Correct ram gb value' }).fill('64');
   await expect(review.getByRole('textbox', { name: 'Correct ram gb value' })).toHaveValue('64');
   await expect(page.getByText(/document could not be decoded safely/i)).toHaveCount(0);
+
+  const pdfResearchResponse = page.waitForResponse((response) =>
+    /\/api\/v1\/shopping-cases\/[^/]+\/requirement-proposals\/[^/]+\/accept$/.test(
+      new URL(response.url()).pathname,
+    ),
+  );
+  await review.getByRole('button', { name: 'Research and corroborate' }).click();
+  const pdfResearch = await pdfResearchResponse;
+  expect(pdfResearch.ok()).toBe(true);
+  const pdfResearchBody = await pdfResearch.json();
+  const pdfCaseId = pdfResearch.url().match(/shopping-cases\/([^/]+)\/requirement-proposals/)?.[1];
+  expect(pdfResearchBody.case_id).toBe(pdfCaseId);
+  await expect(page.getByTestId('buyer-claim-reconciliation')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('product-shelves')).toContainText(/best across accepted shared needs/i);
 });
 
 test('plain-text requirements use the same provisional review contract', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
   await page.addInitScript(
     (uid) => sessionStorage.setItem('uid', uid),
@@ -110,8 +128,12 @@ test('plain-text requirements use the same provisional review contract', async (
   );
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
+  const input = page.getByPlaceholder('Type your message...');
+  await input.fill('I need to simulate a PLC-controlled factory using Factory I/O.');
+  await input.press('Enter');
+  await expect(page.getByTestId('ambiguity-exploration')).toBeVisible({ timeout: 45_000 });
 
-  await page.locator("input[type='file']:not([capture])").setInputFiles({
+  await page.locator("input[type='file'][accept*='.pdf']").setInputFiles({
     name: 'buyer-requirements.txt',
     mimeType: 'text/plain',
     buffer: Buffer.from(
@@ -119,7 +141,7 @@ test('plain-text requirements use the same provisional review contract', async (
       'utf-8',
     ),
   });
-  const input = page.getByPlaceholder('Type your message...');
+  await expect(page.getByTestId('attached-requirement-documents')).toContainText('buyer-requirements.txt');
   await input.fill('Use these requirements for laptop recommendations.');
   await input.press('Enter');
 
@@ -130,4 +152,19 @@ test('plain-text requirements use the same provisional review contract', async (
   await expect(review.getByRole('textbox', { name: 'Correct operating system value' })).toHaveValue('Windows 11 Pro');
   await expect(page.getByText(/homoglyph|unicode obfuscation/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
+
+  await review.getByRole('textbox', { name: 'Correct storage gb value' }).fill('2000');
+  const textResearchResponse = page.waitForResponse((response) =>
+    /\/api\/v1\/shopping-cases\/[^/]+\/requirement-proposals\/[^/]+\/accept$/.test(
+      new URL(response.url()).pathname,
+    ),
+  );
+  await review.getByRole('button', { name: 'Research and corroborate' }).click();
+  const textResearch = await textResearchResponse;
+  expect(textResearch.ok()).toBe(true);
+  const textResearchBody = await textResearch.json();
+  const textCaseId = textResearch.url().match(/shopping-cases\/([^/]+)\/requirement-proposals/)?.[1];
+  expect(textResearchBody.case_id).toBe(textCaseId);
+  await expect(page.getByTestId('buyer-claim-reconciliation')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('product-shelves')).toContainText(/best across accepted shared needs/i);
 });

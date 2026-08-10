@@ -11,4 +11,11 @@ $env:EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY = "e2e-source-policy-reviewer"
 $env:EXTERNAL_RESEARCH_SOURCE_LICENCE = "test-fixture"
 $env:PORTFOLIO_DEMO_INVENTORY_PROFILE = "realistic"
 
+# The upload lane persists an append-only artifact-security verdict before
+# extracted buyer text can enter a shopping case.  A legacy demo database can
+# contain application tables without an Alembic version, which otherwise makes
+# every valid PNG/PDF/TXT upload degrade at that security boundary.
+& python -m alembic upgrade head
+if ($LASTEXITCODE -ne 0) { throw "official research proof migration failed" }
+
 & (Join-Path $PSScriptRoot "..\start_demo.ps1")
