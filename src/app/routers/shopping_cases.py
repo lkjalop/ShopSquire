@@ -740,7 +740,10 @@ def confirm_fulfillment_cart(
     plan = CartMutationPlan(ops=(CartOp(
         action="set_quantity", target_skus=(target_sku,), quantity=quantity,
         previous_quantity=previous, unit_price_cents=product.price_cents,
-        allow_sourcing=selection.choice in {"split_delivery", "wait_preferred", "supplier_enquiry"},
+        allow_sourcing=selection.choice in {
+            "split_delivery", "wait_preferred", "supplier_enquiry",
+            "next_best_now", "substitute",
+        },
     ),), confidence=1.0, source="shopping_case_fulfillment_confirmation")
     proposed = propose_plan(
         tenant_id=tenant_id, uid=body.uid, plan=plan, cart_items=items,
