@@ -5,7 +5,13 @@ import path from 'path';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const apiTarget = (env.VITE_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
+  // A launch-time value must outrank the developer's local env file. This is
+  // essential on hosts where `localhost` resolves to IPv6 while uvicorn is
+  // deliberately bound to 127.0.0.1; ignoring the process value makes the
+  // proxy hang even though both services are individually healthy.
+  const apiTarget = (
+    process.env.VITE_API_BASE_URL || env.VITE_API_BASE_URL || 'http://localhost:8080'
+  ).replace(/\/+$/, '');
   const apiWsTarget = apiTarget.replace(/^http/, 'ws');
 
   return {
