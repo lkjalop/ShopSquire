@@ -148,6 +148,27 @@ def test_catalog_identity_uses_mtm_then_mpn_gtin_family_and_title():
     identity = identity_from_catalog_variant(_Variant())
     assert identity.identifier_type == "machine_type_model"
     assert identity.identifier == "21KX0001AU"
+    assert len(identity.configuration_hash) == 64
+
+
+def test_same_mpn_with_conflicting_configuration_hash_is_rejected():
+    expected = ProductIdentity(
+        "SKU-A", "manufacturer_part_number", "21KX0001AU",
+        configuration_hash="a" * 64, form_factor="laptop",
+    )
+    actual = ProductIdentity(
+        "SKU-A", "manufacturer_part_number", "21KX0001AU",
+        configuration_hash="b" * 64, form_factor="laptop",
+    )
+    registry = ProductCapabilityEvidenceRegistry(
+        providers=[_Provider(_evidence(identity=actual))],
+        policies=[ProductSourcePolicy(
+            "manufacturer-spec", ("Example Manufacturer",), ("specs.example.test",),
+        )],
+    )
+    result = registry.resolve(expected, claim_keys=("ram_gb",), allow_live=True)
+    assert result.status == "rejected"
+    assert result.attempts[0]["reason"] == "product_identity_mismatch"
 
 
 def test_title_fallback_cannot_authorize_configuration_claims():

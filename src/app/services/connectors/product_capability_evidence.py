@@ -21,6 +21,8 @@ class ProductIdentity:
     sku: str
     identifier_type: str
     identifier: str
+    configuration_hash: str = ""
+    form_factor: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,8 @@ class ProductCapabilityResolution:
                 "sku": self.identity.sku,
                 "identifier_type": self.identity.identifier_type,
                 "identifier": self.identity.identifier,
+                "configuration_hash": self.identity.configuration_hash,
+                "form_factor": self.identity.form_factor,
             },
             "accepted_claims": list(self.accepted_claims),
             "unknown_claim_keys": list(self.unknown_claim_keys),
@@ -113,7 +117,15 @@ def _identity_matches(expected: ProductIdentity, actual: ProductIdentity) -> boo
         return False
     if _normalized(expected.identifier_type) != _normalized(actual.identifier_type):
         return False
-    return _normalized(expected.identifier) == _normalized(actual.identifier)
+    if _normalized(expected.identifier) != _normalized(actual.identifier):
+        return False
+    if expected.configuration_hash and actual.configuration_hash:
+        if _normalized(expected.configuration_hash) != _normalized(actual.configuration_hash):
+            return False
+    if expected.form_factor != "unknown" and actual.form_factor != "unknown":
+        if _normalized(expected.form_factor) != _normalized(actual.form_factor):
+            return False
+    return True
 
 
 class ProductCapabilityEvidenceRegistry:
@@ -185,6 +197,16 @@ class ProductCapabilityEvidenceRegistry:
                     "retrieved_at": evidence.retrieved_at,
                     "identity_type": evidence.identity.identifier_type,
                     "identity_value": evidence.identity.identifier,
+                    "configuration_hash": evidence.identity.configuration_hash,
+                    "form_factor": evidence.identity.form_factor,
+                    "claim_class": (
+                        str(raw.get("claim_class") or "attested").strip().lower()
+                        if str(raw.get("claim_class") or "attested").strip().lower()
+                        in {"attested", "derived", "behavioral"}
+                        else "attested"
+                    ),
+                    "scope_caveat": str(raw.get("scope_caveat") or "").strip()[:500] or None,
+                    "freshness_status": "fresh",
                     "provenance_chain": list(evidence.provenance_chain),
                 }
                 gathered.append(claim)
@@ -356,6 +378,8 @@ class OfficialJsonProductProvider:
                 sku=str(raw_identity.get("sku") or ""),
                 identifier_type=str(raw_identity.get("identifier_type") or ""),
                 identifier=str(raw_identity.get("identifier") or ""),
+                configuration_hash=str(raw_identity.get("configuration_hash") or ""),
+                form_factor=str(raw_identity.get("form_factor") or "unknown"),
             ),
             claims=tuple(item for item in list(raw.get("claims") or [])[:64] if isinstance(item, Mapping)),
             provenance_chain=tuple(str(item) for item in list(raw.get("provenance_chain") or [])[:16]),
@@ -388,6 +412,25 @@ def identity_from_catalog_variant(variant: Any) -> ProductIdentity:
     """Choose the strongest externally resolvable identity without guessing."""
     specs = getattr(variant, "specs", None)
     specs = specs if isinstance(specs, Mapping) else {}
+    from src.app.services.recommendation_core.workload_decision import configuration_hash
+
+    raw_form_factor = str(
+        specs.get("form_factor") or specs.get("computer_type") or specs.get("product_type") or ""
+    ).strip().lower()
+    title_low = str(getattr(variant, "title", "") or "").lower()
+    if raw_form_factor in {"notebook", "mobile workstation"} or "laptop" in title_low:
+        form_factor = "laptop"
+    elif raw_form_factor in {"desktop", "workstation"} or "desktop" in title_low:
+        form_factor = "desktop"
+    elif raw_form_factor == "server" or "server" in title_low:
+        form_factor = "server"
+    else:
+        form_factor = "unknown"
+    config_hash = configuration_hash(
+        sku=str(getattr(variant, "sku", "") or ""),
+        specs=specs,
+        form_factor=form_factor,
+    )
     candidates = (
         ("machine_type_model", specs.get("machine_type_model") or specs.get("mtm")),
         ("manufacturer_part_number", specs.get("manufacturer_part_number") or specs.get("mpn")),
@@ -402,9 +445,13 @@ def identity_from_catalog_variant(variant: Any) -> ProductIdentity:
                 sku=str(getattr(variant, "sku", "") or ""),
                 identifier_type=identifier_type,
                 identifier=str(value).strip(),
+                configuration_hash=config_hash,
+                form_factor=form_factor,
             )
     return ProductIdentity(
         sku=str(getattr(variant, "sku", "") or ""),
         identifier_type="unresolved",
         identifier="",
+        configuration_hash=config_hash,
+        form_factor=form_factor,
     )

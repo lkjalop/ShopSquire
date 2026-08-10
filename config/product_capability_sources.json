@@ -8,6 +8,7 @@
       "identity_types": ["machine_type_model", "manufacturer_part_number", "family_identifier"],
       "allowed_publishers": ["Lenovo"],
       "allowed_domains": ["psref.lenovo.com", "psrefstuff.lenovo.com"],
+      "canonical_entrypoints": ["https://psref.lenovo.com/"],
       "max_age_seconds": 2592000,
       "operational_status": "endpoint_required"
     },
@@ -18,6 +19,7 @@
       "identity_types": ["manufacturer_part_number", "family_identifier"],
       "allowed_publishers": ["Intel"],
       "allowed_domains": ["intel.com", "ark.intel.com"],
+      "canonical_entrypoints": ["https://www.intel.com/content/www/us/en/ark.html"],
       "max_age_seconds": 2592000,
       "operational_status": "endpoint_required"
     },
@@ -28,6 +30,51 @@
       "identity_types": ["manufacturer_part_number", "family_identifier"],
       "allowed_publishers": ["NVIDIA"],
       "allowed_domains": ["nvidia.com"],
+      "canonical_entrypoints": ["https://www.nvidia.com/en-au/geforce/laptops/"],
+      "max_age_seconds": 2592000,
+      "operational_status": "endpoint_required"
+    },
+    {
+      "provider_id": "asus_official_specs",
+      "enabled": true,
+      "source_types": ["manufacturer_product_spec"],
+      "identity_types": ["manufacturer_part_number"],
+      "allowed_publishers": ["ASUS", "Republic of Gamers"],
+      "allowed_domains": ["asus.com", "rog.asus.com"],
+      "canonical_entrypoints": ["https://rog.asus.com/au/laptops/"],
+      "max_age_seconds": 2592000,
+      "operational_status": "endpoint_required"
+    },
+    {
+      "provider_id": "msi_official_specs",
+      "enabled": true,
+      "source_types": ["manufacturer_product_spec"],
+      "identity_types": ["manufacturer_part_number"],
+      "allowed_publishers": ["MSI"],
+      "allowed_domains": ["msi.com"],
+      "canonical_entrypoints": ["https://au.msi.com/Laptops"],
+      "max_age_seconds": 2592000,
+      "operational_status": "endpoint_required"
+    },
+    {
+      "provider_id": "gigabyte_official_specs",
+      "enabled": true,
+      "source_types": ["manufacturer_product_spec"],
+      "identity_types": ["manufacturer_part_number"],
+      "allowed_publishers": ["GIGABYTE", "AORUS"],
+      "allowed_domains": ["gigabyte.com", "aorus.com"],
+      "canonical_entrypoints": ["https://www.gigabyte.com/au/Laptop"],
+      "max_age_seconds": 2592000,
+      "operational_status": "endpoint_required"
+    },
+    {
+      "provider_id": "hp_official_specs",
+      "enabled": true,
+      "source_types": ["manufacturer_product_spec"],
+      "identity_types": ["manufacturer_part_number"],
+      "allowed_publishers": ["HP"],
+      "allowed_domains": ["hp.com", "support.hp.com"],
+      "canonical_entrypoints": ["https://support.hp.com/au-en/products/laptops"],
       "max_age_seconds": 2592000,
       "operational_status": "endpoint_required"
     }
