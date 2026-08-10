@@ -177,7 +177,7 @@ def test_chat_short_circuit_forwards_explicit_budget_memory():
     assert out["confirmed_slots"]["total_budget_cents"] == 11_000_000
 
 
-def test_chat_short_circuit_persists_quantity_for_follow_up_turns():
+def test_chat_short_circuit_does_not_persist_unconfirmed_quantity():
     from src.app.deps import DummyRedis
     from src.app.routers.chat import _cart_mutation_short_circuit
     from src.app.services.memory import Memory
@@ -193,7 +193,42 @@ def test_chat_short_circuit_persists_quantity_for_follow_up_turns():
 
     assert out["requested_quantity"] == 60
     state = Memory(redis).get_structured_state("u-cart-memory")
-    assert state["confirmed_slots"]["order_quantity"] == 60
+    assert state.get("confirmed_slots", {}).get("order_quantity") is None
+
+
+def test_chat_short_circuit_forwards_compound_read_only_obligations():
+    from src.app.routers.chat import _cart_mutation_short_circuit
+
+    out = _cart_mutation_short_circuit(
+        _suggest_cart_payload(
+            requested_quantity=31,
+            explanation={
+                "sku": "SKU-TPAD",
+                "workload_summary": "OT cyber range digital twin",
+                "fit_ledger": [{"attribute": "ram_gb", "verdict": "meets"}],
+            },
+            delivery_feasibility={
+                "requested_quantity": 31,
+                "delivery_window_days": 4,
+                "feasibility": "unknown",
+            },
+            case_obligations=[
+                {"kind": "explanation", "status": "answered"},
+                {"kind": "quantity_amendment", "status": "pending_confirmation"},
+                {"kind": "deadline", "status": "unknown"},
+            ],
+        ),
+        q="why is it a fit, add 30 more, and deliver in 4 days",
+        uid="u-compound-forward",
+        db=None,
+    )
+
+    assert out["requested_quantity"] == 31
+    assert out["explanation"]["workload_summary"] == "OT cyber range digital twin"
+    assert out["delivery_feasibility"]["delivery_window_days"] == 4
+    assert [row["kind"] for row in out["case_obligations"]] == [
+        "explanation", "quantity_amendment", "deadline",
+    ]
 
 
 def test_temporary_chat_short_circuit_does_not_persist_memory():
