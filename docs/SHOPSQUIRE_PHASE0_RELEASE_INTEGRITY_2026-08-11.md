@@ -1,0 +1,79 @@
+# ShopSquire Phase 0 release-integrity record
+
+Date: 2026-08-11  
+Branch: `agent/procurement-evidence-index-20260804`  
+Scope: non-destructive reconciliation of the mixed development worktree
+
+## Outcome so far
+
+The original 187 Git-status entries were inventoried without staging, resetting, moving, or deleting user work. The row-level action inventory is `docs/WORKTREE_OWNERSHIP_MANIFEST_2026-08-11.csv`.
+
+The temporary count rose to 189 while this audit script, its focused test, and the inventory itself were being added. Those audit artefacts are part of the Phase 0 closure, not previously hidden workspace changes.
+
+| Action class | Rows | Required action |
+|---|---:|---|
+| Intended-change candidates | 148 | Review by feature boundary; run focused proof; commit whole clean files or reviewed hunks only |
+| Evidence/archive candidates | 40 | Preserve; decide durable repository evidence versus external archive |
+| Mixed scratchpad evidence bundle | 1 | Inventory its contents before any cleanup; never delete the directory wholesale |
+
+The manifest deliberately does not call a source file “safe to commit” merely because it is under `src/` or `tests/`. It identifies candidates; ownership still comes from dependency inspection and test proof.
+
+## Clean-checkout proof
+
+A detached verification worktree exists at `C:\AI\ShopSquire-clean-20260811`.
+
+Verified from committed content only:
+
+- `import src.app.main`: passed.
+- Alembic: one head, `20260861_case_fulfillment`.
+- Full SQLite upgrade plus shadow migration check: passed.
+- Focused API/service/cart/V2 suite: 73 passed.
+- Evidence metrics dependency plus orchestrator suite: 31 passed.
+- Frontend focused suite: 37 passed.
+- Frontend production build: passed after `npm ci`; the existing >500 kB bundle warning remains a performance opportunity, not a build failure.
+- Clean-checkout CI now installs from the frontend lockfile, builds the frontend, and verifies the evidence-metrics dependency.
+
+## Dependency closure
+
+The audit found one committed-runtime dependency that was missing from Git. It is now packaged and clean-checkout tested:
+
+| Dependency | Runtime consumer | Resolution |
+|---|---|---|
+| `src/app/observability/evidence_metrics.py` | Evidence orchestrator late-result/runtime metrics | Committed with focused import/metric proof |
+
+The following untracked modules are not silently treated as complete. They belong to still-dirty feature slices and must be reconciled with their consumers and focused tests:
+
+| Untracked module | Current consumers | Closure boundary |
+|---|---|---|
+| `cart_session_state.py` | Dirty cart and cart-mutation routers | Cart clear/session-state slice plus cart regression tests |
+| `procurement_commitment_projection.py` | Dirty fulfilment-case router | Procurement commitment projection plus fulfilment tests |
+| `research_trigger_decision.py` | Dirty recommendation core | Generic research-trigger slice plus trigger/core tests |
+| `security_connector_identity.py` | Dirty security integrations router | Connector-authentication slice plus security identity tests |
+| `workload_hypothesis_compiler.py` | Focused tests only | Phase 1 open-vocabulary interpretation slice; no committed runtime import yet |
+| `models/read_db.py` | Focused tests only | Read-replica boundary slice; no committed runtime import yet |
+
+## Request and provider lifecycle audit
+
+The following protections are present and tested:
+
+- Chat has an outer request deadline and returns a typed retryable/in-progress degradation.
+- A cancelled chat await abandons the synchronous worker wait; downstream I/O must still use transport deadlines because Python cannot kill a running thread.
+- Evidence lanes use per-lane and total deadlines, cooperative cancellation, tenant concurrency limits, daemon workers, and late-result rejection.
+- Provider admission rejection is distinct from provider execution and cannot claim a network or paid call.
+- Cart confirmation is idempotent, so an SSE/browser retry cannot apply the mutation twice.
+- V2 compatibility remains retained and its architecture regression test passes.
+
+One material gap was found and fixed: official-source research had transport timeouts but could accumulate them serially across sources. It now has a 30-second total execution deadline, clamps every subsequent transport timeout to the remaining allowance, stops dispatching after expiry, and records `research_total_deadline_exceeded` instead of implying a knowledge result.
+
+Residual audit work before declaring Phase 0 complete:
+
+1. Reconcile each runtime-importing untracked dependency above in a focused ownership commit.
+2. Run the clean checkout at the final Phase 0 commit, including Playwright smoke against its own backend/frontend processes.
+3. Audit long-lived background listeners and retry loops outside the buyer research path; record which are service-managed and which require shutdown hooks.
+4. Classify the 40 evidence/archive rows and expand the single `scratchpad/` row into a content inventory before seeking cleanup approval.
+5. Preserve all uncertain files until the owner explicitly approves archive or deletion.
+
+## Phase ordering after integrity closure
+
+Phase 1 remains the generic research-trigger contract. It must be driven by typed material evidence gaps and authority state—not workload keywords. The named gaming, engineering, biomedical, and unknown prompts are probes of the same contract, not new hard-coded personas.
+

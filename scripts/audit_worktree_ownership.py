@@ -25,6 +25,33 @@ GENERATED_NAMES = {
     "tmp-thread-debug.db-wal",
 }
 
+EVIDENCE_SUFFIXES = (".md", ".png", ".jpg", ".jpeg", ".txt", ".csv")
+
+
+def _action_class(status: str, path: str, topic: str) -> str:
+    normalized = path.replace("\\", "/")
+    if topic == "generated runtime evidence":
+        return "generated_artifact"
+    if normalized.startswith("scratchpad/"):
+        return "evidence_or_uncertain_bundle"
+    if normalized.startswith("docs/") or normalized.lower().endswith(EVIDENCE_SUFFIXES):
+        return "evidence_or_archive"
+    if normalized.startswith(
+        (
+            ".github/",
+            "config/",
+            "frontend/",
+            "scripts/",
+            "src/",
+            "tests/",
+            "alembic/",
+        )
+    ) or normalized in {".dockerignore", "Dockerfile", "Dockerfile.web", "start_demo.ps1"}:
+        return "intended_change_candidate"
+    if status != "??":
+        return "tracked_change_requires_hunk_review"
+    return "uncertain_user_owned"
+
 
 def _topic(path: str) -> str:
     normalized = path.replace("\\", "/")
@@ -75,13 +102,27 @@ def _topic(path: str) -> str:
     return "manual classification required"
 
 
-def _disposition(status: str, path: str, topic: str) -> tuple[str, str, str]:
+def _disposition(
+    status: str, path: str, topic: str, action_class: str
+) -> tuple[str, str, str]:
     untracked = status == "??"
     if topic == "generated runtime evidence":
         return (
             "generated",
             "verify_then_remove_or_archive",
             "Retain only when no hosted/final certification artifact supersedes it.",
+        )
+    if action_class == "evidence_or_archive":
+        return (
+            "user_evidence",
+            "review_and_archive_or_commit",
+            "Do not delete; decide whether this is durable project evidence or an external archive.",
+        )
+    if action_class == "evidence_or_uncertain_bundle":
+        return (
+            "mixed_evidence_bundle",
+            "inventory_bundle_before_any_cleanup",
+            "A single Git status row may contain many files; never delete the bundle wholesale.",
         )
     if untracked:
         return (
@@ -119,12 +160,14 @@ def _status_rows(repo: Path) -> list[dict[str, str]]:
                 index += 1
                 path = f"{original} -> {path}"
         topic = _topic(path)
-        ownership, disposition, notes = _disposition(status, path, topic)
+        action_class = _action_class(status, path, topic)
+        ownership, disposition, notes = _disposition(status, path, topic, action_class)
         rows.append(
             {
                 "status": status,
                 "path": path,
                 "topic": topic,
+                "action_class": action_class,
                 "ownership": ownership,
                 "proposed_disposition": disposition,
                 "test_proof": "not_yet_linked",
