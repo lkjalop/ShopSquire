@@ -1,0 +1,16 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.tmp-*
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/dist
+*.sqlite
+*.sqlite3
+*.db
+celerybeat-schedule*
+scratchpad
+dump
