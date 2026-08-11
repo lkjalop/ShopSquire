@@ -35,6 +35,14 @@ class ClarificationObligationState:
         return self.has_shortlist or self.has_selected_product or self.has_cart
 
 
+def allows_covered_profile_exploration(
+    *, catalog_authority: str, covered_profiles: tuple[str, ...] | list[str],
+) -> bool:
+    """Allow browsing, never qualification, when a local profile is already grounded."""
+
+    return str(catalog_authority or "").lower() != "permitted" and bool(covered_profiles)
+
+
 def evaluate_text_gates(query: str) -> Dict[str, Any]:
     try:
         flagged = bool(_INJECTION_RE.search(str(query or "")))

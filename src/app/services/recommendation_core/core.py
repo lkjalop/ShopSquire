@@ -874,6 +874,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # price ceiling and therefore must be answered before products are selected.
     from src.app.services.recommendation_core.gates import (
         ClarificationObligationState,
+        allows_covered_profile_exploration,
         evaluate_text_gates,
         material_pre_retrieval_clarify,
         slot_gap_clarify,
@@ -1053,7 +1054,23 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 "persisted": False,
                 "error_type": type(exc).__name__,
             }
-        if semantic_decision.catalog_authority != "permitted":
+        covered_profile_exploration = allows_covered_profile_exploration(
+            catalog_authority=semantic_decision.catalog_authority,
+            covered_profiles=decision.use_cases,
+        )
+        if covered_profile_exploration:
+            # A covered local profile is enough to explore the catalogue provisionally.
+            # An unresolved modifier (for example, "studio") may still block verified
+            # workload fit, but it must not turn a useful local shortlist into a mandatory
+            # research-consent refusal. The original semantic decision remains visible.
+            resp.extras["provisional_catalog_authority"] = {
+                "status": "allowed",
+                "scope": "covered_profile_exploration_only",
+                "covered_profiles": list(decision.use_cases),
+                "qualification_authority": "none",
+                "commercial_authority": "none",
+            }
+        if semantic_decision.catalog_authority != "permitted" and not covered_profile_exploration:
             # A model can echo a quantity from prior prompt context even when the buyer
             # has switched to a new unresolved subject. Consequential commercial state
             # requires buyer-authored evidence in this turn; bounded model output alone

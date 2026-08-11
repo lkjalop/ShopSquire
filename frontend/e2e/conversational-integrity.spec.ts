@@ -51,6 +51,21 @@ test('prospective arrival request reaches fulfilment instead of post-purchase re
   await expect(page.getByText(/human teammate can via the admin console/i)).toHaveCount(0);
 });
 
+test('ordinary gaming catalog exploration renders products without requiring research', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), `ordinary-${Date.now()}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
+
+  const response = await sendToChat(page, 'I need gaming laptops for a studio.');
+  expect(response.ok()).toBe(true);
+  await expect(page.locator('[data-testid^="product-shelf-"] article').first()).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByTestId('ambiguity-accounting')).toContainText(/external calls: 0/i);
+  await expect(page.getByText(/needs current external requirements before I can qualify products/i)).toHaveCount(0);
+});
+
 test('commercial turns remain bound to an ambiguous case and preserve its purpose', async ({ page }) => {
   test.setTimeout(240_000);
   await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), `interrupt-${Date.now()}`);

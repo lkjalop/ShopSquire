@@ -1,5 +1,6 @@
 from src.app.services.recommendation_core.gates import (
     ClarificationObligationState,
+    allows_covered_profile_exploration,
     slot_gap_clarify,
 )
 
@@ -90,3 +91,17 @@ def test_fit_explanation_obligation_outranks_generic_budget_question():
             has_fit_explanation_obligation=True,
         ),
     ) is None
+
+
+def test_covered_profile_can_browse_when_only_verified_fit_is_blocked():
+    assert allows_covered_profile_exploration(
+        catalog_authority="blocked",
+        covered_profiles=("gaming",),
+    ) is True
+
+
+def test_uncovered_workload_cannot_invent_a_local_profile():
+    assert allows_covered_profile_exploration(
+        catalog_authority="blocked",
+        covered_profiles=(),
+    ) is False
