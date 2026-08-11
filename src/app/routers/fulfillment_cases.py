@@ -1120,6 +1120,21 @@ def commit(case_id: str, body: CommitBody, request: Request) -> Dict[str, Any]:
             except Exception:
                 import logging
                 logging.getLogger(__name__).exception("auto-draft preparation failed for case %s", case_id)
+        try:
+            from src.app.services.procurement_commitment_projection import (
+                project_commitment_consequences,
+            )
+
+            res_payload = project_commitment_consequences(
+                db, tenant_id=tenant_id, case_id=case_id,
+            )
+        except Exception as exc:
+            logging.getLogger("shopsquire.fulfillment.commitment_projection").warning(
+                "commitment consequence projection degraded case=%s error=%s",
+                case_id,
+                type(exc).__name__,
+            )
+            res_payload = {"status": "degraded", "reason": type(exc).__name__}
         # bounded autonomy: auto-send the claim-safe "thanks, sourcing" status to the buyer (flag-gated;
         # no human approval needed because it makes no commitment). Best-effort.
         if body.email:
@@ -1160,7 +1175,9 @@ def commit(case_id: str, body: CommitBody, request: Request) -> Dict[str, Any]:
                 )
             except Exception:
                 pass
-        return _case_view(db, case_id, for_operator=False)
+        response = _case_view(db, case_id, for_operator=False)
+        response["commitment_consequences"] = res_payload
+        return response
 
 
 class NotifyBuyerBody(BaseModel):

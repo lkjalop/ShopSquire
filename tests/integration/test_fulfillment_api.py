@@ -276,6 +276,9 @@ def test_closed_loop_trace_survives_confirmation_and_rfq_redraft(monkeypatch):
         "lines": [{"item_ref": "GAM-0002", "requested_qty": 20, "in_stock": 15, "source_qty": 5}],
     })
     assert first.status_code == 200, first.text
+    assert first.json()["demand_commitment_projection"]["status"] == "projected"
+    assert first.json()["demand_commitment_projection"]["authority"] == "buyer_committed"
+    assert first.json()["demand_commitment_projection"]["allocates_supply"] is False
     first_case = first.json()["cases"][0]["case_id"]
     first_state = client.get(f"{_BASE}/{first_case}/operator-view").json()["state_json"]
     assert first_state["availability"]["shortfall"] == 5
