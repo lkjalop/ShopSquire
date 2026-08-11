@@ -82,6 +82,29 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
   });
 
+  it('retains research authorization and later obligations on the shopping-case trace', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[
+      {
+        event_type: 'ambiguity_exploration_projected',
+        payload: { research_plan_id: 'crp-case', retained_purpose: 'factory simulation' },
+      },
+      {
+        event_type: 'official_research_rerank_completed',
+        payload: {
+          evidence_ladder: [{ tier: 1, mechanism: 'enrolled_canonical_origin', execution_status: 'completed', billing_class: 'free' }],
+        },
+      },
+      {
+        event_type: 'shopping_case_obligations_retained',
+        payload: { obligations: [{ kind: 'quantity', resolution_owner: 'buyer', buyer_text: 'reduce it by 10 units' }] },
+      },
+    ]} />);
+
+    expect(screen.getByText(/Buyer consent recorded:/i)).toHaveTextContent('yes');
+    expect(screen.getByTestId('shopping-case-retained-obligations')).toHaveTextContent(/quantity.*owner: buyer/i);
+    expect(screen.getByTestId('shopping-case-retained-obligations')).toHaveTextContent(/reduce it by 10 units/i);
+  });
+
   it('finds canonical research initiated from a buyer-provided official source', () => {
     render(<WorkloadResearchTrace executionSteps={[]} events={[{
       event_type: 'feedback_loop',

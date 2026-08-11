@@ -1794,7 +1794,13 @@ export default function App() {
       // trace without waiting for an LLM/provider. A 204 means the request belongs to the normal
       // local catalogue/chat path below. The browser supplies only the buyer's words; research
       // hypotheses and publisher scope are server-owned.
-      if (!hasImages && !complaintIntent && !explicitComplaintIntent && mode !== 'faq') {
+      if (
+        !activeShoppingCase?.case_id
+        && !hasImages
+        && !complaintIntent
+        && !explicitComplaintIntent
+        && mode !== 'faq'
+      ) {
         const interpretationResponse = await fetch(apiUrl('/api/v1/shopping-cases/interpretations'), {
           method: 'POST',
           credentials: 'include',
@@ -2501,17 +2507,30 @@ export default function App() {
           setProductShelves(null);
         }
         if (data?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
-          setAmbiguityExploration(data.ambiguity_exploration as AmbiguityExploration);
+          const incomingCaseId = String(data.ambiguity_exploration.case_id || '');
+          const continuesActiveCase = Boolean(
+            activeShoppingCase?.case_id && activeShoppingCase.case_id === incomingCaseId,
+          );
+          // The normal chat response can carry the original provisional projection.
+          // It must not downgrade a researched same-case projection or replace the
+          // durable case trace after later quantity/budget follow-ups.
+          if (!continuesActiveCase) {
+            setAmbiguityExploration(data.ambiguity_exploration as AmbiguityExploration);
+          }
           setActiveShoppingCase({
-            case_id: String(data.ambiguity_exploration.case_id),
+            case_id: incomingCaseId,
             retained_purpose: String(data.ambiguity_exploration.retained_purpose || ''),
           });
-          if (data?.product_shelves?.schema_version === 'product-shelves-v1') {
+          if (!continuesActiveCase && data?.product_shelves?.schema_version === 'product-shelves-v1') {
             setProductShelves(data.product_shelves as ProductShelfProjection);
           }
           switchRightPanelMode('grid');
         }
-        if (data?.shopping_case_id && data?.shopping_case_retained_purpose) {
+        if (
+          data?.shopping_case_id
+          && data?.shopping_case_retained_purpose
+          && !activeShoppingCase?.case_id
+        ) {
           setActiveShoppingCase({
             case_id: String(data.shopping_case_id),
             retained_purpose: String(data.shopping_case_retained_purpose),
@@ -2564,7 +2583,11 @@ export default function App() {
             return updated;
           });
         }
-        setTraceId(nextTraceId);
+        // A shopping case is the durable multi-turn audit identity. Individual
+        // chat turns still retain their own trace IDs server-side, but replacing
+        // the visible trace with the latest turn made approved research appear
+        // to vanish after a quantity or deadline follow-up.
+        setTraceId(normalizeTraceId(ambiguityExploration?.trace_id || nextTraceId));
 
         // Auto-open decision trace when image is security-flagged so the analyst sees the full matrix immediately
         if (
@@ -4142,7 +4165,11 @@ export default function App() {
       {/* Open the trace on the SOURCING turn's trace when a procurement context exists, so the Procurement
           tab/badge resolves — otherwise a later upsell turn's trace would show no journey. (See lib/trace.) */}
       {traceOpen && <DecisionTrace
-        traceId={procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
+        traceId={activeShoppingCase?.case_id
+          ? normalizeTraceId(
+            ambiguityExploration?.trace_id || activeShoppingCase.case_id.replace(/^sc-/, ''),
+          )
+          : procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
         onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} />}
 
       {/* Escalation Room Modal */}

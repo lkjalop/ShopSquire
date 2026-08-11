@@ -26,11 +26,15 @@ test('unfamiliar capability request plans research before buyer-specific clarifi
 
   await expect(page.getByTestId('stream-acknowledgement')).toBeVisible({ timeout: 1_500 });
   expect(Date.now() - started).toBeLessThan(1_500);
-  await expect(page.getByText(/needs current external requirements.*approved official sources/i).last())
+  await expect(page.getByText(/created a provisional shopping case.*local catalog exploration/i).last())
     .toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/external research not yet authorized/i).last()).toBeVisible();
+  await expect(page.getByRole('button', { name: /Research approved sources/i })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
-  await send(page, 'You may research approved official sources for the workload requirements.');
+  await page.getByRole('button', { name: /Research approved sources/i }).click();
+  await expect(page.getByText(/approved-source research completed|research could not complete/i).last())
+    .toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
 
   await send(page, 'The workflow is a local mechanical-maintenance digital twin with engineering simulation and 3D visualisation.');
@@ -51,11 +55,16 @@ test('unfamiliar capability request plans research before buyer-specific clarifi
   await expect(research).toBeVisible({ timeout: 30_000 });
   await expect(research).toContainText(/digital twin/i);
   await expect(research).toContainText(/bounded research plan/i);
-  await expect(research).toContainText(/official requirements/i);
+  await expect(research).toContainText(/official publisher requirements/i);
   await expect(research).toContainText(/Consent recorded:\s*Yes/i);
-  await expect(research).toContainText(/Status:\s*blocked/i);
-  await expect(research).toContainText(/catalog recommendation.*supplier enquiry/i);
-  await expect(research).toContainText(/Prior quantity:\s*30/i);
-  await expect(research).toContainText(/Proposed value:\s*20/i);
-  await expect(research).toContainText(/requires buyer confirmation/i);
+  await expect(research).not.toContainText(/cost budget exceeded/i);
+  await expect(research).toContainText(/External provider calls:/i);
+  await expect(research).toContainText(/Paid calls:\s*(?:0|not recorded)/i);
+  await expect(research).toContainText(/Evidence:\s*context only/i);
+  await expect(research).toContainText(/product requirements not established/i);
+  await expect(research).toContainText(/Cart authority:\s*none.*Supplier authority:\s*none/i);
+  const retained = research.getByTestId('shopping-case-retained-obligations');
+  await expect(retained).toContainText(/quantity.*owner: buyer/i);
+  await expect(retained).toContainText(/total budget is AUD 75,000/i);
+  await expect(retained).toContainText(/reduce it by 10 units/i);
 });

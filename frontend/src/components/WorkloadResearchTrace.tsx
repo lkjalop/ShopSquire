@@ -20,6 +20,11 @@ const isAmbiguityExplorationEvent = (event: any) => (
     .some((value) => String(value || '').toLowerCase() === 'ambiguity_exploration_projected')
 );
 
+const isShoppingCaseObligationEvent = (event: any) => (
+  [event?.event_type, event?.payload?._original_event_type, event?.payload?._event_type]
+    .some((value) => String(value || '').toLowerCase() === 'shopping_case_obligations_retained')
+);
+
 const RequirementRows = ({ title, value }: { title: string; value: any }) => {
   const rows = value && typeof value === 'object' ? Object.entries(value) : [];
   if (!rows.length) return null;
@@ -56,6 +61,9 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
   const officialResearch = [...events].reverse().find(isOfficialResearchEvent)?.payload || {};
   const provisionalExploration = [...events].reverse().find(isAmbiguityExplorationEvent)?.payload || {};
+  const retainedObligations = events
+    .filter(isShoppingCaseObligationEvent)
+    .flatMap((event) => Array.isArray(event?.payload?.obligations) ? event.payload.obligations : []);
   const evidenceLadder = Array.isArray(officialResearch?.evidence_ladder)
     ? officialResearch.evidence_ladder : [];
   const evidenceOutput = evidence?.output || {};
@@ -77,9 +85,9 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
     ? compiler.output.compiled_requirements : [];
   const rejectedClaims = Array.isArray(compiler?.output?.rejected_claims)
     ? compiler.output.rejected_claims : [];
-  const consentRecorded = evidence.id
+  const consentRecorded = Object.keys(officialResearch).length > 0 || (evidence.id
     ? Boolean(evidenceOutput.consent_recorded)
-    : buyerConsent?.status === 'recorded';
+    : buyerConsent?.status === 'recorded');
   const hasResearch = Boolean(
     evidence.id || authorization.id || entities.length || researchPlan.id || researchTrigger.id
     || postCatalogTrigger.id
@@ -127,7 +135,8 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
                 <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
                   {provisionalExploration.research_obligations.map((item: any, index: number) => (
                     <li key={item?.obligation_id || index}>
-                      {words(item?.kind || item?.ambiguity_type || 'research obligation')}
+                      {words(item?.obligation_type || item?.kind || item?.ambiguity_type || 'research obligation')}
+                      {item?.description ? `: ${item.description}` : ''}
                       {item?.resolution_owner ? ` - owner: ${words(item.resolution_owner)}` : ''}
                     </li>
                   ))}
@@ -226,6 +235,39 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
             <small style={{ color: '#64748b' }}>
               Missing evidence remains not verified. No unavailable source establishes safety, compatibility, or fit.
             </small>
+          </div>
+        )}
+
+        {Object.keys(officialResearch).length > 0 && (
+          <div data-testid="official-research-outcome" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Approved-source research outcome</strong>
+            <div style={{ marginTop: 5 }}>
+              Status: <strong>{words(officialResearch.status || 'completed')}</strong>
+              {' · '}Evidence: <strong>{words(officialResearch.evidence_outcome)}</strong>
+            </div>
+            <div>
+              External provider calls: <strong>{String(officialResearch?.provider_accounting?.external_calls ?? 0)}</strong>
+              {' · '}Official fetches: <strong>{String(officialResearch?.provider_accounting?.official_origin_fetches ?? 0)}</strong>
+              {' · '}Cache hits: <strong>{String(officialResearch?.provider_accounting?.cache_hits ?? 0)}</strong>
+              {' · '}Paid calls: <strong>{String(officialResearch?.provider_accounting?.paid_calls ?? 0)}</strong>
+            </div>
+            <small style={{ color: '#64748b' }}>
+              Cart authority: {words(officialResearch.cart_authority)}. Supplier authority: {words(officialResearch.supplier_authority)}.
+            </small>
+          </div>
+        )}
+
+        {retainedObligations.length > 0 && (
+          <div data-testid="shopping-case-retained-obligations" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Case-bound follow-up obligations</strong>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+              {retainedObligations.map((item: any, index: number) => (
+                <li key={`${item?.kind || 'obligation'}-${index}`}>
+                  {words(item?.obligation_type || item?.kind)} - owner: {words(item?.resolution_owner)}
+                  {item?.buyer_text ? `; buyer said: ${item.buyer_text}` : ''}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
