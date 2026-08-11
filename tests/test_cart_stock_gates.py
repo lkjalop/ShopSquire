@@ -12,8 +12,6 @@ All tests use an in-memory SQLite engine with products + inventory rows so
 they run without a live Postgres or Redis dependency.
 """
 
-import json
-import os
 import pathlib
 import uuid
 
@@ -289,6 +287,66 @@ def test_clear_replaces_stale_undo_snapshot_with_the_cart_being_cleared(client_w
         assert [(item["sku"], item["quantity"]) for item in restored.json()["items"]] == [
             ("SKU-INSTOCK-5", 3),
         ]
+    finally:
+        client_with_stock.app.dependency_overrides.pop(get_redis, None)
+
+
+def test_clear_invalidates_stale_quantity_and_selection_for_the_same_session(client_with_stock):
+    from src.app.deps import get_redis
+    from src.app.services.memory import Memory
+
+    fake = _FakeRedis()
+    client_with_stock.app.dependency_overrides[get_redis] = lambda: fake
+    uid = "clear-stale-commercial-state"
+    epoch = "clear-stale-commercial-state-epoch"
+    memory = Memory(fake, tenant_id="default", session_epoch=epoch)
+    memory.set_structured_state(uid, {
+        "constraints": {
+            "quantity": 30,
+            "exact_product_sku": "SKU-INSTOCK-5",
+            "product_selection_authority": "persisted_cart",
+            "requirements": {"ram_gb": {"op": ">=", "value": 32}},
+        },
+        "accepted_constraints": {
+            "quantity": 30,
+            "requirements": {"gpu_vram_gb": {"op": ">=", "value": 8}},
+        },
+        "confirmed_slots": {
+            "order_quantity": 30,
+            "exact_product_sku": "SKU-INSTOCK-5",
+            "use_case": "OT cyber range digital twin",
+        },
+        "active_workflow_lane": "PROCUREMENT",
+        "last_shortlist_skus": ["SKU-INSTOCK-5"],
+        "last_product_explanation": {"sku": "SKU-INSTOCK-5"},
+        "semantic_resolution": {"desired_outcome": "OT cyber range digital twin"},
+    })
+    try:
+        client_with_stock.post(
+            "/api/v1/cart/items",
+            json={"uid": uid, "sku": "SKU-INSTOCK-5", "quantity": 1},
+        )
+
+        cleared = client_with_stock.post(
+            "/api/v1/cart/clear",
+            params={"uid": uid, "session_epoch": epoch},
+        )
+
+        assert cleared.status_code == 200
+        state = memory.get_structured_state(uid)
+        assert state["constraints"] == {
+            "requirements": {"ram_gb": {"op": ">=", "value": 32}},
+        }
+        assert state["accepted_constraints"] == {
+            "requirements": {"gpu_vram_gb": {"op": ">=", "value": 8}},
+        }
+        assert state["confirmed_slots"] == {
+            "use_case": "OT cyber range digital twin",
+        }
+        assert state["semantic_resolution"]["desired_outcome"] == "OT cyber range digital twin"
+        assert state["last_shortlist_skus"] == []
+        assert "active_workflow_lane" not in state
+        assert "last_product_explanation" not in state
     finally:
         client_with_stock.app.dependency_overrides.pop(get_redis, None)
 
