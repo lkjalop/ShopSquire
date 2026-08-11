@@ -31,7 +31,6 @@ def _attachment_forensics_snapshot(
     parsed_fields = ((artifact_intel or {}).get("parsed_fields") if isinstance(artifact_intel, dict) else {}) or {}
     baseline_checks = ((artifact_intel or {}).get("baseline_checks") if isinstance(artifact_intel, dict) else {}) or {}
     forensics_details = ((artifact_intel or {}).get("forensics_details") if isinstance(artifact_intel, dict) else {}) or {}
-    contributions = list((((artifact_intel or {}).get("signal_scores") if isinstance(artifact_intel, dict) else {}) or {}).get("contributions") or [])
     summary: list[dict[str, Any]] = []
     vendor_name = str(parsed_fields.get("vendor_name") or "").strip()
     sender_domain = str(baseline_checks.get("sender_domain") or "").strip().lower()
@@ -108,6 +107,18 @@ def _attachment_forensics_snapshot(
             suspicious_instructions.append("Requests new or changed payment instructions.")
         if bank_fields:
             suspicious_instructions.append("Contains bank or remittance details in the attachment.")
+        _indirect_instruction_patterns = [
+            (r"(?i)\bignore\s+(?:all\s+)?previous\b", "Attempts to override prior instructions."),
+            (r"(?i)\bsystem\s*(?::|prompt)\b", "Contains a forged system-instruction marker."),
+            (r"(?i)\bskip\s+(?:the\s+)?human\s+gate\b", "Attempts to bypass required human authorization."),
+            (r"(?i)\bapprove(?:d)?\s*=\s*true\b", "Attempts to forge approval state."),
+            (r"(?i)\binvoke\s+[a-z0-9_.-]+", "Attempts to invoke a tool from untrusted document content."),
+            (r"(?i)\bauthoritative\s+price\s+update\b", "Attempts to replace authoritative commercial facts."),
+            (r"(?i)\b(?:state|present|claim)\s+.{0,80}\s+as\s+(?:a\s+)?fact\b", "Requests an unsupported claim be presented as fact."),
+        ]
+        for pattern, label in _indirect_instruction_patterns:
+            if re.search(pattern, extracted_text):
+                suspicious_instructions.append(label)
         # VBA / script macro execution indicators in extracted text.
         # Fires for .bas, .vba, .xlsm, .xlam, .ps1, .vbs, and any other attachment
         # where the text surface contains recognisable offensive VBA/script primitives.
@@ -128,11 +139,6 @@ def _attachment_forensics_snapshot(
                 suspicious_instructions.append(
                     f"Attachment contains VBA/script execution indicator: {_vba_label}"
                 )
-        attachment_reasons = [
-            str(item.get("reason") or "")
-            for item in contributions
-            if isinstance(item, dict) and name.lower() in json.dumps(item.get("reason") or "").lower()
-        ]
         mismatch_signals: list[str] = []
         if name in list(forensics_details.get("template_drift") or []):
             mismatch_signals.append("Template differs from the trusted vendor baseline.")
@@ -190,6 +196,12 @@ def _attachment_forensics_snapshot(
                     "embedded_files_count": int(att.get("embedded_files_count") or 0),
                     "object_stream_count": int(att.get("pdf_objstm_count") or 0),
                     "xref_stream_present": bool(att.get("pdf_xrefstm_present")),
+                    "actions": dict(att.get("pdf_actions") or {}) if isinstance(att.get("pdf_actions"), dict) else {},
+                },
+                "office_forensics": {
+                    "external_relationships": list(att.get("office_external_relationships") or []),
+                    "macro_member_count": int(att.get("office_macro_member_count") or 0),
+                    "embedded_object_count": int(att.get("office_embedded_object_count") or 0),
                 },
                 "document_hashes": {
                     "template_hash": att.get("template_hash"),
