@@ -60,6 +60,7 @@ $env:RECOMMEND_POLICY_ANSWER_MODE      = "on" # approved StoreProfile FAQ only; 
 $env:RECOMMEND_SUPPORT_HANDOFF_MODE    = "on" # advice only; case submission remains domain-owned
 $env:RECOMMEND_INVENTORY_READ_MODE     = "on" # read only; reorder actions remain authorization-gated
 $env:RECOMMEND_LEGACY_DELEGATE_ENABLED = "0"  # explicit V2 pilot: unsupported lanes fail boundedly
+$env:RECOMMEND_COMPATIBILITY_CUTOVER_ENABLED = "1" # chat uses typed facade outcomes, never direct suggest()
 $env:ROUTER_PREWARM_ON_START           = "1"
 $env:ROUTER_PREWARM_BLOCKING           = "1"
 $env:ROUTER_PREWARM_REQUIRED           = "1"
