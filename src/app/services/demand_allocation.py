@@ -1105,8 +1105,31 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
     ), params).fetchall()
     promise_calculations: list[dict[str, Any]] = []
     workbench_tables = set(inspect(db.connection()).get_table_names())
+    # A demand commitment is keyed by the buyer/order case while promise and
+    # payment consequences belong to the immutable fulfillment case created
+    # from that order.  Resolve that relationship explicitly; using d.case_id
+    # directly made valid consequence records disappear from Decision Trace.
+    demand_case_ids = sorted({str(row[1]) for row in rows if row[1]})
+    operational_case_ids = {
+        str(row[7]) for row in batches if row[7]
+    }
+    if demand_case_ids and "fulfillment_case_version" in workbench_tables:
+        for demand_case_id in demand_case_ids:
+            group_id = f"order-{demand_case_id}"
+            linked = db.execute(text(
+                "SELECT DISTINCT case_id FROM fulfillment_case_version "
+                "WHERE tenant_id=:tenant AND valid_to IS NULL AND state_json LIKE :group_pattern"
+            ), {
+                "tenant": tenant_id,
+                "group_pattern": f'%"order_group_id"%{group_id}%',
+            }).fetchall()
+            operational_case_ids.update(str(row[0]) for row in linked if row[0])
+    # Older shadow-only fixtures intentionally have no fulfillment-case table.
+    # Keep their existing order-scoped behavior while preferring authoritative
+    # operational identities whenever the projection exists.
+    case_ids = sorted(operational_case_ids) or demand_case_ids
     if "promise_calculation" in workbench_tables:
-        for case_id in sorted({str(row[1]) for row in rows if row[1]}):
+        for case_id in case_ids:
             promise_row = db.execute(text(
                 "SELECT option_id,calculation_version,requested_quantity,requested_arrival_at,"
                 "feasibility,confirmed_quantity,unknown_quantity,quantity_by_deadline,"
@@ -1137,7 +1160,6 @@ def allocation_workbench(db, *, tenant_id: str, sku: str | None = None,
                     None if str(promise_row[4]) == "met" else "unsupported_full_delivery_promise"
                 ),
             })
-    case_ids = sorted({str(row[1]) for row in rows if row[1]})
     outbound_contact_schedule = None
     human_room = None
     canonical_escalation = None

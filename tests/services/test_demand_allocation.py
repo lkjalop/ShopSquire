@@ -773,6 +773,54 @@ def test_workbench_anonymizes_buyers_and_reports_pressure_queue_and_child_count(
     assert "buyer" not in view["demands"][0]
 
 
+def test_workbench_resolves_order_identity_to_fulfillment_case_consequences():
+    db = _db()
+    demand = _demand(db, "order-trace-1", stage="committed", qty=5)
+    db.execute(text(
+        "UPDATE demand_commitment SET case_id='order-trace-1' WHERE id=:id"
+    ), {"id": demand["id"]})
+    db.execute(text("""CREATE TABLE fulfillment_case_version (
+      id TEXT PRIMARY KEY,case_id TEXT,tenant_id TEXT,state_json TEXT,valid_to TEXT)"""))
+    db.execute(text("""CREATE TABLE promise_calculation (
+      id TEXT PRIMARY KEY,tenant_id TEXT,case_id TEXT,option_id TEXT,calculation_version TEXT,
+      requested_quantity INTEGER,requested_arrival_at TEXT,feasibility TEXT,confirmed_quantity INTEGER,
+      unknown_quantity INTEGER,quantity_by_deadline INTEGER,latest_viable_response_at TEXT,
+      earliest_arrival_at TEXT,latest_arrival_at TEXT,carrier_cutoff_at TEXT,dispatch_ready_at TEXT,
+      evaluated_at TEXT,response_expectation_json TEXT,reason_codes_json TEXT,dependencies_json TEXT,
+      status TEXT,calculated_at TEXT)"""))
+    db.execute(text("""CREATE TABLE procurement_payment_consequence (
+      id TEXT PRIMARY KEY,tenant_id TEXT,case_id TEXT,consequence_json TEXT,
+      created_at TEXT,superseded_at TEXT)"""))
+    db.execute(text(
+        "INSERT INTO fulfillment_case_version "
+        "(id,case_id,tenant_id,state_json,valid_to) VALUES "
+        "('v1','fulfillment-1','t1',:state,NULL)"
+    ), {"state": json.dumps({"order_group_id": "order-order-trace-1"})})
+    db.execute(text("""INSERT INTO promise_calculation (
+      id,tenant_id,case_id,option_id,calculation_version,requested_quantity,requested_arrival_at,
+      feasibility,confirmed_quantity,unknown_quantity,quantity_by_deadline,evaluated_at,
+      response_expectation_json,reason_codes_json,dependencies_json,status,calculated_at)
+      VALUES ('p1','t1','fulfillment-1','buyer-commitment','promise-v1',5,
+      'relative:2:business_days','unknown',0,5,0,'2026-08-06T00:00:00Z','{}','["calendar_required"]',
+      '{}','active','2026-08-06T00:00:00Z')"""))
+    consequence = {
+        "plan_type": "balance_after_confirmation", "status": "deposit_policy_required",
+        "currency": "AUD", "total_amount_cents": 50000, "deposit_amount_cents": None,
+        "balance_amount_cents": 50000, "state_prevented": "payment_authorization",
+    }
+    db.execute(text(
+        "INSERT INTO procurement_payment_consequence "
+        "(id,tenant_id,case_id,consequence_json,created_at,superseded_at) "
+        "VALUES ('pay1','t1','fulfillment-1',:payload,'2026-08-06T00:00:00Z',NULL)"
+    ), {"payload": json.dumps(consequence)})
+
+    view = allocation_workbench(db, tenant_id="t1", sku="SKU-1")
+
+    assert view["promise_calculation"]["feasibility"] == "unknown"
+    assert view["promise_calculation"]["requested_arrival_at"] == "relative:2:business_days"
+    assert view["payment_consequence"] == consequence
+
+
 def test_workbench_projects_fresh_supplier_pressure_and_response_sla():
     db = _db()
     observed = datetime.now(timezone.utc) - timedelta(hours=1)
