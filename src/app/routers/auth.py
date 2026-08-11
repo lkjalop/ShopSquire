@@ -20,6 +20,7 @@ from src.app.models.db import db_session
 from src.app.platform.tenant_context import current_tenant_id
 from src.app.policy.action_authority_matrix import AuthDecision, evaluate as evaluate_action_authority
 from src.app.security.csrf_middleware import generate_csrf_token, set_csrf_cookie
+from src.app.security.client_ip import client_ip
 from src.app.security.iam import log_iam_event, check_bruteforce, check_impossible_travel, emit_iam_anomaly
 from src.app.observability.tracing import get_tracer
 from src.app.services.pii_crypto import encrypt_pii, pii_hash
@@ -782,6 +783,7 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
     with tracer.start_as_current_span("auth.login") as span:
         _ensure_auth_tables()
         email = payload.email.strip().lower()
+        source_ip = client_ip(request)
         span.set_attribute("auth.email_domain", email.split("@")[-1] if "@" in email else "unknown")
         with db_session() as db:
             row = db.execute(
@@ -790,10 +792,10 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
             ).fetchone()
             if not row:
                 try:
-                    log_iam_event("login_failure", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), False, {"reason": "invalid_user"})
+                    log_iam_event("login_failure", email, source_ip, request.headers.get("user-agent", ""), False, {"reason": "invalid_user"})
                     reason = check_bruteforce(email)
                     if reason:
-                        emit_iam_anomaly(email, request.client.host if request.client else "unknown", reason)
+                        emit_iam_anomaly(email, source_ip, reason)
                 except Exception:
                     pass
                 raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -801,10 +803,10 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
             _pw_valid, _pw_upgrade = _verify_password(payload.password, ph, salt)
             if not _pw_valid:
                 try:
-                    log_iam_event("login_failure", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), False, {"reason": "bad_password"})
+                    log_iam_event("login_failure", email, source_ip, request.headers.get("user-agent", ""), False, {"reason": "bad_password"})
                     reason = check_bruteforce(email)
                     if reason:
-                        emit_iam_anomaly(email, request.client.host if request.client else "unknown", reason)
+                        emit_iam_anomaly(email, source_ip, reason)
                 except Exception:
                     pass
                 raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -855,10 +857,10 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
         except Exception:
             pass
         try:
-            log_iam_event("login_success", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), True, {"user_id": user_id})
-            reason = check_impossible_travel(email, request.client.host if request.client else "unknown")
+            log_iam_event("login_success", email, source_ip, request.headers.get("user-agent", ""), True, {"user_id": user_id})
+            reason = check_impossible_travel(email, source_ip)
             if reason:
-                emit_iam_anomaly(email, request.client.host if request.client else "unknown", reason)
+                emit_iam_anomaly(email, source_ip, reason)
         except Exception:
             pass
         return {"user_id": user_id, "email": email, "name": name, **token, **jwt_pair}
