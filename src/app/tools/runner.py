@@ -13,7 +13,7 @@ from src.app.policy.gate import evaluate_policy_gate
 from src.app.repositories.catalog import CatalogRepository
 from src.app.security.agent_events import log_mcp_tool_invocation
 from src.app.services.decision_log import log_trace_event
-from src.app.services.registry import get_tool, get_tool_metadata, load_from_config
+from src.app.services.registry import get_tool, get_tool_contract_fingerprint, get_tool_metadata, load_from_config
 from src.app.routers.approvals import enqueue_approval
 from src.app.services.agent_containment import is_contained
 
@@ -29,17 +29,28 @@ class ToolRunner:
         except Exception:
             pass
 
-    def _bridge_call(self, tool: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _bridge_call(self, tool: str, params: Dict[str, Any], *, tenant_id: str | None, trace_id: str | None) -> Dict[str, Any]:
         with self.tracer.start_as_current_span("tools.bridge_call") as span:
             span.set_attribute("tools.bridge_url", self.bridge_url)
             span.set_attribute("tools.name", tool)
             with httpx.Client(timeout=self.bridge_timeout) as client:
+                contract_hash = get_tool_contract_fingerprint(tool)
+                headers = {"X-ShopSquire-Tool-Contract": contract_hash}
+                bridge_token = str(os.getenv("TOOL_BRIDGE_TOKEN", "") or "").strip()
+                if bridge_token:
+                    headers["Authorization"] = f"Bearer {bridge_token}"
                 resp = client.post(
                     f"{self.bridge_url.rstrip('/')}/tools/run",
-                    json={"tool": tool, "params": params},
+                    headers=headers,
+                    json={"tool": tool, "params": params, "tenant_id": tenant_id, "trace_id": trace_id, "contract_hash": contract_hash},
                 )
                 resp.raise_for_status()
-                return resp.json()
+                result = resp.json()
+                strict = str(os.getenv("TOOL_BRIDGE_CONTRACT_ENFORCE", "0")).lower() in {"1", "true", "yes", "on"}
+                returned_hash = str(result.pop("_tool_contract_hash", "") or "") if isinstance(result, dict) else ""
+                if strict and returned_hash != contract_hash:
+                    raise RuntimeError("tool_bridge_contract_mismatch")
+                return result
 
     def _local_tool(self, tool: str, params: Dict[str, Any]) -> Dict[str, Any]:
         if tool == "catalog.search":
@@ -84,7 +95,7 @@ class ToolRunner:
                 return {"error": f"plugin_error:{exc}"}
         return {"error": "unknown_tool"}
 
-    def run(self, tool: str, params: Dict[str, Any], source: str = "demo-user", trace_id: str | None = None) -> Dict[str, Any]:
+    def run(self, tool: str, params: Dict[str, Any], source: str = "demo-user", trace_id: str | None = None, tenant_id: str | None = None) -> Dict[str, Any]:
         with self.tracer.start_as_current_span("tools.run") as span:
             span.set_attribute("tools.name", tool)
             try:
@@ -225,8 +236,20 @@ class ToolRunner:
             except Exception:
                 pass
             try:
-                result = self._bridge_call(tool, params)
+                result = self._bridge_call(tool, params, tenant_id=tenant_id, trace_id=trace_id)
             except Exception:
+                strict_bridge = str(os.getenv("TOOL_BRIDGE_CONTRACT_ENFORCE", "0")).lower() in {"1", "true", "yes", "on"}
+                if strict_bridge:
+                    status = "blocked"
+                    duration = time.perf_counter() - start
+                    record_tool_invocation(tool, status, duration)
+                    return {
+                        "tool": tool,
+                        "status": status,
+                        "source": "bridge_security_boundary",
+                        "result": {"error": "tool_bridge_identity_or_contract_failure"},
+                        "duration_seconds": duration,
+                    }
                 source_mode = "local"
                 try:
                     result = self._local_tool(tool, params)

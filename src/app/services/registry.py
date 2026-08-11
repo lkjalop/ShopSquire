@@ -5,8 +5,8 @@ Loadable from config files to support modular deployments.
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List
+import hashlib
 import json
-import os
 
 
 _AGENTS: Dict[str, Callable] = {}
@@ -57,6 +57,23 @@ def get_tool(name: str) -> Callable | None:
 
 def get_tool_metadata(name: str) -> Dict[str, Any]:
     return dict(_TOOL_META.get(name) or {})
+
+
+def get_tool_contract_fingerprint(name: str) -> str:
+    """Stable identity for the reviewed tool contract, independent of implementation memory address."""
+    meta = get_tool_metadata(name)
+    contract = {
+        "name": str(name or ""),
+        "description": str(meta.get("description") or ""),
+        "risk": str(meta.get("risk") or "unknown"),
+        "agent_types": sorted(str(item) for item in list(meta.get("agent_types") or [])),
+        "input_schema": meta.get("input_schema") or {},
+        "output_schema": meta.get("output_schema") or {},
+        "server_id": str(meta.get("server_id") or "local"),
+        "contract_version": str(meta.get("contract_version") or "1"),
+    }
+    encoded = json.dumps(contract, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def list_tools() -> List[Dict[str, Any]]:
