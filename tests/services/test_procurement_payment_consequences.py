@@ -24,6 +24,17 @@ def test_deposit_keeps_balance_blocked_until_supplier_confirmation():
     assert result["state_prevented"] == "balance_capture"
 
 
+def test_deposit_preference_without_tenant_policy_is_visible_and_blocked():
+    result = evaluate_payment_consequence(
+        plan_type="balance_after_confirmation", total_amount_cents=100_000, currency="AUD",
+        promise_feasibility="unknown", policy_version="payment-v1",
+    )
+
+    assert result["status"] == "deposit_policy_required"
+    assert result["deposit_amount_cents"] is None
+    assert result["state_prevented"] == "payment_authorization"
+
+
 @pytest.mark.parametrize("days", [7, 15, 30, 45, 60, 90])
 def test_only_authoritatively_approved_b2b_terms_create_a_receivable(days):
     blocked = evaluate_payment_consequence(

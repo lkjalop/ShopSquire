@@ -71,7 +71,19 @@ def evaluate_payment_consequence(
         }
     if plan in {"deposit", "balance_after_confirmation"}:
         if not 0 < int(deposit_bps) <= 10000:
-            raise ValueError("deposit_policy_required")
+            return {
+                "plan_type": plan,
+                "status": "deposit_policy_required",
+                "currency": currency,
+                "total_amount_cents": total,
+                "deposit_amount_cents": None,
+                "balance_amount_cents": total,
+                "terms_days": None,
+                "authorization_expires_at": expiry.isoformat() if expiry else None,
+                "policy_version": policy_version,
+                "status_reason": "authoritative_deposit_percentage_required",
+                "state_prevented": "payment_authorization",
+            }
         deposit = (total * int(deposit_bps)) // 10000
         return {
             "plan_type": plan,
