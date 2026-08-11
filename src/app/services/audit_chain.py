@@ -106,6 +106,8 @@ def _append_external_anchor(record: Dict[str, Any]) -> None:
     - `worm_local`: append to a dedicated append-only archive file.
     - `notary_http`: POST signed anchor payload to external notary endpoint.
     - `s3_worm`: upload signed anchor payload to S3 Object Lock COMPLIANCE.
+    - `azure_blob`: upload an immutable, uniquely keyed object through the
+      provider-neutral object storage boundary.
     - `both`: apply all configured mechanisms.
     """
     mode = _external_anchor_mode()
@@ -128,6 +130,9 @@ def _append_external_anchor(record: Dict[str, Any]) -> None:
 
     if mode in ("s3_worm", "both"):
         _append_external_anchor_s3(payload)
+
+    if mode in ("azure_blob", "both"):
+        _append_external_anchor_azure(payload)
 
     if mode in ("notary_http", "both"):
         endpoint = str(os.getenv("AUDIT_CHAIN_NOTARY_URL", "") or "").strip()
@@ -160,6 +165,25 @@ def _append_external_anchor_s3(payload: Dict[str, Any]) -> None:
         ObjectLockMode="COMPLIANCE",
         ObjectLockRetainUntilDate=retain_iso,
     )
+
+
+def _append_external_anchor_azure(payload: Dict[str, Any]) -> None:
+    from src.app.services.storage_s3 import get_default_storage
+
+    prefix = str(
+        os.getenv("AUDIT_CHAIN_AZURE_PREFIX", "audit_chain_anchors/")
+        or "audit_chain_anchors/"
+    ).strip()
+    date_part = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    anchor_id = str(payload.get("anchor_id") or uuid.uuid4().hex)
+    key = f"{prefix.rstrip('/')}/{date_part}/{anchor_id}.json"
+    result = get_default_storage().upload_bytes(
+        key,
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+        content_type="application/json",
+    )
+    if not bool(result.get("ok")):
+        raise RuntimeError(str(result.get("error") or "azure_anchor_upload_failed"))
 
 
 def _read_latest_anchor() -> Dict[str, Any] | None:
