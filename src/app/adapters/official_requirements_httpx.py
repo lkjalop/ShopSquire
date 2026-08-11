@@ -22,7 +22,19 @@ class OfficialRequirementsHttpFetcher(HttpxResearchFetcher):
         endpoint_template: Optional[str] = None,
         resolver: Optional[Callable[..., Any]] = None,
         allow_private: Optional[bool] = None,
+        api_key: Optional[str] = None,
+        auth_header: Optional[str] = None,
     ) -> None:
+        credential = str(
+            api_key if api_key is not None else os.getenv("OFFICIAL_REQUIREMENTS_API_KEY") or ""
+        ).strip()
+        header_name = str(
+            auth_header
+            if auth_header is not None
+            else os.getenv("OFFICIAL_REQUIREMENTS_AUTH_HEADER") or "Authorization"
+        ).strip()
+        auth_scheme = str(os.getenv("OFFICIAL_REQUIREMENTS_AUTH_SCHEME") or "Bearer").strip()
+        auth_value = f"{auth_scheme} {credential}".strip() if credential else ""
         super().__init__(
             client=client,
             search_url_template=(
@@ -33,4 +45,5 @@ class OfficialRequirementsHttpFetcher(HttpxResearchFetcher):
             resolver=resolver,
             allow_private=allow_private,
             user_agent="ShopSquire-Official-Requirements/1.0",
+            request_headers={header_name: auth_value} if header_name and auth_value else None,
         )

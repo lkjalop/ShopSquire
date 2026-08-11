@@ -34,11 +34,21 @@ _REORDER_RE = re.compile(r"\b(?:again|reorder|re-?order|last\s+time|previous\s+o
 
 @dataclass(frozen=True)
 class EvidenceBudget:
-    """Provider-neutral limits; cost units are relative, not currency claims."""
+    """Provider-neutral runtime limits.
+
+    ``max_cost_units`` is retained as a compatibility field, but it is an
+    internal scheduling allowance. It is not money, tokens, provider credit,
+    or evidence that an external call was billed. New trace consumers should
+    use :attr:`max_effort_units` and the bundle's ``effort`` projection.
+    """
 
     per_lane_ms: int = 2500
     total_ms: int = 3000
     max_cost_units: int = 12
+
+    @property
+    def max_effort_units(self) -> int:
+        return int(self.max_cost_units)
 
 
 @dataclass
@@ -104,7 +114,7 @@ def outstanding_evidence_lanes() -> int:
         return _OUTSTANDING_LANES
 
 
-_LEG_COST_UNITS = {
+_LEG_EFFORT_UNITS = {
     "concept_resolution": 3,
     "market": 3,
     "policy": 1,
@@ -113,6 +123,38 @@ _LEG_COST_UNITS = {
     "image": 2,
     "web": 5,
 }
+
+# Compatibility alias for extensions which imported the private constant.
+_LEG_COST_UNITS = _LEG_EFFORT_UNITS
+
+
+def _provider_usage(legs: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Project external calls separately from internal effort.
+
+    Billing is deliberately nullable. A network call is not proof of a paid
+    call, and provider selection is not proof that a call was launched.
+    """
+    dispatched_attempts: list[dict[str, Any]] = []
+    cache_hits = 0
+    for leg in legs.values():
+        data = leg.get("data") if isinstance(leg.get("data"), dict) else {}
+        for attempt in list(data.get("provider_attempts") or []):
+            if not isinstance(attempt, dict) or not attempt.get("provider_id"):
+                continue
+            if str(attempt.get("status") or "").lower() == "cached":
+                cache_hits += 1
+            if attempt.get("external_call_dispatched") is True:
+                dispatched_attempts.append(attempt)
+    classes = [str(item.get("billing_class") or "unknown").lower() for item in dispatched_attempts]
+    billing_recorded = bool(classes) and all(value in {"free", "paid"} for value in classes)
+    return {
+        "external_provider_call_count": len(dispatched_attempts),
+        "external_provider_cache_hit_count": cache_hits,
+        "paid_provider_call_count": (
+            sum(value == "paid" for value in classes) if billing_recorded else None
+        ),
+        "paid_provider_call_count_status": "recorded" if billing_recorded else "not_recorded",
+    }
 
 
 def _table_has_column(db: Any, table: str, column: str) -> bool:
@@ -514,7 +556,6 @@ def _leg_concept_resolution(
         "not_configured": "no_authoritative_evidence",
         "empty": "no_authoritative_evidence",
         "completed": "no_authoritative_evidence",
-        "empty": "no_authoritative_evidence",
     }.get(run_status, "evidence_candidates" if requirements_items else "no_authoritative_evidence")
     return {
         "source": "concept_resolution",
@@ -592,6 +633,10 @@ def _leg_web(plan: Any, query: str, uid: Optional[str], *,
         "data": {
             "query_templated": templated,       # provable: no user tokens on the wire
             "items": clean[:4],
+            "provider_id": res.get("provider_id"),
+            "provider_ids": list(res.get("provider_ids") or []),
+            "provider_attempts": list(res.get("provider_attempts") or [])[:16],
+            "cache_status": res.get("cache_status"),
             "injection_scan": {"checked": len(items), "dropped": dropped,
                                "verdict": "CLEAN" if dropped == 0 else f"{dropped} snippet(s) dropped"},
             "authority": "informs wording only — never ranks, prices or approves",
@@ -632,11 +677,27 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
         "citations": [],
         "contradictions": [],
         "source_health": "healthy",
+        "effort": {
+            "per_lane_ms": configured.per_lane_ms,
+            "total_ms": configured.total_ms,
+            "max_effort_units": configured.max_effort_units,
+            "used_effort_units": 0,
+            "unit_kind": "internal_scheduler_effort",
+        },
+        # Deprecated compatibility projection. These values have never been
+        # currency or provider spend; keep the old keys while clients migrate.
         "budget": {
             "per_lane_ms": configured.per_lane_ms,
             "total_ms": configured.total_ms,
-            "max_cost_units": configured.max_cost_units,
+            "max_cost_units": configured.max_effort_units,
             "used_cost_units": 0,
+            "unit_kind": "deprecated_internal_effort_alias",
+        },
+        "provider_usage": {
+            "external_provider_call_count": 0,
+            "external_provider_cache_hit_count": 0,
+            "paid_provider_call_count": None,
+            "paid_provider_call_count_status": "not_recorded",
         },
         "ms": 0,
         "runtime": {
@@ -649,18 +710,25 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
         return out
     fns = leg_fns or _LEG_FNS
     admitted: list[str] = []
-    used_cost = 0
+    used_effort = 0
     for name in selected:
-        cost = int(_LEG_COST_UNITS.get(name, 1))
-        if used_cost + cost > configured.max_cost_units:
+        effort = int(_LEG_EFFORT_UNITS.get(name, 1))
+        if used_effort + effort > configured.max_effort_units:
             out["legs"][name] = {
                 "source": name, "found": False, "summary": "", "data": {},
-                "error": "cost_budget_exceeded", "health": "cancelled",
+                "error": "effort_allowance_exceeded",
+                "legacy_error": "cost_budget_exceeded",
+                "health": "rejected",
+                "execution_status": "rejected_admission",
+                "admission_reason": "internal_effort_allowance_exceeded",
+                "required_effort_units": effort,
+                "remaining_effort_units": max(0, configured.max_effort_units - used_effort),
             }
             continue
         admitted.append(name)
-        used_cost += cost
-    out["budget"]["used_cost_units"] = used_cost
+        used_effort += effort
+    out["effort"]["used_effort_units"] = used_effort
+    out["budget"]["used_cost_units"] = used_effort
     if not admitted:
         out["source_health"] = "degraded"
         return out
@@ -793,6 +861,16 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
                     data.get("trust_state") == "advisory"
                     or (data.get("injection_scan") or {}).get("dropped", 0)
                 ) else "healthy"
+        if "execution_status" not in leg:
+            if leg.get("health") == "timed_out":
+                leg["execution_status"] = "timed_out"
+            elif leg.get("health") == "cancelled":
+                leg["execution_status"] = "cancelled"
+            elif leg.get("health") == "failed":
+                leg["execution_status"] = "failed"
+            else:
+                # An empty evidence result can still be a completed execution.
+                leg["execution_status"] = "completed"
         if leg.get("found") and leg.get("summary"):
             data = leg.get("data") if isinstance(leg.get("data"), dict) else {}
             citation = {"source": leg.get("source") or name, "summary": leg["summary"]}
@@ -816,10 +894,11 @@ def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
         if len({repr(item.get("value")) for item in values}) > 1
     ]
     health_values = {str(leg.get("health")) for leg in out["legs"].values()}
-    if out["contradictions"] or health_values & {"failed", "timed_out", "cancelled", "degraded"}:
+    if out["contradictions"] or health_values & {"failed", "timed_out", "cancelled", "rejected", "degraded"}:
         out["source_health"] = "degraded"
     elif health_values and health_values <= {"empty"}:
         out["source_health"] = "empty"
     out["ms"] = int((time.perf_counter() - t0) * 1000)
     out["runtime"]["outstanding_lanes_at_return"] = outstanding_evidence_lanes()
+    out["provider_usage"] = _provider_usage(out["legs"])
     return out

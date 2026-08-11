@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from src.app.services.semantic_resolution import validate_semantic_source_policy
@@ -19,6 +20,31 @@ _AUTHORITY = {
     ("tenant_approved_repository", "approved_tenant_document"):
         "approved_tenant_document",
 }
+
+
+def _policy_at_observation(policy: Any, observed_at: Any) -> Any:
+    """Evaluate registry-owned freshness SLA against a provider observation timestamp.
+
+    Fetched content cannot assert that its own policy is fresh. The registry supplies the SLA;
+    this boundary derives the transient freshness verdict and leaves malformed/future/stale
+    observations blocked.
+    """
+    if not isinstance(policy, dict) or str(policy.get("freshness_status")) == "fresh":
+        return policy
+    try:
+        sla_hours = int(policy.get("freshness_sla_hours") or 0)
+        raw = str(observed_at or "").strip()
+        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+    except (TypeError, ValueError):
+        return policy
+    evaluated = dict(policy)
+    evaluated["freshness_status"] = (
+        "fresh" if 0 <= age_seconds <= sla_hours * 3600 else "stale"
+    )
+    return evaluated
 
 
 def accept_provider_claim_candidates(
@@ -35,12 +61,15 @@ def accept_provider_claim_candidates(
         capabilities = {
             str(value).strip() for value in item.get("provider_capabilities") or []
         }
-        policy = item.get("provider_source_policy")
+        enrolled_policy = item.get("provider_source_policy")
         for index, candidate in enumerate(list(item.get("claim_candidates") or [])[:16]):
             if not isinstance(candidate, dict):
                 continue
             claim_id = str(candidate.get("source_record_id") or f"claim-{index}")[:240]
             claim_type = str(candidate.get("claim_type") or "").strip()
+            policy = _policy_at_observation(
+                enrolled_policy, candidate.get("observed_at"),
+            )
             policy_ok, _policy_reason = validate_semantic_source_policy(
                 policy, claim_type=claim_type,
             )

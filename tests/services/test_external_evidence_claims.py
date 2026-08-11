@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from src.app.services.external_evidence_claims import accept_provider_claim_candidates
 
 
@@ -59,6 +61,29 @@ def test_missing_enrollment_policy_cannot_authorize_claim():
     assert result["status"] == "insufficient"
     assert result["claims"] == []
     assert result["rejections"][0]["reason"] == "source_policy_not_approved"
+
+
+def test_registry_freshness_sla_is_evaluated_from_observed_at():
+    item = _item()
+    item["provider_source_policy"].update({
+        "freshness_status": "not_yet_observed",
+        "freshness_sla_hours": 24,
+        "publisher_policy_id": "publisher-policy-v1",
+    })
+    item["claim_candidates"][0]["observed_at"] = (
+        datetime.now(timezone.utc) - timedelta(hours=2)
+    ).isoformat()
+
+    fresh = accept_provider_claim_candidates([item], concept="simulation workload")
+    assert fresh["status"] == "resolved"
+    assert fresh["normalized_evidence"][0]["source_policy"]["freshness_status"] == "fresh"
+
+    item["claim_candidates"][0]["observed_at"] = (
+        datetime.now(timezone.utc) - timedelta(hours=48)
+    ).isoformat()
+    stale = accept_provider_claim_candidates([item], concept="simulation workload")
+    assert stale["status"] == "insufficient"
+    assert stale["rejections"][0]["reason"] == "source_policy_not_approved"
 
 
 def test_conflicting_provider_claims_block_the_requirement_set():

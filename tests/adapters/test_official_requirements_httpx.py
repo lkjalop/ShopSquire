@@ -8,7 +8,10 @@ def _resolver_public(_host, *_args, **_kwargs):
 
 
 def test_official_requirements_connector_returns_typed_candidates():
-    def handler(_request):
+    seen = {}
+
+    def handler(request):
+        seen["authorization"] = request.headers.get("Authorization")
         return httpx.Response(200, json={"results": [{
             "title": "Official workstation requirements",
             "url": "https://docs.vendor.example/workstation",
@@ -25,9 +28,11 @@ def test_official_requirements_connector_returns_typed_candidates():
         client=httpx.Client(transport=httpx.MockTransport(handler)),
         endpoint_template="https://requirements.example/api?q={query}",
         resolver=_resolver_public,
+        api_key="connector-secret",
     )
 
     rows = fetcher.fetch("simulation workstation", allowlist=["vendor.example"])
 
     assert rows[0]["source_domain"] == "docs.vendor.example"
     assert rows[0]["claim_candidates"][0]["attribute_key"] == "ram_gb"
+    assert seen["authorization"] == "Bearer connector-secret"

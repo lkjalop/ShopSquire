@@ -26,6 +26,7 @@ ProviderAuthority = Literal[
     "regulatory_registry",
     "tenant_approved_repository",
 ]
+ProviderBillingClass = Literal["free", "paid", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,10 @@ class ResearchProvider:
     fetcher_factory: Callable[[], Any]
     deadline_ms: int = 1800
     source_policy: Mapping[str, Any] | None = None
+    credential_ref: str | None = None
+    publisher_policy_id: str | None = None
+    freshness_sla_hours: int | None = None
+    billing_class: ProviderBillingClass = "unknown"
 
     def __post_init__(self) -> None:
         if not self.provider_id.strip():
@@ -50,6 +55,10 @@ class ResearchProvider:
             raise ValueError("research_provider_domain_allowlist_required")
         if not 100 <= int(self.deadline_ms) <= 30_000:
             raise ValueError("research_provider_deadline_out_of_bounds")
+        if self.freshness_sla_hours is not None and not 1 <= int(self.freshness_sla_hours) <= 8760:
+            raise ValueError("research_provider_freshness_sla_out_of_bounds")
+        if self.billing_class not in {"free", "paid", "unknown"}:
+            raise ValueError("research_provider_billing_class_invalid")
 
 
 class ResearchProviderRegistry:
@@ -129,8 +138,18 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
     from src.app.adapters.official_requirements_httpx import OfficialRequirementsHttpFetcher
 
     reviewed_by = str(os.getenv("EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY") or "").strip()
+    requirements_credential = str(os.getenv("OFFICIAL_REQUIREMENTS_API_KEY") or "").strip()
+    publisher_policy_id = str(
+        os.getenv("OFFICIAL_REQUIREMENTS_PUBLISHER_POLICY_ID") or ""
+    ).strip()
+    try:
+        freshness_sla_hours = int(
+            os.getenv("OFFICIAL_REQUIREMENTS_FRESHNESS_SLA_HOURS", "0") or 0
+        )
+    except (TypeError, ValueError):
+        freshness_sla_hours = 0
     source_policy = None
-    if reviewed_by:
+    if reviewed_by and publisher_policy_id and freshness_sla_hours > 0:
         source_policy = {
             "policy_version": "semantic-source-v1",
             "review_status": "approved",
@@ -144,10 +163,24 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
                 "concept_identity", "minimum_requirements", "recommended_requirements",
                 "target_requirements", "compatibility", "certification",
             ],
-            "freshness_status": "fresh",
+            # Enrollment declares the SLA, not an observation. A fetched source revision must
+            # still supply observed_at before downstream policy can call it fresh.
+            "freshness_status": "not_yet_observed",
+            "freshness_sla_hours": min(freshness_sla_hours, 8760),
+            "publisher_policy_id": publisher_policy_id[:160],
         }
 
     providers: list[ResearchProvider] = []
+    discovery_billing = str(
+        os.getenv("EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS") or "unknown"
+    ).strip().lower()
+    requirements_billing = str(
+        os.getenv("OFFICIAL_REQUIREMENTS_PROVIDER_BILLING_CLASS") or "unknown"
+    ).strip().lower()
+    if discovery_billing not in {"free", "paid", "unknown"}:
+        discovery_billing = "unknown"
+    if requirements_billing not in {"free", "paid", "unknown"}:
+        requirements_billing = "unknown"
     if search_endpoint:
         providers.append(ResearchProvider(
             provider_id=str(
@@ -160,8 +193,14 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
             fetcher_factory=HttpxResearchFetcher,
             deadline_ms=max(100, min(deadline_ms, 30_000)),
             source_policy=None,
+            billing_class=discovery_billing,
         ))
-    if requirements_endpoint and requirements_domains:
+    if (
+        requirements_endpoint
+        and requirements_domains
+        and requirements_credential
+        and source_policy is not None
+    ):
         providers.append(ResearchProvider(
             provider_id=str(
                 os.getenv("OFFICIAL_REQUIREMENTS_PROVIDER_ID")
@@ -174,5 +213,9 @@ def configured_registry(*, allowed_domains: Iterable[str]) -> ResearchProviderRe
             fetcher_factory=OfficialRequirementsHttpFetcher,
             deadline_ms=max(100, min(deadline_ms, 30_000)),
             source_policy=source_policy,
+            credential_ref="env:OFFICIAL_REQUIREMENTS_API_KEY",
+            publisher_policy_id=publisher_policy_id[:160],
+            freshness_sla_hours=min(freshness_sla_hours, 8760),
+            billing_class=requirements_billing,
         ))
     return ResearchProviderRegistry(providers)

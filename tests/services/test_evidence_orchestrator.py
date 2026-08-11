@@ -21,6 +21,7 @@ class _Plan:
         self.quantity = kw.get("quantity")
         self.availability_horizon_days = kw.get("availability_horizon_days")
         self.category = kw.get("category")
+        self.needs_concept_resolution = kw.get("needs_concept_resolution", False)
 
 
 def _leg(name, found=True, summary="s"):
@@ -120,7 +121,7 @@ def test_broken_leg_reports_error_never_raises():
     assert ev["source_health"] == "degraded"
 
 
-def test_cost_budget_cancels_expensive_lane_before_dispatch(monkeypatch):
+def test_effort_allowance_rejects_lane_before_dispatch_without_claiming_spend(monkeypatch):
     monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
     calls = []
 
@@ -134,7 +135,114 @@ def test_cost_budget_cancels_expensive_lane_before_dispatch(monkeypatch):
         evidence_budget=EvidenceBudget(per_lane_ms=100, total_ms=100, max_cost_units=2),
     )
     assert calls == []
-    assert ev["legs"]["web"]["health"] == "cancelled"
+    rejected = ev["legs"]["web"]
+    assert rejected["health"] == "rejected"
+    assert rejected["execution_status"] == "rejected_admission"
+    assert rejected["admission_reason"] == "internal_effort_allowance_exceeded"
+    assert rejected["error"] == "effort_allowance_exceeded"
+    assert rejected["legacy_error"] == "cost_budget_exceeded"
+    assert ev["effort"] == {
+        "per_lane_ms": 100,
+        "total_ms": 100,
+        "max_effort_units": 2,
+        "used_effort_units": 0,
+        "unit_kind": "internal_scheduler_effort",
+    }
+    assert ev["provider_usage"]["external_provider_call_count"] == 0
+    assert ev["provider_usage"]["paid_provider_call_count"] is None
+
+
+def test_web_leg_is_reachable_when_selected_allowance_covers_its_effort(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    calls = []
+
+    def web(*args, **kwargs):
+        calls.append("web")
+        return {"source": "web", "found": False, "summary": "", "data": {}}
+
+    ev = gather_evidence(
+        _Plan(), query="research", web_consent=True, leg_fns={"web": web},
+        evidence_budget=EvidenceBudget(per_lane_ms=100, total_ms=100, max_cost_units=5),
+    )
+
+    assert calls == ["web"]
+    assert ev["legs"]["web"]["execution_status"] == "completed"
+    assert ev["effort"]["used_effort_units"] == 5
+
+
+def test_concept_and_web_legs_are_jointly_reachable_with_eight_effort_units(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    calls = []
+
+    def completed(name):
+        def leg(*args, **kwargs):
+            calls.append(name)
+            return {"source": name, "found": False, "summary": "", "data": {}}
+        return leg
+
+    ev = gather_evidence(
+        _Plan(needs_concept_resolution=True), query="research", web_consent=True,
+        leg_fns={"concept_resolution": completed("concept_resolution"), "web": completed("web")},
+        evidence_budget=EvidenceBudget(per_lane_ms=100, total_ms=100, max_cost_units=8),
+    )
+
+    assert set(calls) == {"concept_resolution", "web"}
+    assert ev["effort"]["used_effort_units"] == 8
+    assert all(ev["legs"][name]["execution_status"] == "completed" for name in calls)
+
+
+def test_provider_usage_counts_calls_and_only_reports_paid_when_classified(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+
+    def web(*args, **kwargs):
+        return {
+            "source": "web", "found": False, "summary": "",
+            "data": {"provider_attempts": [
+                {"provider_id": "free-index", "status": "ok", "billing_class": "free",
+                 "external_call_dispatched": True},
+                {"provider_id": "paid-index", "status": "empty", "billing_class": "paid",
+                 "external_call_dispatched": True},
+            ]},
+        }
+
+    ev = gather_evidence(
+        _Plan(), query="research", web_consent=True, leg_fns={"web": web},
+        evidence_budget=EvidenceBudget(per_lane_ms=100, total_ms=100, max_cost_units=5),
+    )
+
+    assert ev["provider_usage"] == {
+        "external_provider_call_count": 2,
+        "external_provider_cache_hit_count": 0,
+        "paid_provider_call_count": 1,
+        "paid_provider_call_count_status": "recorded",
+    }
+
+
+def test_cached_provider_attempt_is_not_reported_as_a_new_external_or_paid_call(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+
+    def web(*args, **kwargs):
+        return {
+            "source": "web", "found": True, "summary": "cached evidence",
+            "data": {"provider_attempts": [{
+                "provider_id": "paid-index",
+                "status": "cached",
+                "billing_class": "paid",
+                "external_call_dispatched": False,
+            }]},
+        }
+
+    ev = gather_evidence(
+        _Plan(), query="research", web_consent=True, leg_fns={"web": web},
+        evidence_budget=EvidenceBudget(per_lane_ms=100, total_ms=100, max_cost_units=5),
+    )
+
+    assert ev["provider_usage"] == {
+        "external_provider_call_count": 0,
+        "external_provider_cache_hit_count": 1,
+        "paid_provider_call_count": None,
+        "paid_provider_call_count_status": "not_recorded",
+    }
 
 
 def test_timeout_signals_cooperative_cancellation_and_rejects_late_result():
