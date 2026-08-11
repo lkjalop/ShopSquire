@@ -11,6 +11,7 @@ from fastapi import Request
 from fastapi.responses import ORJSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from sqlalchemy import inspect, text
 
 from src.app.models.db import db_session
 
@@ -103,20 +104,26 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         # ── store availability: fail CLOSED on money paths, degrade (no dedup) elsewhere ──
         try:
             with db_session() as db:
-                db.execute(
+                db.execute(text(
                     "CREATE TABLE IF NOT EXISTS idempotency_keys "
                     "(key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, response_status INT, "
                     "response_body TEXT, owner_token TEXT, lease_expires_at REAL, "
                     "created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT)"
-                )
+                ))
                 # M2 columns on a PRE-EXISTING table (best-effort; already-exists → ignored)
-                for _alter in ("ALTER TABLE idempotency_keys ADD COLUMN owner_token TEXT",
-                               "ALTER TABLE idempotency_keys ADD COLUMN lease_expires_at REAL",
-                               "ALTER TABLE idempotency_keys ADD COLUMN updated_at TEXT"):
-                    try:
-                        db.execute(_alter)
-                    except Exception:
-                        pass
+                existing = {
+                    str(column["name"])
+                    for column in inspect(db.get_bind()).get_columns("idempotency_keys")
+                }
+                for name, sql_type in (
+                    ("owner_token", "TEXT"),
+                    ("lease_expires_at", "REAL"),
+                    ("updated_at", "TEXT"),
+                ):
+                    if name not in existing:
+                        db.execute(text(
+                            f"ALTER TABLE idempotency_keys ADD COLUMN {name} {sql_type}"
+                        ))
                 db.commit()
         except Exception as exc:
             _log.error("idempotency_table_unavailable", exc_info=exc)
