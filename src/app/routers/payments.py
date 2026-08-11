@@ -14,6 +14,7 @@ from src.app.services.payments import StripeClient
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.security.transaction_firewall import evaluate_transaction_firewall
+from src.app.security.client_ip import client_ip
 from src.app.policy.kill_switch import assert_autonomy_allowed
 
 _log = logging.getLogger("shopsquire.payments")
@@ -37,6 +38,20 @@ def _demo_checkout_allowed(settings, capability: Dict | None) -> bool:
     if isinstance(capability, dict) and capability.get("demo_checkout") is True:
         return True
     return not _is_non_dev_env(getattr(settings, "app_env", None))
+
+
+def _payment_execution_enabled(app_env: str | None = None) -> bool:
+    explicit = str(os.getenv("PAYMENT_EXECUTION_ENABLED", "") or "").strip().lower()
+    if explicit in ("1", "true", "yes", "on"):
+        return True
+    if explicit in ("0", "false", "no", "off"):
+        return False
+    return not _is_non_dev_env(app_env)
+
+
+def _require_payment_execution(settings) -> None:
+    if not _payment_execution_enabled(getattr(settings, "app_env", None)):
+        raise HTTPException(status_code=503, detail="Payment execution is disabled by policy")
 
 
 def _idempotent(path: str, key: str | None, *, tenant_id: str = "default") -> bool:
@@ -100,14 +115,15 @@ def providers_rollout_status(
     flags = _ff_get_flags()
     caps = flags.get("CAPABILITIES", {}) if isinstance(flags.get("CAPABILITIES"), dict) else {}
     settings = get_settings()
+    execution_enabled = _payment_execution_enabled(settings.app_env)
     providers = [
         {
             "provider": "stripe",
-            "enabled": bool((caps.get("stripe") or caps.get("payments") or {}).get("enabled", True)),
+            "enabled": execution_enabled and bool((caps.get("stripe") or caps.get("payments") or {}).get("enabled", True)),
             # honest readiness: a placeholder key (sk_test_xxx) is NOT a real integration — mirror the
             # checkout's stripe_live gate so this never reports "ga" on the demo placeholder.
-            "real_integration_ready": _stripe_key_live(settings.stripe_api_key),
-            "rollout_stage": "ga" if _stripe_key_live(settings.stripe_api_key) else "disabled",
+            "real_integration_ready": execution_enabled and _stripe_key_live(settings.stripe_api_key),
+            "rollout_stage": "ga" if execution_enabled and _stripe_key_live(settings.stripe_api_key) else "disabled",
         },
         {
             "provider": "paypal",
@@ -170,6 +186,7 @@ def create_intent(
         if isinstance(cap, dict) and cap.get("enabled") is False:
             raise HTTPException(status_code=503, detail="Payments disabled by feature flags")
         settings = get_settings()
+        _require_payment_execution(settings)
         if not (settings.stripe_api_key and settings.stripe_api_key.startswith("sk_")):
             raise HTTPException(status_code=503, detail="Stripe provider not configured")
         try:
@@ -182,7 +199,7 @@ def create_intent(
             amount_cents=amount_cents,
             currency=currency,
             description=None,
-            request_ip=(request.client.host if request and request.client else None),
+            request_ip=client_ip(request),
             idempotency_key=idempotency_key,
             tenant_id=None,
             trace_id=None,
@@ -237,6 +254,7 @@ def checkout_initiate(
     import secrets
 
     settings = get_settings()
+    _require_payment_execution(settings)
     flags = load_feature_flags(settings.feature_flags_path)
     amount_cents = max(0, int(body.amount_cents or 0))
     currency = str(body.currency or "USD").upper()[:3]
@@ -271,7 +289,7 @@ def checkout_initiate(
         amount_cents=amount_cents,
         currency=currency,
         description=None,
-        request_ip=(request.client.host if request and request.client else None),
+        request_ip=client_ip(request),
         idempotency_key=_request_idempotency_key,
         tenant_id=None,
         trace_id=None,
@@ -416,7 +434,9 @@ def checkout_initiate(
         )
 
     # Hard-block demo mode in production even if ALLOW_DEMO_CHECKOUT is somehow set.
-    if _is_non_dev_env(settings.app_env) and not os.environ.get("ALLOW_DEMO_CHECKOUT", "").lower() in ("1", "true", "yes", "on"):
+    if _is_non_dev_env(settings.app_env) and os.environ.get(
+        "ALLOW_DEMO_CHECKOUT", ""
+    ).lower() not in ("1", "true", "yes", "on"):
         raise HTTPException(
             status_code=503,
             detail="Checkout unavailable in production without a configured Stripe key.",
@@ -500,9 +520,6 @@ async def stripe_webhook(request: Request) -> Dict:
             raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}")
 
     event_type = str(event.get("type") or "")
-    data_obj = (event.get("data") or {}).get("object") or {}
-    intent_id = str(data_obj.get("id") or "").strip()
-
     # M4 (GPT-5.6 #5): process each Stripe event EXACTLY once. Stripe retries delivery, so without a
     # dedup a repeat can double-apply a ledger append / inventory release / settlement. Persist the
     # event.id under a unique key BEFORE handling; a duplicate returns early. Fail-CLOSED on store
@@ -631,7 +648,12 @@ def refund_approve(
     # this is the execution. charge.refunded still reconciles the ledger when the webhook lands.
     settings = get_settings()
     _intent = str(_intent_id or "")
-    if _stripe_key_live(settings.stripe_api_key) and _intent and not _intent.startswith("pi_demo_"):
+    if (
+        _payment_execution_enabled(getattr(settings, "app_env", None))
+        and _stripe_key_live(settings.stripe_api_key)
+        and _intent
+        and not _intent.startswith("pi_demo_")
+    ):
         try:
             client = StripeClient(settings.stripe_api_key)
             refund = client.create_refund(
@@ -676,6 +698,7 @@ def refund_execute(
     """M3: retry an approved refund whose PROVIDER execution failed. Idempotent — re-issues with the
     same key, so the provider returns the same refund (never a second one). Backs the 'operator can
     retry' guarantee the approve path only claimed in a comment before."""
+    _require_payment_execution(get_settings())
     from src.app.services import refund_execution as _rx
     with db_session() as db:
         out = _rx.execute_pending(db, tenant_id="default", order_id=order_id)

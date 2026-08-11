@@ -56,6 +56,21 @@ def _resolved_secret(name: str, default: str) -> str:
     return str(os.getenv(name, default))
 
 
+def _resolved_optional_secret(name: str, default: str = "") -> str:
+    """Resolve a connector secret without making that connector mandatory.
+
+    Strict mode means configured references fail closed; it must not force every
+    optional payment/model provider to be configured for an otherwise valid
+    production deployment.
+    """
+    val = get_secret(name, default)
+    if val not in (None, ""):
+        return str(val)
+    if _secrets_strict_mode():
+        return str(default or "")
+    return str(os.getenv(name, default) or default)
+
+
 def _settings_env_sig() -> tuple:
     # Include env vars that affect settings so cache entries are keyed on current env.
     return (
@@ -66,6 +81,7 @@ def _settings_env_sig() -> tuple:
         os.getenv("REDIS_URL"),
         os.getenv("STRIPE_API_KEY"),
         os.getenv("STRIPE_API_KEY_REF"),
+        os.getenv("PAYMENT_EXECUTION_ENABLED"),
         os.getenv("PAYPAL_CLIENT_ID"),
         os.getenv("PAYPAL_CLIENT_ID_REF"),
         os.getenv("PAYPAL_CLIENT_SECRET"),
@@ -132,13 +148,13 @@ def _get_settings_cached(_sig: tuple) -> Settings:
         api_port=int(os.getenv("API_PORT", "8080")),
         database_url=_resolved_secret("DATABASE_URL", _default_database_url()),
         redis_url=_resolved_secret("REDIS_URL", "redis://localhost:6379/0"),
-        stripe_api_key=_resolved_secret("STRIPE_API_KEY", ""),
-        paypal_client_id=_resolved_secret("PAYPAL_CLIENT_ID", ""),
-        paypal_client_secret=_resolved_secret("PAYPAL_CLIENT_SECRET", ""),
+        stripe_api_key=_resolved_optional_secret("STRIPE_API_KEY"),
+        paypal_client_id=_resolved_optional_secret("PAYPAL_CLIENT_ID"),
+        paypal_client_secret=_resolved_optional_secret("PAYPAL_CLIENT_SECRET"),
         llm_provider=os.getenv("LLM_PROVIDER", "none"),
         llm_model=os.getenv("LLM_MODEL", ""),
-        openai_api_key=_resolved_secret("OPENAI_API_KEY", ""),
-        google_ai_api_key=_resolved_secret("GOOGLE_AI_API_KEY", ""),
+        openai_api_key=_resolved_optional_secret("OPENAI_API_KEY"),
+        google_ai_api_key=_resolved_optional_secret("GOOGLE_AI_API_KEY"),
         ollama_vision_model=os.getenv("OLLAMA_VISION_MODEL", "").strip(),
         vuln_scan_enabled=_is_truthy_env("VULN_SCAN_ENABLED", "1"),
         vuln_scan_web_enabled=_is_truthy_env("VULN_SCAN_WEB_ENABLED", "0"),
@@ -148,8 +164,10 @@ def _get_settings_cached(_sig: tuple) -> Settings:
         gnn_model_path=os.getenv("GNN_MODEL_PATH", "config/gnn_model.pt").strip(),
         feature_flags_path=os.getenv("FEATURE_FLAGS_PATH", "config/feature_flags.json"),
     )
-    # Enforce Stripe live key in non-dev environments.
-    if _is_non_dev_env(s.app_env):
+    # Payment credentials are required only when consequential payment
+    # execution is enabled. A read-only/demo deployment should not need a live
+    # Stripe secret merely to start the governed commerce core.
+    if _is_non_dev_env(s.app_env) and _is_truthy_env("PAYMENT_EXECUTION_ENABLED", "0"):
         stripe_key = str(s.stripe_api_key or "").strip()
         if not stripe_key or stripe_key.startswith("sk_test_"):
             raise RuntimeError("insecure_runtime:STRIPE_API_KEY_must_be_live_key_in_production")
