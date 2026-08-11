@@ -51,28 +51,8 @@ def _threshold_hours() -> int:
 
 
 def _ensure_table() -> None:
-    try:
-        with db_session() as db:
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS email_thread_graph_state (
-                      tenant_id TEXT NOT NULL,
-                      thread_key TEXT NOT NULL,
-                      first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                      last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                      last_sender_domain TEXT,
-                      sender_domains_json TEXT,
-                      message_count INTEGER NOT NULL DEFAULT 0,
-                      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                      PRIMARY KEY (tenant_id, thread_key)
-                    )
-                    """
-                )
-            )
-            db.commit()
-    except Exception:
-        pass
+    """Compatibility hook; the migration chain owns this schema."""
+    return None
 
 
 def _thread_key(email: Dict[str, Any]) -> str:
@@ -171,7 +151,7 @@ def analyze_thread_conversation_graph(email: Dict[str, Any], *, tenant_id: str |
                       last_seen_at=:now,
                       last_sender_domain=:sender,
                       sender_domains_json=:domains,
-                      message_count=message_count + 1,
+                      message_count=email_thread_graph_state.message_count + 1,
                       updated_at=:now
                     """
                 ),

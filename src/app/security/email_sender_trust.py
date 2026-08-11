@@ -17,33 +17,13 @@ def _hash16(value: str | None) -> str | None:
 
 
 def _ensure_table() -> None:
-    try:
-        with db_session() as db:
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS email_sender_trust (
-                      tenant_id TEXT NOT NULL,
-                      sender_domain_hash TEXT NOT NULL,
-                                            first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                      seen_count INTEGER NOT NULL DEFAULT 0,
-                      bank_change_count INTEGER NOT NULL DEFAULT 0,
-                      oob_verified_count INTEGER NOT NULL DEFAULT 0,
-                      reply_chain_mismatch_count INTEGER NOT NULL DEFAULT 0,
-                      last_reply_chain_hash TEXT,
-                      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                      PRIMARY KEY (tenant_id, sender_domain_hash)
-                    )
-                    """
-                )
-            )
-            try:
-                db.execute(text("ALTER TABLE email_sender_trust ADD COLUMN first_seen_at TEXT"))
-            except Exception:
-                pass
-            db.commit()
-    except Exception:
-        pass
+    """Compatibility hook; schema ownership belongs to Alembic.
+
+    Runtime CREATE/ALTER raced across concurrent email inspections on
+    PostgreSQL and could poison otherwise successful requests. Test and
+    production databases must apply the migration chain before serving.
+    """
+    return None
 
 
 def score_sender_trust(email: Dict[str, Any], extracted: Dict[str, Any], tenant_id: str | None) -> Dict[str, Any]:
@@ -147,10 +127,10 @@ def update_sender_trust(email: Dict[str, Any], extracted: Dict[str, Any], verdic
                                         (tenant_id, sender_domain_hash, first_seen_at, seen_count, bank_change_count, oob_verified_count, reply_chain_mismatch_count, last_reply_chain_hash, updated_at)
                                         VALUES (:tenant, :sender, CURRENT_TIMESTAMP, 1, :bank_change, :oob_verified, :mismatch, :chain_hash, CURRENT_TIMESTAMP)
                     ON CONFLICT(tenant_id, sender_domain_hash) DO UPDATE SET
-                      seen_count = seen_count + 1,
-                      bank_change_count = bank_change_count + :bank_change,
-                      oob_verified_count = oob_verified_count + :oob_verified,
-                      reply_chain_mismatch_count = reply_chain_mismatch_count + :mismatch,
+                      seen_count = email_sender_trust.seen_count + 1,
+                      bank_change_count = email_sender_trust.bank_change_count + :bank_change,
+                      oob_verified_count = email_sender_trust.oob_verified_count + :oob_verified,
+                      reply_chain_mismatch_count = email_sender_trust.reply_chain_mismatch_count + :mismatch,
                       last_reply_chain_hash = :chain_hash,
                       updated_at = CURRENT_TIMESTAMP
                     """
@@ -167,4 +147,3 @@ def update_sender_trust(email: Dict[str, Any], extracted: Dict[str, Any], verdic
             db.commit()
     except Exception:
         pass
-
