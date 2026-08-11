@@ -14,7 +14,10 @@ from sqlalchemy import select, text
 
 from src.app.models.db import get_db
 from src.app.models.orm import RequirementProposal, ShoppingCase
-from src.app.services.buyer_requirement_evidence import ExtractedRequirementClaim
+from src.app.services.buyer_requirement_evidence import (
+    ExtractedRequirementClaim,
+    extract_buyer_requirement_claims,
+)
 from src.app.services.accepted_catalog_projection import project_accepted_catalog
 from src.app.services.infrastructure_alternative_projection import project_infrastructure_alternatives
 from src.app.services.evidence_acquisition_ladder import choose_evidence_stage
@@ -37,6 +40,13 @@ class CreateRequirementProposal(BaseModel):
     retained_purpose: str | None = Field(default=None, max_length=500)
     source_reference: str = Field(min_length=1, max_length=500)
     claims: list[ExtractedRequirementClaim] = Field(min_length=1, max_length=64)
+
+
+class CreateManualRequirementProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    uid: str = Field(min_length=1, max_length=200)
+    retained_purpose: str | None = Field(default=None, max_length=500)
+    text: str = Field(min_length=3, max_length=10_000)
 
 
 class ClaimCorrection(BaseModel):
@@ -369,6 +379,42 @@ def create_requirement_proposal(
         "status": "pending_review", "claims": proposal.claims_json,
         "cart_mutation": "not_authorized",
     }
+
+
+@router.post("/{case_id}/requirement-proposals/from-text", status_code=201)
+def create_manual_requirement_proposal(
+    case_id: str,
+    body: CreateManualRequirementProposal,
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Turn explicit buyer-entered specifications into the normal review contract."""
+
+    source_reference = f"manual-specifications:{case_id}"
+    claims = extract_buyer_requirement_claims(
+        body.text,
+        source_reference=source_reference,
+        extraction_confidence=1.0,
+    )
+    if not claims:
+        raise HTTPException(status_code=422, detail={
+            "code": "no_explicit_requirement_claims",
+            "message": (
+                "No explicit supported specifications were found. Include values such as "
+                "RAM 32GB, storage 1TB NVMe, 8 CPU cores, or Windows 11 Pro."
+            ),
+        })
+    return create_requirement_proposal(
+        case_id,
+        CreateRequirementProposal(
+            uid=body.uid,
+            retained_purpose=body.retained_purpose,
+            source_reference=source_reference,
+            claims=claims,
+        ),
+        x_tenant_id=x_tenant_id,
+        db=db,
+    )
 
 
 @router.post("/{case_id}/requirement-proposals/{proposal_id}/accept")

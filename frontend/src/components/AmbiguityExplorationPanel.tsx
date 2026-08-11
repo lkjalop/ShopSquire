@@ -33,6 +33,7 @@ type Props = {
   onResearch: () => void;
   onUpload: () => void;
   onEnterSpecifications: () => void;
+  onSubmitSpecifications?: (text: string) => Promise<void>;
   onResolveEvidenceSource?: (
     hint: { source_url?: string; vendor_name?: string },
     researchAuthorized: boolean,
@@ -41,11 +42,16 @@ type Props = {
 
 export default function AmbiguityExplorationPanel({
   exploration, onResearch, onUpload, onEnterSpecifications, onResolveEvidenceSource,
+  onSubmitSpecifications,
 }: Props) {
   const [showSourceResolver, setShowSourceResolver] = useState(false);
   const [sourceHint, setSourceHint] = useState('');
   const [sourceResolution, setSourceResolution] = useState<any>(null);
   const [sourceBusy, setSourceBusy] = useState(false);
+  const [showManualSpecifications, setShowManualSpecifications] = useState(false);
+  const [manualSpecifications, setManualSpecifications] = useState('');
+  const [manualStatus, setManualStatus] = useState('');
+  const [manualBusy, setManualBusy] = useState(false);
   const question = exploration.next_question?.text || exploration.next_question?.question;
   const resolveSource = async (researchAuthorized: boolean) => {
     if (!onResolveEvidenceSource || !sourceHint.trim() || sourceBusy) return;
@@ -92,9 +98,47 @@ export default function AmbiguityExplorationPanel({
         {onResolveEvidenceSource && (
           <button type="button" onClick={() => setShowSourceResolver((value) => !value)} style={secondaryActionStyle}>Use official link or vendor</button>
         )}
-        <button type="button" onClick={onEnterSpecifications} style={secondaryActionStyle}>Enter specifications</button>
+        <button type="button" onClick={() => {
+          setShowManualSpecifications((value) => !value);
+          onEnterSpecifications();
+        }} style={secondaryActionStyle}>Enter specifications</button>
         <span style={{ fontSize: 12, alignSelf: 'center' }}>Continue provisionally below</span>
       </div>
+      {showManualSpecifications && onSubmitSpecifications && (
+        <div data-testid="manual-requirement-entry" style={{ marginTop: 10, border: '1px solid #cbd5e1', borderRadius: 8, padding: 9 }}>
+          <label htmlFor="manual-requirements" style={{ display: 'block', fontWeight: 700 }}>
+            Enter explicit requirements
+          </label>
+          <div style={{ fontSize: 12, color: '#475569', margin: '3px 0 7px' }}>
+            These become provisional buyer claims for review; they do not qualify a product automatically.
+          </div>
+          <textarea
+            id="manual-requirements"
+            aria-label="Manual specifications"
+            value={manualSpecifications}
+            onChange={(event) => setManualSpecifications(event.target.value)}
+            placeholder="RAM 32GB minimum; 1TB NVMe; Windows 11 Pro recommended"
+            rows={4}
+            style={{ width: '100%', padding: 7, border: '1px solid #94a3b8', borderRadius: 6 }}
+          />
+          <button
+            type="button"
+            disabled={manualBusy || manualSpecifications.trim().length < 3}
+            onClick={() => {
+              setManualBusy(true);
+              setManualStatus('');
+              void onSubmitSpecifications(manualSpecifications.trim())
+                .then(() => setManualStatus('Specifications extracted for review.'))
+                .catch((error) => setManualStatus(error instanceof Error ? error.message : 'Could not extract specifications.'))
+                .finally(() => setManualBusy(false));
+            }}
+            style={{ ...secondaryActionStyle, marginTop: 7 }}
+          >
+            Review extracted requirements
+          </button>
+          {manualStatus && <div role="status" style={{ marginTop: 6, fontSize: 12 }}>{manualStatus}</div>}
+        </div>
+      )}
       {showSourceResolver && onResolveEvidenceSource && (
         <div data-testid="buyer-evidence-source-resolver" style={{ marginTop: 10, border: '1px solid #cbd5e1', borderRadius: 8, padding: 9 }}>
           <label htmlFor="buyer-evidence-source" style={{ display: 'block', fontWeight: 700 }}>

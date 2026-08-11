@@ -38,6 +38,39 @@ def _enrol_local_research(monkeypatch, *, tenant_id: str = "default") -> None:
     monkeypatch.setenv("EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED", "1")
 
 
+def test_manual_specifications_create_same_case_review_proposal():
+    client = _client()
+    case_id = "case-manual"
+    response = client.post(
+        f"/api/v1/shopping-cases/{case_id}/requirement-proposals/from-text",
+        json={
+            "uid": "buyer-manual",
+            "retained_purpose": "I need a mobile system for an unfamiliar scientific workload.",
+            "text": "RAM 32GB minimum\nStorage 1TB NVMe\nWindows 11 Pro recommended",
+        },
+    )
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["case_id"] == case_id
+    assert payload["status"] == "pending_review"
+    assert {row["attribute"] for row in payload["claims"]} >= {
+        "ram_gb", "storage_gb", "storage_type", "operating_system",
+    }
+    assert all(row["authority_status"] == "unverified" for row in payload["claims"])
+    assert payload["cart_mutation"] == "not_authorized"
+
+
+def test_manual_specifications_abstain_when_no_typed_claim_can_be_extracted():
+    client = _client()
+    case_id = "case-manual-empty"
+    response = client.post(
+        f"/api/v1/shopping-cases/{case_id}/requirement-proposals/from-text",
+        json={"uid": "buyer-manual-empty", "text": "make it really good please"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "no_explicit_requirement_claims"
+
+
 def test_interpretation_is_immediate_case_bound_and_zero_network():
     client = _client()
     response = client.post("/api/v1/shopping-cases/interpretations", json={

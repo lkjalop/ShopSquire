@@ -2860,6 +2860,41 @@ export default function App() {
     }]);
   }, [uid, traceId, switchRightPanelMode]);
 
+  const submitManualSpecifications = useCallback(async (text: string) => {
+    if (!ambiguityExploration?.case_id) {
+      throw new Error('This exploration is missing its shopping-case identity.');
+    }
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}`
+      + '/requirement-proposals/from-text',
+    ), {
+      method: 'POST', credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({
+        uid, text, retained_purpose: ambiguityExploration.retained_purpose,
+      }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(String(payload?.detail?.message || payload?.detail?.code || payload?.detail || 'Specification extraction failed.'));
+    }
+    setMessages((current) => [...current, {
+      role: 'assistant',
+      content: `I extracted ${payload.claims?.length || 0} provisional requirement claims from your typed specifications. Review or correct them below. I have not qualified a product or changed your cart.`,
+      timestamp: new Date(),
+      buyerRequirementClaims: payload.claims as BuyerRequirementClaim[],
+      buyerRequirementProposal: {
+        case_id: payload.case_id,
+        proposal_id: payload.proposal_id,
+        proposal_version: payload.proposal_version,
+      },
+    }]);
+  }, [ambiguityExploration, uid]);
+
   const researchAmbiguousShoppingCase = useCallback(async () => {
     if (!ambiguityExploration?.case_id) {
       throw new Error('This exploration is missing its shopping-case identity.');
@@ -3745,6 +3780,7 @@ export default function App() {
                       onUpload={() => document.querySelector<HTMLInputElement>("input[type='file']:not([capture])")?.click()}
                       onResolveEvidenceSource={resolveBuyerEvidenceSource}
                       onEnterSpecifications={() => document.querySelector<HTMLTextAreaElement>("textarea[placeholder='Type your message...']")?.focus()}
+                      onSubmitSpecifications={submitManualSpecifications}
                     />
                   )}
                   {productShelves && <ProductShelvesPanel

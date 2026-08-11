@@ -1,10 +1,33 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import AmbiguityExplorationPanel from '../AmbiguityExplorationPanel';
 import ProductShelvesPanel from '../ProductShelvesPanel';
 
 describe('research truth panels', () => {
+  it('submits manual specifications through the same provisional review boundary', async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    render(<AmbiguityExplorationPanel
+      exploration={{
+        schema_version: 'ambiguity-exploration-v1',
+        retained_purpose: 'Novel mobile scientific workload', status: 'provisional',
+        interpretations: [], next_question: null, execution: 'local', evidence: 'gaps',
+        decision: 'exploration_allowed', cart_authority: 'none',
+        provider_accounting: { external_calls: 0, paid_calls: 0 },
+      }}
+      onResearch={vi.fn()} onUpload={vi.fn()} onEnterSpecifications={vi.fn()}
+      onSubmitSpecifications={submit}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enter specifications' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Manual specifications' }), {
+      target: { value: 'RAM 32GB minimum; 1TB NVMe' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review extracted requirements' }));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith('RAM 32GB minimum; 1TB NVMe'));
+    expect(screen.getByRole('status')).toHaveTextContent(/extracted for review/i);
+  });
+
   it('renders context-only research without offering an accidental repeat', () => {
     render(<AmbiguityExplorationPanel
       exploration={{
