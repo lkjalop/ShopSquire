@@ -272,6 +272,14 @@ def test_context_only_research_is_not_reported_as_product_requirements(monkeypat
         "discovery_reason": None,
         "discovery_result_count": 0,
         "deadline_status": "within_deadline",
+        "parser_coverage": {
+            "pages_fetched": 1,
+            "candidate_claims": 1,
+            "accepted_claims": 0,
+            "rejected_claims": 0,
+            "context_claims": 1,
+            "parse_status": "completed",
+        },
     }]
     assert all(row["provider_capability"] != "WEB_DISCOVERY" for row in result["receipts"])
 
@@ -565,6 +573,35 @@ def test_discovery_uses_bounded_fallback_queries_and_stops_on_official_origin(mo
     assert [row["query_id"] for row in discovery_receipts] == [
         f"{source['source_id']}_q1", f"{source['source_id']}_q2",
     ]
+    assert result["source_execution"][0]["discovery_query_axes"] == [
+        "named_concept", "application_scope",
+    ]
+    assert [row["query_purpose"] for row in discovery_receipts] == [
+        "official_origin_discovery:named_concept",
+        "official_origin_discovery:application_scope",
+    ]
+
+
+def test_origin_quality_prefers_requirements_page_over_forum_order(monkeypatch):
+    from src.app.services.official_workload_research import _discovered_origin_for_source
+
+    source = _approved_source()
+    source["canonical_entrypoints"] = ["https://nist.gov/digital-twins"]
+    results = [
+        {
+            "url": "https://nist.gov/digital-twins/community/forum",
+            "title": "Community forum discussion",
+        },
+        {
+            "url": "https://nist.gov/digital-twins/system-requirements",
+            "title": "Official system requirements",
+        },
+    ]
+
+    selected, error = _discovered_origin_for_source(results, source)
+
+    assert error is None
+    assert selected.endswith("/system-requirements")
 
 
 def test_wrong_workload_applicability_blocks_network_execution(monkeypatch):

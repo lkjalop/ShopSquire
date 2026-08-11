@@ -337,6 +337,21 @@ def _source_discovery_queries(source: dict[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in candidates if value))[:3]
 
 
+def _source_discovery_query_plan(source: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Attach a material coverage axis to each bounded discovery query."""
+
+    queries = _source_discovery_queries(source)
+    claim_types = set(source.get("allowed_claim_types") or [])
+    axes = (
+        ("named_software", "local_execution", "hardware_compatibility")
+        if claim_types.intersection({
+            "minimum_requirements", "recommended_requirements", "compatibility",
+        })
+        else ("named_concept", "application_scope", "official_guidance")
+    )
+    return tuple((axes[index], query) for index, query in enumerate(queries))
+
+
 def _domain_allowed(url: str, domains: list[str]) -> bool:
     host = str(urlparse(url).hostname or "").lower().rstrip(".")
     return bool(host) and any(
@@ -366,27 +381,63 @@ def _discovered_origin_for_source(
 
     domains = list(source.get("allowed_domains") or [])
     candidates = [
-        str(row.get("url") or "") for row in results
+        row for row in results
         if _domain_allowed(str(row.get("url") or ""), domains)
     ]
     canonicals = [
         str(value) for value in source.get("canonical_entrypoints") or [] if str(value).strip()
     ]
     if not canonicals:
-        return (candidates[0], None) if candidates else ("", "official_origin_not_discovered")
+        if not candidates:
+            return "", "official_origin_not_discovered"
+        ranked = sorted(candidates, key=lambda row: _origin_quality_score(row, source), reverse=True)
+        return str(ranked[0].get("url") or ""), None
     canonical_keys = {_normalized_origin(value): value for value in canonicals}
+    eligible: list[dict[str, Any]] = []
     for candidate in candidates:
-        if _normalized_origin(candidate) in canonical_keys:
-            return candidate, None
-    for candidate in candidates:
-        candidate_host, candidate_path = _normalized_origin(candidate)
+        candidate_url = str(candidate.get("url") or "")
+        if _normalized_origin(candidate_url) in canonical_keys:
+            eligible.append(candidate)
+            continue
+        candidate_host, candidate_path = _normalized_origin(candidate_url)
         for canonical in canonicals:
             canonical_host, canonical_path = _normalized_origin(canonical)
             if candidate_host == canonical_host and (
                 candidate_path.startswith(canonical_path.rstrip("/") + "/")
             ):
-                return candidate, None
+                eligible.append(candidate)
+                break
+    if eligible:
+        ranked = sorted(eligible, key=lambda row: _origin_quality_score(row, source), reverse=True)
+        return str(ranked[0].get("url") or ""), None
     return "", "discovered_origin_outside_canonical_family"
+
+
+def _origin_quality_score(result: dict[str, Any], source: dict[str, Any]) -> int:
+    """Deterministically prefer exact, requirements-bearing official pages."""
+
+    url = str(result.get("url") or "")
+    title = str(result.get("title") or "").lower()
+    _host, path = _normalized_origin(url)
+    text = f"{title} {path.lower()}"
+    canonicals = [str(value) for value in source.get("canonical_entrypoints") or []]
+    score = 0
+    if any(_normalized_origin(url) == _normalized_origin(value) for value in canonicals):
+        score += 1000
+    if any(token in text for token in ("system requirement", "requirements", "compatibility")):
+        score += 180
+    if any(token in text for token in ("manual", "documentation", "docs")):
+        score += 80
+    artefact_tokens = {
+        token.lower()
+        for value in source.get("artefact_patterns") or []
+        for token in str(value).split()
+        if len(token) >= 4
+    }
+    score += min(120, 20 * sum(token in text for token in artefact_tokens))
+    if any(token in text for token in ("forum", "community", "blog", "snippet")):
+        score -= 160
+    return score
 
 
 def _policy_version(source: dict[str, Any]) -> str:
@@ -628,6 +679,14 @@ def research_official_sources(
             "discovery_reason": None,
             "discovery_result_count": 0,
             "deadline_status": "within_deadline",
+            "parser_coverage": {
+                "pages_fetched": 0,
+                "candidate_claims": 0,
+                "accepted_claims": 0,
+                "rejected_claims": 0,
+                "context_claims": 0,
+                "parse_status": "not_attempted",
+            },
         }
         if remaining_timeout(15.0) <= 0:
             execution["deadline_status"] = "exceeded_before_dispatch"
@@ -670,6 +729,14 @@ def research_official_sources(
             execution.update({
                 "origin_selection_mode": "evidence_cache",
                 "selected_origin_url": cached.key.canonical_url,
+                "parser_coverage": {
+                    "pages_fetched": 0,
+                    "candidate_claims": len(cached.claims) + len(cached.context_claims),
+                    "accepted_claims": len(cached.claims),
+                    "rejected_claims": 0,
+                    "context_claims": len(cached.context_claims),
+                    "parse_status": "cache_hit",
+                },
             })
             source_execution.append(execution)
             continue
@@ -737,7 +804,10 @@ def research_official_sources(
             selection_error: str | None = "official_origin_not_discovered"
             attempted = 0
             completed_attempt = False
-            for query_index, query in enumerate(_source_discovery_queries(source), 1):
+            query_axes: list[str] = []
+            for query_index, (query_axis, query) in enumerate(
+                _source_discovery_query_plan(source), 1,
+            ):
                 query_timeout = remaining_timeout(min(4.0, discovery_timeout))
                 if query_timeout <= 0:
                     execution["deadline_status"] = "exceeded_during_discovery"
@@ -746,6 +816,7 @@ def research_official_sources(
                     query, allowlist=domains, timeout_s=query_timeout,
                 )
                 attempted += 1
+                query_axes.append(query_axis)
                 completed_attempt = completed_attempt or (
                     str(discovery.last_receipt.get("execution_status") or "failed") == "completed"
                 )
@@ -754,7 +825,7 @@ def research_official_sources(
                     "result_count": discovery.last_receipt.get("result_count", len(attempt_results)),
                     "allowlisted_result_count": len(attempt_results),
                     "billing_class": "free", "query_id": f"{source_id}_q{query_index}",
-                    "query_purpose": "official_origin_discovery",
+                    "query_purpose": f"official_origin_discovery:{query_axis}",
                 })
                 receipts.append(_receipt(
                     discovery.last_receipt, run_id=run_id,
@@ -767,6 +838,7 @@ def research_official_sources(
                 str(row.get("url") or ""): row for row in results if str(row.get("url") or "")
             }
             execution["discovery_query_count"] = attempted
+            execution["discovery_query_axes"] = query_axes
             execution["discovery_result_count"] = len(unique_results)
             execution["discovery_status"] = (
                 "completed" if selected
@@ -819,8 +891,10 @@ def research_official_sources(
             unresolved.append({"source_id": source_id, "reason": origin.get("error")})
             continue
         content_type = str(origin.get("content_type") or "").lower()
+        execution["parser_coverage"]["pages_fetched"] = 1
         parser_type = str(source.get("parser_type") or "")
         if content_type not in _HTML_CONTENT_TYPES or parser_type not in {"html", "html_pdf"}:
+            execution["parser_coverage"]["parse_status"] = "content_type_mismatch"
             unresolved.append({"source_id": source_id, "reason": "source_parser_content_type_mismatch"})
             continue
         observed_at = str(origin["receipt"].get("observed_at") or datetime.now(timezone.utc).isoformat())
@@ -831,6 +905,13 @@ def research_official_sources(
             source, product_rows, context_rows, observed_at=observed_at, now=current,
         )
         unresolved.extend({"source_id": source_id, "reason": reason} for reason in claim_errors)
+        execution["parser_coverage"].update({
+            "candidate_claims": len(product_rows) + len(context_rows) + len(claim_errors),
+            "accepted_claims": len(product_rows),
+            "rejected_claims": len(claim_errors),
+            "context_claims": len(context_rows),
+            "parse_status": "completed" if (product_rows or context_rows) else "no_scoped_claims",
+        })
         claims.extend(product_rows)
         context_claims.extend(context_rows)
         observed = _parse_time(observed_at)
