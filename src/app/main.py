@@ -1563,11 +1563,15 @@ def create_app() -> FastAPI:
                 },
                 "timestamp": None,
             }
-        from src.app.observability.health import dependency_health_snapshot
+        from src.app.observability.health import (
+            dependency_health_cached_snapshot,
+            schedule_dependency_health_refresh,
+        )
 
-        snapshot = dependency_health_snapshot(force=True)
+        snapshot = dependency_health_cached_snapshot()
+        refresh_scheduled = schedule_dependency_health_refresh() if snapshot.get("stale") else False
         deps = snapshot.get("dependencies", {})
-        status = "ok"
+        status = "unknown" if not deps else "ok"
         if any(v.get("status") == "unhealthy" for v in deps.values() if isinstance(v, dict)):
             status = "degraded"
         return {
@@ -1576,6 +1580,11 @@ def create_app() -> FastAPI:
             "commerce_features": commerce_features,
             "dependencies": deps,
             "timestamp": snapshot.get("timestamp"),
+            "readiness_cache": {
+                "age_seconds": snapshot.get("age_seconds"),
+                "stale": snapshot.get("stale"),
+                "refresh_scheduled": refresh_scheduled,
+            },
         }
 
     @app.get("/healthz")

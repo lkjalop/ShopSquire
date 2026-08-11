@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Any, Dict
 from sqlalchemy import text
@@ -11,6 +12,8 @@ from src.app.models.db import db_session
 
 _CACHE: Dict[str, Any] = {"ts": 0, "payload": None}
 _CACHE_TTL_SECONDS = 30
+_REFRESH_LOCK = threading.RLock()
+_REFRESH_IN_FLIGHT = False
 
 
 def dependency_health_cached_snapshot() -> Dict[str, Any]:
@@ -32,6 +35,29 @@ def dependency_health_cached_snapshot() -> Dict[str, Any]:
         "age_seconds": age,
         "stale": age is None or age >= _CACHE_TTL_SECONDS,
     }
+
+
+def schedule_dependency_health_refresh() -> bool:
+    """Refresh dependency observations out of band; never block a health request."""
+
+    global _REFRESH_IN_FLIGHT
+    with _REFRESH_LOCK:
+        if _REFRESH_IN_FLIGHT:
+            return False
+        _REFRESH_IN_FLIGHT = True
+
+    def _refresh() -> None:
+        global _REFRESH_IN_FLIGHT
+        try:
+            dependency_health_snapshot(force=True)
+        finally:
+            with _REFRESH_LOCK:
+                _REFRESH_IN_FLIGHT = False
+
+    threading.Thread(
+        target=_refresh, name="dependency-health-refresh", daemon=True,
+    ).start()
+    return True
 
 
 def _check_db() -> Dict[str, Any]:
