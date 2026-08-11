@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -14,6 +14,11 @@ from src.app.services.market_analysis import MarketFinding, persist_findings
 def db():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
+    s.execute(text("""CREATE TABLE shadow_action (
+      id TEXT PRIMARY KEY,tenant_id TEXT DEFAULT 'default',schema_version INTEGER DEFAULT 1,
+      action_type TEXT,target_ref TEXT,source_finding_type TEXT,direction TEXT,magnitude REAL,
+      confidence REAL,rationale TEXT,params_json TEXT,status TEXT DEFAULT 'proposed',
+      dedup_key TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)"""))
     try:
         yield s
     finally:
@@ -93,6 +98,16 @@ def test_generate_from_persisted_findings_is_log_only(db):
 def test_generate_safe_on_empty(db):
     assert sa.generate_shadow_actions(db) == {"proposed": 0, "by_action": {}}
     assert sa.generate_shadow_actions(None) == {"proposed": 0, "by_action": {}}
+
+
+def test_missing_migration_does_not_create_runtime_schema():
+    eng = create_engine("sqlite://", future=True)
+    session = sessionmaker(bind=eng, future=True)()
+    action = sa.propose_from_findings([
+        MarketFinding("demand_shift", "SKU-1", "warn", 0.5, "v1", {}, "daily")
+    ])
+    assert sa.persist_proposals(session, action) == 0
+    assert "shadow_action" not in inspect(eng).get_table_names()
 
 
 # ── structural safety: the module has NO execution path ──────────────────────

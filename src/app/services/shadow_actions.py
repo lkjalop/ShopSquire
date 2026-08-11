@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 SCHEMA_VERSION = 1
 DEFAULT_TENANT = "default"
@@ -130,34 +130,10 @@ def propose_from_findings(findings: Optional[Iterable[Any]]) -> List[ShadowActio
 
 
 # ── persistence (log-only) ────────────────────────────────────────────────────
-_DDL = """
-CREATE TABLE IF NOT EXISTS shadow_action (
-    id TEXT PRIMARY KEY,
-    tenant_id TEXT DEFAULT 'default',
-    schema_version INTEGER DEFAULT 1,
-    action_type TEXT,
-    target_ref TEXT,
-    source_finding_type TEXT,
-    direction TEXT,
-    magnitude REAL,
-    confidence REAL,
-    rationale TEXT,
-    params_json TEXT,
-    status TEXT DEFAULT 'proposed',
-    dedup_key TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-)
-"""
-_INDEXES = (
-    "CREATE INDEX IF NOT EXISTS ix_shadow_action_type ON shadow_action(action_type)",
-    "CREATE INDEX IF NOT EXISTS ix_shadow_action_dedup ON shadow_action(tenant_id, dedup_key, status)",
-)
-
-
 def ensure_table(db) -> None:
-    db.execute(text(_DDL))
-    for stmt in _INDEXES:
-        db.execute(text(stmt))
+    """Validate migration readiness without mutating schema at runtime."""
+    if "shadow_action" not in inspect(db.get_bind()).get_table_names():
+        raise RuntimeError("shadow_action schema missing; run Alembic migrations")
 
 
 def persist_proposals(db, actions: List[ShadowAction], *, tenant_id: str = DEFAULT_TENANT) -> int:
