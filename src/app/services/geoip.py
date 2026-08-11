@@ -5,13 +5,13 @@ import time
 import json
 import ipaddress
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Optional, Tuple, Dict, Any
 
 from src.app.observability.metrics import (
     record_geoip_lookup,
     record_geoip_cache_hit,
     record_geo_asn_risk,
+    record_geoip_provider,
 )
 
 
@@ -119,7 +119,14 @@ def _mmdb_lookup(ip: str) -> Optional[Dict[str, Any]]:
                 cc = getattr(getattr(city, "country", None), "iso_code", None)
             except Exception:
                 cc = None
-            ans = {"asn": None, "asn_org": None, "country": cc}
+            ans = {
+                "asn": None,
+                "asn_org": None,
+                "country": cc,
+                "provider": "maxmind_mmdb",
+                "lookup_status": "ok" if cc or asn_info else "partial",
+                "data_version": str(int(os.path.getmtime(db_path))),
+            }
             if asn_info:
                 ans.update(asn_info)
             return ans
@@ -128,6 +135,13 @@ def _mmdb_lookup(ip: str) -> Optional[Dict[str, Any]]:
 
 
 def _ip2location_lookup(ip: str) -> Optional[Dict[str, Any]]:
+    if str(os.getenv("GEOIP_ALLOW_NETWORK_LOOKUP", "0")).strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return None
     api_key = os.getenv("IP2LOCATION_API_KEY")
     if not api_key:
         return None
@@ -143,6 +157,8 @@ def _ip2location_lookup(ip: str) -> Optional[Dict[str, Any]]:
             "asn": int(data.get("asn") or 0) or None,
             "asn_org": data.get("as"),
             "country": (data.get("country_code") or data.get("country_code2")),
+            "provider": "ip2location",
+            "lookup_status": "ok",
         }
     except Exception:
         return None
@@ -150,6 +166,13 @@ def _ip2location_lookup(ip: str) -> Optional[Dict[str, Any]]:
 
 def _ip_api_lookup(ip: str) -> Optional[Dict[str, Any]]:
     """Free ip-api.com lookup (45 req/min, no key needed). HTTP only."""
+    if str(os.getenv("GEOIP_ALLOW_NETWORK_LOOKUP", "0")).strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return None
     if str(os.getenv("GEOIP_DISABLE_IP_API", "")).strip().lower() in ("1", "true"):
         return None
     # Skip external lookup for loopback, private, or non-routable IPs (also
@@ -190,6 +213,8 @@ def _ip_api_lookup(ip: str) -> Optional[Dict[str, Any]]:
             "country": data.get("countryCode"),
             "is_hosting": bool(data.get("hosting")),
             "is_vpn": bool(data.get("proxy")),
+            "provider": "ip_api",
+            "lookup_status": "ok",
         }
     except Exception:
         return None
@@ -214,6 +239,8 @@ def _override_match(ip: str) -> Optional[Dict[str, Any]]:
                     "is_hosting": bool(row.get("is_hosting", True)),
                     "risk": float(row.get("risk", 0.8)),
                     "matched_override": True,
+                    "provider": "policy_override",
+                    "lookup_status": "ok",
                 }
         except Exception:
             continue
@@ -236,6 +263,8 @@ def _offline_heuristic_lookup(ip: str) -> Optional[Dict[str, Any]]:
             "risk": 0.0,
             "matched_override": False,
             "offline_heuristic": "private_or_loopback",
+            "provider": "offline_heuristic",
+            "lookup_status": "ok",
         }
     if any(
         ip_obj in ipaddress.ip_network(cidr)
@@ -250,6 +279,8 @@ def _offline_heuristic_lookup(ip: str) -> Optional[Dict[str, Any]]:
             "risk": 0.35,
             "matched_override": False,
             "offline_heuristic": "documentation_range",
+            "provider": "offline_heuristic",
+            "lookup_status": "ok",
         }
 
     heur = _load_offline_heuristics()
@@ -265,6 +296,8 @@ def _offline_heuristic_lookup(ip: str) -> Optional[Dict[str, Any]]:
             "risk": float(row.get("risk", 0.45)),
             "matched_override": False,
             "offline_heuristic": "exact_ip",
+            "provider": "offline_heuristic",
+            "lookup_status": "ok",
         }
         if row.get("tags") is not None:
             out["tags"] = list(row.get("tags") or [])[:8]
@@ -285,6 +318,8 @@ def _offline_heuristic_lookup(ip: str) -> Optional[Dict[str, Any]]:
                     "risk": float(entry.get("risk", 0.75)),
                     "matched_override": False,
                     "offline_heuristic": "cidr_match",
+                    "provider": "offline_heuristic",
+                    "lookup_status": "ok",
                 }
                 if entry.get("tags") is not None:
                     out["tags"] = list(entry.get("tags") or [])[:8]
@@ -351,7 +386,11 @@ def enrich_ip(ip: Optional[str]) -> Dict[str, Any]:
             "is_hosting": bool(provider_data.get("is_hosting")),
             "is_vpn": bool(provider_data.get("is_vpn")),
             "matched_override": False,
+            "provider": provider_data.get("provider") or "none",
+            "lookup_status": provider_data.get("lookup_status") or "unavailable",
         }
+        if provider_data.get("data_version") is not None:
+            result["data_version"] = str(provider_data.get("data_version"))
         if provider_data.get("offline_heuristic") is not None:
             result["offline_heuristic"] = provider_data.get("offline_heuristic")
         if provider_data.get("tags") is not None:
@@ -398,6 +437,10 @@ def enrich_ip(ip: Optional[str]) -> Dict[str, Any]:
     try:
         risk_band = "high" if r >= 0.8 else ("med" if r >= 0.5 else "low")
         record_geo_asn_risk(str(result.get("asn") or "0"), result.get("asn_org") or "unknown", result.get("country") or "XX", risk_band)
+        record_geoip_provider(
+            str(result.get("provider") or "none"),
+            str(result.get("lookup_status") or "unknown"),
+        )
     except Exception:
         pass
 

@@ -676,10 +676,9 @@ def _is_non_local_env() -> bool:
 
 
 def _client_ip(request: Request) -> str:
-    xff = str(request.headers.get("x-forwarded-for") or "").strip()
-    if xff:
-        return xff.split(",")[0].strip()
-    return str(request.client.host if request and request.client else "")
+    from src.app.security.client_ip import client_ip
+
+    return client_ip(request)
 
 
 def _ip_allowed(ip_text: str) -> bool:
@@ -998,6 +997,18 @@ geo_asn_risk_total = Counter(
     labelnames=["asn", "org", "country", "band"],
 )
 
+geoip_provider_total = Counter(
+    "shopsquire_geoip_provider_total",
+    "GeoIP/ASN lookup results by bounded provider and health status",
+    labelnames=["provider", "status"],
+)
+
+client_ip_resolution_total = Counter(
+    "shopsquire_client_ip_resolution_total",
+    "Client IP resolution results without raw addresses in metric labels",
+    labelnames=["source", "result"],
+)
+
 
 def record_geoip_lookup():
     try:
@@ -1016,6 +1027,26 @@ def record_geoip_cache_hit():
 def record_geo_asn_risk(asn: str, org: str, country: str, band: str):
     try:
         geo_asn_risk_total.labels(asn=asn or "0", org=org or "unknown", country=country or "XX", band=band or "low").inc()
+    except Exception:
+        pass
+
+
+def record_geoip_provider(provider: str, status: str) -> None:
+    try:
+        geoip_provider_total.labels(
+            provider=str(provider or "none")[:32],
+            status=str(status or "unknown")[:24],
+        ).inc()
+    except Exception:
+        pass
+
+
+def record_client_ip_resolution(source: str, result: str) -> None:
+    try:
+        client_ip_resolution_total.labels(
+            source=str(source or "unknown")[:32],
+            result=str(result or "unknown")[:32],
+        ).inc()
     except Exception:
         pass
 
