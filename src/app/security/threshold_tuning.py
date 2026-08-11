@@ -7,52 +7,7 @@ from sqlalchemy import text
 from src.app.models.db import db_session
 
 
-def _ensure_tables() -> None:
-    try:
-        with db_session() as db:
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS security_threshold_overrides (
-                      tenant_id TEXT NOT NULL,
-                      threshold_key TEXT NOT NULL,
-                      threshold_value REAL NOT NULL,
-                      source TEXT,
-                      sample_size INTEGER DEFAULT 0,
-                      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                      PRIMARY KEY (tenant_id, threshold_key)
-                    )
-                    """
-                )
-            )
-            db.commit()
-    except Exception:
-        pass
-    try:
-        with db_session() as db:
-            db.execute(text("ALTER TABLE email_security_incidents ADD COLUMN ground_truth TEXT"))
-            db.commit()
-    except Exception:
-        pass
-    try:
-        with db_session() as db:
-            db.execute(text("ALTER TABLE email_security_incidents ADD COLUMN analyst_verdict TEXT"))
-    except Exception:
-        pass
-    try:
-        with db_session() as db:
-            db.execute(text("ALTER TABLE email_security_incidents ADD COLUMN correction_ts TEXT"))
-    except Exception:
-        pass
-    try:
-        with db_session() as db:
-            db.execute(text("ALTER TABLE email_security_incidents ADD COLUMN correction_notes TEXT"))
-    except Exception:
-        pass
-
-
 def get_runtime_thresholds(tenant_id: str | None) -> Dict[str, float]:
-    _ensure_tables()
     tenant = str(tenant_id or "default")
     out: Dict[str, float] = {}
     try:
@@ -104,7 +59,6 @@ def _extract_tuning_rows(tenant: str) -> List[Dict[str, Any]]:
 
 
 def recompute_thresholds_from_corrections(tenant_id: str | None) -> Dict[str, Any]:
-    _ensure_tables()
     tenant = str(tenant_id or "default")
     rows = _extract_tuning_rows(tenant)
     n = len(rows)

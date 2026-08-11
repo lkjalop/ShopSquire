@@ -24,6 +24,7 @@ import hashlib
 import logging
 import math
 import os
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
@@ -151,11 +152,15 @@ def record_email_event(
                 text(
                     """
                     INSERT INTO supplier_baseline_events
-                    (tenant_id, sender_domain_hash, event_ts, hour_of_day, invoice_amount, attachment_count)
-                    VALUES (:tenant, :sdh, :ts, :hour, :amount, :att_count)
+                    (id, tenant_id, sender_domain_hash, event_ts, hour_of_day, invoice_amount, attachment_count)
+                    VALUES (:id, :tenant, :sdh, :ts, :hour, :amount, :att_count)
                     """
                 ),
                 {
+                    # SQLite only auto-generates for the exact INTEGER PRIMARY KEY spelling;
+                    # PostgreSQL's identity column also accepts a caller-supplied unique value.
+                    # Supplying it closes the cross-dialect NULL-id failure without runtime DDL.
+                    "id": uuid.uuid4().int & ((1 << 63) - 1),
                     "tenant": tenant,
                     "sdh": sdh,
                     "ts": ts_iso,
