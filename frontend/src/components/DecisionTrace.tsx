@@ -4353,7 +4353,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                       <div className={styles.sectionTitle}>Deadline Feasibility</div>
                       <div className={styles.kvRow}>
                         <span>Requested window</span>
-                        <span>{deliveryFeasibility.horizon_days ?? '?'} day(s)</span>
+                        <span>{deliveryFeasibility.delivery_window_days ?? deliveryFeasibility.horizon_days ?? '?'} day(s)</span>
                       </div>
                       <div className={styles.kvRow}>
                         <span>Verdict</span>
