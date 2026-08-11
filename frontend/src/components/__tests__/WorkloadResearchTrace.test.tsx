@@ -11,6 +11,37 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.queryByText(/research was not required/i)).not.toBeInTheDocument();
   });
 
+  it('renders a provisional ambiguity plan without claiming external execution', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[{
+      event_type: 'ambiguity_exploration_projected',
+      payload: {
+        retained_purpose: 'I need digital twin simulation and to simulate a cyber attack.',
+        research_plan_id: 'plan-ot-range',
+        interpretations: [
+          { hypothesis_id: 'digital-twin', label: 'Digital twin simulation' },
+          { hypothesis_id: 'ot-cyber', label: 'Simulate a cyber attack' },
+        ],
+        research_obligations: [
+          { obligation_id: 'official', kind: 'official requirements', resolution_owner: 'research' },
+        ],
+        execution: 'local_exploration_completed',
+        evidence: 'material_gaps',
+        decision: 'exploration_allowed',
+        cart_authority: 'none',
+        provider_accounting: { external_calls: 0, paid_calls: 0 },
+      },
+    }]} />);
+
+    const trace = screen.getByTestId('workload-research-trace');
+    expect(trace).toHaveTextContent(/bounded research plan/i);
+    expect(trace).toHaveTextContent(/digital twin simulation/i);
+    expect(trace).toHaveTextContent(/simulate a cyber attack/i);
+    expect(trace).toHaveTextContent(/Status: not executed/i);
+    expect(trace).toHaveTextContent(/External calls: 0/i);
+    expect(trace).toHaveTextContent(/not an external fetch or verified product fit/i);
+    expect(screen.queryByText(/No governed workload research record was produced/i)).toBeNull();
+  });
+
   it('renders every governed ladder rung and engine-level degradation truth', () => {
     render(<WorkloadResearchTrace executionSteps={[]} events={[{
       event_type: 'official_research_rerank_completed',

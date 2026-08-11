@@ -1812,6 +1812,15 @@ export default function App() {
             ));
           }
           if (interpretation?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
+            // A new case owns the right panel. Do not leave the prior turn's
+            // catalog cards actionable underneath provisional case shelves.
+            setDisplayProducts([]);
+            setRecommendationShelf(null);
+            setSourcingIntent(null);
+            setFulfilmentCase(null);
+            setSourcingTraceId(null);
+            setPendingBulkQty(null);
+            setPendingBulkBudget(null);
             setAmbiguityExploration(interpretation.ambiguity_exploration as AmbiguityExploration);
           }
           if (interpretation?.product_shelves?.schema_version === 'product-shelves-v1') {

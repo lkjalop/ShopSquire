@@ -15,6 +15,11 @@ const isOfficialResearchEvent = (event: any) => {
   });
 };
 
+const isAmbiguityExplorationEvent = (event: any) => (
+  [event?.event_type, event?.payload?._original_event_type, event?.payload?._event_type]
+    .some((value) => String(value || '').toLowerCase() === 'ambiguity_exploration_projected')
+);
+
 const RequirementRows = ({ title, value }: { title: string; value: any }) => {
   const rows = value && typeof value === 'object' ? Object.entries(value) : [];
   if (!rows.length) return null;
@@ -50,6 +55,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const materialClarification = executionSteps.find((step) => step?.id === 'material-clarification') || {};
   const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
   const officialResearch = [...events].reverse().find(isOfficialResearchEvent)?.payload || {};
+  const provisionalExploration = [...events].reverse().find(isAmbiguityExplorationEvent)?.payload || {};
   const evidenceLadder = Array.isArray(officialResearch?.evidence_ladder)
     ? officialResearch.evidence_ladder : [];
   const evidenceOutput = evidence?.output || {};
@@ -78,6 +84,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
     evidence.id || authorization.id || entities.length || researchPlan.id || researchTrigger.id
     || postCatalogTrigger.id
     || semanticEvidence.id || semanticAuthorization.id || evidenceLadder.length
+    || provisionalExploration?.research_plan_id
   );
 
   if (!hasResearch) {
@@ -92,6 +99,54 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
     <section data-testid="workload-research-trace">
       <h3 style={{ margin: '0 0 10px', fontSize: 16 }}>Research and product-fit authorization</h3>
       <div style={{ display: 'grid', gap: 8 }}>
+        {provisionalExploration?.research_plan_id && (
+          <div data-testid="provisional-research-plan" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Bounded research plan</strong>
+            <div style={{ marginTop: 5 }}>
+              Purpose: <strong>{provisionalExploration.retained_purpose || 'not recorded'}</strong>
+            </div>
+            <div>
+              Status: <strong>not executed</strong> - provisional catalog exploration is allowed while material evidence gaps remain visible.
+            </div>
+            <div>Plan: <strong>{provisionalExploration.research_plan_id}</strong></div>
+            {Array.isArray(provisionalExploration.interpretations) && provisionalExploration.interpretations.length > 0 && (
+              <div style={{ marginTop: 7 }}>
+                <strong>Bounded interpretations</strong>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                  {provisionalExploration.interpretations.map((item: any, index: number) => (
+                    <li key={item?.hypothesis_id || index}>
+                      {item?.label || item?.description || words(item?.hypothesis_id)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {Array.isArray(provisionalExploration.research_obligations) && provisionalExploration.research_obligations.length > 0 && (
+              <div style={{ marginTop: 7 }}>
+                <strong>Open resolution obligations</strong>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                  {provisionalExploration.research_obligations.map((item: any, index: number) => (
+                    <li key={item?.obligation_id || index}>
+                      {words(item?.kind || item?.ambiguity_type || 'research obligation')}
+                      {item?.resolution_owner ? ` - owner: ${words(item.resolution_owner)}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div data-testid="provisional-provider-accounting" style={{ marginTop: 7, color: '#475569' }}>
+              Execution: {words(provisionalExploration.execution)}
+              {' · '}Evidence: {words(provisionalExploration.evidence)}
+              {' · '}Decision: {words(provisionalExploration.decision)}
+              {' · '}External calls: {String(provisionalExploration?.provider_accounting?.external_calls ?? 0)}
+              {' · '}Paid calls: {String(provisionalExploration?.provider_accounting?.paid_calls ?? 0)}
+              {' · '}Cart authority: {words(provisionalExploration.cart_authority)}
+            </div>
+            <small style={{ color: '#64748b' }}>
+              This records a case-bound plan and local exploration, not an external fetch or verified product fit.
+            </small>
+          </div>
+        )}
         <div style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
           <strong>1. Model interpretation</strong>
           <div data-testid="research-model-entities" style={{ marginTop: 5 }}>
