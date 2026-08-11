@@ -99,7 +99,7 @@ def test_exact_observations_supply_claim_refs_independent_freshness_and_location
     )
     assert titan.requirement_claim_ids == ["official-ram"]
     assert titan.capability_claim_ids
-    assert titan.identity_evidence.status == "retailer_attested"
+    assert titan.identity_evidence.status == "reconciled_oem_retailer"
     assert titan.identity_evidence.mpn == "Titan 18 HX A2WJ-1038AU"
     assert titan.identity_evidence.retailer_sku == "126982"
     assert titan.identity_evidence.claim_ids
@@ -192,3 +192,22 @@ def test_conflicting_oem_and_retailer_identity_is_visible_not_forced_to_exact_re
         for product in [*shelf.initial, *shelf.next_page]
     }
     assert products["SCORP-126982"].identity_evidence.status == "conflicted"
+
+
+def test_only_exact_oem_pages_reconcile_retailer_identity():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        projection = project_accepted_catalog(db, accepted_claims=[])
+
+    products = {
+        product.product.sku: product
+        for shelf in projection.shelves
+        for product in [*shelf.initial, *shelf.next_page]
+    }
+    assert products["SCORP-126982"].identity_evidence.status == "reconciled_oem_retailer"
+    assert products["SCORP-125638"].identity_evidence.status == "reconciled_oem_retailer"
+    assert products["SCORP-C07NXPT"].identity_evidence.status == "reconciled_oem_retailer"
+    assert products["JW-822962"].identity_evidence.status == "retailer_attested"
+    assert products["JW-818845"].identity_evidence.status == "retailer_attested"

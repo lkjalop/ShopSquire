@@ -34,6 +34,26 @@ def test_reviewed_fixture_preserves_identity_conflicts_and_form_factor_specific_
         }
         assert all(row.evidence_status == "conflicted" for row in conflicts)
 
+        exact_oem_mpns = db.execute(select(ProductEvidenceObservation).where(
+            ProductEvidenceObservation.attribute_key == "manufacturer_part_number",
+            ProductEvidenceObservation.source_id.in_(["MSI", "ASUS", "HP"]),
+        )).scalars().all()
+        assert {(row.source_id, row.value_json["value"]) for row in exact_oem_mpns} == {
+            ("MSI", "Titan 18 HX A2WJ-1038AU"),
+            ("ASUS", "GX651AX-SR004W"),
+            ("HP", "C07NXPT"),
+        }
+        assert all(row.observed_at.date().isoformat() == "2026-08-11" for row in exact_oem_mpns)
+
+        asus_os = db.execute(select(ProductEvidenceObservation).where(
+            ProductEvidenceObservation.configuration_id
+            == next(row.id for row in configs if row.sku == "SCORP-125638"),
+            ProductEvidenceObservation.attribute_key == "operating_system",
+        )).scalars().all()
+        assert {row.value_json["value"] for row in asus_os} == {
+            "Windows 11 Home", "Windows 11 Pro",
+        }
+
         built = db.execute(select(ProductAvailabilityObservation).where(
             ProductAvailabilityObservation.configuration_id == zephyr.id,
             ProductAvailabilityObservation.source_record_id.like("https://%"),

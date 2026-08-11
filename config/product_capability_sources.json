@@ -53,9 +53,10 @@
       "identity_types": ["manufacturer_part_number"],
       "allowed_publishers": ["MSI"],
       "allowed_domains": ["msi.com"],
-      "canonical_entrypoints": ["https://au.msi.com/Laptops"],
+      "canonical_entrypoints": ["https://au.msi.com/Laptop/Titan-18-HX-A2WX/Specification"],
       "max_age_seconds": 2592000,
-      "operational_status": "endpoint_required"
+      "parser_type": "exact_sku_spec_table_pending",
+      "operational_status": "reviewed_exact_origin_parser_pending"
     },
     {
       "provider_id": "gigabyte_official_specs",
@@ -75,9 +76,13 @@
       "identity_types": ["manufacturer_part_number"],
       "allowed_publishers": ["HP"],
       "allowed_domains": ["hp.com", "support.hp.com"],
-      "canonical_entrypoints": ["https://support.hp.com/au-en/products/laptops"],
+      "canonical_entrypoints": [
+        "https://www.hp.com/nz-en/products/workstations/product-details/product-specifications/2103171150",
+        "https://support.hp.com/us-en/document/ish_12456093-12456254-16"
+      ],
       "max_age_seconds": 2592000,
-      "operational_status": "endpoint_required"
+      "parser_type": "exact_product_and_family_pages_pending",
+      "operational_status": "reviewed_origins_parser_pending"
     }
   ]
 }

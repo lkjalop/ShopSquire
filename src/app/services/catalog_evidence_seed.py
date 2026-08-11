@@ -54,6 +54,8 @@ class ReviewedConfiguration(BaseModel):
     retailer_sku: str | None = None
     retailer: str
     source_url: str
+    official_source_url: str | None = None
+    official_identity_scope: Literal["exact_configuration", "family_only", "unavailable"] = "unavailable"
     price_cents: int
     form_factor: str
     mobility: str
@@ -69,10 +71,12 @@ class ReviewedConfiguration(BaseModel):
     warranty_type: str | None = None
     warranty_years: int | None = None
     claims: list[SeedClaim] = Field(default_factory=list)
+    official_claims: list[SeedClaim] = Field(default_factory=list)
     availability: list[SeedAvailability] = Field(default_factory=list)
 
 
 SOURCE_DATE = datetime(2026, 8, 8, tzinfo=timezone.utc)
+OEM_REVIEW_DATE = datetime(2026, 8, 11, tzinfo=timezone.utc)
 
 
 REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
@@ -80,6 +84,8 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
         sku="SCORP-126982", title="MSI Titan 18 HX A2WJ RTX 5090 Laptop",
         manufacturer="MSI", mpn="Titan 18 HX A2WJ-1038AU", retailer_sku="126982",
         retailer="Scorptec", source_url="https://www.scorptec.com.au/product/laptops-and-notebooks/gaming-laptops/126982-titan-18-hx-a2wj-1038au",
+        official_source_url="https://au.msi.com/Laptop/Titan-18-HX-A2WX/Specification",
+        official_identity_scope="exact_configuration",
         price_cents=899_900, form_factor="laptop", mobility="mobile_limited",
         device_class="consumer_gaming_flagship", os_edition="Windows 11 Pro",
         gpu_class="consumer_geforce", gpu_vram_gb=24, gpu_tgp_w=175,
@@ -90,12 +96,19 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
             SeedClaim(attribute_key="gpu_tgp_w", value=175, unit="W", claim_class="attested"),
             SeedClaim(attribute_key="fleet_manageable", value=True, claim_class="derived"),
         ],
+        official_claims=[
+            SeedClaim(attribute_key="operating_system", value="Windows 11 Pro", claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=24, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="gpu_tgp_w", value=175, unit="W", claim_class="attested"),
+        ],
         availability=[SeedAvailability(location_id="australia_delivery", status="in_stock"), SeedAvailability(location_id="dandenong", status="in_stock")],
     ),
     ReviewedConfiguration(
         sku="SCORP-125638", title="ASUS ROG Zephyrus Duo GX651 RTX 5090 Laptop",
         manufacturer="ASUS", mpn="GX651AX-SR004W", retailer_sku="125638",
         retailer="Scorptec", source_url="https://www.scorptec.com.au/product/laptops-and-notebooks/gaming-laptops/125638-gx651ax-sr004w",
+        official_source_url="https://rog.asus.com/au/laptops/rog-zephyrus/rog-zephyrus-duo-2026/spec/",
+        official_identity_scope="exact_configuration",
         price_cents=1_299_900, form_factor="laptop", mobility="mobile",
         device_class="consumer_gaming_flagship", os_edition="Windows 11 Pro",
         gpu_class="consumer_geforce", gpu_vram_gb=24, gpu_tgp_w=None,
@@ -106,12 +119,21 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
             SeedClaim(attribute_key="gpu_tgp_w", value=None, unit="W", claim_class="attested", status="unknown"),
             SeedClaim(attribute_key="ram_upgradeable", value=False, claim_class="derived", excerpt="LPDDR5X soldered"),
         ],
+        official_claims=[
+            SeedClaim(attribute_key="operating_system", value="Windows 11 Home", claim_class="attested", status="conflicted", conflict_group="gx651ax-os"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=24, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ram_gb", value=64, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="storage_gb", value=2000, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ram_upgradeable", value=False, claim_class="attested"),
+        ],
         availability=[SeedAvailability(location_id="australia_delivery", status="in_stock"), SeedAvailability(location_id="tingalpa", status="sold_out")],
     ),
     ReviewedConfiguration(
         sku="JW-822962", title="HP ZBook Fury G1i 16 Mobile Workstation",
         manufacturer="HP", mpn="C2EN9PT-CTO-128G5T", retailer_sku="822962",
         retailer="JW Computers", source_url="https://www.jw.com.au/product/hp-zbook-f-16-touchscreen-mobile-workstation-ultra-9-285hx-128gb-ram-5tb-1tb-4tb-ssd-rtx-pro-4000-windows-11-pro",
+        official_source_url="https://support.hp.com/us-en/document/ish_12456093-12456254-16",
+        official_identity_scope="family_only",
         price_cents=1_499_900, form_factor="laptop", mobility="mobile",
         device_class="mobile_workstation", os_edition="Windows 11 Pro",
         gpu_class="professional_rtx_pro", gpu_vram_gb=None, gpu_tgp_w=None,
@@ -128,6 +150,8 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
         sku="SCORP-C07NXPT", title="HP Z2 Mini G1a Workstation",
         manufacturer="HP", mpn="C07NXPT", retailer="Scorptec",
         source_url="https://www.scorptec.com.au/product/branded-systems/workstation/123163-c07nxpt",
+        official_source_url="https://www.hp.com/nz-en/products/workstations/product-details/product-specifications/2103171150",
+        official_identity_scope="exact_configuration",
         price_cents=369_900, form_factor="sff_desktop", mobility="fixed",
         device_class="desktop_workstation", os_edition="Windows 11 Pro",
         gpu_class="integrated", gpu_vram_gb=None, gpu_tgp_w=None,
@@ -137,6 +161,13 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
             SeedClaim(attribute_key="device_class", value="desktop_workstation", claim_class="derived"),
             SeedClaim(attribute_key="gpu_vram_gb", value=None, unit="GB", claim_class="attested", status="unknown"),
             SeedClaim(attribute_key="ram_upgradeable", value=False, claim_class="derived", excerpt="LPDDR5X soldered"),
+        ],
+        official_claims=[
+            SeedClaim(attribute_key="operating_system", value="Windows 11 Pro", claim_class="attested"),
+            SeedClaim(attribute_key="gpu_class", value="integrated", claim_class="attested"),
+            SeedClaim(attribute_key="ram_gb", value=32, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="storage_gb", value=1000, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ram_upgradeable", value=False, claim_class="attested"),
         ],
         availability=[SeedAvailability(location_id="australia_delivery", status="at_supplier")],
     ),
@@ -229,6 +260,37 @@ def _ensure_configuration_observations(
         ))
 
 
+def _ensure_official_observations(
+    db, config: ProductConfiguration, item: ReviewedConfiguration,
+) -> None:
+    """Append exact OEM observations; family pages never certify a retailer SKU."""
+    if item.official_identity_scope != "exact_configuration" or not item.official_source_url:
+        return
+    config.specification_observed_at = OEM_REVIEW_DATE
+    rows = [
+        SeedClaim(attribute_key="manufacturer_part_number", value=item.mpn, claim_class="attested"),
+        *item.official_claims,
+    ]
+    existing = {
+        row.source_record_id
+        for row in db.execute(select(ProductEvidenceObservation).where(
+            ProductEvidenceObservation.configuration_id == config.id,
+        )).scalars()
+    }
+    for index, claim in enumerate(rows):
+        record_id = f"{item.official_source_url}#exact-{index}-{claim.attribute_key}"
+        if record_id in existing:
+            continue
+        db.add(ProductEvidenceObservation(
+            configuration_id=config.id, attribute_key=claim.attribute_key,
+            value_json={"value": claim.value}, unit=claim.unit,
+            claim_class=claim.claim_class, evidence_status=claim.status,
+            conflict_group=claim.conflict_group, source_id=item.manufacturer,
+            source_record_id=record_id, source_excerpt=claim.excerpt,
+            observed_at=OEM_REVIEW_DATE,
+        ))
+
+
 def _ensure_availability_observations(
     db, config: ProductConfiguration, item: ReviewedConfiguration, *,
     inventory_profile: str | None = None,
@@ -270,7 +332,10 @@ def _ensure_availability_observations(
 
 
 def configuration_hash(item: ReviewedConfiguration) -> str:
-    material = item.model_dump(exclude={"claims", "availability"})
+    material = item.model_dump(exclude={
+        "claims", "availability", "official_claims", "official_source_url",
+        "official_identity_scope",
+    })
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
 
 
@@ -308,6 +373,7 @@ def ingest_reviewed_configurations(
             if existing.product_id != product.id:
                 existing.product_id = product.id
             _ensure_configuration_observations(db, existing, item)
+            _ensure_official_observations(db, existing, item)
             _ensure_availability_observations(
                 db, existing, item, inventory_profile=inventory_profile,
             )
@@ -317,7 +383,10 @@ def ingest_reviewed_configurations(
             tenant_id=tenant_id, product_id=product.id, configuration_hash=digest,
             specification_observed_at=SOURCE_DATE, price_observed_at=SOURCE_DATE,
             availability_observed_at=SOURCE_DATE, currency="AUD", active=True,
-            **item.model_dump(exclude={"claims", "availability"}),
+            **item.model_dump(exclude={
+                "claims", "availability", "official_claims", "official_source_url",
+                "official_identity_scope",
+            }),
         )
         db.add(config)
         db.flush()
@@ -332,6 +401,7 @@ def ingest_reviewed_configurations(
             ))
         db.flush()
         _ensure_configuration_observations(db, config, item)
+        _ensure_official_observations(db, config, item)
         _ensure_availability_observations(
             db, config, item, inventory_profile=inventory_profile,
         )
