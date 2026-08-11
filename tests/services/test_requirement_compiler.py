@@ -44,6 +44,12 @@ def test_official_typed_claim_compiles_to_registry_backed_predicate():
             "unit": "GB",
             "authority": "official_requirements",
             "lineage_root": "official-vendor-provider",
+            "artefact_name": "USD Composer",
+            "artefact_version": "2026.2",
+            "requirement_class": "recommended",
+            "scope_caveat": "Good tier, not a performance guarantee",
+            "source_revision": "2026-07-27",
+            "freshness_status": "fresh",
         }
     ])
 
@@ -51,6 +57,10 @@ def test_official_typed_claim_compiles_to_registry_backed_predicate():
     assert result.requirements[0].attribute_key == "ram_gb"
     assert result.requirements[0].value == 32
     assert result.requirements[0].authority == "accepted_evidence"
+    assert result.requirements[0].artefact_name == "USD Composer"
+    assert result.requirements[0].artefact_version == "2026.2"
+    assert result.requirements[0].requirement_class == "recommended"
+    assert result.requirements[0].freshness_status == "fresh"
 
 
 def test_provider_registry_uses_the_canonical_approved_document_capability():

@@ -46,6 +46,7 @@ def build_product_fit_explanation(
     semantic_resolution: Mapping[str, Any] | None = None,
     requirement_compilation: Mapping[str, Any] | None = None,
     product_capability_evidence: Mapping[str, Any] | None = None,
+    behavioral_evidence: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[dict[str, Any], str]:
     """Return the canonical explanation payload and concise grounded narration."""
     semantic = dict(semantic_resolution or {})
@@ -98,6 +99,21 @@ def build_product_fit_explanation(
             )
         status = per_key.get(key)
         verdict = "meets" if status is True else "fails" if status is False else "unknown"
+        requirement_class = str(compiled_row.get("requirement_class") or "minimum").lower()
+        verification_status = str(compiled_row.get("verification_status") or "").lower()
+        if verification_status not in {"verified", "unverified"}:
+            verification_status = "verified" if source_refs else "unverified"
+        if product_evidence_verdict == "conflicts_with_catalog":
+            decision_verdict = "contested"
+        elif status is True:
+            decision_verdict = (
+                "meets_recommended" if requirement_class in {"recommended", "target", "optimal"}
+                else "meets_minimum"
+            )
+        elif status is False and verification_status == "verified":
+            decision_verdict = "below_minimum"
+        else:
+            decision_verdict = "unknown"
         required_text = _format_required(predicates, unit)
         observed_text = _format_value(value, unit) if value is not None else "not recorded"
         ledger.append({
@@ -110,6 +126,13 @@ def build_product_fit_explanation(
                 if source_refs else "buyer_or_authorized_workload_requirement"
             ),
             "requirement_evidence_refs": source_refs,
+            "requirement_class": requirement_class,
+            "verification_status": verification_status,
+            "scope_caveat": compiled_row.get("scope_caveat"),
+            "artefact_name": compiled_row.get("artefact_name"),
+            "artefact_version": compiled_row.get("artefact_version"),
+            "source_revision": compiled_row.get("source_revision"),
+            "freshness_status": compiled_row.get("freshness_status") or "unknown",
             "observed": value,
             "observed_text": observed_text,
             "observed_source": "catalog_attribute",
@@ -118,7 +141,12 @@ def build_product_fit_explanation(
                 if product_claim and product_claim.get("source_record_id") else []
             ),
             "product_evidence_verdict": product_evidence_verdict,
+            "claim_class": (
+                str(product_claim.get("claim_class") or "attested")
+                if product_claim else "catalog_observation"
+            ),
             "verdict": verdict,
+            "decision_verdict": decision_verdict,
         })
         phrases.append(
             f"{_attribute_label(str(key))} {observed_text} "
@@ -133,8 +161,18 @@ def build_product_fit_explanation(
         "bounded_requirements" if workload and has_authoritative_requirements
         else "buyer_requirements" if ledger else "ranking_only"
     )
-    coverage_status = "partial" if qualification_scope == "bounded_requirements" else "not_assessed"
     overall = str(fit.get("overall") or "").strip() or None
+    material_unknowns = list(semantic.get("material_unknowns") or [])[:8]
+    if any(row.get("verdict") == "fails" for row in ledger):
+        coverage_status = "does_not_meet_accepted_requirements"
+    elif not ledger:
+        coverage_status = "not_assessed"
+    elif any(row.get("verdict") == "unknown" for row in ledger) or material_unknowns:
+        coverage_status = "partial"
+    elif qualification_scope == "bounded_requirements":
+        coverage_status = "meets_accepted_requirements_only"
+    else:
+        coverage_status = "not_assessed"
     payload = {
         "sku": str(getattr(product, "sku", "") or ""),
         "name": str(getattr(product, "title", "") or ""),
@@ -145,13 +183,111 @@ def build_product_fit_explanation(
         "verified_requirement_count": len(ledger),
         "basis": list(getattr(product, "why", None) or [])[:3],
         "fit_ledger": ledger,
-        "material_unknowns": list(semantic.get("material_unknowns") or [])[:8],
+        "material_unknowns": material_unknowns,
         "commercial_authority_granted": False,
         "product_capability_evidence": product_evidence or {
             "status": "not_requested",
             "commercial_authority_granted": False,
         },
     }
+
+    # Canonical qualification is a separate deterministic projection. The legacy
+    # `verdict`/`coverage_status` fields remain for transport compatibility while
+    # new UI and narration consume this versioned object.
+    try:
+        from src.app.services.recommendation_core.workload_decision import (
+            FitLedgerRow,
+            ProductConfigurationIdentity,
+            WorkloadContract,
+            deterministic_narration,
+            reduce_workload_decision,
+        )
+
+        artefact_rows = [row for row in ledger if row.get("artefact_name")]
+        artefact_name = str((artefact_rows[0] if artefact_rows else {}).get("artefact_name") or "").strip() or None
+        artefact_version = str((artefact_rows[0] if artefact_rows else {}).get("artefact_version") or "").strip() or None
+        unknown_text = [
+            str(item if isinstance(item, str) else item.get("label") or item.get("question") or item.get("unknown_id") or "")
+            for item in material_unknowns if item
+        ]
+        workload_contract = WorkloadContract(
+            desired_outcome=workload or "",
+            artefact_name=artefact_name,
+            artefact_version=artefact_version,
+            execution_shape=str(semantic.get("execution_shape") or "unresolved")
+            if str(semantic.get("execution_shape") or "unresolved")
+            in {"local", "remote_client", "hybrid", "cloud", "unresolved"}
+            else "unresolved",
+            quantity=semantic.get("quantity") if isinstance(semantic.get("quantity"), int) else None,
+            deadline_days=(
+                semantic.get("deadline_days")
+                if isinstance(semantic.get("deadline_days"), int) else None
+            ),
+            budget_cents=(
+                semantic.get("budget_cents")
+                if isinstance(semantic.get("budget_cents"), int) else None
+            ),
+            currency=(
+                str(semantic.get("currency") or "").upper()
+                if len(str(semantic.get("currency") or "")) == 3 else None
+            ),
+            scale_inputs=dict(semantic.get("scale_inputs") or {}),
+            target_inputs=dict(semantic.get("target_inputs") or {}),
+            constraints=dict(semantic.get("constraints") or {}),
+            assumptions=[str(item) for item in list(semantic.get("assumptions") or [])[:8]],
+            material_unknowns=[item for item in unknown_text if item][:12],
+            surviving_hypothesis_ids=[
+                str(item.get("hypothesis_id") if isinstance(item, Mapping) else item)
+                for item in list(semantic.get("workload_hypotheses") or [])[:5]
+                if str(item)
+            ],
+        )
+        identity_raw = product_evidence.get("identity") if isinstance(product_evidence.get("identity"), Mapping) else {}
+        product_identity = ProductConfigurationIdentity(
+            sku=payload["sku"] or "unknown-sku",
+            identifier_type=str(identity_raw.get("identifier_type") or "unresolved"),
+            identifier=str(identity_raw.get("identifier") or ""),
+            configuration_hash=str(identity_raw.get("configuration_hash") or "").strip() or None,
+            form_factor=str(identity_raw.get("form_factor") or "unknown")
+            if str(identity_raw.get("form_factor") or "unknown") in {"laptop", "desktop", "server", "cloud", "unknown"}
+            else "unknown",
+        )
+        canonical_rows = [FitLedgerRow(
+            attribute_key=str(row["attribute"]),
+            attribute_label=str(row["attribute_label"]),
+            requirement_class=str(row.get("requirement_class") or "minimum"),
+            required=list(row.get("required") or []),
+            required_text=str(row.get("required_text") or "not recorded"),
+            observed=row.get("observed"),
+            observed_text=str(row.get("observed_text") or "not recorded"),
+            verdict=str(row.get("decision_verdict") or "unknown"),
+            verification_status=str(row.get("verification_status") or "unverified"),
+            claim_class=str(row.get("claim_class") or "catalog_observation"),
+            requirement_claim_ids=[str(item) for item in row.get("requirement_evidence_refs") or []],
+            capability_claim_ids=[str(item) for item in row.get("product_evidence_refs") or []],
+            scope_caveat=row.get("scope_caveat"),
+            artefact_name=row.get("artefact_name"),
+            artefact_version=row.get("artefact_version"),
+            freshness_status=str(row.get("freshness_status") or "unknown")
+            if str(row.get("freshness_status") or "unknown") in {"fresh", "stale", "unknown"}
+            else "unknown",
+            resolver=("official product source" if row.get("observed") is None else None),
+        ) for row in ledger]
+        decision_object = reduce_workload_decision(
+            workload=workload_contract,
+            product=product_identity,
+            rows=canonical_rows,
+            behavioral_evidence=behavioral_evidence,
+            availability_status="available" if getattr(product, "stock", None) else "unknown",
+        )
+        payload["workload_decision"] = decision_object.model_dump(mode="json")
+        payload["decision_narration"] = deterministic_narration(decision_object)
+    except Exception as exc:
+        payload["workload_decision"] = {
+            "schema_version": "workload-decision-v1",
+            "overall_decision": "unresolved",
+            "critic": {"status": "blocked", "violations": [f"decision_projection_error:{type(exc).__name__}"]},
+        }
 
     title = payload["name"] or payload["sku"] or "This product"
     if phrases:

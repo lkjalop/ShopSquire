@@ -87,6 +87,26 @@ def compile_authoritative_requirements(
                 value=value,
                 unit=definition.unit,
                 source_claim_ids=[claim_id],
+                artefact_name=(str(claim.get("artefact_name") or "").strip()[:160] or None),
+                artefact_version=(str(claim.get("artefact_version") or "").strip()[:80] or None),
+                requirement_class=(
+                    str(claim.get("requirement_class") or "minimum").strip().lower()
+                    if str(claim.get("requirement_class") or "minimum").strip().lower()
+                    in {"minimum", "recommended", "target", "optimal"}
+                    else "minimum"
+                ),
+                scope_caveat=(str(claim.get("scope_caveat") or "").strip()[:500] or None),
+                source_revision=(str(claim.get("source_revision") or "").strip()[:160] or None),
+                freshness_status=(
+                    str(claim.get("freshness_status") or "unknown").strip().lower()
+                    if str(claim.get("freshness_status") or "unknown").strip().lower()
+                    in {"fresh", "stale", "unknown"}
+                    else "unknown"
+                ),
+                verification_status="verified",
+                supersedes_claim_id=(
+                    str(claim.get("supersedes_claim_id") or "").strip()[:240] or None
+                ),
             )
         )
     return CompilationResult(tuple(accepted), tuple(rejected))

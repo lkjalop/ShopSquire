@@ -145,7 +145,9 @@ def build_cards(variants: List[VariantView],
                 floor_cents = v.price_cents if floor_cents is None else min(floor_cents, v.price_cents)
             failed = [k for k, val in verdict["per_key"].items() if val is False]
             if overall == "meets":
-                card.why.append(f"meets all {len(requirements)} requirements")
+                card.why.append(
+                    f"meets the {len(requirements)} capability checks currently evaluated"
+                )
             elif overall == "unknown":
                 card.why.append("unverified: " + ", ".join(verdict["unknown_keys"]))
             else:
