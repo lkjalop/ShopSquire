@@ -3,11 +3,7 @@ Seed the demo SQLite catalog with real gaming laptops in the $1,199-$1,799 range
 These products are modelled on real 2024/2025 SKUs so the LLM has accurate specs to cite.
 Run: python scripts/seed_gaming_laptops.py
 """
-import json
 import os
-import sqlite3
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -262,11 +258,12 @@ def ensure_gaming_catalog(db) -> int:
             db.execute(
                 _t(
                     "INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at, image_url) "
-                    "VALUES (:id, :sku, :name, :price_cents, 'USD', :specs, 1, :updated_at, :image_url)"
+                    "VALUES (:id, :sku, :name, :price_cents, 'USD', :specs, :active, :updated_at, :image_url)"
                 ),
                 {
                     "id": pid, "sku": sku, "name": str(lap["name"]),
                     "price_cents": int(lap["price_cents"]), "specs": _json.dumps(lap["specs"]),
+                    "active": True,
                     "updated_at": _dt.utcnow(), "image_url": f"/static/images/{sku}.svg",
                 },
             )
