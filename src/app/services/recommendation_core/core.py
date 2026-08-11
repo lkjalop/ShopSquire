@@ -1278,36 +1278,27 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         len((product.fit or {}).get("unknown_keys") or []) for product in resp.products
     )
     possible_requirement_count = max(1, len(resp.products) * len(decision.requirements))
-    resp.extras["research_trigger_post_catalog_shadow"] = assess_research_trigger_shadow(
-        plan.semantic_proposal,
-        semantic_authority_state=plan.semantic_authority_state,
-        catalog_coverage=(qualified_count / max(1, retrieval_count)),
-        retrieval_confidence=(len(resp.products) / max(1, retrieval_count)),
-        unknown_attribute_ratio=(unknown_requirement_count / possible_requirement_count),
-        qualified_product_count=qualified_count,
-        commercial_materiality=(1.0 if requested_quantity and requested_quantity > 1 else 0.0),
-    ).model_dump()
-    from src.app.services.recommendation_core.post_catalog_adjudicator import (
-        adjudicate_post_catalog,
-        explicit_evidence_constraints,
+    from src.app.services.recommendation_core.catalog_research_gate_stage import (
+        CatalogResearchGateInput,
+        run_catalog_research_gate,
     )
 
-    normalized_requirement_count = evidence_requirement_count
-    unknown_gap = unknown_requirement_count / possible_requirement_count
-    catalog_coverage_gap = 1.0 - (qualified_count / max(1, retrieval_count))
-    material_gap = max(unknown_gap, catalog_coverage_gap)
-    explicit_constraints = list(dict.fromkeys([
-        *list(resp.extras.get("unresolved_explicit_constraints") or []),
-        *explicit_evidence_constraints(envelope.query),
-    ]))
-    post_catalog_adjudication = adjudicate_post_catalog(
-        normalized_requirement_count=normalized_requirement_count,
-        evidence_qualified_product_count=qualified_count,
-        retrieval_count=retrieval_count,
-        material_attribute_coverage_gap=material_gap,
-        unresolved_explicit_constraints=explicit_constraints,
-        category_similarity_only=bool(resp.products and normalized_requirement_count == 0),
-    )
+    gate = run_catalog_research_gate(CatalogResearchGateInput(
+        semantic_proposal=plan.semantic_proposal,
+        semantic_authority_state=plan.semantic_authority_state,
+        query=envelope.query, retrieval_count=retrieval_count,
+        returned_product_count=len(resp.products),
+        normalized_requirement_count=evidence_requirement_count,
+        qualified_product_count=qualified_count,
+        unknown_requirement_count=unknown_requirement_count,
+        possible_requirement_count=possible_requirement_count,
+        unresolved_explicit_constraints=list(
+            resp.extras.get("unresolved_explicit_constraints") or []
+        ),
+        requested_quantity=requested_quantity,
+    ))
+    resp.extras["research_trigger_post_catalog_shadow"] = gate.shadow_observation
+    post_catalog_adjudication = gate.adjudication
     resp.extras["post_catalog_adjudication"] = post_catalog_adjudication.model_dump()
     resp.extras["qualification_authority"] = post_catalog_adjudication.qualification_authority
 

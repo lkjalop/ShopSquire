@@ -23,4 +23,11 @@ describe('nonRecommendationOutcome', () => {
   it('does not intercept ordinary recommendation payloads', () => {
     expect(nonRecommendationOutcome({ products: [{ sku: 'RGAM-0007' }] })).toBeNull();
   });
+
+  it('does not hide a typed provisional case when one execution stage degraded', () => {
+    expect(nonRecommendationOutcome({
+      degraded: true,
+      ambiguity_exploration: { schema_version: 'ambiguity-exploration-v1' },
+    })).toBeNull();
+  });
 });

@@ -70,3 +70,67 @@ test('novel suitability request stays provisional and exposes a durable research
   await expect(research).toContainText(/catalog recommendation|exploration/i);
   await page.screenshot({ path: '../.tmp-open-world-browser/coverage-gate.png', fullPage: true });
 });
+
+test('novel publisher is approved case-only, fetched, reviewed, and reranked in one case', async ({ page }) => {
+  test.setTimeout(240_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  await page.addInitScript((uid) => {
+    localStorage.clear();
+    sessionStorage.clear();
+    sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-publisher-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  await send(
+    page,
+    'I process large drone surveys in Agisoft Metashape. Only hardware officially supported by Agisoft is acceptable. Is this gaming laptop suitable?',
+  );
+  await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
+  await expect(page.getByTestId('ambiguity-accounting')).toContainText(/external calls: 0/i);
+
+  const discoveryResponse = page.waitForResponse(
+    response => /\/api\/v1\/shopping-cases\/[^/]+\/research$/.test(response.url()),
+    { timeout: 30_000 },
+  );
+  await page.getByRole('button', { name: /Discover official sources/i }).click();
+  const discovery = await (await discoveryResponse).json();
+  expect(discovery.status).toBe('publisher_resolution_required');
+  expect(discovery.research.provider_accounting.discovery_calls).toBeGreaterThanOrEqual(1);
+  expect(discovery.research.provider_accounting.official_origin_fetches).toBe(0);
+  expect(discovery.research.provider_accounting.paid_calls).toBe(0);
+  expect(discovery.research.candidates.length).toBeGreaterThan(0);
+  expect(discovery.research.candidates[0].candidate_id).toMatch(/^pubcand-/);
+
+  const agisoftCandidate = page.getByTestId('publisher-candidates').getByRole('listitem')
+    .filter({ hasText: /System Requirements.*\(www\.agisoft\.com\)/i })
+    .first();
+  await expect(agisoftCandidate).toBeVisible();
+  await expect(agisoftCandidate.getByRole('button', { name: 'Use for this case' })).toBeVisible();
+  const approvalResponse = page.waitForResponse(
+    response => /\/publisher-candidates\/[^/]+\/approve$/.test(response.url()),
+    { timeout: 30_000 },
+  );
+  await agisoftCandidate.getByRole('button', { name: 'Use for this case' }).click();
+  const approval = await (await approvalResponse).json();
+  expect(approval.candidate.approval_scope).toBe('case_only');
+  expect(approval.provider_accounting.official_origin_fetches).toBeGreaterThanOrEqual(1);
+  expect(approval.provider_accounting.paid_calls).toBe(0);
+  expect(approval.research_status).toBe('claims_pending_review');
+  expect(approval.claims.length).toBeGreaterThan(0);
+  expect(approval.qualification_authority).toBe('none');
+
+  const review = page.getByTestId('buyer-requirement-review').last();
+  await expect(review).toContainText(/exact publisher origin/i);
+  const acceptanceResponse = page.waitForResponse(
+    response => /\/requirement-proposals\/[^/]+\/accept$/.test(response.url()),
+    { timeout: 30_000 },
+  );
+  await review.getByRole('button', { name: 'Accept case evidence' }).click();
+  const accepted = await (await acceptanceResponse).json();
+  expect(accepted.status).toBe('accepted_case_evidence');
+  expect(accepted.qualification_authority).toBe('requirements');
+  expect(accepted.cart_mutation).toBe('not_authorized');
+  await expect(page.getByTestId('ambiguity-exploration')).toContainText(/researched/i);
+  await page.screenshot({ path: '../.tmp-open-world-browser/case-origin-rerank.png', fullPage: true });
+});

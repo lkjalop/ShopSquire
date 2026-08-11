@@ -2449,13 +2449,18 @@ def create_app() -> FastAPI:
                 app.mount("/assets", StaticFiles(directory=merchant_assets), name="merchant_app_assets")
     except Exception:
         pass
-    app.include_router(cart_router)
-    app.include_router(shopping_cases_router)
     from src.app.routers.cart_mutations import router as cart_mutations_router
-    app.include_router(cart_mutations_router)   # C1: confirm-tier plan apply (V2 cart lane)
-    app.include_router(privacy_router)
-    app.include_router(auth_router)
-    app.include_router(account_router)
+    from src.app.app_router_registry import register_routers, router_registration
+
+    register_routers(app, (
+        router_registration("cart", cart_router),
+        router_registration("shopping_cases", shopping_cases_router),
+        # C1: confirm-tier plan apply (V2 cart lane)
+        router_registration("cart_mutations", cart_mutations_router),
+        router_registration("privacy", privacy_router),
+        router_registration("auth", auth_router),
+        router_registration("account", account_router),
+    ))
     
     app.include_router(pricing.router)
     app.include_router(inventory.router)

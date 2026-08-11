@@ -2841,6 +2841,15 @@ export default function App() {
       setProductShelves(payload.product_shelves as ProductShelfProjection);
       switchRightPanelMode('grid');
     }
+    if (payload?.qualification_authority === 'requirements') {
+      setAmbiguityExploration((current) => current ? {
+        ...current,
+        status: 'researched',
+        execution: 'case_origin_claims_accepted',
+        evidence: 'case_approved_requirements_compiled',
+        decision: 'conditional_fit_allowed',
+      } : current);
+    }
     if (payload?.corroboration?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
       setAmbiguityExploration(payload.corroboration.ambiguity_exploration as AmbiguityExploration);
     }
@@ -2853,7 +2862,9 @@ export default function App() {
           : payload?.corroboration?.evidence_outcome === 'context_only'
             ? 'I accepted those as provisional constraints and completed approved-source research in the same case. It found authoritative context but no matching product requirements, so these constraints and product fit remain provisional.'
             : 'I accepted those as provisional constraints and completed approved-source corroboration in the same case. Remaining unknowns stay conditional.'
-        : 'I accepted those as provisional constraints and reranked the local catalog without calling an external provider.',
+        : payload?.qualification_authority === 'requirements'
+          ? 'I accepted the unchanged cited requirements from your case-approved origin and reranked this shopping case. Product fit may now be qualified where exact product evidence is complete; unknowns remain conditional.'
+          : 'I accepted those as provisional constraints and reranked the local catalog without calling an external provider.',
       timestamp: new Date(),
       buyerClaimReconciliation: Array.isArray(payload?.buyer_claim_reconciliation)
         ? payload.buyer_claim_reconciliation as BuyerClaimReconciliation[] : undefined,
@@ -3011,6 +3022,64 @@ export default function App() {
       }]);
     }
     return payload?.resolution || { status: 'unresolved', reason: 'resolution_not_recorded' };
+  }, [ambiguityExploration, uid, traceId]);
+
+  const approvePublisherCandidate = useCallback(async (
+    candidate: NonNullable<AmbiguityExploration['publisher_candidates']>[number],
+  ) => {
+    if (!ambiguityExploration?.case_id) {
+      throw new Error('This exploration is missing its shopping-case identity.');
+    }
+    if (!candidate.candidate_id || !candidate.candidate_version) {
+      throw new Error('This publisher candidate is not durably bound to the shopping case.');
+    }
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}`
+      + `/publisher-candidates/${encodeURIComponent(candidate.candidate_id)}/approve`,
+    ), {
+      method: 'POST', credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `approve-${candidate.candidate_id}-${candidate.candidate_version}`,
+        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+        ...csrfHeaders(),
+      },
+      body: JSON.stringify({
+        uid,
+        expected_candidate_version: candidate.candidate_version,
+        approval_scope: 'case_only',
+        allowed_claim_types: [
+          'minimum_requirements', 'recommended_requirements', 'target_requirements', 'compatibility',
+          'operating_system_support', 'hardware_certification',
+        ],
+        research_authorized: true,
+      }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(String(
+        payload?.detail?.message || payload?.detail?.code || payload?.detail
+        || 'Publisher candidate approval failed.',
+      ));
+    }
+    setTraceId(normalizeTraceId(payload?.trace_id || traceId));
+    setMessages((current) => [...current, {
+      role: 'assistant',
+      content: payload?.research_status === 'claims_pending_review'
+        ? `I fetched the exact case-approved origin and extracted ${payload.claims?.length || 0} cited requirement claims. Review, correct, or reject them below. They have not affected product fit yet, and no cart or supplier action was authorized.`
+        : 'I fetched the exact case-approved origin, but its parser established no usable requirement claims. Continue provisionally, upload requirements, or choose another publisher source.',
+      timestamp: new Date(),
+      buyerRequirementClaims: Array.isArray(payload?.claims)
+        ? payload.claims as BuyerRequirementClaim[] : undefined,
+      buyerRequirementProposal: payload?.buyer_requirement_proposal || undefined,
+    }]);
+    setAmbiguityExploration((current) => current ? {
+      ...current,
+      execution: 'case_approved_official_origin_fetch_completed',
+      evidence: payload?.research_status === 'claims_pending_review'
+        ? 'official_claims_pending_buyer_review' : 'zero_parser_yield',
+      provider_accounting: payload?.provider_accounting || current.provider_accounting,
+    } : current);
   }, [ambiguityExploration, uid, traceId]);
 
   const proposeResearchedProduct = useCallback(async (item: ShelfProduct, quantity: number) => {
@@ -3810,6 +3879,7 @@ export default function App() {
                       onResearch={() => { void researchAmbiguousShoppingCase(); }}
                       onUpload={() => document.querySelector<HTMLInputElement>("input[type='file']:not([capture])")?.click()}
                       onResolveEvidenceSource={resolveBuyerEvidenceSource}
+                      onApprovePublisherCandidate={approvePublisherCandidate}
                       onEnterSpecifications={() => document.querySelector<HTMLTextAreaElement>("textarea[placeholder='Type your message...']")?.focus()}
                       onSubmitSpecifications={submitManualSpecifications}
                     />

@@ -13,7 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 
 from src.app.models.db import get_db
-from src.app.models.orm import RequirementProposal, ShoppingCase
+from src.app.models.orm import (
+    RequirementProposal,
+    ShoppingCase,
+    ShoppingCasePublisherCandidate,
+)
 from src.app.services.buyer_requirement_evidence import (
     ExtractedRequirementClaim,
     extract_buyer_requirement_claims,
@@ -91,6 +95,24 @@ class ResearchShoppingCaseRequest(BaseModel):
     hypothesis_ids: list[str] = Field(min_length=1, max_length=3)
     research_authorized: Literal[True]
     refresh_authorized: bool = False
+
+
+class ApprovePublisherCandidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    uid: str = Field(min_length=1, max_length=200)
+    expected_candidate_version: int = Field(ge=1)
+    approval_scope: Literal["case_only"] = "case_only"
+    allowed_claim_types: list[Literal[
+        "minimum_requirements", "recommended_requirements", "target_requirements",
+        "compatibility", "operating_system_support", "hardware_certification",
+    ]] = Field(
+        default_factory=lambda: [
+            "minimum_requirements", "recommended_requirements", "compatibility",
+        ],
+        min_length=1,
+        max_length=6,
+    )
+    research_authorized: Literal[True]
 
 
 class ResolveBuyerEvidenceSourceRequest(BaseModel):
@@ -312,6 +334,16 @@ def create_case_interpretation(
 
     plan = build_case_research_plan(body.retained_purpose)
     if plan is None:
+        # Positive-evidence constraints such as vendor certification or an OS
+        # support matrix cannot be satisfied by category similarity. This is a
+        # generic evidence-gap trigger, not a workload/persona keyword branch.
+        from src.app.services.recommendation_core.post_catalog_adjudicator import (
+            explicit_evidence_constraints,
+        )
+
+        if explicit_evidence_constraints(body.retained_purpose):
+            plan = build_case_research_plan(body.retained_purpose, allow_open_world=True)
+    if plan is None:
         return Response(status_code=204)
 
     tenant_id = _tenant(x_tenant_id)
@@ -502,20 +534,36 @@ def accept_requirement_proposal(
         if correction is not None:
             item.update(correction.model_dump(exclude={"claim_id"}))
             item["buyer_corrected"] = True
-        item["acceptance_status"] = "accepted_provisional"
-        item["authority_status"] = "unverified"
+        case_origin_evidence = (
+            item.get("evidence_class") == "official_case_source"
+            and item.get("approval_scope") == "case_only"
+            and item.get("authority_status") == "verified_case_origin"
+        )
+        if correction is not None:
+            # A buyer edit is useful evidence, but it is no longer the quoted
+            # publisher claim and must return to provisional authority.
+            case_origin_evidence = False
+        item["acceptance_status"] = (
+            "accepted_case_origin" if case_origin_evidence else "accepted_provisional"
+        )
+        item["authority_status"] = (
+            "verified_case_origin" if case_origin_evidence else "unverified"
+        )
         accepted.append(item)
+    accepted_case_origin = any(
+        item.get("authority_status") == "verified_case_origin" for item in accepted
+    )
     result = {
         "schema_version": "requirement-acceptance-v1",
         "case_id": case_id,
         "proposal_id": proposal_id,
         "proposal_version": proposal.version + 1,
-        "status": "accepted_provisional",
+        "status": "accepted_case_evidence" if accepted_case_origin else "accepted_provisional",
         "accepted_claims": accepted,
         "rejected_claim_ids": sorted(rejected_ids),
         "research_choice": body.research_choice,
         "research_authorized": body.research_choice == "research_and_corroborate",
-        "qualification_authority": "none",
+        "qualification_authority": "requirements" if accepted_case_origin else "none",
         "cart_mutation": "not_authorized",
         "trace_id": case_id.removeprefix("sc-"),
         "provider_accounting": {"external_calls": 0, "paid_calls": 0},
@@ -623,7 +671,7 @@ def accept_requirement_proposal(
     # Ensure the JSON remains serializable before making the state transition durable.
     json.dumps(result, sort_keys=True)
     proposal.version += 1
-    proposal.status = "accepted_provisional"
+    proposal.status = result["status"]
     proposal.acceptance_json = result
     proposal.acceptance_idempotency_key = idempotency_key
     proposal.updated_at = _now()
@@ -642,7 +690,8 @@ def accept_requirement_proposal(
                 "status": result["status"], "research_choice": body.research_choice,
                 "accepted_claim_ids": [item["claim_id"] for item in accepted],
                 "rejected_claim_ids": sorted(rejected_ids),
-                "qualification_authority": "none", "cart_authority": "none",
+                "qualification_authority": result["qualification_authority"],
+                "cart_authority": "none",
                 "provider_accounting": result["provider_accounting"],
                 "shelf_ids": [shelf["shelf_id"] for shelf in result["product_shelves"]["shelves"]],
             },
@@ -981,6 +1030,82 @@ def resolve_case_evidence_source(
     return result
 
 
+@router.post("/{case_id}/publisher-candidates/{candidate_id}/approve")
+def approve_case_publisher_candidate(
+    case_id: str,
+    candidate_id: str,
+    body: ApprovePublisherCandidateRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=200),
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Approve one discovered origin for this case, fetch it, and propose claims for review.
+
+    The action does not enroll the publisher globally. It authorizes one exact
+    origin fetch and produces reviewable requirements; cart and supplier
+    authority remain absent.
+    """
+
+    tenant_id = _tenant(x_tenant_id)
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id,
+        ShoppingCase.case_id == case_id,
+    )).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="shopping_case_not_found")
+    if case.uid != body.uid:
+        raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+    candidate = db.execute(select(ShoppingCasePublisherCandidate).where(
+        ShoppingCasePublisherCandidate.tenant_id == tenant_id,
+        ShoppingCasePublisherCandidate.case_id == case_id,
+        ShoppingCasePublisherCandidate.candidate_id == candidate_id,
+    )).scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="publisher_candidate_not_found")
+    if (
+        candidate.approval_idempotency_key == idempotency_key
+        and candidate.research_result_json
+    ):
+        return candidate.research_result_json
+
+    from src.app.services.case_publisher_candidate_workflow import (
+        execute_case_candidate_research,
+    )
+
+    result, error = execute_case_candidate_research(
+        db, candidate=candidate, case=case, tenant_id=tenant_id, uid=body.uid,
+        expected_version=body.expected_candidate_version,
+        idempotency_key=idempotency_key,
+        allowed_claim_types=body.allowed_claim_types,
+    )
+    if error:
+        status_code = 403 if error == "publisher_candidate_not_owned" else 409
+        raise HTTPException(status_code=status_code, detail={"code": error})
+    assert result is not None
+    try:
+        log_trace_event(
+            trace_id=result["trace_id"],
+            event_type="case_publisher_origin_researched",
+            source_type="buyer",
+            source_id=body.uid,
+            target_type="shopping_case",
+            target_id=case_id,
+            payload={
+                "candidate_id": candidate.candidate_id,
+                "approval_scope": "case_only",
+                "publisher_ownership_status": "buyer_attested_not_independently_verified",
+                "official_claims_pending_review": result["claims"],
+                "receipts": result["research"].get("receipts") or [],
+                "provider_accounting": result["provider_accounting"],
+                "qualification_authority": "none",
+                "cart_authority": "none",
+            },
+        )
+    except Exception:
+        pass
+    return result
+
+
 @router.post("/{case_id}/research")
 def research_shopping_case(
     case_id: str,
@@ -1073,6 +1198,31 @@ def research_shopping_case(
             plan,
             search_url_template=str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip(),
         )
+        from src.app.services.case_publisher_candidate_workflow import (
+            persist_discovered_candidates,
+        )
+
+        persisted_candidates = persist_discovered_candidates(
+            db,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            uid=body.uid,
+            candidates=discovery["candidates"],
+            receipts=discovery["receipts"],
+        )
+        persisted_by_url = {row.url: row for row in persisted_candidates}
+        discovery["candidates"] = [
+            {
+                **candidate,
+                "candidate_id": persisted_by_url[candidate["url"]].candidate_id,
+                "candidate_version": persisted_by_url[candidate["url"]].version,
+                "status": persisted_by_url[candidate["url"]].status,
+                "approval_scope": persisted_by_url[candidate["url"]].approval_scope,
+            }
+            for candidate in discovery["candidates"]
+            if candidate["url"] in persisted_by_url
+        ]
+        db.commit()
         before = project_accepted_catalog(
             db, accepted_claims=[], desired_outcome=plan.retained_purpose,
             budget_cents=body.budget_cents, tenant_id=tenant_id,

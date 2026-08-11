@@ -2874,6 +2874,92 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             )
         except Exception:
             pass
+        # Preserve an open-world research path when catalog ranking reaches its
+        # deadline. This projection is local-only: it calls no discovery
+        # provider and grants no fit, supplier, or cart authority.
+        if _timed_out:
+            try:
+                from datetime import datetime, timezone
+                from src.app.models.orm import ShoppingCase
+                from src.app.services.accepted_catalog_projection import project_accepted_catalog
+                from src.app.services.case_research_plan import build_case_research_plan
+
+                _purpose = " ".join(str(q or "").split())[:500]
+                _plan = build_case_research_plan(_purpose, allow_open_world=True)
+                if _plan is not None:
+                    _projection = project_accepted_catalog(
+                        db, accepted_claims=[], desired_outcome=_purpose,
+                        tenant_id=_request_tenant_id(request),
+                        hypothesis_labels={
+                            item.hypothesis_id: item.label for item in _plan.hypotheses
+                        },
+                    )
+                    _case_id = f"sc-{_degraded_trace.removeprefix('chat-degraded-')}"
+                    _case_uid = _resolve_uid(payload, request)
+                    _case_tenant = _request_tenant_id(request)
+                    existing = db.execute(sql_text(
+                        "SELECT 1 FROM shopping_cases "
+                        "WHERE tenant_id=:tenant_id AND case_id=:case_id LIMIT 1"
+                    ), {"tenant_id": _case_tenant, "case_id": _case_id}).first()
+                    if existing is None:
+                        now = datetime.now(timezone.utc)
+                        db.add(ShoppingCase(
+                            case_id=_case_id, tenant_id=_case_tenant,
+                            uid=str(_case_uid or "guest")[:200], status="active",
+                            retained_purpose=_purpose, created_at=now, updated_at=now,
+                        ))
+                        db.commit()
+                    _ambiguity = {
+                        "schema_version": "ambiguity-exploration-v1",
+                        "case_id": _case_id, "trace_id": _degraded_trace,
+                        "retained_purpose": _purpose, "status": "provisional",
+                        "interpretations": [
+                            item.model_dump(mode="json") for item in _plan.hypotheses
+                        ],
+                        "next_question": {"id": "research_scope", "text": _plan.next_question},
+                        "research_choices": [
+                            "research_approved_sources", "upload_requirements",
+                            "enter_specifications", "continue_provisionally",
+                        ],
+                        "execution": "local_exploration_completed_after_recommend_timeout",
+                        "evidence": "material_gaps", "decision": "exploration_allowed",
+                        "cart_authority": "none",
+                        "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+                        "research_plan_id": _plan.plan_id,
+                        "ambiguity_objects": [
+                            item.model_dump(mode="json") for item in _plan.ambiguities
+                        ],
+                        "research_obligations": [
+                            item.model_dump(mode="json") for item in _plan.obligations
+                        ],
+                        "source_candidate_ids": list(_plan.source_candidate_ids),
+                    }
+                    log_trace_event(
+                        trace_id=_degraded_trace,
+                        event_type="ambiguity_exploration_projected",
+                        source_type="stage", source_id="Timeout_Degradation",
+                        target_type="ui", target_id="research_fit_panel",
+                        payload={
+                            **_ambiguity,
+                            "shelf_ids": [shelf.shelf_id for shelf in _projection.shelves],
+                            "qualification_authority": "none", "commercial_authority": "none",
+                        },
+                    )
+                    return {
+                        "products": [], "view_mode": "cards", "confidence": None,
+                        "decision_trace_id": _degraded_trace, "trace_id": _degraded_trace,
+                        "assistant_message": (
+                            "The catalog-ranking step reached its deadline. I preserved a provisional "
+                            "shortlist and research plan; no external source was called. You can "
+                            "authorize discovery, upload requirements, or continue provisionally."
+                        ),
+                        "next_questions": [], "blocked": False, "degraded": True,
+                        "degraded_reason": _failure_reason, "needs_human_review": False,
+                        "security_route": "allow", "ambiguity_exploration": _ambiguity,
+                        "product_shelves": _projection.model_dump(mode="json"),
+                    }
+            except Exception:
+                logger.warning("timeout ambiguity projection failed", exc_info=True)
         return {
             "products": [],
             "view_mode": "cards",

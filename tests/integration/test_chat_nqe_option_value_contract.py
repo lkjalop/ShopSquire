@@ -103,3 +103,9 @@ def test_chat_recommend_timeout_returns_typed_degradation(monkeypatch):
     assert body["degraded_reason"] == "recommend_timeout"
     assert body["blocked"] is False
     assert str(body["trace_id"]).startswith("chat-degraded-")
+    ambiguity = body["ambiguity_exploration"]
+    assert ambiguity["status"] == "provisional"
+    assert ambiguity["provider_accounting"] == {"external_calls": 0, "paid_calls": 0}
+    assert ambiguity["research_plan_id"].startswith("crp-")
+    assert ambiguity["case_id"].startswith("sc-")
+    assert "shelves" in body["product_shelves"]

@@ -25,6 +25,9 @@ type Props = {
 const label = (value: string) => value.replaceAll('_', ' ');
 
 export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) {
+  const caseOriginEvidence = claims.some(
+    (claim) => claim.authority_status === 'verified_case_origin',
+  );
   const [selected, setSelected] = React.useState(() => new Set(claims.map((claim) => claim.claim_id)));
   const [draftValues, setDraftValues] = React.useState<Record<string, string>>(() => Object.fromEntries(
     claims.map((claim) => [
@@ -82,8 +85,9 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
     >
       <strong>Review extracted requirements</strong>
       <div style={{ marginTop: 4, fontSize: 12 }}>
-        These came from your upload. They are provisional and unverified; no product has
-        been qualified and no cart action was authorized.
+        {caseOriginEvidence
+          ? 'These cited claims came from the exact publisher origin you approved for this case. Review, correct, or reject them before they affect product fit. No cart action was authorized.'
+          : 'These came from your upload. They are provisional and unverified; no product has been qualified and no cart action was authorized.'}
       </div>
       <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
         {claims.slice(0, 12).map((claim) => (
@@ -114,16 +118,20 @@ export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) 
         ))}
       </ul>
       <div style={{ marginTop: 8, fontSize: 12 }}>
-        Select the claims to use. Buyer acceptance keeps them provisional until corroborated.
+        {caseOriginEvidence
+          ? 'Unedited cited claims retain case-only evidence authority. Edited claims become provisional buyer evidence.'
+          : 'Select the claims to use. Buyer acceptance keeps them provisional until corroborated.'}
       </div>
       {onAccept && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
           <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('local_only'); }}>
-            Use provisionally
+            {caseOriginEvidence ? 'Accept case evidence' : 'Use provisionally'}
           </button>
-          <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('research_and_corroborate'); }}>
-            Research and corroborate
-          </button>
+          {!caseOriginEvidence && (
+            <button type="button" disabled={busy || completed || selected.size === 0} onClick={() => { void accept('research_and_corroborate'); }}>
+              Research and corroborate
+            </button>
+          )}
         </div>
       )}
       {status && <div role="status" style={{ marginTop: 8, fontSize: 12 }}>{status}</div>}

@@ -74,6 +74,35 @@ describe('research truth panels', () => {
     expect(screen.queryByRole('button', { name: 'Research approved sources' })).toBeNull();
   });
 
+  it('requires a distinct case-only approval before fetching a discovered origin', async () => {
+    const approve = vi.fn().mockResolvedValue(undefined);
+    render(<AmbiguityExplorationPanel
+      exploration={{
+        schema_version: 'ambiguity-exploration-v1',
+        retained_purpose: 'Novel solver workload', status: 'unresolved',
+        interpretations: [], next_question: null, execution: 'live_discovery_completed',
+        evidence: 'publisher_candidates_only', decision: 'provisional_exploration_only',
+        cart_authority: 'none', provider_accounting: { external_calls: 3, paid_calls: 0 },
+        research_plan_id: 'crp-0123456789abcdef0123',
+        publisher_candidates: [{
+          candidate_id: 'pubcand-123', candidate_version: 1,
+          url: 'https://docs.solver.example/requirements',
+          domain: 'docs.solver.example', title: 'Solver requirements',
+          discovery_only: true, authority: 'not_accepted', status: 'discovered',
+        }],
+      }}
+      onResearch={vi.fn()} onUpload={vi.fn()} onEnterSpecifications={vi.fn()}
+      onApprovePublisherCandidate={approve}
+    />);
+
+    expect(screen.getByText(/does not enroll the publisher globally/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Use for this case' }));
+    await waitFor(() => expect(approve).toHaveBeenCalledWith(expect.objectContaining({
+      candidate_id: 'pubcand-123', candidate_version: 1,
+    })));
+    expect(screen.getByRole('status')).toHaveTextContent(/review its extracted claims/i);
+  });
+
   it('keeps context-only shelves provisional and labels conditional actions for review', () => {
     render(<ProductShelvesPanel
       projection={{

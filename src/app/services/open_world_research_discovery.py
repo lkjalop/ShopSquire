@@ -1,6 +1,7 @@
 """Bounded discovery for cases that do not yet have an enrolled publisher."""
 from __future__ import annotations
 
+import re
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -17,26 +18,50 @@ class DiscoveryFetcher(Protocol):
     ) -> list[dict[str, Any]]: ...
 
 
+_WORD = re.compile(r"[a-z0-9]+")
+_QUALITY_STOP = {
+    "a", "and", "are", "for", "from", "hardware", "in", "is", "of", "official",
+    "only", "or", "requirements", "software", "support", "system", "the", "to",
+    "vendor", "with",
+}
+
+
+def _terms(value: str) -> set[str]:
+    return {
+        token for token in _WORD.findall(str(value or "").lower())
+        if len(token) > 2 and token not in _QUALITY_STOP
+    }
+
+
 def _quality_score(row: dict[str, Any]) -> int:
     url = str(row.get("url") or "")
     title = str(row.get("title") or "").lower()
     path = str(urlparse(url).path or "").lower()
     host = str(urlparse(url).hostname or "").lower()
     score = 0
-    if any(token in path for token in ("requirements", "system-requirements", "manual", "support")):
-        score += 4
-    if any(token in title for token in ("requirements", "documentation", "manual", "support")):
+    if any(token in path for token in ("requirements", "system-requirements")):
+        score += 8
+    elif any(token in path for token in ("manual", "support")):
+        score += 3
+    if "requirements" in title:
+        score += 7
+    elif any(token in title for token in ("documentation", "manual", "support")):
         score += 3
     if host.startswith(("docs.", "documentation.", "help.", "support.")):
         score += 4
     if "official" in title:
         score += 2
+    # Independent query axes are weak corroboration that a result is about the
+    # retained purpose, not merely a page containing the word "requirements".
+    score += min(6, 2 * len(set(row.get("query_axes") or [])))
+    score += min(6, 2 * int(row.get("subject_overlap_count") or 0))
     if any(token in path for token in ("forum", "community", "blog", "reddit")):
         score -= 4
     if any(token in host for token in (
-        "facebook.", "reddit.", "wikipedia.", "alibaba.", "dictionary.", "youtube.",
+        "facebook.", "linkedin.", "reddit.", "wikipedia.", "alibaba.", "dictionary.",
+        "youtube.",
     )):
-        score -= 8
+        score -= 20
     return score
 
 
@@ -80,13 +105,23 @@ def discover_open_world_publishers(
             host = str(urlparse(url).hostname or "").lower()
             if not url.startswith("https://") or not host:
                 continue
-            candidates.setdefault(url, {
+            candidate = candidates.setdefault(url, {
                 "url": url,
                 "domain": host,
                 "title": str(row.get("title") or "")[:200],
                 "discovery_only": True,
                 "authority": "not_accepted",
+                "query_axes": [],
+                "query_ids": [],
+                "subject_overlap_count": 0,
             })
+            candidate["query_axes"] = sorted({*candidate["query_axes"], item.axis})
+            candidate["query_ids"] = sorted({*candidate["query_ids"], item.query_id})
+            result_terms = _terms(f"{candidate['domain']} {candidate['title']} {urlparse(url).path}")
+            purpose_terms = _terms(plan.retained_purpose)
+            candidate["subject_overlap_count"] = max(
+                int(candidate["subject_overlap_count"]), len(result_terms & purpose_terms),
+            )
     # Do not present arbitrary search results as possible authorities.  A row
     # must at least look like requirements, documentation, a manual, or a
     # publisher support surface. Publisher ownership is still unresolved and
@@ -95,6 +130,8 @@ def discover_open_world_publishers(
         (row for row in candidates.values() if _quality_score(row) >= 3),
         key=_quality,
     )[:12]
+    for row in ranked:
+        row["quality_score"] = _quality_score(row)
     external_calls = sum(bool(row.get("external_call_dispatched")) for row in receipts)
     return {
         "schema_version": "open-world-discovery-v1",

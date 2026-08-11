@@ -146,6 +146,36 @@ class RequirementProposal(Base):
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
+class ShoppingCasePublisherCandidate(Base):
+    """A discovered origin whose authority is bounded to one shopping case."""
+
+    __tablename__ = "shopping_case_publisher_candidates"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "case_id", "url", name="uq_case_publisher_candidate_url"),
+    )
+
+    candidate_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    uid: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    domain: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
+    query_axes_json: Mapped[list] = mapped_column(JSON, default=list)
+    discovery_receipt_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(Text, default="discovered")
+    authority_status: Mapped[str] = mapped_column(Text, default="not_accepted")
+    approval_scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allowed_claim_types_json: Mapped[list] = mapped_column(JSON, default=list)
+    approved_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approval_idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requirement_proposal_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    research_result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[str] = mapped_column(TIMESTAMP)
+    updated_at: Mapped[str] = mapped_column(TIMESTAMP)
+
+
 class ShoppingCaseFulfillmentSelection(Base):
     """Revision-bound buyer selection bridging research to guarded cart execution."""
 

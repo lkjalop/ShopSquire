@@ -100,6 +100,24 @@ def test_interpretation_defers_covered_catalog_request_to_normal_chat_lane():
     assert response.status_code == 204
 
 
+def test_explicit_vendor_support_constraint_opens_generic_zero_call_research_case():
+    client = _client()
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-open-world-support",
+        "retained_purpose": (
+            "I use an unenrolled scientific tool. Only hardware officially supported "
+            "by its vendor is acceptable. Is this laptop suitable?"
+        ),
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    exploration = payload["ambiguity_exploration"]
+    assert exploration["provider_accounting"] == {"external_calls": 0, "paid_calls": 0}
+    assert exploration["source_candidate_ids"] == []
+    assert exploration["research_plan_id"].startswith("crp-")
+    assert exploration["status"] == "provisional"
+
+
 def test_open_world_authorization_runs_discovery_but_not_origin_fetch_or_claims(
     monkeypatch,
 ):
@@ -151,6 +169,133 @@ def test_open_world_authorization_runs_discovery_but_not_origin_fetch_or_claims(
     assert payload["research"]["provider_accounting"]["official_origin_fetches"] == 0
     assert payload["research"]["claims"] == []
     assert payload["ambiguity_exploration"]["source_candidate_ids"] == []
+    candidate = payload["research"]["candidates"][0]
+    assert candidate["candidate_id"].startswith("pubcand-")
+    assert candidate["candidate_version"] == 1
+    assert candidate["status"] == "discovered"
+
+
+def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(monkeypatch):
+    client = _client()
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan(
+        "vendor-certified novel multiphysics solver", allow_open_world=True,
+    )
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    _enrol_local_research(monkeypatch)
+    monkeypatch.setattr(
+        "src.app.services.open_world_research_discovery.discover_open_world_publishers",
+        lambda *args, **kwargs: {
+            "schema_version": "open-world-discovery-v1",
+            "status": "publisher_candidates_found", "publisher_status": "unresolved",
+            "candidates": [{
+                "url": "https://docs.solver.example/system-requirements",
+                "domain": "docs.solver.example", "title": "Solver requirements",
+                "discovery_only": True, "authority": "not_accepted",
+            }],
+            "receipts": [{
+                "query_hash": "query-1", "query_axis": "software_requirements",
+                "network_execution": True, "external_call_dispatched": True,
+                "execution_status": "completed",
+            }],
+            "provider_accounting": {
+                "discovery_calls": 1, "external_calls": 1,
+                "official_origin_fetches": 0, "paid_calls": 0,
+            },
+            "claims": [], "next_action": "approve_publisher_origin_or_upload_requirements",
+        },
+    )
+    discovered = client.post("/api/v1/shopping-cases/sc-publisher/research", json={
+        "uid": "buyer-publisher", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    })
+    assert discovered.status_code == 200, discovered.text
+    candidate = discovered.json()["research"]["candidates"][0]
+
+    def official_origin(*args, **kwargs):
+        source = kwargs["sources"][0]
+        assert source["canonical_entrypoints"] == [candidate["url"]]
+        assert source["publisher_policy"]["approval_scope"] == "case_only"
+        return {
+            "claims": [{
+                "claim_id": "official-case-ram-64", "attribute": "ram_gb",
+                "operator": ">=", "value": 64, "unit": "GB",
+                "requirement_class": "minimum", "claim_type": "minimum_requirements",
+                "claim_class": "attested", "authority_status": "verified_official",
+                "freshness_status": "fresh", "source_id": source["source_id"],
+                "citation_url": candidate["url"], "observed_at": "2026-08-11T00:00:00Z",
+                "statement": "The solver requires 64 GB RAM.",
+                "quoted_evidence_span": "The solver requires 64 GB RAM.",
+                "acceptance_status": "accepted_official",
+            }],
+            "context_claims": [], "unresolved": [],
+            "receipts": [{
+                "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+                "network_execution": True, "external_call_dispatched": True,
+                "execution_status": "completed", "query_hash": "origin-1",
+            }],
+            "source_execution": [{"origin_selection_mode": "canonical_direct"}],
+            "provider_accounting": {
+                "external_calls": 1, "official_origin_fetches": 1,
+                "discovery_calls": 0, "paid_calls": 0,
+            },
+            "evidence_outcome": "product_requirements",
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        official_origin,
+    )
+    approved = client.post(
+        f"/api/v1/shopping-cases/sc-publisher/publisher-candidates/"
+        f"{candidate['candidate_id']}/approve",
+        headers={"Idempotency-Key": "approve-case-publisher-1"},
+        json={
+            "uid": "buyer-publisher", "expected_candidate_version": 1,
+            "approval_scope": "case_only",
+            "allowed_claim_types": ["minimum_requirements"],
+            "research_authorized": True,
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    result = approved.json()
+    assert result["research_status"] == "claims_pending_review"
+    assert result["candidate"]["approval_scope"] == "case_only"
+    assert result["candidate"]["publisher_ownership_status"] == (
+        "buyer_attested_not_independently_verified"
+    )
+    assert result["provider_accounting"]["official_origin_fetches"] == 1
+    assert result["qualification_authority"] == "none"
+    assert result["claims"][0]["authority_status"] == "verified_case_origin"
+    assert result["claims"][0]["acceptance_status"] == "pending_buyer_review"
+    proposal = result["buyer_requirement_proposal"]
+
+    accepted = client.post(
+        f"/api/v1/shopping-cases/sc-publisher/requirement-proposals/"
+        f"{proposal['proposal_id']}/accept",
+        headers={"Idempotency-Key": "accept-case-origin-claim-1"},
+        json={
+            "uid": "buyer-publisher", "expected_proposal_version": 1,
+            "accepted_claim_ids": [result["claims"][0]["claim_id"]],
+            "rejected_claim_ids": [], "corrections": [],
+            "research_choice": "local_only",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    accepted_payload = accepted.json()
+    assert accepted_payload["status"] == "accepted_case_evidence"
+    assert accepted_payload["qualification_authority"] == "requirements"
+    assert accepted_payload["accepted_claims"][0]["authority_status"] == (
+        "verified_case_origin"
+    )
+    assert accepted_payload["cart_mutation"] == "not_authorized"
 
 
 def test_accepted_upload_runs_corroboration_in_the_same_interpreted_case(monkeypatch):

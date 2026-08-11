@@ -27,7 +27,9 @@ export type AmbiguityExploration = {
   }[];
   source_candidate_ids?: string[];
   publisher_candidates?: {
+    candidate_id?: string; candidate_version?: number;
     url: string; domain: string; title: string; discovery_only: boolean; authority: string;
+    status?: string; approval_scope?: string | null;
   }[];
 };
 
@@ -41,11 +43,14 @@ type Props = {
     hint: { source_url?: string; vendor_name?: string },
     researchAuthorized: boolean,
   ) => Promise<any>;
+  onApprovePublisherCandidate?: (
+    candidate: NonNullable<AmbiguityExploration['publisher_candidates']>[number],
+  ) => Promise<void>;
 };
 
 export default function AmbiguityExplorationPanel({
   exploration, onResearch, onUpload, onEnterSpecifications, onResolveEvidenceSource,
-  onSubmitSpecifications,
+  onSubmitSpecifications, onApprovePublisherCandidate,
 }: Props) {
   const [showSourceResolver, setShowSourceResolver] = useState(false);
   const [sourceHint, setSourceHint] = useState('');
@@ -55,6 +60,8 @@ export default function AmbiguityExplorationPanel({
   const [manualSpecifications, setManualSpecifications] = useState('');
   const [manualStatus, setManualStatus] = useState('');
   const [manualBusy, setManualBusy] = useState(false);
+  const [approvingCandidate, setApprovingCandidate] = useState<string | null>(null);
+  const [candidateStatus, setCandidateStatus] = useState('');
   const openWorldDiscovery = (exploration.source_candidate_ids?.length || 0) === 0;
   const question = exploration.next_question?.text || exploration.next_question?.question;
   const resolveSource = async (researchAuthorized: boolean) => {
@@ -102,10 +109,35 @@ export default function AmbiguityExplorationPanel({
               <li key={candidate.url}>
                 <a href={candidate.url} target="_blank" rel="noreferrer">{candidate.title || candidate.domain}</a>
                 {' '}({candidate.domain})
+                {onApprovePublisherCandidate && candidate.candidate_id && (
+                  <button
+                    type="button"
+                    disabled={Boolean(approvingCandidate)}
+                    onClick={() => {
+                      setApprovingCandidate(candidate.candidate_id);
+                      setCandidateStatus('');
+                      void onApprovePublisherCandidate(candidate)
+                        .then(() => setCandidateStatus(
+                          'The exact origin was fetched. Review its extracted claims before they affect fit.',
+                        ))
+                        .catch((error) => setCandidateStatus(
+                          error instanceof Error ? error.message : 'Publisher research failed.',
+                        ))
+                        .finally(() => setApprovingCandidate(null));
+                    }}
+                    style={{ ...secondaryActionStyle, marginLeft: 7, padding: '4px 8px' }}
+                  >
+                    {approvingCandidate === candidate.candidate_id
+                      ? 'Fetching exact origin…' : 'Use for this case'}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
-          <div style={{ fontSize: 12 }}>Verify and choose an official publisher link for policy review, or upload requirements.</div>
+          <div style={{ fontSize: 12 }}>
+            Case-only approval fetches this exact origin. It does not enroll the publisher globally or authorize a purchase.
+          </div>
+          {candidateStatus && <div role="status" style={{ marginTop: 6, fontSize: 12 }}>{candidateStatus}</div>}
         </div>
       )}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>

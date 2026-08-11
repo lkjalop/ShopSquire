@@ -13,6 +13,12 @@ export type NonRecommendationOutcome = {
  */
 export function nonRecommendationOutcome(payload: any): NonRecommendationOutcome | null {
   if (!payload || (payload.blocked !== true && payload.degraded !== true)) return null;
+  // A timed-out narration/catalog lane may still return a complete local,
+  // actionable ambiguity projection. Let the normal case UI render that typed
+  // result; `degraded` describes one execution stage, not the whole turn.
+  if (payload.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
+    return null;
+  }
 
   const kind: NonRecommendationOutcome['kind'] = payload.blocked === true ? 'blocked' : 'degraded';
   const supplied = String(

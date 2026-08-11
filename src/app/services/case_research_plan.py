@@ -19,6 +19,9 @@ from src.app.services.official_source_governance import load_official_source_man
 
 _TOKEN = re.compile(r"[a-z0-9]+")
 _ACRONYM = re.compile(r"\b(?:[A-Z][A-Z0-9+.-]{1,7}|[0-9]+[A-Z][A-Z0-9+.-]{0,6})\b")
+_PROPER_NAME = re.compile(
+    r"\b(?:[A-Z][a-z0-9+_-]{2,})(?:\s+(?:[A-Z][A-Za-z0-9+_-]{2,}|[0-9]{4}\s*R[0-9])){0,3}\b"
+)
 _NEGATED_CLAUSE = re.compile(
     r"\b(?:i\s+)?(?:do\s+not|don't|does\s+not|doesn't|without|not\s+interested\s+in)\b"
     r"[^.!?;]*(?:[.!?;]|$)",
@@ -35,9 +38,9 @@ _GENERIC_ACTIVATION_PHRASES = {
     "software requirement", "minimum requirement", "recommended requirement",
 }
 _DISCOVERY_FILLER = _STOP | {
-    "actually", "anything", "care", "could", "engineering", "gaming", "good",
+    "acceptable", "actually", "anything", "care", "could", "engineering", "gaming", "good",
     "about", "but", "buy", "edit", "help", "laptop", "looking", "machine", "need",
-    "officially", "please", "product", "recommend", "run", "should",
+    "officially", "please", "process", "product", "recommend", "run", "should",
     "something", "supported", "suitable", "team", "thing", "this", "vendor",
     "wants", "what", "which", "would", "our",
 }
@@ -108,23 +111,39 @@ def _tokens(value: str) -> set[str]:
     return {token for token in _TOKEN.findall(str(value or "").lower()) if token not in _STOP}
 
 
+def _proper_names(value: str) -> tuple[list[str], set[str]]:
+    names: list[str] = []
+    tokens: set[str] = set()
+    for raw_name in _PROPER_NAME.findall(value):
+        name = raw_name.strip()
+        name_tokens = set(_TOKEN.findall(name.lower()))
+        if name.casefold() in {"only", "this", "which"} or name_tokens <= tokens:
+            continue
+        names.append(name)
+        tokens.update(name_tokens)
+    return names, tokens
+
+
 def _discovery_subject(value: str) -> str:
     """Bound buyer prose to salient terms without classifying a workload."""
 
     positive_text = _NEGATED_CLAUSE.sub(" ", str(value or ""))
     acronyms = [item.strip("+.-") for item in _ACRONYM.findall(positive_text)]
+    proper_names, proper_tokens = _proper_names(positive_text)
     content = [
         token for token in _TOKEN.findall(positive_text.lower())
-        if token not in _DISCOVERY_FILLER and (len(token) > 2 or any(ch.isdigit() for ch in token))
+        if token not in _DISCOVERY_FILLER
+        and token not in proper_tokens
+        and (len(token) > 2 or any(ch.isdigit() for ch in token))
     ]
     terms: list[str] = []
     seen: set[str] = set()
-    for term in [*acronyms, *content]:
+    for term in [*proper_names, *acronyms, *content]:
         folded = term.casefold()
         if folded not in seen:
             seen.add(folded)
             terms.append(term)
-    terms = terms[:14]
+    terms = terms[:8]
     return " ".join(terms) or "buyer described workload"
 
 
@@ -221,6 +240,8 @@ def build_case_research_plan(
         )]
         material = f"{purpose}|open-world-v1"
         discovery_subject = _discovery_subject(purpose)
+        proper_names, _ = _proper_names(_NEGATED_CLAUSE.sub(" ", purpose))
+        requirements_subject = proper_names[0] if proper_names else discovery_subject
         return CaseResearchPlan(
             plan_id="crp-" + hashlib.sha256(material.encode()).hexdigest()[:20],
             retained_purpose=purpose,
@@ -238,8 +259,8 @@ def build_case_research_plan(
             publisher_status="unresolved",
             discovery_queries=[
                 CaseDiscoveryQuery(query_id="concept", axis="concept_and_software", query=f"{discovery_subject} official documentation"),
-                CaseDiscoveryQuery(query_id="requirements", axis="requirements_and_compatibility", query=f"{discovery_subject} system requirements compatibility"),
-                CaseDiscoveryQuery(query_id="support", axis="support_and_constraints", query=f"{discovery_subject} vendor support certification security"),
+                CaseDiscoveryQuery(query_id="requirements", axis="requirements_and_compatibility", query=f"{requirements_subject} system requirements compatibility"),
+                CaseDiscoveryQuery(query_id="support", axis="support_and_constraints", query=f"{requirements_subject} vendor support certification security"),
             ],
             obligations=[
                 CaseResearchObligation(
