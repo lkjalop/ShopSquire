@@ -31,7 +31,9 @@ def test_router_prewarm_records_success(monkeypatch):
         calls.append((url, kwargs))
         return _Response()
 
-    monkeypatch.setattr("httpx.post", _post)
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.turn_router._router_http_post", _post,
+    )
     monkeypatch.setattr(
         "src.app.services.recommendation_core.turn_router._router_model",
         lambda: "router-model",
@@ -55,7 +57,9 @@ def test_router_prewarm_records_failure(monkeypatch):
     def _fail(*args, **kwargs):
         raise TimeoutError("cold model timed out")
 
-    monkeypatch.setattr("httpx.post", _fail)
+    monkeypatch.setattr(
+        "src.app.services.recommendation_core.turn_router._router_http_post", _fail,
+    )
     monkeypatch.setattr(
         "src.app.services.recommendation_core.turn_router._router_model",
         lambda: "router-model",

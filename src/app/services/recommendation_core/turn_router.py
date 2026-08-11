@@ -45,6 +45,8 @@ from src.app.services.taxonomy_registry import (classification_nodes_for_skus, g
 _ROUTER_MAX_CONCURRENCY = max(1, min(int(os.getenv("ROUTER_MAX_CONCURRENCY", "1") or 1), 4))
 _ROUTER_GATE = threading.BoundedSemaphore(_ROUTER_MAX_CONCURRENCY)
 _ROUTER_CALL_STATE = threading.local()
+_ROUTER_HTTP_CLIENT: Any = None
+_ROUTER_HTTP_CLIENT_LOCK = threading.Lock()
 
 
 def router_runtime_contract() -> Dict[str, Any]:
@@ -75,6 +77,25 @@ def last_router_call_metrics() -> Dict[str, Any]:
 
 def _reset_router_call_metrics() -> None:
     _ROUTER_CALL_STATE.metrics = {}
+
+
+def _router_http_post(url: str, **kwargs: Any) -> Any:
+    """Use one process-scoped Ollama client instead of rebuilding transport per turn.
+
+    On the certified Windows host, constructing a fresh top-level ``httpx.post`` transport
+    added about 2.2 seconds to every otherwise-local request. The client is thread-safe; the
+    existing router semaphore still bounds inference concurrency.
+    """
+    global _ROUTER_HTTP_CLIENT
+    if _ROUTER_HTTP_CLIENT is None:
+        with _ROUTER_HTTP_CLIENT_LOCK:
+            if _ROUTER_HTTP_CLIENT is None:
+                import httpx
+                _ROUTER_HTTP_CLIENT = httpx.Client(
+                    follow_redirects=False,
+                    trust_env=False,
+                )
+    return _ROUTER_HTTP_CLIENT.post(url, **kwargs)
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
 _SEMANTIC_REFUSAL_MIN_SCORE = 0.72
@@ -178,7 +199,6 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
             metrics["provider"] = "mock" if mock_runtime else "disabled"
             metrics["outcome"] = "mock_disabled" if mock_runtime else "disabled"
             return ""
-        import httpx
         url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
         metrics["model"] = model
         queue_started = time.monotonic()
@@ -202,10 +222,14 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
         if "qwen3" in model.lower():
             payload["think"] = False
         remaining = max(2.0, float(timeout or 20.0) - (metrics["queue_ms"] / 1000.0))
-        r = httpx.post(f"{url}/api/generate", json=payload, timeout=remaining)
+        r = _router_http_post(f"{url}/api/generate", json=payload, timeout=remaining)
         data = r.json() or {}
         metrics.update({
             "http_status": int(r.status_code),
+            # Ollama's total_duration is the provider-observed request lifetime. Keeping it
+            # separate from this process's wall clock lets operators distinguish model work,
+            # provider-internal scheduling/serialization, and HTTP transport overhead.
+            "provider_total_ms": round(float(data.get("total_duration") or 0) / 1_000_000.0, 1),
             "load_ms": round(float(data.get("load_duration") or 0) / 1_000_000.0, 1),
             "prompt_eval_ms": round(float(data.get("prompt_eval_duration") or 0) / 1_000_000.0, 1),
             "decode_ms": round(float(data.get("eval_duration") or 0) / 1_000_000.0, 1),
@@ -228,14 +252,30 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
         if acquired:
             _ROUTER_GATE.release()
         metrics["wall_ms"] = round((time.monotonic() - started) * 1000.0, 1)
-        metrics["provider_overhead_ms"] = round(max(
+        metrics["model_execution_ms"] = round(
+            float(metrics.get("load_ms") or 0.0)
+            + float(metrics.get("prompt_eval_ms") or 0.0)
+            + float(metrics.get("decode_ms") or 0.0),
+            1,
+        )
+        provider_total_ms = float(metrics.get("provider_total_ms") or 0.0)
+        metrics["provider_internal_overhead_ms"] = round(max(
+            0.0,
+            provider_total_ms - float(metrics["model_execution_ms"]),
+        ), 1)
+        metrics["transport_overhead_ms"] = round(max(
             0.0,
             float(metrics["wall_ms"])
             - float(metrics.get("queue_ms") or 0.0)
-            - float(metrics.get("load_ms") or 0.0)
-            - float(metrics.get("prompt_eval_ms") or 0.0)
-            - float(metrics.get("decode_ms") or 0.0),
-        ), 1)
+            - provider_total_ms,
+        ), 1) if provider_total_ms else 0.0
+        # Compatibility aggregate retained for existing telemetry consumers. New consumers
+        # should use the two explicit overhead fields above.
+        metrics["provider_overhead_ms"] = round(
+            float(metrics.get("provider_internal_overhead_ms") or 0.0)
+            + float(metrics.get("transport_overhead_ms") or 0.0),
+            1,
+        )
         _ROUTER_CALL_STATE.metrics = metrics
 
 
@@ -510,14 +550,48 @@ def _validated_semantic_proposal(data: Dict[str, Any], query: str) -> Dict[str, 
 
         result = validate_semantic_proposal(raw, query=query)
         if result.outcome == "valid" and result.proposal is not None:
+            proposal = result.proposal.model_dump()
+            vague_words = {
+                "a", "an", "for", "help", "i", "item", "me", "my", "need",
+                "product", "request", "something", "suitable", "the", "thing", "to",
+                "use", "want", "what", "workload",
+            }
+
+            def placeholder(value: Any) -> bool:
+                tokens = set(_re.findall(r"[a-z0-9]+", str(value or "").lower()))
+                return not tokens or not (tokens - vague_words)
+
+            material_concepts = [
+                item for item in list(proposal.get("concepts") or [])
+                if isinstance(item, dict) and bool(item.get("material", True))
+            ]
+            if (
+                placeholder(proposal.get("desired_outcome"))
+                and material_concepts
+                and all(placeholder(item.get("text")) for item in material_concepts)
+            ):
+                return {"validation": "rejected", "reasons": ["semantic_placeholder_not_grounded"]}
             return {
                 "validation": "valid",
-                **result.proposal.model_dump(),
+                **proposal,
                 "proposal_origin": "model",
             }
         return {"validation": "rejected", "reasons": list(result.reasons)}
     except Exception:
         return {"validation": "rejected", "reasons": ["semantic_validator_unavailable"]}
+
+
+_BOUNDED_SEMANTIC_CONTINUATION_RE = _re.compile(
+    r"\b(?:approved\s+(?:official\s+)?sources?|you\s+may\s+research|"
+    r"the\s+workflow\s+is|run(?:s|ning)?\s+(?:locally|remotely|in\s+the\s+cloud)|"
+    r"of\s+those|actually\s+(?:reduce|increase|change|make)|"
+    r"(?:reduce|increase|change)\s+it\s+(?:by|to))\b",
+    _re.IGNORECASE,
+)
+
+
+def _is_bounded_semantic_continuation(query: str) -> bool:
+    return bool(_BOUNDED_SEMANTIC_CONTINUATION_RE.search(str(query or "")))
 
 
 def _semantic_proposal_or_relation_fallback(
@@ -535,10 +609,15 @@ def _semantic_proposal_or_relation_fallback(
     """
     persisted = persisted_context if isinstance(persisted_context, dict) else {}
     relation = str(data.get("clarification_relation") or "").strip().lower()
+    # The router model occasionally labels explicit consent, a clarification
+    # answer, or a commercial amendment as a new objective. These bounded forms
+    # cannot supersede the retained workload on their own. A genuinely new
+    # product request still flows through the model's supersede relation.
+    bounded_continuation = _is_bounded_semantic_continuation(query)
     if (
         persisted.get("catalog_authority") == "blocked"
         and persisted.get("concepts")
-        and relation != "supersede"
+        and (relation != "supersede" or bounded_continuation)
     ):
         return {
             "validation": "valid",
@@ -751,6 +830,8 @@ def _bounded_fallback_decision(db, envelope: TurnEnvelope, cands, *, reason: str
         pending.get("semantic_context")
         if isinstance(pending.get("semantic_context"), dict) else {}
     )
+    if not pending_semantic and isinstance(session.get("semantic_resolution"), dict):
+        pending_semantic = dict(session["semantic_resolution"])
     unresolved_case = bool(
         pending_semantic.get("catalog_authority") == "blocked"
         and pending_semantic.get("concepts")
@@ -2140,6 +2221,8 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         and pending
         else "none"
     )
+    if clarification_relation == "supersede" and _is_bounded_semantic_continuation(envelope.query):
+        clarification_relation = "answer"
 
     # A model proposal alone cannot authorize the procurement lane. Fresh procurement requires
     # a bounded quantity; quantity-free turns are only valid when they explicitly concern an
@@ -2451,7 +2534,10 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         requirements=requirements,
         persisted_context=(
             (pending.get("semantic_context") or {})
-            if isinstance(pending, dict) else {}
+            if isinstance(pending, dict) and isinstance(pending.get("semantic_context"), dict)
+            else session.get("semantic_resolution")
+            if isinstance(session.get("semantic_resolution"), dict)
+            else {}
         ),
     )
     # A category match is not workload authority. If the buyer's purpose is outside the

@@ -96,6 +96,87 @@ def test_free_text_answer_is_classified_against_pending_material_question(db):
     assert decision.model_proposal["clarification_relation"] == "answer"
 
 
+def test_bounded_research_consent_cannot_supersede_retained_workload(db):
+    envelope = TurnEnvelope.from_suggest_params(
+        query="You may research approved official sources for the workload requirements.",
+        uid="buyer-consent",
+        tenant_id="default",
+        session={
+            **_pending_session(),
+            "semantic_resolution": _pending_session()["pending_clarification"]["semantic_context"],
+        },
+        external_research_consent=True,
+    )
+
+    decision = route_turn(
+        db,
+        envelope,
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-6",
+            "clarification_relation": "supersede",
+            "confidence": 0.81,
+        }),
+    )
+
+    assert decision.semantic_proposal["proposal_origin"] == "persisted"
+    assert "mechanical digital twin" in decision.semantic_proposal["desired_outcome"]
+    assert decision.semantic_proposal["persisted_case_blocker"] is True
+    assert decision.clarification_relation == "answer"
+
+
+def test_generic_model_placeholder_falls_back_to_buyer_grounded_purpose(db):
+    envelope = TurnEnvelope.from_suggest_params(
+        query="Please recommend a laptop for simulating a digital twin for maintenance of mechanical machines.",
+        uid="buyer-placeholder",
+        tenant_id="default",
+    )
+    decision = route_turn(
+        db,
+        envelope,
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH",
+            "handle": "el-6-6",
+            "confidence": 0.82,
+            "semantic_proposal": {
+                "desired_outcome": "what I need",
+                "concepts": [{"text": "what I need", "status": "unresolved", "material": True}],
+                "evidence_questions": [],
+                "proposed_action": "research_then_clarify",
+                "confidence": 0.8,
+            },
+        }),
+    )
+
+    assert decision.semantic_proposal["proposal_origin"] in {
+        "deterministic_fallback", "coverage_abstention",
+    }
+    assert "digital twin" in decision.semantic_proposal["desired_outcome"].lower()
+    assert "what i need" not in decision.semantic_proposal["concepts"][0]["text"].lower()
+
+
+def test_structured_semantic_case_survives_when_pending_question_record_is_absent(db):
+    semantic = _pending_session()["pending_clarification"]["semantic_context"]
+    envelope = TurnEnvelope.from_suggest_params(
+        query="Actually reduce it by 10 units.",
+        uid="buyer-retained-case",
+        tenant_id="default",
+        session={"semantic_resolution": semantic, "accepted_constraints": {"quantity": 30}},
+    )
+    decision = route_turn(
+        db,
+        envelope,
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "FILTER",
+            "clarification_relation": "supersede",
+            "confidence": 0.8,
+        }),
+    )
+
+    assert "mechanical digital twin" in decision.semantic_proposal["desired_outcome"]
+    assert decision.semantic_proposal["proposal_origin"] == "persisted"
+
+
 def test_missing_pending_relation_gets_one_bounded_model_repair(db):
     responses = iter([
         json.dumps({

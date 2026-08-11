@@ -525,7 +525,7 @@ def test_router_default_generation_budget_fits_bulk_decision(monkeypatch):
         return _Response()
 
     monkeypatch.delenv("ROUTER_NUM_PREDICT", raising=False)
-    monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setattr(turn_router, "_router_http_post", fake_post)
     turn_router._default_llm_fn("route this bulk request", 20)
 
     assert seen["options"]["num_predict"] == 320
@@ -540,6 +540,7 @@ def test_router_call_records_server_phase_metrics(monkeypatch):
         def json(self):
             return {
                 "response": "{}",
+                "total_duration": 8_000_000,
                 "load_duration": 1_000_000,
                 "prompt_eval_duration": 2_000_000,
                 "eval_duration": 3_000_000,
@@ -547,7 +548,7 @@ def test_router_call_records_server_phase_metrics(monkeypatch):
                 "eval_count": 12,
             }
 
-    monkeypatch.setattr("httpx.post", lambda *_args, **_kwargs: _Response())
+    monkeypatch.setattr(turn_router, "_router_http_post", lambda *_args, **_kwargs: _Response())
     turn_router._default_llm_fn("route this", 20)
 
     metrics = turn_router.last_router_call_metrics()
@@ -555,7 +556,11 @@ def test_router_call_records_server_phase_metrics(monkeypatch):
     assert metrics["load_ms"] == 1.0
     assert metrics["prompt_eval_ms"] == 2.0
     assert metrics["decode_ms"] == 3.0
-    assert metrics["provider_overhead_ms"] >= 0.0
+    assert metrics["provider_total_ms"] == 8.0
+    assert metrics["model_execution_ms"] == 6.0
+    assert metrics["provider_internal_overhead_ms"] == 2.0
+    assert metrics["transport_overhead_ms"] >= 0.0
+    assert metrics["provider_overhead_ms"] >= 2.0
     assert metrics["prompt_tokens"] == 40
     assert metrics["output_tokens"] == 12
 
