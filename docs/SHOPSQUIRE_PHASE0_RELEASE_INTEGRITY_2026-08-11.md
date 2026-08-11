@@ -73,7 +73,29 @@ Residual audit work before declaring Phase 0 complete:
 4. Classify the 40 evidence/archive rows and expand the single `scratchpad/` row into a content inventory before seeking cleanup approval.
 5. Preserve all uncertain files until the owner explicitly approves archive or deletion.
 
+## Closure update
+
+The first reconciliation pass reduced the live Git-status count from 187 to 172 while preserving all unrelated files. The following previously hidden dependency boundaries are now committed and tested:
+
+- Cart clear invalidates stale quantity, budget, SKU, procurement-lane and pending-clarification authority while retaining workload evidence.
+- Pending cart changes can be rejected idempotently; a newer proposal supersedes an older unconfirmed card.
+- Generic external research dispatch is gated by typed coverage, material impact, tenant policy and explicit authorization.
+- Business-day delivery constraints and response-contract additions now behave the same in a clean checkout as in the development workspace.
+- Procurement commitment consequences are projected without inventing delivery or payment authority.
+- The grounded workload-hypothesis compiler and explicit read-only database boundary are packaged with focused tests.
+
+The enabled Playwright smoke now passes from the detached clean checkout, including starting its own backend and Vite frontend. A skipped Playwright result is not accepted as proof: the run used `DISABLE_PLAYWRIGHT_TESTS=0` and completed one Chromium journey.
+
+Latest detached-checkout proof at commit `2648f51d` (followed by two isolated, test-only dependency commits):
+
+- Backend import: passed.
+- Single Alembic head: passed.
+- Focused research/evidence/cart/V2 suite: 72 passed.
+- Chromium storefront smoke: 1 passed.
+- Frontend production build: passed.
+
+The outstanding runtime-import closure is `security_connector_identity.py` with the mixed security-ingest router. It is intentionally not bulk-committed without connector authentication and tenant-isolation API proof. The other remaining entries are now feature, evidence/archive, or uncertain-user-work review items rather than known missing imports in the buyer research/cart path.
+
 ## Phase ordering after integrity closure
 
 Phase 1 remains the generic research-trigger contract. It must be driven by typed material evidence gaps and authority state—not workload keywords. The named gaming, engineering, biomedical, and unknown prompts are probes of the same contract, not new hard-coded personas.
-
