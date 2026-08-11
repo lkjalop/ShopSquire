@@ -1,0 +1,1104 @@
+{
+  "schema_version": "live-external-research-certification-v2",
+  "certification_status": "passed",
+  "gate_failures": [],
+  "execution_mode": "live_network",
+  "discovery_requirement": "novel_required",
+  "retained_purpose": "I need to simulate a PLC-controlled factory using Factory I/O and evaluate OT cyber scenarios",
+  "research_plan": {
+    "schema_version": "case-research-plan-v1",
+    "plan_id": "crp-69a3a89058b5fd763936",
+    "retained_purpose": "I need to simulate a PLC-controlled factory using Factory I/O and evaluate OT cyber scenarios",
+    "ambiguities": [
+      {
+        "ambiguity_id": "workload_scope",
+        "ambiguity_type": "workload_scope",
+        "subject_span": "I need to simulate a PLC-controlled factory using Factory I/O and evaluate OT cyber scenarios",
+        "description": "Several governed publisher scopes may materially change product fit.",
+        "hypothesis_ids": [
+          "scope_1_factory_io_official_docs",
+          "scope_2_microsoft_learn_hyperv",
+          "scope_3_mitre_attack_ics"
+        ],
+        "resolution_owners": [
+          "buyer",
+          "research",
+          "catalog"
+        ],
+        "divergent_axes": [
+          "named_software",
+          "local_execution_scope",
+          "dataset_or_project_scale"
+        ]
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "scope_1_factory_io_official_docs",
+        "label": "Factory I/O host requirements and documented PLC/OPC/Modbus integrations",
+        "source_ids": [
+          "factory_io_official_docs"
+        ],
+        "authority": "proposed"
+      },
+      {
+        "hypothesis_id": "scope_2_microsoft_learn_hyperv",
+        "label": "Hyper-V host capability and supported guest operating systems",
+        "source_ids": [
+          "microsoft_learn_hyperv"
+        ],
+        "authority": "proposed"
+      },
+      {
+        "hypothesis_id": "scope_3_mitre_attack_ics",
+        "label": "ICS adversary behaviours and scenario/topology obligations",
+        "source_ids": [
+          "mitre_attack_ics"
+        ],
+        "authority": "proposed"
+      }
+    ],
+    "source_candidate_ids": [
+      "factory_io_official_docs",
+      "microsoft_learn_hyperv",
+      "mitre_attack_ics",
+      "nist_digital_twin_cybersecurity"
+    ],
+    "obligations": [
+      {
+        "obligation_id": "workload_meaning",
+        "obligation_type": "workload_interpretation",
+        "description": "Resolve which proposed workload scope the buyer intends.",
+        "resolution_owner": "buyer",
+        "status": "unresolved"
+      },
+      {
+        "obligation_id": "official_requirements",
+        "obligation_type": "current_requirements",
+        "description": "Retrieve and normalize applicable official publisher requirements.",
+        "resolution_owner": "research",
+        "status": "planned"
+      },
+      {
+        "obligation_id": "exact_product_identity",
+        "obligation_type": "product_configuration",
+        "description": "Corroborate exact catalog configurations against accepted claims.",
+        "resolution_owner": "catalog",
+        "status": "planned"
+      }
+    ],
+    "next_question": "Which named software and version will you use, and which simulation, rendering, or processing stages must run locally?",
+    "external_calls": 0,
+    "authority": "proposal_only"
+  },
+  "approved_source_ids": [
+    "microsoft_learn_hyperv",
+    "nist_digital_twin_cybersecurity",
+    "mitre_attack_ics",
+    "factory_io_official_docs"
+  ],
+  "source_execution": [
+    {
+      "source_id": "microsoft_learn_hyperv",
+      "publisher": "Microsoft",
+      "parser_type": "html",
+      "parser_version": "official-source-parser-v2:microsoft_learn_hyperv",
+      "policy_version": "operator:microsoft-learn",
+      "freshness_sla_hours": 168,
+      "origin_selection_mode": "discovered_novel",
+      "canonical_url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements",
+      "selected_origin_url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements",
+      "cache_status": "miss",
+      "canonical_fetch_status": "not_attempted",
+      "discovery_status": "completed",
+      "discovery_reason": "explicitly_novel",
+      "discovery_result_count": 5,
+      "deadline_status": "within_deadline",
+      "parser_coverage": {
+        "pages_fetched": 1,
+        "candidate_claims": 5,
+        "accepted_claims": 5,
+        "rejected_claims": 0,
+        "context_claims": 0,
+        "parse_status": "completed"
+      },
+      "discovery_query_count": 1,
+      "discovery_query_axes": [
+        "named_software"
+      ]
+    },
+    {
+      "source_id": "nist_digital_twin_cybersecurity",
+      "publisher": "National Institute of Standards and Technology",
+      "parser_type": "html_pdf",
+      "parser_version": "official-source-parser-v2:nist_digital_twin_cybersecurity",
+      "policy_version": "operator:nist-publications",
+      "freshness_sla_hours": 720,
+      "origin_selection_mode": "discovered_novel",
+      "canonical_url": "https://csrc.nist.gov/pubs/ir/8356/final",
+      "selected_origin_url": "https://csrc.nist.gov/pubs/ir/8356/final",
+      "cache_status": "miss",
+      "canonical_fetch_status": "not_attempted",
+      "discovery_status": "completed",
+      "discovery_reason": "explicitly_novel",
+      "discovery_result_count": 4,
+      "deadline_status": "within_deadline",
+      "parser_coverage": {
+        "pages_fetched": 1,
+        "candidate_claims": 1,
+        "accepted_claims": 0,
+        "rejected_claims": 0,
+        "context_claims": 1,
+        "parse_status": "completed"
+      },
+      "discovery_query_count": 2,
+      "discovery_query_axes": [
+        "named_concept",
+        "application_scope"
+      ]
+    },
+    {
+      "source_id": "mitre_attack_ics",
+      "publisher": "MITRE",
+      "parser_type": "html",
+      "parser_version": "official-source-parser-v2:mitre_attack_ics",
+      "policy_version": "operator:mitre-attack",
+      "freshness_sla_hours": 168,
+      "origin_selection_mode": "discovered_novel",
+      "canonical_url": "https://attack.mitre.org/matrices/ics/",
+      "selected_origin_url": "https://attack.mitre.org/matrices/ics/",
+      "cache_status": "miss",
+      "canonical_fetch_status": "not_attempted",
+      "discovery_status": "completed",
+      "discovery_reason": "explicitly_novel",
+      "discovery_result_count": 4,
+      "deadline_status": "within_deadline",
+      "parser_coverage": {
+        "pages_fetched": 1,
+        "candidate_claims": 1,
+        "accepted_claims": 0,
+        "rejected_claims": 0,
+        "context_claims": 1,
+        "parse_status": "completed"
+      },
+      "discovery_query_count": 2,
+      "discovery_query_axes": [
+        "named_concept",
+        "application_scope"
+      ]
+    },
+    {
+      "source_id": "factory_io_official_docs",
+      "publisher": "Real Games",
+      "parser_type": "html",
+      "parser_version": "official-source-parser-v2:factory_io_official_docs",
+      "policy_version": "operator:factory-io-docs",
+      "freshness_sla_hours": 168,
+      "origin_selection_mode": "discovered_novel",
+      "canonical_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "selected_origin_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "cache_status": "miss",
+      "canonical_fetch_status": "not_attempted",
+      "discovery_status": "completed",
+      "discovery_reason": "explicitly_novel",
+      "discovery_result_count": 2,
+      "deadline_status": "within_deadline",
+      "parser_coverage": {
+        "pages_fetched": 1,
+        "candidate_claims": 3,
+        "accepted_claims": 3,
+        "rejected_claims": 0,
+        "context_claims": 0,
+        "parse_status": "completed"
+      },
+      "discovery_query_count": 1,
+      "discovery_query_axes": [
+        "named_software"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "official-fbebff79bbc511ec",
+      "attribute": "ram_gb",
+      "operator": ">=",
+      "value": 4,
+      "unit": "GB",
+      "requirement_class": "minimum",
+      "claim_type": "minimum_requirements",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "microsoft_learn_hyperv",
+      "citation_url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements",
+      "observed_at": "2026-08-11T07:44:38.481918+00:00",
+      "statement": "Microsoft documents at least 4 GB for the host and notes that simultaneous VMs need additional memory.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "virtualisation",
+          "cyber_range",
+          "ot_cyber_range"
+        ],
+        "scope": "Hyper-V host capability and supported guest operating systems",
+        "resolution_owner": "research",
+        "exclusions": [
+          "VM count",
+          "per-VM resource sizing"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:microsoft-learn"
+    },
+    {
+      "claim_id": "official-a19e378c26ae0ff2",
+      "attribute": "operating_system",
+      "operator": "one_of",
+      "value": [
+        "Windows 11 Pro",
+        "Windows 11 Enterprise"
+      ],
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "compatibility",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "microsoft_learn_hyperv",
+      "citation_url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements",
+      "observed_at": "2026-08-11T07:44:38.481918+00:00",
+      "statement": "Microsoft documents Windows 11 Professional or Enterprise for client Hyper-V.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "virtualisation",
+          "cyber_range",
+          "ot_cyber_range"
+        ],
+        "scope": "Hyper-V host capability and supported guest operating systems",
+        "resolution_owner": "research",
+        "exclusions": [
+          "VM count",
+          "per-VM resource sizing"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:microsoft-learn"
+    },
+    {
+      "claim_id": "official-e0140457dc8d699a",
+      "attribute": "virtualization_slat",
+      "operator": "equals",
+      "value": true,
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "compatibility",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "microsoft_learn_hyperv",
+      "citation_url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements",
+      "observed_at": "2026-08-11T07:44:38.481918+00:00",
+      "statement": "Hyper-V requires second-level address translation.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "virtualisation",
+          "cyber_range",
+          "ot_cyber_range"
+        ],
+        "scope": "Hyper-V host capability and supported guest operating systems",
+        "resolution_owner": "research",
+        "exclusions": [
+          "VM count",
+          "per-VM resource sizing"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:microsoft-learn"
+    },
+    {
+      "claim_id": "official-c0d6d5ba7be7df5c",
+      "attribute": "virtualization_extensions",
+      "operator": "equals",
+      "value": true,
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "compatibility",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "microsoft_learn_hyperv",
+      "citation_url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements",
+      "observed_at": "2026-08-11T07:44:38.481918+00:00",
+      "statement": "Hyper-V requires VM Monitor Mode extensions.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "virtualisation",
+          "cyber_range",
+          "ot_cyber_range"
+        ],
+        "scope": "Hyper-V host capability and supported guest operating systems",
+        "resolution_owner": "research",
+        "exclusions": [
+          "VM count",
+          "per-VM resource sizing"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:microsoft-learn"
+    },
+    {
+      "claim_id": "official-7fcfa3363329dbb1",
+      "attribute": "hardware_dep",
+      "operator": "equals",
+      "value": true,
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "compatibility",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "microsoft_learn_hyperv",
+      "citation_url": "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements",
+      "observed_at": "2026-08-11T07:44:38.481918+00:00",
+      "statement": "Hyper-V requires hardware-enforced data execution prevention.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "virtualisation",
+          "cyber_range",
+          "ot_cyber_range"
+        ],
+        "scope": "Hyper-V host capability and supported guest operating systems",
+        "resolution_owner": "research",
+        "exclusions": [
+          "VM count",
+          "per-VM resource sizing"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:microsoft-learn"
+    },
+    {
+      "claim_id": "official-09019600fe42d6be",
+      "attribute": "operating_system",
+      "operator": "one_of",
+      "value": [
+        "Windows 11 Pro",
+        "Windows 11 Enterprise",
+        "Windows 10 Pro",
+        "Windows 10 Enterprise",
+        "Windows 7 SP1"
+      ],
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "minimum_requirements",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "factory_io_official_docs",
+      "citation_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "observed_at": "2026-08-11T07:44:46.769555+00:00",
+      "statement": "Factory I/O documents Windows 7 SP1 or higher.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "factory_io",
+          "plc_simulation",
+          "ot_cyber_range"
+        ],
+        "scope": "Factory I/O host requirements and documented PLC/OPC/Modbus integrations",
+        "resolution_owner": "research",
+        "exclusions": [
+          "generic digital twins",
+          "cyber-range VM capacity"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:factory-io-docs"
+    },
+    {
+      "claim_id": "official-5379369ef2caf3d6",
+      "attribute": "cpu_instruction_set",
+      "operator": "equals",
+      "value": "SSE2",
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "minimum_requirements",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "factory_io_official_docs",
+      "citation_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "observed_at": "2026-08-11T07:44:46.769555+00:00",
+      "statement": "Factory I/O requires a CPU with SSE2 support.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "factory_io",
+          "plc_simulation",
+          "ot_cyber_range"
+        ],
+        "scope": "Factory I/O host requirements and documented PLC/OPC/Modbus integrations",
+        "resolution_owner": "research",
+        "exclusions": [
+          "generic digital twins",
+          "cyber-range VM capacity"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:factory-io-docs"
+    },
+    {
+      "claim_id": "official-4dd7d336e52398aa",
+      "attribute": "graphics_api",
+      "operator": "one_of",
+      "value": [
+        "DX10",
+        "DX11",
+        "DX12"
+      ],
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "compatibility",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "factory_io_official_docs",
+      "citation_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "observed_at": "2026-08-11T07:44:46.769555+00:00",
+      "statement": "Factory I/O documents DX10, DX11 or DX12 capability.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "factory_io",
+          "plc_simulation",
+          "ot_cyber_range"
+        ],
+        "scope": "Factory I/O host requirements and documented PLC/OPC/Modbus integrations",
+        "resolution_owner": "research",
+        "exclusions": [
+          "generic digital twins",
+          "cyber-range VM capacity"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:factory-io-docs"
+    }
+  ],
+  "context_claims": [
+    {
+      "claim_id": "context-nist_digital_twin_cybersecurity",
+      "source_id": "nist_digital_twin_cybersecurity",
+      "claim_type": "workload_scope",
+      "status": "corroborated",
+      "statement": "Official material corroborates the workload scope; it does not establish a hardware floor.",
+      "citation_url": "https://csrc.nist.gov/pubs/ir/8356/final",
+      "observed_at": "2026-08-11T07:44:41.953297+00:00",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_applicability": {
+        "workloads": [
+          "digital_twin",
+          "ot_cyber_range"
+        ],
+        "scope": "Digital-twin concept and cybersecurity context",
+        "resolution_owner": "research",
+        "exclusions": [
+          "hardware requirements",
+          "product qualification"
+        ]
+      },
+      "parser_type": "html_pdf",
+      "policy_version": "operator:nist-publications"
+    },
+    {
+      "claim_id": "context-mitre_attack_ics",
+      "source_id": "mitre_attack_ics",
+      "claim_type": "workload_scope",
+      "status": "corroborated",
+      "statement": "Official material corroborates the workload scope; it does not establish a hardware floor.",
+      "citation_url": "https://attack.mitre.org/matrices/ics/",
+      "observed_at": "2026-08-11T07:44:45.502086+00:00",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_applicability": {
+        "workloads": [
+          "ot_cyber_range",
+          "ics_security_simulation"
+        ],
+        "scope": "ICS adversary behaviours and scenario/topology obligations",
+        "resolution_owner": "research",
+        "exclusions": [
+          "hardware requirements",
+          "VM resource sizing"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:mitre-attack"
+    }
+  ],
+  "unresolved": [],
+  "receipts": [
+    {
+      "receipt_id": "research-6e4ba647d547:1",
+      "execution_id": "research-6e4ba647d547:1",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "microsoft_learn_hyperv_q1",
+      "query_hash": "66d7146a02ceebd1",
+      "query_purpose": "official_origin_discovery:named_software",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:36.002508Z",
+      "completed_at": "2026-08-11T07:44:37.876636Z",
+      "http_status": 200,
+      "result_count": 29,
+      "allowlisted_result_count": 5,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 1,
+          "responses": 1,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1587.62,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 1,
+          "responses": 1,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1587.62,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 1587.62,
+      "degradation_reasons": [],
+      "provider_status": "completed",
+      "response_body_hash": "d44c768c61599b219fbb887ffe71afa459229b59e283296685997696675e9145",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-11T07:44:37.876636Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:2",
+      "execution_id": "research-6e4ba647d547:2",
+      "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+      "provider_id": "governed_http_origin",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "learn.microsoft.com",
+      "query_id": "microsoft_learn_hyperv",
+      "query_hash": "7fa976153728fc11",
+      "query_purpose": "discovered_official_origin_fetch",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:37.878232Z",
+      "completed_at": "2026-08-11T07:44:38.481918Z",
+      "http_status": 200,
+      "result_count": null,
+      "allowlisted_result_count": null,
+      "engines_queried": [],
+      "engines_responded": [],
+      "engine_failures": [],
+      "engine_reliability": [],
+      "suppressed_engines": [],
+      "request_latency_ms": null,
+      "degradation_reasons": [],
+      "provider_status": null,
+      "response_body_hash": "210e8d746dae02a07e0c916aceb9b259a28d35507cdc5eaebb812a95219501fb",
+      "selected_origin_urls": [
+        "https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/host-hardware-requirements"
+      ],
+      "origin_content_type": "text/html",
+      "origin_observed_at": "2026-08-11T07:44:38.481918Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:3",
+      "execution_id": "research-6e4ba647d547:3",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "nist_digital_twin_cybersecurity_q1",
+      "query_hash": "ce45e6e1d394088f",
+      "query_purpose": "official_origin_discovery:named_concept",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:38.489429Z",
+      "completed_at": "2026-08-11T07:44:39.477772Z",
+      "http_status": 200,
+      "result_count": 30,
+      "allowlisted_result_count": 2,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 2,
+          "responses": 2,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1132.556,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 2,
+          "responses": 2,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1132.556,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 677.493,
+      "degradation_reasons": [],
+      "provider_status": "completed",
+      "response_body_hash": "a882612a5c320bde920b4181456b58b4596e34c930fb99efaa8f1f60f8379ad8",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-11T07:44:39.477772Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:4",
+      "execution_id": "research-6e4ba647d547:4",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "nist_digital_twin_cybersecurity_q2",
+      "query_hash": "104c2e90864533f4",
+      "query_purpose": "official_origin_discovery:application_scope",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:39.478834Z",
+      "completed_at": "2026-08-11T07:44:40.360290Z",
+      "http_status": 200,
+      "result_count": 30,
+      "allowlisted_result_count": 2,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 3,
+          "responses": 3,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 955.977,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 3,
+          "responses": 3,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 955.977,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 602.818,
+      "degradation_reasons": [],
+      "provider_status": "completed",
+      "response_body_hash": "58fc5f2d9ae771ea1f029b28b21f21ce3e74662b64cb9363345836b6b66e04a4",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-11T07:44:40.360290Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:5",
+      "execution_id": "research-6e4ba647d547:5",
+      "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+      "provider_id": "governed_http_origin",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "csrc.nist.gov",
+      "query_id": "nist_digital_twin_cybersecurity",
+      "query_hash": "69096db87a837c08",
+      "query_purpose": "discovered_official_origin_fetch",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:40.361602Z",
+      "completed_at": "2026-08-11T07:44:41.953297Z",
+      "http_status": 200,
+      "result_count": null,
+      "allowlisted_result_count": null,
+      "engines_queried": [],
+      "engines_responded": [],
+      "engine_failures": [],
+      "engine_reliability": [],
+      "suppressed_engines": [],
+      "request_latency_ms": null,
+      "degradation_reasons": [],
+      "provider_status": null,
+      "response_body_hash": "9a7e9a140ed3caa4bd281ef74d23f4f00d19dbcfc4315fbd69b71085821f85e5",
+      "selected_origin_urls": [
+        "https://csrc.nist.gov/pubs/ir/8356/final"
+      ],
+      "origin_content_type": "text/html",
+      "origin_observed_at": "2026-08-11T07:44:41.953297Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:6",
+      "execution_id": "research-6e4ba647d547:6",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "mitre_attack_ics_q1",
+      "query_hash": "006853666ad560d6",
+      "query_purpose": "official_origin_discovery:named_concept",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:41.961165Z",
+      "completed_at": "2026-08-11T07:44:43.890045Z",
+      "http_status": 200,
+      "result_count": 30,
+      "allowlisted_result_count": 2,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 4,
+          "responses": 4,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1119.906,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 4,
+          "responses": 4,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1119.906,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 1611.693,
+      "degradation_reasons": [],
+      "provider_status": "completed",
+      "response_body_hash": "0ccc5997d0a359c1b632f9f7cf36cb3fecd6b54f79b488afb12ab49c0b065346",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-11T07:44:43.890045Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:7",
+      "execution_id": "research-6e4ba647d547:7",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "mitre_attack_ics_q2",
+      "query_hash": "f47839cee649498d",
+      "query_purpose": "official_origin_discovery:application_scope",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:43.892881Z",
+      "completed_at": "2026-08-11T07:44:44.886249Z",
+      "http_status": 200,
+      "result_count": 30,
+      "allowlisted_result_count": 2,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 5,
+          "responses": 5,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1041.733,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 5,
+          "responses": 5,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1041.733,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 729.042,
+      "degradation_reasons": [],
+      "provider_status": "completed",
+      "response_body_hash": "9b6402bb419a5166b8ba7220331187e2d449cefb7dea9167d343646f00a6d3b3",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-11T07:44:44.886249Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:8",
+      "execution_id": "research-6e4ba647d547:8",
+      "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+      "provider_id": "governed_http_origin",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "attack.mitre.org",
+      "query_id": "mitre_attack_ics",
+      "query_hash": "6d66d201f78db8cb",
+      "query_purpose": "discovered_official_origin_fetch",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:44.887340Z",
+      "completed_at": "2026-08-11T07:44:45.502086Z",
+      "http_status": 200,
+      "result_count": null,
+      "allowlisted_result_count": null,
+      "engines_queried": [],
+      "engines_responded": [],
+      "engine_failures": [],
+      "engine_reliability": [],
+      "suppressed_engines": [],
+      "request_latency_ms": null,
+      "degradation_reasons": [],
+      "provider_status": null,
+      "response_body_hash": "84a1a6fafbb9b42cd72be7b72f27956eaa4f790c196a22f2bfcd492273eda61b",
+      "selected_origin_urls": [
+        "https://attack.mitre.org/matrices/ics/"
+      ],
+      "origin_content_type": "text/html",
+      "origin_observed_at": "2026-08-11T07:44:45.502086Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:9",
+      "execution_id": "research-6e4ba647d547:9",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "factory_io_official_docs_q1",
+      "query_hash": "8c232e61e07e45f0",
+      "query_purpose": "official_origin_discovery:named_software",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:45.518367Z",
+      "completed_at": "2026-08-11T07:44:46.410888Z",
+      "http_status": 200,
+      "result_count": 30,
+      "allowlisted_result_count": 2,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [
+        {
+          "engine": "wikipedia",
+          "reason": "HTTP error"
+        }
+      ],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 6,
+          "responses": 6,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 969.505,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 6,
+          "responses": 6,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 969.505,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "wikipedia",
+          "attempts": 1,
+          "responses": 0,
+          "failures": 1,
+          "zero_results": 0,
+          "average_latency_ms": 608.361,
+          "unhealthy_rate": 1.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 608.361,
+      "degradation_reasons": [
+        "engines_unresponsive"
+      ],
+      "provider_status": "degraded",
+      "response_body_hash": "aa6ce5207ebfb4229ce6669534f33caf39e84d0c9149860f1512ed03cdd497d0",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-11T07:44:46.410888Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-6e4ba647d547:10",
+      "execution_id": "research-6e4ba647d547:10",
+      "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+      "provider_id": "governed_http_origin",
+      "certification_run_id": "research-6e4ba647d547",
+      "provider_endpoint_host": "docs.factoryio.com",
+      "query_id": "factory_io_official_docs",
+      "query_hash": "8b7f5e267bc35b75",
+      "query_purpose": "discovered_official_origin_fetch",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-11T07:44:46.411549Z",
+      "completed_at": "2026-08-11T07:44:46.769555Z",
+      "http_status": 200,
+      "result_count": null,
+      "allowlisted_result_count": null,
+      "engines_queried": [],
+      "engines_responded": [],
+      "engine_failures": [],
+      "engine_reliability": [],
+      "suppressed_engines": [],
+      "request_latency_ms": null,
+      "degradation_reasons": [],
+      "provider_status": null,
+      "response_body_hash": "5145973cbadcdc3ed2b55af7632ce40a7c71493037c6bfe4f8e866fb7799806a",
+      "selected_origin_urls": [
+        "https://docs.factoryio.com/manual/system-requirements/"
+      ],
+      "origin_content_type": "text/html",
+      "origin_observed_at": "2026-08-11T07:44:46.769555Z",
+      "rejection_reason": null
+    }
+  ],
+  "provider_accounting": {
+    "external_calls": 10,
+    "discovery_calls": 6,
+    "official_origin_fetches": 4,
+    "cache_hits": 0,
+    "paid_calls": 0
+  },
+  "paid_calls": 0,
+  "authority_rule": "discovery finds; source-specific official parser establishes scoped claims"
+}
