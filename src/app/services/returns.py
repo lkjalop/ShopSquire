@@ -3,7 +3,6 @@ import io
 import json
 import uuid
 import hashlib
-import os
 from typing import List, Dict, Any, Tuple
 import re
 from sqlalchemy import text as sql_text
@@ -335,6 +334,8 @@ def capture_evidence(
             reverse_lookup = ReverseImageSearch().external_lookup(phash=phash, sha256=sha256, sku=sku)
         except Exception:
             reverse_lookup = {}
+        # The full-image pass is a necessary fallback when ROI OCR finds no
+        # text (receipts and fault codes are often outside detected regions).
         ocr_text = cv_best_text.get(safe_name) or ocr_image_bytes(b)
         pkg["images"].append(
             {
