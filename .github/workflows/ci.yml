@@ -16,9 +16,9 @@ jobs:
       METRICS_INTERNAL_ONLY: "0"
       METRICS_REQUIRE_AUTH: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Install deps
@@ -76,9 +76,9 @@ jobs:
       SPLUNK_HEC_URL: ${{ secrets.SPLUNK_HEC_URL }}
       SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install deps
@@ -132,7 +132,7 @@ jobs:
               tests/test_verify_db_migrations.py
       - name: Upload PostgreSQL diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: postgres-contracts-${{ matrix.python-version }}
           path: test-results/**

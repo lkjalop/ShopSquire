@@ -16,9 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Scan repository for cardholder data (PAN)
@@ -29,9 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Run Trivy FS scan (JSON)
@@ -43,7 +43,7 @@ jobs:
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM'
       - name: Upload artifact (Trivy FS)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: trivy-fs
           path: trivy-fs.json
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Generate SBOM (Syft)
         uses: anchore/sbom-action@v0.24.0
         with:
@@ -69,7 +69,7 @@ jobs:
           output-file: sbom.spdx.json
           upload-artifact: false
       - name: Upload artifact (SBOM)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sbom-spdx
           path: sbom.spdx.json
@@ -90,7 +90,7 @@ jobs:
           fi
       - name: Upload signature (optional)
         if: ${{ hashFiles('sbom.spdx.sig') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sbom-signature
           path: sbom.spdx.sig
@@ -99,13 +99,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Node (for Snyk CLI)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
       - name: Install Snyk
-        run: npm install -g snyk@latest
+        # Exact version prevents an unreviewed CLI update from changing a security build.
+        run: npm install -g snyk@1.1306.2
       - name: Snyk auth
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -124,7 +125,7 @@ jobs:
           snyk test --file=pyproject.toml --package-manager=pip --json > snyk-python.json || true
       - name: Upload artifact (Snyk Python)
         if: ${{ hashFiles('snyk-python.json') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: snyk-python
           path: snyk-python.json
@@ -141,9 +142,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - name: Install pip-audit
@@ -154,7 +155,7 @@ jobs:
         run: |
           pip-audit -f json -o pip-audit.json || true
       - name: Upload artifact (pip-audit)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pip-audit
           path: pip-audit.json
@@ -174,10 +175,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -199,7 +200,7 @@ jobs:
           subject-path: dist/shopsquire-source.tar.gz
 
       - name: Upload attested source archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: shopsquire-attested-source
           path: dist/shopsquire-source.tar.gz

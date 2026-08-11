@@ -41,8 +41,8 @@ jobs:
       DATABASE_URL: sqlite+pysqlite:///${{ github.workspace }}/tmp/services-${{ matrix.shard }}.sqlite
       DATABASE_URL_RO: sqlite+pysqlite:///${{ github.workspace }}/tmp/services-${{ matrix.shard }}.sqlite
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -86,7 +86,7 @@ jobs:
             tests/services/test_dependency_resilience_timeout.py
       - name: Upload diagnostics and duration evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: service-shard-${{ matrix.shard }}
           path: |
