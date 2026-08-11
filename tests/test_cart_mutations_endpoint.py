@@ -99,6 +99,22 @@ def test_apply_unknown_plan_404(client):
     assert r.status_code == 404
 
 
+def test_reject_endpoint_is_idempotent_and_never_changes_cart(client):
+    uid = "ep-user-reject"
+    prop = _propose(uid)
+    endpoint = f"/api/v1/cart/mutations/{prop['plan_id']}/reject"
+
+    first = client.post(endpoint, json={"uid": uid})
+    assert first.status_code == 200
+    assert first.json()["status"] == "rejected"
+    second = client.post(endpoint, json={"uid": uid})
+    assert second.status_code == 200
+    assert second.json()["status"] == "already_rejected"
+
+    cart = client.get("/api/v1/cart", params={"uid": uid}).json()
+    assert next(row for row in cart["items"] if row["sku"] == "SKU-EP")["quantity"] == 2
+
+
 def test_apply_wrong_tenant_header_forbidden(client):
     # review-6 #5: a plan proposed under the default tenant cannot be applied by a request whose
     # X-Tenant-Id header names a different tenant — and the tenant can't be forced via the body.

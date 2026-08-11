@@ -779,7 +779,7 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
 
 
 @router.post("/clear")
-def clear_cart(uid: str, redis=Depends(get_redis),
+def clear_cart(uid: str, session_epoch: str | None = None, redis=Depends(get_redis),
                role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("cart.clear"):
         signal = _guard_cart_request(surface="cart.clear", uid=uid, sku_values=[], quantity_values=[])
@@ -807,6 +807,21 @@ def clear_cart(uid: str, redis=Depends(get_redis),
                 expire_bundle_approvals_for_cart(_bdb, cart_id=cart_id)
         except Exception as _bexp:
             logging.getLogger("shopsquire.cart").debug("bundle-approval expiry on clear failed: %s", _bexp)
+        try:
+            from src.app.platform.tenant_context import current_tenant_id
+            from src.app.services.cart_session_state import clear_cart_commercial_state
+
+            clear_cart_commercial_state(
+                redis,
+                uid=uid,
+                tenant_id=current_tenant_id(),
+                session_epoch=session_epoch,
+            )
+        except Exception as state_exc:
+            logging.getLogger("shopsquire.cart").warning(
+                "cart cleared but conversation commercial state reset failed: %s",
+                repr(state_exc)[:160],
+            )
         return {
             "cart_id": cart_id,
             "items": [],

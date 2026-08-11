@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from src.app.deps import get_redis
 from src.app.security.auth import ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER, require_role
-from src.app.services.cart_mutation_service import apply_plan, get_plan
+from src.app.services.cart_mutation_service import apply_plan, get_plan, reject_plan
 
 router = APIRouter(prefix="/api/v1/cart/mutations", tags=["cart-mutations"])
 
@@ -28,6 +28,7 @@ def _tenant(header_value: Optional[str]) -> str:
 
 class ApplyPayload(BaseModel):
     uid: str
+    session_epoch: Optional[str] = None
     # tenant_id REMOVED from the body (review-6 #5) — derived from X-Tenant-Id below.
 
 
@@ -36,6 +37,18 @@ def apply_mutation(plan_id: str, payload: ApplyPayload, redis=Depends(get_redis)
                    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
                    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     out = apply_plan(plan_id, tenant_id=_tenant(x_tenant_id), uid=payload.uid, redis=redis)
+    if out.get("status") == "applied" and any(
+        row.get("action") == "clear_all" for row in (out.get("applied") or [])
+        if isinstance(row, dict)
+    ):
+        from src.app.services.cart_session_state import clear_cart_commercial_state
+
+        clear_cart_commercial_state(
+            redis,
+            uid=payload.uid,
+            tenant_id=_tenant(x_tenant_id),
+            session_epoch=payload.session_epoch,
+        )
     status = out.get("status")
     if status == "not_found":
         raise HTTPException(status_code=404, detail={"error": "plan_not_found", "plan_id": plan_id})
@@ -43,6 +56,20 @@ def apply_mutation(plan_id: str, payload: ApplyPayload, redis=Depends(get_redis)
         raise HTTPException(status_code=403, detail={"error": "plan_scope_mismatch", "plan_id": plan_id})
     # applied / already_applied / rejected / stale_cart / expired / conflict are all HONEST
     # 200-level outcomes the card renders — the plan lifecycle, not transport errors.
+    return out
+
+
+@router.post("/{plan_id}/reject")
+def reject_mutation(plan_id: str, payload: ApplyPayload,
+                    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+                    role: str = Depends(require_role(
+                        [ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]
+                    ))) -> Dict:
+    out = reject_plan(plan_id, tenant_id=_tenant(x_tenant_id), uid=payload.uid)
+    if out.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail={"error": "plan_not_found", "plan_id": plan_id})
+    if out.get("status") == "forbidden":
+        raise HTTPException(status_code=403, detail={"error": "plan_scope_mismatch", "plan_id": plan_id})
     return out
 
 
