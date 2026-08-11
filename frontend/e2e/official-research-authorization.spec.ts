@@ -1,5 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
 
+test.skip(
+  process.env.RUN_PRODUCTION_REQUIREMENT_AUTHORITY_CERTIFICATION !== '1',
+  'Requires a production-enrolled tenant, publisher-policy owner, credentials and freshness SLA.',
+);
+
 async function send(page: Page, text: string) {
   const responsePromise = page.waitForResponse(
     response => /\/api\/v1\/chat\/(stream|query)$/.test(response.url()),
@@ -17,7 +22,7 @@ async function send(page: Page, text: string) {
   return [...payloads].reverse().find((item: any) => item?.decision_trace_id || item?.trace_id) || {};
 }
 
-test('official evidence compiles into product authorization under one trace', async ({ page }) => {
+test('production-enrolled official evidence compiles into product authorization under one trace', async ({ page }) => {
   test.setTimeout(180_000);
   const health = await page.request.get('http://127.0.0.1:8080/health');
   expect(health.ok()).toBeTruthy();
