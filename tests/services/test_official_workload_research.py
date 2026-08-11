@@ -114,6 +114,36 @@ def test_unregistered_source_parser_cannot_create_claims() -> None:
     assert context == []
 
 
+def test_expired_total_deadline_dispatches_no_external_provider(monkeypatch) -> None:
+    def unexpected_fetcher(**kwargs):
+        raise AssertionError(f"provider constructed after deadline: {kwargs}")
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher",
+        unexpected_fetcher,
+    )
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.HttpxResearchFetcher",
+        unexpected_fetcher,
+    )
+
+    result = research_official_sources(
+        "novel request",
+        search_url_template="http://127.0.0.1:8888/search?q={query}&format=json",
+        sources=[_approved_source()],
+        total_timeout_s=0,
+    )
+
+    assert result["provider_accounting"]["external_calls"] == 0
+    assert result["execution_mode"] == "not_executed"
+    assert result["runtime"]["deadline_exceeded"] is True
+    assert result["source_execution"][0]["deadline_status"] == "exceeded_before_dispatch"
+    assert result["unresolved"] == [{
+        "source_id": "nist_manufacturing_digital_twins",
+        "reason": "research_total_deadline_exceeded",
+    }]
+
+
 def test_autocad_point_cloud_tier_keeps_scope_and_workstation_requirement() -> None:
     claims, _ = compile_source_claims(
         "autodesk_autocad_requirements",
@@ -241,6 +271,7 @@ def test_context_only_research_is_not_reported_as_product_requirements(monkeypat
         "discovery_status": "not_needed",
         "discovery_reason": None,
         "discovery_result_count": 0,
+        "deadline_status": "within_deadline",
     }]
     assert all(row["provider_capability"] != "WEB_DISCOVERY" for row in result["receipts"])
 

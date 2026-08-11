@@ -7,6 +7,7 @@ contracts, not interchangeable prose.  Discovery snippets are never parsed.
 from __future__ import annotations
 
 import hashlib
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -555,10 +556,17 @@ def research_official_sources(
     novel_source_ids: set[str] | None = None,
     evidence_cache: OfficialEvidenceCache | None = None,
     now: datetime | None = None,
+    total_timeout_s: float = 30.0,
 ) -> dict[str, Any]:
     """Fetch reviewed official origins using cache -> canonical -> discovery fallback."""
 
     run_id = f"research-{uuid.uuid4().hex[:12]}"
+    started_monotonic = time.monotonic()
+    deadline_monotonic = started_monotonic + max(0.0, float(total_timeout_s))
+
+    def remaining_timeout(cap_s: float) -> float:
+        return max(0.0, min(cap_s, deadline_monotonic - time.monotonic()))
+
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     # An unscoped caller may still fetch, but must not share evidence across buyers.
     # Route wiring should always pass the authenticated tenant before relying on cache.
@@ -592,7 +600,13 @@ def research_official_sources(
             "discovery_status": "not_needed",
             "discovery_reason": None,
             "discovery_result_count": 0,
+            "deadline_status": "within_deadline",
         }
+        if remaining_timeout(15.0) <= 0:
+            execution["deadline_status"] = "exceeded_before_dispatch"
+            unresolved.append({"source_id": source_id, "reason": "research_total_deadline_exceeded"})
+            source_execution.append(execution)
+            continue
         policy_errors = _source_policy_errors(source, workload=workload)
         if policy_errors:
             unresolved.extend({"source_id": source_id, "reason": reason} for reason in policy_errors)
@@ -637,8 +651,17 @@ def research_official_sources(
         origin: dict[str, Any] | None = None
         explicit_novel = source_id in novel
         if canonical and not explicit_novel:
+            fetch_timeout = remaining_timeout(15.0)
+            if fetch_timeout <= 0:
+                execution["deadline_status"] = "exceeded_before_canonical_fetch"
+                unresolved.append({
+                    "source_id": source_id, "reason": "research_total_deadline_exceeded",
+                })
+                source_execution.append(execution)
+                continue
             origin = GovernedOfficialOriginFetcher(max_bytes=8 * 1024 * 1024).fetch(
-                canonical, allowlist=domains, timeout_s=15, certification_run_id=run_id,
+                canonical, allowlist=domains, timeout_s=fetch_timeout,
+                certification_run_id=run_id,
             )
             execution["canonical_fetch_status"] = origin["status"]
             raw_canonical_receipt = dict(origin["receipt"])
@@ -673,7 +696,18 @@ def research_official_sources(
             discovery = HttpxResearchFetcher(
                 search_url_template=search_url_template, allow_private=True,
             )
-            results = discovery.fetch(_source_query(source), allowlist=domains, timeout_s=12)
+            discovery_timeout = remaining_timeout(12.0)
+            if discovery_timeout <= 0:
+                execution["deadline_status"] = "exceeded_before_discovery"
+                execution["discovery_status"] = "not_attempted_deadline"
+                unresolved.append({
+                    "source_id": source_id, "reason": "research_total_deadline_exceeded",
+                })
+                source_execution.append(execution)
+                continue
+            results = discovery.fetch(
+                _source_query(source), allowlist=domains, timeout_s=discovery_timeout,
+            )
             execution["discovery_result_count"] = len(results)
             discovery_execution = str(
                 discovery.last_receipt.get("execution_status") or "failed"
@@ -701,8 +735,17 @@ def research_official_sources(
                 })
                 source_execution.append(execution)
                 continue
+            origin_timeout = remaining_timeout(15.0)
+            if origin_timeout <= 0:
+                execution["deadline_status"] = "exceeded_before_discovered_origin_fetch"
+                unresolved.append({
+                    "source_id": source_id, "reason": "research_total_deadline_exceeded",
+                })
+                source_execution.append(execution)
+                continue
             origin = GovernedOfficialOriginFetcher(max_bytes=8 * 1024 * 1024).fetch(
-                selected, allowlist=domains, timeout_s=15, certification_run_id=run_id,
+                selected, allowlist=domains, timeout_s=origin_timeout,
+                certification_run_id=run_id,
             )
             raw_discovered_receipt = dict(origin["receipt"])
             raw_discovered_receipt.update({
@@ -810,6 +853,13 @@ def research_official_sources(
             "cache_hits": cache_hits, "paid_calls": 0,
         },
         "execution_mode": execution_mode,
+        "runtime": {
+            "total_timeout_s": max(0.0, float(total_timeout_s)),
+            "elapsed_ms": round((time.monotonic() - started_monotonic) * 1000, 3),
+            "deadline_exceeded": any(
+                row.get("deadline_status") != "within_deadline" for row in source_execution
+            ),
+        },
         "authority_rule": "discovery finds; source-specific official parser establishes scoped claims",
     }
 
