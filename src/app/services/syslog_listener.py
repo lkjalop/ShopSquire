@@ -90,12 +90,12 @@ def _recv_tcp_loop(host: str, port: int, service: SyslogIngestService, stop_even
 
 def start_syslog_listener(
     *,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     udp_port: int = 5514,
     tcp_port: int = 5514,
     tenant_id: str = "default",
     trace_id: str | None = None,
-    enable_udp: bool = True,
+    enable_udp: bool = False,
     enable_tcp: bool = True,
 ) -> Dict[str, Any]:
     stop_event = threading.Event()

@@ -10,7 +10,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from src.app.services.syslog_listener import start_syslog_listener, stop_syslog_listener
+from src.app.services.syslog_listener import start_syslog_listener, stop_syslog_listener  # noqa: E402
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -21,12 +21,13 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 def main() -> int:
-    host = str(os.getenv("SYSLOG_LISTENER_HOST", "0.0.0.0") or "0.0.0.0")
+    # Bind to a local trusted forwarder by default. Raw UDP has no sender identity.
+    host = str(os.getenv("SYSLOG_LISTENER_HOST", "127.0.0.1") or "127.0.0.1")
     udp_port = int(float(os.getenv("SYSLOG_LISTENER_UDP_PORT", "5514") or 5514))
     tcp_port = int(float(os.getenv("SYSLOG_LISTENER_TCP_PORT", "5514") or 5514))
     tenant_id = str(os.getenv("SYSLOG_LISTENER_TENANT_ID", "default") or "default")
     trace_id = str(os.getenv("SYSLOG_LISTENER_TRACE_ID", "") or "").strip() or None
-    enable_udp = _bool_env("SYSLOG_LISTENER_ENABLE_UDP", True)
+    enable_udp = _bool_env("SYSLOG_LISTENER_ENABLE_UDP", False)
     enable_tcp = _bool_env("SYSLOG_LISTENER_ENABLE_TCP", True)
     if not enable_udp and not enable_tcp:
         print({"status": "disabled", "reason": "both_tcp_udp_disabled"})
