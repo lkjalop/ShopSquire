@@ -27,6 +27,7 @@ import { apiErrorMessage } from './lib/apiError';
 import { selectProportionateAlternatives } from './lib/proportionateAlternatives';
 import { isActionableBuyerQuestion } from './lib/buyerQuestion';
 import { isUnsupportedPostPurchaseTracking } from './lib/postPurchaseIntent';
+import { isUnusableImageEvidence } from './lib/imageEvidenceAuthority';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -618,7 +619,7 @@ export default function App() {
     }));
   }, []);
 
-  const makeClientFastImageTriage = useCallback((file: File) => {
+  const makeClientFastImageTriage = useCallback((file: File, artifactId: string) => {
     const filenameHint = file.name.replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim();
     const suspiciousName = /\b(ssn|qr|password|credential|token|secret|invoice|receipt)\b/i.test(filenameHint);
     return {
@@ -635,14 +636,19 @@ export default function App() {
         reason: 'client_safe_hint_before_deep_triage',
       },
       security: {
-        clean: !suspiciousName,
+        clean: false,
+        artifact_state: 'pending',
+        commercial_authority: 'blocked',
         signals: {
           fast_triage_timeout: true,
           filename_suspicious: suspiciousName,
+          analysis_pending: true,
         },
         analysis_stage: 'client_safe_hint',
-        verdict: 'Image bytes are queued for background security enrichment; product recommendations use safe filename hints only.',
+        verdict: 'Image bytes are queued for background security inspection. The attachment cannot influence recommendations or commercial actions yet.',
       },
+      artifact: { artifact_id: artifactId, state: 'pending', authority: 'blocked' },
+      analysis_state: { analysis_pending: true, analysis_degraded: false, security_risk: suspiciousName },
     };
   }, []);
 
@@ -721,7 +727,7 @@ export default function App() {
         data._filename = file.name;
         return data;
       } catch {
-        if (fast) return makeClientFastImageTriage(file);
+        if (fast) return makeClientFastImageTriage(file, artifactId);
         return {
           _filename: file.name,
           filename: file.name,
@@ -1913,6 +1919,16 @@ export default function App() {
               if (!Array.isArray(deepResults) || deepResults.length === 0) return;
               setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
               setImageTriageRaw(deepResults);
+              const deepTraceId = deepResults.find((row: any) => (
+                row?.decision_trace_id || row?.trace_id || row?.decision_id || row?.artifact?.artifact_id
+              ));
+              setTraceId(normalizeTraceId(
+                deepTraceId?.decision_trace_id
+                  || deepTraceId?.trace_id
+                  || deepTraceId?.decision_id
+                  || deepTraceId?.artifact?.artifact_id
+                  || null,
+              ));
             }).catch(() => {
               // The typed fast result remains visible as pending/degraded. A deep
               // inspection failure must not silently promote the attachment.
@@ -1920,6 +1936,36 @@ export default function App() {
           }
         } finally {
           setImageRoutingInFlight(false);
+        }
+
+        const unusableImageEvidence = imageTriageResults.filter(isUnusableImageEvidence);
+        if (unusableImageEvidence.length > 0) {
+          const pendingTraceId = imageTriageResults.find((row: any) => row?.artifact?.artifact_id);
+          setTraceId(normalizeTraceId(pendingTraceId?.artifact?.artifact_id || null));
+          const contexts = toImageTriageContexts(imageTriageResults, currentAttachedFiles);
+          setImageTriageContexts(contexts);
+          setImageTriageRaw(imageTriageResults);
+          setDisplayProducts([]);
+          setRecommendationShelf(null);
+          setCanonicalImageProducts([]);
+          setCanonicalImageSummary(
+            'No product recommendation was produced because this attachment is not yet trusted evidence.',
+          );
+          switchRightPanelMode('visual_search');
+          setVisualSearchQuery(q);
+          const degraded = unusableImageEvidence.some((result: any) => (
+            Boolean(result?._upload_error)
+            || String(result?.artifact?.state || result?.security?.artifact_state || '').toLowerCase() === 'degraded'
+          ));
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: degraded
+              ? 'Attachment analysis degraded. It was not used for recommendations, memory, or commercial actions. You can retry or continue with text-only specifications.'
+              : 'Attachment inspection is still under review. It was not used for recommendations, memory, or commercial actions. The deeper security result will remain attached to this turn.',
+            timestamp: new Date(),
+          }]);
+          setIsThinking(false);
+          return;
         }
 
         // Auto-route to CV if damage detected
