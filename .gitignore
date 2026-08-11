@@ -130,6 +130,7 @@ latency-*.png
 
 # Playwright E2E run artifacts (frontend + admin)
 frontend/test-results/
+/test-results/
 frontend/playwright-report/
 src/frontend/admin-react/test-results/
 src/frontend/admin-react/playwright-report/
