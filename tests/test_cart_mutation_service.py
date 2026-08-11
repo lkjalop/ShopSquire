@@ -136,6 +136,47 @@ def test_propose_then_apply_single_set(wired):
     assert S.get_plan(prop["plan_id"])["status"] == "applied"
 
 
+def test_new_proposal_supersedes_older_unconfirmed_plan(wired):
+    uid = "u-supersede-pending"
+    items = _cart(uid, ("SKU-A", 1), ("SKU-B", 1))
+    first = S.propose_plan(
+        tenant_id="t1",
+        uid=uid,
+        plan=CartMutationPlan(ops=(CartOp("set_quantity", ("SKU-A",), 2),), confidence=1.0),
+        cart_items=items,
+        query="set A to 2",
+    )
+    second = S.propose_plan(
+        tenant_id="t1",
+        uid=uid,
+        plan=CartMutationPlan(ops=(CartOp("set_quantity", ("SKU-B",), 3),), confidence=1.0),
+        cart_items=items,
+        query="actually set B to 3",
+    )
+
+    assert second["superseded_plan_ids"] == [first["plan_id"]]
+    assert S.get_plan(first["plan_id"])["status"] == "superseded"
+    assert S.apply_plan(first["plan_id"], tenant_id="t1", uid=uid)["current_status"] == "superseded"
+    assert _skus(uid) == {"SKU-A": 1, "SKU-B": 1}
+    assert S.apply_plan(second["plan_id"], tenant_id="t1", uid=uid)["status"] == "applied"
+    assert _skus(uid) == {"SKU-A": 1, "SKU-B": 3}
+
+
+def test_reject_plan_is_durable_idempotent_and_never_mutates_cart(wired):
+    uid = "u-reject-pending"
+    items = _cart(uid, ("SKU-A", 2))
+    proposed = S.propose_plan(
+        tenant_id="t1", uid=uid,
+        plan=CartMutationPlan(ops=(CartOp("set_quantity", ("SKU-A",), 9),)),
+        cart_items=items,
+    )
+
+    assert S.reject_plan(proposed["plan_id"], tenant_id="t1", uid=uid)["status"] == "rejected"
+    assert S.reject_plan(proposed["plan_id"], tenant_id="t1", uid=uid)["status"] == "already_rejected"
+    assert S.apply_plan(proposed["plan_id"], tenant_id="t1", uid=uid)["current_status"] == "rejected"
+    assert _skus(uid) == {"SKU-A": 2}
+
+
 def test_set_quantity_preserves_whole_order_budget_at_apply_time(wired):
     uid = "u-budget-set"
     items = _cart(uid, ("SKU-A", 1), ("SKU-B", 1))

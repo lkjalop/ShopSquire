@@ -90,7 +90,9 @@ def _ensure_plans_table() -> None:
         db.commit()
 
 
-_TERMINAL_STATUSES = ("applied", "already_applied", "stale_cart", "expired", "rejected", "error")
+_TERMINAL_STATUSES = (
+    "applied", "already_applied", "stale_cart", "expired", "rejected", "superseded", "error",
+)
 
 
 def cleanup_plans(*, older_than_days: int = 7) -> int:
@@ -127,7 +129,26 @@ def propose_plan(*, tenant_id: str, uid: str, plan: CartMutationPlan,
         logger.debug("propose real-cart read fell back to passed slice: %s", repr(exc)[:80])
         cart_hash = cart_content_hash(cart_items)
     expires_at = (_now() + timedelta(minutes=_PLAN_TTL_MINUTES)).strftime(_TS_FMT)
+    superseded_plan_ids: List[str] = []
     with db_session() as db:
+        # One owner has one current confirmation decision. A newer proposal explicitly
+        # supersedes every still-unconfirmed proposal so an old chat card cannot be applied
+        # after the buyer has revised the instruction. The update and insert commit together.
+        superseded_plan_ids = [str(row[0]) for row in db.execute(text(
+            "SELECT id FROM cart_mutation_plans "
+            "WHERE tenant_id = :t AND uid = :u AND status = 'proposed' "
+            "ORDER BY created_at DESC"
+        ), {"t": str(tenant_id or "default"), "u": str(uid or "")}).fetchall()[:20]]
+        if superseded_plan_ids:
+            db.execute(text(
+                "UPDATE cart_mutation_plans SET status = 'superseded', result = :result, "
+                "applied_at = :at WHERE tenant_id = :t AND uid = :u AND status = 'proposed'"
+            ), {
+                "result": json.dumps({"reason": "replaced_by_newer_plan", "superseded_by": plan_id}),
+                "at": _now().strftime(_TS_FMT),
+                "t": str(tenant_id or "default"),
+                "u": str(uid or ""),
+            })
         db.execute(text(
             "INSERT INTO cart_mutation_plans (id, tenant_id, uid, trace_id, query, plan, risk, "
             "status, cart_hash, cart_version, expires_at) VALUES (:id, :t, :u, :tr, :q, :p, :r, "
@@ -137,7 +158,8 @@ def propose_plan(*, tenant_id: str, uid: str, plan: CartMutationPlan,
              "r": risk, "h": cart_hash, "cv": int(cart_version), "e": expires_at})
         db.commit()
     return {"plan_id": plan_id, "risk": risk, "cart_hash": cart_hash,
-            "cart_version": cart_version, "expires_at": expires_at}
+            "cart_version": cart_version, "expires_at": expires_at,
+            "superseded_plan_ids": superseded_plan_ids}
 
 
 def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
@@ -154,6 +176,40 @@ def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
             "status": row[7], "cart_hash": row[8],
             "result": json.loads(row[9]) if row[9] else None,
             "expires_at": row[10], "applied_at": row[11], "cart_version": int(row[12] or 0)}
+
+
+def reject_plan(plan_id: str, *, tenant_id: str, uid: str) -> Dict[str, Any]:
+    """Durably discard an unconfirmed plan without touching the cart."""
+    row = get_plan(plan_id)
+    if row is None:
+        return {"status": "not_found", "plan_id": plan_id}
+    if row["tenant_id"] != str(tenant_id or "default") or row["uid"] != str(uid or ""):
+        return {"status": "forbidden", "plan_id": plan_id}
+    if row["status"] == "rejected":
+        return {"status": "already_rejected", "plan_id": plan_id}
+    if row["status"] != "proposed":
+        return {"status": "conflict", "plan_id": plan_id, "current_status": row["status"]}
+    with db_session() as db:
+        changed = db.execute(text(
+            "UPDATE cart_mutation_plans SET status = 'rejected', result = :result, "
+            "applied_at = :at WHERE id = :id AND tenant_id = :t AND uid = :u "
+            "AND status = 'proposed'"
+        ), {
+            "result": json.dumps({"reason": "buyer_discarded"}),
+            "at": _now().strftime(_TS_FMT),
+            "id": plan_id,
+            "t": str(tenant_id or "default"),
+            "u": str(uid or ""),
+        })
+        db.commit()
+    if int(getattr(changed, "rowcount", 0) or 0) == 1:
+        return {"status": "rejected", "plan_id": plan_id}
+    current = get_plan(plan_id)
+    return {
+        "status": "conflict",
+        "plan_id": plan_id,
+        "current_status": (current or {}).get("status"),
+    }
 
 
 def _finish(plan_id: str, status: str, result: Dict[str, Any], *, db=None) -> None:
