@@ -51,6 +51,7 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   await expect(offers).toContainText(/SCORP-126982: unable to fulfil/i);
   await expect(offers).toContainText(/ACCEPTED.*covers the required exact-configuration quantity/i);
   await expect(offers).toContainText(/REJECTED.*no available quantity/i);
+  await expect(offers).toContainText(/CONDITIONAL.*short by/i);
   await expect(offers).toContainText(/LATE.*21 days misses the 10-day window/i);
   await expect(offers).not.toContainText(/proposed substitute/i);
   await offers.getByLabel(/27 × SCORP-126982.*exact configuration/i).check();

@@ -88,23 +88,6 @@ def normalize_supplier_offers(
             f"{row.source_type}|{row.source_reference}|{row.supplier_reference}|"
             f"{row.offered_sku}|{row.relationship}|{row.quantity_available}|{row.lead_time_days}"
         )
-        if row.quantity_available == 0:
-            response_status = "rejected"
-            response_reason = "Supplier reported no available quantity."
-        elif row.relationship == "compatible_substitute":
-            response_status = "conditional"
-            response_reason = "Supplier proposed a substitute; workload fit and buyer acceptance are required."
-        elif deadline_days is not None and row.lead_time_days is not None \
-                and row.lead_time_days > deadline_days:
-            response_status = "late"
-            response_reason = f"Supplier lead time of {row.lead_time_days} days misses the {deadline_days}-day window."
-        elif requested_quantity is not None \
-                and available_now + row.quantity_available < requested_quantity:
-            response_status = "conditional"
-            response_reason = "Supplier quantity does not close the full verified shortfall."
-        else:
-            response_status = "accepted"
-            response_reason = "Supplier response covers the required exact-configuration quantity within the stated window."
         commercial_decision = reduce_commercial_candidate(CommercialCandidate(
             sku=row.offered_sku,
             exact_identity=row.relationship == "exact",
@@ -124,6 +107,27 @@ def normalize_supplier_offers(
             deadline_days=deadline_days,
             relationship=row.relationship,
         ))
+        if row.quantity_available == 0:
+            # A supplier's explicit zero-quantity response is a rejection fact;
+            # fit/budget/deadline classification still comes from the reducer.
+            response_status = "rejected"
+            response_reason = "Supplier reported no available quantity."
+        elif commercial_decision.quantity_outcome == "late":
+            response_status = "late"
+            response_reason = next(
+                (reason for reason in commercial_decision.reasons if "deadline" in reason),
+                "The supplier offer misses the requested deadline.",
+            )
+        elif commercial_decision.status == "QUALIFIED_NOW":
+            response_status = "accepted"
+            response_reason = "Supplier response covers the required exact-configuration quantity within the stated window."
+        else:
+            response_status = "conditional"
+            response_reason = (
+                "Supplier proposed a substitute; workload fit and buyer acceptance are required."
+                if row.relationship == "compatible_substitute" else
+                next(iter(commercial_decision.reasons), "Supplier response requires buyer review.")
+            )
         offers.append(BuyerSafeSupplierOffer(
             offer_id="offer-" + hashlib.sha256(material.encode()).hexdigest()[:20],
             offered_sku=row.offered_sku,
@@ -170,6 +174,15 @@ def certification_fixture_offers(
         quantity_available=0,
         lead_time_days=None,
         unit_price_cents=None,
+    ), SupplierOfferInput(
+        source_type="deterministic_certification_fixture",
+        source_reference=f"{case_id}:fixture-rfq-response:partial",
+        supplier_reference="fixture-supplier-partial",
+        offered_sku=preferred_sku,
+        relationship="exact",
+        quantity_available=max(1, remaining // 2) if remaining else 0,
+        lead_time_days=5,
+        unit_price_cents=575_000,
     )]
     if substitute_sku:
         rows.append(SupplierOfferInput(
