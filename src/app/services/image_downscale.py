@@ -76,7 +76,7 @@ def bound_image_for_vlm(blob: bytes, *, max_edge: Optional[int] = None) -> Dict[
     """Return a copy of `blob` safe to feed the VLM/OCR.
 
     Result:
-      {"reject": True,  "reason": "megapixels"|"bytes", "meta": {...}}  -> caller 413s
+      {"reject": True,  "reason": "megapixels"|"bytes"|"decode"|"resize", "meta": {...}}
       {"reject": False, "bytes": <downscaled-or-original>, "downscaled": bool, "meta": {...}}
 
     On any decode error the original bytes pass through (best-effort; the CV timeout is the

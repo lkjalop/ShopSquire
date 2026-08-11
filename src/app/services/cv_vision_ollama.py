@@ -52,6 +52,10 @@ def vision_analyze_with_ollama(
 
     Returns a stable dict shape; never raises (caller should catch anyway).
     """
+    # The advertised timeout bounds the entire optional lane, including image
+    # normalization. A malformed or very expensive decode must not consume the
+    # budget and then start a fresh provider timeout.
+    deadline = time.monotonic() + max(0.1, float(timeout_s))
     # Ollama can be on the host or inside Docker.
     # In Docker, `127.0.0.1` points to the container itself, so we also try `host.docker.internal`.
     env_url = (os.getenv("OLLAMA_URL") or "http://127.0.0.1:11434").rstrip("/")
@@ -111,7 +115,12 @@ def vision_analyze_with_ollama(
         # Ollama vision models are more reliable with PNG/JPEG. Convert WEBP/other formats to PNG when possible.
         norm_bytes = image_bytes
         try:
-            if Image is not None:
+            supported_magic = (
+                image_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+                or image_bytes.startswith(b"\xff\xd8\xff")
+                or (image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP")
+            )
+            if Image is not None and supported_magic:
                 import io
 
                 img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -125,10 +134,28 @@ def vision_analyze_with_ollama(
         img_b64 = base64.b64encode(norm_bytes).decode("ascii")
         last_err: Dict[str, Any] | None = None
         _MAX_ATTEMPTS = 2  # 1 retry on transient failure (timeout / connection reset)
+        # timeout_s is a lane budget, not a per-model/per-retry allowance. Without one shared
+        # deadline, a disconnect multiplied the advertised two-second timeout across retries and
+        # model aliases into a measured ten-second stall.
+        if time.monotonic() >= deadline:
+            return {
+                "ok": False,
+                "error": "ollama_timeout",
+                "detail": "vision_lane_deadline_exhausted_before_dispatch",
+                "model": chosen_model,
+                "url": env_url,
+            }
         for url in base_urls:
+            if time.monotonic() >= deadline:
+                break
             for m in model_candidates:
+                if time.monotonic() >= deadline:
+                    break
                 _success = False
                 for _attempt in range(_MAX_ATTEMPTS):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0.05:
+                        break
                     started = time.time()
                     try:
                         resp = requests.post(
@@ -142,7 +169,7 @@ def vision_analyze_with_ollama(
                                 "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                                 "options": {"temperature": 0.0},
                             },
-                            timeout=timeout_s,
+                            timeout=max(0.05, min(float(timeout_s), remaining)),
                         )
                         ms = int((time.time() - started) * 1000)
                         if resp.status_code >= 400:
@@ -159,7 +186,9 @@ def vision_analyze_with_ollama(
                     except requests.exceptions.Timeout as exc:
                         last_err = {"ok": False, "error": "ollama_timeout", "detail": str(exc), "attempt": _attempt + 1, "model": m, "url": url}
                         if _attempt < _MAX_ATTEMPTS - 1:
-                            time.sleep(1.0)
+                            remaining = deadline - time.monotonic()
+                            if remaining > 0:
+                                time.sleep(min(1.0, remaining))
                         continue
                     except requests.RequestException as exc:
                         last_err = {"ok": False, "error": "ollama_request_exception", "detail": str(exc), "model": m, "url": url}

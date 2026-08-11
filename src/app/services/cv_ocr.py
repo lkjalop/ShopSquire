@@ -152,8 +152,10 @@ def _glm_ocr(image_bytes: bytes) -> Dict[str, Any]:
 
 
 def extract_text(image_bytes: bytes, provider: str | None = None, fallback: str | None = None) -> Dict[str, Any]:
-    # Allow tests/integration to override without editing model packs.
-    provider = (os.getenv("CV_OCR_PROVIDER") or provider or "tesseract").lower()
+    # An explicit, policy-selected provider belongs to the caller and must win.
+    # The environment is only the default. Reversing this precedence caused the
+    # bounded screenshot path to silently use GPU-hosted OCR and time out.
+    provider = (provider or os.getenv("CV_OCR_PROVIDER") or "tesseract").lower()
     if provider in ("disabled", "none", "off"):
         return _annotate_degradation({"text": "", "confidence": 0.0, "boxes": [], "error": None, "provider": "disabled"})
     if provider in ("glm-ocr", "glm_ocr", "ollama-ocr"):
