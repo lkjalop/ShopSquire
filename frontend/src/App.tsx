@@ -426,6 +426,10 @@ export default function App() {
   const [productShelves, setProductShelves] = useState<ProductShelfProjection | null>(null);
   const [supplierContinuation, setSupplierContinuation] = useState<SupplierContinuation | null>(null);
   const [ambiguityExploration, setAmbiguityExploration] = useState<AmbiguityExploration | null>(null);
+  const [activeShoppingCase, setActiveShoppingCase] = useState<{
+    case_id: string;
+    retained_purpose: string;
+  } | null>(null);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   // Safe-internet-search results (separate labeled source; never owned catalog items).
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
@@ -1822,6 +1826,10 @@ export default function App() {
             setPendingBulkQty(null);
             setPendingBulkBudget(null);
             setAmbiguityExploration(interpretation.ambiguity_exploration as AmbiguityExploration);
+            setActiveShoppingCase({
+              case_id: String(interpretation.ambiguity_exploration.case_id),
+              retained_purpose: String(interpretation.ambiguity_exploration.retained_purpose || q),
+            });
           }
           if (interpretation?.product_shelves?.schema_version === 'product-shelves-v1') {
             setProductShelves(interpretation.product_shelves as ProductShelfProjection);
@@ -2035,8 +2043,8 @@ export default function App() {
           session_id: conversationEpoch,
           memory_mode: temporaryChat ? 'temporary' : 'standard',
         };
-        if (ambiguityExploration?.case_id) {
-          chatPayload.shopping_case_id = ambiguityExploration.case_id;
+        if (activeShoppingCase?.case_id || ambiguityExploration?.case_id) {
+          chatPayload.shopping_case_id = activeShoppingCase?.case_id || ambiguityExploration?.case_id;
         }
         const copyProfileId = String(localStorage.getItem('shopsquire_copy_profile_id') || (import.meta as any).env?.VITE_COPY_PROFILE_ID || '').trim();
         const copyBrandName = String(localStorage.getItem('shopsquire_brand_name') || (import.meta as any).env?.VITE_BRAND_NAME || '').trim();
@@ -2494,10 +2502,20 @@ export default function App() {
         }
         if (data?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
           setAmbiguityExploration(data.ambiguity_exploration as AmbiguityExploration);
+          setActiveShoppingCase({
+            case_id: String(data.ambiguity_exploration.case_id),
+            retained_purpose: String(data.ambiguity_exploration.retained_purpose || ''),
+          });
           if (data?.product_shelves?.schema_version === 'product-shelves-v1') {
             setProductShelves(data.product_shelves as ProductShelfProjection);
           }
           switchRightPanelMode('grid');
+        }
+        if (data?.shopping_case_id && data?.shopping_case_retained_purpose) {
+          setActiveShoppingCase({
+            case_id: String(data.shopping_case_id),
+            retained_purpose: String(data.shopping_case_retained_purpose),
+          });
         }
         setTraceEvidence(data.evidence || null);
         const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);

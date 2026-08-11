@@ -76,7 +76,7 @@ test('commercial turns remain bound to an ambiguous case and preserve its purpos
 
   const panel = page.getByTestId('ambiguity-exploration');
   await expect(panel).toBeVisible({ timeout: 60_000 });
-  const caseId = initialAnswer.ambiguity_exploration?.case_id;
+  const caseId = initialAnswer.shopping_case_id || initialAnswer.ambiguity_exploration?.case_id;
   expect(caseId).toMatch(/^sc-/);
 
   const quantityResponse = await sendToChat(
@@ -104,4 +104,34 @@ test('commercial turns remain bound to an ambiguous case and preserve its purpos
     'I need laptops for a factory rollout.',
   );
   expect(purposeAnswer.shopping_case_retained_purpose).not.toMatch(/Buyer clarification to/i);
+});
+
+test('a product swap preserves the CAD purpose and quantity', async ({ page }) => {
+  test.setTimeout(240_000);
+  await page.addInitScript((uid) => sessionStorage.setItem('uid', uid), `swap-${Date.now()}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
+
+  const initialResponse = await sendToChat(page, 'I need 20 laptops for CAD work.');
+  const initialAnswer = await latestAnswer(initialResponse);
+  const caseId = initialAnswer.shopping_case_id || initialAnswer.ambiguity_exploration?.case_id;
+  expect(caseId).toMatch(/^sc-/);
+
+  const swapResponse = await sendToChat(
+    page,
+    'Actually swap that for the workstation one instead, same quantity.',
+  );
+  expect(swapResponse.ok()).toBe(true);
+  expect(swapResponse.request().postDataJSON()).toMatchObject({
+    shopping_case_id: caseId,
+    confirmed_slots: { order_quantity: 20 },
+  });
+  const swapAnswer = await latestAnswer(swapResponse);
+  const purposeAnswer = await latestEventWith(swapResponse, 'shopping_case_retained_purpose');
+  expect(swapAnswer.shopping_case_obligations).toContain('selected_product');
+  expect(swapAnswer.requested_quantity).toBe(20);
+  expect(purposeAnswer.shopping_case_retained_purpose).toBe(
+    'I need 20 laptops for CAD work.',
+  );
+  expect(purposeAnswer.shopping_case_retained_purpose).not.toMatch(/workstation one/i);
 });

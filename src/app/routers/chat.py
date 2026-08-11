@@ -3605,7 +3605,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         == "blocked"
     )
     response_slots_for_output = dict(response_confirmed_slots)
-    if semantic_catalog_blocked and data.get("requested_quantity") is None:
+    same_case_commercial_interruption = bool(
+        active_shopping_case_id and case_commercial_obligations
+    )
+    if (
+        semantic_catalog_blocked
+        and data.get("requested_quantity") is None
+        and not same_case_commercial_interruption
+    ):
         # Accepted commercial state belongs to the suspended prior subject. Do not project
         # its quantity/budget into a new unresolved subject: the storefront uses these fields
         # to pin procurement panels and trace identity to the current turn.
@@ -3867,6 +3874,46 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         except Exception as exc:
             logger.debug("provisional ambiguity projection skipped: %s", exc)
 
+    # Covered local catalogue exploration still needs a durable case boundary:
+    # subsequent quantity, deadline, selection, swap, or supplier turns amend
+    # this purpose instead of floating as unrelated chat prose. Ambiguity and
+    # research projections remain separate and retain their stricter contract.
+    if not active_shopping_case_id and products:
+        try:
+            from datetime import datetime, timezone
+            import uuid as _uuid
+            from src.app.models.orm import ShoppingCase
+
+            created_case_id = "sc-" + str(
+                decision_trace_id or _uuid.uuid4().hex
+            ).removeprefix("sc-")[:196]
+            existing_case = db.execute(sql_text(
+                "SELECT 1 FROM shopping_cases "
+                "WHERE tenant_id=:tenant_id AND case_id=:case_id LIMIT 1"
+            ), {
+                "tenant_id": tenant_id,
+                "case_id": created_case_id,
+            }).first()
+            if existing_case is None:
+                now = datetime.now(timezone.utc)
+                db.add(ShoppingCase(
+                    case_id=created_case_id,
+                    tenant_id=tenant_id,
+                    uid=str(uid or "guest")[:200],
+                    status="active",
+                    retained_purpose=str(submitted_query or q or "")[:500],
+                    created_at=now,
+                    updated_at=now,
+                ))
+                db.commit()
+            active_shopping_case_id = created_case_id
+            active_shopping_case_purpose = str(submitted_query or q or "")[:500]
+        except Exception:
+            logger.warning(
+                "covered catalog shopping-case creation failed; preserving response",
+                exc_info=True,
+            )
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -3879,6 +3926,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # new-line picks + adversarial verdict + needs_confirmation so the UI confirms qty/budget, not guesses.
         "multi_intent": multi_intent,
         "shopping_case_obligations": case_commercial_obligations,
+        "shopping_case_id": active_shopping_case_id or None,
         "shopping_case_retained_purpose": active_shopping_case_purpose or None,
         "needs_disambiguation": False if turn_intent == "POLICY_QUESTION" else bool(
             data.get("needs_disambiguation") or (not products and next_questions)
@@ -3975,7 +4023,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             if data.get("requested_quantity") is not None
             else (
                 None
-                if semantic_catalog_blocked
+                if semantic_catalog_blocked and not same_case_commercial_interruption
                 else response_slots_for_output.get("order_quantity")
             )
         ),
