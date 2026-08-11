@@ -99,3 +99,45 @@ The outstanding runtime-import closure is `security_connector_identity.py` with 
 ## Phase ordering after integrity closure
 
 Phase 1 remains the generic research-trigger contract. It must be driven by typed material evidence gaps and authority state—not workload keywords. The named gaming, engineering, biomedical, and unknown prompts are probes of the same contract, not new hard-coded personas.
+
+## 11 August continuation checkpoint
+
+The development worktree now has 27 Git-status entries: 17 tracked changes and
+10 untracked path groups. This is down from 187 without a reset, blanket stage,
+or deletion. Thirty-five dated assessment/product-note files and three
+historical screenshots have been archived with explicit non-certification
+labels. The 62 files under `scratchpad/` are now individually inventoried
+(18,514,966 bytes total); runtime logs remain ignored and preserved pending
+owner-approved deletion.
+
+New focused closure commits cover:
+
+- shopping-case research and trace continuity across budget/quantity follow-ups;
+- OCR requirement and business-day delivery regression contracts;
+- opt-in GeoIP network lookup with provider-health telemetry;
+- explicit production payment-execution policy;
+- migrated security schema authority and cross-dialect supplier identities;
+- authenticated, contract-fingerprinted tool-bridge calls;
+- trusted client-IP use for IAM events;
+- bounded router-model prewarming;
+- supported GitHub Action revisions and attested cloud-image publishing.
+
+Detached clean-checkout proof at `fcc8fa3e`:
+
+- full SQLite migration from an empty database: passed;
+- application and V2 compatibility imports: passed;
+- focused integrity/security/research tests: 32 passed;
+- cart and V2 compatibility regression tests: 122 passed;
+- `npm ci`: passed with zero reported vulnerabilities;
+- frontend production build: passed (existing bundle-size warning retained).
+
+The canonical real-backend semantic browser journey also passes in the
+development runtime (1 Chromium test, 24.1 seconds). It proves approved research
+remains bound to the original shopping case through three follow-up turns,
+provider/cache accounting remains visible, and cart/supplier authority remains
+none.
+
+Phase 0 is not declared complete yet. Residual code/config/browser groups still
+require focused disposition, and the final clean-checkout Playwright run must be
+repeated after those intended groups are either committed or explicitly
+preserved as out-of-scope work.
