@@ -102,3 +102,15 @@ def test_flattened_screenshot_ocr_recovers_explicit_hardware_sections():
     storage = [claim.value for claim in claims if claim.attribute == "storage_gb"]
     assert ram == [32, 64]
     assert storage == [1000, 2000]
+
+
+def test_compact_manual_specifications_extract_each_typed_clause():
+    claims = extract_buyer_requirement_claims(
+        "RAM 32GB minimum; 1TB NVMe storage; Windows 11 Pro recommended",
+        source_reference="manual-specifications:case-1",
+    )
+    projected = {(claim.attribute, claim.value) for claim in claims}
+    assert ("ram_gb", 32) in projected
+    assert ("storage_gb", 1000) in projected
+    assert ("storage_type", "NVMe SSD") in projected
+    assert ("operating_system", "Windows 11 Pro") in projected

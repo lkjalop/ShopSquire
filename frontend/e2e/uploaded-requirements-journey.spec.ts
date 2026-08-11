@@ -183,3 +183,51 @@ test('plain-text requirements use the same provisional review contract', async (
   await expect(page.getByTestId('buyer-claim-reconciliation')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('product-shelves')).toContainText(/best across accepted shared needs/i);
 });
+
+test('manual specifications use the same editable same-case corroboration contract', async ({ page }) => {
+  test.setTimeout(180_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+  await page.addInitScript(
+    (uid) => sessionStorage.setItem('uid', uid),
+    `enterprise-e2e-manual-requirements-${suffix}`,
+  );
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
+  const input = page.getByPlaceholder('Type your message...');
+  await input.fill('I need to simulate a PLC-controlled factory using Factory I/O.');
+  await input.press('Enter');
+
+  const panel = page.getByTestId('ambiguity-exploration');
+  await expect(panel).toBeVisible({ timeout: 45_000 });
+  await panel.getByRole('button', { name: 'Enter specifications' }).click();
+  const entry = panel.getByTestId('manual-requirement-entry');
+  await entry.getByLabel('Manual specifications').fill(
+    'RAM 32GB minimum; 1TB NVMe; Windows 11 Pro recommended',
+  );
+  const proposalResponse = page.waitForResponse((response) =>
+    /\/api\/v1\/shopping-cases\/[^/]+\/requirement-proposals\/from-text$/.test(
+      new URL(response.url()).pathname,
+    ),
+  );
+  await entry.getByRole('button', { name: 'Review extracted requirements' }).click();
+  expect((await proposalResponse).ok()).toBe(true);
+
+  const review = page.getByTestId('buyer-requirement-review');
+  await expect(review).toBeVisible({ timeout: 45_000 });
+  await expect(review).toContainText(/provisional and unverified/i);
+  await expect(review.getByRole('textbox', { name: 'Correct ram gb value' })).toHaveValue('32');
+  await expect(review.getByRole('textbox', { name: 'Correct storage gb value' })).toHaveValue('1000');
+  await expect(review.getByRole('textbox', { name: 'Correct operating system value' })).toHaveValue('Windows 11 Pro');
+  await review.getByRole('textbox', { name: 'Correct ram gb value' }).fill('64');
+
+  const acceptanceResponse = page.waitForResponse((response) =>
+    /\/api\/v1\/shopping-cases\/[^/]+\/requirement-proposals\/[^/]+\/accept$/.test(
+      new URL(response.url()).pathname,
+    ),
+  );
+  await review.getByRole('button', { name: 'Research and corroborate' }).click();
+  expect((await acceptanceResponse).ok()).toBe(true);
+  await expect(page.getByTestId('buyer-claim-reconciliation')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('product-shelves')).toContainText(/best across accepted shared needs/i);
+  await expect(page.getByRole('button', { name: 'Research approved sources' })).toHaveCount(0);
+});

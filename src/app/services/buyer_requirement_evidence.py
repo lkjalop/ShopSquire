@@ -128,6 +128,25 @@ def extract_buyer_requirement_claims(
         str(text or ""),
         flags=re.I,
     )
+    # Manual entry commonly uses compact comma/semicolon-separated clauses
+    # ("RAM 32GB; storage 1TB NVMe; Windows 11 Pro"). Split only when the
+    # following clause starts with a known capability label. This preserves
+    # prose punctuation while allowing every explicit claim family to be read.
+    normalized_text = re.sub(
+        r"\s*;\s*(?=(?:(?:processor|cpu|memory|ram|storage|graphics|gpu|"
+        r"networking|os\s+setup|windows\s+11)\b|\d+\s*(?:tb|tib)\b"
+        r"(?=[^;\n]*(?:storage|nvme|ssd))))",
+        "\n",
+        normalized_text,
+        flags=re.I,
+    )
+    normalized_text = re.sub(
+        r"\s*,\s*(?=(?:processor\b|cpu\b|memory\b|ram\b|storage\b|"
+        r"graphics\b|gpu\b|networking\b|os\s+setup\b|windows\s+11\b))",
+        "\n",
+        normalized_text,
+        flags=re.I,
+    )
     for raw_line in normalized_text.splitlines():
         line = re.sub(r"^[\s*•\-]+", "", raw_line).strip()
         if not line:
