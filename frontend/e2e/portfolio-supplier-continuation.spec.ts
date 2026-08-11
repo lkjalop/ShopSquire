@@ -122,3 +122,49 @@ test('unavailable flagship offers a proportionate conditional substitute without
   await expect(continuation.getByRole('button', { name: 'Cart updated' })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/Applied the explicitly confirmed fulfilment selection: 30 ×/i)).toBeVisible();
 });
+
+test('buyer can review wait and split paths then cancel without changing the cart', async ({ page }) => {
+  test.setTimeout(150_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
+  await page.addInitScript(
+    (uid) => sessionStorage.setItem('uid', uid),
+    `portfolio-supplier-cancel-${suffix}`,
+  );
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
+  const input = page.getByPlaceholder('Type your message...');
+  await input.fill('I need to simulate a PLC-controlled factory and cyberattacks against the OT network.');
+  await input.press('Enter');
+
+  const interpretation = page.getByTestId('ambiguity-exploration');
+  await expect(interpretation).toBeVisible({ timeout: 45_000 });
+  await interpretation.getByRole('button', { name: 'Use official link or vendor' }).click();
+  await interpretation.getByLabel('Official requirements URL or named vendor').fill(
+    'https://docs.factoryio.com/manual/system-requirements/',
+  );
+  await interpretation.getByRole('button', { name: 'Check source' }).click();
+  await interpretation.getByRole('button', { name: 'Research matched canonical source' }).click();
+  await expect(page.getByText(/fetched the reviewed canonical publisher page/i)).toBeVisible({ timeout: 60_000 });
+
+  const titan = page.getByTestId('product-shelves').locator('article')
+    .filter({ hasText: 'MSI Titan 18 HX A2WJ RTX 5090 Laptop' }).first();
+  await titan.getByRole('spinbutton').fill('30');
+  await titan.getByRole('button', { name: /Review option|Propose cart change/i }).click();
+  const continuation = page.getByTestId('supplier-continuation');
+  await continuation.getByLabel('Needed within days').fill('10');
+  await continuation.getByRole('button', { name: 'Assess fulfilment' }).click();
+
+  const choices = continuation.getByTestId('fulfillment-choices');
+  await choices.getByRole('button', { name: /Wait 8 days for the preferred fit/i }).click();
+  await expect(continuation).toContainText(/Keep SCORP-126982 for all 30 units/i);
+  await continuation.getByRole('button', { name: 'Change fulfilment choice' }).click();
+  await continuation.getByTestId('fulfillment-choices')
+    .getByRole('button', { name: /Take 3 now and source 27/i }).click();
+  await expect(continuation).toContainText(/Keep SCORP-126982 for all 30 units/i);
+  await expect(page.getByText(/Cart \(0\)/i).first()).toBeVisible();
+
+  await continuation.getByRole('button', { name: 'Close review' }).click();
+  await expect(continuation).toHaveCount(0);
+  await expect(page.getByText(/Cart \(0\)/i).first()).toBeVisible();
+  await expect(page.getByText(/Applied the explicitly confirmed fulfilment selection/i)).toHaveCount(0);
+});
