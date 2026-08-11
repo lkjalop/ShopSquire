@@ -54,3 +54,9 @@ def test_empty_query_is_safe():
     p = decompose("")
     assert p.intent == INTENT_PRODUCT_SEARCH
     assert p.hard_constraints == {}
+
+
+def test_business_day_delivery_window_is_a_bounded_operational_horizon():
+    plan = decompose("I need delivery within two business days")
+
+    assert plan.availability_horizon_days == 2
