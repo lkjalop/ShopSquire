@@ -19,6 +19,7 @@ from src.app.models.orm import (
 from src.app.services.recommendation_core.product_shelves import (
     AvailabilityProjection,
     EvidenceFreshnessProjection,
+    ProductIdentityEvidenceProjection,
     ProductShelfProjection,
     ShelfCandidateInput,
     build_product_shelves,
@@ -212,6 +213,52 @@ def _identity(row: ProductConfiguration) -> ProductConfigurationIdentity:
             },
         ),
         form_factor=canonical_form,
+    )
+
+
+def _identity_evidence(
+    row: ProductConfiguration,
+    observations: Sequence[ProductEvidenceObservation],
+) -> ProductIdentityEvidenceProjection:
+    identity_rows = [
+        item for item in observations
+        if item.attribute_key in {"manufacturer_part_number", "mpn"}
+        and item.evidence_status != "unknown"
+    ]
+    observed_mpns = {
+        _normalized(_value(item)) for item in identity_rows if _value(item) is not None
+    }
+    configured_mpn = _normalized(row.mpn)
+    conflicting = bool(
+        any(item.evidence_status == "conflicted" for item in identity_rows)
+        or len(observed_mpns) > 1
+        or (configured_mpn and observed_mpns and configured_mpn not in observed_mpns)
+    )
+    source_names = {_normalized(item.source_id) for item in identity_rows}
+    manufacturer_source = _normalized(row.manufacturer)
+    retailer_source = _normalized(row.retailer)
+    reconciled = bool(
+        configured_mpn
+        and manufacturer_source in source_names
+        and retailer_source in source_names
+        and manufacturer_source != retailer_source
+        and not conflicting
+    )
+    status = (
+        "conflicted" if conflicting else
+        "reconciled_oem_retailer" if reconciled else
+        "retailer_attested" if configured_mpn and (row.source_url or identity_rows) else
+        "unresolved"
+    )
+    return ProductIdentityEvidenceProjection(
+        status=status,
+        manufacturer=row.manufacturer,
+        mpn=row.mpn,
+        retailer_sku=row.retailer_sku,
+        retailer=row.retailer,
+        source_url=row.source_url,
+        configuration_hash=row.configuration_hash,
+        claim_ids=[item.id for item in identity_rows],
     )
 
 
@@ -457,6 +504,7 @@ def project_accepted_catalog(
                 row, availability_by_configuration[row.id], now=observed_now,
             ),
             availability=availability,
+            identity_evidence=_identity_evidence(row, observations),
         ))
     return build_product_shelves(
         candidates, hypothesis_ids=hypothesis_ids, scope_labels=labels,

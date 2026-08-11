@@ -186,6 +186,8 @@ def _configuration_claims(item: ReviewedConfiguration) -> dict[str, tuple[Any, s
     """Every material configuration field is an independently referenceable fact."""
 
     return {
+        "manufacturer_part_number": (item.mpn, None),
+        "retailer_sku": (item.retailer_sku, None),
         "form_factor": (item.form_factor, None),
         "mobility": (item.mobility, None),
         "device_class": (item.device_class, None),

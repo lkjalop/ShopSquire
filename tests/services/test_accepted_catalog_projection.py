@@ -99,6 +99,10 @@ def test_exact_observations_supply_claim_refs_independent_freshness_and_location
     )
     assert titan.requirement_claim_ids == ["official-ram"]
     assert titan.capability_claim_ids
+    assert titan.identity_evidence.status == "retailer_attested"
+    assert titan.identity_evidence.mpn == "Titan 18 HX A2WJ-1038AU"
+    assert titan.identity_evidence.retailer_sku == "126982"
+    assert titan.identity_evidence.claim_ids
     assert titan.evidence_freshness.specification == "fresh"
     assert titan.evidence_freshness.price == "fresh"
     assert titan.evidence_freshness.availability == "fresh"
@@ -159,3 +163,32 @@ def test_product_clocks_age_independently_and_workstation_identity_is_preserved(
     assert zbook.evidence_freshness.specification == "fresh"
     assert zbook.evidence_freshness.price == "stale"
     assert zbook.evidence_freshness.availability == "stale"
+
+
+def test_conflicting_oem_and_retailer_identity_is_visible_not_forced_to_exact_reconciliation():
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        from src.app.models.orm import ProductConfiguration, ProductEvidenceObservation
+
+        titan = db.query(ProductConfiguration).filter_by(sku="SCORP-126982").one()
+        db.add(ProductEvidenceObservation(
+            configuration_id=titan.id,
+            attribute_key="manufacturer_part_number",
+            value_json={"value": "OEM-DIFFERENT-CONFIG"},
+            claim_class="attested",
+            evidence_status="observed",
+            source_id="MSI",
+            source_record_id="https://www.msi.com/example#mpn",
+            observed_at=datetime(2026, 8, 8, 12, tzinfo=timezone.utc),
+        ))
+        db.commit()
+        projection = project_accepted_catalog(db, accepted_claims=[])
+
+    products = {
+        product.product.sku: product
+        for shelf in projection.shelves
+        for product in [*shelf.initial, *shelf.next_page]
+    }
+    assert products["SCORP-126982"].identity_evidence.status == "conflicted"

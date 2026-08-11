@@ -58,6 +58,23 @@ class AvailabilityProjection(BaseModel):
     freshness_status: FreshnessStatus = "unknown"
 
 
+class ProductIdentityEvidenceProjection(BaseModel):
+    """Buyer-visible identity truth for one exact sellable configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal[
+        "unresolved", "retailer_attested", "reconciled_oem_retailer", "conflicted",
+    ] = "unresolved"
+    manufacturer: str | None = None
+    mpn: str | None = None
+    retailer_sku: str | None = None
+    retailer: str | None = None
+    source_url: str | None = None
+    configuration_hash: str | None = None
+    claim_ids: list[str] = Field(default_factory=list, max_length=32)
+
+
 def configuration_identity_key(product: ProductConfigurationIdentity) -> str:
     """Return a stable key for the exact decision-material configuration."""
     material = "|".join(
@@ -97,6 +114,9 @@ class ShelfCandidateInput(BaseModel):
         default_factory=EvidenceFreshnessProjection,
     )
     availability: list[AvailabilityProjection] = Field(default_factory=list, max_length=64)
+    identity_evidence: ProductIdentityEvidenceProjection = Field(
+        default_factory=ProductIdentityEvidenceProjection,
+    )
     fit_by_scope: dict[str, WorkloadDecision | None] = Field(
         default_factory=dict, max_length=8
     )
@@ -153,6 +173,9 @@ class ShelfProduct(BaseModel):
         default_factory=EvidenceFreshnessProjection,
     )
     availability: list[AvailabilityProjection] = Field(default_factory=list, max_length=64)
+    identity_evidence: ProductIdentityEvidenceProjection = Field(
+        default_factory=ProductIdentityEvidenceProjection,
+    )
     requested_quantity: int | None = Field(default=None, ge=1, le=1_000_000)
     available_now: int | None = Field(default=None, ge=0, le=1_000_000)
     shortfall: int | None = Field(default=None, ge=0, le=1_000_000)
@@ -487,6 +510,7 @@ def build_product_shelves(
                     ),
                     evidence_freshness=candidate.evidence_freshness,
                     availability=candidate.availability,
+                    identity_evidence=candidate.identity_evidence,
                     requested_quantity=requested_quantity,
                     available_now=available_now,
                     shortfall=shortfall,

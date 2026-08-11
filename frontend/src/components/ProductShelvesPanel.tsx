@@ -32,6 +32,12 @@ export type ShelfProduct = {
     lead_time_min_days?: number | null; lead_time_max_days?: number | null;
     freshness_status?: string;
   }[];
+  identity_evidence?: {
+    status: 'unresolved' | 'retailer_attested' | 'reconciled_oem_retailer' | 'conflicted';
+    manufacturer?: string | null; mpn?: string | null; retailer_sku?: string | null;
+    retailer?: string | null; source_url?: string | null; configuration_hash?: string | null;
+    claim_ids?: string[];
+  };
   commercial_decision?: {
     status: string;
     fit_tier: string;
@@ -195,6 +201,12 @@ function Shelf({ shelf, onPropose, narration }: {
             <details style={{ marginTop: 6, fontSize: 11 }}>
               <summary>Why this recommendation</summary>
               <div>Exact configuration: {item.product.identifier || 'not verified'}</div>
+            {item.identity_evidence ? (
+              <div>
+                Identity: {identityStatusLabel(item.identity_evidence.status)}
+                {item.identity_evidence.retailer_sku ? ` · retailer SKU ${item.identity_evidence.retailer_sku}` : ''}
+              </div>
+            ) : null}
             {item.commercial_decision ? (
               <div>
                 Commercial status: {item.commercial_decision.status}
@@ -266,4 +278,11 @@ function freshAvailableQuantity(item: ShelfProduct): number | null {
     row.freshness_status === 'fresh'
     && (row.quantity === 0 || ['sold_out', 'built_to_order', 'at_supplier'].includes(row.status))
   )) ? 0 : null;
+}
+
+function identityStatusLabel(status: NonNullable<ShelfProduct['identity_evidence']>['status']) {
+  if (status === 'reconciled_oem_retailer') return 'OEM and retailer reconciled';
+  if (status === 'retailer_attested') return 'retailer attested; OEM corroboration pending';
+  if (status === 'conflicted') return 'conflicting identity evidence';
+  return 'not verified';
 }
