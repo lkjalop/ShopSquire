@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -26,6 +27,49 @@ GENERATED_NAMES = {
 }
 
 EVIDENCE_SUFFIXES = (".md", ".png", ".jpg", ".jpeg", ".txt", ".csv")
+SCRATCH_RUNTIME_SUFFIXES = (".log", ".out", ".err")
+
+
+def _file_observation(repo: Path, path: str) -> tuple[str, str]:
+    candidate = repo / path
+    if not candidate.is_file():
+        return "", ""
+    stat = candidate.stat()
+    modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+    return str(stat.st_size), modified
+
+
+def _scratchpad_rows(repo: Path) -> list[dict[str, str]]:
+    root = repo / "scratchpad"
+    if not root.is_dir():
+        return []
+    rows: list[dict[str, str]] = []
+    for candidate in sorted(path for path in root.rglob("*") if path.is_file()):
+        relative = candidate.relative_to(repo).as_posix()
+        is_runtime = candidate.name.lower().endswith(SCRATCH_RUNTIME_SUFFIXES)
+        size_bytes, modified_utc = _file_observation(repo, relative)
+        rows.append(
+            {
+                "status": "!!" if is_runtime else "??",
+                "path": relative,
+                "topic": "generated runtime evidence" if is_runtime else "scratchpad evidence",
+                "action_class": "generated_artifact" if is_runtime else "evidence_or_archive",
+                "ownership": "generated" if is_runtime else "authorship_unverified",
+                "proposed_disposition": (
+                    "verify_then_remove_or_archive" if is_runtime
+                    else "review_and_archive_or_commit"
+                ),
+                "test_proof": "not_yet_linked",
+                "size_bytes": size_bytes,
+                "modified_utc": modified_utc,
+                "notes": (
+                    "Ignored runtime stream; deletion still requires explicit approval."
+                    if is_runtime
+                    else "Preserve until its evidence value and ownership are reviewed."
+                ),
+            }
+        )
+    return rows
 
 
 def _action_class(status: str, path: str, topic: str) -> str:
@@ -159,9 +203,13 @@ def _status_rows(repo: Path) -> list[dict[str, str]]:
                 original = entries[index]
                 index += 1
                 path = f"{original} -> {path}"
+        if path.replace("\\", "/").rstrip("/") == "scratchpad":
+            rows.extend(_scratchpad_rows(repo))
+            continue
         topic = _topic(path)
         action_class = _action_class(status, path, topic)
         ownership, disposition, notes = _disposition(status, path, topic, action_class)
+        size_bytes, modified_utc = _file_observation(repo, path)
         rows.append(
             {
                 "status": status,
@@ -171,6 +219,8 @@ def _status_rows(repo: Path) -> list[dict[str, str]]:
                 "ownership": ownership,
                 "proposed_disposition": disposition,
                 "test_proof": "not_yet_linked",
+                "size_bytes": size_bytes,
+                "modified_utc": modified_utc,
                 "notes": notes,
             }
         )
