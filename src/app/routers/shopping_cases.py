@@ -141,12 +141,47 @@ class ConfirmFulfillmentCartRequest(BaseModel):
     substitution_authorized: bool = False
 
 
+class PortfolioNarrationPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    uid: str = Field(min_length=1, max_length=200)
+    projection: dict[str, Any]
+
+
 def _tenant(value: str | None) -> str:
     return str(value or "default").strip() or "default"
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@router.post("/{case_id}/narration-preview")
+def portfolio_narration_preview(
+    case_id: str,
+    body: PortfolioNarrationPreviewRequest,
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Buyer-triggered prose preview; ranking and commerce authority remain deterministic."""
+    from src.app.services.portfolio_narration_preview import (
+        ShelfNarrationProjection, render_portfolio_narration_preview,
+    )
+
+    tenant_id = _tenant(x_tenant_id)
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id, ShoppingCase.case_id == case_id,
+    )).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="shopping_case_not_found")
+    if case.uid != body.uid:
+        raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+    projection = ShelfNarrationProjection.model_validate(body.projection)
+    result = render_portfolio_narration_preview(projection)
+    result.update({
+        "schema_version": "portfolio-narration-preview-response-v1",
+        "case_id": case_id, "cart_authority": "none", "supplier_authority": "none",
+    })
+    return result
 
 
 def _external_research_runtime_status() -> dict[str, Any]:

@@ -151,4 +151,33 @@ describe('research truth panels', () => {
     expect(screen.queryByTestId('product-narration-WS-3')).toBeNull();
     expect(screen.getByText(/current buyer renderer is deterministic/i)).toBeTruthy();
   });
+
+  it('shows only critic-accepted preview output and labels its lack of authority', async () => {
+    const preview = vi.fn().mockResolvedValue({
+      text: 'Critic-accepted local preview.', renderer: 'local_model_preview',
+      status: 'accepted_preview', fallback_reason: null,
+    });
+    render(<ProductShelvesPanel projection={{
+      schema_version: 'product-shelves-v1', evidence_status: 'researched',
+      narration_projection: {
+        purpose: 'Factory I/O', accepted_requirements: [],
+        shelf_summary: 'Deterministic summary.', top_product_sentences: [],
+        reranking_summary: 'No rank change.',
+      },
+      shelves: [{
+        shelf_id: 'shared', scope_label: 'Shared fit', budget_band: 'best',
+        remaining_count: 0, next_page: [], initial: [{
+          identity_key: 'pc-preview', title: 'Preview workstation', price_cents: 500000,
+          currency: 'AUD', fit_status: 'conditional', relevance_score: 0.8,
+          product: { sku: 'WS-PREVIEW' },
+        }],
+      }],
+    }} onNarrationPreview={preview} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI explanation preview' }));
+    await waitFor(() => expect(screen.getByTestId('deterministic-shelf-narration'))
+      .toHaveTextContent('Critic-accepted local preview.'));
+    expect(screen.getByTestId('narration-preview-status'))
+      .toHaveTextContent(/critic accepted.*no commerce authority/i);
+  });
 });

@@ -3074,6 +3074,29 @@ export default function App() {
     }]);
   }, [ambiguityExploration, productShelves, uid]);
 
+  const requestPortfolioNarrationPreview = useCallback(async (
+    projection: NonNullable<ProductShelfProjection['narration_projection']>,
+  ) => {
+    if (!ambiguityExploration?.case_id) {
+      return { text: projection.shelf_summary, renderer: 'deterministic', status: 'no_case', fallback_reason: 'no_case' };
+    }
+    const response = await fetch(apiUrl(
+      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/narration-preview`,
+    ), {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders() },
+      body: JSON.stringify({ uid, projection }),
+    });
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      return {
+        text: projection.shelf_summary, renderer: 'deterministic', status: 'request_failed',
+        fallback_reason: apiErrorMessage(payload, 'preview request failed'),
+      };
+    }
+    return payload;
+  }, [ambiguityExploration, uid]);
+
   const assessSupplierContinuation = useCallback(async (deadlineDays: number) => {
     if (!supplierContinuation) return;
     const response = await fetch(apiUrl(
@@ -3786,6 +3809,7 @@ export default function App() {
                   {productShelves && <ProductShelvesPanel
                     projection={productShelves}
                     onPropose={ambiguityExploration?.status === 'researched' ? proposeResearchedProduct : undefined}
+                    onNarrationPreview={requestPortfolioNarrationPreview}
                   />}
                   {supplierContinuation && <SupplierContinuationCard
                     journey={supplierContinuation}

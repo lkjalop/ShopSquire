@@ -96,11 +96,18 @@ const secondaryCommerceStyle = {
   borderRadius: 6, padding: '6px 9px', fontWeight: 700,
 } as const;
 
-export default function ProductShelvesPanel({ projection, onPropose }: {
+export default function ProductShelvesPanel({ projection, onPropose, onNarrationPreview }: {
   projection: ProductShelfProjection;
   onPropose?: (product: ShelfProduct, quantity: number) => void;
+  onNarrationPreview?: (projection: NonNullable<ProductShelfProjection['narration_projection']>) => Promise<{
+    text: string; renderer: string; status: string; fallback_reason?: string | null;
+  }>;
 }) {
   const [showNarration, setShowNarration] = React.useState(true);
+  const [preview, setPreview] = React.useState<{
+    text: string; renderer: string; status: string; fallback_reason?: string | null;
+  } | null>(null);
+  const [previewBusy, setPreviewBusy] = React.useState(false);
   if (!projection?.shelves?.length) return null;
   return (
     <section data-testid="product-shelves" aria-label="Provisional product shelves" style={{ padding: 12 }}>
@@ -124,9 +131,27 @@ export default function ProductShelvesPanel({ projection, onPropose }: {
           >
             Concise evidence narration: {showNarration ? 'on' : 'off'}
           </button>
+          {onNarrationPreview ? (
+            <button type="button" disabled={previewBusy} style={{ ...secondaryCommerceStyle, marginLeft: 7 }}
+              onClick={() => {
+                setPreviewBusy(true);
+                void onNarrationPreview(projection.narration_projection!)
+                  .then(setPreview)
+                  .finally(() => setPreviewBusy(false));
+              }}>
+              {previewBusy ? 'Checking AI preview…' : 'AI explanation preview'}
+            </button>
+          ) : null}
           {showNarration ? (
             <div data-testid="deterministic-shelf-narration" style={{ fontSize: 12, marginTop: 6, color: '#334155' }}>
-              {projection.narration_projection.shelf_summary}
+              {preview?.text || projection.narration_projection.shelf_summary}
+              {preview ? (
+                <div data-testid="narration-preview-status" style={{ marginTop: 4, fontSize: 11 }}>
+                  {preview.renderer === 'local_model_preview'
+                    ? 'Local AI preview · critic accepted · no commerce authority'
+                    : `Deterministic fallback · ${preview.fallback_reason || preview.status}`}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <details style={{ marginTop: 4, fontSize: 11 }}>
