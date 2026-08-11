@@ -1085,6 +1085,16 @@ def research_shopping_case(
         "official_claim_count": len(research["claims"]),
         "context_claim_count": len(research["context_claims"]),
     })
+    from src.app.services.research_explainability_projection import (
+        project_research_explainability,
+    )
+
+    buyer_receipt, narration_projection = project_research_explainability(
+        purpose=plan.retained_purpose, research=research,
+        shelves=after_projection, delta=delta,
+    )
+    after_projection["research_receipt"] = buyer_receipt.model_dump(mode="json")
+    after_projection["narration_projection"] = narration_projection.model_dump(mode="json")
     research_execution_mode = str(research.get("execution_mode") or "").strip().lower()
     provider_accounting = research.get("provider_accounting") or {}
     if research_execution_mode == "evidence_cache" or (

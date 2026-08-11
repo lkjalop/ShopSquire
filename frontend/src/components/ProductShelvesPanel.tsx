@@ -61,6 +61,24 @@ export type ProductShelfProjection = {
     sku: string; before?: number | null; after?: number | null;
     movement: number; reason: string;
   }[];
+  research_receipt?: {
+    summary: string;
+    publisher_labels: string[];
+    requirements_established: number;
+    context_claims: number;
+    unresolved_count: number;
+    product_identity_status: 'separately_verified';
+    availability_status: 'separately_verified';
+  };
+  narration_projection?: {
+    purpose: string;
+    accepted_requirements: Record<string, unknown>[];
+    shelf_summary: string;
+    top_product_sentences: {
+      sku: string; sentence: string; evidence_basis: 'verified' | 'conditional' | 'failed';
+    }[];
+    reranking_summary: string;
+  };
 };
 
 const money = (value: number, currency: string) => new Intl.NumberFormat('en-AU', {
@@ -79,6 +97,21 @@ export default function ProductShelvesPanel({ projection, onPropose }: {
   if (!projection?.shelves?.length) return null;
   return (
     <section data-testid="product-shelves" aria-label="Provisional product shelves" style={{ padding: 12 }}>
+      {projection.research_receipt ? (
+        <section data-testid="buyer-research-receipt" style={{ border: '1px solid #86efac', background: '#f0fdf4', borderRadius: 8, padding: 9, marginBottom: 10, fontSize: 12 }}>
+          <strong>Research receipt</strong>
+          <div>{projection.research_receipt.summary}</div>
+          <details style={{ marginTop: 4 }}>
+            <summary>What remains separately verified</summary>
+            Product identity and availability are checked against their own evidence and freshness clocks.
+          </details>
+        </section>
+      ) : null}
+      {projection.narration_projection ? (
+        <div data-testid="deterministic-shelf-narration" style={{ fontSize: 12, marginBottom: 10, color: '#334155' }}>
+          {projection.narration_projection.shelf_summary}
+        </div>
+      ) : null}
       <div style={{ fontSize: 12, marginBottom: 10, color: projection.evidence_status === 'researched' ? '#065f46' : '#92400e' }}>
         {projection.evidence_status === 'researched'
           ? `Official research compiled ${projection.official_claim_count || 0} scoped product claims and ${projection.context_claim_count || 0} context claims.`
@@ -97,19 +130,34 @@ export default function ProductShelvesPanel({ projection, onPropose }: {
             <div key={row.sku} style={{ fontSize: 12, marginTop: 4 }}>
               {row.sku}: {row.before ?? 'not ranked'} → {row.after ?? 'not ranked'} — {row.reason}
             </div>
-          )) : <div style={{ fontSize: 12, marginTop: 4 }}>{projection.evidence_status === 'researched'
-            ? 'Ranking order did not change; evidence status and visible gaps were updated.'
-            : 'No product requirements were established, so research did not authorize a verified rerank.'}</div>}
+          )) : (
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              {projection.narration_projection?.reranking_summary || (
+                projection.evidence_status === 'researched'
+                  ? 'Ranking order did not change; evidence status and visible gaps were updated.'
+                  : 'No product requirements were established, so research did not authorize a verified rerank.'
+              )}
+            </div>
+          )}
         </section>
       )}
       {projection.shelves.map((shelf) => (
-        <Shelf key={shelf.shelf_id} shelf={shelf} onPropose={onPropose} />
+        <Shelf
+          key={shelf.shelf_id}
+          shelf={shelf}
+          onPropose={onPropose}
+          narration={projection.narration_projection?.top_product_sentences || []}
+        />
       ))}
     </section>
   );
 }
 
-function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (product: ShelfProduct, quantity: number) => void }) {
+function Shelf({ shelf, onPropose, narration }: {
+  shelf: ProductShelf;
+  onPropose?: (product: ShelfProduct, quantity: number) => void;
+  narration: { sku: string; sentence: string }[];
+}) {
   const [expanded, setExpanded] = React.useState(false);
   const [quantities, setQuantities] = React.useState<Record<string, number>>({});
   const products = expanded ? [...shelf.initial, ...shelf.next_page] : shelf.initial;
@@ -134,6 +182,11 @@ function Shelf({ shelf, onPropose }: { shelf: ProductShelf; onPropose?: (product
               {item.fit_status === 'qualified' ? 'Verified fit' : 'Conditional fit'}
             </div>
             <div style={{ marginTop: 5, fontSize: 11 }}>{item.why_ranked || 'Provisional catalog exploration.'}</div>
+            {narration.find((row) => row.sku === item.product.sku)?.sentence ? (
+              <div data-testid={`product-narration-${item.product.sku}`} style={{ marginTop: 5, fontSize: 11, color: '#334155' }}>
+                {narration.find((row) => row.sku === item.product.sku)?.sentence}
+              </div>
+            ) : null}
             {item.explanation?.budget_note ? <div style={{ fontSize: 11 }}>{item.explanation.budget_note}</div> : null}
             {item.explanation?.availability_note ? <div style={{ fontSize: 11 }}>{item.explanation.availability_note}</div> : null}
             {freshAvailableQuantity(item) != null ? (

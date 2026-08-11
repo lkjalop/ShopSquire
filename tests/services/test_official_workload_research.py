@@ -259,6 +259,7 @@ def test_context_only_research_is_not_reported_as_product_requirements(monkeypat
     }
     assert result["source_execution"] == [{
         "source_id": "nist_manufacturing_digital_twins",
+        "publisher": "NIST",
         "parser_type": "html",
         "parser_version": "official-source-parser-v2:nist_manufacturing_digital_twins",
         "policy_version": "test:nist-v1",

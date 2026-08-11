@@ -679,6 +679,7 @@ def research_official_sources(
         canonical = str((source.get("canonical_entrypoints") or [""])[0])
         execution = {
             "source_id": source_id,
+            "publisher": source.get("publisher"),
             "parser_type": source.get("parser_type"),
             "parser_version": _parser_version(source_id),
             "policy_version": _policy_version(source),

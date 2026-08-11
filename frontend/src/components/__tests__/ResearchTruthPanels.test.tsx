@@ -87,4 +87,40 @@ describe('research truth panels', () => {
     expect(screen.getByText(/specification fresh.*price stale.*availability fresh/i)).toBeTruthy();
     expect(screen.getByText(/sydney in_stock \(12\)/i)).toBeTruthy();
   });
+
+  it('shows concise research and narration while keeping mechanics in drill-down', () => {
+    render(<ProductShelvesPanel projection={{
+      schema_version: 'product-shelves-v1', evidence_status: 'researched',
+      official_claim_count: 3, context_claim_count: 0, research_delta: [],
+      research_receipt: {
+        summary: "Researched Factory I/O's official requirements. 3 requirements were established; product identity and availability remain separately verified.",
+        publisher_labels: ['Factory I/O'], requirements_established: 3,
+        context_claims: 0, unresolved_count: 0,
+        product_identity_status: 'separately_verified',
+        availability_status: 'separately_verified',
+      },
+      narration_projection: {
+        purpose: 'Run Factory I/O', accepted_requirements: [],
+        shelf_summary: 'Three leading options are ranked for the retained purpose.',
+        top_product_sentences: [{
+          sku: 'WS-3', evidence_basis: 'conditional',
+          sentence: 'Workstation C remains conditional because GPU TGP is not verified.',
+        }],
+        reranking_summary: 'Research did not change the leading order; unresolved gaps remain visible.',
+      },
+      shelves: [{
+        shelf_id: 'shared', scope_label: 'Shared fit', budget_band: 'best',
+        remaining_count: 0, next_page: [], initial: [{
+          identity_key: 'pc-3', title: 'Workstation C', price_cents: 500000,
+          currency: 'AUD', fit_status: 'conditional', relevance_score: 0.8,
+          product: { sku: 'WS-3', identifier: 'MPN-3' },
+        }],
+      }],
+    }} />);
+
+    expect(screen.getByTestId('buyer-research-receipt')).toHaveTextContent(/Factory I\/O's official requirements/i);
+    expect(screen.getByTestId('deterministic-shelf-narration')).toHaveTextContent(/three leading options/i);
+    expect(screen.getByTestId('product-narration-WS-3')).toHaveTextContent(/GPU TGP is not verified/i);
+    expect(screen.getByText(/unresolved gaps remain visible/i)).toBeTruthy();
+  });
 });
