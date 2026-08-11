@@ -138,6 +138,7 @@ describe('Decision Trace component ontology', () => {
     });
 
     expect(strip.authority.label).toBe('Platform authorized');
+    expect(strip.execution.label).toBe('Not executed');
     expect(strip.freshness.status).toBe('good');
     expect(strip.completeness.label).toBe('Partial');
     expect(strip.uncertainty.label).toBe('1 concern');
@@ -159,6 +160,7 @@ describe('Decision Trace component ontology', () => {
     });
 
     expect(strip.freshness.label).toBe('Not assessed');
+    expect(strip.execution.label).toBe('Blocked');
     expect(strip.completeness.label).toBe('Not recorded');
     expect(strip.uncertainty.label).toBe('Material');
   });
@@ -200,6 +202,25 @@ describe('Decision Trace component ontology', () => {
     expect(strip.freshness.label).toBe('Current');
     expect(strip.completeness.label).toBe('Complete');
     expect(strip.uncertainty.label).toBe('No material concern');
+  });
+
+  it('labels a receipted canonical official-origin fetch as completed', () => {
+    const strip = deriveTraceTrustStrip({
+      events: [{
+        event_type: 'official_research_rerank_completed',
+        payload: {
+          evidence_outcome: 'product_requirements',
+          official_claims: [{ observed_at: '2026-08-10T00:00:00Z' }],
+          receipts: [{
+            provider_kind: 'official_origin_fetch',
+            execution_status: 'completed',
+          }],
+        },
+      }],
+      executionSteps: [], evidence: null, marketProjections: [], hippographInsights: [],
+    });
+
+    expect(strip.execution.label).toBe('Completed');
   });
 
   it('compacts raw event volume into state changed, prevented, and observed milestones', () => {

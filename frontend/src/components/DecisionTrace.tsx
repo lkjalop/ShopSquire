@@ -288,6 +288,7 @@ type TrustTone = 'good' | 'warn' | 'neutral';
 type TrustCue = { label: string; detail: string; status: TrustTone };
 
 export type TraceTrustStrip = {
+  execution: TrustCue;
   authority: TrustCue;
   freshness: TrustCue;
   completeness: TrustCue;
@@ -333,6 +334,36 @@ export function deriveTraceTrustStrip({
     ...(Array.isArray(event?.payload?.official_claims) ? event.payload.official_claims : []),
     ...(Array.isArray(event?.payload?.context_claims) ? event.payload.context_claims : []),
   ]);
+  const researchPayloads = officialResearchEvents.map((event) => event?.payload || {});
+  const researchTiers = researchPayloads.flatMap((payload) => (
+    Array.isArray(payload?.evidence_ladder) ? payload.evidence_ladder : []
+  ));
+  const researchReceipts = researchPayloads.flatMap((payload) => (
+    Array.isArray(payload?.receipts) ? payload.receipts : []
+  ));
+  const sourceExecutions = researchPayloads.flatMap((payload) => (
+    Array.isArray(payload?.source_execution) ? payload.source_execution : []
+  ));
+  const canonicalFetchCompleted = sourceExecutions.some((source) => (
+    String(source?.canonical_fetch_status || '').toLowerCase() === 'completed'
+  )) || researchReceipts.some((receipt) => (
+    String(receipt?.provider_kind || receipt?.kind || '').toLowerCase().includes('official')
+    && String(receipt?.execution_status || receipt?.status || '').toLowerCase() === 'completed'
+  ));
+  const researchBlocked = researchPayloads.some((payload) => (
+    String(payload?.status || '').toLowerCase() === 'blocked'
+  )) || researchTiers.some((tier) => (
+    ['blocked', 'rejected', 'failed', 'degraded'].includes(
+      String(tier?.execution_status || tier?.status || '').toLowerCase(),
+    )
+  ));
+  const execution: TrustCue = canonicalFetchCompleted
+    ? { label: 'Completed', detail: 'At least one governed canonical official-origin fetch completed.', status: 'good' }
+    : researchBlocked
+      ? { label: 'Blocked', detail: 'Research was attempted but a governed execution boundary prevented completion.', status: 'warn' }
+      : officialResearchEvents.length > 0
+        ? { label: 'Not completed', detail: 'Research state was recorded without a completed canonical fetch.', status: 'neutral' }
+        : { label: 'Not executed', detail: 'No governed research execution was recorded.', status: 'neutral' };
   const authorities = executionSteps.map((step) => String(step?.authority || '').toLowerCase());
   const eventText = JSON.stringify(events || []).toLowerCase();
   const humanApproved = /human.{0,24}(approved|authorized)|approved.{0,24}human/.test(eventText);
@@ -364,7 +395,7 @@ export function deriveTraceTrustStrip({
   const freshness: TrustCue = ageHours == null
     ? officialResearchEvents.length > 0
       ? { label: 'Not assessed', detail: 'Research was recorded but no accepted evidence observation time exists.', status: 'neutral' }
-      : { label: 'Freshness unknown', detail: 'No observation time was recorded.', status: 'neutral' }
+      : { label: 'Not assessed', detail: 'Nothing was fetched, so evidence freshness was not assessed.', status: 'neutral' }
     : ageHours <= 24
       ? { label: 'Current', detail: `Newest evidence is ${Math.max(0, Math.round(ageHours))}h old.`, status: 'good' }
       : ageHours <= 168
@@ -428,7 +459,7 @@ export function deriveTraceTrustStrip({
     ? { label: 'Simulation only', detail: 'This evidence cannot increase autonomous authority.', status: 'warn' }
     : { label: 'Operational trace', detail: 'No simulation-only flag was recorded.', status: 'good' };
 
-  return { authority, freshness, completeness, uncertainty, simulation };
+  return { execution, authority, freshness, completeness, uncertainty, simulation };
 }
 
 export type CompactTimelineItem = {

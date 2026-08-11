@@ -1,4 +1,7 @@
-from src.app.services.recommendation_core.gates import slot_gap_clarify
+from src.app.services.recommendation_core.gates import (
+    ClarificationObligationState,
+    slot_gap_clarify,
+)
 
 
 def test_known_use_case_does_not_get_asked_again_without_hardware_requirements():
@@ -47,4 +50,43 @@ def test_empty_retrieval_fully_specified_stays_honest_no_match():
     # Budget + requirements known but still empty -> not a slot gap; keep the honest no-match.
     assert slot_gap_clarify(
         has_products=False, budget_known=True, has_requirements=True
+    ) is None
+
+
+def test_empty_retrieval_never_contradicts_an_existing_selection():
+    assert slot_gap_clarify(
+        has_products=False,
+        has_selection=True,
+        budget_known=False,
+        has_requirements=False,
+    ) is None
+
+
+def test_empty_turn_never_claims_no_match_while_a_shortlist_is_visible():
+    assert slot_gap_clarify(
+        has_products=False,
+        budget_known=False,
+        has_requirements=False,
+        obligation_state=ClarificationObligationState(has_shortlist=True),
+    ) is None
+
+
+def test_empty_turn_never_claims_no_match_while_cart_context_is_visible():
+    assert slot_gap_clarify(
+        has_products=False,
+        budget_known=False,
+        has_requirements=False,
+        obligation_state=ClarificationObligationState(has_cart=True),
+    ) is None
+
+
+def test_fit_explanation_obligation_outranks_generic_budget_question():
+    assert slot_gap_clarify(
+        has_products=True,
+        budget_known=False,
+        has_requirements=True,
+        obligation_state=ClarificationObligationState(
+            has_shortlist=True,
+            has_fit_explanation_obligation=True,
+        ),
     ) is None

@@ -281,20 +281,15 @@ def create_case_interpretation(
         db, accepted_claims=[], desired_outcome=plan.retained_purpose,
         tenant_id=tenant_id, hypothesis_labels=plan_hypothesis_labels(plan),
     )
-    exploration = {
+    from src.app.services.shopping_case_truth_projection import ShoppingCaseTruthProjection
+
+    exploration = ShoppingCaseTruthProjection.model_validate({
         "schema_version": "ambiguity-exploration-v1",
         "case_id": case_id,
         "trace_id": trace_id,
         "retained_purpose": plan.retained_purpose,
         "status": "provisional",
-        "interpretations": [
-            {
-                "hypothesis_id": row.hypothesis_id,
-                "label": row.label,
-                "authority": row.authority,
-            }
-            for row in plan.hypotheses
-        ],
+        "interpretations": [row.model_dump(mode="json") for row in plan.hypotheses],
         "next_question": {"id": "research_scope", "text": plan.next_question},
         "research_choices": [
             "research_approved_sources", "upload_requirements",
@@ -309,7 +304,7 @@ def create_case_interpretation(
         "ambiguity_objects": [row.model_dump(mode="json") for row in plan.ambiguities],
         "research_obligations": [row.model_dump(mode="json") for row in plan.obligations],
         "source_candidate_ids": list(plan.source_candidate_ids),
-    }
+    }).model_dump(mode="json")
     log_trace_event(
         trace_id=trace_id,
         event_type="ambiguity_exploration_projected",
@@ -1105,7 +1100,9 @@ def research_shopping_case(
         research_execution = "official_research_not_executed"
     else:
         research_execution = "governed_official_research_completed"
-    exploration = {
+    from src.app.services.shopping_case_truth_projection import ShoppingCaseTruthProjection
+
+    exploration = ShoppingCaseTruthProjection.model_validate({
         "schema_version": "ambiguity-exploration-v1",
         "case_id": case_id, "trace_id": case_id.removeprefix("sc-"),
         "retained_purpose": plan.retained_purpose,
@@ -1143,7 +1140,7 @@ def research_shopping_case(
             for row in plan.obligations
         ],
         "source_candidate_ids": list(plan.source_candidate_ids),
-    }
+    }).model_dump(mode="json")
     result = {
         "schema_version": "shopping-case-research-v1", "case_id": case_id,
         "status": "research_completed", "retained_purpose": plan.retained_purpose,

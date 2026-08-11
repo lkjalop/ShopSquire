@@ -12,13 +12,27 @@ ask budget; no requirements → ask use-case. One bounded question, marked clari
 """
 from __future__ import annotations
 
-import re
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 # P1-3: the SHARED injection markers — the same source of truth the legacy commerce guard and the
 # narration guard use, so no surface admits an attack string another blocks. A THIN first gate, not a
 # replacement for the security battery (which joins with the image lane).
 from src.app.security.injection_patterns import INJECTION_RE as _INJECTION_RE
+
+
+@dataclass(frozen=True)
+class ClarificationObligationState:
+    """Buyer-visible product context that a slot-gap question must not erase."""
+
+    has_shortlist: bool = False
+    has_selected_product: bool = False
+    has_cart: bool = False
+    has_fit_explanation_obligation: bool = False
+
+    @property
+    def has_product_context(self) -> bool:
+        return self.has_shortlist or self.has_selected_product or self.has_cart
 
 
 def evaluate_text_gates(query: str) -> Dict[str, Any]:
@@ -35,8 +49,20 @@ def evaluate_text_gates(query: str) -> Dict[str, Any]:
 
 def slot_gap_clarify(*, has_products: bool, budget_known: bool,
                      has_requirements: bool, has_use_case: bool = False,
-                     allow_budget_question: bool = True) -> Optional[Dict[str, Any]]:
+                     allow_budget_question: bool = True,
+                     has_selection: bool = False,
+                     obligation_state: ClarificationObligationState | None = None,
+                     ) -> Optional[Dict[str, Any]]:
+    state = obligation_state or ClarificationObligationState(
+        has_shortlist=has_products,
+        has_selected_product=has_selection,
+    )
     if not has_products:
+        # Empty retrieval is a fact about this turn, not the conversation. A carted or explicitly
+        # selected product makes "I didn't find a match yet" false; let the selected-product
+        # obligation answer (or degrade honestly) without replacing it with a budget interrogation.
+        if state.has_product_context or state.has_fit_explanation_obligation:
+            return None
         # Empty retrieval is when a clarify matters MOST, not least: a missing slot on a zero-result
         # turn is a recoverable dead-end, so ask ONE narrowing question instead of returning nothing.
         # A fully-specified empty turn stays None (an honest no-match, not a slot gap).
@@ -47,7 +73,11 @@ def slot_gap_clarify(*, has_products: bool, budget_known: bool,
             return {"id": "ask_use_case_empty", "goal": "recover_empty", "reason": "empty_use_case_slot",
                     "text": "I didn't find a match yet — what will you mainly use it for? That changes which specs matter."}
         return None
-    if not budget_known and allow_budget_question:
+    if (
+        not budget_known
+        and allow_budget_question
+        and not state.has_fit_explanation_obligation
+    ):
         return {"id": "ask_budget", "text": "What budget range should I stay within?",
                 "goal": "narrow_results", "reason": "budget_slot_empty"}
     if not has_requirements and not has_use_case:

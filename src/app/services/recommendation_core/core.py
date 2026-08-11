@@ -873,7 +873,10 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # refinement remains post-retrieval; an unresolved bulk budget scope changes the authorized
     # price ceiling and therefore must be answered before products are selected.
     from src.app.services.recommendation_core.gates import (
-        evaluate_text_gates, material_pre_retrieval_clarify, slot_gap_clarify,
+        ClarificationObligationState,
+        evaluate_text_gates,
+        material_pre_retrieval_clarify,
+        slot_gap_clarify,
     )
     if envelope.pre_gate is not None:
         pg = envelope.pre_gate
@@ -1298,6 +1301,19 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     if not resp.off_catalog and not resp.clarify:
         q = slot_gap_clarify(
             has_products=bool(resp.products),
+            has_selection=bool(envelope.cart or decision.exact_product_sku),
+            obligation_state=ClarificationObligationState(
+                has_shortlist=bool(resp.products),
+                has_selected_product=bool(decision.exact_product_sku),
+                has_cart=bool(envelope.cart),
+                has_fit_explanation_obligation=bool(
+                    decision.exact_product_sku
+                    and (
+                        "EXPLAIN" in decision.secondary_lanes
+                        or decision.lane == "EXPLAIN"
+                    )
+                ),
+            ),
             budget_known=envelope.budget_max_cents is not None or envelope.budget_min_cents is not None,
             has_requirements=bool(decision.requirements),
             has_use_case=bool(decision.use_cases),
