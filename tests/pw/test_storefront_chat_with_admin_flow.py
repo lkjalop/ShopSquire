@@ -78,11 +78,6 @@ def frontend_server(test_server):
             proc.kill()
 
 
-@pytest.mark.xfail(
-    reason="Requires a stable Vite frontend build with CV Triage UI flow — "
-    "flaky due to Vite startup timing and frontend render latency.",
-    strict=False,
-)
 def test_chat_with_admin_click_path_opens_escalation_room(page, frontend_server):
     captured = {"payload": None}
 
@@ -133,7 +128,7 @@ def test_chat_with_admin_click_path_opens_escalation_room(page, frontend_server)
     page.get_by_placeholder("Type your message...").press("Enter")
 
     page.get_by_text("CV Triage", exact=True).wait_for(timeout=10000)
-    page.get_by_role("button", name="Analyze complaint without upload").click()
+    page.get_by_role("button", name="Analyze photos for damage and product signals").click()
     page.get_by_role("button", name="Escalate and chat with admin").wait_for(timeout=10000)
     page.get_by_role("button", name="Escalate and chat with admin").click()
 
