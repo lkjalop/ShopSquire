@@ -7,6 +7,8 @@ The model is injected (llm_fn) so the doctrine is tested without a live Ollama.
 """
 import json
 
+import pytest
+
 from src.app.services.recommendation_core.cart_resolver import (
     CartMutationPlan,
     resolve_cart_mutation,
@@ -21,8 +23,10 @@ _CART = [
 ]
 
 
-def _env(query, cart=_CART):
-    return TurnEnvelope.from_suggest_params(query=query, uid="u1", tenant_id="t1", cart=cart)
+def _env(query, cart=_CART, **kwargs):
+    return TurnEnvelope.from_suggest_params(
+        query=query, uid="u1", tenant_id="t1", cart=cart, **kwargs,
+    )
 
 
 def _fixed_llm(obj):
@@ -106,6 +110,149 @@ def test_budget_increase_does_not_become_relative_quantity_change():
     assert plan.ops[0].target_skus == ("LAP-ASUS",)
     assert plan.ops[0].quantity == 40
     assert plan.ops[0].budget_max_cents == 8_000_000
+
+
+@pytest.mark.parametrize("query", [
+    "can you increase the total units by another 40?",
+    "add another 40 units",
+    "increase it by 40",
+    "give me 40 more",
+    "double the quantity",
+])
+def test_single_line_relative_quantity_permutations_are_deterministic(monkeypatch, query):
+    import src.app.services.recommendation_core.cart_resolver as resolver
+
+    cart = [{
+        "sku": "RGAM-0007",
+        "name": 'HP OMEN MAX 16" 2.5K 240Hz OLED Gaming Laptop',
+        "quantity": 40,
+        "price_cents": 449_900,
+    }]
+    monkeypatch.setattr(
+        resolver,
+        "_default_llm_fn",
+        lambda *_args, **_kwargs: pytest.fail("relative arithmetic must not call a model"),
+    )
+
+    plan = resolve_cart_mutation(_env(query, cart=cart))
+
+    assert plan.source == "grammar"
+    assert not plan.needs_clarification
+    assert plan.ops[0].target_skus == ("RGAM-0007",)
+    assert plan.ops[0].quantity == 80
+
+
+def test_unnamed_relative_quantity_does_not_guess_across_cart_lines(monkeypatch):
+    import src.app.services.recommendation_core.cart_resolver as resolver
+
+    cart = [
+        {"sku": "RGAM-0007", "name": "HP OMEN MAX 16", "quantity": 40},
+        {"sku": "LAP-ASUS", "name": "ASUS TUF Gaming F16", "quantity": 12},
+    ]
+    monkeypatch.setattr(
+        resolver,
+        "_default_llm_fn",
+        lambda *_args, **_kwargs: pytest.fail("relative arithmetic must not call a model"),
+    )
+
+    plan = resolve_cart_mutation(_env("add another 40 units", cart=cart))
+
+    assert not plan.ops
+    assert plan.needs_clarification
+
+
+def test_screenshot_compound_add_and_clear_is_grounded_without_model(monkeypatch):
+    """Screenshot 53: both requested acts survive and remain confirmation-only downstream."""
+    import src.app.services.recommendation_core.cart_resolver as resolver
+
+    cart = [
+        {
+            "sku": "LAP-858DC749",
+            "name": 'Lenovo Legion Pro 7 16IAX10H 16" WQXGA 240Hz OLED Gaming Laptop',
+            "quantity": 30,
+            "price_cents": 599_900,
+        },
+        {
+            "sku": "LAP-343A37BC",
+            "name": 'ASUS ProArt 16 16" 3K 120Hz OLED Copilot+ AI PC Laptop',
+            "quantity": 30,
+            "price_cents": 489_400,
+        },
+    ]
+    monkeypatch.setattr(
+        resolver,
+        "_default_llm_fn",
+        lambda *_args, **_kwargs: pytest.fail("grounded compound command must not call a model"),
+    )
+
+    plan = resolve_cart_mutation(_env(
+        'add 30 for ASUS ProArt 16 16" 3K 120Hz OLED Copilot+ AI PC Laptop; '
+        'clear 30 Lenovo Legion Pro 7 16IAX10H 16" WQXGA 240Hz OLED Gaming Laptop',
+        cart=cart,
+    ))
+
+    assert plan.source == "grammar"
+    assert not plan.needs_clarification
+    assert [op.action for op in plan.ops] == ["set_quantity", "remove_items"]
+    assert plan.ops[0].target_skus == ("LAP-343A37BC",)
+    assert plan.ops[0].previous_quantity == 30
+    assert plan.ops[0].quantity == 60
+    assert plan.ops[1].target_skus == ("LAP-858DC749",)
+
+
+def test_reduce_by_ten_preserves_total_budget_and_exposes_headroom_inputs(monkeypatch):
+    import src.app.services.recommendation_core.cart_resolver as resolver
+
+    cart = [{
+        "sku": "RGAM-0007",
+        "name": "HP OMEN MAX 16",
+        "quantity": 30,
+        "price_cents": 249_900,
+    }]
+    session = {
+        "accepted_constraints": {
+            "budget_scope": "total",
+            "total_budget_cents": 7_500_000,
+        }
+    }
+    monkeypatch.setattr(
+        resolver,
+        "_default_llm_fn",
+        lambda *_args, **_kwargs: pytest.fail("relative arithmetic must not call a model"),
+    )
+
+    plan = resolve_cart_mutation(_env(
+        "Actually reduce it by 10 units, but I don't think it is powerful enough.",
+        cart=cart,
+        session=session,
+    ))
+
+    assert plan.source == "grammar"
+    assert not plan.needs_clarification
+    assert plan.ops[0].quantity == 20
+    assert plan.ops[0].previous_quantity == 30
+    assert plan.ops[0].budget_max_cents == 7_500_000
+    assert plan.ops[0].unit_price_cents == 249_900
+
+
+def test_screenshot_budget_resolution_sentence_preserves_line_and_quantity():
+    cart = [{
+        "sku": "RGAM-0007",
+        "name": 'HP OMEN MAX 16" 2.5K 240Hz OLED Gaming Laptop (Core Ultra 9) [GeForce RTX 5080]',
+        "quantity": 40,
+        "price_cents": 449_900,
+    }]
+
+    plan = resolve_cart_mutation(_env(
+        'Increase the total budget to $359920 and set "HP OMEN MAX 16" to 80 units.',
+        cart=cart,
+    ))
+
+    assert plan.source == "grammar"
+    assert not plan.needs_clarification
+    assert plan.ops[0].target_skus == ("RGAM-0007",)
+    assert plan.ops[0].quantity == 80
+    assert plan.ops[0].budget_max_cents == 35_992_000
 
 
 def test_bare_quantity_continuation_binds_the_only_cart_line():
@@ -429,6 +576,42 @@ def test_relative_quantity_modes_are_recomputed_from_the_current_cart():
         )
         assert not plan.ambiguous, query
         assert plan.ops[0].quantity == expected, query
+
+
+@pytest.mark.parametrize(
+    ("starting_quantity", "query", "mode", "operand", "expected"),
+    [
+        (1, "add 30 more IdeaPads", "add", 30, 31),
+        (30, "add 30 more IdeaPads", "add", 30, 60),
+        (30, "reduce the IdeaPads by 10", "subtract", 10, 20),
+        (30, "remove 10 IdeaPad units", "subtract", 10, 20),
+        (30, "halve the IdeaPad quantity", "divide", 2, 15),
+        (30, "double the IdeaPad quantity", "multiply", 2, 60),
+        (30, "divide the IdeaPad quantity by 3", "divide", 3, 10),
+        (30, "set the IdeaPad quantity to 12", "set", 12, 12),
+    ],
+)
+def test_relative_quantity_permutations_use_authoritative_current_quantity(
+    starting_quantity, query, mode, operand, expected,
+):
+    cart = [{
+        "sku": "LAP-IDEAP3I9",
+        "name": "Lenovo IdeaPad Slim 3i Laptop",
+        "quantity": starting_quantity,
+    }]
+    plan = resolve_cart_mutation(
+        _env(query, cart=cart),
+        llm_fn=_fixed_llm({"ops": [{
+            "action": "set_quantity",
+            "targets": ["IdeaPad"],
+            "quantity_mode": mode,
+            "quantity": operand,
+        }], "confidence": 0.95}),
+    )
+
+    assert not plan.ambiguous, query
+    assert plan.ops[0].previous_quantity == starting_quantity
+    assert plan.ops[0].quantity == expected
 
 
 def test_relative_quantity_is_authorized_from_shopper_words_not_model_arithmetic():

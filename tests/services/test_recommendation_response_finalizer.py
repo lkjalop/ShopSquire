@@ -100,6 +100,11 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
             "coverage_status": "bounded",
             "fit_ledger": [{"attribute": "gpu_vram_gb", "verdict": "meets"}],
         },
+        "delivery_feasibility": {
+            "requested_deadline": "2 days",
+            "status": "unknown",
+            "reason": "Dated transfer ETA is unavailable.",
+        },
     }
     out = finalizer.finalize_core_response(
         payload, "trace-voice-1", query="compare these",
@@ -123,6 +128,10 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     assert out["right_panel"]["case_obligations"]["selected_sku"] is None
     assert out["right_panel"]["explanation"]["sku"] == "SKU-B"
     assert recorded["event"]["payload"]["right_panel_contract"]["explanation"]["sku"] == "SKU-B"
+    assert out["right_panel"]["delivery_feasibility"]["status"] == "unknown"
+    assert recorded["event"]["payload"]["delivery_feasibility"]["requested_deadline"] == "2 days"
+    assert recorded["decision"]["retrieved_context"]["delivery_feasibility"]["status"] == "unknown"
+    assert recorded["decision"]["proposed_action"]["delivery_feasibility"]["reason"].startswith("Dated")
     assert recorded["event"]["payload"]["catalog_alignment"]["authority"] == "candidate_only"
     assert recorded["decision"]["retrieved_context"]["case_obligations"]["unresolved"] == [
         "explicit_sku_selection",

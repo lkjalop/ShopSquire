@@ -99,7 +99,7 @@ _QUANTITY_CHANGE_INTENT = re.compile(
 _QUANTITY_SIGNAL_INTENT = re.compile(
     r"\b(?:make|set|change|reduce|increase|raise|lower|cut|add|subtract|double|halve|"
     r"multiply|divide)\b|"
-    r"\b(?:take|remove)\s+[0-9]{1,6}\s+units?\b|"
+    r"\b(?:take|remove)\s+[0-9]{1,6}(?:\s+[a-z][a-z0-9_-]*){0,5}\s+units?\b|"
     r"\b[0-9]{1,6}\s+(?:more|fewer|less)\b|\bto\s+[0-9]{1,6}\b",
     re.IGNORECASE,
 )
@@ -162,7 +162,7 @@ def _relative_quantity_instruction(query: str) -> Optional[Tuple[str, int]]:
     # "reduce to 15" is absolute, not subtraction. Relative reductions require by/off/fewer/less.
     matches = re.finditer(
         r"\b(?:subtract|reduce|decrease|lower|cut)\b.{0,36}?\bby\s+([0-9]{1,6})\b|"
-        r"\b(?:take|remove)\s+([0-9]{1,6})\s+units?\b.{0,12}\boff\b|"
+        r"\b(?:take|remove)\s+([0-9]{1,6})(?:\s+[a-z][a-z0-9_-]*){0,5}\s+units?\b|"
         r"\b([0-9]{1,6})\s+(?:fewer|less)\b",
         text,
         re.IGNORECASE,
@@ -211,6 +211,10 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
 
 def _grammar_cart_data(envelope: TurnEnvelope) -> Optional[Dict[str, Any]]:
     """Reuse the canonical amendment grammar before paying for model interpretation."""
+    lines = _cart_lines(envelope)
+    compound = _grounded_compound_cart_data(envelope.query, lines)
+    if compound is not None:
+        return compound
     try:
         from src.app.services.intent_decomposer import decompose_turn
         intent = decompose_turn(envelope.query, has_prior_selection=bool(envelope.cart))
@@ -249,6 +253,65 @@ def _grammar_cart_data(envelope: TurnEnvelope) -> Optional[Dict[str, Any]]:
         }],
         "confidence": 1.0,
     }
+
+
+_COMPOUND_ACTION_START = re.compile(
+    r"\b(?:add|remove|clear|delete|drop|get\s+rid\s+of)\b",
+    re.IGNORECASE,
+)
+
+
+def _grounded_compound_cart_data(
+    query: str,
+    lines: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Parse a narrow, cart-grounded multi-operation command without a provider call.
+
+    The general intent decomposer deliberately treats ``add 30 ASUS`` as a possible new
+    catalog line.  Once ASUS is already in the authoritative cart, however, a compound
+    command such as ``add 30 for ASUS; clear 30 Lenovo`` has a safer interpretation:
+    bind each action clause to one real cart line and let the normal resolver clamps do
+    the arithmetic.  We only take this path for two or more supported action clauses;
+    unsupported replace/keep semantics continue to the model rather than being dropped.
+    """
+    text = str(query or "")
+    if len(lines) < 1 or _REPLACE_INTENT.search(text) or _KEEP_INTENT.search(text):
+        return None
+    starts = list(_COMPOUND_ACTION_START.finditer(text))
+    if len(starts) < 2:
+        return None
+
+    raw_ops: List[Dict[str, Any]] = []
+    for index, match in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else len(text)
+        clause = text[match.start():end].strip(" ,;.?")
+        verb = re.sub(r"\s+", " ", match.group(0).lower())
+        if verb == "add":
+            quantity = re.search(
+                r"\badd\s+(?:another\s+)?([0-9]{1,6})(?:\s+more)?\b|"
+                r"\b([0-9]{1,6})\s+more\b",
+                clause,
+                re.IGNORECASE,
+            )
+            if quantity is None:
+                return None
+            operand = int(quantity.group(1) or quantity.group(2))
+            raw_ops.append({
+                "action": "set_quantity",
+                "targets": [clause],
+                "quantity_mode": "add",
+                "quantity": operand,
+            })
+            continue
+        if verb in {"remove", "clear", "delete", "drop", "get rid of"}:
+            if _CLEAR_ALL_SCOPE_INTENT.search(clause):
+                raw_ops.append({"action": "clear_all"})
+            else:
+                raw_ops.append({"action": "remove_items", "targets": [clause]})
+            continue
+        return None
+
+    return {"ops": raw_ops, "confidence": 1.0} if len(raw_ops) >= 2 else None
 
 
 def _cart_lines(envelope: TurnEnvelope) -> List[Dict[str, Any]]:

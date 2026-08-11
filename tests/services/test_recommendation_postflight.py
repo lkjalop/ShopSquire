@@ -156,6 +156,14 @@ def test_accepted_semantic_evidence_and_fit_explanation_roundtrip():
         "workload_summary": "simulate mechanical-machine maintenance",
         "fit_ledger": [],
     }
+    core.extras["product_explanations"] = {
+        "LAP-1": core.extras["explanation"],
+        "LAP-2": {
+            "sku": "LAP-2",
+            "workload_summary": "simulate mechanical-machine maintenance",
+            "fit_ledger": [{"attribute": "ram_gb", "verdict": "meets"}],
+        },
+    }
 
     assert write_session(r, env, core) is True
     raw = _raw(r)
@@ -164,12 +172,36 @@ def test_accepted_semantic_evidence_and_fit_explanation_roundtrip():
         "source_claim_ids"
     ] == ["official:ram"]
     assert raw["last_product_explanation"]["sku"] == "LAP-1"
+    assert set(raw["product_explanations"]) == {"LAP-1", "LAP-2"}
 
     slice_ = F._read_session_slice(r, "u1", "t1")
     assert slice_["semantic_resolution"]["desired_outcome"] == (
         "simulate mechanical-machine maintenance"
     )
     assert slice_["semantic_requirement_compilation"]["status"] == "accepted"
+    assert slice_["product_explanations"]["LAP-2"]["sku"] == "LAP-2"
+
+
+def test_operational_constraints_roundtrip_without_entering_product_requirements():
+    r = _Redis()
+    env = _env()
+    core = _core(env)
+    core.extras["decision"]["operational_constraints"] = {
+        "delivery_window_days": 2,
+        "payment_plan": "balance_after_confirmation",
+    }
+    core.extras["constraints_used"] = {
+        "requirements": {"ram_gb": [[">=", 16]]},
+        "operational_constraints": core.extras["decision"]["operational_constraints"],
+    }
+
+    assert write_session(r, env, core) is True
+    constraints = _raw(r)["constraints"]
+    assert constraints["requirements"] == {"ram_gb": [[">=", 16]]}
+    assert constraints["operational_constraints"] == {
+        "delivery_window_days": 2,
+        "payment_plan": "balance_after_confirmation",
+    }
 
 
 def test_explicit_brand_clear_drops_all_prior_brand_constraints():

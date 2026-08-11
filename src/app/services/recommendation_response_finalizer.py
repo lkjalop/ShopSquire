@@ -101,6 +101,11 @@ def finalize_core_response(
     right_panel["semantic_evidence"] = out.get("semantic_evidence")
     right_panel["catalog_alignment"] = out.get("catalog_alignment")
     right_panel["case_obligations"] = out.get("case_obligations")
+    right_panel["delivery_feasibility"] = (
+        dict(out.get("delivery_feasibility") or {})
+        if isinstance(out.get("delivery_feasibility"), dict)
+        else None
+    )
     right_panel["explanation"] = (
         dict(out.get("explanation") or {})
         if isinstance(out.get("explanation"), dict)
@@ -206,7 +211,8 @@ def finalize_core_response(
                      "semantic_resolution": out.get("semantic_resolution"),
                      "semantic_evidence": out.get("semantic_evidence"),
                      "catalog_alignment": out.get("catalog_alignment"),
-                     "case_obligations": out.get("case_obligations")},
+                     "case_obligations": out.get("case_obligations"),
+                     "delivery_feasibility": out.get("delivery_feasibility")},
         )
         persisted = log_decision(
             agent_name="Recommendation_Core",
@@ -222,6 +228,7 @@ def finalize_core_response(
                 "semantic_evidence": out.get("semantic_evidence"),
                 "catalog_alignment": out.get("catalog_alignment"),
                 "case_obligations": out.get("case_obligations"),
+                "delivery_feasibility": out.get("delivery_feasibility"),
             },
             proposed_action={
                 "decision_mode": str(out.get("decision_mode") or "catalog_recommendation"),
@@ -240,6 +247,7 @@ def finalize_core_response(
                 "semantic_evidence": out.get("semantic_evidence"),
                 "catalog_alignment": out.get("catalog_alignment"),
                 "case_obligations": out.get("case_obligations"),
+                "delivery_feasibility": out.get("delivery_feasibility"),
             },
             decision_id=trace_id, tenant_id=str(tenant_id or "default"),
             actor_id=str(uid or "") or None, actor_role="buyer",

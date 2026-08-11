@@ -186,8 +186,13 @@ def test_compound_explain_relative_quantity_and_deadline_preserve_case_state(wir
     assert payload["delivery_feasibility"]["requested_quantity"] == 31
     assert payload["delivery_feasibility"]["delivery_window_days"] == 4
     assert payload["delivery_feasibility"]["feasibility"] == "unknown"
+    assert payload["delivery_feasibility"]["owner"] == "fulfilment_operator"
+    assert {move["id"] for move in payload["delivery_feasibility"]["recovery_moves"]} >= {
+        "request_dated_commitment", "split_partial_now", "reduce_quantity", "qualified_substitute",
+    }
     assert "budget range" not in payload["message"].lower()
     assert "industrial maintenance simulation" in payload["message"].lower()
+    assert "dated fulfilment commitment" in payload["message"].lower()
     assert "31" in payload["message"]
     from src.app.routers.cart import _get_or_create_cart
     _, items, _ = _get_or_create_cart(uid)

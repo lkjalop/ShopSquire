@@ -77,6 +77,12 @@ def write_session(
                 "budget_min_cents": used.get("budget_min_cents", envelope.budget_min_cents),
                 "budget_max_cents": used.get("budget_max_cents", envelope.budget_max_cents),
                 "requirements": (used.get("requirements") or decision.get("requirements") or {}),
+                "operational_constraints": (
+                    used.get("operational_constraints")
+                    or decision.get("operational_constraints")
+                    or prior.get("operational_constraints")
+                    or {}
+                ),
                 "use_cases": intent.get("use_cases") or [],
                 "workload_entities": (used.get("workload_entities")
                                       or decision.get("workload_entities")
@@ -123,6 +129,11 @@ def write_session(
                 dict(core.extras["explanation"])
                 if isinstance(core.extras.get("explanation"), dict)
                 else (envelope.session or {}).get("last_product_explanation")
+            ),
+            "product_explanations": (
+                dict(core.extras["product_explanations"])
+                if isinstance(core.extras.get("product_explanations"), dict)
+                else (envelope.session or {}).get("product_explanations")
             ),
             "ts": int(time.time()),
         }

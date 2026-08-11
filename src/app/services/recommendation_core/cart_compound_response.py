@@ -156,11 +156,37 @@ def project_cart_compound_context(envelope: Any, plan: Any) -> Dict[str, Any]:
                 "date_qualified_transfer_eta_missing",
                 "supplier_arrival_unconfirmed",
             ],
+            "owner": "fulfilment_operator",
+            "recovery_moves": [
+                {
+                    "id": "request_dated_commitment",
+                    "label": "Request a dated fulfilment commitment",
+                    "requires_human_review": True,
+                },
+                *([{
+                    "id": "split_partial_now",
+                    "label": f"Ship up to {min(local, quantity)} locally available units now and verify the remainder",
+                    "quantity_now": min(local, quantity),
+                    "requires_human_review": True,
+                }] if local > 0 else []),
+                {
+                    "id": "reduce_quantity",
+                    "label": "Reduce the quantity to a date-confirmed amount",
+                    "requires_human_review": False,
+                },
+                {
+                    "id": "qualified_substitute",
+                    "label": "Check a qualified substitute with stronger dated availability",
+                    "requires_human_review": True,
+                },
+            ],
             "commercial_authority_granted": False,
         }
         message_parts.append(
             f"I cannot confirm {quantity} units within {int(horizon)} days from stock counts alone; "
-            "dated local arrival, transfer ETA, and any supplier-confirmed arrival still need verification."
+            "dated local arrival, transfer ETA, and any supplier-confirmed arrival still need verification. "
+            "Next, request a dated fulfilment commitment; you can also split available units now, "
+            "reduce the quantity, or check a qualified substitute."
         )
 
     additions["case_obligations"] = [

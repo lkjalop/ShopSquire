@@ -304,7 +304,7 @@ def _cart_clarify_message(plan) -> str:
             f"item in it — which line did you mean? Name it and I'll make the change.")
 
 
-def _cart_confirm_message(plan) -> str:
+def _cart_confirm_message(plan, *, superseded_count: int = 0) -> str:
     """The confirmation ask for a confirm-tier plan — states exactly what WILL happen; nothing
     has happened yet."""
     bits: List[str] = []
@@ -361,9 +361,14 @@ def _cart_confirm_message(plan) -> str:
                          "clear_previous", "keep_only"} for op in plan.ops):
         reconfirm = (" After an inventory change, review and reconfirm the updated delivery plan "
                      "before checkout.")
+    supersession = (
+        f" This replaces {superseded_count} earlier unconfirmed cart change"
+        f"{'s' if superseded_count != 1 else ''}."
+        if superseded_count else ""
+    )
     return (f"Just to confirm before I touch your cart — you want me to: {what}. "
             f"Nothing is changed yet; confirm and I'll apply it (undo stays available)."
-            f"{budget_note}{reconfirm}")
+            f"{supersession}{budget_note}{reconfirm}")
 
 
 def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
@@ -435,14 +440,19 @@ def _serve_cart_mutation(envelope: TurnEnvelope, *, role: str,
     # remove/change a line without a human click. Auto-apply is a SEPARATE opt-in flipped ONLY
     # after the measured false-positive rate on ordinary carted turns is acceptably low.
     if prop["risk"] != RISK_AUTO or not _cart_auto_apply_enabled():
-        core = CoreResponse(envelope=envelope, lane="CART_MUTATE",
-                            message=_cart_confirm_message(plan)).finalize()
+        superseded_plan_ids = list(prop.get("superseded_plan_ids") or [])
+        core = CoreResponse(
+            envelope=envelope,
+            lane="CART_MUTATE",
+            message=_cart_confirm_message(plan, superseded_count=len(superseded_plan_ids)),
+        ).finalize()
         payload = to_legacy(core)
         payload["cart_mutation"] = {"applied": [], "rejected": [], "ambiguous": [],
                                     "needs_clarification": False, "needs_confirmation": True,
                                     "plan_id": prop["plan_id"], "risk": prop["risk"],
                                     "ops": [o.as_dict() for o in plan.ops],
-                                    "expires_at": prop["expires_at"]}
+                                    "expires_at": prop["expires_at"],
+                                    "superseded_plan_ids": superseded_plan_ids}
         payload["cart_updated"] = False
         return with_trace(attach_compound(payload), envelope.trace_id)
 
