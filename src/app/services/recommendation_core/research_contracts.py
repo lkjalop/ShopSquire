@@ -185,6 +185,19 @@ class DiscoveryEngineFailure(BaseModel):
     reason: str = Field(min_length=1, max_length=160)
 
 
+class DiscoveryEngineReliabilityProjection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str = Field(min_length=1, max_length=80)
+    attempts: int = Field(ge=0)
+    responses: int = Field(ge=0)
+    failures: int = Field(ge=0)
+    zero_results: int = Field(ge=0)
+    average_latency_ms: float = Field(ge=0)
+    unhealthy_rate: float = Field(ge=0, le=1)
+    suppressed: bool
+
+
 class ProviderExecutionReceipt(BaseModel):
     """Auditable truth about discovery or authoritative-origin execution.
 
@@ -219,6 +232,11 @@ class ProviderExecutionReceipt(BaseModel):
     engines_queried: list[str] = Field(default_factory=list, max_length=16)
     engines_responded: list[str] = Field(default_factory=list, max_length=16)
     engine_failures: list[DiscoveryEngineFailure] = Field(default_factory=list, max_length=16)
+    engine_reliability: list[DiscoveryEngineReliabilityProjection] = Field(
+        default_factory=list, max_length=16,
+    )
+    suppressed_engines: list[str] = Field(default_factory=list, max_length=16)
+    request_latency_ms: float | None = Field(default=None, ge=0)
     degradation_reasons: list[Literal[
         "engines_captcha", "engines_rate_limited", "engines_unresponsive",
         "zero_allowlisted_results",
@@ -322,6 +340,11 @@ class ProviderExecutionReceipt(BaseModel):
             "engines_queried": self.engines_queried,
             "engines_responded": self.engines_responded,
             "engine_failures": [row.model_dump(mode="json") for row in self.engine_failures],
+            "engine_reliability": [
+                row.model_dump(mode="json") for row in self.engine_reliability
+            ],
+            "suppressed_engines": self.suppressed_engines,
+            "request_latency_ms": self.request_latency_ms,
             "degradation_reasons": self.degradation_reasons,
             "provider_status": self.provider_status,
             "rejection_reason": self.rejection_reason,

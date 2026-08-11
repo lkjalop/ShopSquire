@@ -11,6 +11,7 @@ import httpx
 
 from src.app.adapters.external_research_httpx import HttpxResearchFetcher, _domain_allowed, _host_is_safe
 from src.app.ports.external_product_research import ExternalResearchFetcher
+from src.app.services.discovery_engine_reliability import DiscoveryEngineReliability
 
 _TEMPLATE = "https://search.example.com/api?q={query}"
 
@@ -111,6 +112,40 @@ def test_searxng_engine_degradation_is_recorded_separately_from_results():
         "engines_captcha", "engines_rate_limited",
     }
     assert receipt["provider_status"] == "degraded"
+
+
+def test_repeated_engine_failure_suppresses_only_that_engine_on_next_request():
+    health = DiscoveryEngineReliability(window_size=5, minimum_attempts=3)
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls == 4:
+            assert request.url.params["engines"] == "bing,google"
+        return httpx.Response(200, json={
+            "results": [{
+                "title": "Official", "url": "https://trusted.com/requirements",
+                "engines": ["bing", "google"],
+            }],
+            "unresponsive_engines": (
+                [["wikipedia", "timeout"]] if calls <= 3 else []
+            ),
+        })
+
+    fetcher = HttpxResearchFetcher(
+        client=_client(handler), search_url_template=_TEMPLATE,
+        resolver=_resolver_public, engine_reliability=health,
+    )
+    for _ in range(4):
+        assert fetcher.fetch("requirements", allowlist=["trusted.com"])
+
+    assert calls == 4
+    assert fetcher.last_receipt["suppressed_engines"] == ["wikipedia"]
+    assert any(
+        row["engine"] == "wikipedia" and row["suppressed"]
+        for row in fetcher.last_receipt["engine_reliability"]
+    )
 
 
 def test_zero_allowlisted_results_is_not_reported_as_successful_evidence():

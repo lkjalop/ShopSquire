@@ -283,6 +283,9 @@ def _receipt(raw: dict[str, Any], *, run_id: str, capability: str, index: int) -
         engines_queried=list(raw.get("engines_queried") or []),
         engines_responded=list(raw.get("engines_responded") or []),
         engine_failures=list(raw.get("engine_failures") or []),
+        engine_reliability=list(raw.get("engine_reliability") or []),
+        suppressed_engines=list(raw.get("suppressed_engines") or []),
+        request_latency_ms=raw.get("request_latency_ms"),
         degradation_reasons=list(raw.get("degradation_reasons") or []),
         provider_status=raw.get("provider_status"),
         response_body_hash=raw.get("response_body_hash"),
@@ -600,6 +603,16 @@ def _evidence_ladder_projection(
                 engine for row in discovery for engine in row.get("engines_responded") or []
             }),
             "engine_failures": engine_failures,
+            "engine_reliability": [
+                row
+                for receipt in discovery
+                for row in receipt.get("engine_reliability") or []
+            ][-16:],
+            "suppressed_engines": sorted({
+                engine
+                for row in discovery
+                for engine in row.get("suppressed_engines") or []
+            }),
             "allowlisted_result_count": allowlisted_hits,
             "dispatch_count": sum(bool(row.get("external_call_dispatched")) for row in discovery),
             "billing_class": "free",

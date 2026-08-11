@@ -28,9 +28,15 @@ import json
 import os
 import socket
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import parse_qs, parse_qsl, quote_plus, urlencode, urlparse, urlunparse
+
+from src.app.services.discovery_engine_reliability import (
+    DEFAULT_DISCOVERY_ENGINE_RELIABILITY,
+    DiscoveryEngineReliability,
+)
 
 try:
     import httpx
@@ -110,6 +116,7 @@ class HttpxResearchFetcher:
         user_agent: str = _DEFAULT_UA,
         max_bytes: int = _DEFAULT_MAX_BYTES,
         request_headers: Optional[Dict[str, str]] = None,
+        engine_reliability: Optional[DiscoveryEngineReliability] = None,
     ):
         self._client = client
         self._template = search_url_template or os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or ""
@@ -117,6 +124,7 @@ class HttpxResearchFetcher:
         self._allow_private = _truthy(os.getenv("EXTERNAL_RESEARCH_ALLOW_PRIVATE")) if allow_private is None else bool(allow_private)
         self._ua = user_agent
         self._max_bytes = int(max_bytes)
+        self._engine_reliability = engine_reliability or DEFAULT_DISCOVERY_ENGINE_RELIABILITY
         # Headers are transport configuration only. They are never copied into result rows or
         # evidence traces, so connector credentials cannot leak into recommendation payloads.
         self._request_headers = {
@@ -155,6 +163,15 @@ class HttpxResearchFetcher:
             return []
         url = self._template.replace("{query}", quote_plus(str(scrubbed_query)))
         parsed = urlparse(url)
+        endpoint = str(parsed.hostname or "")
+        reliability_before = self._engine_reliability.snapshots(endpoint)
+        suppressed_before = [row["engine"] for row in reliability_before if row["suppressed"]]
+        if suppressed_before and not parse_qs(parsed.query).get("engines"):
+            recommended = self._engine_reliability.recommended_engines(endpoint)
+            query_items = parse_qsl(parsed.query, keep_blank_values=True)
+            query_items.append(("engines", ",".join(recommended)))
+            parsed = parsed._replace(query=urlencode(query_items))
+            url = urlunparse(parsed)
         self.last_receipt = {
             "provider_capability": "WEB_DISCOVERY",
             "provider_id": "searxng_compatible_discovery",
@@ -191,6 +208,7 @@ class HttpxResearchFetcher:
                 target=_cancel_transport, name="external-research-cancel", daemon=True,
             ).start()
         try:
+            request_started = time.perf_counter()
             resp = client.get(url, timeout=timeout_s, headers=self._request_headers or None)
             raw_body = bytes(resp.content)
             completed_at = datetime.now(timezone.utc).isoformat()
@@ -279,5 +297,17 @@ class HttpxResearchFetcher:
             "engine_failures": engine_failures,
             "degradation_reasons": degradation_reasons,
             "provider_status": "degraded" if degradation_reasons else "completed",
+        })
+        request_latency_ms = round((time.perf_counter() - request_started) * 1000, 3)
+        self._engine_reliability.record(
+            endpoint=endpoint, receipt=self.last_receipt, latency_ms=request_latency_ms,
+        )
+        reliability_after = self._engine_reliability.snapshots(endpoint)
+        self.last_receipt.update({
+            "request_latency_ms": request_latency_ms,
+            "engine_reliability": reliability_after,
+            "suppressed_engines": [
+                row["engine"] for row in reliability_after if row["suppressed"]
+            ],
         })
         return out
