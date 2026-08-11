@@ -267,6 +267,8 @@ def _case_research_plan_from_trace(
         purpose = str(payload.get("retained_purpose") or "").strip()
         recorded_plan_id = str(payload.get("research_plan_id") or "").strip()
         plan = build_case_research_plan(purpose) if purpose else None
+        if plan is None and purpose and recorded_plan_id:
+            plan = build_case_research_plan(purpose, allow_open_world=True)
         if plan is None or plan.plan_id != recorded_plan_id:
             return None
         return plan
@@ -1036,6 +1038,99 @@ def research_shopping_case(
     )
 
     approved_sources = approved_sources_for_plan(plan)
+    if plan.publisher_status == "unresolved":
+        from src.app.services.official_source_governance import load_official_source_manifest
+        from src.app.services.open_world_research_discovery import (
+            discover_open_world_publishers,
+        )
+        from src.app.services.shopping_case_truth_projection import (
+            ShoppingCaseTruthProjection,
+        )
+
+        governed_domains = sorted({
+            str(domain).strip().lower()
+            for source in load_official_source_manifest().get("sources") or []
+            if source.get("review_status") == "approved"
+            for domain in source.get("allowed_domains") or []
+            if str(domain).strip()
+        })
+        readiness = external_search_readiness(
+            allowlist=governed_domains,
+            tenant_id=tenant_id,
+            runtime_status=_external_research_runtime_status(),
+        )
+        if not readiness.get("effective"):
+            code = str(readiness.get("error_code") or "external_research_degraded")
+            raise HTTPException(status_code=503, detail={
+                "code": code,
+                "message": (
+                    "Open-world publisher discovery is unavailable. Upload, link, or enter "
+                    "requirements; no provider call was dispatched."
+                ),
+                "readiness": readiness,
+            })
+        discovery = discover_open_world_publishers(
+            plan,
+            search_url_template=str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip(),
+        )
+        before = project_accepted_catalog(
+            db, accepted_claims=[], desired_outcome=plan.retained_purpose,
+            budget_cents=body.budget_cents, tenant_id=tenant_id,
+        ).model_dump(mode="json")
+        provider_accounting = discovery["provider_accounting"]
+        exploration = ShoppingCaseTruthProjection.model_validate({
+            "schema_version": "ambiguity-exploration-v1",
+            "case_id": case_id, "trace_id": case_id.removeprefix("sc-"),
+            "retained_purpose": plan.retained_purpose,
+            "status": "unresolved",
+            "interpretations": [row.model_dump(mode="json") for row in plan.hypotheses],
+            "next_question": {"id": "publisher_scope", "text": plan.next_question},
+            "research_choices": [
+                "approve_discovered_source", "upload_requirements",
+                "enter_specifications", "continue_provisionally",
+            ],
+            "execution": "live_discovery_completed",
+            "evidence": "publisher_candidates_only",
+            "decision": "provisional_exploration_only",
+            "cart_authority": "none",
+            "provider_accounting": provider_accounting,
+            "discovery_readiness": readiness,
+            "research_plan_id": plan.plan_id,
+            "ambiguity_objects": [row.model_dump(mode="json") for row in plan.ambiguities],
+            "research_obligations": [row.model_dump(mode="json") for row in plan.obligations],
+            "source_candidate_ids": [],
+            "publisher_candidates": discovery["candidates"],
+        }).model_dump(mode="json")
+        result = {
+            "schema_version": "shopping-case-research-v1", "case_id": case_id,
+            "status": "publisher_resolution_required",
+            "retained_purpose": plan.retained_purpose,
+            "research_plan": plan.model_dump(mode="json"),
+            "research": discovery,
+            "product_shelves": before,
+            "ambiguity_exploration": exploration,
+            "evidence_outcome": "unresolved",
+            "research_delta": [],
+            "cart_mutation": "not_authorized",
+            "supplier_send": "not_authorized",
+            "trace_id": case_id.removeprefix("sc-"),
+        }
+        log_trace_event(
+            trace_id=result["trace_id"], event_type="open_world_discovery_completed",
+            source_type="stage", source_id="SearXNG_Discovery",
+            target_type="shopping_case", target_id=case_id,
+            payload={
+                "case_id": case_id,
+                "publisher_status": "unresolved",
+                "publisher_candidates": discovery["candidates"],
+                "receipts": discovery["receipts"],
+                "provider_accounting": provider_accounting,
+                "official_claims": [],
+                "qualification_authority": "none",
+                "cart_authority": "none",
+            },
+        )
+        return result
     if not approved_sources:
         raise HTTPException(status_code=409, detail={
             "code": "publisher_policy_review_required",

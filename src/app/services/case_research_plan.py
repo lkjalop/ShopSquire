@@ -18,7 +18,12 @@ from src.app.services.official_source_governance import load_official_source_man
 
 
 _TOKEN = re.compile(r"[a-z0-9]+")
-_ACRONYM = re.compile(r"\b[A-Z][A-Z0-9+.-]{1,7}\b")
+_ACRONYM = re.compile(r"\b(?:[A-Z][A-Z0-9+.-]{1,7}|[0-9]+[A-Z][A-Z0-9+.-]{0,6})\b")
+_NEGATED_CLAUSE = re.compile(
+    r"\b(?:i\s+)?(?:do\s+not|don't|does\s+not|doesn't|without|not\s+interested\s+in)\b"
+    r"[^.!?;]*(?:[.!?;]|$)",
+    re.IGNORECASE,
+)
 _STOP = {
     "a", "an", "and", "are", "as", "at", "be", "buyer", "current", "do",
     "for", "from", "generic", "hardware", "i", "in", "is", "it", "large",
@@ -29,6 +34,13 @@ _GENERIC_ACTIVATION_PHRASES = {
     "requirement", "system requirement", "hardware requirement",
     "software requirement", "minimum requirement", "recommended requirement",
 }
+_DISCOVERY_FILLER = _STOP | {
+    "actually", "anything", "care", "could", "engineering", "gaming", "good",
+    "about", "but", "buy", "edit", "help", "laptop", "looking", "machine", "need",
+    "officially", "please", "product", "recommend", "run", "should",
+    "something", "supported", "suitable", "team", "thing", "this", "vendor",
+    "wants", "what", "which", "would", "our",
+}
 
 
 class CaseResearchHypothesis(BaseModel):
@@ -36,7 +48,7 @@ class CaseResearchHypothesis(BaseModel):
 
     hypothesis_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
     label: str = Field(min_length=2, max_length=200)
-    source_ids: list[str] = Field(min_length=1, max_length=8)
+    source_ids: list[str] = Field(default_factory=list, max_length=8)
     authority: Literal["proposed"] = "proposed"
 
 
@@ -66,6 +78,15 @@ class CaseResearchObligation(BaseModel):
     status: Literal["unresolved", "planned", "resolved", "blocked"] = "unresolved"
 
 
+class CaseDiscoveryQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    axis: Literal["concept_and_software", "requirements_and_compatibility", "support_and_constraints"]
+    query: str = Field(min_length=3, max_length=700)
+    authority: Literal["discovery_only"] = "discovery_only"
+
+
 class CaseResearchPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -74,7 +95,9 @@ class CaseResearchPlan(BaseModel):
     retained_purpose: str = Field(min_length=3, max_length=500)
     ambiguities: list[CaseAmbiguityObject] = Field(min_length=1, max_length=8)
     hypotheses: list[CaseResearchHypothesis] = Field(min_length=1, max_length=3)
-    source_candidate_ids: list[str] = Field(min_length=1, max_length=16)
+    source_candidate_ids: list[str] = Field(default_factory=list, max_length=16)
+    publisher_status: Literal["resolved_enrolled", "unresolved"] = "resolved_enrolled"
+    discovery_queries: list[CaseDiscoveryQuery] = Field(default_factory=list, max_length=3)
     obligations: list[CaseResearchObligation] = Field(min_length=1, max_length=16)
     next_question: str = Field(min_length=3, max_length=300)
     external_calls: Literal[0] = 0
@@ -83,6 +106,26 @@ class CaseResearchPlan(BaseModel):
 
 def _tokens(value: str) -> set[str]:
     return {token for token in _TOKEN.findall(str(value or "").lower()) if token not in _STOP}
+
+
+def _discovery_subject(value: str) -> str:
+    """Bound buyer prose to salient terms without classifying a workload."""
+
+    positive_text = _NEGATED_CLAUSE.sub(" ", str(value or ""))
+    acronyms = [item.strip("+.-") for item in _ACRONYM.findall(positive_text)]
+    content = [
+        token for token in _TOKEN.findall(positive_text.lower())
+        if token not in _DISCOVERY_FILLER and (len(token) > 2 or any(ch.isdigit() for ch in token))
+    ]
+    terms: list[str] = []
+    seen: set[str] = set()
+    for term in [*acronyms, *content]:
+        folded = term.casefold()
+        if folded not in seen:
+            seen.add(folded)
+            terms.append(term)
+    terms = terms[:14]
+    return " ".join(terms) or "buyer described workload"
 
 
 def _source_terms(source: Mapping[str, Any]) -> set[str]:
@@ -162,10 +205,61 @@ def build_case_research_plan(
     retained_purpose: str,
     *,
     manifest: Mapping[str, Any] | None = None,
+    allow_open_world: bool = False,
 ) -> CaseResearchPlan | None:
     sources = candidate_sources_for_purpose(retained_purpose, manifest=manifest)
     if not sources:
-        return None
+        if not allow_open_world:
+            return None
+        purpose = " ".join(str(retained_purpose or "").split())[:500]
+        if len(purpose) < 3:
+            return None
+        hypotheses = [CaseResearchHypothesis(
+            hypothesis_id="open_world_workload",
+            label="Unresolved workload requiring authoritative source discovery",
+            source_ids=[],
+        )]
+        material = f"{purpose}|open-world-v1"
+        discovery_subject = _discovery_subject(purpose)
+        return CaseResearchPlan(
+            plan_id="crp-" + hashlib.sha256(material.encode()).hexdigest()[:20],
+            retained_purpose=purpose,
+            ambiguities=[CaseAmbiguityObject(
+                ambiguity_id="open_world_scope",
+                ambiguity_type="open_world_workload_scope",
+                subject_span=purpose[:240],
+                description="The requested outcome has no enrolled authoritative publisher scope yet.",
+                hypothesis_ids=["open_world_workload"],
+                resolution_owners=["research", "tenant_policy", "buyer"],
+                divergent_axes=["named_software", "local_execution_scope", "support_or_certification"],
+            )],
+            hypotheses=hypotheses,
+            source_candidate_ids=[],
+            publisher_status="unresolved",
+            discovery_queries=[
+                CaseDiscoveryQuery(query_id="concept", axis="concept_and_software", query=f"{discovery_subject} official documentation"),
+                CaseDiscoveryQuery(query_id="requirements", axis="requirements_and_compatibility", query=f"{discovery_subject} system requirements compatibility"),
+                CaseDiscoveryQuery(query_id="support", axis="support_and_constraints", query=f"{discovery_subject} vendor support certification security"),
+            ],
+            obligations=[
+                CaseResearchObligation(
+                    obligation_id="publisher_resolution", obligation_type="publisher_discovery",
+                    description="Discover a likely authoritative origin without treating search results as evidence.",
+                    resolution_owner="research", status="planned",
+                ),
+                CaseResearchObligation(
+                    obligation_id="publisher_approval", obligation_type="publisher_policy",
+                    description="Approve a discovered publisher origin before fetching evidence.",
+                    resolution_owner="tenant_policy",
+                ),
+                CaseResearchObligation(
+                    obligation_id="exact_product_identity", obligation_type="product_configuration",
+                    description="Corroborate exact catalog configurations against accepted claims.",
+                    resolution_owner="catalog", status="planned",
+                ),
+            ],
+            next_question="Which named software or standard governs this work, and what must run locally?",
+        )
     hypotheses: list[CaseResearchHypothesis] = []
     for index, source in enumerate(sources[:3], 1):
         hypotheses.append(CaseResearchHypothesis(
@@ -212,6 +306,7 @@ def build_case_research_plan(
         plan_id=plan_id, retained_purpose=retained_purpose[:500],
         ambiguities=[ambiguity], hypotheses=hypotheses,
         source_candidate_ids=source_ids, obligations=obligations,
+        publisher_status="resolved_enrolled",
         next_question=(
             "Which named software and version will you use, and which simulation, rendering, "
             "or processing stages must run locally?"
@@ -237,7 +332,7 @@ def plan_hypothesis_labels(plan: CaseResearchPlan) -> dict[str, str]:
 
 
 __all__ = [
-    "CaseAmbiguityObject", "CaseResearchHypothesis", "CaseResearchObligation",
+    "CaseAmbiguityObject", "CaseDiscoveryQuery", "CaseResearchHypothesis", "CaseResearchObligation",
     "CaseResearchPlan", "approved_sources_for_plan", "build_case_research_plan",
     "candidate_sources_for_purpose", "plan_hypothesis_labels",
 ]

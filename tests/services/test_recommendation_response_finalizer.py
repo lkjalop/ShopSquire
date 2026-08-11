@@ -175,6 +175,48 @@ def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
     }
 
 
+def test_finalizer_never_authorizes_products_without_positive_fit_evidence(monkeypatch):
+    monkeypatch.setattr(finalizer, "log_trace_event", lambda **_: None)
+    monkeypatch.setattr(finalizer, "log_decision", lambda **_: True)
+
+    out = finalizer.finalize_core_response(
+        {
+            "results": [{"sku": "GPU-1", "name": "Expensive gaming laptop"}],
+            "right_panel": {"mode": "recommendations"},
+            "constraints_used": {"requirements": {}},
+            "catalog_alignment": {"authority": "candidate_only"},
+        },
+        None,
+    )
+
+    # No trace persistence is needed for the truth projection itself.
+    out = finalizer.finalize_core_response(
+        {
+            "results": [{"sku": "GPU-1", "name": "Expensive gaming laptop"}],
+            "right_panel": {"mode": "recommendations"},
+            "constraints_used": {"requirements": {}},
+            "catalog_alignment": {"authority": "candidate_only"},
+        },
+        "trace-provisional-1",
+    )
+    section = out["right_panel"]["anchor_sections"][0]
+    assert section["title"] == "Provisional catalog exploration"
+    assert section["qualification_authority"] == "none"
+    assert "capability" not in section["match_basis"]
+
+
+def test_finalizer_deduplicates_repeated_exact_sku(monkeypatch):
+    monkeypatch.setattr(finalizer, "log_trace_event", lambda **_: None)
+    monkeypatch.setattr(finalizer, "log_decision", lambda **_: True)
+    out = finalizer.finalize_core_response({
+        "results": [
+            {"sku": "SAME-1", "name": "Same configuration"},
+            {"sku": "SAME-1", "name": "Same configuration repeated"},
+        ],
+    }, "trace-dedupe-1")
+    assert [row["sku"] for row in out["results"]] == ["SAME-1"]
+
+
 def test_finalizer_adds_sanitize_persist_and_projection_timings(monkeypatch):
     events = []
     monkeypatch.setattr(finalizer, "security_sanitize", lambda payload: dict(payload))

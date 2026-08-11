@@ -26,6 +26,9 @@ export type AmbiguityExploration = {
     status: string;
   }[];
   source_candidate_ids?: string[];
+  publisher_candidates?: {
+    url: string; domain: string; title: string; discovery_only: boolean; authority: string;
+  }[];
 };
 
 type Props = {
@@ -52,6 +55,7 @@ export default function AmbiguityExplorationPanel({
   const [manualSpecifications, setManualSpecifications] = useState('');
   const [manualStatus, setManualStatus] = useState('');
   const [manualBusy, setManualBusy] = useState(false);
+  const openWorldDiscovery = (exploration.source_candidate_ids?.length || 0) === 0;
   const question = exploration.next_question?.text || exploration.next_question?.question;
   const resolveSource = async (researchAuthorized: boolean) => {
     if (!onResolveEvidenceSource || !sourceHint.trim() || sourceBusy) return;
@@ -78,7 +82,7 @@ export default function AmbiguityExplorationPanel({
           : exploration.status === 'context_only'
             ? 'Context researched — no authoritative product requirements were established'
             : exploration.status === 'unresolved'
-              ? 'Research completed — no accepted scoped claims were found'
+              ? 'Discovery completed — no publisher origin or requirement claim has been accepted'
               : 'Provisional — external research not yet authorized'}
       </div>
       {exploration.interpretations?.length > 0 && (
@@ -90,12 +94,35 @@ export default function AmbiguityExplorationPanel({
         </div>
       )}
       {question && <div data-testid="high-information-question" style={{ marginTop: 8 }}><strong>One question:</strong> {question}</div>}
+      {exploration.publisher_candidates && exploration.publisher_candidates.length > 0 && (
+        <div data-testid="publisher-candidates" style={{ marginTop: 9, padding: 9, border: '1px solid #fdba74', borderRadius: 8 }}>
+          <strong>Possible publisher sources — ownership not yet verified</strong>
+          <ul style={{ margin: '5px 0', paddingLeft: 20 }}>
+            {exploration.publisher_candidates.slice(0, 5).map((candidate) => (
+              <li key={candidate.url}>
+                <a href={candidate.url} target="_blank" rel="noreferrer">{candidate.title || candidate.domain}</a>
+                {' '}({candidate.domain})
+              </li>
+            ))}
+          </ul>
+          <div style={{ fontSize: 12 }}>Verify and choose an official publisher link for policy review, or upload requirements.</div>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>
-        {exploration.status === 'provisional' && (
-          <button type="button" onClick={() => onResearch(false)} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Research approved sources</button>
+        {exploration.status === 'provisional' && Boolean(exploration.research_plan_id) && (
+          <button type="button" onClick={() => onResearch(false)} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>
+            {openWorldDiscovery ? 'Discover official sources' : 'Research approved sources'}
+          </button>
         )}
-        {exploration.status === 'unresolved' && (
-          <button type="button" onClick={() => onResearch(true)} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Retry approved research</button>
+        {exploration.status === 'unresolved' && Boolean(exploration.research_plan_id) && (
+          <button type="button" onClick={() => onResearch(true)} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>
+            {openWorldDiscovery ? 'Refresh source discovery' : 'Retry approved research'}
+          </button>
+        )}
+        {!exploration.research_plan_id && (
+          <span data-testid="research-plan-unavailable" style={{ fontSize: 12, color: '#9a3412', alignSelf: 'center' }}>
+            No governed research plan is available; upload, link, or enter requirements instead.
+          </span>
         )}
         <button type="button" onClick={onUpload} style={secondaryActionStyle}>Upload requirements</button>
         {onResolveEvidenceSource && (

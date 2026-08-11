@@ -32,7 +32,7 @@ async function send(page: import('@playwright/test').Page, text: string) {
   ) || {};
 }
 
-test('unresolved open-world workload clears stale commercial state before research', async ({ page }) => {
+test('novel suitability request stays provisional and exposes a durable research plan', async ({ page }) => {
   test.setTimeout(180_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
   await page.addInitScript((uid) => {
@@ -43,26 +43,17 @@ test('unresolved open-world workload clears stale commercial state before resear
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
-  await send(page, 'I need 30 gaming laptops under AUD 2500 each.');
-  if (await page.getByRole('button', { name: 'Add', exact: true }).count() === 0) {
-    // The stale commercial context is setup, not the behavior under test. One bounded retry
-    // tolerates a cold local-model stall while preserving the exact buyer turn.
-    await send(page, 'I need 30 gaming laptops under AUD 2500 each.');
-  }
-  await expect(page.getByRole('button', { name: 'Add', exact: true }).first()).toBeVisible();
-
   const unresolved = await send(
     page,
-    'I need help with a laptop for digital twin simulation? I need it to simulate a cyber attack?',
+    'I edit 8K RAW video and do colour-critical grading. I do not care about gaming FPS. Which laptop should I buy?',
   );
   const unresolvedTraceId = String(unresolved.decision_trace_id || unresolved.trace_id || '');
   expect(unresolvedTraceId).not.toBe('');
-  expect(unresolved.requested_quantity ?? null).toBeNull();
+  expect(unresolved.qualification_authority ?? 'none').toBe('none');
 
-  const assistantMessages = page.locator('[class*="message"][class*="assistant"] [class*="messageContent"]');
-  const latest = assistantMessages.last();
-  await expect(latest).toContainText(/provisional shopping case/i);
-  await expect(latest).not.toContainText(/30 units|for gaming/i);
+  await expect(page.getByTestId('ambiguity-exploration')).toContainText(/provisional/i);
+  await expect(page.getByRole('button', { name: /Discover official sources/i })).toBeVisible();
+  await expect(page.getByText(/Authorized recommendation/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
   await expect(page.getByTestId('ambiguity-accounting')).toContainText(/external calls: 0/i);
 
@@ -72,8 +63,8 @@ test('unresolved open-world workload clears stale commercial state before resear
   await modal.getByRole('button', { name: /^Research & Fit/ }).click();
   await modal.getByRole('tab', { name: /Research Breakdown/ }).click();
   const research = modal.getByTestId('workload-research-trace');
-  await expect(research).toContainText(/digital twin simulation/i);
-  await expect(research).toContainText(/simulate a cyber attack/i);
+  await expect(research).toContainText(/8K RAW video/i);
+  await expect(research).toContainText(/colour-critical grading/i);
   await expect(research).toContainText(/bounded research plan/i);
   await expect(research).toContainText(/Status:\s*(blocked|planned|not executed)/i);
   await expect(research).toContainText(/catalog recommendation|exploration/i);

@@ -148,6 +148,17 @@ class ProductCardExplanation(BaseModel):
     claim_refs: list[str] = Field(default_factory=list, max_length=128)
 
 
+class AttributeFitVerdict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    attribute: str
+    label: str
+    verdict: Literal["strong", "meets", "failed", "not_verified", "contradicted", "not_applicable"]
+    requirement_class: Literal["minimum", "recommended", "target", "optimal"]
+    requirement_claim_ids: list[str] = Field(default_factory=list, max_length=8)
+    capability_claim_ids: list[str] = Field(default_factory=list, max_length=8)
+
+
 class ShelfProduct(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -166,6 +177,7 @@ class ShelfProduct(BaseModel):
     compromises: list[str] = Field(default_factory=list, max_length=12)
     why_ranked: str = Field(default="Provisional catalog exploration", max_length=500)
     explanation: ProductCardExplanation | None = None
+    attribute_verdicts: list[AttributeFitVerdict] = Field(default_factory=list, max_length=64)
     requirement_claim_ids: list[str] = Field(default_factory=list, max_length=64)
     capability_claim_ids: list[str] = Field(default_factory=list, max_length=64)
     freshness_status: Literal["fresh", "stale", "unknown", "mixed"] = "unknown"
@@ -491,6 +503,24 @@ def build_product_shelves(
                     ),
                     why_ranked=explanation.summary,
                     explanation=explanation,
+                    attribute_verdicts=(
+                        [AttributeFitVerdict(
+                            attribute=row.attribute_key,
+                            label=row.attribute_label,
+                            verdict=(
+                                "strong" if row.verdict == "meets_recommended"
+                                else "meets" if row.verdict == "meets_minimum"
+                                else "failed" if row.verdict == "below_minimum"
+                                else "contradicted" if row.verdict == "contested"
+                                else "not_applicable" if row.verdict == "not_applicable"
+                                else "not_verified"
+                            ),
+                            requirement_class=row.requirement_class,
+                            requirement_claim_ids=row.requirement_claim_ids,
+                            capability_claim_ids=row.capability_claim_ids,
+                        ) for row in decision.fit_ledger]
+                        if decision else []
+                    ),
                     requirement_claim_ids=(
                         list(dict.fromkeys(
                             claim_id for row in decision.fit_ledger

@@ -3744,6 +3744,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         logger.debug("case research-plan projection skipped: %s", exc)
     provisional_exploration_needed = bool(
         semantic_catalog_blocked
+        or bool((data.get("post_catalog_adjudication") or {}).get("research_needed"))
         or (
             turn_intent == "SEARCH"
             and not products
@@ -3756,6 +3757,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             }
         )
     )
+    if provisional_exploration_needed and _case_research_plan is None:
+        try:
+            _case_research_plan = build_case_research_plan(
+                active_shopping_case_purpose or str(q or "")[:500],
+                allow_open_world=True,
+            )
+        except Exception as exc:
+            logger.debug("open-world research-plan projection skipped: %s", exc)
     if provisional_exploration_needed and not buyer_requirement_claims:
         try:
             from src.app.services.accepted_catalog_projection import project_accepted_catalog
@@ -3799,13 +3808,18 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 "status": "provisional",
                 "interpretations": _semantic_hypotheses,
                 "next_question": (
-                    _questions[0] if _questions
+                    # A generic catalog budget question must not displace the
+                    # evidence question that resolves an open-world suitability
+                    # gap.  The durable plan owns that material question.
+                    ({"id": "research_scope", "text": _case_research_plan.next_question}
+                     if _case_research_plan is not None
+                     and _case_research_plan.publisher_status == "unresolved"
+                     else _questions[0]) if _questions
                     else ({"id": "research_scope", "text": _case_research_plan.next_question}
                           if _case_research_plan is not None else None)
                 ),
-                "research_choices": [
-                    "research_approved_sources", "upload_requirements",
-                    "enter_specifications", "continue_provisionally",
+                "research_choices": (["research_approved_sources"] if _case_research_plan else []) + [
+                    "upload_requirements", "enter_specifications", "continue_provisionally",
                 ],
                 "execution": "local_exploration_completed",
                 "evidence": "material_gaps",

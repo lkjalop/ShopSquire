@@ -57,6 +57,41 @@ def test_unrelated_normal_persona_does_not_open_external_research():
     ) is None
 
 
+def test_open_world_plan_has_no_invented_publisher_and_bounded_query_axes():
+    plan = build_case_research_plan(
+        "I need vendor-certified hardware for a novel multiphysics solver",
+        manifest=_manifest(),
+        allow_open_world=True,
+    )
+    assert plan is not None
+    assert plan.publisher_status == "unresolved"
+    assert plan.source_candidate_ids == []
+    assert plan.hypotheses[0].source_ids == []
+    assert 2 <= len(plan.discovery_queries) <= 3
+    assert len({row.axis for row in plan.discovery_queries}) == len(plan.discovery_queries)
+    assert all(row.query for row in plan.discovery_queries)
+    assert all("I need" not in row.query for row in plan.discovery_queries)
+    assert any(row.resolution_owner == "research" for row in plan.obligations)
+
+
+def test_open_world_queries_drop_negated_preferences_and_buyer_filler():
+    plan = build_case_research_plan(
+        "I edit 8K RAW video and do colour-critical grading. "
+        "I do not care about gaming FPS. Which laptop should I buy?",
+        manifest=_manifest(),
+        allow_open_world=True,
+    )
+    assert plan is not None
+    queries = " ".join(row.query.lower() for row in plan.discovery_queries)
+    assert "8k" in queries
+    assert "raw" in queries
+    assert "colour" in queries
+    assert "gaming" not in queries
+    assert "fps" not in queries
+    assert "should" not in queries
+    assert " buy " not in f" {queries} "
+
+
 def test_generic_requirements_phrase_cannot_invent_an_unrelated_workload():
     manifest = {"sources": [
         _source("factory", ["factory_io", "plc_simulation"], ["Factory I/O", "System Requirements"]),

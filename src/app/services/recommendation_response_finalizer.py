@@ -18,8 +18,52 @@ def _products(payload: Dict[str, Any]) -> list[dict[str, Any]]:
         (payload.get("proposal") or {}).get("results") if isinstance(payload.get("proposal"), dict) else None,
     ):
         if isinstance(candidate, list):
-            return [dict(item) for item in candidate if isinstance(item, dict)]
+            rows = [dict(item) for item in candidate if isinstance(item, dict)]
+            seen: set[str] = set()
+            unique: list[dict[str, Any]] = []
+            for item in rows:
+                specs = item.get("specs") if isinstance(item.get("specs"), dict) else {}
+                identity = str(
+                    item.get("configuration_hash")
+                    or item.get("mpn")
+                    or specs.get("manufacturer_part_number")
+                    or specs.get("mpn")
+                    or item.get("sku")
+                    or ""
+                ).strip().lower()
+                if identity and identity in seen:
+                    continue
+                if identity:
+                    seen.add(identity)
+                unique.append(item)
+            return unique
     return []
+
+
+def _positive_workload_fit_evidence(payload: Dict[str, Any]) -> bool:
+    """Return true only when typed evidence positively qualifies at least one SKU.
+
+    Product presence, category similarity, model prose, and event wording are not
+    qualification authority.
+    """
+
+    requirements = ((payload.get("constraints_used") or {}).get("requirements") or {})
+    compiled = payload.get("semantic_compiled_requirements") or []
+    alignment = payload.get("catalog_alignment") or {}
+    positively_aligned = bool(alignment.get("exact") or alignment.get("qualified"))
+    product_fit = any(
+        str((item.get("workload_fit") or {}).get("overall") or "").lower()
+        in {"meets", "qualified", "verified"}
+        for item in _products(payload)
+    )
+    accepted_claims = int(
+        ((payload.get("research") or {}).get("claims_accepted") or 0)
+        if isinstance(payload.get("research"), dict) else 0
+    )
+    return bool(
+        (requirements or compiled or accepted_claims > 0)
+        and (positively_aligned or product_fit)
+    )
 
 
 def finalize_core_response(
@@ -49,6 +93,9 @@ def finalize_core_response(
     out["decision_trace_id"] = trace_id
     out.setdefault("decision_id", trace_id)
     products = _products(out)[:8]
+    for key in ("products", "results"):
+        if isinstance(out.get(key), list):
+            out[key] = _products({key: out[key]})
     summary = [
         {
             "sku": str(item.get("sku") or ""),
@@ -77,11 +124,21 @@ def finalize_core_response(
     shelf = out.get("shelf") if isinstance(out.get("shelf"), dict) else {}
     shelf_bands = shelf.get("bands") if isinstance(shelf.get("bands"), list) else []
     if not right_panel["anchor_sections"] and summary and not shelf_bands:
+        fit_authorized = _positive_workload_fit_evidence(out)
         right_panel["anchor_sections"] = [{
-            "title": "Authorized recommendation",
-            "match_basis": ["catalog eligibility", "budget", "capability"],
+            "title": (
+                "Authorized recommendation" if fit_authorized
+                else "Provisional catalog exploration"
+            ),
+            "qualification_authority": "positive_evidence" if fit_authorized else "none",
+            "match_basis": (
+                ["catalog eligibility", "budget", "capability"] if fit_authorized
+                else ["catalog eligibility", "category similarity"]
+            ),
             "summary": (
                 "Products shown after deterministic catalog, budget, and capability checks."
+                if fit_authorized else
+                "Products are exploratory until workload requirements and exact fit are evidenced."
             ),
             "top_products": [
                 {

@@ -180,3 +180,29 @@ def test_trace_projects_relative_quantity_as_pending_commercial_authorization():
     assert reducer["output"]["prior_quantity"] == 30
     assert reducer["output"]["obligations"][0]["proposed_value"] == 20
     assert reducer["output"]["commercial_authority_granted"] is False
+def test_trace_scopes_catalog_policy_separately_from_workload_fit_authority():
+    core = SimpleNamespace(
+        lane="SEARCH",
+        degraded=False,
+        products=[SimpleNamespace()],
+        clarify=[],
+        extras={
+            "decision": {"source": "model", "model_proposal": {}, "authorization_changes": []},
+            "plan": {},
+            "gates": {"policy_route": "allow", "source": "commerce_request_guard"},
+            "qualification_authority": "none",
+            "post_catalog_adjudication": {
+                "qualification_authority": "none",
+                "research_needed": True,
+                "reason_codes": ["no_normalized_requirements"],
+            },
+            "stage_results": [],
+        },
+    )
+
+    by_id = {item["id"]: item for item in build_execution_steps(core)}
+
+    assert by_id["platform-authorization"]["authority_scope"] == "catalog_routing"
+    assert by_id["commerce-policy-gate"]["authority_scope"] == "request_policy"
+    assert by_id["post-catalog-adjudication"]["authority"] == "withholds_authority"
+    assert by_id["buyer-response"]["label"] == "Present provisional catalog exploration"

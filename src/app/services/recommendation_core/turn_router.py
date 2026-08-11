@@ -2223,6 +2223,16 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     )
     if clarification_relation == "supersede" and _is_bounded_semantic_continuation(envelope.query):
         clarification_relation = "answer"
+    # A logistics/commercial obligation is not an answer to an unrelated semantic
+    # question. Preserve the pending question and let the commercial turn proceed.
+    # This clamp uses closed quantity/time/commerce grammars, never workload names.
+    commercial_interrupt = bool(
+        explicit_quantity is not None
+        or operational_constraints.get("delivery_window_days") is not None
+        or _CASE_CONTEXT_OPERATION.search(envelope.query or "")
+    )
+    if clarification_relation == "answer" and commercial_interrupt:
+        clarification_relation = "interrupt"
 
     # A model proposal alone cannot authorize the procurement lane. Fresh procurement requires
     # a bounded quantity; quantity-free turns are only valid when they explicitly concern an

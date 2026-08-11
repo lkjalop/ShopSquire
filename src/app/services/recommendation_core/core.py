@@ -1254,9 +1254,25 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                       won_message=resp._msg_priority > _prio_before)
 
     retrieval_count = int((resp.extras.get("evidence") or {}).get("count") or 0)
-    qualified_count = sum(
-        1 for product in resp.products
-        if not decision.requirements or (product.fit or {}).get("overall") == "meets"
+    # Model-proposed requirements are retrieval hypotheses, not positive
+    # workload-fit evidence.  Only predicates compiled from accepted evidence
+    # may qualify a SKU.
+    workload_evidence_items = list(
+        (((resp.extras.get("intent") or {}).get("title_requirements") or {})
+         .get("external_workload_evidence") or {}).get("items") or []
+    )
+    workload_compiled_requirements = [
+        requirement
+        for item in workload_evidence_items if isinstance(item, dict)
+        for requirement in list(item.get("compiled_requirements") or [])
+        if isinstance(requirement, dict)
+    ]
+    evidence_requirement_count = len(semantic_compiled_requirements or []) + len(
+        workload_compiled_requirements
+    )
+    qualified_count = (
+        sum(1 for product in resp.products if (product.fit or {}).get("overall") == "meets")
+        if evidence_requirement_count > 0 else 0
     )
     unknown_requirement_count = sum(
         len((product.fit or {}).get("unknown_keys") or []) for product in resp.products
@@ -1271,6 +1287,29 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         qualified_product_count=qualified_count,
         commercial_materiality=(1.0 if requested_quantity and requested_quantity > 1 else 0.0),
     ).model_dump()
+    from src.app.services.recommendation_core.post_catalog_adjudicator import (
+        adjudicate_post_catalog,
+        explicit_evidence_constraints,
+    )
+
+    normalized_requirement_count = evidence_requirement_count
+    unknown_gap = unknown_requirement_count / possible_requirement_count
+    catalog_coverage_gap = 1.0 - (qualified_count / max(1, retrieval_count))
+    material_gap = max(unknown_gap, catalog_coverage_gap)
+    explicit_constraints = list(dict.fromkeys([
+        *list(resp.extras.get("unresolved_explicit_constraints") or []),
+        *explicit_evidence_constraints(envelope.query),
+    ]))
+    post_catalog_adjudication = adjudicate_post_catalog(
+        normalized_requirement_count=normalized_requirement_count,
+        evidence_qualified_product_count=qualified_count,
+        retrieval_count=retrieval_count,
+        material_attribute_coverage_gap=material_gap,
+        unresolved_explicit_constraints=explicit_constraints,
+        category_similarity_only=bool(resp.products and normalized_requirement_count == 0),
+    )
+    resp.extras["post_catalog_adjudication"] = post_catalog_adjudication.model_dump()
+    resp.extras["qualification_authority"] = post_catalog_adjudication.qualification_authority
 
     # Resolving a concept permits catalog alignment; it does not itself prove
     # that any SKU is suitable. A provider can supply an explicit SKU qualification,

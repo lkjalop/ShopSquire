@@ -41,6 +41,7 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
         "id": "platform-authorization",
         "kind": "gate",
         "authority": "authorizes",
+        "authority_scope": "catalog_routing",
         "label": "Clamp proposal to catalog and policy",
         "status": "corrected" if clamped else ("defaulted" if changes else "accepted"),
         "source": "recommendation_core",
@@ -133,6 +134,7 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             "id": "workload-authorization",
             "kind": "gate",
             "authority": "authorizes",
+            "authority_scope": "workload_fit",
             "label": "Authorize workload-to-product fit",
             "status": workload_authorization.get("status") or "unknown",
             "source": "recommendation_core",
@@ -167,6 +169,23 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             "status": post_catalog_trigger.get("recommendation") or "unknown",
             "source": "research_routing_shadow",
             "output": post_catalog_trigger,
+        })
+    post_catalog_adjudication = dict(
+        (getattr(core, "extras", {}) or {}).get("post_catalog_adjudication") or {}
+    )
+    if post_catalog_adjudication:
+        fit_authorized = (
+            post_catalog_adjudication.get("qualification_authority") == "positive_evidence"
+        )
+        steps.append({
+            "id": "post-catalog-adjudication",
+            "kind": "gate",
+            "authority": "authorizes" if fit_authorized else "withholds_authority",
+            "authority_scope": "workload_fit",
+            "label": "Adjudicate evidence-qualified catalog fit",
+            "status": "accepted" if fit_authorized else "research_required",
+            "source": "post_catalog_adjudicator",
+            "output": post_catalog_adjudication,
         })
     if research_plan.get("evidence_needs") or research_plan.get("material_slots"):
         steps.append({
@@ -234,6 +253,7 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             "id": "semantic-authorization",
             "kind": "gate",
             "authority": "authorizes",
+            "authority_scope": "concept_to_catalog",
             "label": "Authorize concept-to-catalog fit",
             "status": (
                 "accepted"
@@ -323,19 +343,28 @@ def build_execution_steps(core: Any) -> List[Dict[str, Any]]:
             "id": "commerce-policy-gate",
             "kind": "gate",
             "authority": "authorizes",
+            "authority_scope": "request_policy",
             "label": "Commerce policy gate",
             "status": "accepted" if gates.get("policy_route") == "allow" else "blocked",
             "source": gates.get("source") or "recommendation_core",
             "output": gates,
         })
+    qualification_authority = str(
+        (getattr(core, "extras", {}) or {}).get("qualification_authority") or "none"
+    )
+    fit_authorized = qualification_authority == "positive_evidence"
     steps.append({
         "id": "buyer-response",
         "kind": "stage",
         "authority": "presents",
-        "label": "Present authorized recommendation",
+        "label": (
+            "Present evidence-qualified recommendation"
+            if fit_authorized else "Present provisional catalog exploration"
+        ),
         "status": "degraded" if getattr(core, "degraded", False) else "completed",
         "source": "recommendation_core",
         "output": {"lane": getattr(core, "lane", None),
+                   "qualification_authority": qualification_authority,
                    "product_count": len(getattr(core, "products", []) or []),
                    "clarification_count": len(getattr(core, "clarify", []) or [])},
     })

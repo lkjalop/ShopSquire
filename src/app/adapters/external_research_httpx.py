@@ -86,6 +86,14 @@ def _domain_allowed(domain: str, allowlist: List[str]) -> bool:
     return False
 
 
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(str(host).split("%")[0])
+        return True
+    except ValueError:
+        return False
+
+
 def _engine_failure_rows(value: Any) -> List[Dict[str, str]]:
     """Normalize SearXNG's list/tuple engine failures for a UI-safe receipt."""
 
@@ -143,19 +151,20 @@ class HttpxResearchFetcher:
 
     def fetch(
         self, scrubbed_query: str, *, allowlist: List[str], timeout_s: float = 4.0,
-        cancellation: Any = None,
+        cancellation: Any = None, discovery_candidates_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """Port entry point — never raises."""
         try:
             return self._fetch(
                 scrubbed_query, allowlist or [], float(timeout_s), cancellation=cancellation,
+                discovery_candidates_only=discovery_candidates_only,
             )
         except Exception:
             return []
 
     def _fetch(
         self, scrubbed_query: str, allowlist: List[str], timeout_s: float,
-        *, cancellation: Any = None,
+        *, cancellation: Any = None, discovery_candidates_only: bool = False,
     ) -> List[Dict[str, Any]]:
         if httpx is None or not self._template or not str(scrubbed_query).strip():
             return []
@@ -265,7 +274,14 @@ class HttpxResearchFetcher:
                     responded_engines.add(str(engine).strip())
             u = str(r.get("url") or "")
             dom = (urlparse(u).hostname or "").lower()
-            if not _domain_allowed(dom, allowlist):  # adapter-side allowlist (defense in depth)
+            parsed_result = urlparse(u)
+            is_public_candidate = bool(
+                parsed_result.scheme == "https" and parsed_result.hostname
+                and not _is_ip_literal(parsed_result.hostname)
+            )
+            if not _domain_allowed(dom, allowlist) and not (
+                discovery_candidates_only and is_public_candidate
+            ):
                 continue
             out.append({
                 "title": str(r.get("title") or r.get("name") or "")[:200],

@@ -82,6 +82,23 @@ def test_nist_scope_never_becomes_a_hardware_floor() -> None:
     assert "does not establish a hardware floor" in context[0]["statement"]
 
 
+def test_reviewed_source_without_fast_parser_uses_cited_generic_extractor() -> None:
+    claims, context = compile_source_claims(
+        "reviewed_vendor_without_fast_parser",
+        b"<h2>System requirements</h2><p>32 GB RAM is recommended. "
+        b"At least 8 GB VRAM is required.</p>",
+        observed_at="2026-08-11T00:00:00Z",
+        citation_url="https://docs.vendor.example/system-requirements",
+        allow_generic=True,
+    )
+
+    assert context == []
+    assert {row["attribute"] for row in claims} == {"ram_gb", "gpu_vram_gb"}
+    assert all(row["extractor"] == "provider_neutral_deterministic" for row in claims)
+    assert all(row["quoted_evidence_span"] for row in claims)
+    assert all(row["citation_url"].startswith("https://docs.vendor.example/") for row in claims)
+
+
 def test_application_parsers_do_not_share_claims_across_publishers() -> None:
     observed_at = "2026-08-08T00:00:00Z"
     blender, _ = compile_source_claims(

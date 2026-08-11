@@ -11,7 +11,8 @@ const isOfficialResearchEvent = (event: any) => {
   return [event?.event_type, payload?._original_event_type, payload?._event_type].some((value) => {
     const eventType = String(value || '').toLowerCase();
     return eventType.includes('official_research_rerank_completed')
-      || eventType.includes('buyer_evidence_source_researched');
+      || eventType.includes('buyer_evidence_source_researched')
+      || eventType.includes('open_world_discovery_completed');
   });
 };
 

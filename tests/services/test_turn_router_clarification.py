@@ -96,6 +96,25 @@ def test_free_text_answer_is_classified_against_pending_material_question(db):
     assert decision.model_proposal["clarification_relation"] == "answer"
 
 
+@pytest.mark.parametrize("message", [
+    "I need 60 units delivered today.",
+    "Make it 40 and the deadline is 3 days.",
+    "Ask a supplier for a quote and lead time.",
+])
+def test_commercial_obligation_interrupts_pending_semantic_question(db, message):
+    envelope = TurnEnvelope.from_suggest_params(
+        query=message, uid="buyer-1", tenant_id="default", session=_pending_session(),
+    )
+    decision = route_turn(
+        db, envelope,
+        llm_fn=lambda _prompt, _timeout: json.dumps({
+            "lane": "SEARCH", "handle": "el-6-6", "requirements": {},
+            "clarification_relation": "answer", "confidence": 0.9,
+        }),
+    )
+    assert decision.clarification_relation == "interrupt"
+
+
 def test_bounded_research_consent_cannot_supersede_retained_workload(db):
     envelope = TurnEnvelope.from_suggest_params(
         query="You may research approved official sources for the workload requirements.",

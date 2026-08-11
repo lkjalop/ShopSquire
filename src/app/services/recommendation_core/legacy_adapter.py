@@ -165,6 +165,11 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "semantic_evidence": core.extras.get("semantic_evidence"),
         "approved_narration_evidence": core.extras.get("approved_narration_evidence", []),
         "catalog_alignment": core.extras.get("catalog_alignment"),
+        # Authoritative post-retrieval feedback must cross the compatibility
+        # boundary so chat can open a durable research case when retrieval
+        # reality disproves the pre-catalog guess.
+        "post_catalog_adjudication": core.extras.get("post_catalog_adjudication"),
+        "qualification_authority": core.extras.get("qualification_authority", "none"),
         "supplier_enquiry_option": core.extras.get("supplier_enquiry_option"),
         # Read-only procurement operations are a first-class compatibility contract.
         # Dropping these fields made the browser replace the current case with an empty

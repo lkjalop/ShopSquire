@@ -2903,11 +2903,16 @@ export default function App() {
       throw new Error('This case has no governed research plan. Upload requirements or continue provisionally.');
     }
     setIsThinking(true);
+    const researchController = new AbortController();
+    const researchDeadline = window.setTimeout(
+      () => researchController.abort('research_deadline_exceeded'), 20_000,
+    );
     try {
       const response = await fetch(apiUrl(
         `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/research`,
       ), {
         method: 'POST', credentials: 'include',
+        signal: researchController.signal,
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
@@ -2937,7 +2942,9 @@ export default function App() {
       setTraceId(normalizeTraceId(payload?.trace_id || ambiguityExploration.trace_id || traceId));
       setMessages((current) => [...current, {
         role: 'assistant',
-        content: payload?.evidence_outcome === 'context_only'
+        content: payload?.status === 'publisher_resolution_required'
+          ? `Discovery searched ${payload?.research?.receipts?.length || 0} bounded query axes and found ${payload?.research?.candidates?.length || 0} possible publisher origins. None has been accepted or fetched, so 0 requirement claims were established. Choose an official link, upload requirements, or continue provisionally. Paid calls: 0.`
+          : payload?.evidence_outcome === 'context_only'
           ? `Approved-source research completed in the same shopping case. It established ${payload?.research?.context_claims?.length || 0} context claims but no authoritative product requirements, so the shortlist remains provisional. Tell me the named software/version or accept uploaded requirements to continue. No cart or supplier action was authorized.`
           : `Approved-source research completed in the same shopping case. I compiled ${payload?.research?.claims?.length || 0} scoped product claims and kept ${payload?.research?.unresolved?.length || 0} source or capability gaps visible. No cart or supplier action was authorized.`,
         timestamp: new Date(),
@@ -2945,10 +2952,11 @@ export default function App() {
     } catch (error: any) {
       setMessages((current) => [...current, {
         role: 'assistant',
-        content: `Approved-source research could not complete: ${error?.message || String(error)} You can upload requirements or continue provisionally.`,
+        content: `Approved-source research could not complete: ${error?.name === 'AbortError' ? 'the 20-second research deadline was reached' : (error?.message || String(error))}. You can upload requirements or continue provisionally; retry requires explicit authorization.`,
         timestamp: new Date(),
       }]);
     } finally {
+      window.clearTimeout(researchDeadline);
       setIsThinking(false);
     }
   }, [ambiguityExploration, uid, traceId]);
@@ -3887,7 +3895,7 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                  {Array.isArray(rightPanelContract?.anchor_sections) && rightPanelContract!.anchor_sections!.length > 0 && (
+                  {!ambiguityExploration && Array.isArray(rightPanelContract?.anchor_sections) && rightPanelContract!.anchor_sections!.length > 0 && (
                     <div className={styles.tierPanel}>
                       {(rightPanelContract!.anchor_sections || []).map((section, idx) => (
                         <div key={String(section?.anchor_id || idx)} className={styles.tierBlock}>
@@ -3919,6 +3927,7 @@ export default function App() {
                   {/* BACKEND choice-lanes (evidence-driven) — render these when present; map each lane's
                       skus to the full product cards. Falls back to the frontend heuristic lanes below. */}
                   {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode)
+                    && !ambiguityExploration
                     && !recommendationShelf
                     && filteredDisplayProducts.length > 0
                     && Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0 && (
@@ -3966,6 +3975,7 @@ export default function App() {
 
                   {/* Heuristic lane fallback — only when the backend provided no device_lanes. */}
                   {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode)
+                    && !ambiguityExploration
                     && !recommendationShelf
                     && filteredDisplayProducts.length > 0
                     && !(Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0) && (
@@ -4013,7 +4023,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {expandedLane && (
+                  {!ambiguityExploration && expandedLane && (
                     <div className={styles.expandedLanePanel}>
                       <div className={styles.expandedLaneHeader}>
                         <div className={styles.expandedLaneTitle}>
@@ -4052,7 +4062,7 @@ export default function App() {
                       )}
                     </div>
                   )}
-                  {rightPanelContract?.mode === 'shopping' && rightPanelContract?.show_tiers && (
+                  {!ambiguityExploration && rightPanelContract?.mode === 'shopping' && rightPanelContract?.show_tiers && (
                     <div className={styles.tierPanel}>
                       <div className={styles.tierBlock}>
                         <div className={styles.tierLabel}>
@@ -4220,19 +4230,19 @@ export default function App() {
                         confirmedSourcingOrderId={confirmedSourcingOrderId}
                         onConfirmedSourcingOrderId={setConfirmedSourcingOrderId}
                       />
-                    </>) : recommendationShelf && ['grid', 'list'].includes(rightPanelMode) ? (
+                    </>) : !ambiguityExploration && recommendationShelf && ['grid', 'list'].includes(rightPanelMode) ? (
                       <RecommendationShelf
                         shelf={recommendationShelf}
                         onAdd={addToCart}
                         onWhy={handleWhyProduct}
                       />
-                    ) : !productShelves && filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
+                    ) : !ambiguityExploration && !productShelves && filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
                       <div className={styles.emptyProductState}>
                         <div className={styles.emptyProductIcon}>🔍</div>
                         <div className={styles.emptyProductTitle}>No products found</div>
                         <div className={styles.emptyProductHint}>Try adjusting your budget, use-case, or brand filter. I can help — just ask!</div>
                       </div>
-                    ) : (
+                    ) : ambiguityExploration || productShelves ? null : (
                       <ProductGrid
                         products={filteredDisplayProducts}
                         onAdd={addToCart}

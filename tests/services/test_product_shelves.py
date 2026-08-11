@@ -220,6 +220,26 @@ def test_verified_hard_failure_is_excluded_but_unknown_is_conditional():
     ]
 
 
+def test_most_expensive_configuration_loses_when_verified_requirement_fails():
+    expensive = _product(1)
+    supported = _product(2)
+    projection = build_product_shelves([
+        _candidate(
+            1, price=1_500_000, score=1.0, product=expensive,
+            shared=_decision(expensive, verdict="below_minimum"),
+        ),
+        _candidate(
+            2, price=500_000, score=0.7, product=supported,
+            shared=_decision(supported),
+        ),
+    ])
+
+    assert [item.product.sku for item in _shelf(projection, "shared").initial] == ["SKU-2"]
+    assert [(item.sku, item.reason) for item in projection.exclusions] == [
+        ("SKU-1", "verified_hard_failure")
+    ]
+
+
 def test_unverified_below_minimum_cannot_be_excluded_as_hard_failure():
     product = _product(1)
     candidate = _candidate(

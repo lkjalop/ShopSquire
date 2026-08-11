@@ -250,13 +250,55 @@ _HTML_CONTENT_TYPES = {"text/html", "text/plain", "application/xhtml+xml"}
 
 def compile_source_claims(
     source_id: str, content: bytes, *, observed_at: str, citation_url: str,
+    allow_generic: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Compile only claims recognized by the selected source-specific parser."""
+    """Compile claims through a source parser or the conservative generic fallback."""
 
     parser = _SOURCE_PARSERS.get(source_id)
-    if parser is None:
+    source_text = _html_text(content)
+    if parser is not None:
+        return parser(source_id, source_text.casefold(), observed_at, citation_url)
+    if not allow_generic:
         return [], []
-    return parser(source_id, _html_text(content).casefold(), observed_at, citation_url)
+
+    # Provider-neutral extraction is a bounded fallback for reviewed publishers
+    # without a dedicated parser.  Search snippets never enter this function;
+    # the caller has already completed an allowlisted official-origin fetch.
+    from src.app.services.generic_requirement_extractor import (
+        critique_extracted_requirements,
+        extract_generic_requirements,
+    )
+
+    observed = _parse_time(observed_at)
+    if observed is None:
+        return [], []
+    candidates = extract_generic_requirements(
+        source_text, citation_url=citation_url, observed_at=observed,
+    )
+    critique = critique_extracted_requirements(
+        candidates, source_text=source_text, accepted_url=citation_url,
+    )
+    rows: list[dict[str, Any]] = []
+    for candidate in critique.accepted:
+        claim_type = {
+            "minimum": "minimum_requirements",
+            "recommended": "recommended_requirements",
+            "target": "target_requirements",
+            "conditional": "recommended_requirements",
+        }[candidate.requirement_class]
+        row = _claim(
+            source_id, candidate.attribute, candidate.operator, candidate.value,
+            unit=candidate.unit, claim_type=claim_type,
+            requirement_class=candidate.requirement_class,
+            condition=candidate.condition,
+            statement=candidate.quoted_evidence_span,
+            observed_at=observed_at, citation_url=citation_url,
+        )
+        row["page_section"] = candidate.page_section
+        row["quoted_evidence_span"] = candidate.quoted_evidence_span
+        row["extractor"] = "provider_neutral_deterministic"
+        rows.append(row)
+    return rows, []
 
 
 def _receipt(raw: dict[str, Any], *, run_id: str, capability: str, index: int) -> dict[str, Any]:
@@ -914,6 +956,7 @@ def research_official_sources(
         observed_at = str(origin["receipt"].get("observed_at") or datetime.now(timezone.utc).isoformat())
         product_rows, context_rows = compile_source_claims(
             source_id, origin["content"], observed_at=observed_at, citation_url=selected,
+            allow_generic=True,
         )
         product_rows, context_rows, claim_errors = _compiled_claims_allowed(
             source, product_rows, context_rows, observed_at=observed_at, now=current,

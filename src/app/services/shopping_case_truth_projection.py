@@ -48,7 +48,8 @@ class ShoppingCaseTruthProjection(BaseModel):
     research_plan_id: str = Field(pattern=r"^crp-[a-f0-9]{20}$")
     ambiguity_objects: list[CaseAmbiguityObject] = Field(min_length=1, max_length=8)
     research_obligations: list[CaseResearchObligation] = Field(min_length=1, max_length=16)
-    source_candidate_ids: list[str] = Field(min_length=1, max_length=16)
+    source_candidate_ids: list[str] = Field(default_factory=list, max_length=16)
+    publisher_candidates: list[dict] = Field(default_factory=list, max_length=12)
 
     @model_validator(mode="after")
     def validate_case_identity_and_hypotheses(self) -> "ShoppingCaseTruthProjection":

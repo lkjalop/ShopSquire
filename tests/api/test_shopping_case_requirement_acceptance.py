@@ -100,6 +100,59 @@ def test_interpretation_defers_covered_catalog_request_to_normal_chat_lane():
     assert response.status_code == 204
 
 
+def test_open_world_authorization_runs_discovery_but_not_origin_fetch_or_claims(
+    monkeypatch,
+):
+    client = _client()
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan(
+        "vendor-certified novel multiphysics solver", allow_open_world=True,
+    )
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    _enrol_local_research(monkeypatch)
+    monkeypatch.setattr(
+        "src.app.services.open_world_research_discovery.discover_open_world_publishers",
+        lambda *args, **kwargs: {
+            "schema_version": "open-world-discovery-v1",
+            "status": "publisher_candidates_found",
+            "publisher_status": "unresolved",
+            "candidates": [{
+                "url": "https://solver.example/docs/requirements",
+                "domain": "solver.example", "title": "Requirements",
+                "discovery_only": True, "authority": "not_accepted",
+            }],
+            "receipts": [{
+                "query_hash": "abc", "network_execution": True,
+                "external_call_dispatched": True, "execution_status": "completed",
+            }],
+            "provider_accounting": {
+                "discovery_calls": 1, "external_calls": 1,
+                "official_origin_fetches": 0, "paid_calls": 0,
+            },
+            "claims": [],
+            "next_action": "approve_publisher_origin_or_upload_requirements",
+        },
+    )
+    response = client.post("/api/v1/shopping-cases/sc-open/research", json={
+        "uid": "buyer-open", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    })
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "publisher_resolution_required"
+    assert payload["research"]["provider_accounting"]["discovery_calls"] == 1
+    assert payload["research"]["provider_accounting"]["official_origin_fetches"] == 0
+    assert payload["research"]["claims"] == []
+    assert payload["ambiguity_exploration"]["source_candidate_ids"] == []
+
+
 def test_accepted_upload_runs_corroboration_in_the_same_interpreted_case(monkeypatch):
     client = _client()
     _enrol_local_research(monkeypatch)

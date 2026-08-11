@@ -64,11 +64,12 @@ describe('research truth panels', () => {
         interpretations: [], next_question: null, execution: 'research_completed',
         evidence: 'no_accepted_claims', decision: 'provisional_exploration_only',
         cart_authority: 'none', provider_accounting: { external_calls: 1, paid_calls: 0 },
+        research_plan_id: 'crp-0123456789abcdef0123',
       }}
       onResearch={research} onUpload={vi.fn()} onEnterSpecifications={vi.fn()}
     />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry approved research' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh source discovery' }));
     expect(research).toHaveBeenCalledWith(true);
     expect(screen.queryByRole('button', { name: 'Research approved sources' })).toBeNull();
   });

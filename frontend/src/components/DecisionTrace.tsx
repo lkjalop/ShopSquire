@@ -327,7 +327,8 @@ export function deriveTraceTrustStrip({
     return [event?.event_type, payload?._original_event_type, payload?._event_type].some((value) => {
       const eventType = String(value || '').toLowerCase();
       return eventType.includes('official_research_rerank_completed')
-        || eventType.includes('buyer_evidence_source_researched');
+        || eventType.includes('buyer_evidence_source_researched')
+        || eventType.includes('open_world_discovery_completed');
     });
   });
   const officialClaims = officialResearchEvents.flatMap((event) => [
@@ -357,6 +358,10 @@ export function deriveTraceTrustStrip({
     String(tier?.mechanism || '').toLowerCase() === 'evidence_cache'
     && String(tier?.execution_status || tier?.status || '').toLowerCase() === 'completed'
   ));
+  const discoveryCompleted = researchReceipts.some((receipt) => (
+    String(receipt?.provider_capability || receipt?.provider_kind || '').toLowerCase().includes('web_discovery')
+    && String(receipt?.execution_status || receipt?.status || '').toLowerCase() === 'completed'
+  ));
   const researchBlocked = researchPayloads.some((payload) => (
     String(payload?.status || '').toLowerCase() === 'blocked'
   )) || researchTiers.some((tier) => (
@@ -368,15 +373,26 @@ export function deriveTraceTrustStrip({
     ? { label: 'Completed', detail: 'At least one governed canonical official-origin fetch completed.', status: 'good' }
     : governedCacheCompleted
       ? { label: 'Completed from cache', detail: 'Fresh governed official evidence was reused; no network fetch was needed.', status: 'good' }
-    : researchBlocked
+      : discoveryCompleted
+        ? { label: 'Discovery completed', detail: 'Web discovery returned publisher candidates; no official origin or requirement claim was accepted.', status: 'warn' }
+      : researchBlocked
       ? { label: 'Blocked', detail: 'Research was attempted but a governed execution boundary prevented completion.', status: 'warn' }
       : officialResearchEvents.length > 0
         ? { label: 'Not completed', detail: 'Research state was recorded without a completed canonical fetch.', status: 'neutral' }
         : { label: 'Not executed', detail: 'No governed research execution was recorded.', status: 'neutral' };
   const authorities = executionSteps.map((step) => String(step?.authority || '').toLowerCase());
-  const eventText = JSON.stringify(events || []).toLowerCase();
-  const humanApproved = /human.{0,24}(approved|authorized)|approved.{0,24}human/.test(eventText);
-  const authorized = authorities.includes('authorizes') || /authorized|policy_gate/.test(eventText);
+  const humanApproved = executionSteps.some((step) => (
+    String(step?.authority || '').toLowerCase() === 'authorizes'
+    && String(step?.actor_type || step?.resolution_owner || '').toLowerCase() === 'human'
+    && ['accepted', 'approved', 'completed'].includes(String(step?.status || '').toLowerCase())
+  ));
+  const authorized = executionSteps.some((step) => (
+    String(step?.authority || '').toLowerCase() === 'authorizes'
+    && ['workload_fit', 'commerce', 'supplier', 'cart'].includes(
+      String(step?.authority_scope || '').toLowerCase(),
+    )
+    && ['accepted', 'approved', 'completed'].includes(String(step?.status || '').toLowerCase())
+  ));
   const proposed = authorities.includes('proposes');
   const authority: TrustCue = humanApproved
     ? { label: 'Human step recorded', detail: 'A human authorized at least one recorded step; supplier-send and payment authority remain separately gated.', status: 'good' }
@@ -386,16 +402,14 @@ export function deriveTraceTrustStrip({
         ? { label: 'Proposal only', detail: 'A model proposal exists without recorded execution authority.', status: 'warn' }
         : { label: 'Authority unrecorded', detail: 'No typed authority path is available.', status: 'neutral' };
 
-  const observedTimes = (events || [])
-    .flatMap((event) => [
-      event?.timestamp,
-      event?.created_at,
-      event?.payload?.as_of,
-      event?.payload?.observed_at,
-      ...(Array.isArray(event?.payload?.official_claims)
-        ? event.payload.official_claims.map((claim: any) => claim?.observed_at) : []),
-      ...(Array.isArray(event?.payload?.context_claims)
-        ? event.payload.context_claims.map((claim: any) => claim?.observed_at) : []),
+  const observedTimes = researchPayloads
+    .flatMap((payload) => [
+      ...(Array.isArray(payload?.claims)
+        ? payload.claims.map((claim: any) => claim?.observed_at) : []),
+      ...(Array.isArray(payload?.official_claims)
+        ? payload.official_claims.map((claim: any) => claim?.observed_at) : []),
+      ...(Array.isArray(payload?.context_claims)
+        ? payload.context_claims.map((claim: any) => claim?.observed_at) : []),
     ])
     .map((value) => Date.parse(String(value || '')))
     .filter((value) => Number.isFinite(value));

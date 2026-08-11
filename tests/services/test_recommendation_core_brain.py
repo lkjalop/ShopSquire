@@ -3025,6 +3025,26 @@ def test_known_wrong_a100_spec_laptop_now_sells(db):
                                      "products_min": 1})
 
 
+def test_model_floors_do_not_become_workload_fit_authority(db):
+    resp = recommend_turn(
+        db,
+        _env("Which laptop should I buy with 8 GB RAM and 256 GB storage?"),
+        llm_fn=_route_stub(
+            "SEARCH", "el-6-6", {"ram_gb": [">=", 8], "storage_gb": [">=", 256]},
+        ),
+    )
+    payload = to_legacy(resp)
+
+    assert payload["qualification_authority"] == "none"
+    assert payload["post_catalog_adjudication"]["research_needed"] is True
+    assert "no_normalized_requirements" in payload["post_catalog_adjudication"]["reason_codes"]
+    assert payload["products"]
+    buyer_step = next(
+        step for step in payload["execution_steps"] if step["id"] == "buyer-response"
+    )
+    assert buyer_step["label"] == "Present provisional catalog exploration"
+
+
 def test_known_wrong_valorant_now_answers_with_closest_match(db):
     resp = recommend_turn(db, _env("i want to play valorant at 144fps"),
                           llm_fn=_route_stub("SEARCH", "el-6-11-2", {"refresh_hz": [">=", 144]}))
