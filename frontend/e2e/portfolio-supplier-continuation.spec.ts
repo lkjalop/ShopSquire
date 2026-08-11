@@ -53,6 +53,10 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   await expect(offers).toContainText(/REJECTED.*no available quantity/i);
   await expect(offers).toContainText(/CONDITIONAL.*short by/i);
   await expect(offers).toContainText(/LATE.*after the requested deadline/i);
+  await expect(offers).toContainText(/QUARANTINED.*identity or response integrity was not verified/i);
+  const quarantined = offers.locator('label').filter({ hasText: /QUARANTINED/i });
+  await expect(quarantined.getByRole('radio')).toBeDisabled();
+  await expect(quarantined).toContainText(/unavailable for selection or cart confirmation/i);
   await expect(offers).toContainText(/Commercial status: QUALIFIED_LATE.*quantity late/i);
   await expect(offers).not.toContainText(/proposed substitute/i);
   await offers.getByLabel(/27 × SCORP-126982.*exact configuration/i).check();

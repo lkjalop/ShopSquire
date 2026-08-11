@@ -40,6 +40,7 @@ class SupplierOfferInput(BaseModel):
     unit_price_cents: int | None = Field(default=None, ge=0, le=1_000_000_000)
     currency: str = Field(default="AUD", min_length=3, max_length=3)
     validity_expires_at: str | None = Field(default=None, max_length=80)
+    trust_status: Literal["trusted", "untrusted"] = "trusted"
 
 
 class BuyerSafeSupplierOffer(BaseModel):
@@ -56,7 +57,10 @@ class BuyerSafeSupplierOffer(BaseModel):
     provenance: dict[str, str]
     supplier_send: Literal["not_performed"] = "not_performed"
     purchase_commitment: Literal[False] = False
-    response_status: Literal["accepted", "rejected", "conditional", "late", "unverified"] = "unverified"
+    trust_status: Literal["trusted", "untrusted"] = "trusted"
+    response_status: Literal[
+        "accepted", "rejected", "conditional", "late", "unverified", "quarantined",
+    ] = "unverified"
     response_reason: str = "Legacy response was not normalized against quantity and deadline."
     commercial_decision: CommercialDecision | None = None
 
@@ -107,7 +111,10 @@ def normalize_supplier_offers(
             deadline_days=deadline_days,
             relationship=row.relationship,
         ))
-        if row.quantity_available == 0:
+        if row.trust_status == "untrusted":
+            response_status = "quarantined"
+            response_reason = "Supplier identity or response integrity was not verified."
+        elif row.quantity_available == 0:
             # A supplier's explicit zero-quantity response is a rejection fact;
             # fit/budget/deadline classification still comes from the reducer.
             response_status = "rejected"
@@ -142,6 +149,7 @@ def normalize_supplier_offers(
                 "source_reference": row.source_reference,
                 "supplier_reference": row.supplier_reference,
             },
+            trust_status=row.trust_status,
             response_status=response_status,
             response_reason=response_reason,
             commercial_decision=commercial_decision,
@@ -204,6 +212,17 @@ def certification_fixture_offers(
         quantity_available=requested_quantity,
         lead_time_days=21,
         unit_price_cents=590_000,
+    ))
+    rows.append(SupplierOfferInput(
+        source_type="deterministic_certification_fixture",
+        source_reference=f"{case_id}:fixture-rfq-response:untrusted",
+        supplier_reference="fixture-supplier-untrusted",
+        offered_sku=preferred_sku,
+        relationship="exact",
+        quantity_available=requested_quantity,
+        lead_time_days=1,
+        unit_price_cents=400_000,
+        trust_status="untrusted",
     ))
     return rows
 
@@ -299,6 +318,8 @@ def resolve_confirmed_cart_target(
     offer = next((row for row in selection.offers if row.offer_id == selected_offer_id), None)
     if selected_offer_id and offer is None:
         raise ValueError("supplier_offer_not_found")
+    if offer is not None and offer.trust_status != "trusted":
+        raise ValueError("supplier_offer_quarantined")
     requires_offer = selection.choice in {"supplier_enquiry", "substitute"}
     if requires_offer and offer is None:
         raise ValueError("supplier_offer_selection_required")

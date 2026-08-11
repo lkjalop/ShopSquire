@@ -17,7 +17,8 @@ export type SupplierOffer = {
   provenance?: Record<string, string>;
   supplier_send?: string;
   purchase_commitment?: boolean;
-  response_status?: 'accepted' | 'rejected' | 'conditional' | 'late' | 'unverified';
+  trust_status?: 'trusted' | 'untrusted';
+  response_status?: 'accepted' | 'rejected' | 'conditional' | 'late' | 'unverified' | 'quarantined';
   response_reason?: string;
   commercial_decision?: {
     status: string;
@@ -177,7 +178,8 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
               display: 'block', border: '1px solid #fed7aa', borderRadius: 7,
               padding: 8, background: offer.quantity_available > 0 ? '#fff' : '#f8fafc',
             }}>
-              <input type="radio" name="supplier-offer" disabled={offer.quantity_available === 0}
+              <input type="radio" name="supplier-offer"
+                disabled={offer.quantity_available === 0 || offer.trust_status === 'untrusted'}
                 checked={journey.selectedOfferId === offer.offer_id}
                 onChange={() => onSelectOffer(offer.offer_id)} />{' '}
               {offer.quantity_available > 0
@@ -193,6 +195,11 @@ export default function SupplierContinuationCard({ journey, onAssess, onSelectCh
                 {String(offer.response_status || 'unverified').toUpperCase()}
                 {offer.response_reason ? ` — ${offer.response_reason}` : ''}
               </div>
+              {offer.trust_status === 'untrusted' ? (
+                <div style={{ fontSize: 11, color: '#991b1b' }}>
+                  Quarantined — unavailable for selection or cart confirmation.
+                </div>
+              ) : null}
               {offer.response_status === 'accepted'
                 && offer.relationship === 'exact'
                 && (journey.availableNow || 0) + offer.quantity_available >= journey.requestedQuantity ? (

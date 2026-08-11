@@ -23,6 +23,7 @@ def test_certification_fixture_contains_positive_and_negative_responses() -> Non
     assert any(row.quantity_available == 9 and row.lead_time_days == 5 for row in rows)
     assert any(row.offered_sku == "SUBSTITUTE" and row.quantity_available == 30 for row in rows)
     assert any(row.offered_sku == "PREFERRED" and row.quantity_available == 30 and row.lead_time_days == 21 for row in rows)
+    assert any(row.trust_status == "untrusted" for row in rows)
 
 
 def _db() -> Session:
@@ -66,6 +67,7 @@ def test_supplier_responses_normalize_accept_reject_substitute_and_late() -> Non
     assert by_supplier["fixture-supplier-partial"].response_status == "conditional"
     assert by_supplier["fixture-supplier-substitute"].response_status == "conditional"
     assert by_supplier["fixture-supplier-late"].response_status == "late"
+    assert by_supplier["fixture-supplier-untrusted"].response_status == "quarantined"
     assert by_supplier["fixture-supplier-preferred"].commercial_decision.status == "QUALIFIED_NOW"
     assert by_supplier["fixture-supplier-unavailable"].commercial_decision.status == "QUALIFIED_PARTIAL"
     assert by_supplier["fixture-supplier-partial"].commercial_decision.status == "QUALIFIED_PARTIAL"
@@ -140,3 +142,39 @@ def test_split_and_wait_keep_exact_preferred_sku() -> None:
             selection, selected_offer_id=None, substitution_authorized=False,
         )
         assert (target, quantity, offer) == ("PREFERRED", 30, None)
+
+
+def test_untrusted_supplier_offer_is_quarantined_from_cart_resolution() -> None:
+    offers = normalize_supplier_offers([SupplierOfferInput(
+        source_type="deterministic_certification_fixture",
+        source_reference="fixture-untrusted",
+        supplier_reference="supplier-untrusted",
+        offered_sku="PREFERRED",
+        relationship="exact",
+        quantity_available=30,
+        trust_status="untrusted",
+    )], requested_quantity=30)
+    assert offers[0].response_status == "quarantined"
+    with _db() as db:
+        selection, error = select_fulfillment_option(
+            db, tenant_id="default", case_id="sc-untrusted", uid="buyer",
+            expected_revision=0, choice="supplier_enquiry", preferred_sku="PREFERRED",
+            requested_quantity=30, available_now=0, idempotency_key="select-untrusted",
+            offers=[SupplierOfferInput(
+                source_type="deterministic_certification_fixture",
+                source_reference="fixture-untrusted",
+                supplier_reference="supplier-untrusted",
+                offered_sku="PREFERRED", relationship="exact", quantity_available=30,
+                trust_status="untrusted",
+            )],
+        )
+    assert error is None and selection is not None
+    try:
+        resolve_confirmed_cart_target(
+            selection, selected_offer_id=selection.offers[0].offer_id,
+            substitution_authorized=False,
+        )
+    except ValueError as exc:
+        assert str(exc) == "supplier_offer_quarantined"
+    else:
+        raise AssertionError("untrusted supplier offer reached cart resolution")
