@@ -70,6 +70,8 @@ def build_shadow_prompt(decision: Mapping[str, Any]) -> str:
     }
     return (
         "Render a concise shopping explanation from this authorized decision JSON only. "
+        "Use at most three short sentences: decision for the buyer's stated outcome; the most "
+        "material verified fit reason; then the most material limitation, unknown, or next question. "
         "Do not add facts, prices, requirements, performance promises, or product identities. "
         "State material unknowns. Never say qualified if the decision is conditional, unresolved, "
         "or not qualified. Preserve every material_preservation.required_terms string verbatim "

@@ -52,6 +52,32 @@ def test_qualified_requires_named_workload_exact_configuration_and_claims():
     assert decision.overall_decision == "qualified_for_stated_scope"
     assert decision.critic.status == "pass"
     assert len(decision.infrastructure_alternatives.alternatives) == 5
+    strengths = {
+        block["block"]: block for block in decision.authorized_narration_blocks
+    }["verified_strengths"]
+    assert strengths["items"] == ["RAM"]
+    assert strengths["claim_refs"] == ["req-1", "cap-1"]
+    assert "Verified against the accepted minimum for: RAM" in deterministic_narration(decision)
+
+
+def test_narration_separates_recommended_headroom_and_unavailable_configuration():
+    decision = reduce_workload_decision(
+        workload=WorkloadContract(
+            desired_outcome="local rendering", artefact_name="Named renderer",
+        ),
+        product=_product(),
+        rows=[_row(
+            attribute_key="gpu_vram_gb", attribute_label="GPU VRAM",
+            verdict="meets_recommended", requirement_class="recommended",
+        )],
+        availability_status="unavailable",
+    )
+    by_name = {block["block"]: block for block in decision.authorized_narration_blocks}
+    assert by_name["verified_headroom"]["items"] == ["GPU VRAM"]
+    assert by_name["availability_conflict"]["status"] == "unavailable"
+    copy = deterministic_narration(decision)
+    assert "Verified recommended headroom for: GPU VRAM" in copy
+    assert "not currently verified as available" in copy
 
 
 def test_ambiguous_workload_cannot_qualify_a_product():

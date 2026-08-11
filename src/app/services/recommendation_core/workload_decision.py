@@ -247,6 +247,14 @@ def reduce_workload_decision(
     }[overall]
     failures = [row.attribute_label for row in bounded_rows if row.verdict == "below_minimum"]
     unknowns = [row.attribute_label for row in bounded_rows if row.verdict in {"unknown", "contested"}]
+    verified_minimums = [
+        row.attribute_label for row in bounded_rows
+        if row.verdict == "meets_minimum" and row.verification_status == "verified"
+    ]
+    verified_headroom = [
+        row.attribute_label for row in bounded_rows
+        if row.verdict == "meets_recommended" and row.verification_status == "verified"
+    ]
     blocks: list[dict[str, Any]] = [
         {"block": "verdict", "text": verdict_label, "claim_refs": []},
         {
@@ -255,6 +263,32 @@ def reduce_workload_decision(
             "claim_refs": [],
         },
     ]
+    if verified_minimums:
+        blocks.append({
+            "block": "verified_strengths",
+            "items": list(dict.fromkeys(verified_minimums))[:8],
+            "text": "Verified against the accepted minimum for: "
+            + ", ".join(dict.fromkeys(verified_minimums)),
+            "claim_refs": list(dict.fromkeys(
+                claim_id
+                for row in bounded_rows
+                if row.verdict == "meets_minimum" and row.verification_status == "verified"
+                for claim_id in row.requirement_claim_ids + row.capability_claim_ids
+            )),
+        })
+    if verified_headroom:
+        blocks.append({
+            "block": "verified_headroom",
+            "items": list(dict.fromkeys(verified_headroom))[:8],
+            "text": "Verified recommended headroom for: "
+            + ", ".join(dict.fromkeys(verified_headroom)),
+            "claim_refs": list(dict.fromkeys(
+                claim_id
+                for row in bounded_rows
+                if row.verdict == "meets_recommended" and row.verification_status == "verified"
+                for claim_id in row.requirement_claim_ids + row.capability_claim_ids
+            )),
+        })
     if failures:
         blocks.append({"block": "failures", "items": failures, "claim_refs": [
             claim_id for row in bounded_rows if row.verdict == "below_minimum"
@@ -295,6 +329,13 @@ def reduce_workload_decision(
             "text": "This configuration exceeds the buyer's budget ceiling",
             "claim_refs": [],
         })
+    if availability_status == "unavailable":
+        blocks.append({
+            "block": "availability_conflict",
+            "status": "unavailable",
+            "text": "This exact configuration is not currently verified as available",
+            "claim_refs": [],
+        })
     return WorkloadDecision(
         decision_id="wd-" + hashlib.sha256(
             f"{product.sku}|{product.configuration_hash}|{workload.model_dump_json()}".encode()
@@ -323,15 +364,35 @@ def deterministic_narration(decision: WorkloadDecision) -> str:
     verdict = str(decision.authorized_narration_blocks[0].get("text") or "Decision unavailable")
     scope = decision.workload.desired_outcome or decision.workload.artefact_name or "the stated workload"
     parts = [f"{verdict}: {scope}."]
+    verified_minimums = [
+        row.attribute_label for row in decision.fit_ledger
+        if row.verdict == "meets_minimum" and row.verification_status == "verified"
+    ]
+    verified_headroom = [
+        row.attribute_label for row in decision.fit_ledger
+        if row.verdict == "meets_recommended" and row.verification_status == "verified"
+    ]
     failures = [row.attribute_label for row in decision.fit_ledger if row.verdict == "below_minimum"]
     gaps = [row.attribute_label for row in decision.fit_ledger if row.verdict in {"unknown", "contested"}]
     gaps.extend(decision.workload.material_unknowns)
+    if verified_minimums:
+        parts.append(
+            "Verified against the accepted minimum for: "
+            + ", ".join(dict.fromkeys(verified_minimums)) + "."
+        )
+    if verified_headroom:
+        parts.append(
+            "Verified recommended headroom for: "
+            + ", ".join(dict.fromkeys(verified_headroom)) + "."
+        )
     if failures:
         parts.append("Below the accepted minimum: " + ", ".join(dict.fromkeys(failures)) + ".")
     if gaps:
         parts.append("Still unresolved: " + ", ".join(dict.fromkeys(gaps)) + ".")
     if decision.budget_status == "over":
         parts.append("This configuration exceeds the buyer's budget ceiling.")
+    if decision.availability_status == "unavailable":
+        parts.append("This exact configuration is not currently verified as available.")
     if decision.performance_status == "unknown":
         parts.append("Behavioral performance is not verified for this exact configuration.")
     if decision.critic.status == "blocked":
