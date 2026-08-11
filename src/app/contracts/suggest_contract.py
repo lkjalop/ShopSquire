@@ -108,10 +108,13 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     # expose why catalog/commerce authority was withheld and preserve the current case view;
     # they do not allow the model to mutate catalog, cart, procurement, or payment state.
     "semantic_resolution", "semantic_evidence", "approved_narration_evidence",
+    "semantic_requirement_compilation", "infrastructure_alternatives",
     "catalog_alignment", "supplier_enquiry_option", "preserve_current_view",
     "case_operation", "case_anchor", "state_changed",
     "case_obligations",
     "router_outcome",
+    # Deadline feasibility and its bounded human handoff are additive procurement evidence.
+    "delivery_feasibility", "human_escalation",
 })
 
 # Observed branch shapes (detection heuristics used by validate_response):

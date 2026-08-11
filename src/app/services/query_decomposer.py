@@ -71,7 +71,7 @@ _AVAILABILITY_RE = re.compile(
 def _extract_availability_horizon(q: str) -> Optional[int]:
     """Days from an availability horizon ('in 4 weeks' / 'in fourteen days' → 28 / 14). Agnostic."""
     m = re.search(
-        rf"\b(?:in|within|by)\s+(\d{{1,3}}|{_NUMBER_WORD_ALT})\s+(day|week|month)s?\b",
+        rf"\b(?:in|within|by)\s+(\d{{1,3}}|{_NUMBER_WORD_ALT})\s+(?:business\s+)?(day|week|month)s?\b",
         str(q or "").lower(),
     )
     if not m:

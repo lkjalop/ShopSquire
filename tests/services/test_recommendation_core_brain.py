@@ -115,6 +115,10 @@ def test_unresolved_fit_blocks_procurement_before_catalog_retrieval(
     assert response.clarify[0]["id"] == "external_research_consent"
     assert "approved official sources" in response.clarify[0]["text"]
     assert response.extras["semantic_resolution"]["catalog_authority"] == "blocked"
+    assert response.extras["research_trigger"]["should_execute_external_research"] is False
+    assert response.extras["research_trigger"]["route"] in {
+        "request_authorization", "request_buyer_evidence",
+    }
     assert response.extras["case_anchor"]["case_id"].startswith("semantic-")
     assert response.extras["case_anchor"]["catalog_authority"] == "blocked"
     assert "catalog_recommendation" in response.extras["semantic_resolution"]["state_prevented"]
