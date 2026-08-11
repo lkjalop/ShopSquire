@@ -203,6 +203,21 @@ class SemanticCache:
         self._local.pop(key, None)
         self._local_expiry.pop(key, None)
 
+    def delete_strict(self, key: str) -> None:
+        """Delete an entry without concealing shared-cache failures.
+
+        The compatibility ``delete`` method remains best-effort for callers
+        that do not own an authority transition.  Temporal invalidation uses
+        this strict variant so a Redis outage becomes durable retry work
+        instead of an apparent successful eviction.
+        """
+        if not key:
+            return
+        if self._redis is not None:
+            self._redis.delete(key)
+        self._local.pop(key, None)
+        self._local_expiry.pop(key, None)
+
     def set_safe(self, key: str, value: Any, *, source_id: str, trust_score: float, ex: Optional[int] = None) -> None:
         ts = int(time.time())
         wrapped = {
