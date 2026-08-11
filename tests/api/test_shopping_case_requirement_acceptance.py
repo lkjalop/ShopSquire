@@ -100,6 +100,27 @@ def test_interpretation_defers_covered_catalog_request_to_normal_chat_lane():
     assert response.status_code == 204
 
 
+def test_interpretation_blocks_explicit_out_of_storefront_category_without_research_or_laptops():
+    client = _client()
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-furniture",
+        "retained_purpose": "I need an ergonomic standing desk and mesh office chair",
+        "storefront_taxonomy_handle": "el-6-6",
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "catalog-boundary-v1"
+    assert payload["catalog_boundary"]["status"] == "out_of_category"
+    assert payload["catalog_boundary"]["taxonomy_handle"] == "fr-12-1-2"
+    assert payload["provider_accounting"] == {"external_calls": 0, "paid_calls": 0}
+    assert "ambiguity_exploration" not in payload
+    assert all(
+        not shelf["initial"] and not shelf["next_page"]
+        for shelf in payload["product_shelves"]["shelves"]
+    )
+
+
 def test_explicit_vendor_support_constraint_opens_generic_zero_call_research_case():
     client = _client()
     response = client.post("/api/v1/shopping-cases/interpretations", json={

@@ -175,13 +175,57 @@ def _source_phrases(source: Mapping[str, Any]) -> set[str]:
     }
 
 
-def candidate_sources_for_purpose(
+def _requires_named_application(source: Mapping[str, Any]) -> bool:
+    """Whether this publisher can speak only for a named application/framework.
+
+    The source manifest already records this boundary in scope/exclusions.  Enforcing
+    it here prevents an adjacent concept (for example photogrammetry) from borrowing
+    AutoCAD or Blender requirements merely because both mention large 3D data.
+    """
+
+    applicability = source.get("applicability") or {}
+    scope = _normalized_phrase(applicability.get("scope") or "")
+    exclusions = " ".join(
+        _normalized_phrase(item) for item in applicability.get("exclusions") or []
+    )
+    allowed = {str(item) for item in source.get("allowed_claim_types") or []}
+    return bool(
+        " named " in f" {scope} "
+        or scope.endswith(" only")
+        or "other cgi application" in exclusions
+        or "other cad application" in exclusions
+        or allowed & {"minimum_requirements", "recommended_requirements", "target_requirements"}
+    )
+
+
+def _named_application_hit(source: Mapping[str, Any], normalized_purpose: str) -> bool:
+    generic = {
+        "system requirement", "requirement", "large dataset", "point cloud",
+        "large complex model", "bim", "driver", "windows", "manufacturing",
+        "predictive maintenance", "model card revision",
+    }
+    for raw in source.get("artefact_patterns") or []:
+        phrase = _normalized_phrase(raw)
+        if not phrase or phrase in generic:
+            continue
+        if f" {phrase} " in normalized_purpose:
+            return True
+        # Versioned product patterns such as "AutoCAD 2026" also accept the
+        # distinctive product name without forcing the buyer to know a version.
+        tokens = phrase.split()
+        if len(tokens) > 1 and any(ch.isdigit() for ch in tokens[-1]):
+            product = " ".join(tokens[:-1])
+            if product not in generic and f" {product} " in normalized_purpose:
+                return True
+    return False
+
+
+def _candidate_sources_for_purpose(
     retained_purpose: str,
     *,
-    manifest: Mapping[str, Any] | None = None,
+    manifest: Mapping[str, Any] | None,
+    enforce_named_applicability: bool,
 ) -> tuple[dict[str, Any], ...]:
-    """Return bounded source-scope candidates without granting execution authority."""
-
     purpose_tokens = _tokens(retained_purpose)
     if not purpose_tokens:
         return ()
@@ -209,10 +253,30 @@ def candidate_sources_for_purpose(
         acronym_hits = buyer_acronyms & _source_terms(source)
         if not exact_phrases and not acronym_hits:
             continue
+        if (
+            enforce_named_applicability
+            and _requires_named_application(source)
+            and not _named_application_hit(source, normalized_purpose)
+        ):
+            continue
         score = sum(len(phrase.split()) + 2 for phrase in exact_phrases) + 4 * len(acronym_hits)
         ranked.append((-score, str(source.get("source_id") or ""), source))
     ranked.sort(key=lambda item: (item[0], item[1]))
     return tuple(item[2] for item in ranked[:8])
+
+
+def candidate_sources_for_purpose(
+    retained_purpose: str,
+    *,
+    manifest: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Return bounded source-scope candidates without granting execution authority."""
+
+    return _candidate_sources_for_purpose(
+        retained_purpose,
+        manifest=manifest,
+        enforce_named_applicability=True,
+    )
 
 
 def _hypothesis_label(source: Mapping[str, Any]) -> str:
@@ -227,8 +291,15 @@ def build_case_research_plan(
     allow_open_world: bool = False,
 ) -> CaseResearchPlan | None:
     sources = candidate_sources_for_purpose(retained_purpose, manifest=manifest)
+    adjacent_sources = _candidate_sources_for_purpose(
+        retained_purpose,
+        manifest=manifest,
+        enforce_named_applicability=False,
+    )
     if not sources:
-        if not allow_open_world:
+        # A nearby enrolled application is a discovery hint, not authority. Preserve
+        # that evidence gap as an open-world plan rather than snapping to its claims.
+        if not allow_open_world and not adjacent_sources:
             return None
         purpose = " ".join(str(retained_purpose or "").split())[:500]
         if len(purpose) < 3:

@@ -4,6 +4,27 @@ from src.app.services.case_research_plan import (
 )
 
 
+def test_adjacent_enrolled_applications_become_open_world_not_false_authority():
+    plan = build_case_research_plan(
+        "I need a laptop for drone photogrammetry, GIS and very large 3D models.",
+    )
+
+    assert plan is not None
+    assert plan.publisher_status == "unresolved"
+    assert plan.source_candidate_ids == []
+    assert [row.hypothesis_id for row in plan.hypotheses] == ["open_world_workload"]
+
+
+def test_named_application_keeps_its_enrolled_publisher_scope():
+    plan = build_case_research_plan(
+        "I need a laptop for Blender rendering and large scenes.",
+    )
+
+    assert plan is not None
+    assert plan.publisher_status == "resolved_enrolled"
+    assert "blender_official_requirements" in plan.source_candidate_ids
+
+
 def _source(source_id, workloads, artefacts, *, approved=True):
     return {
         "source_id": source_id, "publisher": source_id,

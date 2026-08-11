@@ -71,6 +71,33 @@ test('novel suitability request stays provisional and exposes a durable research
   await page.screenshot({ path: '../.tmp-open-world-browser/coverage-gate.png', fullPage: true });
 });
 
+test('explicit furniture and pharmacy categories cannot inherit laptop shelves', async ({ page }) => {
+  test.setTimeout(120_000);
+  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  await page.addInitScript((uid) => {
+    localStorage.clear();
+    sessionStorage.clear();
+    sessionStorage.setItem('uid', uid);
+  }, `enterprise-e2e-category-boundary-${suffix}`);
+  await page.goto('/');
+  await page.getByRole('button', { name: /Ask Me/i }).click();
+
+  for (const request of [
+    'I need an ergonomic standing desk and mesh office chair.',
+    'I need ibuprofen and a blood pressure monitor.',
+  ]) {
+    const boundary = await send(page, request);
+    expect(boundary.schema_version).toBe('catalog-boundary-v1');
+    expect(boundary.catalog_boundary.status).toBe('out_of_category');
+    expect(boundary.catalog_boundary.configuration_ids).toEqual([]);
+    expect(boundary.provider_accounting).toEqual({ external_calls: 0, paid_calls: 0 });
+    await expect(page.getByText(/outside this storefront's current catalog/i).last()).toBeVisible();
+    await expect(page.getByTestId('ambiguity-exploration')).toHaveCount(0);
+    const shelves = page.getByTestId('product-shelves');
+    if (await shelves.count()) await expect(shelves.locator('article')).toHaveCount(0);
+  }
+});
+
 test('novel publisher is approved case-only, fetched, reviewed, and reranked in one case', async ({ page }) => {
   test.setTimeout(240_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;

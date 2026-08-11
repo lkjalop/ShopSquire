@@ -132,6 +132,7 @@ class CreateCaseInterpretationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     uid: str = Field(min_length=1, max_length=200)
     retained_purpose: str = Field(min_length=3, max_length=500)
+    storefront_taxonomy_handle: str | None = Field(default=None, min_length=2, max_length=160)
 
 
 class ProposeCaseCartMutationRequest(BaseModel):
@@ -297,6 +298,44 @@ def _case_research_plan_from_trace(
     return None
 
 
+def _case_catalog_candidate_set_from_trace(
+    db, *, case_id: str, tenant_id: str,
+):
+    """Load the immutable catalog boundary recorded with the shopping case."""
+
+    from src.app.services.case_catalog_candidates import CatalogCandidateSet
+    from src.app.services.decision_log import get_cached_trace_events
+
+    trace_id = case_id.removeprefix("sc-")
+    events = list(get_cached_trace_events(trace_id))
+    if not events:
+        try:
+            rows = db.execute(text(
+                "SELECT event_type, payload FROM decision_trace_events "
+                "WHERE trace_id=:trace_id AND tenant_id=:tenant_id ORDER BY created_at ASC"
+            ), {"trace_id": trace_id, "tenant_id": tenant_id}).mappings().all()
+            events = [dict(row) for row in rows]
+        except Exception:
+            events = []
+    for event in reversed(events):
+        if str(event.get("event_type") or "") != "ambiguity_exploration_projected":
+            continue
+        raw = _payload_object(event.get("payload")).get("catalog_candidate_set")
+        if isinstance(raw, dict):
+            try:
+                return CatalogCandidateSet.model_validate(raw)
+            except ValueError:
+                break
+    # A legacy/malformed case may continue gathering evidence, but cannot fall
+    # back to the tenant-wide catalog and present that as a query-specific shelf.
+    return CatalogCandidateSet(
+        retained_purpose="Unresolved legacy shopping case",
+        status="unresolved",
+        taxonomy_source="unresolved",
+        reason="case_candidate_set_not_recorded",
+    )
+
+
 def _case_trace_has_event(db, *, case_id: str, tenant_id: str, event_type: str) -> bool:
     from src.app.services.decision_log import get_cached_trace_events
 
@@ -332,6 +371,34 @@ def create_case_interpretation(
         build_case_research_plan, plan_hypothesis_labels,
     )
 
+    tenant_id = _tenant(x_tenant_id)
+    from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set
+
+    candidate_set = build_case_catalog_candidate_set(
+        db,
+        retained_purpose=body.retained_purpose,
+        tenant_id=tenant_id,
+        storefront_taxonomy_handle=body.storefront_taxonomy_handle,
+    )
+    if candidate_set.reason == "buyer_named_category_outside_storefront_context":
+        empty_projection = project_accepted_catalog(
+            db, accepted_claims=[], desired_outcome=body.retained_purpose,
+            tenant_id=tenant_id, candidate_configuration_ids=[],
+        )
+        return {
+            "schema_version": "catalog-boundary-v1",
+            "catalog_boundary": candidate_set.model_dump(mode="json"),
+            "product_shelves": empty_projection.model_dump(mode="json"),
+            "assistant_message": (
+                f"That request is for {candidate_set.taxonomy_label or 'a different product category'}, "
+                "which is outside this storefront's current catalog. I have not shown laptops or "
+                "started workload research for it."
+            ),
+            "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+            "cart_mutation": "not_authorized",
+            "supplier_send": "not_authorized",
+        }
+
     plan = build_case_research_plan(body.retained_purpose)
     if plan is None:
         # Positive-evidence constraints such as vendor certification or an OS
@@ -346,7 +413,6 @@ def create_case_interpretation(
     if plan is None:
         return Response(status_code=204)
 
-    tenant_id = _tenant(x_tenant_id)
     trace_id = "case-" + uuid.uuid4().hex[:20]
     case_id = f"sc-{trace_id}"
     case = ShoppingCase(
@@ -359,6 +425,7 @@ def create_case_interpretation(
     projection = project_accepted_catalog(
         db, accepted_claims=[], desired_outcome=plan.retained_purpose,
         tenant_id=tenant_id, hypothesis_labels=plan_hypothesis_labels(plan),
+        candidate_configuration_ids=candidate_set.configuration_ids,
     )
     from src.app.services.shopping_case_truth_projection import ShoppingCaseTruthProjection
 
@@ -396,6 +463,7 @@ def create_case_interpretation(
             "shelf_ids": [shelf.shelf_id for shelf in projection.shelves],
             "qualification_authority": "none",
             "commercial_authority": "none",
+            "catalog_candidate_set": candidate_set.model_dump(mode="json"),
         },
     )
     return {
@@ -404,6 +472,7 @@ def create_case_interpretation(
         "trace_id": trace_id,
         "ambiguity_exploration": exploration,
         "product_shelves": projection.model_dump(mode="json"),
+        "catalog_candidate_set": candidate_set.model_dump(mode="json"),
         "assistant_message": (
             "I created a provisional shopping case from your outcome. The shelves are local "
             "catalog exploration, not verified fit. Answer the one material question or authorize "
@@ -575,6 +644,9 @@ def accept_requirement_proposal(
         db, accepted_claims=accepted,
         desired_outcome=case.retained_purpose or "Buyer accepted requirements",
         tenant_id=tenant_id,
+        candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
+            db, case_id=case_id, tenant_id=tenant_id,
+        ).configuration_ids,
     )
     result["product_shelves"] = shelves.model_dump(mode="json")
     result["architecture_alternatives"] = project_infrastructure_alternatives(
@@ -644,6 +716,9 @@ def accept_requirement_proposal(
                         accepted_claims=[*accepted, *official_claims],
                         desired_outcome=case.retained_purpose or "Buyer accepted requirements",
                         tenant_id=tenant_id,
+                        candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
+                            db, case_id=case_id, tenant_id=tenant_id,
+                        ).configuration_ids,
                         hypothesis_labels={
                             row.hypothesis_id: row.label for row in plan.hypotheses
                         },
@@ -998,6 +1073,9 @@ def resolve_case_evidence_source(
         db, accepted_claims=list(research.get("claims") or []),
         desired_outcome=case.retained_purpose or "Buyer supplied evidence source",
         tenant_id=tenant_id,
+        candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
+            db, case_id=case_id, tenant_id=tenant_id,
+        ).configuration_ids,
     ).model_dump(mode="json")
     evidence_outcome = str(research.get("evidence_outcome") or "unresolved")
     result = {
@@ -1226,6 +1304,9 @@ def research_shopping_case(
         before = project_accepted_catalog(
             db, accepted_claims=[], desired_outcome=plan.retained_purpose,
             budget_cents=body.budget_cents, tenant_id=tenant_id,
+            candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
+                db, case_id=case_id, tenant_id=tenant_id,
+            ).configuration_ids,
         ).model_dump(mode="json")
         provider_accounting = discovery["provider_accounting"]
         exploration = ShoppingCaseTruthProjection.model_validate({
@@ -1368,6 +1449,9 @@ def research_shopping_case(
     before = project_accepted_catalog(
         db, accepted_claims=[], desired_outcome=plan.retained_purpose,
         budget_cents=body.budget_cents, tenant_id=tenant_id,
+        candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
+            db, case_id=case_id, tenant_id=tenant_id,
+        ).configuration_ids,
     ).model_dump(mode="json")
     research = research_official_sources(
         plan.retained_purpose, search_url_template=search_url,
@@ -1387,6 +1471,9 @@ def research_shopping_case(
     after_projection = project_accepted_catalog(
         db, accepted_claims=research["claims"], desired_outcome=plan.retained_purpose,
         budget_cents=body.budget_cents, tenant_id=tenant_id,
+        candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
+            db, case_id=case_id, tenant_id=tenant_id,
+        ).configuration_ids,
         hypothesis_labels=plan_hypothesis_labels(plan),
         hypothesis_claims={
             hypothesis.hypothesis_id: [

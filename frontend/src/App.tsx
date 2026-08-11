@@ -1815,7 +1815,13 @@ export default function App() {
             'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
             ...csrfHeaders(),
           },
-          body: JSON.stringify({ uid, retained_purpose: q }),
+          body: JSON.stringify({
+            uid,
+            retained_purpose: q,
+            // The current storefront is the pinned laptop category. The backend
+            // clamps buyer-named categories against it before exposing any shelf.
+            storefront_taxonomy_handle: 'el-6-6',
+          }),
         });
         if (interpretationResponse.status !== 204) {
           const interpretation = await safeJson(interpretationResponse);
@@ -1842,6 +1848,15 @@ export default function App() {
               case_id: String(interpretation.ambiguity_exploration.case_id),
               retained_purpose: String(interpretation.ambiguity_exploration.retained_purpose || q),
             });
+          }
+          if (interpretation?.catalog_boundary?.schema_version === 'catalog-candidate-set-v1') {
+            // A buyer-named category outside this storefront is a terminal local
+            // boundary for this turn. Clear every prior actionable product surface.
+            setDisplayProducts([]);
+            setRecommendationShelf(null);
+            setProductShelves(null);
+            setAmbiguityExploration(null);
+            setActiveShoppingCase(null);
           }
           if (interpretation?.product_shelves?.schema_version === 'product-shelves-v1') {
             setProductShelves(interpretation.product_shelves as ProductShelfProjection);

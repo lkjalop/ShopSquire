@@ -408,13 +408,27 @@ def project_accepted_catalog(
     tenant_id: str = "default",
     hypothesis_labels: Mapping[str, str] | None = None,
     hypothesis_claims: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    candidate_configuration_ids: Sequence[str] | None = None,
     now: datetime | None = None,
 ) -> ProductShelfProjection:
     observed_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    rows = db.execute(select(ProductConfiguration).where(
+    candidate_query = select(ProductConfiguration).where(
         ProductConfiguration.tenant_id == tenant_id,
         ProductConfiguration.active.is_(True),
-    )).scalars().all()
+    )
+    # ``None`` is retained for isolated administrative/legacy projections. Buyer-facing
+    # shopping-case callers pass an explicit case-bound list; an empty list therefore
+    # means no eligible candidates and must never fall back to the whole catalog.
+    if candidate_configuration_ids is not None:
+        bounded_ids = [str(value) for value in candidate_configuration_ids if str(value)]
+        if not bounded_ids:
+            rows = []
+        else:
+            rows = db.execute(candidate_query.where(
+                ProductConfiguration.id.in_(bounded_ids),
+            )).scalars().all()
+    else:
+        rows = db.execute(candidate_query).scalars().all()
     configuration_ids = [row.id for row in rows]
     evidence_by_configuration: dict[str, list[ProductEvidenceObservation]] = defaultdict(list)
     availability_by_configuration: dict[str, list[ProductAvailabilityObservation]] = defaultdict(list)
