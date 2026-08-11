@@ -11,8 +11,8 @@ Reference: MAESTRO Framework for Agentic AI Security (2025)
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
-from typing import Any, Dict, FrozenSet, List, Optional, Set
+from dataclasses import dataclass
+from typing import Any, Dict, FrozenSet, List, Optional
 from src.app.services.registry import get_tool_metadata
 
 
@@ -312,18 +312,6 @@ AGENT_BOUNDARIES: Dict[str, AgentBoundary] = {
         can_call_external_api=True,
         can_invoke_llm=False,
         allowed_peers=frozenset(["Orchestrator"]),
-        risk_tier="high",
-    ),
-    "Supplier_Communication_Agent": AgentBoundary(
-        agent_name="Supplier_Communication_Agent",
-        # Draft freely; the SEND is the consequential tool — gated by execution_gate AND this boundary.
-        allowed_tools=frozenset(["draft_supplier_message", "dispatch_supplier_message"]),
-        allowed_data_scopes=frozenset(["suppliers", "orders", "inventory"]),
-        max_autonomous_value_usd=0.0,  # cannot auto-approve any spend; outbound send is human-gated
-        can_write_db=False,
-        can_call_external_api=True,    # emails a supplier via the injected mailer (allowlisted recipient)
-        can_invoke_llm=True,           # drafts the message
-        allowed_peers=frozenset(["Orchestrator", "Inventory_Agent"]),
         risk_tier="high",
     ),
 }
