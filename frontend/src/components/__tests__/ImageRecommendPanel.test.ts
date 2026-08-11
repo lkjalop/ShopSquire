@@ -75,6 +75,10 @@ describe('computeTrustLevel', () => {
     expect(computeTrustLevel({ qr_prompt_injection: true }, 0)).toBe('red');
   });
 
+  it('returns red when the upload admission gate rejected the attachment', () => {
+    expect(computeTrustLevel({ upload_rejected: true } as any, 0)).toBe('red');
+  });
+
   it('returns red when sessionSuspicious >= 3 with clean signals', () => {
     expect(computeTrustLevel(clean(), 3)).toBe('red');
   });

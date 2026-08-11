@@ -161,7 +161,7 @@ function persistOperatorMetrics(timing: any, traceId: string | null, source = 'v
 /* ---------- helpers ---------- */
 export function computeTrustLevel(signals: ImageAnalysisContext['cv_signals'], sessionSuspicious: number): TrustLevel {
   const s = signals as Record<string, any>;
-  if (sessionSuspicious >= 3 || signals.qr_prompt_injection) return 'red';
+  if (sessionSuspicious >= 3 || signals.qr_prompt_injection || s.upload_rejected) return 'red';
   // Explicit threat-hypothesis signals always warrant orange
   if (s.ransomware_indicator || s.c2_beacon_detected || s.payment_social_engineering) return 'orange';
   if (signals.qr_external_url_detected) return 'orange';
@@ -181,6 +181,7 @@ export function shouldUseFastPath(query: string): boolean {
 /** One-line analyst explanation for why this image lane was flagged. */
 function buildLaneDetectionReason(signals: ImageAnalysisContext['cv_signals']): string {
   const s = signals as Record<string, any>;
+  if (s.upload_rejected) return `Upload rejected by the admission gate (${String(s.upload_error || 'policy')}).`;
   if (signals.qr_prompt_injection) return 'Detected because QR payload is an injection attempt targeting the AI assistant.';
   if (s.ransomware_indicator) return 'Detected because decoded payload references ransomware extension/locking patterns.';
   if (s.payment_social_engineering) return 'Detected because QR payload is an external payment/social-engineering link.';
@@ -193,13 +194,19 @@ function buildLaneDetectionReason(signals: ImageAnalysisContext['cv_signals']): 
 
 function buildBuyerSecurityNotice(signals: ImageAnalysisContext['cv_signals']): string {
   const s = signals as Record<string, any>;
+  if (s.upload_rejected) {
+    return 'Blocked: this attachment failed the upload safety gate. It was not used for recommendations, memory, or commercial actions.';
+  }
+  if (signals.qr_prompt_injection) {
+    return 'Blocked: the QR code contains instructions targeting the assistant. It was not used for recommendations or actions.';
+  }
   if (s.fast_triage_timeout || s.analysis_pending) {
     return 'Image security enrichment is still running. Recommendations use bounded visual hints until analysis completes.';
   }
   if (s.analysis_degraded) {
     return 'Image analysis is degraded. Recommendations use only the verified evidence available.';
   }
-  if (signals.qr_code_detected && s.qr_benign_detected) {
+  if (signals.qr_code_detected && s.qr_benign_detected && !s.qr_prompt_injection && s.qr_policy_action === 'allow') {
     return 'QR detected and decoded successfully. The visible content looks benign, so recommendations can continue.';
   }
   if (s.payment_social_engineering || signals.qr_external_url_detected || signals.qr_code_detected) {
