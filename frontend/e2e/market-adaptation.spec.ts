@@ -1,6 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
 import { readFileSync } from 'fs';
-import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
@@ -17,7 +16,6 @@ import { dirname, resolve } from 'path';
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const REPO = resolve(here, '../..');
 
 function devApiKey(): string {
   if (process.env.VITE_API_KEY?.trim()) return process.env.VITE_API_KEY.trim();
@@ -31,9 +29,18 @@ function devApiKey(): string {
 }
 
 // inject / clear the demand signal via the demo script (runs at the repo root so the module import resolves)
-function seedDemand(args: string[]): void {
-  execFileSync('poetry', ['run', 'python', '-m', 'scripts.demo_market_adaptation', ...args],
-    { cwd: REPO, env: { ...process.env, PYTHONIOENCODING: 'utf-8' }, stdio: 'pipe' });
+async function seedDemand(
+  page: Page,
+  direction: 'spike' | 'slowdown' | 'clear',
+  confidence = 0.8,
+  severity: 'info' | 'warn' | 'critical' = 'warn',
+): Promise<any> {
+  const response = await page.request.post('/api/v1/fulfillment/market/demo-demand-signal', {
+    headers: { 'x-api-key': devApiKey() },
+    data: { direction, confidence, severity },
+  });
+  expect(response.ok(), `demo signal failed (${response.status()})`).toBeTruthy();
+  return response.json();
 }
 
 async function suggest(page: Page, query: string): Promise<any> {
@@ -44,27 +51,16 @@ async function suggest(page: Page, query: string): Promise<any> {
   return r.json();
 }
 
-test.beforeAll(() => { seedDemand(['--clear']); });
-test.afterAll(() => { seedDemand(['--clear']); });
-
 test('adaptive storefront — strong signal adapts, weak signal is governed, clearing reverts', async ({ page }) => {
   await test.step('1 · STRONG demand signal → the storefront re-ranks (gate ALLOWS)', async () => {
-    seedDemand(['--direction', 'spike', '--confidence', '0.85', '--severity', 'critical']);
+    const seeded = await seedDemand(page, 'spike', 0.85, 'critical');
+    expect(seeded.demand_trend).toBe('rising');
     // drive it in the browser so the recording shows the storefront; assert on the response it receives
     await page.goto('/');
-    const input = page.getByPlaceholder('Type your message...');
-    if (!(await input.isVisible().catch(() => false))) {
-      await page.getByRole('button', { name: /Ask Me/i }).click();
-      await input.waitFor({ state: 'visible' });
-    }
     // TRANSPORT-AGNOSTIC: the app tries /chat/stream first and only falls back to /chat/query when the
     // stream is slow — waiting on /query alone flakes whenever the model is warm enough for the stream
     // to win. Drive the turn in the browser (for the recording), wait for EITHER chat transport to
     // complete, then assert the governed adaptation via the suggest API (same gate, deterministic).
-    const chatResp = page.waitForResponse((r) => /\/api\/v1\/chat\/(query|stream)/.test(r.url()), { timeout: 60_000 });
-    await input.fill('business laptop for the office');
-    await input.press('Enter');
-    await chatResp;
     const d = await suggest(page, 'business laptop for the office');
     const nudge = d?.sales_response_nudge;
     expect(nudge, 'suggest should carry the sales_response_nudge').toBeTruthy();
@@ -75,14 +71,14 @@ test('adaptive storefront — strong signal adapts, weak signal is governed, cle
   });
 
   await test.step('2 · WEAK signal → the gate DENIES (governed — does not act on noise)', async () => {
-    seedDemand(['--direction', 'spike', '--confidence', '0.3', '--severity', 'warn']);
+    await seedDemand(page, 'spike', 0.3, 'warn');
     const d = await suggest(page, 'business laptop for the office');
     expect(d.sales_response_nudge?.gate).toBe('low_confidence');
     expect(d.sales_response_nudge?.applied).toBe(0);
   });
 
   await test.step('3 · clear the signal → the storefront REVERTS (no adaptation)', async () => {
-    seedDemand(['--clear']);
+    await seedDemand(page, 'clear');
     const d = await suggest(page, 'business laptop for the office');
     // no active demand finding → nothing actionable → the nudge is absent/no-op
     expect(d.sales_response_nudge == null || d.sales_response_nudge.applied === 0).toBeTruthy();

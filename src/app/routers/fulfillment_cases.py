@@ -1825,6 +1825,71 @@ def market_refresh(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, An
         return {"tenant_id": tenant_id, "refreshed": out, "state": mp.state(db, tenant_id=tenant_id)}
 
 
+@router.post("/market/demo-demand-signal")
+def market_demo_demand_signal(
+    payload: Dict[str, Any] = Body(...),
+    role: str = Depends(require_role(_OPERATOR)),
+) -> Dict[str, Any]:
+    """Replace the active demo demand signal inside the running API process.
+
+    This endpoint is deliberately unavailable unless the existing fulfilment demo
+    gate is enabled. It prevents browser certification from writing a different
+    database than the API it is testing and never exists as a production market
+    ingestion path.
+    """
+
+    if not _demo_enabled():
+        raise HTTPException(status_code=403, detail="demo market signal disabled")
+    direction = str(payload.get("direction") or "").strip().lower()
+    if direction not in {"spike", "slowdown", "clear"}:
+        raise HTTPException(status_code=422, detail="direction must be spike, slowdown, or clear")
+    try:
+        confidence = float(payload.get("confidence", 0.8))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="confidence must be numeric") from exc
+    if not 0.0 <= confidence <= 1.0:
+        raise HTTPException(status_code=422, detail="confidence must be between 0 and 1")
+    severity = str(payload.get("severity") or "warn").strip().lower()
+    if severity not in {"info", "warn", "critical"}:
+        raise HTTPException(status_code=422, detail="invalid severity")
+
+    from sqlalchemy import text
+    from src.app.services.market_analysis import (
+        FINDING_DEMAND_SHIFT,
+        MarketFinding,
+        persist_findings,
+    )
+    from src.app.services.sales_response_policy import classify_demand_trend
+    from src.app.services.market_analysis import load_recent_findings
+
+    with db_session() as db:
+        expired = db.execute(text(
+            "UPDATE market_finding SET status='expired' "
+            "WHERE finding_type IN ('demand_shift', 'demand_forecast') AND status='active'"
+        )).rowcount
+        inserted = 0
+        if direction != "clear":
+            inserted = persist_findings(db, [MarketFinding(
+                finding_type=FINDING_DEMAND_SHIFT,
+                entity_ref=None,
+                severity=severity,
+                confidence=confidence,
+                summary=f"Demo: demand {direction} detected",
+                evidence={"direction": direction, "seeded": True},
+                window="recent",
+            )])
+        db.commit()
+        trend, observed_confidence = classify_demand_trend(load_recent_findings(db, limit=50))
+    return {
+        "mode": "deterministic_demo_fixture",
+        "expired": int(expired or 0),
+        "inserted": int(inserted or 0),
+        "demand_trend": trend,
+        "confidence": observed_confidence,
+        "commercial_authority_granted": False,
+    }
+
+
 @router.get("/market/state")
 def market_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """The current request tenant's REAL findings — the live counterpart to /replay/state."""

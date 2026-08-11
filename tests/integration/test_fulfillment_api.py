@@ -365,6 +365,29 @@ def test_market_refresh_and_state_follow_request_tenant(monkeypatch):
     ]
 
 
+def test_demo_demand_signal_is_gated_and_replaces_conflicting_state(monkeypatch):
+    endpoint = "/api/v1/fulfillment/market/demo-demand-signal"
+    assert client.post(endpoint, json={"direction": "spike"}).status_code == 403
+    monkeypatch.setenv("FULFILLMENT_DEMO_ENABLED", "1")
+
+    rising = client.post(endpoint, json={
+        "direction": "spike", "confidence": 0.85, "severity": "critical",
+    })
+    assert rising.status_code == 200
+    assert rising.json()["demand_trend"] == "rising"
+
+    falling = client.post(endpoint, json={
+        "direction": "slowdown", "confidence": 0.3, "severity": "warn",
+    })
+    assert falling.status_code == 200
+    assert falling.json()["demand_trend"] == "falling"
+    assert falling.json()["expired"] >= 1
+
+    cleared = client.post(endpoint, json={"direction": "clear"})
+    assert cleared.status_code == 200
+    assert cleared.json()["demand_trend"] == "steady"
+
+
 def test_edit_draft_and_asof_routes_wired():
     cid = _open()
     # edit-draft from NEW has no draft → 409 (route exists + guards), not a 404 unrouted

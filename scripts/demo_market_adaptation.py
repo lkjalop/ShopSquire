@@ -38,10 +38,17 @@ def main() -> None:
         if a.clear:
             n = db.execute(text(
                 "UPDATE market_finding SET status='expired' "
-                "WHERE finding_type='demand_shift' AND status='active'")).rowcount
+                "WHERE finding_type IN ('demand_shift', 'demand_forecast') "
+                "AND status='active'")).rowcount
             db.commit()
             print(f"cleared {n} active demand_shift finding(s) — storefront reverts on next turn")
             return
+        # Certification controls one active observation at a time. Otherwise a
+        # stronger older direction can legitimately win the policy reduction.
+        db.execute(text(
+            "UPDATE market_finding SET status='expired' "
+            "WHERE finding_type IN ('demand_shift', 'demand_forecast') AND status='active'"
+        ))
         finding = MarketFinding(
             finding_type=FINDING_DEMAND_SHIFT, entity_ref=None, severity=a.severity,
             confidence=float(a.confidence),
