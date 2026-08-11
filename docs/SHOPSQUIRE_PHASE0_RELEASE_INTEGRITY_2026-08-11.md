@@ -141,3 +141,34 @@ Phase 0 is not declared complete yet. Residual code/config/browser groups still
 require focused disposition, and the final clean-checkout Playwright run must be
 repeated after those intended groups are either committed or explicitly
 preserved as out-of-scope work.
+
+## Final clean-checkout continuation proof
+
+At commit `ad07da70`, the detached verification worktree was advanced to the
+latest reviewed Phase 0 closure. From committed files only:
+
+- a new empty SQLite database migrated through `20260861_case_fulfillment`;
+- the application and V2 compatibility router imported successfully;
+- 197 focused research, product-shelf, security-corpus, cart and V2 regression
+  tests passed;
+- the security upload corpus was generated in an isolated pytest directory, so
+  ignored `dump/` files are no longer a hidden test dependency;
+- the production frontend build passed; the existing 556 kB application chunk
+  remains a performance warning;
+- the clean worktree has no tracked or untracked changes (only ignored proof
+  databases, dependency/build output and runtime logs).
+
+The live development browser additionally passed the enabled Chromium admin
+escalation journey. Two older commercial browser drafts remain red and are not
+claimed as certification: market adaptation observes a conflicting `falling`
+demand signal after seeding `rising`, and the qualified-commercial journey
+expects obsolete clarification copy. The Lenovo-specific fit/deadline extension
+is also too brittle for the generic open-world acceptance contract.
+
+The refreshed ownership inventory now contains 69 file-level rows: seven
+intended-change candidates, 20 evidence/archive items and 42 generated runtime
+artifacts. The seven intended candidates are deliberately preserved rather than
+silently committed: three red browser drafts, two audit E2Es that still depend
+on local authentication/fixture assumptions, and two restored config files
+showing only worktree normalization noise. No scratchpad evidence or generated
+runtime file was deleted.
