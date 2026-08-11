@@ -2895,7 +2895,7 @@ export default function App() {
     }]);
   }, [ambiguityExploration, uid]);
 
-  const researchAmbiguousShoppingCase = useCallback(async () => {
+  const researchAmbiguousShoppingCase = useCallback(async (refreshAuthorized = false) => {
     if (!ambiguityExploration?.case_id) {
       throw new Error('This exploration is missing its shopping-case identity.');
     }
@@ -2921,7 +2921,7 @@ export default function App() {
             .map((item) => item.hypothesis_id)
             .filter((value): value is string => Boolean(value)),
           research_authorized: true,
-          refresh_authorized: false,
+          refresh_authorized: refreshAuthorized,
         }),
       });
       const payload = await safeJson(response);

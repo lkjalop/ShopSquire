@@ -55,6 +55,24 @@ describe('research truth panels', () => {
     });
   });
 
+  it('offers an explicitly authorized retry only after unresolved research', () => {
+    const research = vi.fn();
+    render(<AmbiguityExplorationPanel
+      exploration={{
+        schema_version: 'ambiguity-exploration-v1',
+        retained_purpose: 'Novel workload', status: 'unresolved',
+        interpretations: [], next_question: null, execution: 'research_completed',
+        evidence: 'no_accepted_claims', decision: 'provisional_exploration_only',
+        cart_authority: 'none', provider_accounting: { external_calls: 1, paid_calls: 0 },
+      }}
+      onResearch={research} onUpload={vi.fn()} onEnterSpecifications={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry approved research' }));
+    expect(research).toHaveBeenCalledWith(true);
+    expect(screen.queryByRole('button', { name: 'Research approved sources' })).toBeNull();
+  });
+
   it('keeps context-only shelves provisional and labels conditional actions for review', () => {
     render(<ProductShelvesPanel
       projection={{

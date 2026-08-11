@@ -30,7 +30,7 @@ export type AmbiguityExploration = {
 
 type Props = {
   exploration: AmbiguityExploration;
-  onResearch: () => void;
+  onResearch: (refreshAuthorized?: boolean) => void;
   onUpload: () => void;
   onEnterSpecifications: () => void;
   onSubmitSpecifications?: (text: string) => Promise<void>;
@@ -92,7 +92,10 @@ export default function AmbiguityExplorationPanel({
       {question && <div data-testid="high-information-question" style={{ marginTop: 8 }}><strong>One question:</strong> {question}</div>}
       <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10 }}>
         {exploration.status === 'provisional' && (
-          <button type="button" onClick={onResearch} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Research approved sources</button>
+          <button type="button" onClick={() => onResearch(false)} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Research approved sources</button>
+        )}
+        {exploration.status === 'unresolved' && (
+          <button type="button" onClick={() => onResearch(true)} style={{ background: '#f15a0a', color: '#fff', border: 0, borderRadius: 6, padding: '7px 11px', fontWeight: 700 }}>Retry approved research</button>
         )}
         <button type="button" onClick={onUpload} style={secondaryActionStyle}>Upload requirements</button>
         {onResolveEvidenceSource && (
