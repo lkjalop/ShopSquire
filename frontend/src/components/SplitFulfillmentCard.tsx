@@ -17,10 +17,11 @@ export default function SplitFulfillmentCard({
   refreshKey: string;                                   // re-fetch when the cart signature changes
   nameFor: (sku: string) => string;                     // resolve a display name from the cart
   onSplitState?: (hasSplit: boolean, confirmed: boolean) => void;
-  onConfirmed?: () => void | Promise<void>;             // GATE 1: commit sourcing + draft RFQs (human-gated)
+  onConfirmed?: () => boolean | void | Promise<boolean | void>;
 }) {
   const [plan, setPlan] = useState<SplitPlan | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -45,10 +46,17 @@ export default function SplitFulfillmentCard({
 
   const d = plan.delivery;
   const money = (c: number) => `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-  const confirmPlan = () => {
-    setConfirmed(true);
-    onSplitState?.(true, true);
-    void onConfirmed?.();   // GATE 1: create + commit the sourcing cases → RFQs drafted (human-gated)
+  const confirmPlan = async () => {
+    if (confirming) return;
+    setConfirming(true);
+    try {
+      const accepted = await onConfirmed?.();
+      if (accepted === false) return;
+      setConfirmed(true);
+      onSplitState?.(true, true);
+    } finally {
+      setConfirming(false);
+    }
   };
 
   return (
@@ -87,18 +95,22 @@ export default function SplitFulfillmentCard({
         </>
       )}
 
-      <div style={{ fontWeight: 600, color: '#92400e', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 8 }}>
-        Requires supplier RFQ
-      </div>
-      {plan.later.map((l) => (
-        <div key={`later-${l.sku}`} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-          <span>{l.qty} × {nameFor(l.sku)}</span>
-          <span style={{ color: '#92400e' }} data-testid={`split-eta-${l.sku}`}>
-            {l.eta_days != null ? `supplier lead time ~${l.eta_days} days` : 'availability unconfirmed'}
-            {l.supplier_ref ? ` · ${l.supplier_ref}` : ''}
-          </span>
-        </div>
-      ))}
+      {!!plan.later?.length && (
+        <>
+          <div style={{ fontWeight: 600, color: '#92400e', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 8 }}>
+            Requires supplier RFQ
+          </div>
+          {plan.later.map((l) => (
+            <div key={`later-${l.sku}`} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+              <span>{l.qty} × {nameFor(l.sku)}</span>
+              <span style={{ color: '#92400e' }} data-testid={`split-eta-${l.sku}`}>
+                {l.eta_days != null ? `supplier lead time ~${l.eta_days} days` : 'availability unconfirmed'}
+                {l.supplier_ref ? ` · ${l.supplier_ref}` : ''}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
 
       <div data-testid="split-delivery" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #93c5fd', color: '#1e3a8a' }}>
         {d.waived
@@ -119,13 +131,14 @@ export default function SplitFulfillmentCard({
           <button
             type="button"
             data-testid="split-confirm"
-            onClick={confirmPlan}
+            onClick={() => { void confirmPlan(); }}
+            disabled={confirming}
             style={{
-              padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              padding: '7px 14px', borderRadius: 8, border: 'none', cursor: confirming ? 'wait' : 'pointer',
               background: '#2563eb', color: '#fff', fontWeight: 600, fontSize: 13,
             }}
           >
-            Confirm delivery plan
+            {confirming ? 'Confirming delivery plan…' : 'Confirm delivery plan'}
           </button>
         )}
       </div>

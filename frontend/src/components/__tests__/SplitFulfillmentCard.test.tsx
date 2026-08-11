@@ -30,7 +30,9 @@ describe('SplitFulfillmentCard', () => {
   it('renders now/later with the real supplier ETA + delivery, and confirms the plan', async () => {
     (api.getSplitOffer as any).mockResolvedValue(SPLIT);
     const onSplitState = vi.fn();
-    render(<SplitFulfillmentCard uid="u1" refreshKey="LAP-1:25" nameFor={nameFor} onSplitState={onSplitState} />);
+    const onConfirmed = vi.fn().mockResolvedValue(true);
+    render(<SplitFulfillmentCard uid="u1" refreshKey="LAP-1:25" nameFor={nameFor}
+                                 onSplitState={onSplitState} onConfirmed={onConfirmed} />);
 
     await waitFor(() => expect(screen.getByTestId('split-fulfillment-card')).toBeInTheDocument());
     expect(screen.getByTestId('split-rationale')).toHaveTextContent(/remaining 3 follow in ~6 days/);
@@ -42,8 +44,19 @@ describe('SplitFulfillmentCard', () => {
     expect(onSplitState).toHaveBeenCalledWith(true, false);
 
     fireEvent.click(screen.getByTestId('split-confirm'));
-    expect(screen.getByTestId('split-confirmed')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('split-confirmed')).toBeInTheDocument());
+    expect(onConfirmed).toHaveBeenCalledTimes(1);
     expect(onSplitState).toHaveBeenLastCalledWith(true, true);
+  });
+
+  it('does not claim confirmation when governed sourcing rejects the plan', async () => {
+    (api.getSplitOffer as any).mockResolvedValue(SPLIT);
+    render(<SplitFulfillmentCard uid="u1" refreshKey="LAP-1:25" nameFor={nameFor}
+                                 onConfirmed={vi.fn().mockResolvedValue(false)} />);
+    await waitFor(() => expect(screen.getByTestId('split-confirm')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('split-confirm'));
+    await waitFor(() => expect(screen.getByTestId('split-confirm')).not.toBeDisabled());
+    expect(screen.queryByTestId('split-confirmed')).not.toBeInTheDocument();
   });
 
   it('renders nothing when the cart is fully in stock (no second shipment to disclose)', async () => {
@@ -72,6 +85,22 @@ describe('SplitFulfillmentCard', () => {
     expect(screen.getByTestId('split-transfer-LAP-1')).toHaveTextContent('confirmed internal stock');
     expect(screen.getByText('Requires supplier RFQ')).toBeInTheDocument();
     expect(screen.getByTestId('split-eta-LAP-1')).toHaveTextContent(/supplier lead time ~6 days/);
+  });
+
+  it('does not show an empty supplier-RFQ section when network inventory covers the order', async () => {
+    (api.getSplitOffer as any).mockResolvedValue({
+      ...SPLIT,
+      split: {
+        ...SPLIT.split,
+        now: [{ sku: 'LAP-1', qty: 8, unit_cents: 139900 }],
+        transfers: [{ sku: 'LAP-1', qty: 32, unit_cents: 139900 }],
+        later: [],
+        fully_in_stock: true,
+      },
+    });
+    render(<SplitFulfillmentCard uid="u1" refreshKey="LAP-1:40" nameFor={nameFor} />);
+    await waitFor(() => expect(screen.getByTestId('split-network-covered')).toBeInTheDocument());
+    expect(screen.queryByText('Requires supplier RFQ')).not.toBeInTheDocument();
   });
 
   it('stays hidden and reports no split when the offer fetch fails (best-effort, never blocks the cart)', async () => {
