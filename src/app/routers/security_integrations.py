@@ -6,7 +6,7 @@ from typing import Any
 import os
 import httpx
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import text as sql_text
 from src.app.models.db import db_session
 from src.app.deps import get_redis
@@ -45,11 +45,27 @@ from src.app.security.model_theft import model_theft_runtime_report
 from src.app.services.decision_log import log_trace_event
 from src.app.models.compliance_registry import ensure_compliance_registry_table, insert_artifact
 from src.app.services.ticketing import TicketingAgent
+from src.app.services.security_connector_identity import authenticate_security_connector
+from src.app.platform.tenant_context import current_tenant_id
 import uuid
 import json
 
 
 router = APIRouter(prefix="/api/v1/security", tags=["security"])
+
+
+def _authoritative_operator_tenant(request: Request, payload: Dict[str, Any]) -> str:
+    header_tenant = str(request.headers.get("x-tenant-id") or "").strip()
+    claimed = str(payload.get("tenant_id") or ((payload.get("event") or {}).get("tenant_id") if isinstance(payload.get("event"), dict) else "") or "").strip()
+    env = str(os.getenv("APP_ENV") or "dev").strip().lower()
+    if header_tenant:
+        if claimed and claimed != header_tenant:
+            raise HTTPException(status_code=403, detail="security_event_tenant_claim_mismatch")
+        return current_tenant_id()
+    if env in {"prod", "production", "staging"}:
+        raise HTTPException(status_code=403, detail="authoritative_security_event_tenant_required")
+    # Compatibility is deliberately confined to non-production tests and local replay.
+    return claimed or current_tenant_id()
 
 
 def _ensure_demo_routes_enabled() -> None:
@@ -877,16 +893,19 @@ def pentest_simulate(
 @router.post("/events/ingest")
 def security_events_ingest(
     payload: Dict[str, Any],
+    request: Request,
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     vendor = str(payload.get("vendor") or "siem")
     event_payload = payload.get("event") if isinstance(payload.get("event"), dict) else payload
     raw_targets = payload.get("storage_targets") if isinstance(payload.get("storage_targets"), list) else None
     storage_targets = [str(t).strip().lower() for t in (raw_targets or []) if str(t).strip()]
+    authoritative_tenant = _authoritative_operator_tenant(request, payload)
     out = ingest_security_event(
         vendor=vendor,
         payload=event_payload if isinstance(event_payload, dict) else {},
         storage_targets=storage_targets or None,
+        authoritative_tenant_id=authoritative_tenant,
     )
     policy = out.get("policy") if isinstance(out.get("policy"), dict) else {}
     canonical = out.get("canonical") if isinstance(out.get("canonical"), dict) else {}
@@ -943,6 +962,49 @@ def security_events_ingest(
     return {"ok": True, **out, "ticket": ticket}
 
 
+@router.post("/events/connector-ingest")
+def security_connector_ingest(
+    payload: Dict[str, Any],
+    x_security_connector_id: str = Header(alias="X-Security-Connector-Id"),
+    authorization: str = Header(alias="Authorization"),
+) -> Dict[str, Any]:
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else payload
+    family = str(payload.get("event_family") or event.get("event_type") or event.get("type") or "other").strip().lower()
+    source_id = str(payload.get("source_id") or event.get("device_id") or event.get("source_id") or "").strip() or None
+    bearer = authorization.split(" ", 1)[1].strip() if authorization.startswith("Bearer ") else ""
+    try:
+        identity = authenticate_security_connector(
+            connector_id=x_security_connector_id,
+            bearer_secret=bearer,
+            event_family=family,
+            source_id=source_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=401 if "credential" in str(exc) or "unknown" in str(exc) else 403, detail=str(exc)) from exc
+    requested_targets = [str(item).strip().lower() for item in list(payload.get("storage_targets") or []) if str(item).strip()]
+    if requested_targets and not set(requested_targets).issubset(set(identity.storage_targets)):
+        raise HTTPException(status_code=403, detail="security_connector_storage_target_denied")
+    out = ingest_security_event(
+        vendor=identity.provider,
+        payload=event,
+        storage_targets=requested_targets or list(identity.storage_targets),
+        authoritative_tenant_id=identity.tenant_id,
+    )
+    canonical = out.get("canonical") if isinstance(out.get("canonical"), dict) else {}
+    trace_id = str(canonical.get("trace_id") or "").strip()
+    if trace_id:
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="security_connector_event_ingested",
+            source_type="connector",
+            source_id=identity.connector_id,
+            target_type="security_event",
+            target_id=str(out.get("id") or "") or None,
+            payload={"provider": identity.provider, "tenant_authority": "connector_subscription", "policy": out.get("policy")},
+        )
+    return {"ok": True, **out, "connector_identity": {"connector_id": identity.connector_id, "provider": identity.provider}}
+
+
 @router.get("/events/replay/{event_id}")
 def security_events_replay(
     event_id: str,
@@ -957,10 +1019,12 @@ def security_events_replay(
 @router.post("/events/pull/crowdstrike")
 def security_events_pull_crowdstrike(
     payload: Dict[str, Any],
+    request: Request,
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    tenant_id = _authoritative_operator_tenant(request, payload)
     out = pull_crowdstrike_and_ingest(
-        tenant_id=str(payload.get("tenant_id") or "default"),
+        tenant_id=tenant_id,
         trace_id=str(payload.get("trace_id") or "").strip() or None,
         limit=int(payload.get("limit") or 50),
         lookback_minutes=int(payload.get("lookback_minutes") or 60),
@@ -987,6 +1051,7 @@ def security_events_pull_crowdstrike(
 @router.post("/events/ingest/firewall-syslog")
 def security_events_ingest_firewall_syslog(
     payload: Dict[str, Any],
+    request: Request,
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     lines = payload.get("lines") if isinstance(payload.get("lines"), list) else []
@@ -994,7 +1059,7 @@ def security_events_ingest_firewall_syslog(
         raise HTTPException(status_code=400, detail="lines_required")
     out = ingest_firewall_syslog_lines(
         lines=[str(x) for x in lines],
-        tenant_id=str(payload.get("tenant_id") or "default"),
+        tenant_id=_authoritative_operator_tenant(request, payload),
         trace_id=str(payload.get("trace_id") or "").strip() or None,
     )
     tid = str(payload.get("trace_id") or "").strip()
@@ -1017,6 +1082,7 @@ def security_events_ingest_firewall_syslog(
 @router.post("/events/ingest/process-tree")
 def security_events_ingest_process_tree(
     payload: Dict[str, Any],
+    request: Request,
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     events = payload.get("events") if isinstance(payload.get("events"), list) else []
@@ -1024,7 +1090,7 @@ def security_events_ingest_process_tree(
         raise HTTPException(status_code=400, detail="events_required")
     out = ingest_process_tree_events(
         events=[event for event in events if isinstance(event, dict)],
-        tenant_id=str(payload.get("tenant_id") or "default"),
+        tenant_id=_authoritative_operator_tenant(request, payload),
         trace_id=str(payload.get("trace_id") or "").strip() or None,
     )
     tid = str(payload.get("trace_id") or "").strip()
@@ -1047,6 +1113,7 @@ def security_events_ingest_process_tree(
 @router.post("/events/ingest/dns-proxy")
 def security_events_ingest_dns_proxy(
     payload: Dict[str, Any],
+    request: Request,
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     lines = payload.get("lines") if isinstance(payload.get("lines"), list) else []
@@ -1054,7 +1121,7 @@ def security_events_ingest_dns_proxy(
         raise HTTPException(status_code=400, detail="lines_required")
     out = ingest_dns_proxy_lines(
         lines=[str(x) for x in lines],
-        tenant_id=str(payload.get("tenant_id") or "default"),
+        tenant_id=_authoritative_operator_tenant(request, payload),
         trace_id=str(payload.get("trace_id") or "").strip() or None,
     )
     tid = str(payload.get("trace_id") or "").strip()
@@ -1077,6 +1144,7 @@ def security_events_ingest_dns_proxy(
 @router.post("/events/ingest/edr-memory")
 def security_events_ingest_edr_memory(
     payload: Dict[str, Any],
+    request: Request,
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     events = payload.get("events") if isinstance(payload.get("events"), list) else []
@@ -1084,7 +1152,7 @@ def security_events_ingest_edr_memory(
         raise HTTPException(status_code=400, detail="events_required")
     out = ingest_edr_memory_events(
         events=[event for event in events if isinstance(event, dict)],
-        tenant_id=str(payload.get("tenant_id") or "default"),
+        tenant_id=_authoritative_operator_tenant(request, payload),
         trace_id=str(payload.get("trace_id") or "").strip() or None,
     )
     tid = str(payload.get("trace_id") or "").strip()

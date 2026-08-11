@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from src.app.models.db import db_session
 from src.app.rules.tenant_config_store import TenantConfigStore
@@ -312,9 +312,12 @@ def _compute_impossible_travel(event: Dict[str, Any], geo: Dict[str, Any]) -> Di
     }
 
 
-def normalize_vendor_payload(vendor: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_vendor_payload(vendor: str, payload: Dict[str, Any], *, authoritative_tenant_id: str | None = None) -> Dict[str, Any]:
     v = str(vendor or "unknown").strip().lower()
-    p = payload if isinstance(payload, dict) else {}
+    p = dict(payload) if isinstance(payload, dict) else {}
+    claimed_tenant_id = str(p.get("tenant_id") or "").strip() or None
+    if authoritative_tenant_id:
+        p["tenant_id"] = str(authoritative_tenant_id).strip()
     if v == "crowdstrike":
         trace_id = str(p.get("trace_id") or p.get("correlation_id") or p.get("detection_id") or "").strip()
         score = _as_float(p.get("confidence"), default=_as_float(p.get("score"), default=0.75))
@@ -349,6 +352,8 @@ def normalize_vendor_payload(vendor: str, payload: Dict[str, Any]) -> Dict[str, 
         )
         if isinstance(out.get("impossible_travel"), dict) and out["impossible_travel"].get("detected"):
             out["type"] = "network"
+        out["untrusted_claimed_tenant_id"] = claimed_tenant_id
+        out["tenant_authority"] = "authenticated_connector_or_request_context" if authoritative_tenant_id else "legacy_payload_claim"
         return out
     if v in {"firewall", "generic_firewall"}:
         action = str(p.get("action") or "").lower()
@@ -383,6 +388,8 @@ def normalize_vendor_payload(vendor: str, payload: Dict[str, Any]) -> Dict[str, 
                 "impossible_travel": _compute_impossible_travel(out, geo),
             }
         )
+        out["untrusted_claimed_tenant_id"] = claimed_tenant_id
+        out["tenant_authority"] = "authenticated_connector_or_request_context" if authoritative_tenant_id else "legacy_payload_claim"
         return out
     # siem/default passthrough
     event_type = str(p.get("type") or p.get("event_type") or "other").strip().lower()
@@ -414,6 +421,8 @@ def normalize_vendor_payload(vendor: str, payload: Dict[str, Any]) -> Dict[str, 
             "impossible_travel": _compute_impossible_travel(out, geo),
         }
     )
+    out["untrusted_claimed_tenant_id"] = claimed_tenant_id
+    out["tenant_authority"] = "authenticated_connector_or_request_context" if authoritative_tenant_id else "legacy_payload_claim"
     return out
 
 
@@ -515,20 +524,23 @@ def ensure_security_event_ingest_table() -> None:
                     """
                 )
             )
-            for alter in [
-                "ALTER TABLE security_event_ingest ADD COLUMN geo_country TEXT",
-                "ALTER TABLE security_event_ingest ADD COLUMN asn INTEGER",
-                "ALTER TABLE security_event_ingest ADD COLUMN asn_org TEXT",
-                "ALTER TABLE security_event_ingest ADD COLUMN is_vpn INTEGER",
-                "ALTER TABLE security_event_ingest ADD COLUMN is_hosting INTEGER",
-                "ALTER TABLE security_event_ingest ADD COLUMN is_tor INTEGER",
-                "ALTER TABLE security_event_ingest ADD COLUMN geo_risk REAL",
-                "ALTER TABLE security_event_ingest ADD COLUMN impossible_travel INTEGER",
-            ]:
-                try:
-                    db.execute(text(alter))
-                except Exception:
-                    pass
+            # Legacy SQLite fixtures can predate the canonical migration.  Only
+            # repair a genuinely missing column; executing ALTER-and-catching
+            # "already exists" poisons PostgreSQL's whole transaction.
+            existing = {
+                str(column["name"])
+                for column in inspect(db.get_bind()).get_columns("security_event_ingest")
+            }
+            for name, sql_type in (
+                ("geo_country", "TEXT"), ("asn", "INTEGER"),
+                ("asn_org", "TEXT"), ("is_vpn", "INTEGER"),
+                ("is_hosting", "INTEGER"), ("is_tor", "INTEGER"),
+                ("geo_risk", "REAL"), ("impossible_travel", "INTEGER"),
+            ):
+                if name not in existing:
+                    db.execute(text(
+                        f"ALTER TABLE security_event_ingest ADD COLUMN {name} {sql_type}"
+                    ))
             db.commit()
             _SECURITY_EVENT_TABLE_READY = True
         except Exception:
@@ -538,11 +550,23 @@ def ensure_security_event_ingest_table() -> None:
                 pass
 
 
-def ingest_security_event(vendor: str, payload: Dict[str, Any], storage_targets: List[str] | None = None) -> Dict[str, Any]:
+def ingest_security_event(
+    vendor: str,
+    payload: Dict[str, Any],
+    storage_targets: List[str] | None = None,
+    *,
+    authoritative_tenant_id: str | None = None,
+) -> Dict[str, Any]:
     ensure_security_event_ingest_table()
-    canonical = normalize_vendor_payload(vendor, payload if isinstance(payload, dict) else {})
+    canonical = normalize_vendor_payload(
+        vendor,
+        payload if isinstance(payload, dict) else {},
+        authoritative_tenant_id=authoritative_tenant_id,
+    )
     policy = decide_policy_action(canonical)
-    uid = _event_fingerprint(str(vendor or ""), payload if isinstance(payload, dict) else {})
+    fingerprint_payload = dict(payload) if isinstance(payload, dict) else {}
+    fingerprint_payload["tenant_id"] = str(canonical.get("tenant_id") or "default")
+    uid = _event_fingerprint(str(vendor or ""), fingerprint_payload)
     rid = f"sei-{uid[:24]}"
     tenant_id = str(canonical.get("tenant_id") or "default")
     req_targets = _normalize_storage_targets([str(t) for t in (storage_targets or []) if str(t).strip()], default_to_database=False) if storage_targets else []
