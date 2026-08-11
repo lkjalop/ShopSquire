@@ -350,6 +350,13 @@ export function deriveTraceTrustStrip({
     String(receipt?.provider_kind || receipt?.kind || '').toLowerCase().includes('official')
     && String(receipt?.execution_status || receipt?.status || '').toLowerCase() === 'completed'
   ));
+  const governedCacheCompleted = researchReceipts.some((receipt) => (
+    String(receipt?.execution_status || receipt?.status || '').toLowerCase() === 'completed'
+    && ['fresh_hit', 'hit'].includes(String(receipt?.cache_status || '').toLowerCase())
+  )) || researchTiers.some((tier) => (
+    String(tier?.mechanism || '').toLowerCase() === 'evidence_cache'
+    && String(tier?.execution_status || tier?.status || '').toLowerCase() === 'completed'
+  ));
   const researchBlocked = researchPayloads.some((payload) => (
     String(payload?.status || '').toLowerCase() === 'blocked'
   )) || researchTiers.some((tier) => (
@@ -359,6 +366,8 @@ export function deriveTraceTrustStrip({
   ));
   const execution: TrustCue = canonicalFetchCompleted
     ? { label: 'Completed', detail: 'At least one governed canonical official-origin fetch completed.', status: 'good' }
+    : governedCacheCompleted
+      ? { label: 'Completed from cache', detail: 'Fresh governed official evidence was reused; no network fetch was needed.', status: 'good' }
     : researchBlocked
       ? { label: 'Blocked', detail: 'Research was attempted but a governed execution boundary prevented completion.', status: 'warn' }
       : officialResearchEvents.length > 0
@@ -1429,7 +1438,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       || payload?.right_panel_contract?.delivery_feasibility
       || payload?.right_panel_contract?.human_escalation
     );
-    return s.includes('procurement') || s.includes('split') || s.includes('supplier') || s.includes('sourcing')
+    const shoppingCaseContinuation = eventMatches(e, [
+      'supplier_responses_normalized', 'fulfillment_cart_change_confirmed',
+    ]);
+    return shoppingCaseContinuation
+      || s.includes('procurement') || s.includes('split') || s.includes('supplier') || s.includes('sourcing')
       || t.includes('procurement') || t.includes('split') || t.includes('sourc') || t.includes('availability')
       || t.includes('channel') || t.includes('return_claim') || hasDeadlineDecision;
   });
@@ -4387,7 +4400,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         || et.startsWith('bulk_') || et.startsWith('procurement_') || et.startsWith('alternatives_')
                         || et.includes('availability') || et.includes('buyer_qualif') || et.includes('supplier')
                         || et.includes('split') || et.includes('sourc') || et.includes('channel')
-                        || et.includes('integrity') || sidl.includes('integrity');  // outbound integrity guard
+                        || et.includes('integrity') || sidl.includes('integrity')
+                        || eventMatches(e, [
+                          'supplier_responses_normalized', 'fulfillment_cart_change_confirmed',
+                        ]);  // shopping-case continuation + outbound integrity guard
                     });
                     // Outbound integrity blocks — the platform quarantining its OWN drafted supplier mail
                     // before send (poisoned payload / data leak). Surfaced prominently: bounded autonomy

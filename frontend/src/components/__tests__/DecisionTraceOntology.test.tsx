@@ -223,6 +223,28 @@ describe('Decision Trace component ontology', () => {
     expect(strip.execution.label).toBe('Completed');
   });
 
+  it('labels a fresh governed evidence-cache hit as completed without implying a network fetch', () => {
+    const strip = deriveTraceTrustStrip({
+      events: [{
+        event_type: 'feedback_loop',
+        payload: {
+          _original_event_type: 'official_research_rerank_completed',
+          evidence_outcome: 'product_requirements',
+          official_claims: [{ observed_at: '2026-08-10T00:00:00Z' }],
+          receipts: [{
+            provider_capability: 'OFFICIAL_ORIGIN_FETCH',
+            execution_status: 'completed', cache_status: 'fresh_hit',
+            network_execution: false, external_call_dispatched: false,
+          }],
+        },
+      }],
+      executionSteps: [], evidence: null, marketProjections: [], hippographInsights: [],
+    });
+
+    expect(strip.execution.label).toBe('Completed from cache');
+    expect(strip.execution.detail).toContain('no network fetch was needed');
+  });
+
   it('compacts raw event volume into state changed, prevented, and observed milestones', () => {
     const timeline = compactStateTimeline([
       { event_type: 'query_received', payload: { summary: 'Buyer request received' } },

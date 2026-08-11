@@ -1,79 +1,62 @@
-import { test, expect, Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 async function send(page: Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
   await input.fill(text);
   await input.press('Enter');
+  await expect(page.getByTestId('stream-acknowledgement')).toBeHidden({ timeout: 90_000 });
 }
 
-test('simulation-qualified evidence reaches explicit SKU, ATP, commitment and exact-shortfall RFQ', async ({ page }) => {
-  test.setTimeout(240_000);
-  let checkoutUpsellRequests = 0;
-  let splitOfferRequests = 0;
-  page.on('request', (request) => {
-    if (request.url().includes('/api/v1/recommend/checkout_upsell')) checkoutUpsellRequests += 1;
-    if (request.url().includes('/api/v1/cart/split-offer')) splitOfferRequests += 1;
-  });
-  const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  const uid = `enterprise-e2e-qualified-${suffix}`;
+test('ambiguous research continues into an explicit synthetic supplier decision', async ({ page }) => {
+  test.setTimeout(300_000);
+  const uid = `enterprise-e2e-${Date.now()}-${Math.random()}`;
   await page.addInitScript((value) => sessionStorage.setItem('uid', value), uid);
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click();
 
-  await test.step('unqualified intent cannot reach inventory or a product slate', async () => {
-    await send(page, 'Please recommend 80 laptops capable of simulating a digital twin for maintenance of mechanical machines.');
-    await expect(page.getByTestId('stream-acknowledgement')).toBeVisible({ timeout: 1_500 });
-    await expect(page.getByText(/Which exact software, standard, or workflow and version/i).last())
-      .toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0);
-  });
+  await send(
+    page,
+    'I need 30 laptops within 10 days to run Factory I/O for a PLC-controlled factory simulation.',
+  );
 
-  await test.step('explicit consent replays a versioned simulation contract and qualifies one SKU', async () => {
-    await send(page, 'Search online for 80 laptops capable of digital twin simulation.');
-    const consent = page.getByRole('button', { name: /Check approved sources/i });
-    await expect(consent).toBeVisible();
-    await consent.click();
+  await expect(page.getByText(/Which named software and version/i)).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Provisional product shelves' })).toBeVisible();
+  await expect(page.getByText(/external research not yet authorized/i)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review option' })).toHaveCount(0);
 
-    await expect(page.getByText(/HP OMEN MAX 16/i).first()).toBeVisible({ timeout: 60_000 });
-    const add = page.getByRole('button', { name: 'Add', exact: true }).first();
-    await expect(add).toBeVisible();
+  await page.getByRole('button', { name: 'Research approved sources' }).click();
+  await expect(page.getByText(/Approved-source research completed in the same shopping case/i))
+    .toBeVisible({ timeout: 90_000 });
+  const researchProof = page.locator('details').filter({ hasText: 'Research proof' }).last();
+  await researchProof.locator('summary').click();
+  await expect(researchProof.getByTestId('ambiguity-accounting')).toContainText(/Paid calls: 0/i);
 
-    await page.getByTitle('Decision Trace').click();
-    const modal = page.getByTestId('decision-trace-modal');
-    await modal.getByRole('button', { name: /^Reasoning/ }).click();
-    const semantic = modal.getByTestId('semantic-resolution-trace');
-    await expect(semantic).toContainText(/qualified catalog match/i);
-    await expect(semantic).toContainText(/RGAM-0007/i);
-    await expect(semantic).toContainText(/simulation contract only/i);
-    await expect(semantic).toContainText(/not live vendor requirements or availability/i);
-    await modal.getByTitle('Close').click();
+  const firstShelf = page.getByRole('region', { name: 'Provisional product shelves' })
+    .locator('article').first();
+  await expect(firstShelf).toBeVisible();
+  await firstShelf.getByRole('spinbutton').fill('30');
+  await firstShelf.getByRole('button', { name: /Review option|Propose cart change/ }).click();
 
-    // The pre-selection trace may legitimately inspect the empty cart. Count
-    // only requests for the selected 80-unit cart from this point onward.
-    splitOfferRequests = 0;
-    await add.click();
-    await expect(page.locator('[data-testid^="qty-"]').first()).toHaveText('80');
-  });
+  const continuation = page.getByTestId('supplier-continuation');
+  await expect(continuation).toContainText(/nothing has changed yet/i);
+  await expect(continuation).toContainText(/30/);
+  await continuation.getByLabel('Needed within days').fill('10');
+  await continuation.getByRole('button', { name: 'Assess fulfilment' }).click();
+  await expect(page.getByTestId('fulfillment-choices')).toBeVisible();
 
-  await test.step('buyer commitment uses versioned ATP and drafts only the unresolved shortfall', async () => {
-    const split = page.getByTestId('split-fulfillment-card');
-    await expect(split).toBeVisible({ timeout: 30_000 });
-    const rationale = await page.getByTestId('split-rationale').innerText();
-    expect(rationale).toMatch(/supplier RFQ|follow/i);
-    await page.getByTestId('split-confirm').click();
-    await expect(page.getByTestId('cart-sourcing-note')).toContainText(/RFQ.*drafted/i, { timeout: 45_000 });
+  await page.getByRole('button', { name: /Ask suppliers for/i }).click();
+  const offers = page.getByTestId('supplier-offers');
+  await expect(offers).toContainText(/Synthetic certification responses/i);
+  await expect(offers).toContainText(/ACCEPTED/i);
+  await expect(offers).toContainText(/REJECTED/i);
+  await expect(page.getByTestId('real-supplier-locked')).toContainText(/human RFQ preview/i);
 
-    await page.getByTitle('Decision Trace').click();
-    const modal = page.getByTestId('decision-trace-modal');
-    await modal.getByRole('button', { name: /^Commercial Journey/ }).click();
-    await modal.getByRole('tab', { name: /Procurement/ }).click();
-    const rfq = modal.getByTestId('proc-drafted-rfq');
-    await expect(rfq).toBeVisible({ timeout: 45_000 });
-    await expect(rfq).toContainText(/supplier-shortfall unit/i);
-    await expect(rfq).toContainText(/human-gated.*not sent/i);
-    await expect(modal.getByTestId('proc-rfq-body')).toContainText(/Quantity:/i);
-  });
-
-  expect(checkoutUpsellRequests).toBe(1);
-  expect(splitOfferRequests).toBe(1);
+  const accepted = offers.locator('label').filter({ hasText: /ACCEPTED/i }).first();
+  await accepted.getByRole('radio').check();
+  await expect(continuation.getByText('Final confirmation')).toBeVisible();
+  await expect(continuation).toContainText(/not a purchase commitment/i);
+  await continuation.getByRole('button', { name: 'Confirm exact cart change' }).click();
+  await expect(continuation.getByRole('button', { name: 'Cart updated' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/Applied the explicitly confirmed fulfilment selection: 30 ×/i))
+    .toBeVisible();
 });
