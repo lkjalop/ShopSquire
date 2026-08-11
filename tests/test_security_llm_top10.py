@@ -21,7 +21,7 @@ def test_security_detects_unicode_prompt_injection():
     assert signals.get("unicode_obfuscation") is True
     assert signals.get("jailbreak") is True
     assert "LLM01:PromptInjection" in tags
-    assert "LLM02:InsecureOutputHandling" in tags
+    assert "LLM05:ImproperOutputHandling" in tags
 
 
 def test_security_detects_pii_and_redacts():
@@ -34,5 +34,5 @@ def test_security_detects_pii_and_redacts():
     details = result.get("details", {})
     tags = details.get("owasp_llm_top10", [])
     sanitized = result.get("sanitized", {})
-    assert "LLM06:SensitiveInformationDisclosure" in tags
+    assert "LLM02:SensitiveInformationDisclosure" in tags
     assert "alex@example.com" not in str(sanitized)

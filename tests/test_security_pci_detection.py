@@ -8,4 +8,4 @@ def test_pci_detection_triggers_llm06():
     tags = details.get("owasp_llm_top10", [])
     signals = details.get("signals", {})
     assert signals.get("pci") is True
-    assert "LLM06:SensitiveInformationDisclosure" in tags
+    assert "LLM02:SensitiveInformationDisclosure" in tags

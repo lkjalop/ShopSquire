@@ -12,17 +12,18 @@ from types import SimpleNamespace
 from src.app.security.maestro_boundaries import (
     AGENT_BOUNDARIES,
     record_agent_action,
-    validate_agent_action,
 )
 
 
 # ── boundary registry ──
 def test_supplier_comms_boundary_now_defined():
     b = AGENT_BOUNDARIES.get("Supplier_Communication_Agent")
-    assert b is not None and b.risk_tier == "high"
+    assert b is not None and b.risk_tier == "critical"
     assert "dispatch_supplier_message" in b.allowed_tools
+    assert "stage_draft" in b.allowed_tools
     assert "suppliers" in b.allowed_data_scopes
     assert b.max_autonomous_value_usd == 0.0  # cannot auto-approve spend
+    assert b.can_invoke_llm is False  # transport never interprets untrusted supplier content
 
 
 def test_consequential_agents_all_have_boundaries():

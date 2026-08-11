@@ -16,8 +16,7 @@ from src.app.deps import (
 )
 from src.app.security.nlp_deception import DeceptionDetector
 import re
-from src.app.models.db import db_session, get_engine
-from src.app.config import get_settings, load_feature_flags
+from src.app.models.db import db_session
 from fastapi import Request
 from src.app.observability.tracing import init_tracer, get_tracer
 from src.app.observability.metrics import record_control_failure, record_security_event
@@ -25,14 +24,14 @@ from src.app.security.escalation import auto_route_security_event
 from src.app.security.pci import contains_pci_data
 from sqlalchemy.engine import Engine
 import random
-import ipaddress
 from urllib.parse import unquote
 from src.app.observability.worm import append_worm_record
 from src.app.services.geoip import enrich_ip
 from src.app.observability.metrics import record_geo_velocity_anomaly
 from src.app.security.jailbreak_embedding_guard import is_embedding_jailbreak
-from src.app.security.dread_scorer import compute_dread, infer_kill_chain_stage as dread_kill_chain
+from src.app.security.dread_scorer import compute_dread
 from src.app.security.atlas_map import atlas_dimensions
+from src.app.security.client_ip import resolve_client_ip
 
 
 def _load_json(path: str) -> Dict:
@@ -281,40 +280,40 @@ def _owasp_llm_tags(signals: Dict[str, bool], cv_signals: Dict[str, Any] | None 
     if signals.get("jailbreak"):
         tags.append("LLM01:PromptInjection")
     if signals.get("pii") or signals.get("pci"):
-        tags.append("LLM06:SensitiveInformationDisclosure")
+        tags.append("LLM02:SensitiveInformationDisclosure")
     if signals.get("api_key"):
-        tags.append("LLM06:SensitiveInformationDisclosure")
+        tags.append("LLM02:SensitiveInformationDisclosure")
     if signals.get("unicode_obfuscation"):
-        tags.append("LLM02:InsecureOutputHandling")
+        tags.append("LLM05:ImproperOutputHandling")
     if signals.get("prompt_injection"):
         tags.append("LLM01:PromptInjection")
     if signals.get("agentic_tool_abuse"):
-        tags.append("LLM08:ExcessiveAgency")
+        tags.append("LLM06:ExcessiveAgency")
     if signals.get("data_exfiltration"):
-        tags.append("LLM06:SensitiveInformationDisclosure")
+        tags.append("LLM02:SensitiveInformationDisclosure")
     if signals.get("supply_chain"):
-        tags.append("LLM05:SupplyChainVulnerabilities")
+        tags.append("LLM03:SupplyChain")
     if signals.get("training_poisoning"):
-        tags.append("LLM03:TrainingDataPoisoning")
+        tags.append("LLM04:DataAndModelPoisoning")
     if signals.get("poisoning_attempt"):
-        tags.append("LLM03:TrainingDataPoisoning")
+        tags.append("LLM04:DataAndModelPoisoning")
     if signals.get("model_drift"):
-        tags.append("LLM03:TrainingDataPoisoning")
+        tags.append("LLM04:DataAndModelPoisoning")
     if signals.get("model_dos"):
-        tags.append("LLM04:ModelDenialOfService")
+        tags.append("LLM10:UnboundedConsumption")
     if signals.get("plugin_insecure"):
-        tags.append("LLM07:InsecurePluginDesign")
+        tags.append("LLM03:SupplyChain")
     if signals.get("overreliance"):
-        tags.append("LLM09:Overreliance")
+        tags.append("LLM09:Misinformation")
     if signals.get("embedding_weakness"):
-        tags.append("LLM10:VectorEmbeddingWeaknesses")
+        tags.append("LLM08:VectorAndEmbeddingWeaknesses")
     cv_signals = cv_signals or {}
     if cv_signals.get("ocr_prompt_injection"):
         tags.append("LLM01:PromptInjection")
     if cv_signals.get("qr_code_detected") or cv_signals.get("qr_external_url_detected") or cv_signals.get("qr_prompt_injection"):
         tags.append("LLM01:PromptInjection")
     if cv_signals.get("duplicate_image_detected") or cv_signals.get("manipulation_detected"):
-        tags.append("LLM05:SupplyChainVulnerabilities")
+        tags.append("LLM05:ImproperOutputHandling")
     return tags
 
 
@@ -390,7 +389,6 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
     # Base signals
     mitre = _load_json(os.path.join("config", "security", "taxonomy", "mitre_atlas_techniques.json"))
     stride = _load_json(os.path.join("config", "security", "taxonomy", "stride_categories.json"))
-    dread = _load_json(os.path.join("config", "security", "taxonomy", "dread_weights.json"))
     cvss = _load_json(os.path.join("config", "security", "taxonomy", "cvss_v3_severity_map.json"))
     policy = _load_json(os.path.join("config", "security", "taxonomy", "risk_correlation_policy.json"))
 
@@ -653,6 +651,16 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
                 "ip_hash": hash_value(ip),
                 "geo": geo,
                 "velocity_asn_anomaly": bool(velocity_asn_anomaly),
+                "source": str((actor_context or {}).get("network_source") or "payload"),
+                "trusted_proxy_hops": int(
+                    (actor_context or {}).get("trusted_proxy_hops") or 0
+                ),
+                "forwarded_ignored": bool(
+                    (actor_context or {}).get("forwarded_ignored")
+                ),
+                "malformed_forwarded": bool(
+                    (actor_context or {}).get("malformed_forwarded")
+                ),
             }
     except Exception:
         pass
@@ -846,11 +854,12 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
     actor_ctx: Dict[str, Any] = {}
     try:
         if request is not None:
-            xfwd = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
-            if xfwd:
-                actor_ctx["ip"] = xfwd.split(",")[0].strip()
-            elif request.client:
-                actor_ctx["ip"] = request.client.host
+            resolved_ip = resolve_client_ip(request)
+            actor_ctx["ip"] = resolved_ip.ip
+            actor_ctx["network_source"] = resolved_ip.source
+            actor_ctx["trusted_proxy_hops"] = resolved_ip.trusted_proxy_hops
+            actor_ctx["forwarded_ignored"] = resolved_ip.forwarded_ignored
+            actor_ctx["malformed_forwarded"] = resolved_ip.malformed_forwarded
     except Exception:
         actor_ctx = {}
     # If the caller already provided an analysis blob (e.g. pre-computed details),
@@ -865,7 +874,7 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
     if isinstance(provided, dict) and provided:
         details = provided
         severity = details.get("severity", "info")
-        risk_raw = details.get("risk_raw", 0.0)
+        _risk_raw = details.get("risk_raw", 0.0)
         risk_adj = details.get("risk_adj", 0.0)
         # Recompute signals from the provided payload (or fall back to any
         # existing signals). Always populate MITRE and OWASP tag lists so
@@ -904,7 +913,7 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
         # recording there. For now, populate placeholders; the persisted
         # details will contain the real analysis once the thread runs.
         severity = "info"
-        risk_raw = 0.0
+        _risk_raw = 0.0
         risk_adj = 0.0
         details = {"signals": {}, "mitre_atlas": [], "owasp_llm_top10": []}
     try:
@@ -928,7 +937,6 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
         def _persist():
             from sqlalchemy import text as _text
             severity_l = severity
-            risk_raw_l = risk_raw
             risk_adj_l = risk_adj
             details_l = details
             event_id = str(uuid.uuid4())
@@ -936,9 +944,8 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
             # If compute_risk was deferred, compute it now so persisted event has full analysis
             if not (isinstance(provided, dict) and provided):
                 try:
-                    sev, r_raw, r_adj, det = compute_risk(raw_payload, actor_context=actor_ctx or None)
+                    sev, _r_raw, r_adj, det = compute_risk(raw_payload, actor_context=actor_ctx or None)
                     severity_l = sev
-                    risk_raw_l = r_raw
                     risk_adj_l = r_adj
                     details_l = det
                 except Exception:
@@ -1086,7 +1093,8 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
 
             except Exception:
                 try:
-                    import sys, traceback
+                    import sys
+                    import traceback
                     sys.stderr.write(f"[observer] failed to persist event for path={path}\n")
                     traceback.print_exc(file=sys.stderr)
                     sys.stderr.flush()

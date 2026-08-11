@@ -105,15 +105,24 @@ def emit_to_crowdstrike(event: Dict[str, Any]) -> None:
 
 
 def emit_security_telemetry(event: Dict[str, Any]) -> None:
-    """Emit security event to configured backends.
+    """Persist and queue a canonical security handoff.
 
     Expect keys: event_id, timestamp, interaction_type, severity, details.
     """
+    # Incident lifecycle events are consequences of a security observation.
+    # Forwarding them back into the same observer creates an alert/incident loop.
+    if str(event.get("event") or "").startswith("security.auto_"):
+        return
     try:
         # Ensure JSON-serializable copy
         payload = json.loads(json.dumps(event, ensure_ascii=False))
         payload = enrich_security_event(payload)
     except Exception:
         payload = {"raw": str(event)}
-    emit_to_splunk(payload)
-    emit_to_crowdstrike(payload)
+    payload.setdefault("schema_version", "shopsquire.security.v1")
+    payload.setdefault("source", "shopsquire_security_observer")
+    payload.setdefault("tenant_id", str(event.get("tenant_id") or "default"))
+    payload.setdefault("trace_id", event.get("trace_id") or event.get("event_id"))
+    from src.app.security.siem_adapter import emit_security_handoff
+
+    emit_security_handoff(payload)
