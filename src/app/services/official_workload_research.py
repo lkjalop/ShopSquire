@@ -310,6 +310,33 @@ def _source_query(source: dict[str, Any]) -> str:
     return f"{artefact} {publisher} official {purpose}"[:240]
 
 
+def _source_discovery_queries(source: dict[str, Any]) -> tuple[str, ...]:
+    """Return a bounded, progressively broader official-origin query set.
+
+    Queries are built exclusively from reviewed manifest data.  Raw buyer text is
+    deliberately excluded so discovery cannot leak case-specific or personal
+    information.  Callers stop as soon as an acceptable canonical-family origin is
+    found, keeping the common path to one free local request.
+    """
+
+    publisher = str(source.get("publisher") or "official publisher").strip()
+    artefacts = [
+        str(value).strip()
+        for value in source.get("artefact_patterns") or []
+        if str(value).strip()
+    ]
+    primary = _source_query(source)
+    candidates = [primary]
+    if len(artefacts) > 1:
+        candidates.append(f"{artefacts[1]} {publisher} official documentation"[:240])
+    claim_types = set(source.get("allowed_claim_types") or [])
+    if claim_types.intersection({"minimum_requirements", "recommended_requirements", "compatibility"}):
+        candidates.append(f"{publisher} official system requirements compatibility"[:240])
+    else:
+        candidates.append(f"{publisher} official documentation workload scope"[:240])
+    return tuple(dict.fromkeys(value for value in candidates if value))[:3]
+
+
 def _domain_allowed(url: str, domains: list[str]) -> bool:
     host = str(urlparse(url).hostname or "").lower().rstrip(".")
     return bool(host) and any(
@@ -705,29 +732,47 @@ def research_official_sources(
                 })
                 source_execution.append(execution)
                 continue
-            results = discovery.fetch(
-                _source_query(source), allowlist=domains, timeout_s=discovery_timeout,
-            )
-            execution["discovery_result_count"] = len(results)
-            discovery_execution = str(
-                discovery.last_receipt.get("execution_status") or "failed"
-            )
+            results: list[dict[str, Any]] = []
+            selected = ""
+            selection_error: str | None = "official_origin_not_discovered"
+            attempted = 0
+            completed_attempt = False
+            for query_index, query in enumerate(_source_discovery_queries(source), 1):
+                query_timeout = remaining_timeout(min(4.0, discovery_timeout))
+                if query_timeout <= 0:
+                    execution["deadline_status"] = "exceeded_during_discovery"
+                    break
+                attempt_results = discovery.fetch(
+                    query, allowlist=domains, timeout_s=query_timeout,
+                )
+                attempted += 1
+                completed_attempt = completed_attempt or (
+                    str(discovery.last_receipt.get("execution_status") or "failed") == "completed"
+                )
+                results.extend(attempt_results)
+                discovery.last_receipt.update({
+                    "result_count": discovery.last_receipt.get("result_count", len(attempt_results)),
+                    "allowlisted_result_count": len(attempt_results),
+                    "billing_class": "free", "query_id": f"{source_id}_q{query_index}",
+                    "query_purpose": "official_origin_discovery",
+                })
+                receipts.append(_receipt(
+                    discovery.last_receipt, run_id=run_id,
+                    capability="WEB_DISCOVERY", index=len(receipts) + 1,
+                ))
+                selected, selection_error = _discovered_origin_for_source(results, source)
+                if selected:
+                    break
+            unique_results = {
+                str(row.get("url") or ""): row for row in results if str(row.get("url") or "")
+            }
+            execution["discovery_query_count"] = attempted
+            execution["discovery_result_count"] = len(unique_results)
             execution["discovery_status"] = (
-                "completed" if results
-                else "attempted_empty" if discovery_execution == "completed"
+                "completed" if selected
+                else "attempted_empty" if completed_attempt
                 else "failed"
             )
-            discovery.last_receipt.update({
-                "result_count": discovery.last_receipt.get("result_count", len(results)),
-                "allowlisted_result_count": len(results),
-                "billing_class": "free", "query_id": source_id,
-                "query_purpose": "official_origin_discovery",
-            })
-            receipts.append(_receipt(
-                discovery.last_receipt, run_id=run_id,
-                capability="WEB_DISCOVERY", index=len(receipts) + 1,
-            ))
-            selected, selection_error = _discovered_origin_for_source(results, source)
             if not selected:
                 unresolved.append({
                     "source_id": source_id,
