@@ -206,6 +206,10 @@ def test_timing_breakdown_separates_model_and_core_phases():
             "load_ms": 200,
             "prompt_eval_ms": 2200,
             "decode_ms": 5600,
+            "model_execution_ms": 8000,
+            "provider_total_ms": 8200,
+            "provider_internal_overhead_ms": 200,
+            "transport_overhead_ms": 200,
             "wall_ms": 8500,
             "outcome": "ok",
             "model": "qwen3:14b",
@@ -221,6 +225,10 @@ def test_timing_breakdown_separates_model_and_core_phases():
     assert timing["router_load_ms"] == 200
     assert timing["router_prefill_ms"] == 2200
     assert timing["router_decode_ms"] == 5600
+    assert timing["router_model_execution_ms"] == 8000
+    assert timing["router_provider_total_ms"] == 8200
+    assert timing["router_provider_internal_overhead_ms"] == 200
+    assert timing["router_transport_overhead_ms"] == 200
     assert timing["router_provider_overhead_ms"] == 400
     assert timing["router_wall_ms"] == 8500
     assert timing["router_outcome"] == "ok"

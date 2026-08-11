@@ -159,6 +159,21 @@ def build_timing_breakdown(
     router_prefill_ms = float(model.get("prompt_eval_ms") or 0.0)
     router_decode_ms = float(model.get("decode_ms") or 0.0)
     router_wall_ms = float(model.get("wall_ms") or 0.0)
+    router_model_execution_ms = float(model.get("model_execution_ms") or (
+        router_load_ms + router_prefill_ms + router_decode_ms
+    ))
+    router_provider_total_ms = float(model.get("provider_total_ms") or 0.0)
+    router_provider_internal_overhead_ms = float(
+        model.get("provider_internal_overhead_ms") or max(
+            0.0, router_provider_total_ms - router_model_execution_ms,
+        )
+    )
+    router_transport_overhead_ms = float(
+        model.get("transport_overhead_ms") or (
+            max(0.0, router_wall_ms - router_queue_ms - router_provider_total_ms)
+            if router_provider_total_ms else 0.0
+        )
+    )
     router_provider_overhead_ms = max(
         0.0,
         router_wall_ms
@@ -178,6 +193,10 @@ def build_timing_breakdown(
         "router_load_ms": round(router_load_ms, 1),
         "router_prefill_ms": round(router_prefill_ms, 1),
         "router_decode_ms": round(router_decode_ms, 1),
+        "router_model_execution_ms": round(router_model_execution_ms, 1),
+        "router_provider_total_ms": round(router_provider_total_ms, 1),
+        "router_provider_internal_overhead_ms": round(router_provider_internal_overhead_ms, 1),
+        "router_transport_overhead_ms": round(router_transport_overhead_ms, 1),
         "router_provider_overhead_ms": round(router_provider_overhead_ms, 1),
         "router_wall_ms": round(router_wall_ms, 1),
         "router_outcome": str(model.get("outcome") or "not_called"),
@@ -1032,6 +1051,17 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             if item.get("sku")
         ]
         resp.extras["semantic_resolution"] = semantic_decision.as_dict()
+        from src.app.services.infrastructure_alternative_projection import (
+            project_infrastructure_alternatives,
+        )
+        resp.extras["infrastructure_alternatives"] = project_infrastructure_alternatives(
+            desired_outcome=semantic_decision.desired_outcome,
+            unresolved_inputs=[
+                str(item.get("description") or "")
+                for item in semantic_decision.material_unknowns
+                if isinstance(item, dict)
+            ],
+        ).model_dump()
         resp.extras["semantic_evidence"] = evidence_bundle
         resp.extras["approved_narration_evidence"] = list(
             approved_narration_evidence(normalized)
@@ -2571,6 +2601,25 @@ def _apply_secondary_explanation(
         product_capability_evidence=product_capability,
     )
     resp.extras["explanation"] = explanation_payload
+    # Retain one bounded ledger per authorized card. The buyer may select a
+    # non-top product and ask about it later; reusing the top card's ledger or
+    # dropping to generic ranking would both be misleading.
+    product_explanations: Dict[str, Dict[str, Any]] = {}
+    for card in resp.products[:10]:
+        card_payload, _ = build_product_fit_explanation(
+            product=card,
+            requirements=decision.requirements,
+            semantic_resolution=semantic,
+            requirement_compilation=compilation,
+            product_capability_evidence=(
+                product_capability if card.sku == top.sku else {
+                    "status": "not_requested",
+                    "commercial_authority_granted": False,
+                }
+            ),
+        )
+        product_explanations[str(card.sku)] = card_payload
+    resp.extras["product_explanations"] = product_explanations
     current = str(resp.message or "").strip()
     if explanation not in current:
         resp.message = f"{current} {explanation}".strip()

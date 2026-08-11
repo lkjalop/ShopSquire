@@ -103,7 +103,7 @@ def test_fit_ranking_meets_then_unknown_then_fails(db):
     assert [c.sku for c in cards] == ["LAP-2", "LAP-3", "LAP-1"]
     assert summary["meets"] == 1 and summary["unknown"] == 1 and summary["fails"] == 1
     assert not summary["closest_match_mode"]
-    assert cards[0].why == ["meets all 2 requirements"]
+    assert cards[0].why == ["meets the 2 capability checks currently evaluated"]
     assert "unverified" in cards[1].why[0]              # unknown ≠ fail, shown and labeled
     assert "below requirement" in cards[2].why[0]
 
@@ -206,7 +206,7 @@ def test_workload_host_gate_separates_devices_from_accessories():
     A gaming laptop (under el-6 Computers) is a host; a mouse (el-7-*), a bag (lb-*), and a laptop
     case (el-7-*) are not — so they never inherit gpu_vram_gb/ram_gb floors. Unknown/None node
     fails OPEN (never silently drop a floor we're unsure about)."""
-    from src.app.services.recommendation_core.core import (_is_workload_host_product, _vertical_root)
+    from src.app.services.recommendation_core.core import _is_workload_host_product
     assert _is_workload_host_product("el-6-11-2") is True     # Gaming Laptops — a device
     assert _is_workload_host_product("el-7-9-12-11") is False  # Mice — an accessory
     assert _is_workload_host_product("lb-15") is False         # Laptop Bags — an accessory
