@@ -271,7 +271,7 @@ export default function ProcurementOperationalTrace({
           <strong>Human procurement support</strong>
           <div style={rowStyle}><span>Room state</span><span>{humanize(allocationView.human_room.state)}</span></div>
           <div style={rowStyle}><span>Assigned operator</span><span>{safeText(allocationView.human_room.assigned_operator_id, 'not assigned')}</span></div>
-          <div>Version {safeText(allocationView.human_room.version, 'not recorded')} Â· tenant and case scoped</div>
+          <div>Version {safeText(allocationView.human_room.version, 'not recorded')} · tenant and case scoped</div>
         </section>
       )}
       {allocationView.canonical_escalation && (
