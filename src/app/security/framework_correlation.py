@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.app.security.control_registry import get_control_record, get_control_registry_version
 from src.app.security.owasp_map import map_signals_to_owasp
 
-_FRAMEWORK_MAPPING_VERSION = "2026.03.28.1"
+_FRAMEWORK_MAPPING_VERSION = "2026.08.01.1"
 _VALID_KILL_CHAIN_STAGES = {
     "Reconnaissance",
     "Weaponization",
@@ -51,7 +51,6 @@ _CONTROL_NAME_CATALOG: Dict[str, Dict[str, str]] = {
         "T1197": "BITS Jobs",
         "T1053.005": "Scheduled Task/Job: Scheduled Task",
         "T1048.003": "Exfiltration Over Alternative Protocol: Exfiltration Over Unencrypted/Obfuscated Non-C2 Protocol",
-        "T1105": "Ingress Tool Transfer",
         "T1071.001": "Application Layer Protocol: Web Protocols",
         "T1071.004": "Application Layer Protocol: DNS",
         "T1573.002": "Encrypted Channel: Asymmetric Cryptography",
@@ -62,7 +61,6 @@ _CONTROL_NAME_CATALOG: Dict[str, Dict[str, str]] = {
     "MITRE ATLAS": {
         "AML.T0043": "Craft Adversarial Data",
         "AML.T0051": "Prompt Injection",
-        "AML.T0048": "Discover ML Artifacts",
         "AML.T0040": "ML Supply Chain Compromise",
     },
     "ISO27001": {
@@ -118,13 +116,6 @@ _SIGNAL_TO_ATLAS: Dict[str, str] = {
     "encoded_payload_detected": "AML.T0051",
     "homoglyph_injection": "AML.T0051",
     "exif_text_injection": "AML.T0051",
-    "qr_external_url_detected": "AML.T0048",
-    "qr_external_url": "AML.T0048",
-    "qr_payload_vcard": "AML.T0048",
-    "qr_payload_wifi": "AML.T0048",
-    "qr_multi_mismatch": "AML.T0048",
-    "qr_label_destination_mismatch": "AML.T0048",
-    "polyglot_suspected": "AML.T0048",
     "cross_image_split_injection": "AML.T0051",
     "agentic_tool_injection": "AML.T0051",
     "agentic_tool_abuse": "AML.T0040",
@@ -569,8 +560,10 @@ def _build_framework_row(
         "business_significance": business_significance,
         "mapping_source": mapping_source,
         "mapping_version": _FRAMEWORK_MAPPING_VERSION,
+        "claim_status": "observed" if evidence_refs else "possible",
         "mapping_confidence": mapping_confidence,
         "analyst_review_required": True,
+        "review_status": "pending_human_review",
         "rule_id": f"{framework.lower().replace(' ', '_')}::{str(control).lower().replace(' ', '_')}",
         "control_implemented": control_implemented,
         "evidence_of_control": evidence_of_control,
