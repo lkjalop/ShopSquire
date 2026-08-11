@@ -36,3 +36,43 @@ def test_reliability_never_disables_the_only_known_engine():
         )
 
     assert health.recommended_engines("search.local") == ["only"]
+
+
+def test_recent_engine_health_survives_process_reconstruction(tmp_path):
+    database = tmp_path / "discovery-health.db"
+    first = DiscoveryEngineReliability(
+        window_size=3, minimum_attempts=2, storage_path=str(database),
+    )
+    for _ in range(3):
+        first.record(
+            endpoint="search.local",
+            receipt={
+                "engines_queried": ["bing", "wikipedia"],
+                "engines_responded": ["bing"],
+                "engine_failures": [{"engine": "wikipedia", "reason": "timeout"}],
+            },
+            latency_ms=80,
+        )
+
+    restored = DiscoveryEngineReliability(
+        window_size=3, minimum_attempts=2, storage_path=str(database),
+    )
+    rows = {row["engine"]: row for row in restored.snapshots("search.local")}
+    assert rows["bing"]["responses"] == 3
+    assert rows["wikipedia"]["failures"] == 3
+    assert rows["wikipedia"]["suppressed"] is True
+    assert restored.recommended_engines("search.local") == ["bing"]
+
+
+def test_persistence_failure_never_breaks_research_telemetry(tmp_path):
+    directory_instead_of_database = tmp_path / "not-a-database"
+    directory_instead_of_database.mkdir()
+    health = DiscoveryEngineReliability(storage_path=str(directory_instead_of_database))
+
+    health.record(
+        endpoint="search.local",
+        receipt={"engines_queried": ["bing"], "engines_responded": ["bing"]},
+        latency_ms=12,
+    )
+
+    assert health.snapshots("search.local")[0]["responses"] == 1
