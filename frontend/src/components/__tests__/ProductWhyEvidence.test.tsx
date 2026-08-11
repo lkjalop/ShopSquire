@@ -66,4 +66,55 @@ describe('ProductWhyEvidence', () => {
     expect(screen.getAllByText(/partial/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Ranking evidence unavailable/)).not.toBeInTheDocument();
   });
+
+  it('renders the versioned decision, fit receipt, critic, and infrastructure alternatives', () => {
+    render(
+      <ProductWhyEvidence
+        explanation={{
+          sku: 'LAP-2',
+          decision_narration: 'Conditional: small OT lab. Still unresolved: VM count.',
+          workload_decision: {
+            schema_version: 'workload-decision-v1',
+            overall_decision: 'conditional',
+            compatibility_status: 'partial',
+            performance_status: 'unknown',
+            scale_status: 'unresolved',
+            workload: {
+              desired_outcome: 'small OT lab',
+              artefact_name: 'GNS3',
+              artefact_version: '3.1',
+              material_unknowns: ['VM count'],
+            },
+            product: {
+              identifier_type: 'manufacturer_part_number',
+              identifier: '83LY001SAU',
+              form_factor: 'laptop',
+            },
+            fit_ledger: [{
+              attribute_key: 'host_os',
+              attribute_label: 'Host OS',
+              required_text: 'Windows Pro or Enterprise',
+              observed_text: 'Windows 11 Home',
+              verdict: 'below_minimum',
+              requirement_class: 'minimum',
+              verification_status: 'verified',
+            }],
+            infrastructure_alternatives: {
+              alternatives: [
+                { architecture_class: 'laptop', label: 'Laptop', execution_location: 'local', mobility: 'portable', tradeoffs_to_verify: ['thermals'] },
+                { architecture_class: 'cloud', label: 'Cloud', execution_location: 'remote_service', mobility: 'not_applicable', tradeoffs_to_verify: ['data residency'] },
+              ],
+            },
+            critic: { status: 'pass', violations: [] },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('region', { name: /workload decision/i })).toHaveTextContent('conditional');
+    expect(screen.getByText(/Windows 11 Home/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/VM count/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Compare where this workload should run/i)).toBeInTheDocument();
+    expect(screen.getByText(/Evidence and critic/i)).toBeInTheDocument();
+  });
 });

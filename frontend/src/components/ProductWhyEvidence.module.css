@@ -1,0 +1,166 @@
+.decision {
+  display: grid;
+  gap: 14px;
+  color: #17243a;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px;
+  border: 1px solid #b8c9e1;
+  border-radius: 12px;
+  background: #f6f9fd;
+}
+
+.eyebrow {
+  color: #526b8d;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.verdict {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.05rem;
+  text-transform: capitalize;
+}
+
+.scope,
+.narration {
+  margin: 5px 0 0;
+  color: #435671;
+  line-height: 1.45;
+}
+
+.statusGrid {
+  display: grid;
+  min-width: 190px;
+  gap: 5px;
+  font-size: 0.78rem;
+}
+
+.statusGrid span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ledger {
+  display: grid;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.1fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(105px, 0.7fr);
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid #d7e0ed;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 0.84rem;
+}
+
+.row small {
+  display: block;
+  color: #647792;
+  font-size: 0.68rem;
+}
+
+.caveat {
+  grid-column: 1 / -1;
+  padding-top: 6px;
+  border-top: 1px dashed #d7e0ed;
+  color: #5d526d;
+}
+
+.meets_minimum,
+.meets_recommended {
+  color: #087647;
+  font-weight: 800;
+}
+
+.below_minimum {
+  color: #b42318;
+  font-weight: 800;
+}
+
+.unknown,
+.contested {
+  color: #9a5b00;
+  font-weight: 800;
+}
+
+.unknownPanel {
+  padding: 12px 14px;
+  border-left: 4px solid #d28a16;
+  border-radius: 8px;
+  background: #fff8e7;
+}
+
+.unknownPanel ul {
+  margin: 6px 0 0 20px;
+}
+
+.alternatives,
+.audit {
+  padding: 11px 13px;
+  border: 1px solid #d7e0ed;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.alternatives summary,
+.audit summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.alternativeGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.alternativeGrid article {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-radius: 8px;
+  background: #f3f6fa;
+  font-size: 0.75rem;
+}
+
+.alternativeGrid small,
+.alternativeGrid span {
+  color: #5d6f88;
+}
+
+@media (max-width: 720px) {
+  .header {
+    display: grid;
+  }
+
+  .statusGrid {
+    width: 100%;
+  }
+
+  .row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .row > :last-child:not(.caveat) {
+    grid-column: 1 / -1;
+  }
+
+  .alternativeGrid {
+    grid-template-columns: 1fr;
+  }
+}
