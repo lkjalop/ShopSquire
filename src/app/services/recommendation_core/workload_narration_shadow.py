@@ -76,9 +76,30 @@ def build_shadow_prompt(decision: Mapping[str, Any]) -> str:
         "State material unknowns. Never say qualified if the decision is conditional, unresolved, "
         "or not qualified. Preserve every material_preservation.required_terms string verbatim "
         "(case differences are acceptable), and preserve every supplier_choices entry verbatim. "
+        "If supplier_choices is non-empty, use one sentence beginning 'Choices:' and include every "
+        "entry as a semicolon-separated list; do not summarize, select, or omit an option. Use the "
+        "remaining sentence for the recorded supplier/cart authority state. "
+        "For a limitation or gap, retain the explicit prefix 'Still unresolved or not verified:'; "
+        "do not replace it with softer wording. Do not call a verified meet a minimum or recommended "
+        "requirement unless an authorized block uses that exact classification. "
         "The authorized_narration_blocks are the preferred safe wording; join or lightly connect "
         "them instead of paraphrasing away decision-material details. Return prose only.\nDECISION_JSON:\n"
         + json.dumps(bounded, sort_keys=True, ensure_ascii=False, default=str)
+    )
+
+
+def build_shadow_repair_prompt(
+    decision: Mapping[str, Any], *, candidate: str, violations: list[str],
+) -> str:
+    """One bounded critic retry; the rejected draft remains audit-only."""
+    authorized = list(decision.get("authorized_narration_blocks") or [])[:12]
+    return (
+        "Rewrite the rejected shopping explanation once using only the authorized sentences below. "
+        "Copy each authorized sentence verbatim, in order; you may add conjunctions but no facts. "
+        "Preserve every required term and do not soften unknowns. Return prose only. "
+        f"AUTHORIZED_BLOCKS: {json.dumps(authorized, ensure_ascii=False)}\n"
+        f"VALIDATION_ERRORS: {json.dumps(violations, ensure_ascii=False)}\n"
+        f"REJECTED_DRAFT: {json.dumps(candidate, ensure_ascii=False)}"
     )
 
 
@@ -109,13 +130,16 @@ def validate_shadow_narration(text: str, decision: Mapping[str, Any]) -> list[st
         if number not in allowed_numbers:
             violations.append(f"unreferenced_numeric_claim:{number}")
     rows = list(decision.get("fit_ledger") or [])
-    if _FLOOR_LANGUAGE_RE.search(candidate):
-        for row in rows:
-            if not _candidate_mentions_row(low, row):
-                continue
-            if not list(row.get("requirement_claim_ids") or []):
-                key = str(row.get("attribute_key") or "unknown")
-                violations.append(f"unsourced_hardware_floor:{key}")
+    fragments = [part.strip() for part in re.split(r"[.;\n]+", low) if part.strip()]
+    for row in rows:
+        row_asserted_as_floor = any(
+            _FLOOR_LANGUAGE_RE.search(fragment)
+            and _candidate_mentions_row(fragment, row)
+            for fragment in fragments
+        )
+        if row_asserted_as_floor and not list(row.get("requirement_claim_ids") or []):
+            key = str(row.get("attribute_key") or "unknown")
+            violations.append(f"unsourced_hardware_floor:{key}")
     # ``performance_status=verified`` proves that exact behavioral evidence
     # exists; it does not authorize the narrator to invent a score, frame rate,
     # duration, or qualitative result.  Specific behavioral prose will only be
@@ -179,8 +203,24 @@ def run_shadow_narration(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     try:
-        candidate = str(generate(build_shadow_prompt(decision)) or "").strip()
-        violations = validate_shadow_narration(candidate, decision)
+        first_candidate = str(generate(build_shadow_prompt(decision)) or "").strip()
+        first_violations = validate_shadow_narration(first_candidate, decision)
+        candidate = first_candidate
+        violations = first_violations
+        attempts = 1
+        repairable_prefixes = (
+            "material_fact_omitted:", "material_unknowns_omitted",
+            "ledger_gap_omitted:", "ledger_miss_omitted:", "ledger_miss_softened:",
+            "budget_conflict_omitted", "critic_block_omitted",
+        )
+        if first_violations and all(
+            violation.startswith(repairable_prefixes) for violation in first_violations
+        ):
+            attempts = 2
+            candidate = str(generate(build_shadow_repair_prompt(
+                decision, candidate=first_candidate, violations=first_violations,
+            )) or "").strip()
+            violations = validate_shadow_narration(candidate, decision)
         return {
             "mode": "shadow",
             "model_id": str(model_id),
@@ -188,6 +228,11 @@ def run_shadow_narration(
             "candidate": candidate if not violations else None,
             "candidate_retained_for_audit": candidate,
             "violations": violations,
+            "generation_attempts": attempts,
+            "initial_candidate_retained_for_audit": (
+                first_candidate if attempts > 1 else None
+            ),
+            "initial_violations": first_violations if attempts > 1 else [],
             "buyer_visible": False,
             "commercial_authority_granted": False,
             "elapsed_ms": int((time.perf_counter() - started) * 1000),
@@ -199,6 +244,7 @@ def run_shadow_narration(
             "status": "error",
             "candidate": None,
             "violations": [f"generator_error:{type(exc).__name__}"],
+            "generation_attempts": 1,
             "buyer_visible": False,
             "commercial_authority_granted": False,
             "elapsed_ms": int((time.perf_counter() - started) * 1000),

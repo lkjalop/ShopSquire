@@ -26,6 +26,21 @@ def test_shadow_candidate_never_becomes_buyer_visible():
     assert result["commercial_authority_granted"] is False
 
 
+def test_shadow_critic_gets_one_bounded_repair_without_gaining_authority():
+    candidates = iter([
+        "Conditional.",
+        "Conditional. VM count and Host OS are still unresolved, and performance is not verified.",
+    ])
+    result = run_shadow_narration(DECISION, generate=lambda _: next(candidates), model_id="test")
+
+    assert result["status"] == "accepted_shadow"
+    assert result["generation_attempts"] == 2
+    assert "material_unknowns_omitted" in result["initial_violations"]
+    assert result["candidate_retained_for_audit"].startswith("Conditional")
+    assert result["buyer_visible"] is False
+    assert result["commercial_authority_granted"] is False
+
+
 def test_shadow_guard_rejects_overstatement_and_invented_number():
     violations = validate_shadow_narration(
         "This is a good choice and will handle 70 models.", DECISION,
