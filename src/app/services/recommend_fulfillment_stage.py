@@ -488,6 +488,9 @@ def _buyer_requirements(constraints: Dict[str, Any], *, query: str = "") -> Dict
             needed_by = ""
     if needed_by:
         reqs["needed_by"] = needed_by
+    payment_plan = str(constraints.get("payment_plan") or "").strip().lower()
+    if payment_plan in {"full_payment", "deposit", "balance_after_confirmation", "b2b_terms"}:
+        reqs["payment_plan"] = payment_plan
     ship_to = str(constraints.get("ship_to") or constraints.get("region") or "").strip()
     if ship_to:
         reqs["ship_to"] = ship_to  # else the RFQ falls back to the profile's configured ship-to region
