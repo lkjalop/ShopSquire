@@ -100,6 +100,7 @@ export default function ProductShelvesPanel({ projection, onPropose }: {
   projection: ProductShelfProjection;
   onPropose?: (product: ShelfProduct, quantity: number) => void;
 }) {
+  const [showNarration, setShowNarration] = React.useState(true);
   if (!projection?.shelves?.length) return null;
   return (
     <section data-testid="product-shelves" aria-label="Provisional product shelves" style={{ padding: 12 }}>
@@ -114,9 +115,25 @@ export default function ProductShelvesPanel({ projection, onPropose }: {
         </section>
       ) : null}
       {projection.narration_projection ? (
-        <div data-testid="deterministic-shelf-narration" style={{ fontSize: 12, marginBottom: 10, color: '#334155' }}>
-          {projection.narration_projection.shelf_summary}
-        </div>
+        <section data-testid="portfolio-narration-control" style={{ marginBottom: 10 }}>
+          <button
+            type="button"
+            aria-pressed={showNarration}
+            onClick={() => setShowNarration((value) => !value)}
+            style={secondaryCommerceStyle}
+          >
+            Concise evidence narration: {showNarration ? 'on' : 'off'}
+          </button>
+          {showNarration ? (
+            <div data-testid="deterministic-shelf-narration" style={{ fontSize: 12, marginTop: 6, color: '#334155' }}>
+              {projection.narration_projection.shelf_summary}
+            </div>
+          ) : null}
+          <details style={{ marginTop: 4, fontSize: 11 }}>
+            <summary>Narration authority</summary>
+            The current buyer renderer is deterministic and evidence-bound. Model narration cannot change ranking, supplier, or cart authority and falls back to this copy.
+          </details>
+        </section>
       ) : null}
       <div style={{ fontSize: 12, marginBottom: 10, color: projection.evidence_status === 'researched' ? '#065f46' : '#92400e' }}>
         {projection.evidence_status === 'researched'
@@ -153,16 +170,18 @@ export default function ProductShelvesPanel({ projection, onPropose }: {
           shelf={shelf}
           onPropose={onPropose}
           narration={projection.narration_projection?.top_product_sentences || []}
+          showNarration={showNarration}
         />
       ))}
     </section>
   );
 }
 
-function Shelf({ shelf, onPropose, narration }: {
+function Shelf({ shelf, onPropose, narration, showNarration }: {
   shelf: ProductShelf;
   onPropose?: (product: ShelfProduct, quantity: number) => void;
   narration: { sku: string; sentence: string }[];
+  showNarration: boolean;
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const [quantities, setQuantities] = React.useState<Record<string, number>>({});
@@ -188,7 +207,7 @@ function Shelf({ shelf, onPropose, narration }: {
               {item.fit_status === 'qualified' ? 'Verified fit' : 'Conditional fit'}
             </div>
             <div style={{ marginTop: 5, fontSize: 11 }}>{item.why_ranked || 'Provisional catalog exploration.'}</div>
-            {narration.find((row) => row.sku === item.product.sku)?.sentence ? (
+            {showNarration && narration.find((row) => row.sku === item.product.sku)?.sentence ? (
               <div data-testid={`product-narration-${item.product.sku}`} style={{ marginTop: 5, fontSize: 11, color: '#334155' }}>
                 {narration.find((row) => row.sku === item.product.sku)?.sentence}
               </div>

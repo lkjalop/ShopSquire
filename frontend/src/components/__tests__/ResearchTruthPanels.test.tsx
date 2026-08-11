@@ -142,8 +142,13 @@ describe('research truth panels', () => {
     }} />);
 
     expect(screen.getByTestId('buyer-research-receipt')).toHaveTextContent(/Factory I\/O's official requirements/i);
+    expect(screen.getByRole('button', { name: /Concise evidence narration: on/i })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('deterministic-shelf-narration')).toHaveTextContent(/three leading options/i);
     expect(screen.getByTestId('product-narration-WS-3')).toHaveTextContent(/GPU TGP is not verified/i);
     expect(screen.getByText(/unresolved gaps remain visible/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Concise evidence narration: on/i }));
+    expect(screen.queryByTestId('deterministic-shelf-narration')).toBeNull();
+    expect(screen.queryByTestId('product-narration-WS-3')).toBeNull();
+    expect(screen.getByText(/current buyer renderer is deterministic/i)).toBeTruthy();
   });
 });
