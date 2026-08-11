@@ -18,6 +18,22 @@ groups:
         annotations:
           summary: "Burst of velocity anomalies"
           description: "Distinct users per ASN exceeded burst threshold"
+      - alert: ForwardedHeaderSpoofing
+        expr: sum(increase(shopsquire_client_ip_resolution_total{result=~"forwarded_ignored|malformed"}[10m])) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Untrusted or malformed forwarding headers reached ShopSquire"
+          description: "Inspect the edge path and TRUSTED_PROXY_CIDRS before relying on IP controls"
+      - alert: GeoIPSourceUnavailable
+        expr: sum(rate(shopsquire_geoip_provider_total{status="unavailable"}[15m])) / clamp_min(sum(rate(shopsquire_geoip_provider_total[15m])), 0.001) > 0.25
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GeoIP/ASN enrichment is unavailable for more than 25 percent of lookups"
+          description: "Treat geo risk as unknown; missing enrichment must not silently become low risk"
   - name: shopsquire-ragas
     interval: 5m
     rules:
