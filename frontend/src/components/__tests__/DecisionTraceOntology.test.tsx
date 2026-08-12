@@ -137,9 +137,9 @@ describe('Decision Trace component ontology', () => {
       }],
     });
 
-    expect(strip.authority.label).toBe('Platform authorized');
+    expect(strip.authority.label).toBe('Proposal only');
     expect(strip.execution.label).toBe('Not executed');
-    expect(strip.freshness.status).toBe('good');
+    expect(strip.freshness.status).toBe('neutral');
     expect(strip.completeness.label).toBe('Partial');
     expect(strip.uncertainty.label).toBe('1 concern');
     expect(strip.simulation.label).toBe('Simulation only');
