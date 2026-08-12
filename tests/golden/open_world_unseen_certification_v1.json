@@ -1,0 +1,53 @@
+{
+  "schema_version": "open-world-unseen-certification-v1",
+  "frozen_at": "2026-08-13T07:20:00+10:00",
+  "freeze_base_commit": "7ac14682a6738f240ebd800cb795fd510dbeafc8",
+  "official_source_registry_sha256": "5ab5a58b7a43f160745f7959f595dba364686e472fe6db1959f4388065ee97bb",
+  "research_planner_sha256": "48400982360978d7ec1f2ee5507e7d6890e0d1fe37773c8c4a444f9a474e579a",
+  "policy": {
+    "purpose": "Measure open-world generalization without adding prompt-specific source aliases or workload hardware floors.",
+    "holdout_use": "Certification only; do not tune routing, queries, parsers, or ranking against individual failures.",
+    "required_pre_authorization_external_calls": 0,
+    "required_paid_calls": 0,
+    "maximum_discovery_queries": 3,
+    "search_snippets_are_evidence": false
+  },
+  "visible_development": [
+    {"id": "dev-01", "prompt": "I want Minecraft to look almost photorealistic with a huge modpack."},
+    {"id": "dev-02", "prompt": "I edit wedding films and do not want exports running overnight."},
+    {"id": "dev-03", "prompt": "I make music with very large sample libraries and need it quiet on stage."},
+    {"id": "dev-04", "prompt": "I want to scan rooms and turn them into explorable 3D environments."},
+    {"id": "dev-05", "prompt": "This must be officially supported for five years and work with our Linux fleet."},
+    {"id": "dev-06", "prompt": "Only configurations in the vendor's certified hardware matrix are acceptable."},
+    {"id": "dev-07", "prompt": "It needs two external 6K displays through one dock, but I cannot install proprietary drivers."},
+    {"id": "dev-08", "prompt": "Exclude anything with an unresolved critical firmware advisory."}
+  ],
+  "sealed_holdout": [
+    {"id": "holdout-01", "prompt": "I need a portable system for processing terrestrial LiDAR scans and registering billion-point surveys."},
+    {"id": "holdout-02", "prompt": "Can this laptop run a coupled FEA and CFD workflow? Only configurations certified by the solver vendor are acceptable."},
+    {"id": "holdout-03", "prompt": "I need something mobile for basecalling nanopore sequencing data in the field."},
+    {"id": "holdout-04", "prompt": "We analyse cryo-electron microscopy data locally before uploading it."},
+    {"id": "holdout-05", "prompt": "I need to reconstruct drone imagery into georeferenced orthomosaics and dense meshes."},
+    {"id": "holdout-06", "prompt": "Can I simulate robotic surgery force feedback and stereo vision locally?"},
+    {"id": "holdout-07", "prompt": "I need a machine for computational chemistry and molecular-dynamics experiments, but I do not know which stages require a GPU."},
+    {"id": "holdout-08", "prompt": "We train anomaly-detection models from vibration sensors on mining equipment while offline."},
+    {"id": "holdout-09", "prompt": "Could this notebook process hyperspectral crop images at a remote field station without cloud access?"},
+    {"id": "holdout-10", "prompt": "I need to align and inspect whole-slide pathology images while travelling between hospitals."},
+    {"id": "holdout-11", "prompt": "Will this handle real-time acoustic beamforming from a large microphone array?"},
+    {"id": "holdout-12", "prompt": "We need local reconstruction of subsurface radar scans where internet access is intermittent."}
+  ],
+  "category_boundaries": [
+    {"id": "boundary-01", "prompt": "I need a standing desk for a photogrammetry workstation."},
+    {"id": "boundary-02", "prompt": "Recommend an ultrasound machine for a rural clinic."},
+    {"id": "boundary-03", "prompt": "We need laboratory refrigerators with remote monitoring."},
+    {"id": "boundary-04", "prompt": "Find ergonomic seating for an engineer who works with point clouds."}
+  ],
+  "metamorphic_templates": [
+    {"id": "meta-01", "base": "holdout-02", "transform": "paraphrase and reorder clauses"},
+    {"id": "meta-02", "base": "holdout-03", "transform": "add quantity 12 and deadline 10 days"},
+    {"id": "meta-03", "base": "holdout-05", "transform": "make mobility optional and cloud acceptable"},
+    {"id": "meta-04", "base": "holdout-07", "transform": "add AUD 6000 per-unit budget"},
+    {"id": "meta-05", "base": "holdout-09", "transform": "introduce realistic spelling errors"},
+    {"id": "meta-06", "base": "holdout-10", "transform": "change exact certification from required to preferred"}
+  ]
+}
