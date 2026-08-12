@@ -329,3 +329,75 @@ def test_revoked_and_expired_staff_tokens_are_rejected(test_server, monkeypatch,
         encoding="utf-8",
     )
     assert escalation_room._role_for_token(expired_id, expired_token) is None
+
+
+@pytest.mark.parametrize(
+    ("apply_status", "expected_copy"),
+    [
+        ("applied", "applied the change to your cart"),
+        ("stale_cart", "cart changed since I proposed that"),
+    ],
+)
+def test_human_substitute_apply_and_stale_revision_are_buyer_visible(page, frontend_server, apply_status, expected_copy):
+    event = {
+        "event_id": f"human-substitute-{apply_status}",
+        "role": "merchant",
+        "event_type": "proposed_substitute",
+        "message": "A specialist proposed Model B.",
+        "actor": {"actor_type": "human_staff", "display_name": "Alex", "title": "Product specialist"},
+        "meta": {
+            "buyer_confirmation_required": True,
+            "cart_plan": {
+                "plan_id": f"cmp-{apply_status}",
+                "plan": {"ops": [{
+                    "action": "replace_item", "target_skus": ["MODEL-A"],
+                    "replacement_sku": "MODEL-B", "replacement_name": "Model B", "quantity": 30,
+                }]},
+            },
+        },
+    }
+    page.route("**/api/v1/orchestrate", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"decision_trace_id":"trace-human-apply","proposal":{"results":[]}}',
+    ))
+    page.route("**/api/v1/cv/analyze", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"case_id":"case-human-apply","trace_id":"trace-human-apply","cv_analysis":{"confidence":0.2},"suggested_routing":"security_review","ui_actions":{"chat_with_admin":true}}',
+    ))
+    page.route("**/api/v1/incidents/escalate", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"ok":true,"incident_id":"inc-human-apply","buyer_token":"buyer-token"}',
+    ))
+    page.route(
+        "**/api/v1/incidents/inc-human-apply/room/stream**",
+        lambda route: route.fulfill(
+            status=200,
+            headers={"content-type": "text/event-stream"},
+            body=f"data: {__import__('json').dumps([event])}\n\n",
+        ),
+    )
+    page.route(
+        f"**/api/v1/cart/mutations/cmp-{apply_status}/apply",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__('json').dumps({
+                "status": apply_status,
+                "applied": [{"action": "replace_item", "sku": "MODEL-A", "replacement_sku": "MODEL-B"}]
+                if apply_status == "applied" else [],
+            }),
+        ),
+    )
+    page.route("**/api/v1/cart", lambda route: route.fulfill(status=200, content_type="application/json", body='{"items":[]}'))
+    page.route("**/api/v1/incidents/inc-human-apply/room/message**", lambda route: route.fulfill(status=200, content_type="application/json", body='{"sent":true}'))
+
+    page.goto(frontend_server, wait_until="domcontentloaded")
+    page.get_by_role("button", name="Ask Me!").click()
+    page.get_by_placeholder("Type your message...").fill("return request damaged laptop")
+    page.get_by_placeholder("Type your message...").press("Enter")
+    page.get_by_text("CV Triage", exact=True).wait_for(timeout=10000)
+    page.get_by_role("button", name="Analyze photos for damage and product signals").click()
+    page.get_by_role("button", name="Escalate and chat with admin").click()
+    page.get_by_role("button", name="Review proposed cart change").click()
+    page.get_by_role("button", name="Apply change").click()
+    page.get_by_text(expected_copy, exact=False).wait_for(timeout=10000)

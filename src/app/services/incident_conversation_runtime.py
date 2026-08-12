@@ -95,6 +95,11 @@ class IncidentConversationRuntime:
                             self._deliver_local(incident_id, event)
                     except Exception:
                         continue
+            except Exception:
+                # Broker disconnects and process shutdown must end this daemon quietly. A future
+                # subscriber recreates it through ensure_broker_listener; no buyer request waits
+                # on this background loop.
+                return
             finally:
                 with self._lock:
                     self._listener_started = False

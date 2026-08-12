@@ -78,3 +78,24 @@ def test_presence_uses_atomic_hash_and_is_visible_to_another_worker(monkeypatch)
     assert redis.expiries["incident_chat_presence:inc-shared"] == 90
     second_worker.leave("inc-shared", {"actor_id": "staff:bob"})
     assert [row["actor_id"] for row in first_worker.active_staff("inc-shared")] == ["staff:alice"]
+
+
+def test_broker_listener_exits_cleanly_when_subscription_disconnects(monkeypatch):
+    class BrokenPubSub:
+        def subscribe(self, _channel):
+            return None
+
+        def listen(self):
+            raise ConnectionError("broker_closed")
+            yield  # pragma: no cover
+
+    class Broker:
+        def pubsub(self, **_kwargs):
+            return BrokenPubSub()
+
+    runtime = IncidentConversationRuntime(instance_id="worker-disconnect")
+    monkeypatch.setattr("src.app.services.incident_conversation_runtime.get_redis", lambda: Broker())
+    assert runtime.ensure_broker_listener() is True
+    runtime._listener_thread.join(timeout=2)
+    assert runtime._listener_thread.is_alive() is False
+    assert runtime._listener_started is False
