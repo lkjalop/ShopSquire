@@ -5,9 +5,15 @@ import MarketIntelligencePanel from './decision-trace/MarketIntelligencePanel';
 import RawTracePanel from './decision-trace/RawTracePanel';
 import SemanticResolutionTrace from './SemanticResolutionTrace';
 import WorkloadResearchTrace from './WorkloadResearchTrace';
-import { procurementDraftPending, procurementGateDisplay } from '../lib/procurementGateDisplay';
-import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResult } from '../lib/api';
+import { procurementGateDisplay } from '../lib/procurementGateDisplay';
+import { apiUrl, wsUrl, getApiBase, safeJson } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
+import { useProcurementTrace } from '../hooks/useProcurementTrace';
+import {
+  resolveExecutionSteps,
+  resolveRecommendationPayload,
+  resolveSemanticProjection,
+} from './decision-trace/traceProjections';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
 import { explainProcEvent } from '../lib/procEventExplain';
 import { dealEconomicsStatus, formatDealMoney } from '../lib/dealEconomicsDisplay';
@@ -747,7 +753,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     || traceSectionForLeaf(activeTab);
   // When this decision opened a procurement journey, badge the Procurement tab so the operator sees it
   // exists instead of having to click through blind. FulfilmentTraceLink resolves the case; it reports up.
-  const [procurementCaseId, setProcurementCaseId] = useState<string | null>(null);
   const [auditTrail, setAuditTrail] = useState<any | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
@@ -755,35 +760,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // fetched by trace so the whole procurement story lives on ONE tab (no jumping to the ops console). The
   // drafted RFQ carries a supplier contact, so it's shown ONLY when an owner/operator key is configured
   // (a normal shopper never sees it — blind-ship stays intact).
-  const [procCase, setProcCase] = useState<any | null>(null);
-  const [procCases, setProcCases] = useState<any[]>([]);  // ALL cases for the trace (multi-supplier → N RFQs)
-  const [procHistory, setProcHistory] = useState<any | null>(null);
-  const [allocationView, setAllocationView] = useState<any | null>(null);
   // Procurement agent-row drill-down: row index → expanded (the payload is the evidence — one click deep).
   const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
-  const [procJourney, setProcJourney] = useState<any[] | null>(null);
-  const [procDetailRetry, setProcDetailRetry] = useState(0);
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
   // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
-  const [pendingSplit, setPendingSplit] = useState<SplitOfferResult | null>(null);
-  const [procLoading, setProcLoading] = useState(false);
-  useEffect(() => {
-    if (activeTab !== 'procurement' || procLoading || procCase || procurementCaseId) { return; }
-    let alive = true;
-    // Case resolution is a faster, authoritative read. Give it a short head
-    // start before asking for a provisional live-cart split; otherwise opening
-    // a committed trace issues a redundant split calculation while the case
-    // lookup is already in flight.
-    const timer = window.setTimeout(() => {
-      const uid = (() => { try { return sessionStorage.getItem('uid') || 'demo-user'; } catch { return 'demo-user'; } })();
-      getSplitOffer(uid)
-        .then((r) => { if (alive) setPendingSplit(r?.split && !r.split.fully_in_stock ? r : null); })
-        .catch(() => { if (alive) setPendingSplit(null); });
-    }, 750);
-    return () => { alive = false; window.clearTimeout(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, procLoading, procCase, procurementCaseId]);
   const canSeeOperatorDraft = !!getOwnerApiKey();
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
@@ -793,6 +774,27 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const noTraceTelemetrySentRef = useRef(false);
   const effectiveTraceId = (typeof traceId === 'string' && traceId.trim()) ? traceId.trim() : (fallbackTraceId || null);
   const traceIdText = effectiveTraceId || '';
+  const procurementRevision = events.reduce((revision, event) => {
+    if (!eventMatches(event, ['case_superseded', 'external_message_drafted', 'quote_drafted'])) return revision;
+    return String(event.id ?? event.seq ?? event.created_at ?? event.timestamp ?? revision);
+  }, '');
+  const {
+    caseId: procurementCaseId,
+    setCaseId: setProcurementCaseId,
+    primaryCase: procCase,
+    cases: procCases,
+    history: procHistory,
+    allocation: allocationView,
+    journey: procJourney,
+    pendingSplit,
+    loading: procLoading,
+  } = useProcurementTrace({
+    active: activeTab === 'procurement',
+    traceId: traceIdText,
+    apiKey: effectiveApiKey,
+    canSeeOperatorDraft,
+    revision: procurementRevision,
+  });
   const selectTraceLeaf = (leaf: TraceLeafTab) => {
     setActiveTab(leaf);
     setActiveSectionId(traceSectionForLeaf(leaf).id);
@@ -1026,107 +1028,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     }
   }, [effectiveTraceId, activeTab, effectiveApiKey]);
 
-  // Procurement drill-down: fetch the case (operator view → the drafted supplier RFQ) + its bitemporal
-  // journey (the case's own audit trail) when the Procurement tab is open. Keeps the whole procurement
-  // story — agent events, the human-gated draft, and the audit — on one tab. Re-runs when a case resolves.
-  const loadProcurementDetail = useCallback(async () => {
-    if (!effectiveTraceId) return;
-    setProcLoading(true);
-    try {
-      const headers = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
-      // Read-only: resolve EVERY case opened from this trace — a multi-supplier bulk order opens one case
-      // per supplier group (each with its own drafted RFQ), so the Procurement tab shows all N, not just the
-      // newest. Falls back gracefully to an empty list; the primary case (cases[0]) drives the audit journey.
-      const caseViewPath = canSeeOperatorDraft
-        ? `/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all/operator-view`
-        : `/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all`;
-      const allView: any = await fetchJsonWithDeadline(
-        apiUrl(caseViewPath),
-        { credentials: 'include', headers },
-      ).catch(() => null);
-      const cases: any[] = Array.isArray(allView?.cases) ? allView.cases : [];
-      // The projection may include prior superseded revisions so operators can
-      // audit an amendment. Those revisions are history, not additional
-      // suppliers. Rendering all of them as a "multi-supplier" fan-out mixed
-      // stale RFQ quantities into the current decision and made the first card
-      // nondeterministic. Prefer active cases; fall back to the superseded set
-      // only when the trace itself has no active revision.
-      const activeCases = cases.filter(
-        (item: any) => String(item?.state || '').toUpperCase() !== 'SUPERSEDED',
-      );
-      const visibleCases = activeCases.length ? activeCases : cases;
-      setProcCases(visibleCases);
-      const orderGroupId = String(allView?.order_group_id || '');
-      const embeddedHistory = allView?.amendment_history?.case_count
-        ? allView.amendment_history
-        : null;
-      const primary = visibleCases[0] || null;
-      setProcCase(primary && (primary.case_id || primary.state) ? primary : null);
-      const cid = (primary && primary.case_id) || procurementCaseId;
-      const orderId = canSeeOperatorDraft && orderGroupId.startsWith('order-')
-        ? orderGroupId.slice('order-'.length) : '';
-      const allocationSku = canSeeOperatorDraft && primary ? String(
-        primary?.state_json?.availability?.item_ref
-        || primary?.state_json?.draft?.commercial_scope?.item_ref || '',
-      ).trim() : '';
-      const workbenchPath = `/api/v1/admin/allocation/workbench${allocationSku ? `?sku=${encodeURIComponent(allocationSku)}` : ''}`;
-      const [history, allocation, journey]: any[] = await Promise.all([
-        orderId
-          ? fetchJsonWithDeadline(apiUrl(`/api/v1/fulfillment/cases/by-order/${encodeURIComponent(orderId)}`), { credentials: 'include', headers }).catch(() => null)
-          : Promise.resolve(null),
-        canSeeOperatorDraft && primary
-          ? fetchJsonWithDeadline(apiUrl(workbenchPath), { credentials: 'include', headers }).catch(() => null)
-          : Promise.resolve(null),
-        cid
-          ? fetchJsonWithDeadline(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(cid)}/journey`), { credentials: 'include', headers }).catch(() => null)
-          : Promise.resolve(null),
-      ]);
-      setProcHistory(history?.case_count ? history : embeddedHistory);
-      setAllocationView(allocation?.summary ? allocation : null);
-      setProcJourney(Array.isArray(journey?.journey) ? journey.journey : null);
-    } finally {
-      setProcLoading(false);
-    }
-  }, [effectiveTraceId, effectiveApiKey, procurementCaseId, canSeeOperatorDraft]);
-
-  // A cart amendment keeps the original recommendation trace but supersedes and redrafts its
-  // fulfillment case. Refresh the read model when that lifecycle advances; otherwise the tab
-  // keeps the pre-amendment RFQ until the modal is closed and reopened.
-  const procurementRevision = events.reduce((revision, event) => {
-    if (!eventMatches(event, ['case_superseded', 'external_message_drafted', 'quote_drafted'])) {
-      return revision;
-    }
-    return String(event.id ?? event.seq ?? event.created_at ?? event.timestamp ?? revision);
-  }, '');
-
-  useEffect(() => {
-    if (activeTab !== 'procurement' || !effectiveTraceId) return;
-    loadProcurementDetail();
-  }, [activeTab, effectiveTraceId, procurementCaseId, procurementRevision, procDetailRetry, loadProcurementDetail]);
-
-  // Auto-drafting runs after buyer commitment. The first detail read can therefore observe COMMITTED
-  // before the persisted draft exists. Retry that narrow state a few times so opening Procurement
-  // directly does not require the operator to switch tabs to reveal an RFQ that materialized seconds later.
-  useEffect(() => {
-    if (activeTab !== 'procurement' || !procurementCaseId || !procurementDraftPending(procCase)) return;
-    if (procDetailRetry >= 4) return;
-    const timer = window.setTimeout(() => setProcDetailRetry((value) => value + 1), 1000);
-    return () => window.clearTimeout(timer);
-  }, [activeTab, procurementCaseId, procCase, procDetailRetry]);
-
-  // Each trace resolves its own procurement case. Drop any prior turn's resolved case id when the trace
-  // changes so a normal (no-procurement) trace doesn't inherit a stale case id — which would keep the tab
-  // badged AND (via the guard below) re-fire the case lookup. FulfilmentTraceLink re-resolves when the new
-  // trace genuinely carries procurement signals.
-  useEffect(() => {
-    setProcurementCaseId(null);
-    setProcCase(null);
-    setProcCases([]);
-    setProcJourney(null);
-    setProcHistory(null);
-    setPendingSplit(null);
-    setProcDetailRetry(0);
-  }, [effectiveTraceId]);
 
   useEffect(() => {
     if (traceId && traceId.trim()) {
@@ -1386,11 +1287,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   })();
 
   const ms = trace?.model_selection || {};
-  const persistedExecutionEvent = [...allDisplayEvents].reverse().find((evt: any) =>
-    Array.isArray(evt?.payload?.execution_steps));
-  const typedExecutionSteps = Array.isArray(trace?.execution_steps) && trace!.execution_steps!.length > 0
-    ? trace!.execution_steps!
-    : (persistedExecutionEvent?.payload?.execution_steps || []);
+  const typedExecutionSteps = resolveExecutionSteps(trace, allDisplayEvents);
   const proposalExecutionStep = typedExecutionSteps.find((step: any) =>
     step?.kind === 'model' && step?.authority === 'proposes');
 
@@ -1482,55 +1379,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
   // Prefer recommendation records emitted through normalized envelopes
   // (e.g. feedback_loop with _original_event_type=recommendation_result).
-  const recommendationEventPayload = (() => {
-    const candidates = (allDisplayEvents || [])
-      .map((evt) => {
-        const payload = evt?.payload || {};
-        const original = String(payload?._original_event_type || payload?.original_event_type || '').toLowerCase().trim();
-        const isRec = original === 'recommendation_result' || eventMatches(evt, 'recommendation_result');
-        if (!isRec) return null;
-        const rightPanel = (payload?.right_panel_contract && typeof payload.right_panel_contract === 'object')
-          ? payload.right_panel_contract
-          : ((payload?.right_panel && typeof payload.right_panel === 'object') ? payload.right_panel : {});
-        const anchors = Array.isArray((rightPanel as any)?.anchor_sections) ? (rightPanel as any).anchor_sections : [];
-        const products = Array.isArray(payload?.products_summary) ? payload.products_summary : [];
-        const score = (original === 'recommendation_result' ? 100 : 0) + (anchors.length > 0 ? 10 : 0) + (products.length > 0 ? 5 : 0);
-        return { payload, score };
-      })
-      .filter(Boolean) as Array<{ payload: any; score: number }>;
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0].payload || null;
-  })();
+  const recommendationEventPayload = resolveRecommendationPayload(allDisplayEvents);
   // Semantic resolution may be persisted on the normalized recommendation
   // envelope, the trace projection, or an event retained by older stores.  It
   // is decision evidence, so do not make its visibility depend on anchor/product
   // scoring used to choose the preferred recommendation event.
-  const semanticEventPayload: any = [...(allDisplayEvents || [])]
-    .reverse()
-    .map((event: any) => event?.payload || {})
-    .find((eventPayload: any) => eventPayload?.semantic_resolution) || {};
-  const semanticResolution: any = (recommendationEventPayload as any)?.semantic_resolution
-    || (recommendationEventPayload as any)?.right_panel_contract?.semantic_resolution
-    || (trace as any)?.semantic_resolution
-    || (trace as any)?.intent_analysis?.semantic_resolution
-    || semanticEventPayload?.semantic_resolution
-    || null;
-  const semanticEvidence: any = (recommendationEventPayload as any)?.semantic_evidence
-    || (recommendationEventPayload as any)?.right_panel_contract?.semantic_evidence
-    || (trace as any)?.semantic_evidence
-    || semanticEventPayload?.semantic_evidence
-    || null;
-  const catalogAlignment: any = (recommendationEventPayload as any)?.catalog_alignment
-    || (recommendationEventPayload as any)?.right_panel_contract?.catalog_alignment
-    || (trace as any)?.catalog_alignment
-    || semanticEventPayload?.catalog_alignment
-    || null;
-  const caseObligations: any[] = (recommendationEventPayload as any)?.case_obligations
-    || (recommendationEventPayload as any)?.right_panel_contract?.case_obligations
-    || (trace as any)?.case_obligations
-    || semanticEventPayload?.case_obligations
-    || [];
+  const {
+    semanticResolution,
+    semanticEvidence,
+    catalogAlignment,
+    caseObligations,
+  } = resolveSemanticProjection(trace, allDisplayEvents, recommendationEventPayload);
   const whyAnchorSections: any[] = resolveWhyAnchorSections(trace, allDisplayEvents);
   const whyProducts: any[] = Array.isArray(trace?.products) && trace!.products!.length > 0
     ? (trace!.products || [])
