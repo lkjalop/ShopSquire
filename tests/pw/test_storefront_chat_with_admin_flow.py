@@ -80,7 +80,7 @@ def frontend_server(test_server):
 
 
 def test_chat_with_admin_click_path_opens_escalation_room(page, frontend_server):
-    captured = {"payload": None}
+    captured = {"payload": None, "rejected_plan": None}
 
     def handle_orchestrate(route):
         route.fulfill(
@@ -115,13 +115,40 @@ def test_chat_with_admin_click_path_opens_escalation_room(page, frontend_server)
         )
 
     def handle_stream(route):
-        route.fulfill(status=200, headers={"content-type": "text/event-stream"}, body="data: []\n\n")
+        event = {
+            "event_id": "human-substitute-event-1",
+            "role": "merchant",
+            "event_type": "proposed_substitute",
+            "message": "I found a compatible substitute available now.",
+            "actor": {"actor_type": "human_staff", "display_name": "Alex", "title": "Product specialist"},
+            "meta": {
+                "buyer_confirmation_required": True,
+                "cart_plan": {
+                    "plan_id": "cmp-human-browser-1",
+                    "plan": {"ops": [{
+                        "action": "replace_item", "target_skus": ["MODEL-A"],
+                        "replacement_sku": "MODEL-B", "replacement_name": "Model B",
+                        "quantity": 30,
+                    }]},
+                },
+            },
+        }
+        route.fulfill(
+            status=200,
+            headers={"content-type": "text/event-stream"},
+            body=f"data: {__import__('json').dumps([event])}\n\n",
+        )
+
+    def handle_reject(route, request):
+        captured["rejected_plan"] = request.url
+        route.fulfill(status=200, content_type="application/json", body='{"status":"rejected"}')
 
     page.route("**/api/v1/orchestrate", handle_orchestrate)
     page.route("**/api/v1/cv/analyze", handle_cv_analyze)
     page.route("**/api/v1/incidents/escalate", handle_escalate)
     page.route("**/api/v1/incidents/inc-chat-001/room/stream**", handle_stream)
     page.route("**/api/v1/incidents/inc-chat-001/room/message**", lambda route: route.fulfill(status=200, content_type="application/json", body='{"sent":true,"role":"buyer"}'))
+    page.route("**/api/v1/cart/mutations/cmp-human-browser-1/reject", handle_reject)
 
     page.goto(frontend_server, wait_until="domcontentloaded")
     page.get_by_role("button", name="Ask Me!").click()
@@ -135,11 +162,16 @@ def test_chat_with_admin_click_path_opens_escalation_room(page, frontend_server)
 
     page.get_by_text("Human support", exact=True).wait_for(timeout=10000)
     page.get_by_test_id("human-conversation").wait_for(timeout=10000)
+    page.get_by_role("button", name="Review proposed cart change").click()
+    page.get_by_test_id("pending-cart-change").wait_for(timeout=10000)
+    page.get_by_role("button", name="Discard plan").click()
+    page.get_by_text("left your cart exactly as it was", exact=False).wait_for(timeout=10000)
 
     assert captured["payload"] is not None
     assert captured["payload"].get("trace_id") == "trace-cv-1"
     assert isinstance(captured["payload"].get("context"), dict)
     assert isinstance(captured["payload"]["context"].get("evidence_tags"), list)
+    assert captured["rejected_plan"] is not None
 
 
 def test_two_browser_buyer_and_authenticated_staff_exchange_messages(browser, frontend_server, test_server):
