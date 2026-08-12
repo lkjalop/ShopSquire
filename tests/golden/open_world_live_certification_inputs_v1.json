@@ -1,0 +1,32 @@
+{
+  "schema_version": "open-world-live-certification-inputs-v1",
+  "frozen_at": "2026-08-13T08:10:00+10:00",
+  "policy": {
+    "purpose": "Live SearXNG transport and candidate-origin certification after implementation freeze.",
+    "automatic_publisher_approval": false,
+    "search_snippets_are_evidence": false,
+    "paid_discovery_allowed": false
+  },
+  "prompts": [
+    {
+      "id": "live-unseen-01",
+      "prompt": "I need a portable workstation for identifying proteins from tandem mass-spectrometry spectra against large reference libraries."
+    },
+    {
+      "id": "live-unseen-02",
+      "prompt": "Can this notebook handle FPGA synthesis, place-and-route and timing closure? Vendor-supported toolchains are mandatory."
+    },
+    {
+      "id": "live-unseen-03",
+      "prompt": "We model slope stability and groundwater coupling for remote geotechnical projects with unreliable internet."
+    },
+    {
+      "id": "live-unseen-04",
+      "prompt": "I calibrate radio-interferometer observations and make large spectral-line image cubes while travelling between observatories."
+    },
+    {
+      "id": "live-unseen-05",
+      "prompt": "I need to segment dental cone-beam CT scans locally, but only software-vendor-supported hardware is acceptable."
+    }
+  ]
+}

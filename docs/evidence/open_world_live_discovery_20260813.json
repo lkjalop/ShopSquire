@@ -1,0 +1,1296 @@
+{
+  "schema_version": "open-world-live-discovery-certification-v1",
+  "created_at": "2026-08-12T22:28:05.380590+00:00",
+  "input_sha256": "ba990887de6566ce77d48709b49680e5267bf94b816c0490af90be03cb0a2133",
+  "execution_mode": "live_network",
+  "search_provider": "local_searxng",
+  "billing_class": "free",
+  "certification_status": "passed",
+  "gate_failures": [],
+  "runs": [
+    {
+      "prompt_id": "live-unseen-01",
+      "plan_id": "crp-b96e1ecfdc590e9fa30f",
+      "query_axes": [
+        "concept_and_software",
+        "requirements_and_compatibility",
+        "support_and_constraints"
+      ],
+      "query_hashes": [
+        "6f981e2af35f0239",
+        "686b0c68263bf727",
+        "b2921006df7205a4"
+      ],
+      "receipts": [
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "6f981e2af35f0239",
+          "started_at": "2026-08-12T22:27:41.322282+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:43.318182+00:00",
+          "observed_at": "2026-08-12T22:27:43.318182+00:00",
+          "response_body_hash": "0538f75e6e9e78c095db27db2e0c62a980e30ff70aff80c7bfcdfad81a43687b",
+          "response_bytes": 22881,
+          "raw_result_count": 30,
+          "result_count": 29,
+          "allowlisted_result_count": 29,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 1617.51,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 1,
+              "responses": 1,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1617.51,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 1,
+              "responses": 1,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1617.51,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            }
+          ],
+          "suppressed_engines": [],
+          "query_id": "concept",
+          "query_axis": "concept_and_software",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "686b0c68263bf727",
+          "started_at": "2026-08-12T22:27:43.318979+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:45.525479+00:00",
+          "observed_at": "2026-08-12T22:27:45.525479+00:00",
+          "response_body_hash": "eadf367ba6d69a3e2fac79a033e058420a3460288cdc3967f74307fe59ad1282",
+          "response_bytes": 23212,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 2031.154,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 2,
+              "responses": 2,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1824.332,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 2,
+              "responses": 2,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1824.332,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            }
+          ],
+          "suppressed_engines": [],
+          "query_id": "requirements",
+          "query_axis": "requirements_and_compatibility",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "b2921006df7205a4",
+          "started_at": "2026-08-12T22:27:45.528266+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:47.186632+00:00",
+          "observed_at": "2026-08-12T22:27:47.186632+00:00",
+          "response_body_hash": "00ae1275aa98606493e0bc9cda0725968c8bffbf1b3ed210f3460cb0a75fa003",
+          "response_bytes": 23539,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 922.514,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 3,
+              "responses": 3,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1523.726,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 3,
+              "responses": 3,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1523.726,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            }
+          ],
+          "suppressed_engines": [],
+          "query_id": "support",
+          "query_axis": "support_and_constraints",
+          "query_text_retained": false
+        }
+      ],
+      "candidate_origins": [
+        {
+          "url": "https://academic.oup.com/bioinformatics/article/38/6/1568/6493242",
+          "domain": "academic.oup.com",
+          "title": "SPEQ: quality assessment of peptide tandem mass spectra with ...",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://currentprotocols.onlinelibrary.wiley.com/doi/10.1002/0471140864.ps2502s49",
+          "domain": "currentprotocols.onlinelibrary.wiley.com",
+          "title": "Overview of Tandem Mass Spectrometry (MS/MS) Database Search ...",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://www.thermofisher.com/au/en/home/life-science/protein-biology/protein-biology-learning-center/protein-biology-resource-library/pierce-protein-methods/overview-mass-spectrometry.html",
+          "domain": "www.thermofisher.com",
+          "title": "Overview of Mass Spectrometry for Protein Analysis",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://analyticalsciencejournals.onlinelibrary.wiley.com/doi/10.1002/mas.21512",
+          "domain": "analyticalsciencejournals.onlinelibrary.wiley.com",
+          "title": "Tandem mass spectral libraries of peptides and their roles in ...",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10278091/",
+          "domain": "pmc.ncbi.nlm.nih.gov",
+          "title": "Portable Mass Spectrometry System: Instrumentation, Applications ...",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        }
+      ],
+      "outcome": "candidate_origins_not_accepted",
+      "provider_accounting": {
+        "discovery_calls": 3,
+        "external_calls": 3,
+        "official_origin_fetches": 0,
+        "paid_calls": 0
+      }
+    },
+    {
+      "prompt_id": "live-unseen-02",
+      "plan_id": "crp-7e9ee7f0f6ab70c92cf3",
+      "query_axes": [
+        "concept_and_software",
+        "requirements_and_compatibility",
+        "support_and_constraints"
+      ],
+      "query_hashes": [
+        "bec560a6f84d90bc",
+        "033f2898e52134c9",
+        "d4aea2c501774f83"
+      ],
+      "receipts": [
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "bec560a6f84d90bc",
+          "started_at": "2026-08-12T22:27:47.193581+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:48.585133+00:00",
+          "observed_at": "2026-08-12T22:27:48.585133+00:00",
+          "response_body_hash": "0cc880e1e72aace9d247fdc93585515430a8019b0b3355b3f5d36b4b0233806f",
+          "response_bytes": 23433,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 1042.531,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 4,
+              "responses": 4,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1403.427,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 4,
+              "responses": 4,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1403.427,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            }
+          ],
+          "suppressed_engines": [],
+          "query_id": "concept",
+          "query_axis": "concept_and_software",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "033f2898e52134c9",
+          "started_at": "2026-08-12T22:27:48.588271+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:50.939777+00:00",
+          "observed_at": "2026-08-12T22:27:50.939777+00:00",
+          "response_body_hash": "fac75db58eb30ed20997c9b4f7057aae3527a020e645e6252cfba3227b5f62f3",
+          "response_bytes": 24223,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 1657.197,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 5,
+              "responses": 5,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1454.181,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 5,
+              "responses": 5,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1454.181,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            }
+          ],
+          "suppressed_engines": [],
+          "query_id": "requirements",
+          "query_axis": "requirements_and_compatibility",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "d4aea2c501774f83",
+          "started_at": "2026-08-12T22:27:50.941056+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:52.399900+00:00",
+          "observed_at": "2026-08-12T22:27:52.399900+00:00",
+          "response_body_hash": "258576e0854738e8b156288bbd236126d11972a8378e01056ec6dd6aec7ac3bb",
+          "response_bytes": 23524,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 791.854,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 6,
+              "responses": 6,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1343.793,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 6,
+              "responses": 6,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1343.793,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            }
+          ],
+          "suppressed_engines": [],
+          "query_id": "support",
+          "query_axis": "support_and_constraints",
+          "query_text_retained": false
+        }
+      ],
+      "candidate_origins": [
+        {
+          "url": "https://docs.oracle.com/cd/E85014_01/doc.832/e88125/c_supportandcompatibility.htm",
+          "domain": "docs.oracle.com",
+          "title": "2 System Requirements, Supported Systems, and Compatibility",
+          "quality_score": 18,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://kb.synology.com/APM/tutorial/supported_database_OS_combinations_APM",
+          "domain": "kb.synology.com",
+          "title": "What database and operating system combinations are supported ...",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://www.frontiersoftware.com/system/files/document/2023-11/FS-Supported-Hardware-and-Software.pdf",
+          "domain": "www.frontiersoftware.com",
+          "title": "Supported Hardware and Software",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://oit.duke.edu/help/articles/kb0025071/",
+          "domain": "oit.duke.edu",
+          "title": "Recommended Computer Specifications & OIT Supported Software",
+          "quality_score": 7,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://eli.lipsitz.net/posts/fpga-gameboy-emulator/",
+          "domain": "eli.lipsitz.net",
+          "title": "Building an FPGA Game Boy emulator | Eli Lipsitz",
+          "quality_score": 4,
+          "authority": "candidate_only_not_accepted"
+        }
+      ],
+      "outcome": "candidate_origins_not_accepted",
+      "provider_accounting": {
+        "discovery_calls": 3,
+        "external_calls": 3,
+        "official_origin_fetches": 0,
+        "paid_calls": 0
+      }
+    },
+    {
+      "prompt_id": "live-unseen-03",
+      "plan_id": "crp-9496adf655fd36f95869",
+      "query_axes": [
+        "concept_and_software",
+        "requirements_and_compatibility",
+        "support_and_constraints"
+      ],
+      "query_hashes": [
+        "29185da54e247f01",
+        "00bf95c9418b49b2",
+        "898f5d5fa4daaa6b"
+      ],
+      "receipts": [
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "29185da54e247f01",
+          "started_at": "2026-08-12T22:27:52.411918+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:54.049543+00:00",
+          "observed_at": "2026-08-12T22:27:54.049543+00:00",
+          "response_body_hash": "ccd381742f38a2c8d524a54d88e0185d10b32332976ebd812ee682a94df738ff",
+          "response_bytes": 23608,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [
+            {
+              "engine": "mojeek",
+              "reason": "access denied"
+            }
+          ],
+          "degradation_reasons": [
+            "engines_unresponsive"
+          ],
+          "provider_status": "degraded",
+          "request_latency_ms": 991.916,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 7,
+              "responses": 7,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1293.525,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 7,
+              "responses": 7,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1293.525,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 1,
+              "responses": 0,
+              "failures": 1,
+              "zero_results": 0,
+              "average_latency_ms": 991.916,
+              "unhealthy_rate": 1.0,
+              "suppressed": false
+            }
+          ],
+          "suppressed_engines": [],
+          "query_id": "concept",
+          "query_axis": "concept_and_software",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "00bf95c9418b49b2",
+          "started_at": "2026-08-12T22:27:54.053242+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:55.648133+00:00",
+          "observed_at": "2026-08-12T22:27:55.648133+00:00",
+          "response_body_hash": "61a4f072be8a092f2dd73010942a22a01e74dc58dcdd83f45ae9900d9faa91fc",
+          "response_bytes": 23756,
+          "raw_result_count": 30,
+          "result_count": 29,
+          "allowlisted_result_count": 29,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [
+            {
+              "engine": "mojeek",
+              "reason": "Suspended: access denied"
+            }
+          ],
+          "degradation_reasons": [
+            "engines_unresponsive"
+          ],
+          "provider_status": "degraded",
+          "request_latency_ms": 1084.775,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 8,
+              "responses": 8,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1267.431,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 8,
+              "responses": 8,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1267.431,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 2,
+              "responses": 0,
+              "failures": 2,
+              "zero_results": 0,
+              "average_latency_ms": 1038.346,
+              "unhealthy_rate": 1.0,
+              "suppressed": false
+            }
+          ],
+          "suppressed_engines": [],
+          "query_id": "requirements",
+          "query_axis": "requirements_and_compatibility",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "898f5d5fa4daaa6b",
+          "started_at": "2026-08-12T22:27:55.650342+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:58.313254+00:00",
+          "observed_at": "2026-08-12T22:27:58.313254+00:00",
+          "response_body_hash": "e6ef08050f460c07b3cbb8c2220db9326c3288e70b957f0b61a9fce231db9b1b",
+          "response_bytes": 23685,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [
+            {
+              "engine": "mojeek",
+              "reason": "Suspended: access denied"
+            }
+          ],
+          "degradation_reasons": [
+            "engines_unresponsive"
+          ],
+          "provider_status": "degraded",
+          "request_latency_ms": 2077.932,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 9,
+              "responses": 9,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1357.487,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 9,
+              "responses": 9,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1357.487,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 3,
+              "responses": 0,
+              "failures": 3,
+              "zero_results": 0,
+              "average_latency_ms": 1384.874,
+              "unhealthy_rate": 1.0,
+              "suppressed": true
+            }
+          ],
+          "suppressed_engines": [
+            "mojeek"
+          ],
+          "query_id": "support",
+          "query_axis": "support_and_constraints",
+          "query_text_retained": false
+        }
+      ],
+      "candidate_origins": [
+        {
+          "url": "https://fl-nzgs-media.s3.amazonaws.com/uploads/2024/11/NZGS-Slope-Stability-Guidance-Final-Oct-24-2.pdf",
+          "domain": "fl-nzgs-media.s3.amazonaws.com",
+          "title": "SLOPE STABILITY GEOTECHNICAL GUIDANCE SERIES - AWS",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://fl-nzgs-media.s3.amazonaws.com/uploads/2025/04/Unit-3-NZGS-Slope-Stability-Guidance-DRAFT.pdf",
+          "domain": "fl-nzgs-media.s3.amazonaws.com",
+          "title": "slope stability geotechnical guidance | unit 3 - AWS",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://wsdot.wa.gov/publications/manuals/fulltext/M46-03/M46-03.03Complete.pdf",
+          "domain": "wsdot.wa.gov",
+          "title": "Geotechnical Design Manual - wsdot",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://fl-nzgs-media.s3.amazonaws.com/uploads/2024/11/NZGS-Slope-Stability-Guidance-Final-Oct-24.pdf",
+          "domain": "fl-nzgs-media.s3.amazonaws.com",
+          "title": "SLOPE STABILITY GEOTECHNICAL GUIDANCE SERIES - AWS",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://models.com/",
+          "domain": "models.com",
+          "title": "Models.com - The faces of fashion - top model rankings, modeling ...",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        }
+      ],
+      "outcome": "candidate_origins_not_accepted",
+      "provider_accounting": {
+        "discovery_calls": 3,
+        "external_calls": 3,
+        "official_origin_fetches": 0,
+        "paid_calls": 0
+      }
+    },
+    {
+      "prompt_id": "live-unseen-04",
+      "plan_id": "crp-3f436431ce10ad4fd78c",
+      "query_axes": [
+        "concept_and_software",
+        "requirements_and_compatibility",
+        "support_and_constraints"
+      ],
+      "query_hashes": [
+        "cae5f9a289ae4ffa",
+        "7833558f3df46c13",
+        "1c01751887b1f615"
+      ],
+      "receipts": [
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "cae5f9a289ae4ffa",
+          "started_at": "2026-08-12T22:27:58.349778+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:27:59.670782+00:00",
+          "observed_at": "2026-08-12T22:27:59.670782+00:00",
+          "response_body_hash": "5e98813291251099b6308d35e86e6ac3823952764f653a653fe74abc765e0737",
+          "response_bytes": 22939,
+          "raw_result_count": 30,
+          "result_count": 29,
+          "allowlisted_result_count": 29,
+          "engines_queried": [
+            "bing",
+            "google cse"
+          ],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 604.788,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 10,
+              "responses": 10,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1282.217,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 10,
+              "responses": 10,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1282.217,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 3,
+              "responses": 0,
+              "failures": 3,
+              "zero_results": 0,
+              "average_latency_ms": 1384.874,
+              "unhealthy_rate": 1.0,
+              "suppressed": true
+            }
+          ],
+          "suppressed_engines": [
+            "mojeek"
+          ],
+          "query_id": "concept",
+          "query_axis": "concept_and_software",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "7833558f3df46c13",
+          "started_at": "2026-08-12T22:27:59.705142+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:28:00.931225+00:00",
+          "observed_at": "2026-08-12T22:28:00.931225+00:00",
+          "response_body_hash": "f120fd181028a7010a6a77319fef6ebc9b776c287a83cb133291eef0fe297969",
+          "response_bytes": 23199,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [
+            "bing",
+            "google cse"
+          ],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 529.093,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 11,
+              "responses": 11,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1213.751,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 11,
+              "responses": 11,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1213.751,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 3,
+              "responses": 0,
+              "failures": 3,
+              "zero_results": 0,
+              "average_latency_ms": 1384.874,
+              "unhealthy_rate": 1.0,
+              "suppressed": true
+            }
+          ],
+          "suppressed_engines": [
+            "mojeek"
+          ],
+          "query_id": "requirements",
+          "query_axis": "requirements_and_compatibility",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "1c01751887b1f615",
+          "started_at": "2026-08-12T22:28:00.934092+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:28:02.068825+00:00",
+          "observed_at": "2026-08-12T22:28:02.068825+00:00",
+          "response_body_hash": "47f8af65dcac742500ca85fb43846d571f26e692fdc6588e1d600afb31c4bea2",
+          "response_bytes": 23697,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [
+            "bing",
+            "google cse"
+          ],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 544.863,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 12,
+              "responses": 12,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1158.011,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 12,
+              "responses": 12,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1158.011,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 3,
+              "responses": 0,
+              "failures": 3,
+              "zero_results": 0,
+              "average_latency_ms": 1384.874,
+              "unhealthy_rate": 1.0,
+              "suppressed": true
+            }
+          ],
+          "suppressed_engines": [
+            "mojeek"
+          ],
+          "query_id": "support",
+          "query_axis": "support_and_constraints",
+          "query_text_retained": false
+        }
+      ],
+      "candidate_origins": [
+        {
+          "url": "https://academic.oup.com/mnras/article/525/3/3946/7244707",
+          "domain": "academic.oup.com",
+          "title": "A novel radio imaging method for physical spectral index modelling",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029%2F2023RS007734",
+          "domain": "agupubs.onlinelibrary.wiley.com",
+          "title": "First Observations With a GNSS Antenna to Radio Telescope ...",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://englishwordchamps.com/calibrate-meaning-and-examples/",
+          "domain": "englishwordchamps.com",
+          "title": "Calibrate \u2013 Meaning, Usage, and Examples Explained",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://www.joincalibrate.com/",
+          "domain": "www.joincalibrate.com",
+          "title": "Calibrate Weight Loss: Members Lose 20% Achieved Over 3 Years | Calibrate",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://www.merriam-webster.com/dictionary/calibrate",
+          "domain": "www.merriam-webster.com",
+          "title": "CALIBRATE Definition & Meaning - Merriam-Webster",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        }
+      ],
+      "outcome": "candidate_origins_not_accepted",
+      "provider_accounting": {
+        "discovery_calls": 3,
+        "external_calls": 3,
+        "official_origin_fetches": 0,
+        "paid_calls": 0
+      }
+    },
+    {
+      "prompt_id": "live-unseen-05",
+      "plan_id": "crp-d469cb4b2e2a175f6a46",
+      "query_axes": [
+        "concept_and_software",
+        "requirements_and_compatibility",
+        "support_and_constraints"
+      ],
+      "query_hashes": [
+        "c828f937e0dac956",
+        "70cc3ff54263bd7a",
+        "68ca64b128aaa6d2"
+      ],
+      "receipts": [
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "c828f937e0dac956",
+          "started_at": "2026-08-12T22:28:02.081302+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:28:03.325948+00:00",
+          "observed_at": "2026-08-12T22:28:03.325948+00:00",
+          "response_body_hash": "fbfdb76b3acab8aacaf4737b816042650fd4d12c8c5154c8df081e9df972a353",
+          "response_bytes": 23487,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [
+            "bing",
+            "google cse"
+          ],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 619.847,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 13,
+              "responses": 13,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1116.613,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 13,
+              "responses": 13,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1116.613,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 3,
+              "responses": 0,
+              "failures": 3,
+              "zero_results": 0,
+              "average_latency_ms": 1384.874,
+              "unhealthy_rate": 1.0,
+              "suppressed": true
+            }
+          ],
+          "suppressed_engines": [
+            "mojeek"
+          ],
+          "query_id": "concept",
+          "query_axis": "concept_and_software",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "70cc3ff54263bd7a",
+          "started_at": "2026-08-12T22:28:03.329076+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:28:04.347408+00:00",
+          "observed_at": "2026-08-12T22:28:04.347408+00:00",
+          "response_body_hash": "0b1a840f6836e8e0c396d67248c97e500a8f30f9c581be0b16ea009a5cfe6a39",
+          "response_bytes": 22893,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [
+            "bing",
+            "google cse"
+          ],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 505.311,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 14,
+              "responses": 14,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1072.949,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 14,
+              "responses": 14,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1072.949,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 3,
+              "responses": 0,
+              "failures": 3,
+              "zero_results": 0,
+              "average_latency_ms": 1384.874,
+              "unhealthy_rate": 1.0,
+              "suppressed": true
+            }
+          ],
+          "suppressed_engines": [
+            "mojeek"
+          ],
+          "query_id": "requirements",
+          "query_axis": "requirements_and_compatibility",
+          "query_text_retained": false
+        },
+        {
+          "provider_capability": "WEB_DISCOVERY",
+          "provider_id": "searxng_compatible_discovery",
+          "provider_endpoint_host": "127.0.0.1",
+          "query_hash": "68ca64b128aaa6d2",
+          "started_at": "2026-08-12T22:28:04.349617+00:00",
+          "fixture": false,
+          "network_execution": true,
+          "cache_status": "miss",
+          "billing_class": "free",
+          "execution_status": "completed",
+          "external_call_dispatched": true,
+          "http_status": 200,
+          "completed_at": "2026-08-12T22:28:05.377163+00:00",
+          "observed_at": "2026-08-12T22:28:05.377163+00:00",
+          "response_body_hash": "9004af333cb5873163277b629b845b46b7de338f79247e8d2c7145b4251555fc",
+          "response_bytes": 23464,
+          "raw_result_count": 30,
+          "result_count": 30,
+          "allowlisted_result_count": 30,
+          "engines_queried": [
+            "bing",
+            "google cse"
+          ],
+          "engines_responded": [
+            "bing",
+            "google cse"
+          ],
+          "engine_failures": [],
+          "degradation_reasons": [],
+          "provider_status": "completed",
+          "request_latency_ms": 530.489,
+          "engine_reliability": [
+            {
+              "engine": "bing",
+              "attempts": 15,
+              "responses": 15,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1036.785,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "google cse",
+              "attempts": 15,
+              "responses": 15,
+              "failures": 0,
+              "zero_results": 0,
+              "average_latency_ms": 1036.785,
+              "unhealthy_rate": 0.0,
+              "suppressed": false
+            },
+            {
+              "engine": "mojeek",
+              "attempts": 3,
+              "responses": 0,
+              "failures": 3,
+              "zero_results": 0,
+              "average_latency_ms": 1384.874,
+              "unhealthy_rate": 1.0,
+              "suppressed": true
+            }
+          ],
+          "suppressed_engines": [
+            "mojeek"
+          ],
+          "query_id": "support",
+          "query_axis": "support_and_constraints",
+          "query_text_retained": false
+        }
+      ],
+      "candidate_origins": [
+        {
+          "url": "https://www.planmeca.com/dental-software/planmeca-romexis/specifications/system-requirements/",
+          "domain": "www.planmeca.com",
+          "title": "System requirements | Planmeca Romexis 6 software",
+          "quality_score": 19,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://completesmilesbv.com.au/ai-and-cone-beam-ct-a-diagnostic-revolution/",
+          "domain": "completesmilesbv.com.au",
+          "title": "AI and Cone-Beam CT: A Diagnostic Revolution - Complete Smiles",
+          "quality_score": 10,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://radiologyscan.com.au/ct-scan-uses/",
+          "domain": "radiologyscan.com.au",
+          "title": "CT scans explained: how they work and what they're for",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://www.healthline.com/health/ct-scan",
+          "domain": "www.healthline.com",
+          "title": "CT Scans: Overview, Uses, Procedure, Risks, More - Healthline",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        },
+        {
+          "url": "https://www.physicamedica.com/article/S1120-1797%252821%252900251-9/fulltext",
+          "domain": "www.physicamedica.com",
+          "title": "Dental cone beam CT: An updated review - Physica Medica",
+          "quality_score": 8,
+          "authority": "candidate_only_not_accepted"
+        }
+      ],
+      "outcome": "candidate_origins_not_accepted",
+      "provider_accounting": {
+        "discovery_calls": 3,
+        "external_calls": 3,
+        "official_origin_fetches": 0,
+        "paid_calls": 0
+      }
+    }
+  ],
+  "authority_rule": "Discovery returns candidates only; case approval and fetched-origin verification are separate and search snippets establish no claim."
+}

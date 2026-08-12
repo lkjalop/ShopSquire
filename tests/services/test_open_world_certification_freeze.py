@@ -8,10 +8,16 @@ from src.app.services.case_research_plan import build_case_research_plan
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = ROOT / "tests" / "golden" / "open_world_unseen_certification_v1.json"
 SEAL = ROOT / "tests" / "golden" / "open_world_unseen_certification_v1.sha256"
+LIVE_INPUTS = ROOT / "tests" / "golden" / "open_world_live_certification_inputs_v1.json"
+LIVE_SEAL = ROOT / "tests" / "golden" / "open_world_live_certification_inputs_v1.sha256"
 
 
 def test_unseen_certification_corpus_matches_committed_seal():
     assert hashlib.sha256(CORPUS.read_bytes()).hexdigest() == SEAL.read_text().strip()
+
+
+def test_live_input_matrix_matches_committed_seal():
+    assert hashlib.sha256(LIVE_INPUTS.read_bytes()).hexdigest() == LIVE_SEAL.read_text().strip()
 
 
 def test_holdout_prompts_get_bounded_non_authoritative_open_world_plans():
