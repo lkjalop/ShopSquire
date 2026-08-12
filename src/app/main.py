@@ -27,16 +27,10 @@ from src.app.routers.account import router as account_router
 from src.app.routers.cart import router as cart_router
 from src.app.routers.shopping_cases import router as shopping_cases_router
 from src.app.routers.privacy import router as privacy_router
-from src.app.routers.incident import router as incident_router
 from src.app.routers.payments_paypal import router as payments_paypal
 from src.app.routers.payments_revolut import router as payments_revolut
 from src.app.routers.payments_googlepay import router as payments_googlepay
 from src.app.routers.payments_afterpay import router as payments_afterpay
-from src.app.routers.session_memory import router as session_memory_router
-from src.app.routers.decisions import router as decisions_router
-from src.app.routers.voice import router as voice_router
-from src.app.routers.vision import router as vision_router
-from src.app.routers.image_sidecar import router as image_sidecar_router
 from src.app.routers.cv import router as cv_router
 from src.app.routers.recruiting import router as recruiting_router
 from src.app.routers.scoring import router as scoring_router
@@ -82,9 +76,8 @@ from src.app.models.init_db import ensure_metadata
 from sqlalchemy import text as sql_text
 from src.app.observability.tracing import init_tracer
 from src.app.observability.logging import init_logging, bind_request_id, new_request_id
-from src.app.observability.metrics import router as metrics_router
 from src.app.observability.init import instrument_app
-from src.app.routers.sla import router as sla_router
+from src.app.bootstrap.core_router_group import register_core_router_group
 from src.app.security.observer import emit_security_event
 from src.app.security.webhook_security import WebhookSecurityMiddleware
 from src.app.security.idempotency import IdempotencyMiddleware
@@ -1956,19 +1949,12 @@ def create_app() -> FastAPI:
         app.include_router(decision_time_travel_router)
     except Exception as e:
         logging.getLogger("shopsquire.startup").exception("failed to include decision_time_travel router: %s", e)
-    app.include_router(incident_router)
-    app.include_router(metrics_router)
-    app.include_router(sla_router)
-    app.include_router(session_memory_router)
-    app.include_router(decisions_router)
+    register_core_router_group(app)
     try:
         from src.app.routers.authz_audit import router as authz_audit_router
         app.include_router(authz_audit_router)
     except Exception as e:
         logging.getLogger("shopsquire.startup").exception("failed to include authz_audit router: %s", e)
-    app.include_router(voice_router)
-    app.include_router(vision_router)
-    app.include_router(image_sidecar_router)
     # CV analysis endpoint (complaints triage)
     try:
         app.include_router(cv_router)
