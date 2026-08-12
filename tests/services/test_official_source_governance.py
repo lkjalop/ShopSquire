@@ -8,7 +8,7 @@ from src.app.services.official_source_governance import (
 def test_official_source_manifest_is_valid_but_not_falsely_enrolled():
     status = source_governance_readiness()
     assert status["schema_version"] == "official-workload-sources-v2"
-    assert status["valid_source_count"] == 13
+    assert status["valid_source_count"] == 18
     assert status["errors"] == []
     assert "docs.gns3.com" in status["domain_allowlist"]
     assert "learn.microsoft.com" in status["domain_allowlist"]
@@ -20,7 +20,7 @@ def test_official_source_manifest_is_valid_but_not_falsely_enrolled():
     assert "dev.epicgames.com" in status["domain_allowlist"]
     assert len(status["canonical_entrypoints"]) >= 17
     assert status["approved_source_count"] == 10
-    assert status["pending_independent_human_review_count"] == 3
+    assert status["pending_independent_human_review_count"] == 8
     assert status["operationally_enrolled"] is False
 
 
@@ -75,3 +75,20 @@ def test_isaac_does_not_apply_to_default_ot_cyber_range():
     assert {source["source_id"] for source in isaac_sources} == {
         "nvidia_omniverse_isaac_docs"
     }
+
+
+def test_five_year_fleet_sources_are_explicit_candidates_not_blanket_authority():
+    operational = governed_sources_for_workload("five_year_fleet")
+    assert operational == ()
+    candidates = governed_sources_for_workload(
+        "five_year_fleet", include_pending_review=True,
+    )
+    assert {source["source_id"] for source in candidates} == {
+        "ubuntu_certified_laptops",
+        "lenovo_accessory_compatibility",
+        "microsoft_windows_enterprise_lifecycle",
+        "lenovo_product_security_advisories",
+        "hp_warranty_status",
+    }
+    assert all(source["review_status"] == "pending_independent_human_review" for source in candidates)
+    assert all("exact_product_fit" in source["forbidden_claim_types"] for source in candidates)
