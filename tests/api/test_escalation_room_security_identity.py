@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
@@ -13,7 +15,7 @@ def test_admin_incident_sse_requires_staff_authentication():
 
 def test_admin_message_ignores_client_supplied_staff_identity(monkeypatch, tmp_path):
     monkeypatch.setattr(escalation_room, "_CHAT_DIR", tmp_path)
-    monkeypatch.setattr(escalation_room, "_ROOM_STAFF_JOINED", set())
+    escalation_room.INCIDENT_CONVERSATION_RUNTIME.local_presence.clear()
     client = TestClient(create_app(), headers=default_headers())
 
     response = client.post(
@@ -76,3 +78,19 @@ def test_html_is_persisted_as_plain_message_data(monkeypatch, tmp_path):
     )
     assert record["message"] == "<script>alert(1)</script>"
     assert record["event_type"] == "message"
+
+
+def test_human_substitute_message_is_advisory_and_requires_buyer_confirmation(monkeypatch, tmp_path):
+    monkeypatch.setattr(escalation_room, "_CHAT_DIR", tmp_path)
+    escalation_room.INCIDENT_CONVERSATION_RUNTIME.local_presence.clear()
+    client = TestClient(create_app(), headers=default_headers())
+    response = client.post(
+        "/api/v1/admin/incidents/inc-substitute/room/message",
+        json={"message": "Supplier offered MODEL-B.", "message_kind": "proposed_substitute"},
+    )
+    assert response.status_code == 200
+    records = [json.loads(line) for line in (tmp_path / "inc-substitute.ndjson").read_text().splitlines()]
+    proposal = records[-1]
+    assert proposal["event_type"] == "proposed_substitute"
+    assert proposal["meta"]["commercial_authority"] == "none"
+    assert proposal["meta"]["buyer_confirmation_required"] is True

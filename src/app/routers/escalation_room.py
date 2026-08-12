@@ -32,13 +32,12 @@ from src.app.services.playbook_engine import (
 from src.app.services.incident_alert_adapters import dispatch_incident_alert
 from src.app.services.decision_log import log_trace_event
 from src.app.services.incident_conversation_identity import build_conversation_event, server_actor_identity
+from src.app.services.incident_conversation_runtime import INCIDENT_CONVERSATION_RUNTIME
 
 
 router = APIRouter(prefix="/api/v1/admin/incidents", tags=["admin", "escalation"])
 public_router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
 
-_ROOM_SUBSCRIBERS: Dict[str, list[asyncio.Queue]] = {}
-_ROOM_STAFF_JOINED: set[str] = set()
 def _default_incident_chat_dir() -> Path:
     configured = str(os.getenv("INCIDENT_CHAT_DIR", "") or "").strip()
     if configured:
@@ -443,6 +442,7 @@ def _append_chat(
     *,
     event_type: str = "message",
     persist: bool = True,
+    actor_identity: Dict | None = None,
 ) -> Dict:
     rec = build_conversation_event(
         incident_id=incident_id,
@@ -450,6 +450,7 @@ def _append_chat(
         message=message,
         event_type=event_type,
         meta=meta,
+        actor=actor_identity,
     )
     if persist:
         try:
@@ -459,24 +460,14 @@ def _append_chat(
         except Exception:
             logging.getLogger(__name__).exception("failed to append chat to disk for %s", incident_id)
 
-    # Publish to subscribers
-    try:
-        qs = list(_ROOM_SUBSCRIBERS.get(incident_id) or [])
-        for q in qs:
-            try:
-                q.put_nowait(rec)
-            except Exception:
-                logging.getLogger(__name__).exception("failed to publish chat to subscriber queue")
-    except Exception:
-        logging.getLogger(__name__).exception("failed to publish chat to subscribers for %s", incident_id)
+    INCIDENT_CONVERSATION_RUNTIME.publish_local(incident_id, rec)
     return rec
 
 
 def _announce_staff_joined(incident_id: str, role: str) -> None:
-    if incident_id in _ROOM_STAFF_JOINED:
-        return
-    _ROOM_STAFF_JOINED.add(incident_id)
     actor = server_actor_identity(role)
+    if not INCIDENT_CONVERSATION_RUNTIME.join(incident_id, actor):
+        return
     _append_chat(
         incident_id,
         role,
@@ -487,10 +478,9 @@ def _announce_staff_joined(incident_id: str, role: str) -> None:
 
 
 def _announce_staff_left(incident_id: str, role: str) -> None:
-    if incident_id not in _ROOM_STAFF_JOINED:
-        return
-    _ROOM_STAFF_JOINED.discard(incident_id)
     actor = server_actor_identity(role)
+    if not INCIDENT_CONVERSATION_RUNTIME.leave(incident_id, actor):
+        return
     _append_chat(
         incident_id,
         role,
@@ -909,8 +899,7 @@ async def ws_room(incident_id: str, websocket: WebSocket):
 
     await websocket.accept()
     _announce_staff_joined(incident_id, role)
-    q: asyncio.Queue = asyncio.Queue()
-    _ROOM_SUBSCRIBERS.setdefault(incident_id, []).append(q)
+    q = INCIDENT_CONVERSATION_RUNTIME.subscribe(incident_id)
     try:
         # Send recent history snapshot (last 20 lines)
         try:
@@ -935,12 +924,7 @@ async def ws_room(incident_id: str, websocket: WebSocket):
     except WebSocketDisconnect:
         return
     finally:
-        try:
-            subs = _ROOM_SUBSCRIBERS.get(incident_id) or []
-            if q in subs:
-                subs.remove(q)
-        except Exception:
-            pass
+        INCIDENT_CONVERSATION_RUNTIME.unsubscribe(incident_id, q)
         _announce_staff_left(incident_id, role)
 
 
@@ -950,8 +934,7 @@ async def sse_room(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ):
     _announce_staff_joined(incident_id, role)
-    q: asyncio.Queue = asyncio.Queue()
-    _ROOM_SUBSCRIBERS.setdefault(incident_id, []).append(q)
+    q = INCIDENT_CONVERSATION_RUNTIME.subscribe(incident_id)
 
     async def gen():
         # Snapshot
@@ -974,12 +957,7 @@ async def sse_room(
                 except Exception:
                     await asyncio.sleep(0.25)
         finally:
-            try:
-                subs = _ROOM_SUBSCRIBERS.get(incident_id) or []
-                if q in subs:
-                    subs.remove(q)
-            except Exception:
-                pass
+            INCIDENT_CONVERSATION_RUNTIME.unsubscribe(incident_id, q)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -989,6 +967,7 @@ class IncidentRoomMessageRequest(BaseModel):
     message_id: str | None = Field(default=None, max_length=96)
     role: str | None = None
     event_type: str | None = None
+    message_kind: str | None = None
 
 
 @router.post("/{incident_id}/room/message")
@@ -1001,6 +980,10 @@ def send_message(
     if _incident_room_is_closed(incident_id):
         raise HTTPException(status_code=409, detail="incident_room_closed")
     event_type = str((body.event_type if body else None) or "").strip().lower() or "message"
+    message_kind = str((body.message_kind if body else None) or "advice").strip().lower()
+    allowed_kinds = {"advice", "explanation", "supplier_update", "proposed_substitute", "payment_status", "shipping_status"}
+    if message_kind not in allowed_kinds:
+        raise HTTPException(status_code=400, detail="unsupported_message_kind")
     # Identity is derived from the authenticated server role. The request body cannot impersonate staff.
     actor = role
     msg = str((body.message if body else None) or message or "")
@@ -1030,7 +1013,19 @@ def send_message(
         raise HTTPException(status_code=400, detail="message_required")
     try:
         _announce_staff_joined(incident_id, actor)
-        rec = _append_chat(incident_id, actor, msg.strip(), meta={"actor": actor, "channel": "admin"})
+        rec = _append_chat(
+            incident_id,
+            actor,
+            msg.strip(),
+            meta={
+                "actor": actor,
+                "channel": "admin",
+                "message_kind": message_kind,
+                "commercial_authority": "none",
+                "buyer_confirmation_required": message_kind == "proposed_substitute",
+            },
+            event_type=message_kind,
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="append_failed")
     return {
@@ -1057,7 +1052,27 @@ def issue_staff_token(incident_id: str, role: str = Depends(require_role([ROLE_M
         raise
     except Exception:
         pass
-    return {"ok": True, **_issue_staff_token(incident_id), "staff_identity": server_actor_identity(role)}
+    return {
+        "ok": True,
+        **_issue_staff_token(incident_id),
+        "staff_identity": server_actor_identity(role),
+        "presence": INCIDENT_CONVERSATION_RUNTIME.active_staff(incident_id),
+        "event_distribution": INCIDENT_CONVERSATION_RUNTIME.distribution_status,
+    }
+
+
+@router.get("/{incident_id}/room/presence")
+def incident_room_presence(
+    incident_id: str,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    _ = role
+    return {
+        "incident_id": incident_id,
+        "staff": INCIDENT_CONVERSATION_RUNTIME.active_staff(incident_id),
+        "event_distribution": INCIDENT_CONVERSATION_RUNTIME.distribution_status,
+        "cross_worker_events": "not_enrolled",
+    }
 
 
 class IncidentAssignRequest(BaseModel):
@@ -1899,6 +1914,7 @@ class PublicChatMessage(BaseModel):
     message_id: str | None = Field(default=None, max_length=96)
     role: str | None = None
     event_type: str | None = None
+    message_kind: str | None = None
 
 
 @public_router.get("/{incident_id}/room/stream")
@@ -1915,8 +1931,7 @@ async def public_sse_room(
     if stream_role in (ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER, "staff"):
         _announce_staff_joined(incident_id, stream_role)
 
-    q: asyncio.Queue = asyncio.Queue()
-    _ROOM_SUBSCRIBERS.setdefault(incident_id, []).append(q)
+    q = INCIDENT_CONVERSATION_RUNTIME.subscribe(incident_id)
 
     async def gen():
         # Snapshot
@@ -1939,12 +1954,7 @@ async def public_sse_room(
                 except Exception:
                     await asyncio.sleep(0.25)
         finally:
-            try:
-                subs = _ROOM_SUBSCRIBERS.get(incident_id) or []
-                if q in subs:
-                    subs.remove(q)
-            except Exception:
-                pass
+            INCIDENT_CONVERSATION_RUNTIME.unsubscribe(incident_id, q)
             if stream_role in (ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER, "staff"):
                 _announce_staff_left(incident_id, stream_role)
 

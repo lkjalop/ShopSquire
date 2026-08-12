@@ -1,6 +1,13 @@
 from src.app.services.incident_conversation_identity import build_conversation_event, server_actor_identity
 
 
+def test_staff_subject_produces_distinct_server_owned_actor_ids():
+    first = server_actor_identity("merchant", subject="alice@example.com")
+    second = server_actor_identity("merchant", subject="bob@example.com")
+    assert first["actor_id"] != second["actor_id"]
+    assert first["identity_source"] == "authenticated_server_role"
+
+
 def test_staff_identity_is_server_derived(monkeypatch):
     monkeypatch.setenv("INCIDENT_STAFF_MERCHANT_DISPLAY_NAME", "Alex Chen")
     monkeypatch.setenv("INCIDENT_STAFF_MERCHANT_TITLE", "Procurement specialist")

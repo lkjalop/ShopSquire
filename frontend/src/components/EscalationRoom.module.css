@@ -126,6 +126,8 @@
 .remoteBubble { background: #eef3f8; color: #152a43; border-bottom-left-radius: 4px; }
 .actorLine { display: flex; gap: 6px; align-items: baseline; font-size: 12px; margin-bottom: 3px; }
 .actorLine span { font-size: 10px; opacity: .72; }
+.messageKind { font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #9f3f13; margin-bottom: 4px; }
+.confirmationNotice { margin-top: 7px; padding-top: 6px; border-top: 1px solid #cbd5e1; font-size: 11px; font-weight: 600; color: #7c2d12; }
 .ownBubble .meta { color: rgba(255,255,255,.78); }
 .presenceEvent { text-align: center; color: #64748b; font-size: 11px; margin: 8px 0; }
 .meta { font-size: 11px; color: #6b7280; }
