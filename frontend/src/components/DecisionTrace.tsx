@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { evidenceRows } from '../lib/evidenceDisplay';
 import styles from './DecisionTrace.module.css';
 import MarketIntelligencePanel from './decision-trace/MarketIntelligencePanel';
+import RawTracePanel from './decision-trace/RawTracePanel';
 import SemanticResolutionTrace from './SemanticResolutionTrace';
 import WorkloadResearchTrace from './WorkloadResearchTrace';
 import { procurementDraftPending, procurementGateDisplay } from '../lib/procurementGateDisplay';
@@ -4947,25 +4948,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
 
               {activeTab === 'raw' && (trace || events.length > 0) && (
-                <>
-                  {explainReplayLoading && <div className={styles.muted}>Loading replay payload...</div>}
-                  {replay && (
-                    <>
-                      <div className={styles.sectionTitle}>Replay</div>
-                      <pre className={styles.rawJson}>{JSON.stringify(replay, null, 2)}</pre>
-                    </>
-                  )}
-                  <div className={styles.sectionTitle}>Trace Payload</div>
-                  <pre className={styles.rawJson}>{JSON.stringify(
-                    trace || {
-                      trace_id: traceIdText,
-                      snapshot_status: 'unavailable',
-                      retained_normalized_events: events,
-                    },
-                    null,
-                    2,
-                  )}</pre>
-                </>
+                <RawTracePanel
+                  trace={trace}
+                  events={events}
+                  traceId={traceIdText}
+                  replay={replay}
+                  replayLoading={explainReplayLoading}
+                  classNames={styles}
+                />
               )}
               </div>
 
