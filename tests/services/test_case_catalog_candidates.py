@@ -36,7 +36,13 @@ def test_laptop_storefront_context_bounds_shared_shelf_to_portable_configuration
         for shelf in projection.shelves if shelf.scope_id == "shared"
         for product in [*shelf.initial, *shelf.next_page]
     }
-    assert skus == {"SCORP-126982", "SCORP-125638", "JW-822962"}
+    assert len(candidate_set.configuration_ids) == 10
+    assert len(skus) == 8  # stable top-three plus bounded next-five projection
+    assert skus <= {
+        "SCORP-126982", "SCORP-125638", "JW-822962", "JB-899169",
+        "JB-816759", "JB-840466", "JB-896579", "JB-782503", "JB-840569",
+        "SCORP-126560",
+    }
     assert "SCORP-C07NXPT" not in skus
     assert "JW-818845" not in skus
 
@@ -103,7 +109,7 @@ def test_explicit_laptop_purchase_object_outranks_workload_nouns():
 
     assert candidate_set.status == "eligible"
     assert candidate_set.taxonomy_handle == "el-6-6"
-    assert len(candidate_set.configuration_ids) == 3
+    assert len(candidate_set.configuration_ids) == 10
 
 
 def test_constraint_word_does_not_override_storefront_purchase_category():

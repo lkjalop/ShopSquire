@@ -56,6 +56,9 @@ class ReviewedConfiguration(BaseModel):
     source_url: str
     official_source_url: str | None = None
     official_identity_scope: Literal["exact_configuration", "family_only", "unavailable"] = "unavailable"
+    reviewed_at: datetime = Field(
+        default_factory=lambda: datetime(2026, 8, 8, tzinfo=timezone.utc),
+    )
     price_cents: int
     form_factor: str
     mobility: str
@@ -77,6 +80,7 @@ class ReviewedConfiguration(BaseModel):
 
 SOURCE_DATE = datetime(2026, 8, 8, tzinfo=timezone.utc)
 OEM_REVIEW_DATE = datetime(2026, 8, 11, tzinfo=timezone.utc)
+PORTABLE_REVIEW_DATE = datetime(2026, 8, 12, tzinfo=timezone.utc)
 
 
 REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
@@ -147,6 +151,125 @@ REVIEWED_CONFIGURATIONS: tuple[ReviewedConfiguration, ...] = (
         availability=[SeedAvailability(location_id="australia_delivery", status="available", lead_time_min_days=2, lead_time_max_days=4)],
     ),
     ReviewedConfiguration(
+        sku="JB-899169", title="Lenovo LOQ 15.6-inch RTX 3050 Gaming Laptop",
+        manufacturer="Lenovo", mpn="83S000FKAU", retailer_sku="899169",
+        retailer="JB Hi-Fi", source_url="https://www.jbhifi.com.au/products/lenovo-loq-15-6-full-hd-144hz-gaming-laptop-amd-ryzen-7-170geforce-rtx-3050",
+        reviewed_at=PORTABLE_REVIEW_DATE,
+        price_cents=169_900, form_factor="laptop", mobility="mobile",
+        device_class="gaming_laptop", os_edition="Windows 11 Home",
+        gpu_class="consumer_geforce", gpu_vram_gb=6, gpu_tgp_w=65,
+        ram_installed_gb=16, storage_gb=512, warranty_type="manufacturer",
+        warranty_years=1,
+        claims=[
+            SeedClaim(attribute_key="cpu_cores", value=8, claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=6, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="gpu_tgp_w", value=65, unit="W", claim_class="attested"),
+            SeedClaim(attribute_key="ethernet_port", value=True, claim_class="attested"),
+        ],
+        availability=[SeedAvailability(location_id="australia_delivery", status="available")],
+    ),
+    ReviewedConfiguration(
+        sku="JB-816759", title="Lenovo Legion 5i 15.1-inch RTX 5070 Gaming Laptop",
+        manufacturer="Lenovo", mpn="83LY001SAU", retailer_sku="816759",
+        retailer="JB Hi-Fi", source_url="https://www.jbhifi.com.au/products/lenovo-legion-5i-15-1-wqxga-165hz-oled-gaming-laptop-intel-core-i9geforce-rtx-5070",
+        reviewed_at=PORTABLE_REVIEW_DATE,
+        price_cents=389_900, form_factor="laptop", mobility="mobile",
+        device_class="gaming_laptop", os_edition="Windows 11 Home",
+        gpu_class="consumer_geforce", gpu_vram_gb=8,
+        ram_installed_gb=32, storage_gb=1000, warranty_type="manufacturer",
+        warranty_years=1,
+        claims=[
+            SeedClaim(attribute_key="cpu_cores", value=24, claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=8, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ethernet_port", value=True, claim_class="attested"),
+        ],
+        availability=[SeedAvailability(location_id="australia_delivery", status="available")],
+    ),
+    ReviewedConfiguration(
+        sku="JB-840466", title="Lenovo Legion 9i 18-inch RTX 5080 Gaming Laptop",
+        manufacturer="Lenovo", mpn="83EY004HAU", retailer_sku="840466",
+        retailer="JB Hi-Fi", source_url="https://www.jbhifi.com.au/products/lenovo-legion-9i-18-wquxga-240hz-gaming-laptop-intel-core-ultra-9geforce-rtx-5080",
+        reviewed_at=PORTABLE_REVIEW_DATE,
+        price_cents=879_900, form_factor="laptop", mobility="mobile_limited",
+        device_class="consumer_gaming_flagship", os_edition="Windows 11 Home",
+        gpu_class="consumer_geforce", gpu_vram_gb=16,
+        ram_installed_gb=64, storage_gb=2000, warranty_type="manufacturer",
+        warranty_years=1,
+        claims=[
+            SeedClaim(attribute_key="cpu_cores", value=24, claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=16, unit="GB", claim_class="attested"),
+        ],
+        availability=[SeedAvailability(location_id="australia_delivery", status="sold_out", quantity=0)],
+    ),
+    ReviewedConfiguration(
+        sku="JB-896579", title="MSI Crosshair 16 HX RTX 5070 Gaming Laptop",
+        manufacturer="MSI", mpn="6808864", retailer_sku="896579",
+        retailer="JB Hi-Fi", source_url="https://www.jbhifi.com.au/products/msi-crosshair-16-hx-16-wqxga-240hz-gaming-laptop-intel-core-i9-14900hxnvidia-geforce-rtx-5070",
+        reviewed_at=PORTABLE_REVIEW_DATE,
+        price_cents=459_900, form_factor="laptop", mobility="mobile_limited",
+        device_class="gaming_laptop", os_edition="Windows 11 Home",
+        gpu_class="consumer_geforce", gpu_vram_gb=8,
+        ram_installed_gb=32, storage_gb=1000, warranty_type="manufacturer",
+        warranty_years=1,
+        claims=[
+            SeedClaim(attribute_key="cpu_cores", value=24, claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=8, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ethernet_port", value=True, claim_class="attested"),
+        ],
+        availability=[SeedAvailability(location_id="australia_delivery", status="available")],
+    ),
+    ReviewedConfiguration(
+        sku="JB-782503", title="MSI Thin A15 RTX 3050 Gaming Laptop",
+        manufacturer="MSI", mpn="6267871", retailer_sku="782503",
+        retailer="JB Hi-Fi", source_url="https://www.jbhifi.com.au/products/msi-thin-a15-15-fhd-144hz-gaming-laptop-ryzen-7-geforce-rtx-3050",
+        reviewed_at=PORTABLE_REVIEW_DATE,
+        price_cents=149_800, form_factor="laptop", mobility="mobile",
+        device_class="gaming_laptop", os_edition="Windows 11 Home",
+        gpu_class="consumer_geforce", gpu_vram_gb=4,
+        ram_installed_gb=8, storage_gb=512, warranty_type="manufacturer",
+        warranty_years=1,
+        claims=[
+            SeedClaim(attribute_key="cpu_cores", value=8, claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=4, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ethernet_port", value=True, claim_class="attested"),
+        ],
+        availability=[SeedAvailability(location_id="australia_delivery", status="sold_out", quantity=0)],
+    ),
+    ReviewedConfiguration(
+        sku="JB-840569", title="HP OMEN 15.3-inch RTX 5070 Gaming Laptop",
+        manufacturer="HP", mpn="DB1M5PA#ABG", retailer_sku="840569",
+        retailer="JB Hi-Fi", source_url="https://www.jbhifi.com.au/products/hyperx-omen-15-3-wqxga-gaming-laptop-intel-core-i7geforce-rtx-5070",
+        reviewed_at=PORTABLE_REVIEW_DATE,
+        price_cents=479_900, form_factor="laptop", mobility="mobile_limited",
+        device_class="gaming_laptop", os_edition="Windows 11 Home",
+        gpu_class="consumer_geforce", gpu_vram_gb=8,
+        ram_installed_gb=24, storage_gb=1000, warranty_type="manufacturer",
+        warranty_years=1,
+        claims=[
+            SeedClaim(attribute_key="cpu_cores", value=16, claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=8, unit="GB", claim_class="attested"),
+            SeedClaim(attribute_key="ethernet_port", value=True, claim_class="attested"),
+        ],
+        availability=[SeedAvailability(location_id="australia_delivery", status="available")],
+    ),
+    ReviewedConfiguration(
+        sku="SCORP-126560", title="Gigabyte AORUS MASTER 16 Gen 2 RTX 5090 Laptop",
+        manufacturer="Gigabyte", mpn="AORUS MASTER 16 6ZJM6AUE64SH",
+        retailer_sku="126560", retailer="Scorptec",
+        source_url="https://www.scorptec.com.au/product/laptops-and-notebooks/gaming-laptops/126560-aorus-master-16-6zjm6aue64sh",
+        reviewed_at=PORTABLE_REVIEW_DATE,
+        price_cents=899_900, form_factor="laptop", mobility="mobile_limited",
+        device_class="consumer_gaming_flagship", os_edition="Windows 11 Home",
+        gpu_class="consumer_geforce", gpu_vram_gb=24,
+        ram_installed_gb=32, storage_gb=1000, warranty_type="manufacturer",
+        warranty_years=1,
+        claims=[
+            SeedClaim(attribute_key="cpu_cores", value=16, claim_class="attested"),
+            SeedClaim(attribute_key="gpu_vram_gb", value=24, unit="GB", claim_class="attested"),
+        ],
+        availability=[SeedAvailability(location_id="australia_delivery", status="in_stock")],
+    ),
+    ReviewedConfiguration(
         sku="SCORP-C07NXPT", title="HP Z2 Mini G1a Workstation",
         manufacturer="HP", mpn="C07NXPT", retailer="Scorptec",
         source_url="https://www.scorptec.com.au/product/branded-systems/workstation/123163-c07nxpt",
@@ -200,6 +323,27 @@ PORTFOLIO_DEMO_AVAILABILITY: dict[str, tuple[SeedAvailability, ...]] = {
     ),
     "JW-822962": (
         SeedAvailability(location_id="portfolio_network", status="available", quantity=2),
+    ),
+    "JB-899169": (
+        SeedAvailability(location_id="portfolio_network", status="in_stock", quantity=12),
+    ),
+    "JB-816759": (
+        SeedAvailability(location_id="portfolio_network", status="in_stock", quantity=7),
+    ),
+    "JB-840466": (
+        SeedAvailability(location_id="portfolio_network", status="sold_out", quantity=0),
+    ),
+    "JB-896579": (
+        SeedAvailability(location_id="portfolio_network", status="in_stock", quantity=5),
+    ),
+    "JB-782503": (
+        SeedAvailability(location_id="portfolio_network", status="sold_out", quantity=0),
+    ),
+    "JB-840569": (
+        SeedAvailability(location_id="portfolio_network", status="in_stock", quantity=4),
+    ),
+    "SCORP-126560": (
+        SeedAvailability(location_id="portfolio_network", status="in_stock", quantity=2),
     ),
     "SCORP-C07NXPT": (
         SeedAvailability(location_id="portfolio_network", status="at_supplier", quantity=0),
@@ -256,7 +400,7 @@ def _ensure_configuration_observations(
             evidence_status="observed",
             source_id=item.retailer,
             source_record_id=f"{item.source_url}#spec-{attribute}",
-            observed_at=SOURCE_DATE,
+            observed_at=item.reviewed_at,
         ))
 
 
@@ -304,7 +448,7 @@ def _ensure_availability_observations(
         )).scalars()
     }
     observations = [
-        (f"{item.source_url}#availability-{index}", availability, SOURCE_DATE)
+        (f"{item.source_url}#availability-{index}", availability, item.reviewed_at)
         for index, availability in enumerate(item.availability)
     ]
     if inventory_profile == "realistic":
@@ -334,7 +478,7 @@ def _ensure_availability_observations(
 def configuration_hash(item: ReviewedConfiguration) -> str:
     material = item.model_dump(exclude={
         "claims", "availability", "official_claims", "official_source_url",
-        "official_identity_scope",
+        "official_identity_scope", "reviewed_at",
     })
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
 
@@ -381,11 +525,11 @@ def ingest_reviewed_configurations(
             continue
         config = ProductConfiguration(
             tenant_id=tenant_id, product_id=product.id, configuration_hash=digest,
-            specification_observed_at=SOURCE_DATE, price_observed_at=SOURCE_DATE,
-            availability_observed_at=SOURCE_DATE, currency="AUD", active=True,
+            specification_observed_at=item.reviewed_at, price_observed_at=item.reviewed_at,
+            availability_observed_at=item.reviewed_at, currency="AUD", active=True,
             **item.model_dump(exclude={
                 "claims", "availability", "official_claims", "official_source_url",
-                "official_identity_scope",
+                "official_identity_scope", "reviewed_at",
             }),
         )
         db.add(config)
@@ -397,7 +541,7 @@ def ingest_reviewed_configurations(
                 claim_class=claim.claim_class, evidence_status=claim.status,
                 conflict_group=claim.conflict_group, source_id=item.retailer,
                 source_record_id=f"{item.source_url}#{index}", source_excerpt=claim.excerpt,
-                observed_at=SOURCE_DATE,
+                observed_at=item.reviewed_at,
             ))
         db.flush()
         _ensure_configuration_observations(db, config, item)

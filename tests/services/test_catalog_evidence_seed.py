@@ -16,7 +16,8 @@ def test_reviewed_fixture_preserves_identity_conflicts_and_form_factor_specific_
         second = ingest_reviewed_configurations(db, inventory_profile="realistic")
         assert first == second
         configs = db.execute(select(ProductConfiguration)).scalars().all()
-        assert len(configs) == 5
+        assert len(configs) == 12
+        assert sum(row.form_factor == "laptop" for row in configs) == 10
         assert all(row.mpn and row.configuration_hash and row.product_id for row in configs)
         products = db.execute(select(Product)).scalars().all()
         assert {row.sku for row in products} == {row.sku for row in configs}
@@ -75,6 +76,19 @@ def test_reviewed_fixture_preserves_identity_conflicts_and_form_factor_specific_
             "SCORP-126982": 3,
             "SCORP-125638": 0,
             "JW-822962": 2,
+            "JB-899169": 12,
+            "JB-816759": 7,
+            "JB-840466": 0,
+            "JB-896579": 5,
+            "JB-782503": 0,
+            "JB-840569": 4,
+            "SCORP-126560": 2,
             "SCORP-C07NXPT": 0,
             "JW-818845": 0,
         }
+
+        reviewed = next(row for row in configs if row.sku == "JB-899169")
+        assert reviewed.mpn == "83S000FKAU"
+        assert reviewed.retailer_sku == "899169"
+        assert reviewed.specification_observed_at.date().isoformat() == "2026-08-12"
+        assert reviewed.price_observed_at.date().isoformat() == "2026-08-12"
