@@ -29,8 +29,6 @@ from src.app.services.fulfillment_choice_reducer import reduce_fulfillment_choic
 from src.app.services.decision_log import log_trace_event
 from src.app.services.commerce_feature_readiness import (
     external_research_runtime_observation,
-    external_search_readiness,
-    record_external_research_runtime_observation,
 )
 from src.app.services.requirement_claim_reconciliation import reconcile_requirement_claims
 
@@ -1237,17 +1235,9 @@ def research_shopping_case(
         )
         db.add(case)
         db.flush()
-    from src.app.services.case_research_plan import (
-        approved_sources_for_plan, plan_hypothesis_labels,
-    )
-    from src.app.services.official_workload_research import (
-        DEFAULT_OFFICIAL_EVIDENCE_CACHE, ranking_delta, research_official_sources,
-    )
+    from src.app.services.case_research_plan import approved_sources_for_plan
 
     approved_sources = approved_sources_for_plan(plan)
-    from src.app.services.shopping_case_research_contract import (
-        project_research_execution_contract,
-    )
 
     if plan.publisher_status == "unresolved":
         from src.app.services.shopping_case_open_world_research import (
@@ -1280,248 +1270,31 @@ def research_shopping_case(
                 ),
                 "readiness": exc.readiness,
             }) from exc
-    if not approved_sources:
-        raise HTTPException(status_code=409, detail={
-            "code": "publisher_policy_review_required",
-            "message": "Applicable publisher sources exist, but none is approved for this tenant.",
-            "source_candidate_ids": plan.source_candidate_ids,
-        })
-    invalid_source_policies = [
-        str(source.get("source_id") or "unknown")
-        for source in approved_sources
-        if (
-            source.get("review_status") != "approved"
-            or int(source.get("freshness_sla_hours") or 0) <= 0
-            or (source.get("publisher_policy") or {}).get("direct_origin_required") is not True
-        )
-    ]
-    if invalid_source_policies:
-        raise HTTPException(status_code=409, detail={
-            "code": "publisher_policy_or_freshness_not_enrolled",
-            "message": "Applicable sources lack an approved direct-origin policy or freshness SLA.",
-            "source_ids": invalid_source_policies,
-        })
-
-    source_domains = sorted({
-        str(domain).strip().lower()
-        for source in approved_sources
-        for domain in source.get("allowed_domains") or []
-        if str(domain).strip()
-    })
-    readiness = external_search_readiness(
-        allowlist=source_domains,
-        tenant_id=tenant_id,
-        runtime_status=_external_research_runtime_status(),
-    )
-    canonical_direct_ready = all(
-        bool(source.get("canonical_entrypoints")) for source in approved_sources
-    )
-    hard_readiness_errors = {
-        "external_research_disabled",
-        "external_research_tenant_not_enrolled",
-        "discovery_domain_allowlist_not_configured",
-    }
-    if not readiness["effective"] and (
-        readiness.get("error_code") in hard_readiness_errors
-        or not canonical_direct_ready
-    ):
-        code = str(readiness.get("error_code") or "external_research_degraded")
-        messages = {
-            "external_research_disabled": "Approved-source research is disabled by operator policy.",
-            "discovery_endpoint_not_configured": (
-                "The discovery endpoint is not configured. Upload requirements or ask an operator "
-                "to enroll a SearXNG-compatible endpoint."
-            ),
-            "discovery_endpoint_unreachable": (
-                "The configured discovery endpoint was observed as unreachable."
-            ),
-            "discovery_endpoint_degraded": (
-                "The configured discovery endpoint is degraded; no research call was dispatched."
-            ),
-            "discovery_reachability_not_observed": (
-                "Discovery is configured but has no successful reachability observation."
-            ),
-            "external_research_tenant_not_enrolled": (
-                "This tenant is not enrolled for approved-source research."
-            ),
-        }
-        raise HTTPException(
-            status_code=(403 if code == "external_research_tenant_not_enrolled" else 503),
-            detail={
-                "code": code,
-                "message": messages.get(code, readiness.get("reason") or "Research is unavailable."),
-                "readiness": {
-                    key: readiness.get(key) for key in (
-                        "configured", "reachable", "effective", "degraded",
-                        "capability_status", "last_success_at", "last_failure_at",
-                        "last_failure_code",
-                    )
-                },
-            },
-        )
-    search_url = (
-        str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip()
-        if readiness["effective"] else ""
+    from src.app.services.shopping_case_enrolled_research import (
+        EnrolledResearchUnavailable,
+        execute_enrolled_official_research,
     )
 
-    before = project_accepted_catalog(
-        db, accepted_claims=[], desired_outcome=plan.retained_purpose,
-        budget_cents=body.budget_cents, tenant_id=tenant_id,
-        candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
-            db, case_id=case_id, tenant_id=tenant_id,
-        ).configuration_ids,
-    ).model_dump(mode="json")
-    research = research_official_sources(
-        plan.retained_purpose, search_url_template=search_url,
-        sources=list(approved_sources), plan_id=plan.plan_id,
-        hypothesis_ids=body.hypothesis_ids,
-        tenant_id=tenant_id,
-        evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE,
-    )
-    research["discovery_readiness"] = {
-        key: readiness.get(key) for key in (
-            "configured", "reachable", "effective", "degraded", "capability_status",
-            "error_code", "last_discovery_success_at", "last_discovery_result_count",
-        )
-    }
-    research["canonical_direct_ready"] = canonical_direct_ready
-    record_external_research_runtime_observation(research)
-    after_projection = project_accepted_catalog(
-        db, accepted_claims=research["claims"], desired_outcome=plan.retained_purpose,
-        budget_cents=body.budget_cents, tenant_id=tenant_id,
-        candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
-            db, case_id=case_id, tenant_id=tenant_id,
-        ).configuration_ids,
-        hypothesis_labels=plan_hypothesis_labels(plan),
-        hypothesis_claims={
-            hypothesis.hypothesis_id: [
-                claim for claim in research["claims"]
-                if str(claim.get("source_id") or "") in set(hypothesis.source_ids)
-            ]
-            for hypothesis in plan.hypotheses
-        },
-    ).model_dump(mode="json")
-    delta = ranking_delta(before, after_projection)
-    evidence_outcome = str(research.get("evidence_outcome") or (
-        "product_requirements" if research["claims"]
-        else "context_only" if research["context_claims"]
-        else "unresolved"
-    ))
-    evidence_status = (
-        "researched" if evidence_outcome == "product_requirements" else evidence_outcome
-    )
-    research_contract = project_research_execution_contract(
-        plan,
-        requirements_compiled=evidence_outcome == "product_requirements",
-    ).model_dump(mode="json")
-    research["research_plan_id"] = plan.plan_id
-    research["execution_contract"] = research_contract
-    after_projection.update({
-        "evidence_status": evidence_status,
-        "research_delta": delta,
-        "official_claim_count": len(research["claims"]),
-        "context_claim_count": len(research["context_claims"]),
-    })
-    from src.app.services.research_explainability_projection import (
-        project_research_explainability,
-    )
-
-    buyer_receipt, narration_projection = project_research_explainability(
-        purpose=plan.retained_purpose, research=research,
-        shelves=after_projection, delta=delta,
-    )
-    after_projection["research_receipt"] = buyer_receipt.model_dump(mode="json")
-    after_projection["narration_projection"] = narration_projection.model_dump(mode="json")
-    research_execution_mode = str(research.get("execution_mode") or "").strip().lower()
-    provider_accounting = research.get("provider_accounting") or {}
-    if research_execution_mode == "evidence_cache" or (
-        int(provider_accounting.get("cache_hits") or 0) > 0
-        and int(provider_accounting.get("external_calls") or 0) == 0
-    ):
-        research_execution = "governed_evidence_cache_hit"
-    elif research_execution_mode == "live_network" or int(
-        provider_accounting.get("external_calls") or 0
-    ) > 0:
-        research_execution = "live_official_research_completed"
-    elif research_execution_mode == "not_executed":
-        research_execution = "official_research_not_executed"
-    else:
-        research_execution = "governed_official_research_completed"
-    from src.app.services.shopping_case_truth_projection import ShoppingCaseTruthProjection
-
-    exploration = ShoppingCaseTruthProjection.model_validate({
-        "schema_version": "ambiguity-exploration-v1",
-        "case_id": case_id, "trace_id": case_id.removeprefix("sc-"),
-        "retained_purpose": plan.retained_purpose,
-        "status": evidence_status,
-        "interpretations": [row.model_dump(mode="json") for row in plan.hypotheses],
-        "next_question": {"id": "research_scope", "text": plan.next_question},
-        "execution": research_execution,
-        "evidence": (
-            "scoped_product_requirements_compiled"
-            if evidence_outcome == "product_requirements"
-            else "authoritative_context_only"
-            if evidence_outcome == "context_only"
-            else "no_accepted_claims"
-        ),
-        "decision": (
-            "conditional_fit_allowed"
-            if evidence_outcome == "product_requirements"
-            else "provisional_exploration_only"
-        ),
-        "cart_authority": "none",
-        "provider_accounting": research["provider_accounting"],
-        "discovery_readiness": research["discovery_readiness"],
-        "research_plan_id": plan.plan_id,
-        "ambiguity_objects": [row.model_dump(mode="json") for row in plan.ambiguities],
-        "research_obligations": [
-            {
-                **row.model_dump(mode="json"),
-                "status": (
-                    "resolved" if row.obligation_id == "official_requirements"
-                    else "blocked" if row.obligation_id == "exact_product_identity"
-                    and evidence_outcome != "product_requirements"
-                    else row.status
-                ),
-            }
-            for row in plan.obligations
-        ],
-        "source_candidate_ids": list(plan.source_candidate_ids),
-    }).model_dump(mode="json")
-    result = {
-        "schema_version": "shopping-case-research-v1", "case_id": case_id,
-        "status": "research_completed", "retained_purpose": plan.retained_purpose,
-        "research_plan": plan.model_dump(mode="json"),
-        "research_contract": research_contract,
-        "research": research, "product_shelves": after_projection,
-        "ambiguity_exploration": exploration,
-        "evidence_outcome": evidence_outcome,
-        "research_delta": delta, "cart_mutation": "not_authorized",
-        "supplier_send": "not_authorized", "trace_id": case_id.removeprefix("sc-"),
-    }
-    case.retained_purpose = plan.retained_purpose
-    case.updated_at = _now()
-    db.commit()
     try:
-        log_trace_event(
-            trace_id=result["trace_id"], event_type="official_research_rerank_completed",
-            source_type="stage", source_id="Governed_Official_Research",
-            target_type="shopping_case", target_id=case_id,
-            payload={
-                "case_id": case_id, "status": result["status"],
-                "provider_accounting": research["provider_accounting"],
-                "receipts": research["receipts"], "research_delta": delta,
-                "evidence_ladder": research.get("evidence_ladder", []),
-                "source_execution": research.get("source_execution", []),
-                "official_claims": research["claims"],
-                "context_claims": research["context_claims"],
-                "evidence_outcome": evidence_outcome,
-                "cart_authority": "none", "supplier_authority": "none",
-            },
+        return execute_enrolled_official_research(
+            db,
+            plan=plan,
+            approved_sources=list(approved_sources),
+            tenant_id=tenant_id,
+            case_id=case_id,
+            case=case,
+            hypothesis_ids=body.hypothesis_ids,
+            candidate_configuration_ids=_case_catalog_candidate_set_from_trace(
+                db, case_id=case_id, tenant_id=tenant_id,
+            ).configuration_ids,
+            budget_cents=body.budget_cents,
+            runtime_status=_external_research_runtime_status(),
+            configured_search_url=str(
+                os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or ""
+            ).strip(),
         )
-    except Exception:
-        pass
-    return result
+    except EnrolledResearchUnavailable as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.post("/{case_id}/cart-proposals")
