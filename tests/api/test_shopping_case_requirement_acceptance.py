@@ -219,6 +219,12 @@ def test_open_world_authorization_runs_discovery_but_not_origin_fetch_or_claims(
 def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(monkeypatch):
     client = _client()
     from src.app.services.case_research_plan import build_case_research_plan
+    from src.app.services.commerce_feature_readiness import (
+        external_research_runtime_observation,
+        reset_external_research_runtime_observation,
+    )
+
+    reset_external_research_runtime_observation()
 
     plan = build_case_research_plan(
         "vendor-certified novel multiphysics solver", allow_open_world=True,
@@ -316,6 +322,9 @@ def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(
     assert result["qualification_authority"] == "none"
     assert result["claims"][0]["authority_status"] == "verified_case_origin"
     assert result["claims"][0]["acceptance_status"] == "pending_buyer_review"
+    runtime = external_research_runtime_observation()
+    assert runtime["last_official_fetch_success_at"]
+    assert runtime["last_claim_compilation_count"] == 1
     proposal = result["buyer_requirement_proposal"]
 
     accepted = client.post(

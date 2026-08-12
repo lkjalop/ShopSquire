@@ -227,6 +227,11 @@ def execute_case_candidate_research(
         search_url_template="", sources=[source], tenant_id=tenant_id,
         evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE, total_timeout_s=12.0,
     )
+    from src.app.services.commerce_feature_readiness import (
+        record_external_research_runtime_observation,
+    )
+
+    record_external_research_runtime_observation(research)
     claims = case_review_claims(research.get("claims") or [], candidate=approved)
     proposal: RequirementProposal | None = None
     if claims:
