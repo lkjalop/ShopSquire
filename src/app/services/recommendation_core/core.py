@@ -107,7 +107,13 @@ def _vertical_root(node_handle: Optional[str]) -> Optional[str]:
     return None
 
 
-def _run_stage(resp: CoreResponse, name: str, fn: Callable[[], None]) -> None:
+def _run_stage(
+    resp: CoreResponse,
+    name: str,
+    fn: Callable[[], None],
+    *,
+    cancellation: Any = None,
+) -> None:
     """Run one guarded post-retrieval stage (P0.5): time it, record a telemetry breadcrumb, and
     swallow-but-log any failure — a stage failure must never break the turn (the products already
     stand on their own). won_message is inferred from whether the message-priority slot advanced,
@@ -116,8 +122,15 @@ def _run_stage(resp: CoreResponse, name: str, fn: Callable[[], None]) -> None:
     prio_before = resp._msg_priority
     status = "ok"
     try:
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
         fn()
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
     except Exception as exc:
+        from src.app.services.recommendation_core.cancellation import RecommendationCancelled
+        if isinstance(exc, RecommendationCancelled):
+            raise
         status = "error"
         logger.warning("%s stage skipped: %s", name, repr(exc)[:120])
     resp.record_stage(name, status=status,
@@ -1412,18 +1425,25 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     #   complement-offer (1d.4) — declared complement → bundle-upsell if stocked, else source-it RFQ.
     #   bulk-economics (1f)  — 'N units, $T total' → ÷units viability + tradeoff menu.
     _run_stage(resp, "capability_budget",
-               lambda: _apply_capability_budget(db, envelope, decision, resp, limit))
-    _run_stage(resp, "shelf", lambda: _build_shelf(db, envelope, decision, resp, limit))
+               lambda: _apply_capability_budget(db, envelope, decision, resp, limit),
+               cancellation=envelope.cancellation)
+    _run_stage(resp, "shelf", lambda: _build_shelf(db, envelope, decision, resp, limit),
+               cancellation=envelope.cancellation)
     _run_stage(resp, "variant_clarify",
-               lambda: _maybe_variant_clarify(envelope, decision, resp))
+               lambda: _maybe_variant_clarify(envelope, decision, resp),
+               cancellation=envelope.cancellation)
     _run_stage(resp, "complement_offer",
-               lambda: _maybe_complement_offer(db, envelope, decision, resp))
+               lambda: _maybe_complement_offer(db, envelope, decision, resp),
+               cancellation=envelope.cancellation)
     _run_stage(resp, "bulk_economics",
-               lambda: _maybe_bulk_economics(db, envelope, decision, resp))
+               lambda: _maybe_bulk_economics(db, envelope, decision, resp),
+               cancellation=envelope.cancellation)
     _run_stage(resp, "fulfillment_preview",
-               lambda: _maybe_fulfillment_preview(envelope, decision, resp))
+               lambda: _maybe_fulfillment_preview(envelope, decision, resp),
+               cancellation=envelope.cancellation)
     _run_stage(resp, "secondary_explanation",
-               lambda: _apply_secondary_explanation(db, envelope, decision, resp))
+               lambda: _apply_secondary_explanation(db, envelope, decision, resp),
+               cancellation=envelope.cancellation)
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
