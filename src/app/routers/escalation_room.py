@@ -1024,6 +1024,12 @@ class IncidentRoomMessageRequest(BaseModel):
     role: str | None = None
     event_type: str | None = None
     message_kind: str | None = None
+    buyer_uid: str | None = None
+    source_sku: str | None = None
+    replacement_sku: str | None = None
+    quantity: int | None = Field(default=None, ge=1, le=500)
+    supplier_provenance: str | None = Field(default=None, max_length=500)
+    delivery_consequence: str | None = Field(default=None, max_length=500)
 
 
 @router.post("/{incident_id}/room/message")
@@ -1068,6 +1074,27 @@ def send_message(
     if not msg.strip():
         raise HTTPException(status_code=400, detail="message_required")
     try:
+        substitute_plan = None
+        if message_kind == "proposed_substitute":
+            from src.app.platform.tenant_context import current_tenant_id
+            from src.app.services.human_substitute_proposal import HumanSubstituteRequest, propose_human_substitute
+
+            try:
+                substitute_plan = propose_human_substitute(
+                    tenant_id=current_tenant_id(),
+                    incident_id=incident_id,
+                    trace_id=_incident_trace_id(incident_id),
+                    request=HumanSubstituteRequest(
+                        buyer_uid=str((body.buyer_uid if body else None) or ""),
+                        source_sku=str((body.source_sku if body else None) or ""),
+                        replacement_sku=str((body.replacement_sku if body else None) or ""),
+                        quantity=int((body.quantity if body else None) or 0),
+                        supplier_provenance=str((body.supplier_provenance if body else None) or ""),
+                        delivery_consequence=str((body.delivery_consequence if body else None) or ""),
+                    ),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         _announce_staff_joined(incident_id, actor)
         rec = _append_chat(
             incident_id,
@@ -1079,6 +1106,7 @@ def send_message(
                 "message_kind": message_kind,
                 "commercial_authority": "none",
                 "buyer_confirmation_required": message_kind == "proposed_substitute",
+                "cart_plan": substitute_plan,
             },
             event_type=message_kind,
         )
@@ -1092,6 +1120,8 @@ def send_message(
                     "buyer_confirmation_required": message_kind == "proposed_substitute",
                 },
             )
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=500, detail="append_failed")
     return {
@@ -1100,6 +1130,7 @@ def send_message(
         "message_id": rec["event_id"],
         "delivery_status": rec["delivery_status"],
         "actor": rec["actor"],
+        "cart_plan": substitute_plan,
     }
 
 

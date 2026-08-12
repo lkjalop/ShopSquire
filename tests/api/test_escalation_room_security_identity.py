@@ -83,10 +83,23 @@ def test_html_is_persisted_as_plain_message_data(monkeypatch, tmp_path):
 def test_human_substitute_message_is_advisory_and_requires_buyer_confirmation(monkeypatch, tmp_path):
     monkeypatch.setattr(escalation_room, "_CHAT_DIR", tmp_path)
     escalation_room.INCIDENT_CONVERSATION_RUNTIME.local_presence.clear()
+    monkeypatch.setattr(
+        "src.app.services.human_substitute_proposal.propose_human_substitute",
+        lambda **_kwargs: {
+            "plan_id": "cmp-human-1",
+            "plan": {"ops": [{"action": "replace_item", "target_skus": ["MODEL-A"], "replacement_sku": "MODEL-B", "quantity": 30}]},
+            "buyer_confirmation_required": True,
+            "commercial_authority": "none",
+        },
+    )
     client = TestClient(create_app(), headers=default_headers())
     response = client.post(
         "/api/v1/admin/incidents/inc-substitute/room/message",
-        json={"message": "Supplier offered MODEL-B.", "message_kind": "proposed_substitute"},
+        json={
+            "message": "Supplier offered MODEL-B.", "message_kind": "proposed_substitute",
+            "buyer_uid": "buyer-1", "source_sku": "MODEL-A", "replacement_sku": "MODEL-B",
+            "quantity": 30, "supplier_provenance": "fixture offer", "delivery_consequence": "30 now",
+        },
     )
     assert response.status_code == 200
     records = [json.loads(line) for line in (tmp_path / "inc-substitute.ndjson").read_text().splitlines()]
@@ -94,3 +107,26 @@ def test_human_substitute_message_is_advisory_and_requires_buyer_confirmation(mo
     assert proposal["event_type"] == "proposed_substitute"
     assert proposal["meta"]["commercial_authority"] == "none"
     assert proposal["meta"]["buyer_confirmation_required"] is True
+    assert proposal["meta"]["cart_plan"]["plan_id"] == "cmp-human-1"
+
+
+def test_invalid_human_substitute_returns_typed_error_without_posting_message(monkeypatch, tmp_path):
+    monkeypatch.setattr(escalation_room, "_CHAT_DIR", tmp_path)
+    monkeypatch.setattr(
+        "src.app.services.human_substitute_proposal.propose_human_substitute",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("source_sku_not_in_cart")),
+    )
+    client = TestClient(create_app(), headers=default_headers())
+
+    response = client.post(
+        "/api/v1/admin/incidents/inc-invalid-substitute/room/message",
+        json={
+            "message": "Use MODEL-B.", "message_kind": "proposed_substitute",
+            "buyer_uid": "buyer-1", "source_sku": "MISSING", "replacement_sku": "MODEL-B",
+            "quantity": 1, "supplier_provenance": "fixture offer", "delivery_consequence": "available now",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "source_sku_not_in_cart"
+    assert not (tmp_path / "inc-invalid-substitute.ndjson").exists()

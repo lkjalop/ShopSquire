@@ -4,6 +4,8 @@ import styles from './EscalationRoom.module.css';
 import { apiUrl, safeJson } from '../lib/api';
 import { apiFetch } from '../lib/csrf';
 import { type IncidentRoomEvent as RoomEvent, useIncidentConversation } from '../hooks/useIncidentConversation';
+import { pendingCartPlanFromHumanEvent } from '../lib/humanCartProposal';
+import type { PendingCartPlan } from './PendingCartChangeCard';
 
 function parseError(status: number, body: any, fallback: string) {
   if (body && typeof body === 'object') {
@@ -19,6 +21,7 @@ export default function EscalationRoom({
   embedded = false,
   onClose,
   onResolve,
+  onCartProposal,
 }: {
   incidentId: string;
   buyerToken?: string | null;
@@ -26,6 +29,7 @@ export default function EscalationRoom({
   embedded?: boolean;
   onClose: () => void;
   onResolve?: (incidentId: string) => void;
+  onCartProposal?: (plan: PendingCartPlan) => void;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const OWNER_API_KEY = ((import.meta as any).env?.VITE_OWNER_API_KEY as string | undefined) || API_KEY;
@@ -245,7 +249,21 @@ export default function EscalationRoom({
                     {!own && <div className={styles.messageKind}>{messageKind}</div>}
                     <div>{e.message || ''}</div>
                     {e.meta?.buyer_confirmation_required && (
-                      <div className={styles.confirmationNotice}>Proposal only — review and confirm separately before your cart changes.</div>
+                      <div className={styles.confirmationNotice}>
+                        Proposal only — review and confirm separately before your cart changes.
+                        {pendingCartPlanFromHumanEvent(e.meta?.cart_plan) && onCartProposal && (
+                          <button
+                            type="button"
+                            className={styles.resolveBtn}
+                            onClick={() => {
+                              const plan = pendingCartPlanFromHumanEvent(e.meta?.cart_plan);
+                              if (plan) onCartProposal(plan);
+                            }}
+                          >
+                            Review proposed cart change
+                          </button>
+                        )}
+                      </div>
                     )}
                     <div className={styles.meta}>{e.time || ''}{own && e.delivery_status ? ` · ${e.delivery_status}` : ''}</div>
                   </div>

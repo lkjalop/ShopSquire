@@ -14,6 +14,7 @@ const DecisionTrace = lazy(() => import('./components/DecisionTrace'));
 const EscalationRoom = lazy(() => import('./components/EscalationRoom'));
 import RightPanelExtras from './components/RightPanelExtras';
 import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
+import { useHumanEscalation } from './hooks/useHumanEscalation';
 import AffordabilityResolutionCard, {
   type AffordabilityResolution,
 } from './components/AffordabilityResolutionCard';
@@ -491,9 +492,7 @@ export default function App() {
       return null;
     }
   });
-  const [escalationOpen, setEscalationOpen] = useState(false);
-  const [escalationIncidentId, setEscalationIncidentId] = useState<string | null>(null);
-  const [escalationBuyerToken, setEscalationBuyerToken] = useState<string | null>(null);
+  const humanEscalation = useHumanEscalation();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isThinking, setIsThinking] = useState(false);
   const [streamAcknowledgement, setStreamAcknowledgement] = useState<string | null>(null);
@@ -3692,13 +3691,23 @@ export default function App() {
                     )}
                   </div>
                 ))}
-                {escalationOpen && escalationIncidentId && (
+                {humanEscalation.open && humanEscalation.incidentId && (
                   <Suspense fallback={<div role="status">Connecting to human support...</div>}>
                     <EscalationRoom
                       embedded
-                      incidentId={escalationIncidentId}
-                      buyerToken={escalationBuyerToken}
-                      onClose={() => setEscalationOpen(false)}
+                      incidentId={humanEscalation.incidentId}
+                      buyerToken={humanEscalation.buyerToken}
+                      onClose={humanEscalation.close}
+                      onCartProposal={(plan) => {
+                        setMessages((previous) => previous.some((item) => item.cartConfirm?.planId === plan.planId)
+                          ? previous
+                          : [...previous, {
+                            role: 'assistant',
+                            content: 'A human specialist proposed a substitute. Nothing has changed yet—review and confirm or decline below.',
+                            timestamp: new Date(),
+                            cartConfirm: plan,
+                          }]);
+                      }}
                     />
                   </Suspense>
                 )}
@@ -4255,9 +4264,7 @@ export default function App() {
                           }]);
                           return;
                         }
-                        setEscalationIncidentId(incId);
-                        if (payload?.buyer_token) setEscalationBuyerToken(String(payload.buyer_token)); else setEscalationBuyerToken(null);
-                        setEscalationOpen(true);
+                        humanEscalation.openFromPayload(payload);
                         setMessages(prev => [...prev, { role: 'assistant', content: 'Escalated to human review. Opening escalation room...', timestamp: new Date() }]);
                       }}
                       onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
