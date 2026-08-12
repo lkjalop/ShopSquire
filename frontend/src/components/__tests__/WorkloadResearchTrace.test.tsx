@@ -441,4 +441,23 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.getByTestId('open-world-query-proposal')).toHaveTextContent(/ReadTimeout/i);
     expect(screen.getByTestId('open-world-query-proposal')).toHaveTextContent(/Authority:\s*none/i);
   });
+
+  it('separates origin consistency from independently verified publisher ownership', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[{
+      event_type: 'case_publisher_origin_researched',
+      payload: {
+        provider_accounting: { external_calls: 1, paid_calls: 0 },
+        publisher_origin_verification: {
+          status: 'origin_consistent',
+          ownership_authority: 'not_independently_verified',
+          reasons: ['identity_matches_origin_host', 'document_matches_buyer_subject'],
+        },
+      },
+    }]} />);
+
+    const panel = screen.getByTestId('publisher-origin-verification');
+    expect(panel).toHaveTextContent(/origin consistent/i);
+    expect(panel).toHaveTextContent(/not independently verified/i);
+    expect(panel).toHaveTextContent(/not proof of corporate ownership/i);
+  });
 });

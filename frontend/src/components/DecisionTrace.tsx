@@ -24,6 +24,7 @@ import { shouldShowMissingAnchorReasoning } from '../lib/tracePresentation';
 import ArtifactSecuritySummary from './security/ArtifactSecuritySummary';
 import ProcurementOperationalTrace, { DisruptionEvidenceTrace } from './ProcurementOperationalTrace';
 import ReturnLifecycleTrace from './ReturnLifecycleTrace';
+import ProcurementTracePanel from './decision-trace/ProcurementTracePanel';
 import {
   TRACE_LEAF_LABELS,
   TRACE_SECTIONS,
@@ -4151,33 +4152,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
 
               {activeTab === 'procurement' && (
-                <div className={styles.summaryPane}>
-                  {deliveryFeasibility && (
-                    <div data-testid="trace-delivery-feasibility" className={styles.anchorBlock}>
-                      <div className={styles.sectionTitle}>Deadline Feasibility</div>
-                      <div className={styles.kvRow}>
-                        <span>Requested window</span>
-                        <span>{deliveryFeasibility.delivery_window_days ?? deliveryFeasibility.horizon_days ?? '?'} day(s)</span>
-                      </div>
-                      <div className={styles.kvRow}>
-                        <span>Verdict</span>
-                        <span>{humanizeKey(String(deliveryFeasibility.feasibility || 'unknown'))}</span>
-                      </div>
-                      <div className={styles.kvRow}>
-                        <span>Confirmed by deadline</span>
-                        <span>{deliveryFeasibility.quantity_confirmed_by_deadline ?? 0}</span>
-                      </div>
-                      <div className={styles.kvRow}>
-                        <span>Quantity lacking dated arrival evidence</span>
-                        <span>{deliveryFeasibility.unknown_quantity ?? 'Not recorded'}</span>
-                      </div>
-                      {fulfillmentEscalation && (
-                        <div className={styles.whyNarrative}>
-                          Human review: {humanizeKey(String(fulfillmentEscalation.reason || fulfillmentEscalation.status || 'required'))}. No supplier contact or delivery promise was executed.
-                        </div>
-                      )}
-                    </div>
-                  )}
+                <ProcurementTracePanel
+                  deliveryFeasibility={deliveryFeasibility}
+                  fulfillmentEscalation={fulfillmentEscalation}
+                  classNames={styles}
+                  humanize={humanizeKey}
+                >
                   {(() => {
                     const src = events.length > 0 ? events : displayEvents;
                     const procEvents = traceDomains.procurementEvents.filter((e) => {
@@ -4692,7 +4672,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                       </>
                     );
                   })()}
-                </div>
+                </ProcurementTracePanel>
               )}
 
               {activeTab === 'audit' && (

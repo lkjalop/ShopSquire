@@ -12,6 +12,7 @@ const isOfficialResearchEvent = (event: any) => {
     const eventType = String(value || '').toLowerCase();
     return eventType.includes('official_research_rerank_completed')
       || eventType.includes('buyer_evidence_source_researched')
+      || eventType.includes('case_publisher_origin_researched')
       || eventType.includes('open_world_discovery_completed');
   });
 };
@@ -62,6 +63,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
   const officialResearch = [...events].reverse().find(isOfficialResearchEvent)?.payload || {};
   const queryProposal = officialResearch?.query_proposal || {};
+  const publisherOriginVerification = officialResearch?.publisher_origin_verification || {};
   const provisionalExploration = [...events].reverse().find(isAmbiguityExplorationEvent)?.payload || {};
   const retainedObligations = events
     .filter(isShoppingCaseObligationEvent)
@@ -298,6 +300,26 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
             {queryProposal.reason && <div>Fallback reason: <strong>{words(queryProposal.reason)}</strong></div>}
             <small style={{ color: '#64748b' }}>
               Query expansion may improve discovery vocabulary. It cannot establish requirements, accept a publisher, rank products, contact suppliers, or change the cart.
+            </small>
+          </div>
+        )}
+
+        {Object.keys(publisherOriginVerification).length > 0 && (
+          <div data-testid="publisher-origin-verification" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Publisher-origin verification</strong>
+            <div style={{ marginTop: 5 }}>
+              Document-origin consistency: <strong>{words(publisherOriginVerification.status)}</strong>
+            </div>
+            <div>
+              Corporate ownership authority: <strong>{words(
+                publisherOriginVerification.ownership_authority || 'not independently verified'
+              )}</strong>
+            </div>
+            {Array.isArray(publisherOriginVerification.reasons) && publisherOriginVerification.reasons.length > 0 && (
+              <div>Signals: {publisherOriginVerification.reasons.map(words).join(' | ')}</div>
+            )}
+            <small style={{ color: '#64748b' }}>
+              Consistent page metadata is not proof of corporate ownership. Case-only buyer approval and claim review remain separate.
             </small>
           </div>
         )}
