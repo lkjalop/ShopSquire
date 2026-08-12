@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('../../lib/api', () => ({
   apiUrl: (path: string) => `http://localhost${path}`,
-  safeJson: vi.fn(async () => ({ results: [] })),
+  safeJson: vi.fn(async (response: any) => typeof response?.json === 'function' ? response.json() : ({ results: [] })),
   confirmCartSourcing: vi.fn(),
   commitFulfillmentCase: vi.fn(),
   getSplitOffer: vi.fn(),
@@ -36,10 +36,29 @@ const splitOffer = (quantity: number) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+  vi.stubGlobal('fetch', vi.fn(async (input: any) => {
+    if (String(input).includes('/api/v1/payments/readiness')) {
+      return { ok: true, json: async () => ({ payment: { status: 'demo_only', label: 'Demo only' }, shipping: { status: 'estimated_plan_only', label: 'Estimated plan only' } }) };
+    }
+    return { ok: true };
+  }));
 });
 
 describe('CartPanel sourcing amendments', () => {
+  it('shows honest checkout readiness and hides checkout when payment is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: any) => ({
+      ok: true,
+      json: async () => String(input).includes('/api/v1/payments/readiness')
+        ? { payment: { status: 'unavailable', label: 'Unavailable', reason: 'No payment method is configured.' }, shipping: { status: 'estimated_plan_only', label: 'Estimated plan only' } }
+        : { results: [] },
+    })));
+    (api.getSplitOffer as any).mockResolvedValue(splitOffer(1));
+    render(<CartPanel uid="u1" cart={cart(1)} onRefresh={vi.fn()} onRemove={vi.fn()} onClear={vi.fn()} onAdd={vi.fn()} />);
+
+    expect(await screen.findByTestId('checkout-readiness')).toHaveTextContent('Payment: Unavailable');
+    expect(screen.queryByTestId('cart-checkout')).not.toBeInTheDocument();
+  });
+
   it('uses the recommendation trace as a fresh order identity before the persistent cart id', async () => {
     (api.getSplitOffer as any).mockResolvedValue(splitOffer(20));
     (api.confirmCartSourcing as any).mockResolvedValue({

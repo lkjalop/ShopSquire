@@ -25,6 +25,10 @@ type BundleSavings = {
   approval_id?: string | null;
 };
 type CartState = { cart_id: string; items: CartItem[]; subtotal_cents: number; currency: string; bundle_savings?: BundleSavings };
+type CheckoutReadiness = {
+  payment?: { status?: 'configured' | 'demo_only' | 'unavailable' | string; label?: string; reason?: string };
+  shipping?: { status?: string; label?: string; reason?: string };
+};
 
 // React development StrictMode deliberately replays effects. Share the same
 // in-flight read so that replay does not double model/database work. The entry
@@ -88,6 +92,7 @@ export default function CartPanel({
   const [upsells, setUpsells] = useState<Product[]>([]);
   const [upsellTraceId, setUpsellTraceId] = useState<string | null>(null);
   const [loadingUpsell, setLoadingUpsell] = useState(false);
+  const [checkoutReadiness, setCheckoutReadiness] = useState<CheckoutReadiness | null>(null);
 
   const cartSkus = useMemo(() => (cart?.items || []).map((i) => i.sku).filter(Boolean), [cart]);
   const upsellQuery = useMemo(() => {
@@ -95,6 +100,18 @@ export default function CartPanel({
     if (cartSkus.length === 1) return `Recommend 4 complementary alternatives to ${cartSkus[0]} under similar budget.`;
     return `Recommend 4 complementary alternatives for a cart containing: ${cartSkus.slice(0, 4).join(', ')}.`;
   }, [cartSkus]);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 4000);
+    fetch(apiUrl('/api/v1/payments/readiness'), { credentials: 'include', signal: controller.signal })
+      .then(safeJson)
+      .then((value) => { if (active && value) setCheckoutReadiness(value as CheckoutReadiness); })
+      .catch(() => { if (active) setCheckoutReadiness(null); })
+      .finally(() => window.clearTimeout(timeout));
+    return () => { active = false; controller.abort(); window.clearTimeout(timeout); };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -290,6 +307,7 @@ export default function CartPanel({
     }
   };
   const splitBlocksCheckout = splitHasSplit && !splitConfirmed;
+  const paymentUnavailable = checkoutReadiness?.payment?.status === 'unavailable';
 
   const proceedToCheckout = () => {
     // Persist cart snapshot (+ uid, so checkout can create the REAL order server-side)
@@ -489,6 +507,8 @@ export default function CartPanel({
                               title="Jump to the delivery plan above and confirm it to unlock checkout">
                         ↑ Confirm delivery plan first
                       </button>
+                    : paymentUnavailable
+                    ? null
                     : <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-checkout"
                               disabled={checkingSourcing} onClick={goToCheckout}>
                         {checkingSourcing ? 'Checking stock…' : 'Checkout'}
@@ -496,6 +516,14 @@ export default function CartPanel({
               </div>
             </div>
           </div>
+          {checkoutReadiness && (
+            <div data-testid="checkout-readiness" role="status" style={{ margin: '6px 0 10px', fontSize: 12, color: '#4b5563' }}>
+              Payment: <strong>{checkoutReadiness.payment?.label || 'Not recorded'}</strong>
+              {checkoutReadiness.payment?.reason ? ` — ${checkoutReadiness.payment.reason}` : ''}
+              {' · '}Shipping: <strong>{checkoutReadiness.shipping?.label || 'Not recorded'}</strong>
+              {checkoutReadiness.shipping?.reason ? ` — ${checkoutReadiness.shipping.reason}` : ''}
+            </div>
+          )}
           {sourcingNote && !sourcingNeedsReview && (
             <div data-testid="cart-sourcing-note" role="status"
                  style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #fcd34d',
