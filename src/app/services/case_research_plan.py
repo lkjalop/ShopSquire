@@ -165,11 +165,13 @@ def _normalized_phrase(value: str) -> str:
 
 def _source_phrases(source: Mapping[str, Any]) -> set[str]:
     applicability = source.get("applicability") or {}
+    activation = source.get("activation_policy") or {}
     return {
         phrase
         for phrase in (
             *[_normalized_phrase(item) for item in applicability.get("workloads") or []],
             *[_normalized_phrase(item) for item in source.get("artefact_patterns") or []],
+            *[_normalized_phrase(item) for item in activation.get("provisional_scope_aliases") or []],
         )
         if phrase and phrase not in _GENERIC_ACTIVATION_PHRASES
     }
@@ -199,6 +201,15 @@ def _requires_named_application(source: Mapping[str, Any]) -> bool:
 
 
 def _named_application_hit(source: Mapping[str, Any], normalized_purpose: str) -> bool:
+    activation = source.get("activation_policy") or {}
+    if activation.get("scope_aliases_are_proposal_grade") is True:
+        aliases = {
+            _normalized_phrase(value)
+            for value in activation.get("provisional_scope_aliases") or []
+            if _normalized_phrase(value)
+        }
+        if any(f" {alias} " in normalized_purpose for alias in aliases):
+            return True
     generic = {
         "system requirement", "requirement", "large dataset", "point cloud",
         "large complex model", "bim", "driver", "windows", "manufacturing",

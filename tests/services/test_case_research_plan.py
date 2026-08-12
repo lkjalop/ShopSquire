@@ -25,6 +25,39 @@ def test_named_application_keeps_its_enrolled_publisher_scope():
     assert "blender_official_requirements" in plan.source_candidate_ids
 
 
+def test_real_manifest_preserves_governed_scope_hypotheses_for_six_prompt_matrix():
+    expected = {
+        "I do CGI; I don't want renders taking all night.": {"blender_official_requirements"},
+        "I need CAD for very large 3D models and point-cloud work.": {"autodesk_autocad_requirements"},
+        "I'm an architect working with large BIM models and real-time walkthroughs.": {"autodesk_revit_requirements"},
+        "I need to simulate a PLC-controlled factory and cyberattacks against the OT network.": {
+            "factory_io_official_docs", "mitre_attack_ics",
+        },
+    }
+    for prompt, required_sources in expected.items():
+        plan = build_case_research_plan(prompt)
+        assert plan is not None
+        assert plan.publisher_status == "resolved_enrolled"
+        assert required_sources <= set(plan.source_candidate_ids)
+
+
+def test_scope_aliases_are_manifest_governed_and_paraphrase_stable():
+    prompts = (
+        "Recommend portable hardware for computer-generated imagery and 3D rendering.",
+        "I work on point cloud datasets in CAD and need a mobile computer.",
+        "Need a notebook for building information modelling on large projects.",
+    )
+    expected = (
+        "blender_official_requirements",
+        "autodesk_autocad_requirements",
+        "autodesk_revit_requirements",
+    )
+    for prompt, source_id in zip(prompts, expected, strict=True):
+        plan = build_case_research_plan(prompt)
+        assert plan is not None
+        assert source_id in plan.source_candidate_ids
+
+
 def _source(source_id, workloads, artefacts, *, approved=True):
     return {
         "source_id": source_id, "publisher": source_id,

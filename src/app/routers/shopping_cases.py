@@ -1245,6 +1245,10 @@ def research_shopping_case(
     )
 
     approved_sources = approved_sources_for_plan(plan)
+    from src.app.services.shopping_case_research_contract import (
+        project_research_execution_contract,
+    )
+
     if plan.publisher_status == "unresolved":
         from src.app.services.official_source_governance import load_official_source_manifest
         from src.app.services.open_world_research_discovery import (
@@ -1317,6 +1321,9 @@ def research_shopping_case(
             ).configuration_ids,
         ).model_dump(mode="json")
         provider_accounting = discovery["provider_accounting"]
+        research_contract = project_research_execution_contract(plan).model_dump(mode="json")
+        discovery["research_plan_id"] = plan.plan_id
+        discovery["execution_contract"] = research_contract
         exploration = ShoppingCaseTruthProjection.model_validate({
             "schema_version": "ambiguity-exploration-v1",
             "case_id": case_id, "trace_id": case_id.removeprefix("sc-"),
@@ -1345,6 +1352,7 @@ def research_shopping_case(
             "status": "publisher_resolution_required",
             "retained_purpose": plan.retained_purpose,
             "research_plan": plan.model_dump(mode="json"),
+            "research_contract": research_contract,
             "research": discovery,
             "product_shelves": before,
             "ambiguity_exploration": exploration,
@@ -1500,6 +1508,12 @@ def research_shopping_case(
     evidence_status = (
         "researched" if evidence_outcome == "product_requirements" else evidence_outcome
     )
+    research_contract = project_research_execution_contract(
+        plan,
+        requirements_compiled=evidence_outcome == "product_requirements",
+    ).model_dump(mode="json")
+    research["research_plan_id"] = plan.plan_id
+    research["execution_contract"] = research_contract
     after_projection.update({
         "evidence_status": evidence_status,
         "research_delta": delta,
@@ -1576,6 +1590,7 @@ def research_shopping_case(
         "schema_version": "shopping-case-research-v1", "case_id": case_id,
         "status": "research_completed", "retained_purpose": plan.retained_purpose,
         "research_plan": plan.model_dump(mode="json"),
+        "research_contract": research_contract,
         "research": research, "product_shelves": after_projection,
         "ambiguity_exploration": exploration,
         "evidence_outcome": evidence_outcome,
