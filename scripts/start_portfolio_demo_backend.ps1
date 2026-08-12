@@ -10,6 +10,10 @@ $environment = @{
     EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED = '1'
     EXTERNAL_RESEARCH_PROVIDER_ID = 'local_searxng'
     EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS = 'free'
+    # Advisory terminology expansion runs after provisional exploration is
+    # returned. Research consent never waits for this local model.
+    OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED = '1'
+    OPEN_WORLD_QUERY_MODEL = 'qwen3:14b'
     EXTERNAL_RESEARCH_TENANT_ALLOWLIST = 'default,portfolio-demo'
     EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY = 'leoma-project-owner'
     EXTERNAL_RESEARCH_SOURCE_LICENCE = 'portfolio-demo-policy-v1'

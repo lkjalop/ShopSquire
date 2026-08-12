@@ -11,6 +11,8 @@ import json
 import os
 import re
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from threading import Lock
 from typing import Any, Callable, Literal
 
 import httpx
@@ -32,6 +34,23 @@ _FILLER = {
     "is", "it", "laptop", "machine", "need", "not", "of", "only", "or", "run",
     "something", "system", "the", "this", "to", "we", "what", "which", "will", "with",
 }
+_SHADOW_LOCK = Lock()
+_SHADOW_FUTURES: dict[str, Future[tuple[CaseResearchPlan, dict[str, Any]]]] = {}
+_SHADOW_MAX_PENDING = 1
+_SHADOW_MAX_RETAINED = 64
+
+
+def _submit_shadow(
+    plan: CaseResearchPlan,
+) -> Future[tuple[CaseResearchPlan, dict[str, Any]]]:
+    """Submit one bounded task and release its worker after completion."""
+
+    executor = ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="open-world-query-shadow",
+    )
+    future = executor.submit(propose_open_world_queries, plan, timeout_s=6.0)
+    future.add_done_callback(lambda _completed: executor.shutdown(wait=False))
+    return future
 
 
 class ProposedDiscoveryQuery(BaseModel):
@@ -102,9 +121,13 @@ def propose_open_world_queries(
 
     if plan.publisher_status != "unresolved":
         return plan, {"status": "not_applicable", "model_calls": 0}
-    enabled = str(os.getenv("OPEN_WORLD_QUERY_PROPOSER_ENABLED", "0")).lower() in {
-        "1", "true", "yes", "on",
-    }
+    enabled = any(
+        str(os.getenv(name, "0")).lower() in {"1", "true", "yes", "on"}
+        for name in (
+            "OPEN_WORLD_QUERY_PROPOSER_ENABLED",
+            "OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED",
+        )
+    )
     if not enabled and model_fn is None:
         return plan, {"status": "disabled", "model_calls": 0}
     budget = max(1.0, min(float(timeout_s or 6.0), 10.0))
@@ -161,4 +184,76 @@ def propose_open_world_queries(
         }
 
 
-__all__ = ["OpenWorldQueryProposal", "propose_open_world_queries"]
+def schedule_open_world_query_proposal(plan: CaseResearchPlan) -> dict[str, Any]:
+    """Schedule advisory interpretation without delaying the buyer response."""
+
+    enabled = str(os.getenv("OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED", "0")).lower() in {
+        "1", "true", "yes", "on",
+    }
+    if not enabled or plan.publisher_status != "unresolved":
+        return {"status": "disabled", "model_calls": 0, "authority": "none"}
+    with _SHADOW_LOCK:
+        existing = _SHADOW_FUTURES.get(plan.plan_id)
+        if existing is not None:
+            return {
+                "status": "completed_shadow_available" if existing.done() else "scheduled_shadow",
+                "model_calls": 0,
+                "authority": "discovery_proposal_only",
+            }
+        if len(_SHADOW_FUTURES) >= _SHADOW_MAX_RETAINED:
+            for stale_plan_id, stale_future in list(_SHADOW_FUTURES.items()):
+                if stale_future.done():
+                    _SHADOW_FUTURES.pop(stale_plan_id, None)
+                if len(_SHADOW_FUTURES) < _SHADOW_MAX_RETAINED // 2:
+                    break
+        active = sum(not future.done() for future in _SHADOW_FUTURES.values())
+        if active >= _SHADOW_MAX_PENDING:
+            return {
+                "status": "capacity_degraded",
+                "model_calls": 0,
+                "authority": "none",
+                "reason": "shadow_capacity_reached",
+            }
+        _SHADOW_FUTURES[plan.plan_id] = _submit_shadow(plan)
+    return {
+        "status": "scheduled_shadow",
+        "model_calls": 0,
+        "authority": "discovery_proposal_only",
+    }
+
+
+def consume_open_world_query_proposal(
+    plan: CaseResearchPlan,
+) -> tuple[CaseResearchPlan, dict[str, Any]]:
+    """Use a completed shadow result; never wait for one in the request path."""
+
+    with _SHADOW_LOCK:
+        future = _SHADOW_FUTURES.get(plan.plan_id)
+    if future is None:
+        scheduled = schedule_open_world_query_proposal(plan)
+        return plan, scheduled
+    if not future.done():
+        return plan, {
+            "status": "scheduled_shadow",
+            "model_calls": 0,
+            "authority": "discovery_proposal_only",
+            "reason": "deterministic_plan_used_without_waiting",
+        }
+    with _SHADOW_LOCK:
+        _SHADOW_FUTURES.pop(plan.plan_id, None)
+    try:
+        proposed, receipt = future.result(timeout=0)
+    except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
+        return plan, {
+            "status": "rejected_or_unavailable",
+            "model_calls": 1,
+            "authority": "none",
+            "reason": type(exc).__name__,
+        }
+    return proposed, {**receipt, "status": f"{receipt['status']}_shadow"}
+
+
+__all__ = [
+    "OpenWorldQueryProposal", "consume_open_world_query_proposal",
+    "propose_open_world_queries", "schedule_open_world_query_proposal",
+]

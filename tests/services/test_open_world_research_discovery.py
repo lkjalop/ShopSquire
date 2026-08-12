@@ -128,3 +128,56 @@ def test_named_publisher_host_outranks_blogs_with_the_same_requirements_title():
 
     assert result["candidates"][0]["domain"] == "www.acmesolver.com"
     assert result["candidates"][0]["authority"] == "not_accepted"
+
+
+class NoCrediblePublisherFetcher(StubFetcher):
+    def fetch(self, query, *, allowlist, timeout_s, discovery_candidates_only):
+        self.calls.append((query, allowlist, timeout_s, discovery_candidates_only))
+        self.last_receipt = {
+            "query_hash": f"empty-{len(self.calls)}", "network_execution": True,
+            "external_call_dispatched": True, "execution_status": "completed",
+            "http_status": 200,
+        }
+        return [{
+            "title": "Unrelated discussion",
+            "url": "https://www.reddit.com/r/hardware/comments/unrelated",
+        }]
+
+
+def test_completed_search_with_no_credible_publisher_remains_unresolved():
+    plan = build_case_research_plan(
+        "portable analysis for an unfamiliar scientific workflow", allow_open_world=True,
+    )
+    assert plan is not None
+
+    result = discover_open_world_publishers(
+        plan, search_url_template="http://search/?q={query}",
+        fetcher=NoCrediblePublisherFetcher(),
+    )
+
+    assert result["status"] == "no_publisher_candidates"
+    assert result["candidates"] == []
+    assert result["provider_accounting"]["discovery_calls"] == 3
+    assert result["next_action"] == "approve_publisher_origin_or_upload_requirements"
+
+
+def test_cooperative_cancellation_stops_remaining_query_dispatches():
+    plan = build_case_research_plan(
+        "portable analysis for an unfamiliar scientific workflow", allow_open_world=True,
+    )
+    assert plan is not None
+    fetcher = StubFetcher()
+
+    result = discover_open_world_publishers(
+        plan, search_url_template="http://search/?q={query}", fetcher=fetcher,
+        cancellation_requested=lambda: len(fetcher.calls) >= 1,
+    )
+
+    assert len(fetcher.calls) == 1
+    assert result["status"] == "cancelled"
+    assert result["candidates"] == []
+    assert result["provider_accounting"]["discovery_calls"] == 1
+    assert result["cancellation"] == {
+        "requested": True, "remaining_queries_not_dispatched": 2,
+    }
+    assert result["next_action"] == "explicit_refresh_or_upload_requirements"

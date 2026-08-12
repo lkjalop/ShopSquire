@@ -133,6 +133,7 @@ def case_source_policy(row: ShoppingCasePublisherCandidate, *, purpose: str) -> 
             "search_snippets_forbidden": True,
             "approval_scope": "case_only",
             "publisher_ownership_status": "buyer_attested_not_independently_verified",
+            "semantic_ownership_verification_required": True,
         },
         "cache_policy": {"store_source_text": False, "store_hashes_and_claims_only": True},
     }
@@ -179,7 +180,7 @@ def case_review_claims(
             )[:500],
             "evidence_class": "official_case_source",
             "extraction_confidence": 1.0,
-            "authority_status": "verified_case_origin",
+            "authority_status": "case_origin_critic_accepted",
             "acceptance_status": "pending_buyer_review",
             "approval_scope": "case_only",
             "publisher_ownership_status": "buyer_attested_not_independently_verified",
@@ -232,6 +233,11 @@ def execute_case_candidate_research(
     )
 
     record_external_research_runtime_observation(research)
+    source_execution = list(research.get("source_execution") or [])
+    origin_verification = (
+        dict(source_execution[0].get("publisher_origin_verification") or {})
+        if source_execution else {}
+    )
     claims = case_review_claims(research.get("claims") or [], candidate=approved)
     proposal: RequirementProposal | None = None
     if claims:
@@ -255,6 +261,7 @@ def execute_case_candidate_research(
             "status": approved.status, "authority_status": approved.authority_status,
             "approval_scope": approved.approval_scope,
             "publisher_ownership_status": "buyer_attested_not_independently_verified",
+            "publisher_origin_verification": origin_verification,
         },
         "research_status": "claims_pending_review" if claims else "zero_parser_yield",
         "evidence_outcome": "review_required" if claims else "unresolved",

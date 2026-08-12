@@ -268,19 +268,9 @@ def _case_research_plan_from_trace(
     """Rebuild a plan only from the server-recorded ambiguity event."""
 
     from src.app.services.case_research_plan import build_case_research_plan
-    from src.app.services.decision_log import get_cached_trace_events
+    from src.app.services.shopping_case_trace_reader import load_case_trace_events
 
-    trace_id = case_id.removeprefix("sc-")
-    events = list(get_cached_trace_events(trace_id))
-    if not events:
-        try:
-            rows = db.execute(text(
-                "SELECT event_type, payload FROM decision_trace_events "
-                "WHERE trace_id=:trace_id AND tenant_id=:tenant_id ORDER BY created_at ASC"
-            ), {"trace_id": trace_id, "tenant_id": tenant_id}).mappings().all()
-            events = [dict(row) for row in rows]
-        except Exception:
-            events = []
+    events = load_case_trace_events(db, case_id=case_id, tenant_id=tenant_id)
     for event in reversed(events):
         if str(event.get("event_type") or "") != "ambiguity_exploration_projected":
             continue
@@ -302,19 +292,9 @@ def _case_catalog_candidate_set_from_trace(
     """Load the immutable catalog boundary recorded with the shopping case."""
 
     from src.app.services.case_catalog_candidates import CatalogCandidateSet
-    from src.app.services.decision_log import get_cached_trace_events
+    from src.app.services.shopping_case_trace_reader import load_case_trace_events
 
-    trace_id = case_id.removeprefix("sc-")
-    events = list(get_cached_trace_events(trace_id))
-    if not events:
-        try:
-            rows = db.execute(text(
-                "SELECT event_type, payload FROM decision_trace_events "
-                "WHERE trace_id=:trace_id AND tenant_id=:tenant_id ORDER BY created_at ASC"
-            ), {"trace_id": trace_id, "tenant_id": tenant_id}).mappings().all()
-            events = [dict(row) for row in rows]
-        except Exception:
-            events = []
+    events = load_case_trace_events(db, case_id=case_id, tenant_id=tenant_id)
     for event in reversed(events):
         if str(event.get("event_type") or "") != "ambiguity_exploration_projected":
             continue
@@ -414,6 +394,15 @@ def create_case_interpretation(
             plan = build_case_research_plan(body.retained_purpose, allow_open_world=True)
     if plan is None:
         return Response(status_code=204)
+
+    if plan.publisher_status == "unresolved":
+        from src.app.services.open_world_query_proposal import (
+            schedule_open_world_query_proposal,
+        )
+
+        # Advisory query interpretation starts after the deterministic plan is
+        # available and never delays provisional catalog exploration.
+        schedule_open_world_query_proposal(plan)
 
     trace_id = "case-" + uuid.uuid4().hex[:20]
     case_id = f"sc-{trace_id}"
@@ -608,7 +597,7 @@ def accept_requirement_proposal(
         case_origin_evidence = (
             item.get("evidence_class") == "official_case_source"
             and item.get("approval_scope") == "case_only"
-            and item.get("authority_status") == "verified_case_origin"
+            and item.get("authority_status") == "case_origin_critic_accepted"
         )
         if correction is not None:
             # A buyer edit is useful evidence, but it is no longer the quoted
@@ -618,11 +607,11 @@ def accept_requirement_proposal(
             "accepted_case_origin" if case_origin_evidence else "accepted_provisional"
         )
         item["authority_status"] = (
-            "verified_case_origin" if case_origin_evidence else "unverified"
+            "case_origin_critic_accepted" if case_origin_evidence else "unverified"
         )
         accepted.append(item)
     accepted_case_origin = any(
-        item.get("authority_status") == "verified_case_origin" for item in accepted
+        item.get("authority_status") == "case_origin_critic_accepted" for item in accepted
     )
     result = {
         "schema_version": "requirement-acceptance-v1",
@@ -1174,6 +1163,9 @@ def approve_case_publisher_candidate(
                 "candidate_id": candidate.candidate_id,
                 "approval_scope": "case_only",
                 "publisher_ownership_status": "buyer_attested_not_independently_verified",
+                "publisher_origin_verification": result["candidate"].get(
+                    "publisher_origin_verification"
+                ),
                 "official_claims_pending_review": result["claims"],
                 "receipts": result["research"].get("receipts") or [],
                 "provider_accounting": result["provider_accounting"],

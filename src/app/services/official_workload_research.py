@@ -23,6 +23,7 @@ from src.app.services.official_evidence_cache import (
     OfficialEvidenceCacheKey,
 )
 from src.app.services.official_source_governance import governed_sources_for_workload
+from src.app.services.publisher_origin_verification import verify_publisher_origin
 from src.app.services.recommendation_core.research_contracts import ProviderExecutionReceipt
 
 
@@ -794,6 +795,13 @@ def research_official_sources(
                     "parse_status": "cache_hit",
                 },
             })
+            if (source.get("publisher_policy") or {}).get(
+                "semantic_ownership_verification_required"
+            ):
+                execution["publisher_origin_verification"] = {
+                    "status": "cached_prior_verification",
+                    "ownership_authority": "not_independently_verified",
+                }
             source_execution.append(execution)
             continue
 
@@ -948,6 +956,25 @@ def research_official_sources(
             continue
         content_type = str(origin.get("content_type") or "").lower()
         execution["parser_coverage"]["pages_fetched"] = 1
+        ownership_required = bool(
+            (source.get("publisher_policy") or {}).get(
+                "semantic_ownership_verification_required"
+            )
+        )
+        if ownership_required:
+            verification = verify_publisher_origin(
+                approved_url=selected,
+                content=origin["content"],
+                purpose=purpose,
+            ).model_dump(mode="json")
+            execution["publisher_origin_verification"] = verification
+            if verification["status"] == "contradicted":
+                execution["parser_coverage"]["parse_status"] = "origin_contradicted"
+                unresolved.append({
+                    "source_id": source_id,
+                    "reason": "publisher_origin_semantically_contradicted",
+                })
+                continue
         parser_type = str(source.get("parser_type") or "")
         if content_type not in _HTML_CONTENT_TYPES or parser_type not in {"html", "html_pdf"}:
             execution["parser_coverage"]["parse_status"] = "content_type_mismatch"

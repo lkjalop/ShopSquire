@@ -320,7 +320,7 @@ def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(
     )
     assert result["provider_accounting"]["official_origin_fetches"] == 1
     assert result["qualification_authority"] == "none"
-    assert result["claims"][0]["authority_status"] == "verified_case_origin"
+    assert result["claims"][0]["authority_status"] == "case_origin_critic_accepted"
     assert result["claims"][0]["acceptance_status"] == "pending_buyer_review"
     runtime = external_research_runtime_observation()
     assert runtime["last_official_fetch_success_at"]
@@ -343,7 +343,7 @@ def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(
     assert accepted_payload["status"] == "accepted_case_evidence"
     assert accepted_payload["qualification_authority"] == "requirements"
     assert accepted_payload["accepted_claims"][0]["authority_status"] == (
-        "verified_case_origin"
+        "case_origin_critic_accepted"
     )
     assert accepted_payload["cart_mutation"] == "not_authorized"
 

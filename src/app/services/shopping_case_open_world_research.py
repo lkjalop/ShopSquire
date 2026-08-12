@@ -21,7 +21,7 @@ from src.app.services.commerce_feature_readiness import (
 from src.app.services.decision_log import log_trace_event
 from src.app.services.official_source_governance import load_official_source_manifest
 from src.app.services.open_world_research_discovery import discover_open_world_publishers
-from src.app.services.open_world_query_proposal import propose_open_world_queries
+from src.app.services.open_world_query_proposal import consume_open_world_query_proposal
 from src.app.services.shopping_case_research_contract import (
     project_research_execution_contract,
 )
@@ -71,7 +71,10 @@ def execute_open_world_publisher_discovery(
             readiness=readiness,
         )
 
-    discovery_plan, query_proposal = propose_open_world_queries(plan)
+    # Interpretation may have been scheduled when the provisional case was
+    # created. Consent never waits for it: a completed validated proposal is
+    # consumed, otherwise the original deterministic plan executes now.
+    discovery_plan, query_proposal = consume_open_world_query_proposal(plan)
     discovery = discover_open_world_publishers(
         discovery_plan,
         search_url_template=search_url_template,

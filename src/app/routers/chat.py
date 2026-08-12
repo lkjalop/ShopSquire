@@ -2920,7 +2920,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         },
                         candidate_configuration_ids=_candidate_set.configuration_ids,
                     )
-                    _case_id = f"sc-{_degraded_trace.removeprefix('chat-degraded-')}"
+                    # Keep case and trace identity reversible. The research
+                    # endpoint derives the trace by removing only ``sc-``.
+                    _case_id = f"sc-{_degraded_trace}"
                     _case_uid = _resolve_uid(payload, request)
                     existing = _fallback_db.execute(sql_text(
                         "SELECT 1 FROM shopping_cases "
@@ -2960,6 +2962,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         "source_candidate_ids": list(_plan.source_candidate_ids),
                         "catalog_candidate_set": _candidate_set.model_dump(mode="json"),
                     }
+                    from src.app.services.open_world_query_proposal import (
+                        schedule_open_world_query_proposal,
+                    )
+
+                    schedule_open_world_query_proposal(_plan)
                     log_trace_event(
                         trace_id=_degraded_trace,
                         event_type="ambiguity_exploration_projected",
@@ -3880,6 +3887,18 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             )
         except Exception as exc:
             logger.debug("open-world research-plan projection skipped: %s", exc)
+    if (
+        _case_research_plan is not None
+        and _case_research_plan.publisher_status == "unresolved"
+    ):
+        try:
+            from src.app.services.open_world_query_proposal import (
+                schedule_open_world_query_proposal,
+            )
+
+            schedule_open_world_query_proposal(_case_research_plan)
+        except Exception as exc:
+            logger.debug("open-world query shadow scheduling skipped: %s", exc)
     if provisional_exploration_needed and not buyer_requirement_claims:
         try:
             from src.app.services.accepted_catalog_projection import project_accepted_catalog

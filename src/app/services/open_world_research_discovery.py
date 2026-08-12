@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
 from src.app.adapters.external_research_httpx import HttpxResearchFetcher
@@ -89,6 +89,7 @@ def discover_open_world_publishers(
     search_url_template: str,
     fetcher: DiscoveryFetcher | None = None,
     timeout_s: float = 9.0,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Discover candidate origins; never fetch them or compile their snippets as claims."""
 
@@ -101,7 +102,11 @@ def discover_open_world_publishers(
     receipts: list[dict[str, Any]] = []
     named_subject_terms = _named_subject_terms(plan.retained_purpose)
     per_query = max(1.0, min(4.0, timeout_s / max(1, len(plan.discovery_queries))))
+    cancelled = False
     for item in plan.discovery_queries[:3]:
+        if cancellation_requested and cancellation_requested():
+            cancelled = True
+            break
         rows = transport.fetch(
             item.query, allowlist=[], timeout_s=per_query,
             discovery_candidates_only=True,
@@ -115,6 +120,9 @@ def discover_open_world_publishers(
             "result_count": len(rows),
         })
         receipts.append(receipt)
+        if cancellation_requested and cancellation_requested():
+            cancelled = True
+            break
         for row in rows:
             url = str(row.get("url") or "")
             host = str(urlparse(url).hostname or "").lower()
@@ -147,7 +155,7 @@ def discover_open_world_publishers(
     # must at least look like requirements, documentation, a manual, or a
     # publisher support surface. Publisher ownership is still unresolved and
     # must be approved separately.
-    ranked = sorted(
+    ranked = [] if cancelled else sorted(
         (
             row for row in candidates.values()
             if int(row.get("subject_overlap_count") or 0) > 0
@@ -160,7 +168,11 @@ def discover_open_world_publishers(
     external_calls = sum(bool(row.get("external_call_dispatched")) for row in receipts)
     return {
         "schema_version": "open-world-discovery-v1",
-        "status": "publisher_candidates_found" if ranked else "no_publisher_candidates",
+        "status": (
+            "cancelled" if cancelled
+            else "publisher_candidates_found" if ranked
+            else "no_publisher_candidates"
+        ),
         "publisher_status": "unresolved",
         "candidates": ranked,
         "receipts": receipts,
@@ -171,7 +183,16 @@ def discover_open_world_publishers(
             "paid_calls": 0,
         },
         "claims": [],
-        "next_action": "approve_publisher_origin_or_upload_requirements",
+        "next_action": (
+            "explicit_refresh_or_upload_requirements" if cancelled
+            else "approve_publisher_origin_or_upload_requirements"
+        ),
+        "cancellation": {
+            "requested": cancelled,
+            "remaining_queries_not_dispatched": max(
+                0, min(3, len(plan.discovery_queries)) - len(receipts)
+            ),
+        },
     }
 
 
