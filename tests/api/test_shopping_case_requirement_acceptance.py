@@ -139,6 +139,26 @@ def test_explicit_vendor_support_constraint_opens_generic_zero_call_research_cas
     assert exploration["status"] == "provisional"
 
 
+def test_material_suitability_question_opens_generic_zero_call_research_case():
+    client = _client()
+    response = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-open-world-fit",
+        "retained_purpose": (
+            "I edit 8K RAW video and do colour-critical grading. I do not care about "
+            "gaming FPS. Which laptop should I buy?"
+        ),
+        "storefront_taxonomy_handle": "el-6-6",
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    exploration = payload["ambiguity_exploration"]
+    assert exploration["status"] == "provisional"
+    assert exploration["provider_accounting"] == {"external_calls": 0, "paid_calls": 0}
+    assert exploration["source_candidate_ids"] == []
+    assert exploration["research_plan_id"].startswith("crp-")
+    assert payload["cart_mutation"] == "not_authorized"
+
+
 def test_open_world_authorization_runs_discovery_but_not_origin_fetch_or_claims(
     monkeypatch,
 ):

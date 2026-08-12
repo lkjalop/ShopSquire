@@ -1,6 +1,7 @@
 from src.app.services.recommendation_core.post_catalog_adjudicator import (
     adjudicate_post_catalog,
     explicit_evidence_constraints,
+    suitability_evidence_requested,
 )
 
 
@@ -46,3 +47,14 @@ def test_explicit_evidence_constraints_are_workload_agnostic():
         "Only officially supported hardware; no unresolved critical firmware advisory."
     ) == ["vendor_certification", "security_status"]
     assert explicit_evidence_constraints("Show ordinary laptops") == []
+
+
+def test_suitability_evidence_request_is_open_vocabulary_not_workload_named():
+    assert suitability_evidence_requested(
+        "I edit 8K RAW video and do colour-critical grading. Which laptop should I buy?"
+    ) is True
+    assert suitability_evidence_requested(
+        "Can this machine handle a novel protein-folding assay pipeline?"
+    ) is True
+    assert suitability_evidence_requested("Show me ordinary laptops") is False
+    assert suitability_evidence_requested("Which laptop should I buy?") is False

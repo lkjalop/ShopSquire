@@ -406,9 +406,13 @@ def create_case_interpretation(
         # generic evidence-gap trigger, not a workload/persona keyword branch.
         from src.app.services.recommendation_core.post_catalog_adjudicator import (
             explicit_evidence_constraints,
+            suitability_evidence_requested,
         )
 
-        if explicit_evidence_constraints(body.retained_purpose):
+        if (
+            explicit_evidence_constraints(body.retained_purpose)
+            or suitability_evidence_requested(body.retained_purpose)
+        ):
             plan = build_case_research_plan(body.retained_purpose, allow_open_world=True)
     if plan is None:
         return Response(status_code=204)

@@ -38,6 +38,20 @@ _EXPLICIT_EVIDENCE_CONSTRAINTS = {
     ),
 }
 
+_SUITABILITY_DECISION = re.compile(
+    r"\b(?:which\b[^?]{0,100}\bshould\s+i\s+(?:buy|choose)|"
+    r"(?:is|are|would)\b[^?]{0,100}\b(?:suitable|appropriate|good\s+for)|"
+    r"(?:can|will)\b[^?]{0,100}\b(?:handle|run|support|do)|"
+    r"recommend(?:ation|ed)?\b[^?]{0,120}\bfor)\b",
+    re.IGNORECASE,
+)
+_FIT_FILLER = {
+    "a", "an", "and", "are", "buy", "can", "choose", "do", "for", "good",
+    "handle", "i", "is", "laptop", "me", "not", "please", "recommend",
+    "recommended", "run", "should", "suitable", "support", "the", "this",
+    "which", "will", "would",
+}
+
 
 def explicit_evidence_constraints(text: str) -> list[str]:
     """Extract vertical-agnostic constraints that require positive evidence."""
@@ -48,6 +62,29 @@ def explicit_evidence_constraints(text: str) -> list[str]:
         for constraint, pattern in _EXPLICIT_EVIDENCE_CONSTRAINTS.items()
         if pattern.search(value)
     ]
+
+
+def suitability_evidence_requested(text: str) -> bool:
+    """Whether a buyer asks for fit against a materially described outcome.
+
+    This deliberately recognizes the decision shape, not a workload vocabulary.
+    A bare catalogue browse (``show laptops``) remains local, while novel fields
+    such as media, scientific, biomedical, or future workloads take the same
+    open-world evidence path when the buyer asks whether a product can do them.
+    """
+
+    value = str(text or "")
+    if not _SUITABILITY_DECISION.search(value):
+        return False
+    positive = re.sub(
+        r"\b(?:i\s+)?(?:do\s+not|don't|without|not\s+interested\s+in)\b[^.!?;]*",
+        " ", value, flags=re.IGNORECASE,
+    )
+    material_tokens = {
+        token for token in re.findall(r"[a-z0-9]+", positive.lower())
+        if token not in _FIT_FILLER and (len(token) > 2 or any(char.isdigit() for char in token))
+    }
+    return len(material_tokens) >= 2
 
 
 def adjudicate_post_catalog(
@@ -100,4 +137,5 @@ def adjudicate_post_catalog(
 
 __all__ = [
     "PostCatalogAdjudication", "adjudicate_post_catalog", "explicit_evidence_constraints",
+    "suitability_evidence_requested",
 ]
