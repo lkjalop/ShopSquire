@@ -146,6 +146,30 @@ def case_review_claims(
     rows: list[dict[str, Any]] = []
     for raw in claims:
         item = dict(raw)
+        claim_type = str(item.get("claim_type") or "").strip()
+        citation = urlparse(str(item.get("citation_url") or "").strip())
+        citation_host = str(citation.hostname or "").lower().rstrip(".")
+        candidate_host = str(candidate.domain or "").lower().rstrip(".")
+        citation_matches_approved_origin = bool(
+            citation.scheme == "https"
+            and citation_host
+            and candidate_host
+            and (
+                citation_host == candidate_host
+                or citation_host.endswith("." + candidate_host)
+            )
+            and not citation.username
+            and not citation.password
+        )
+        if (
+            claim_type not in set(candidate.allowed_claim_types_json or [])
+            or claim_type in CASE_FORBIDDEN_CLAIM_TYPES
+            or not citation_matches_approved_origin
+        ):
+            # The research service and its parser/critic are separate trust
+            # boundaries. Re-check the case-only claim policy here before a
+            # row can become buyer-reviewable evidence or influence ranking.
+            continue
         item.update({
             "subject": "buyer_workload_requirement",
             "constraint_tier": "preferred",

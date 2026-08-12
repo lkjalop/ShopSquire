@@ -319,6 +319,107 @@ def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(
     assert accepted_payload["cart_mutation"] == "not_authorized"
 
 
+def test_case_only_publisher_policy_rejects_cross_origin_and_forbidden_claims(monkeypatch):
+    client = _client()
+    from src.app.services.case_research_plan import build_case_research_plan
+
+    plan = build_case_research_plan(
+        "vendor-certified novel multiphysics solver", allow_open_world=True,
+    )
+    assert plan is not None
+    monkeypatch.setattr(
+        "src.app.routers.shopping_cases._case_research_plan_from_trace",
+        lambda db, *, case_id, tenant_id: plan,
+    )
+    _enrol_local_research(monkeypatch)
+    monkeypatch.setattr(
+        "src.app.services.open_world_research_discovery.discover_open_world_publishers",
+        lambda *args, **kwargs: {
+            "schema_version": "open-world-discovery-v1",
+            "status": "publisher_candidates_found", "publisher_status": "unresolved",
+            "candidates": [{
+                "url": "https://docs.solver.example/system-requirements",
+                "domain": "docs.solver.example", "title": "Solver requirements",
+                "discovery_only": True, "authority": "not_accepted",
+            }],
+            "receipts": [{
+                "query_hash": "query-policy", "query_axis": "software_requirements",
+                "network_execution": True, "external_call_dispatched": True,
+                "execution_status": "completed",
+            }],
+            "provider_accounting": {
+                "discovery_calls": 1, "external_calls": 1,
+                "official_origin_fetches": 0, "paid_calls": 0,
+            },
+            "claims": [], "next_action": "approve_publisher_origin_or_upload_requirements",
+        },
+    )
+    discovered = client.post("/api/v1/shopping-cases/sc-publisher/research", json={
+        "uid": "buyer-publisher", "research_plan_id": plan.plan_id,
+        "ambiguity_object_ids": [row.ambiguity_id for row in plan.ambiguities],
+        "hypothesis_ids": [row.hypothesis_id for row in plan.hypotheses],
+        "research_authorized": True,
+    })
+    assert discovered.status_code == 200, discovered.text
+    candidate = discovered.json()["research"]["candidates"][0]
+
+    def poisoned_origin(*args, **kwargs):
+        source = kwargs["sources"][0]
+        common = {
+            "attribute": "ram_gb", "operator": ">=", "value": 64, "unit": "GB",
+            "requirement_class": "minimum", "claim_class": "attested",
+            "authority_status": "verified_official", "freshness_status": "fresh",
+            "source_id": source["source_id"], "observed_at": "2026-08-12T00:00:00Z",
+            "statement": "The solver requires 64 GB RAM.",
+            "quoted_evidence_span": "The solver requires 64 GB RAM.",
+            "acceptance_status": "accepted_official",
+        }
+        return {
+            "claims": [
+                {
+                    **common, "claim_id": "safe-minimum",
+                    "claim_type": "minimum_requirements", "citation_url": candidate["url"],
+                },
+                {
+                    **common, "claim_id": "cross-origin",
+                    "claim_type": "minimum_requirements",
+                    "citation_url": "https://attacker.example/fake-requirements",
+                },
+                {
+                    **common, "claim_id": "forbidden-fit", "claim_type": "exact_product_fit",
+                    "citation_url": candidate["url"],
+                },
+            ],
+            "context_claims": [], "unresolved": [], "receipts": [],
+            "source_execution": [{"origin_selection_mode": "canonical_direct"}],
+            "provider_accounting": {
+                "external_calls": 1, "official_origin_fetches": 1,
+                "discovery_calls": 0, "paid_calls": 0,
+            },
+            "evidence_outcome": "product_requirements",
+        }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.research_official_sources",
+        poisoned_origin,
+    )
+    approved = client.post(
+        f"/api/v1/shopping-cases/sc-publisher/publisher-candidates/"
+        f"{candidate['candidate_id']}/approve",
+        headers={"Idempotency-Key": "approve-policy-boundary-1"},
+        json={
+            "uid": "buyer-publisher", "expected_candidate_version": 1,
+            "approval_scope": "case_only",
+            "allowed_claim_types": ["minimum_requirements"],
+            "research_authorized": True,
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    payload = approved.json()
+    assert [row["claim_id"] for row in payload["claims"]] == ["safe-minimum"]
+    assert payload["buyer_requirement_proposal"] is not None
+
+
 def test_accepted_upload_runs_corroboration_in_the_same_interpreted_case(monkeypatch):
     client = _client()
     _enrol_local_research(monkeypatch)
