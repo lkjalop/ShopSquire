@@ -4,6 +4,8 @@ import {
   resolveExecutionSteps,
   resolveRecommendationPayload,
   resolveSemanticProjection,
+  projectReasoningDomain,
+  projectTraceDomains,
 } from '../traceProjections';
 
 describe('Decision Trace projections', () => {
@@ -31,5 +33,27 @@ describe('Decision Trace projections', () => {
     const projection = resolveSemanticProjection({}, [{ payload: { semantic_resolution: { status: 'unresolved' } } }], null);
     expect(projection.semanticResolution).toEqual({ status: 'unresolved' });
     expect(projection.caseObligations).toEqual([]);
+  });
+
+  it('projects procurement, security and memory without event-text authority inference', () => {
+    const projection = projectTraceDomains([
+      { event_type: 'supplier_responses_normalized', payload: {} },
+      { event_type: 'outbound_integrity_blocked', payload: {} },
+      { event_type: 'cache_hit', payload: { security_status: 'review_required' } },
+    ]);
+    expect(projection.procurementEvents).toHaveLength(2);
+    expect(projection.outboundIntegrityEvents).toHaveLength(1);
+    expect(projection.security).toMatchObject({ present: true, authority: 'evidence_only' });
+    expect(projection.memory.present).toBe(true);
+  });
+
+  it('combines why, intent, complexity and execution as explanation-only reasoning', () => {
+    const projection = projectReasoningDomain({
+      semanticResolution: { status: 'resolved' }, caseObligations: [{ id: 'fit' }],
+      executionSteps: [{ kind: 'stage' }], modelSelection: { selected: 'local' },
+    });
+    expect(projection.authority).toBe('explanation_only');
+    expect(projection.obligations).toHaveLength(1);
+    expect(projection.executionSteps).toHaveLength(1);
   });
 });

@@ -3,6 +3,7 @@ import { evidenceRows } from '../lib/evidenceDisplay';
 import styles from './DecisionTrace.module.css';
 import MarketIntelligencePanel from './decision-trace/MarketIntelligencePanel';
 import RawTracePanel from './decision-trace/RawTracePanel';
+import AuditTracePanel from './decision-trace/AuditTracePanel';
 import SemanticResolutionTrace from './SemanticResolutionTrace';
 import WorkloadResearchTrace from './WorkloadResearchTrace';
 import { procurementGateDisplay } from '../lib/procurementGateDisplay';
@@ -13,16 +14,15 @@ import {
   resolveExecutionSteps,
   resolveRecommendationPayload,
   resolveSemanticProjection,
+  projectReasoningDomain,
+  projectTraceDomains,
 } from './decision-trace/traceProjections';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
 import { explainProcEvent } from '../lib/procEventExplain';
 import { dealEconomicsStatus, formatDealMoney } from '../lib/dealEconomicsDisplay';
 import { shouldShowMissingAnchorReasoning } from '../lib/tracePresentation';
 import ArtifactSecuritySummary from './security/ArtifactSecuritySummary';
-import ProcurementOperationalTrace, {
-  DisruptionEvidenceTrace,
-  TemporalCacheTechnicalTrace,
-} from './ProcurementOperationalTrace';
+import ProcurementOperationalTrace, { DisruptionEvidenceTrace } from './ProcurementOperationalTrace';
 import ReturnLifecycleTrace from './ReturnLifecycleTrace';
 import {
   TRACE_LEAF_LABELS,
@@ -1311,13 +1311,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       || t.includes('procurement') || t.includes('split') || t.includes('sourc') || t.includes('availability')
       || t.includes('channel') || t.includes('return_claim') || hasDeadlineDecision;
   });
-  const eventCorpus = JSON.stringify(allDisplayEvents || []).toLowerCase();
-  const hasSecuritySignal = /(security|quarantin|blocked|threat|risk|review_required)/.test(eventCorpus);
-  const hasMemorySignal = /(memory|cache|session|shortlist|nqe)/.test(eventCorpus);
-  const hasMultimodalSignal = Boolean(
-    (Array.isArray(imageTriage) && imageTriage.length)
-    || /(image|multimodal|ocr|qr_|vision)/.test(eventCorpus),
-  );
+  const traceDomains = projectTraceDomains(allDisplayEvents, imageTriage);
+  const hasSecuritySignal = traceDomains.security.present;
+  const hasMemorySignal = traceDomains.memory.present;
+  const hasMultimodalSignal = traceDomains.security.multimodal;
   const leafHasContent = (leaf: TraceLeafTab): boolean => {
     switch (leaf) {
       case 'summary':
@@ -1390,6 +1387,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     catalogAlignment,
     caseObligations,
   } = resolveSemanticProjection(trace, allDisplayEvents, recommendationEventPayload);
+  const reasoningDomain = projectReasoningDomain({
+    semanticResolution, semanticEvidence, catalogAlignment, caseObligations,
+    executionSteps: typedExecutionSteps, modelSelection: ms,
+  });
   const whyAnchorSections: any[] = resolveWhyAnchorSections(trace, allDisplayEvents);
   const whyProducts: any[] = Array.isArray(trace?.products) && trace!.products!.length > 0
     ? (trace!.products || [])
@@ -2650,7 +2651,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 </div>
               )}
               {activeTab === 'why' && (
-                <div className={styles.summaryPane}>
+                <div className={styles.summaryPane} data-reasoning-authority={reasoningDomain.authority}>
                   <SemanticResolutionTrace
                     resolution={semanticResolution}
                     evidence={semanticEvidence}
@@ -3078,7 +3079,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
 
               {activeTab === 'complexity' && (
-                <div className={styles.summaryPane}>
+                <div className={styles.summaryPane} data-reasoning-authority={reasoningDomain.authority}>
                   {(() => {
                     const cxEvt = events.find(e => eventMatches(e, ['tier_complexity_score', 'tier_decision', 'model_selection']));
                     const escEvt = events.find(e => eventMatches(e, ['tier_escalation', 'tier_decision']));
@@ -4179,7 +4180,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   )}
                   {(() => {
                     const src = events.length > 0 ? events : displayEvents;
-                    const procEvents = (src || []).filter((e) => {
+                    const procEvents = traceDomains.procurementEvents.filter((e) => {
                       const sid = String((e as any).source_id || '');
                       const sidl = sid.toLowerCase();
                       const et = String(e.event_type || '').toLowerCase();
@@ -4198,8 +4199,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     // Outbound integrity blocks — the platform quarantining its OWN drafted supplier mail
                     // before send (poisoned payload / data leak). Surfaced prominently: bounded autonomy
                     // contained ShopSquire's own potential blast radius.
-                    const integrityBlocks = (src || []).filter((e) =>
-                      String(e.event_type || '').toLowerCase().includes('outbound_integrity'));
+                    const integrityBlocks = traceDomains.outboundIntegrityEvents;
                     // The GENUINE market-intelligence step (real findings + a bounded, deterministic
                     // recommendation) — surfaced as a card so the intelligence is seen, not just logged.
                     const miEvent: any = [...(src || [])].reverse().find((e: any) =>
@@ -4696,105 +4696,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               )}
 
               {activeTab === 'audit' && (
-                <div className={styles.summaryPane}>
-                  <TemporalCacheTechnicalTrace allocationView={allocationView} />
-                  {auditLoading && <div className={styles.empty}>Loading audit trail...</div>}
-                  {!auditLoading && auditError && (
-                    <div className={styles.empty} role="alert">
-                      {auditError} No decision state was changed.
-                      <button onClick={() => selectTraceLeaf('audit')}>Retry</button>
-                    </div>
-                  )}
-                  {!auditLoading && !auditTrail && !auditError && <div className={styles.empty}>No audit trail data. Click the tab to fetch.</div>}
-                  {auditTrail && (
-                    <>
-                      <div className={styles.sectionTitle}>Bitemporal Decision Audit</div>
-                      <div className={styles.kvRow}><span>Decisions</span><span>{auditTrail.decision_count}</span></div>
-                      <div className={styles.kvRow}><span>Events</span><span>{auditTrail.event_count}</span></div>
-                      <div className={styles.kvRow}><span>Hash Chain Length</span><span>{auditTrail.immutability?.chain_length}</span></div>
-                      <div className={styles.kvRow}><span>Tip Hash</span><span className={styles.mono}>{auditTrail.immutability?.tip_hash}</span></div>
-                      <div className={styles.kvRow}><span>Chain Verified</span><span>{auditTrail.immutability?.verified ? '\u2705 Yes' : '\u26a0\ufe0f Not in this environment'}</span></div>
-                      {auditTrail.immutability?.reason && (
-                        <div className={styles.kvRow}><span>Why</span><span style={{ fontSize: 12, color: '#6b7280' }}>{auditTrail.immutability.reason}</span></div>
-                      )}
-                      {auditTrail.immutability?.persisted_chain && (
-                        <div className={styles.kvRow}><span>Persisted WORM chain</span><span style={{ fontSize: 12 }}>
-                          {auditTrail.immutability.persisted_chain.entries_checked} entries {'\u00b7'} anchor {auditTrail.immutability.persisted_chain.anchor_present ? 'present' : 'pending'}
-                        </span></div>
-                      )}
-
-                      <div className={styles.sectionTitle}>Storage & Immutability</div>
-                      <div className={styles.kvRow}><span>Backend</span><span>{auditTrail.storage?.backend}</span></div>
-                      <div className={styles.kvRow}><span>Encryption at Rest</span><span>{auditTrail.storage?.encryption_at_rest ? 'Yes' : 'No'}</span></div>
-                      <div className={styles.kvRow}><span>Backup</span><span>{auditTrail.storage?.backup_enabled ? 'Enabled' : 'Not configured'}</span></div>
-
-                      {(auditTrail.decisions || []).length > 0 && (
-                        <>
-                          <div className={styles.sectionTitle}>Component Decisions (Bitemporal)</div>
-                          <table className={styles.smallTable}>
-                            <thead><tr><th>Component</th><th>Valid From</th><th>Valid To</th><th>System From</th><th>Status</th><th>Approval</th></tr></thead>
-                            <tbody>
-                              {(auditTrail.decisions || []).map((d: any, i: number) => (
-                                <tr key={i}>
-                                  <td>{d.agent_name}</td>
-                                  <td className={styles.mono}>{d.valid_from?.slice(0, 19)}</td>
-                                  <td className={styles.mono}>{d.valid_to === 'infinity' ? '\u221e' : d.valid_to?.slice(0, 19)}</td>
-                                  <td className={styles.mono}>{d.system_from?.slice(0, 19)}</td>
-                                  <td>{d.execution_status}</td>
-                                  <td>{d.approval_required ? '\u26a0\ufe0f Required' : '\u2705 Auto'}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </>
-                      )}
-
-                      <div className={styles.sectionTitle}>Hash Chain (Tamper Evidence)</div>
-                      <div style={{maxHeight: '200px', overflow: 'auto'}}>
-                        <table className={styles.smallTable}>
-                          <thead><tr><th>#</th><th>Type</th><th>Timestamp</th><th>Hash</th><th>Prev</th></tr></thead>
-                          <tbody>
-                            {(auditTrail.hash_chain || []).slice(0, 50).map((h: any, i: number) => (
-                              <tr key={i}>
-                                <td>{i + 1}</td>
-                                <td>{h.type}</td>
-                                <td className={styles.mono}>{h.timestamp?.slice(0, 19) || '--'}</td>
-                                <td className={styles.mono}>{h.hash}</td>
-                                <td className={styles.mono}>{h.prev_hash === 'genesis' ? 'genesis' : h.prev_hash}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className={styles.sectionTitle}>Compliance Retention Policy</div>
-                      <div className={styles.sectionTitle} style={{fontSize: '11px', marginTop: '4px'}}>Must Retain</div>
-                      {(auditTrail.retention_policy?.retain_mandatory || []).map((r: any, i: number) => (
-                        <div key={i} className={styles.kvRow}>
-                          <span style={{fontFamily: 'monospace', fontSize: '11px'}}>{r.field}</span>
-                          <span title={r.reason}>{r.min_retention_days}d \u2014 {r.reason?.slice(0, 60)}</span>
-                        </div>
-                      ))}
-                      <div className={styles.sectionTitle} style={{fontSize: '11px', marginTop: '8px'}}>Purge Eligible</div>
-                      {(auditTrail.retention_policy?.purge_eligible || []).map((r: any, i: number) => (
-                        <div key={i} className={styles.kvRow}>
-                          <span style={{fontFamily: 'monospace', fontSize: '11px'}}>{r.field}</span>
-                          <span>After {r.after_days}d \u2014 {r.reason?.slice(0, 60)}</span>
-                        </div>
-                      ))}
-                      {(auditTrail.retention_policy?.pii_fields_detected || []).length > 0 && (
-                        <>
-                          <div className={styles.sectionTitle} style={{fontSize: '11px', marginTop: '8px', color: '#dc2626'}}>PII Fields Detected</div>
-                          <div className={styles.tagRow}>
-                            {auditTrail.retention_policy.pii_fields_detected.map((f: string) => (
-                              <span key={f} className={styles.tag} style={{background: '#dc2626'}}>{f}</span>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
+                <AuditTracePanel
+                  allocationView={allocationView}
+                  loading={auditLoading}
+                  error={auditError}
+                  auditTrail={auditTrail}
+                  onRetry={() => selectTraceLeaf('audit')}
+                  classNames={styles}
+                />
               )}
 
               {activeTab === 'raw' && (trace || events.length > 0) && (

@@ -70,3 +70,48 @@ export function resolveSemanticProjection(trace: any, events: TraceProjectionEve
       || [],
   };
 }
+
+export function projectTraceDomains(events: TraceProjectionEvent[], imageTriage: any[] = []) {
+  const corpus = JSON.stringify(events || []).toLowerCase();
+  const procurementEvents = (events || []).filter((event: any) => {
+    const source = String(event?.source_id || '').toLowerCase();
+    const type = originalEventType(event);
+    const payload = event?.payload || {};
+    return source.includes('procurement') || source.includes('split') || source.includes('supplier')
+      || source.includes('sourcing') || source.includes('integrity')
+      || type.startsWith('bulk_') || type.startsWith('procurement_') || type.startsWith('alternatives_')
+      || type.includes('availability') || type.includes('supplier') || type.includes('split')
+      || type.includes('sourc') || type.includes('channel') || type.includes('integrity')
+      || type === 'supplier_responses_normalized' || type === 'fulfillment_cart_change_confirmed'
+      || Boolean(payload.delivery_feasibility || payload.human_escalation);
+  });
+  return {
+    procurementEvents,
+    outboundIntegrityEvents: (events || []).filter((event) => originalEventType(event).includes('outbound_integrity')),
+    security: {
+      present: /(security|quarantin|blocked|threat|risk|review_required)/.test(corpus),
+      multimodal: Boolean(imageTriage?.length || /(image|multimodal|ocr|qr_|vision)/.test(corpus)),
+      authority: 'evidence_only',
+    },
+    memory: { present: /(memory|cache|session|shortlist|nqe)/.test(corpus) },
+  };
+}
+
+export function projectReasoningDomain({
+  semanticResolution,
+  semanticEvidence,
+  catalogAlignment,
+  caseObligations,
+  executionSteps,
+  modelSelection,
+}: Record<string, any>) {
+  return {
+    interpretation: semanticResolution || null,
+    evidence: semanticEvidence || null,
+    catalogAlignment: catalogAlignment || null,
+    obligations: Array.isArray(caseObligations) ? caseObligations : [],
+    executionSteps: Array.isArray(executionSteps) ? executionSteps : [],
+    complexity: modelSelection || null,
+    authority: 'explanation_only',
+  };
+}
