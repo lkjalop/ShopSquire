@@ -104,3 +104,22 @@ def test_explicit_laptop_purchase_object_outranks_workload_nouns():
     assert candidate_set.status == "eligible"
     assert candidate_set.taxonomy_handle == "el-6-6"
     assert len(candidate_set.configuration_ids) == 3
+
+
+def test_constraint_word_does_not_override_storefront_purchase_category():
+    engine = _database()
+    with Session(engine) as db:
+        ingest_reviewed_configurations(db)
+        candidate_set = build_case_catalog_candidate_set(
+            db,
+            retained_purpose=(
+                "Should we buy 40 mobile workstations? Verify Linux support, Windows management, "
+                "dock compatibility and warranty before recommending them."
+            ),
+            tenant_id="default",
+            storefront_taxonomy_handle="el-6-6",
+        )
+
+    assert candidate_set.status == "eligible"
+    assert candidate_set.taxonomy_handle == "el-6-6"
+    assert candidate_set.taxonomy_source == "storefront_context"

@@ -1804,8 +1804,6 @@ export default function App() {
         !activeShoppingCase?.case_id
         && !hasImages
         && !complaintIntent
-        && !explicitComplaintIntent
-        && mode !== 'faq'
       ) {
         const interpretationResponse = await fetch(apiUrl('/api/v1/shopping-cases/interpretations'), {
           method: 'POST',

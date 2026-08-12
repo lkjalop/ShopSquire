@@ -2878,37 +2878,53 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         # deadline. This projection is local-only: it calls no discovery
         # provider and grants no fit, supplier, or cart authority.
         if _timed_out:
+            _fallback_db_gen = None
             try:
                 from datetime import datetime, timezone
+                from src.app.models.db import get_db_for_request
                 from src.app.models.orm import ShoppingCase
                 from src.app.services.accepted_catalog_projection import project_accepted_catalog
+                from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set
                 from src.app.services.case_research_plan import build_case_research_plan
 
                 _purpose = " ".join(str(q or "").split())[:500]
                 _plan = build_case_research_plan(_purpose, allow_open_world=True)
                 if _plan is not None:
+                    # ``wait_for`` can cancel the await, but it cannot stop the sync
+                    # recommendation worker that is still using the request session.
+                    # Never let timeout recovery query/commit with that same Session:
+                    # doing so races its rollback and can raise IllegalStateChangeError.
+                    _fallback_db_gen = get_db_for_request(request)
+                    _fallback_db = next(_fallback_db_gen)
+                    _case_tenant = _request_tenant_id(request)
+                    _candidate_set = build_case_catalog_candidate_set(
+                        _fallback_db,
+                        retained_purpose=_purpose,
+                        tenant_id=_case_tenant,
+                        storefront_taxonomy_handle=None,
+                    )
                     _projection = project_accepted_catalog(
-                        db, accepted_claims=[], desired_outcome=_purpose,
-                        tenant_id=_request_tenant_id(request),
+                        _fallback_db, accepted_claims=[], desired_outcome=_purpose,
+                        tenant_id=_case_tenant,
                         hypothesis_labels={
                             item.hypothesis_id: item.label for item in _plan.hypotheses
                         },
+                        candidate_configuration_ids=_candidate_set.configuration_ids,
                     )
                     _case_id = f"sc-{_degraded_trace.removeprefix('chat-degraded-')}"
                     _case_uid = _resolve_uid(payload, request)
-                    _case_tenant = _request_tenant_id(request)
-                    existing = db.execute(sql_text(
+                    existing = _fallback_db.execute(sql_text(
                         "SELECT 1 FROM shopping_cases "
                         "WHERE tenant_id=:tenant_id AND case_id=:case_id LIMIT 1"
                     ), {"tenant_id": _case_tenant, "case_id": _case_id}).first()
                     if existing is None:
                         now = datetime.now(timezone.utc)
-                        db.add(ShoppingCase(
+                        _fallback_db.add(ShoppingCase(
                             case_id=_case_id, tenant_id=_case_tenant,
                             uid=str(_case_uid or "guest")[:200], status="active",
                             retained_purpose=_purpose, created_at=now, updated_at=now,
                         ))
-                        db.commit()
+                        _fallback_db.commit()
                     _ambiguity = {
                         "schema_version": "ambiguity-exploration-v1",
                         "case_id": _case_id, "trace_id": _degraded_trace,
@@ -2933,6 +2949,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             item.model_dump(mode="json") for item in _plan.obligations
                         ],
                         "source_candidate_ids": list(_plan.source_candidate_ids),
+                        "catalog_candidate_set": _candidate_set.model_dump(mode="json"),
                     }
                     log_trace_event(
                         trace_id=_degraded_trace,
@@ -2960,6 +2977,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     }
             except Exception:
                 logger.warning("timeout ambiguity projection failed", exc_info=True)
+            finally:
+                if _fallback_db_gen is not None:
+                    _fallback_db_gen.close()
         return {
             "products": [],
             "view_mode": "cards",

@@ -84,12 +84,30 @@ def test_chat_forwards_qr_cv_signals_from_image_security_payload(monkeypatch):
 
 def test_chat_recommend_timeout_returns_typed_degradation(monkeypatch):
     from src.app.routers import chat as chat_router
+    from src.app.models import db as db_module
+
+    request_session = None
+    fallback_sessions = []
 
     async def _never_returns(*args, **kwargs):
+        nonlocal request_session
+        request_session = kwargs["db"]
         await asyncio.Event().wait()
+
+    original_get_db_for_request = db_module.get_db_for_request
+
+    def _record_fallback_session(request):
+        generator = original_get_db_for_request(request)
+        session = next(generator)
+        fallback_sessions.append(session)
+        try:
+            yield session
+        finally:
+            generator.close()
 
     monkeypatch.setenv("CHAT_UPSTREAM_TIMEOUT_SEC", "0.05")
     monkeypatch.setattr(chat_router, "_call_recommend_in_process", _never_returns)
+    monkeypatch.setattr(db_module, "get_db_for_request", _record_fallback_session)
     app = create_app()
     client = TestClient(app)
     resp = client.post(
@@ -109,3 +127,5 @@ def test_chat_recommend_timeout_returns_typed_degradation(monkeypatch):
     assert ambiguity["research_plan_id"].startswith("crp-")
     assert ambiguity["case_id"].startswith("sc-")
     assert "shelves" in body["product_shelves"]
+    assert request_session is not None
+    assert any(session is not request_session for session in fallback_sessions)

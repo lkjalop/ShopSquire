@@ -77,6 +77,24 @@ def _explicit_category(purpose: str, *, preferred_handle: str | None = None):
     ]
     if related:
         ranked = related
+    elif preferred_handle:
+        # An unrelated taxonomy label overrides storefront context only when it
+        # is actually the grammatical purchase object.  A constraint such as
+        # "Windows management" must not become Building Materials > Windows,
+        # while "I need a standing desk" must still cross the catalog boundary.
+        purpose_normal = _normal(purpose)
+        purchase_objects = []
+        for row in ranked:
+            category = _singular(row[2].name)
+            purchase_pattern = re.compile(
+                rf"\b(?:need|want|buy|purchase|find|show|source|looking for|help me with)\b"
+                rf"(?:\s+[a-z0-9]+){{0,8}}\s+{re.escape(category)}\b"
+            )
+            if purchase_pattern.search(purpose_normal):
+                purchase_objects.append(row)
+        if not purchase_objects:
+            return None
+        ranked = purchase_objects
     return max(ranked, key=lambda row: (row[0], row[1], row[2].handle))[2]
 
 
