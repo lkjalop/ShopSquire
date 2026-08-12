@@ -18,7 +18,10 @@ class StubFetcher:
         }
         return [
             {"url": "https://vendor.example/blog/opinion", "title": "Opinion"},
-            {"url": "https://vendor.example/docs/system-requirements/", "title": "System requirements"},
+            {
+                "url": "https://vendor.example/docs/scientific-solver-system-requirements/",
+                "title": "Scientific solver system requirements",
+            },
         ]
 
 
@@ -31,7 +34,9 @@ def test_novel_plan_runs_bounded_discovery_without_fetching_or_claiming_authorit
     )
     assert len(fetcher.calls) == 3
     assert all(call[1] == [] and call[3] is True for call in fetcher.calls)
-    assert result["candidates"][0]["url"].endswith("/docs/system-requirements/")
+    assert result["candidates"][0]["url"].endswith(
+        "/docs/scientific-solver-system-requirements/"
+    )
     assert all("/blog/" not in item["url"] for item in result["candidates"])
     assert result["provider_accounting"] == {
         "discovery_calls": 3, "external_calls": 3,

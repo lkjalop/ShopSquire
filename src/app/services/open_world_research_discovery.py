@@ -19,6 +19,7 @@ class DiscoveryFetcher(Protocol):
 
 
 _WORD = re.compile(r"[a-z0-9]+")
+_NAMED_SUBJECT = re.compile(r"\b[A-Z][A-Za-z0-9+.-]*(?:\s+[A-Z][A-Za-z0-9+.-]*)*\b")
 _QUALITY_STOP = {
     "a", "and", "are", "for", "from", "hardware", "in", "is", "of", "official",
     "only", "or", "requirements", "software", "support", "system", "the", "to",
@@ -30,6 +31,15 @@ def _terms(value: str) -> set[str]:
     return {
         token for token in _WORD.findall(str(value or "").lower())
         if len(token) > 2 and token not in _QUALITY_STOP
+    }
+
+
+def _named_subject_terms(value: str) -> set[str]:
+    return {
+        token
+        for phrase in _NAMED_SUBJECT.findall(str(value or ""))
+        for token in _terms(phrase)
+        if token not in {"can", "could", "exclude", "only", "this", "we", "which", "will"}
     }
 
 
@@ -89,6 +99,7 @@ def discover_open_world_publishers(
     )
     candidates: dict[str, dict[str, Any]] = {}
     receipts: list[dict[str, Any]] = []
+    named_subject_terms = _named_subject_terms(plan.retained_purpose)
     per_query = max(1.0, min(4.0, timeout_s / max(1, len(plan.discovery_queries))))
     for item in plan.discovery_queries[:3]:
         rows = transport.fetch(
@@ -130,14 +141,18 @@ def discover_open_world_publishers(
             )
             candidate["publisher_host_overlap_count"] = max(
                 int(candidate["publisher_host_overlap_count"]),
-                len(host_terms & purpose_terms),
+                len(host_terms & named_subject_terms),
             )
     # Do not present arbitrary search results as possible authorities.  A row
     # must at least look like requirements, documentation, a manual, or a
     # publisher support surface. Publisher ownership is still unresolved and
     # must be approved separately.
     ranked = sorted(
-        (row for row in candidates.values() if _quality_score(row) >= 3),
+        (
+            row for row in candidates.values()
+            if int(row.get("subject_overlap_count") or 0) > 0
+            and _quality_score(row) >= 3
+        ),
         key=_quality,
     )[:12]
     for row in ranked:

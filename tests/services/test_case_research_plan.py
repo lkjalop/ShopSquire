@@ -146,6 +146,19 @@ def test_open_world_queries_drop_negated_preferences_and_buyer_filler():
     assert " buy " not in f" {queries} "
 
 
+def test_sentence_starters_are_not_mistaken_for_named_software():
+    for prompt, expected in [
+        ("Can this laptop run coupled FEA and CFD simulations?", "coupled FEA CFD simulations"),
+        ("Could this handle hyperspectral crop images?", "hyperspectral crop images"),
+        ("Will it handle acoustic beamforming?", "acoustic beamforming"),
+    ]:
+        plan = build_case_research_plan(prompt, manifest=_manifest(), allow_open_world=True)
+        assert plan is not None
+        query = plan.discovery_queries[1].query.lower()
+        assert set(expected.lower().split()) <= set(query.split())
+        assert not query.startswith(("can ", "could ", "will "))
+
+
 def test_generic_requirements_phrase_cannot_invent_an_unrelated_workload():
     manifest = {"sources": [
         _source("factory", ["factory_io", "plc_simulation"], ["Factory I/O", "System Requirements"]),

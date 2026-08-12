@@ -61,6 +61,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
   const materialClarification = executionSteps.find((step) => step?.id === 'material-clarification') || {};
   const commercialCase = executionSteps.find((step) => step?.id === 'commercial-case-reducer') || {};
   const officialResearch = [...events].reverse().find(isOfficialResearchEvent)?.payload || {};
+  const queryProposal = officialResearch?.query_proposal || {};
   const provisionalExploration = [...events].reverse().find(isAmbiguityExplorationEvent)?.payload || {};
   const retainedObligations = events
     .filter(isShoppingCaseObligationEvent)
@@ -93,6 +94,7 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
     evidence.id || authorization.id || entities.length || researchPlan.id || researchTrigger.id
     || postCatalogTrigger.id
     || semanticEvidence.id || semanticAuthorization.id || evidenceLadder.length
+    || Object.keys(officialResearch).length > 0
     || provisionalExploration?.research_plan_id
   );
 
@@ -278,6 +280,24 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
             </div>
             <small style={{ color: '#64748b' }}>
               Cart authority: {words(officialResearch.cart_authority)}. Supplier authority: {words(officialResearch.supplier_authority)}.
+            </small>
+          </div>
+        )}
+
+        {Object.keys(queryProposal).length > 0 && (
+          <div data-testid="open-world-query-proposal" style={{ border: '1px solid #cbd5e1', padding: 10, borderRadius: 6 }}>
+            <strong>Open-vocabulary query proposal</strong>
+            <div style={{ marginTop: 5 }}>
+              Status: <strong>{words(queryProposal.status)}</strong>
+              {' · '}Model calls: <strong>{String(queryProposal.model_calls ?? 0)}</strong>
+              {queryProposal.latency_ms != null && (
+                <>{' · '}Latency: <strong>{String(queryProposal.latency_ms)}ms</strong></>
+              )}
+            </div>
+            <div>Authority: <strong>{words(queryProposal.authority || 'none')}</strong></div>
+            {queryProposal.reason && <div>Fallback reason: <strong>{words(queryProposal.reason)}</strong></div>}
+            <small style={{ color: '#64748b' }}>
+              Query expansion may improve discovery vocabulary. It cannot establish requirements, accept a publisher, rank products, contact suppliers, or change the cart.
             </small>
           </div>
         )}

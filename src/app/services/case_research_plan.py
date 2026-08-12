@@ -39,10 +39,10 @@ _GENERIC_ACTIVATION_PHRASES = {
 }
 _DISCOVERY_FILLER = _STOP | {
     "acceptable", "actually", "anything", "care", "could", "engineering", "gaming", "good",
-    "about", "but", "buy", "edit", "help", "laptop", "looking", "machine", "need",
+    "about", "but", "buy", "can", "could", "edit", "help", "laptop", "looking", "machine", "need",
     "officially", "please", "process", "product", "recommend", "run", "should",
     "something", "supported", "suitable", "team", "thing", "this", "vendor",
-    "wants", "what", "which", "would", "our",
+    "wants", "what", "which", "will", "would", "our",
 }
 
 
@@ -117,7 +117,9 @@ def _proper_names(value: str) -> tuple[list[str], set[str]]:
     for raw_name in _PROPER_NAME.findall(value):
         name = raw_name.strip()
         name_tokens = set(_TOKEN.findall(name.lower()))
-        if name.casefold() in {"only", "this", "which"} or name_tokens <= tokens:
+        if name.casefold() in {
+            "can", "could", "exclude", "only", "this", "we", "which", "will",
+        } or name_tokens <= tokens:
             continue
         names.append(name)
         tokens.update(name_tokens)

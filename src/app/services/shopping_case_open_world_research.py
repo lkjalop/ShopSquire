@@ -21,6 +21,7 @@ from src.app.services.commerce_feature_readiness import (
 from src.app.services.decision_log import log_trace_event
 from src.app.services.official_source_governance import load_official_source_manifest
 from src.app.services.open_world_research_discovery import discover_open_world_publishers
+from src.app.services.open_world_query_proposal import propose_open_world_queries
 from src.app.services.shopping_case_research_contract import (
     project_research_execution_contract,
 )
@@ -70,10 +71,12 @@ def execute_open_world_publisher_discovery(
             readiness=readiness,
         )
 
+    discovery_plan, query_proposal = propose_open_world_queries(plan)
     discovery = discover_open_world_publishers(
-        plan,
+        discovery_plan,
         search_url_template=search_url_template,
     )
+    discovery["query_proposal"] = query_proposal
     # Discovery receipts prove dispatch/reachability, but discovered snippets
     # remain candidate metadata and can never compile as requirements.
     record_external_research_runtime_observation(discovery)
@@ -166,6 +169,7 @@ def execute_open_world_publisher_discovery(
             "publisher_candidates": discovery["candidates"],
             "receipts": discovery["receipts"],
             "provider_accounting": accounting,
+            "query_proposal": discovery.get("query_proposal"),
             "official_claims": [],
             "qualification_authority": "none",
             "cart_authority": "none",

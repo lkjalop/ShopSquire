@@ -424,4 +424,21 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.getByTestId('discovery-engine-health')).toHaveTextContent(/google: degraded \(1800ms\)/i);
     expect(screen.getByText(/Temporarily suppressed:/i)).toHaveTextContent(/wikipedia/i);
   });
+
+  it('shows query-proposal fallback without granting research or commerce authority', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[{
+      event_type: 'open_world_discovery_completed',
+      payload: {
+        provider_accounting: { external_calls: 3, paid_calls: 0 },
+        query_proposal: {
+          status: 'rejected_or_unavailable', model_calls: 1, latency_ms: 6000,
+          reason: 'ReadTimeout', authority: 'none',
+        },
+      },
+    }]} />);
+
+    expect(screen.getByTestId('open-world-query-proposal')).toHaveTextContent(/rejected or unavailable/i);
+    expect(screen.getByTestId('open-world-query-proposal')).toHaveTextContent(/ReadTimeout/i);
+    expect(screen.getByTestId('open-world-query-proposal')).toHaveTextContent(/Authority:\s*none/i);
+  });
 });
