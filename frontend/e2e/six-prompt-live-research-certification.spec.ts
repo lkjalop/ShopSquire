@@ -94,7 +94,9 @@ for (const scenario of scenarios) {
       response.request().method() === 'POST'
         && /\/api\/v1\/shopping-cases\/[^/]+\/research(?:\?|$)/.test(response.url())
     ), { timeout: 180_000 });
-    await panel.getByRole('button', { name: /Research approved sources/i }).click();
+    // Covered workloads can use reviewed canonical sources immediately; open-world
+    // interpretations first discover a publisher. Both are governed research consent.
+    await panel.getByRole('button', { name: /Research approved sources|Discover official sources/i }).click();
     const response = await responsePromise;
     const requestBody = response.request().postDataJSON();
     expect(requestBody).toMatchObject({ research_authorized: true });
