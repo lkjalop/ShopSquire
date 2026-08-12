@@ -47,6 +47,7 @@ def frontend_server(test_server):
     env = os.environ.copy()
     env["VITE_API_BASE_URL"] = test_server["base_url"]
     env["VITE_ALLOW_OFFLINE_FALLBACK"] = "0"
+    env["VITE_FORCE_INCIDENT_SSE"] = "true"
     npm_cmd = shutil.which("npm") or shutil.which("npm.cmd")
     if not npm_cmd:
         pytest.skip("npm executable not found in PATH for Playwright test")
@@ -175,6 +176,8 @@ def test_two_browser_buyer_and_authenticated_staff_exchange_messages(browser, fr
         )
         buyer_page.get_by_test_id("human-conversation").wait_for(timeout=10000)
         staff_page.get_by_test_id("human-conversation").wait_for(timeout=10000)
+        buyer_page.get_by_text("sse", exact=True).wait_for(timeout=10000)
+        staff_page.get_by_text("sse", exact=True).wait_for(timeout=10000)
 
         staff_page.get_by_placeholder("Message your specialist...").fill("I am Alex from ShopSquire support.")
         staff_page.get_by_role("button", name="Send").click()
@@ -193,6 +196,61 @@ def test_two_browser_buyer_and_authenticated_staff_exchange_messages(browser, fr
         buyer_page.get_by_test_id("human-conversation").wait_for(timeout=10000)
         buyer_page.get_by_text("I am Alex from ShopSquire support.", exact=True).wait_for(timeout=10000)
         assert buyer_page.get_by_text("I am Alex from ShopSquire support.", exact=True).count() == 1
+
+        assignment = requests.post(
+            f"{test_server['base_url']}/api/v1/admin/incidents/{incident_id}/assign",
+            json={"assigned_to": "product-specialist-2", "team": "procurement"},
+            headers={"x-api-key": os.getenv("MERCHANT_API_KEY", "local-merchant-key")},
+            timeout=10,
+        )
+        assert assignment.status_code == 200, assignment.text
+        buyer_page.get_by_text("Incident assignment updated.", exact=True).wait_for(timeout=10000)
     finally:
         buyer_context.close()
         staff_context.close()
+
+
+def test_rotated_staff_token_is_rejected_and_new_token_uses_sse(browser, frontend_server, test_server):
+    create = requests.post(
+        f"{test_server['base_url']}/api/v1/incidents/escalate",
+        json={"case_id": "rotate-case", "trace_id": "rotate-trace", "reason": "buyer_requested_human"},
+        headers={"host": "localhost"},
+        timeout=10,
+    )
+    assert create.status_code == 200, create.text
+    incident_id = create.json()["incident_id"]
+    headers = {"x-api-key": os.getenv("MERCHANT_API_KEY", "local-merchant-key")}
+    first = requests.post(
+        f"{test_server['base_url']}/api/v1/admin/incidents/{incident_id}/room/token",
+        headers=headers,
+        timeout=10,
+    ).json()["staff_token"]
+    second = requests.post(
+        f"{test_server['base_url']}/api/v1/admin/incidents/{incident_id}/room/token",
+        headers=headers,
+        timeout=10,
+    ).json()["staff_token"]
+    assert first != second
+
+    rejected = requests.post(
+        f"{test_server['base_url']}/api/v1/incidents/{incident_id}/room/message",
+        headers={"x-incident-token": first},
+        json={"message": "This rotated credential must fail."},
+        timeout=10,
+    )
+    assert rejected.status_code == 401
+
+    context = browser.new_context()
+    page = context.new_page()
+    try:
+        page.goto(
+            f"{frontend_server}/?surface=incident&role=staff&incident_id={incident_id}&token={second}",
+            wait_until="domcontentloaded",
+        )
+        page.get_by_test_id("human-conversation").wait_for(timeout=10000)
+        page.get_by_text("sse", exact=True).wait_for(timeout=10000)
+        page.get_by_placeholder("Message your specialist...").fill("Rotated staff credential is active.")
+        page.get_by_role("button", name="Send").click()
+        page.get_by_text("Rotated staff credential is active.", exact=True).wait_for(timeout=10000)
+    finally:
+        context.close()
