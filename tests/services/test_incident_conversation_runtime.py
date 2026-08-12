@@ -46,3 +46,35 @@ def test_publish_uses_broker_envelope_without_duplicating_local_delivery(monkeyp
     envelope = __import__("json").loads(published[0][1])
     assert envelope["origin"] == "worker-a"
     assert envelope["incident_id"] == "inc-2"
+
+
+def test_presence_uses_atomic_hash_and_is_visible_to_another_worker(monkeypatch):
+    class SharedRedis:
+        def __init__(self):
+            self.hashes = {}
+            self.expiries = {}
+
+        def hset(self, key, field, value):
+            self.hashes.setdefault(key, {})[field] = value
+
+        def hgetall(self, key):
+            return dict(self.hashes.get(key, {}))
+
+        def hdel(self, key, field):
+            self.hashes.setdefault(key, {}).pop(field, None)
+
+        def expire(self, key, seconds):
+            self.expiries[key] = seconds
+
+    redis = SharedRedis()
+    monkeypatch.setattr("src.app.services.incident_conversation_runtime.get_redis", lambda: redis)
+    first_worker = IncidentConversationRuntime(instance_id="worker-a")
+    second_worker = IncidentConversationRuntime(instance_id="worker-b")
+
+    first_worker.join("inc-shared", {"actor_id": "staff:alice", "display_name": "Alice"})
+    second_worker.join("inc-shared", {"actor_id": "staff:bob", "display_name": "Bob"})
+
+    assert [row["actor_id"] for row in first_worker.active_staff("inc-shared")] == ["staff:alice", "staff:bob"]
+    assert redis.expiries["incident_chat_presence:inc-shared"] == 90
+    second_worker.leave("inc-shared", {"actor_id": "staff:bob"})
+    assert [row["actor_id"] for row in first_worker.active_staff("inc-shared")] == ["staff:alice"]

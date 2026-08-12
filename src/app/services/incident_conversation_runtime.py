@@ -132,13 +132,20 @@ class IncidentConversationRuntime:
         try:
             redis = get_redis()
             if not isinstance(redis, DummyRedis):
-                raw = redis.get(self._presence_key(incident_id))
-                if raw:
-                    decoded = json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
-                    now = int(time.time())
-                    for actor_id, record in dict(decoded).items():
-                        if now - int(record.get("last_seen_at") or 0) <= self.presence_ttl_seconds:
-                            merged[actor_id] = record
+                decoded: dict[str, Any] = {}
+                if hasattr(redis, "hgetall"):
+                    for actor_id_raw, record_raw in dict(redis.hgetall(self._presence_key(incident_id)) or {}).items():
+                        actor_id = actor_id_raw.decode() if isinstance(actor_id_raw, bytes) else str(actor_id_raw)
+                        record_text = record_raw.decode() if isinstance(record_raw, bytes) else str(record_raw)
+                        decoded[actor_id] = json.loads(record_text)
+                else:
+                    raw = redis.get(self._presence_key(incident_id))
+                    if raw:
+                        decoded = json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
+                now = int(time.time())
+                for actor_id, record in decoded.items():
+                    if now - int(record.get("last_seen_at") or 0) <= self.presence_ttl_seconds:
+                        merged[actor_id] = record
         except Exception:
             pass
         return sorted(merged.values(), key=lambda item: str(item.get("actor_id") or ""))
@@ -162,6 +169,10 @@ class IncidentConversationRuntime:
             if isinstance(redis, DummyRedis):
                 return
             key = self._presence_key(incident_id)
+            if hasattr(redis, "hset"):
+                redis.hset(key, actor_id, json.dumps(record))
+                redis.expire(key, self.presence_ttl_seconds)
+                return
             current = redis.get(key)
             values = json.loads(current.decode() if isinstance(current, bytes) else str(current)) if current else {}
             values[actor_id] = record
@@ -175,6 +186,9 @@ class IncidentConversationRuntime:
             if isinstance(redis, DummyRedis):
                 return
             key = self._presence_key(incident_id)
+            if hasattr(redis, "hdel"):
+                redis.hdel(key, actor_id)
+                return
             current = redis.get(key)
             values = json.loads(current.decode() if isinstance(current, bytes) else str(current)) if current else {}
             values.pop(actor_id, None)

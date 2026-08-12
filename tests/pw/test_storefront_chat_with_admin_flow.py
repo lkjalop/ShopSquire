@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 import requests
 
+from src.app.routers import escalation_room
+
 
 def _is_port_open(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -286,3 +288,44 @@ def test_rotated_staff_token_is_rejected_and_new_token_uses_sse(browser, fronten
         page.get_by_text("Rotated staff credential is active.", exact=True).wait_for(timeout=10000)
     finally:
         context.close()
+
+
+def test_revoked_and_expired_staff_tokens_are_rejected(test_server, monkeypatch, tmp_path):
+    create = requests.post(
+        f"{test_server['base_url']}/api/v1/incidents/escalate",
+        json={"case_id": "revoke-case", "trace_id": "revoke-trace", "reason": "buyer_requested_human"},
+        headers={"host": "localhost"},
+        timeout=10,
+    )
+    assert create.status_code == 200, create.text
+    incident_id = create.json()["incident_id"]
+    headers = {"x-api-key": os.getenv("MERCHANT_API_KEY", "local-merchant-key")}
+    issued = requests.post(
+        f"{test_server['base_url']}/api/v1/admin/incidents/{incident_id}/room/token",
+        headers=headers,
+        timeout=10,
+    ).json()["staff_token"]
+    revoked = requests.delete(
+        f"{test_server['base_url']}/api/v1/admin/incidents/{incident_id}/room/token",
+        headers=headers,
+        timeout=10,
+    )
+    assert revoked.status_code == 200, revoked.text
+    denied = requests.post(
+        f"{test_server['base_url']}/api/v1/incidents/{incident_id}/room/message",
+        headers={"x-incident-token": issued},
+        json={"message": "Revoked token must not post."},
+        timeout=10,
+    )
+    assert denied.status_code == 401
+
+    # Expiry is a token-contract property; use the same file-backed record consumed by the
+    # live route and an unambiguously elapsed timestamp.
+    monkeypatch.setattr(escalation_room, "_TOKENS_DIR", tmp_path)
+    expired_id = "inc-expired-browser-contract"
+    expired_token = "expired-staff-token"
+    (tmp_path / f"{expired_id}.json").write_text(
+        __import__('json').dumps({"staff": expired_token, "exp": 1}),
+        encoding="utf-8",
+    )
+    assert escalation_room._role_for_token(expired_id, expired_token) is None
