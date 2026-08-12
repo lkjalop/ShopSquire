@@ -2087,10 +2087,12 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
         return
 
     from src.app.config import get_settings, load_feature_flags
-    from src.app.services.recommend_fulfillment_stage import run_fulfillment_stage
+    from src.app.services.recommendation_fulfillment_facade import (
+        RecommendationFulfillmentRequest,
+        project_recommendation_fulfillment,
+    )
 
     flags = load_feature_flags(get_settings().feature_flags_path)
-    flags["FULFILLMENT_DEFER_TO_CART"] = True
     constraints: Dict[str, Any] = {
         "order_quantity": int(quantity),
         "budget_min": (envelope.budget_min_cents / 100
@@ -2112,33 +2114,33 @@ def _maybe_fulfillment_preview(envelope: TurnEnvelope, decision: TurnDecision,
     payment_plan = decision.operational_constraints.get("payment_plan")
     if payment_plan:
         constraints["payment_plan"] = str(payment_plan)
-    projection: Dict[str, Any] = {}
-    availability_line = run_fulfillment_stage(
+    fulfillment = project_recommendation_fulfillment(RecommendationFulfillmentRequest(
         results=[product.as_dict() for product in resp.products],
         constraints=constraints,
-        payload=projection,
         uid=envelope.uid,
         trace_id=envelope.trace_id,
-        flags=flags,
-        query=envelope.query,
         tenant_id=envelope.tenant_id,
-        # The shared core has already authorized one canonical slate. Re-parsing the raw
-        # sentence as a cart manifest can turn audience phrases such as "20 students"
-        # into phantom line items and replace the selected SKU with a legacy alias.
-        allow_query_order_split=False,
-    )
+        query=envelope.query,
+        flags=flags,
+    ))
+    availability_line = fulfillment.summary
     if availability_line and availability_line.lower() not in resp.message.lower():
         resp.message = " ".join(
             part for part in (resp.message.strip(), availability_line.strip()) if part
         )
-    for key in ("availability", "fulfillment_options", "sourcing_intent"):
-        if projection.get(key) is not None:
-            resp.extras[key] = projection[key]
-    if horizon_days is not None and projection.get("availability"):
+    projection = {
+        "availability": fulfillment.availability,
+        "fulfillment_options": fulfillment.fulfillment_options,
+        "sourcing_intent": fulfillment.sourcing_intent,
+    }
+    for key, value in projection.items():
+        if value is not None and value != []:
+            resp.extras[key] = value
+    if horizon_days is not None and fulfillment.availability:
         deadline = _deadline_feasibility_from_preview(
             quantity=int(quantity),
             horizon_days=int(horizon_days),
-            availability=projection["availability"],
+            availability=fulfillment.availability,
         )
         resp.extras["delivery_feasibility"] = deadline
         from src.app.services.bulk_alternatives import augment_deadline_alternatives
