@@ -230,6 +230,22 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
                       ))}
                     </ul>
                   )}
+                  {Array.isArray(tier.engine_reliability) && tier.engine_reliability.length > 0 && (
+                    <div data-testid="discovery-engine-health" style={{ marginTop: 4, fontSize: 12 }}>
+                      Engine health:{' '}
+                      {tier.engine_reliability.map((row: any, index: number) => {
+                        const name = row?.engine || row?.engine_id || `engine ${index + 1}`;
+                        const health = row?.health || row?.status || row?.health_status || 'not recorded';
+                        const latency = row?.latency_ms ?? row?.rolling_latency_ms ?? row?.ewma_latency_ms;
+                        return `${name}: ${words(health)}${latency != null ? ` (${latency}ms)` : ''}`;
+                      }).join(' | ')}
+                    </div>
+                  )}
+                  {Array.isArray(tier.suppressed_engines) && tier.suppressed_engines.length > 0 && (
+                    <div style={{ fontSize: 12, color: '#b45309' }}>
+                      Temporarily suppressed: {tier.suppressed_engines.join(', ')}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -247,6 +263,14 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
               {' · '}Evidence: <strong>{words(officialResearch.evidence_outcome)}</strong>
             </div>
             <div>
+              Execution source: <strong>{words(
+                Number(officialResearch?.provider_accounting?.external_calls || 0) > 0
+                  ? 'live network'
+                  : Number(officialResearch?.provider_accounting?.cache_hits || 0) > 0
+                    ? 'governed evidence cache'
+                    : officialResearch?.execution_mode || 'not executed'
+              )}</strong>
+              {' Â· '}
               External provider calls: <strong>{String(officialResearch?.provider_accounting?.external_calls ?? 0)}</strong>
               {' · '}Official fetches: <strong>{String(officialResearch?.provider_accounting?.official_origin_fetches ?? 0)}</strong>
               {' · '}Cache hits: <strong>{String(officialResearch?.provider_accounting?.cache_hits ?? 0)}</strong>

@@ -397,4 +397,31 @@ describe('WorkloadResearchTrace', () => {
     expect(screen.getByTestId('research-provider-usage')).toHaveTextContent(/External provider calls:\s*0/i);
     expect(screen.getByTestId('research-provider-usage')).toHaveTextContent(/Paid calls:\s*not recorded/i);
   });
+
+  it('distinguishes live research, cache reuse, and discovery engine health', () => {
+    render(<WorkloadResearchTrace executionSteps={[]} events={[{
+      event_type: 'official_research_rerank_completed',
+      payload: {
+        status: 'completed', evidence_outcome: 'product_requirements',
+        provider_accounting: {
+          external_calls: 2, official_origin_fetches: 1, cache_hits: 0, paid_calls: 0,
+        },
+        evidence_ladder: [{
+          tier: 4, mechanism: 'self_hosted_discovery', execution_status: 'completed',
+          billing_class: 'free', dispatch_count: 1, allowlisted_result_count: 3,
+          engines_queried: ['bing', 'google'], engines_responded: ['bing'],
+          engine_reliability: [
+            { engine: 'bing', health: 'healthy', latency_ms: 421 },
+            { engine: 'google', health: 'degraded', latency_ms: 1800 },
+          ],
+          suppressed_engines: ['wikipedia'],
+        }],
+      },
+    }]} />);
+
+    expect(screen.getByTestId('official-research-outcome')).toHaveTextContent(/Execution source:\s*live network/i);
+    expect(screen.getByTestId('discovery-engine-health')).toHaveTextContent(/bing: healthy \(421ms\)/i);
+    expect(screen.getByTestId('discovery-engine-health')).toHaveTextContent(/google: degraded \(1800ms\)/i);
+    expect(screen.getByText(/Temporarily suppressed:/i)).toHaveTextContent(/wikipedia/i);
+  });
 });
