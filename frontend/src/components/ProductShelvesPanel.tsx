@@ -52,6 +52,7 @@ type ProductShelf = {
   shelf_id: string;
   scope_label: string;
   budget_band: 'best' | 'within_budget' | 'stretch';
+  decision_view?: 'technical_fit' | 'available_by_deadline' | 'commercially_proportionate';
   initial: ShelfProduct[];
   next_page: ShelfProduct[];
   remaining_count: number;
@@ -212,7 +213,10 @@ function Shelf({ shelf, onPropose, narration, showNarration }: {
   const [quantities, setQuantities] = React.useState<Record<string, number>>({});
   const products = expanded ? [...shelf.initial, ...shelf.next_page] : shelf.initial;
   const band = shelf.budget_band === 'within_budget' ? 'Within budget'
-    : shelf.budget_band === 'stretch' ? 'Stretch' : 'Best fit';
+    : shelf.budget_band === 'stretch' ? 'Stretch'
+      : shelf.decision_view === 'available_by_deadline' ? 'Availability and deadline fit'
+        : shelf.decision_view === 'commercially_proportionate' ? 'At least 20% lower unit price'
+          : 'Best technical fit';
   return (
     <section data-testid={`product-shelf-${shelf.shelf_id}`} style={{ marginBottom: 16 }}>
       <h3 style={{ margin: '0 0 3px', fontSize: 15 }}>{shelf.scope_label}</h3>

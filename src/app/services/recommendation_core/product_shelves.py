@@ -30,6 +30,9 @@ from src.app.services.recommendation_core.workload_decision import (
 
 FitStatus = Literal["qualified", "conditional", "failed"]
 BudgetBand = Literal["best", "within_budget", "stretch"]
+DecisionView = Literal[
+    "technical_fit", "available_by_deadline", "commercially_proportionate",
+]
 FreshnessStatus = Literal["fresh", "stale", "unknown"]
 
 
@@ -202,6 +205,7 @@ class ProductShelf(BaseModel):
     scope_id: str
     scope_label: str
     budget_band: BudgetBand
+    decision_view: DecisionView = "technical_fit"
     budget_cents: int | None = None
     initial: list[ShelfProduct] = Field(default_factory=list, max_length=3)
     next_page: list[ShelfProduct] = Field(default_factory=list, max_length=5)
@@ -247,19 +251,25 @@ def _fit_status(decision: WorkloadDecision | None) -> FitStatus:
     return "conditional"
 
 
-def _ordered(products: Sequence[ShelfProduct]) -> list[ShelfProduct]:
+def _ordered(
+    products: Sequence[ShelfProduct], *, decision_view: DecisionView = "technical_fit",
+) -> list[ShelfProduct]:
     fit_priority = {"qualified": 0, "conditional": 1, "unverified": 2, "failed": 3}
     quantity_priority = {"complete_by_deadline": 0, "partial": 1, "late": 2, "unknown": 3}
-    return sorted(
-        products,
-        key=lambda item: (
+    if decision_view == "available_by_deadline":
+        return sorted(products, key=lambda item: (
+            quantity_priority[item.commercial_decision.quantity_outcome],
             fit_priority[item.commercial_decision.fit_tier],
             -item.relevance_score,
-            quantity_priority[item.commercial_decision.quantity_outcome],
             item.price_cents,
             item.identity_key,
-        ),
-    )
+        ))
+    return sorted(products, key=lambda item: (
+        fit_priority[item.commercial_decision.fit_tier],
+        -item.relevance_score,
+        item.price_cents,
+        item.identity_key,
+    ))
 
 
 def _card_explanation(
@@ -334,15 +344,17 @@ def _page(
     scope_id: str,
     scope_label: str,
     budget_band: BudgetBand,
+    decision_view: DecisionView = "technical_fit",
     budget_cents: int | None,
     products: Sequence[ShelfProduct],
 ) -> ProductShelf:
-    ordered = _ordered(products)
+    ordered = _ordered(products, decision_view=decision_view)
     return ProductShelf(
         shelf_id=shelf_id,
         scope_id=scope_id,
         scope_label=scope_label,
         budget_band=budget_band,
+        decision_view=decision_view,
         budget_cents=budget_cents,
         initial=ordered[:3],
         next_page=ordered[3:8],
@@ -564,31 +576,73 @@ def build_product_shelves(
                         products=eligible,
                     )
                 )
-            continue
+        else:
+            within = [item for item in eligible if item.commercial_decision.budget_outcome == "within"]
+            stretch = [item for item in eligible if item.commercial_decision.budget_outcome == "over"]
+            if within:
+                shelves.append(
+                    _page(
+                        shelf_id=f"{scope_id}:within_budget",
+                        scope_id=scope_id,
+                        scope_label=scope_label,
+                        budget_band="within_budget",
+                        budget_cents=budget_cents,
+                        products=within,
+                    )
+                )
+            if stretch:
+                shelves.append(
+                    _page(
+                        shelf_id=f"{scope_id}:stretch",
+                        scope_id=scope_id,
+                        scope_label=scope_label,
+                        budget_band="stretch",
+                        budget_cents=budget_cents,
+                        products=stretch,
+                    )
+                )
 
-        within = [item for item in eligible if item.commercial_decision.budget_outcome == "within"]
-        stretch = [item for item in eligible if item.commercial_decision.budget_outcome == "over"]
-        if within:
-            shelves.append(
-                _page(
-                    shelf_id=f"{scope_id}:within_budget",
-                    scope_id=scope_id,
-                    scope_label=scope_label,
-                    budget_band="within_budget",
-                    budget_cents=budget_cents,
-                    products=within,
+        # Availability is a separate buyer decision, never a hidden tie-breaker
+        # inside technical fit. This projection exists only when quantity is known.
+        if eligible and requested_quantity is not None:
+            shelves.append(_page(
+                shelf_id=f"{scope_id}:available_by_deadline",
+                scope_id=scope_id,
+                scope_label=f"Best available by deadline — {scope_label}",
+                budget_band="best",
+                decision_view="available_by_deadline",
+                budget_cents=budget_cents,
+                products=eligible,
+            ))
+
+        # Portfolio commercial review is advisory. Keep the technical winner and
+        # offer materially cheaper configurations (20%+) without treating them as
+        # equivalent or allowing a verified hard failure back into the shelf.
+        technical = _ordered(eligible)
+        if technical:
+            preferred = technical[0]
+            commercial_review = (
+                preferred.price_cents * (requested_quantity or 1) >= 3_000_000
+                or (
+                    (requested_quantity or 1) > 10
+                    and preferred.price_cents >= 400_000
                 )
             )
-        if stretch:
-            shelves.append(
-                _page(
-                    shelf_id=f"{scope_id}:stretch",
+            max_alternative_price = preferred.price_cents * 80 // 100
+            alternatives = [
+                item for item in eligible
+                if item.identity_key != preferred.identity_key
+                and item.price_cents <= max_alternative_price
+            ]
+            if commercial_review and alternatives:
+                shelves.append(_page(
+                    shelf_id=f"{scope_id}:commercially_proportionate",
                     scope_id=scope_id,
-                    scope_label=scope_label,
-                    budget_band="stretch",
+                    scope_label=f"Commercially proportionate alternatives — {scope_label}",
+                    budget_band="best",
+                    decision_view="commercially_proportionate",
                     budget_cents=budget_cents,
-                    products=stretch,
-                )
-            )
+                    products=alternatives[:3],
+                ))
 
     return ProductShelfProjection(shelves=shelves, exclusions=exclusions)

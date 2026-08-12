@@ -193,6 +193,38 @@ def test_quantity_fit_is_visible_without_displacing_the_better_workload_fit():
     assert products[0].commercial_decision.status == "QUALIFIED_PARTIAL"
     assert products[1].commercial_decision.status == "QUALIFIED_NOW"
 
+    deadline_products = _shelf(
+        projection, "shared:available_by_deadline"
+    ).initial
+    assert [item.product.sku for item in deadline_products] == [
+        "SKU-2", "SKU-1", "SKU-3",
+    ]
+    assert _shelf(
+        projection, "shared:available_by_deadline"
+    ).decision_view == "available_by_deadline"
+
+
+def test_high_value_review_adds_cheaper_shelf_without_hiding_technical_winner():
+    projection = build_product_shelves(
+        [
+            _candidate(1, price=600_000, score=1.0, available_now=3),
+            _candidate(2, price=450_000, score=0.8, available_now=15),
+            _candidate(3, price=479_999, score=0.7, available_now=15),
+            _candidate(4, price=500_000, score=0.6, available_now=15),
+        ],
+        requested_quantity=15,
+    )
+
+    assert _shelf(projection, "shared").initial[0].product.sku == "SKU-1"
+    alternatives = _shelf(
+        projection, "shared:commercially_proportionate"
+    )
+    assert alternatives.decision_view == "commercially_proportionate"
+    assert [item.product.sku for item in alternatives.initial] == [
+        "SKU-2", "SKU-3",
+    ]
+    assert all(item.price_cents <= 480_000 for item in alternatives.initial)
+
 
 def test_verified_hard_failure_is_excluded_but_unknown_is_conditional():
     failed_product = _product(1)
