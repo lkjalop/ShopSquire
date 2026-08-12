@@ -88,3 +88,38 @@ def test_open_world_queries_lead_with_named_software_not_buyer_filler():
     assert all(row.query.lower().startswith("agisoft metashape") for row in plan.discovery_queries)
     assert all("process" not in row.query.lower() for row in plan.discovery_queries)
     assert plan.discovery_queries[1].query == "Agisoft Metashape system requirements compatibility"
+
+
+class PublisherHostFetcher(StubFetcher):
+    def fetch(self, query, *, allowlist, timeout_s, discovery_candidates_only):
+        self.calls.append((query, allowlist, timeout_s, discovery_candidates_only))
+        self.last_receipt = {
+            "query_hash": f"hash-{len(self.calls)}", "network_execution": True,
+            "external_call_dispatched": True, "execution_status": "completed", "http_status": 200,
+        }
+        return [
+            {
+                "title": "AcmeSolver System Requirements",
+                "url": "https://hardware-blog.example/acmesolver-system-requirements/",
+            },
+            {
+                "title": "System Requirements - AcmeSolver",
+                "url": "https://www.acmesolver.com/support/system-requirements/",
+            },
+        ]
+
+
+def test_named_publisher_host_outranks_blogs_with_the_same_requirements_title():
+    plan = build_case_research_plan(
+        "I process surveys in AcmeSolver and need its official system requirements",
+        allow_open_world=True,
+    )
+    assert plan is not None
+    result = discover_open_world_publishers(
+        plan,
+        search_url_template="https://search.invalid/?q={query}",
+        fetcher=PublisherHostFetcher(),
+    )
+
+    assert result["candidates"][0]["domain"] == "www.acmesolver.com"
+    assert result["candidates"][0]["authority"] == "not_accepted"

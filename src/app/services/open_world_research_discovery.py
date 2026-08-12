@@ -55,6 +55,10 @@ def _quality_score(row: dict[str, Any]) -> int:
     # retained purpose, not merely a page containing the word "requirements".
     score += min(6, 2 * len(set(row.get("query_axes") or [])))
     score += min(6, 2 * int(row.get("subject_overlap_count") or 0))
+    # Prefer a publisher-looking origin whose hostname contains the buyer's
+    # named subject over a reseller/blog that repeats that name only in a title
+    # or URL path. This remains a discovery hint, never an authority grant.
+    score += min(12, 6 * int(row.get("publisher_host_overlap_count") or 0))
     if any(token in path for token in ("forum", "community", "blog", "reddit")):
         score -= 4
     if any(token in host for token in (
@@ -114,13 +118,19 @@ def discover_open_world_publishers(
                 "query_axes": [],
                 "query_ids": [],
                 "subject_overlap_count": 0,
+                "publisher_host_overlap_count": 0,
             })
             candidate["query_axes"] = sorted({*candidate["query_axes"], item.axis})
             candidate["query_ids"] = sorted({*candidate["query_ids"], item.query_id})
             result_terms = _terms(f"{candidate['domain']} {candidate['title']} {urlparse(url).path}")
             purpose_terms = _terms(plan.retained_purpose)
+            host_terms = _terms(candidate["domain"].replace(".", " "))
             candidate["subject_overlap_count"] = max(
                 int(candidate["subject_overlap_count"]), len(result_terms & purpose_terms),
+            )
+            candidate["publisher_host_overlap_count"] = max(
+                int(candidate["publisher_host_overlap_count"]),
+                len(host_terms & purpose_terms),
             )
     # Do not present arbitrary search results as possible authorities.  A row
     # must at least look like requirements, documentation, a manual, or a
