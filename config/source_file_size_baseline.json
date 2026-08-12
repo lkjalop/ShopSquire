@@ -1,0 +1,20 @@
+{
+  "frontend/src/App.tsx": 4410,
+  "frontend/src/components/DecisionTrace.tsx": 5062,
+  "src/app/main.py": 2725,
+  "src/app/routers/admin.py": 4137,
+  "src/app/routers/admin_bi.py": 2139,
+  "src/app/routers/admin_email_security.py": 3244,
+  "src/app/routers/chat.py": 4601,
+  "src/app/routers/decisions.py": 2673,
+  "src/app/routers/escalation_room.py": 2029,
+  "src/app/routers/fulfillment_cases.py": 2447,
+  "src/app/routers/merchant_dashboard.py": 3203,
+  "src/app/routers/support_complaints.py": 4025,
+  "src/app/security/email_security.py": 2856,
+  "src/app/services/orchestrator.py": 3929,
+  "src/app/services/recommendation_core/core.py": 2804,
+  "src/app/services/recommendation_core/turn_router.py": 2649,
+  "src/app/services/recommendations.py": 2297,
+  "src/frontend/storefront-react/src/App.jsx": 4003
+}

@@ -3692,6 +3692,16 @@ export default function App() {
                     )}
                   </div>
                 ))}
+                {escalationOpen && escalationIncidentId && (
+                  <Suspense fallback={<div role="status">Connecting to human support...</div>}>
+                    <EscalationRoom
+                      embedded
+                      incidentId={escalationIncidentId}
+                      buyerToken={escalationBuyerToken}
+                      onClose={() => setEscalationOpen(false)}
+                    />
+                  </Suspense>
+                )}
                 {(isThinking || imageRoutingInFlight) && (
                   <div className={`${styles.message} ${styles.assistant}`}>
                     <div className={`${styles.messageContent} ${styles.thinkingBubble}`}>
@@ -4373,13 +4383,6 @@ export default function App() {
             : procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
           onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} />
       </Suspense>}
-
-      {/* Escalation Room Modal */}
-      {escalationOpen && escalationIncidentId && (
-        <Suspense fallback={<div role="status">Loading escalation room…</div>}>
-          <EscalationRoom incidentId={escalationIncidentId} buyerToken={escalationBuyerToken} onClose={() => setEscalationOpen(false)} />
-        </Suspense>
-      )}
 
       {/* Login Modal */}
       {showLogin && (

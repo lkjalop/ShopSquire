@@ -4,7 +4,6 @@ import json
 import asyncio
 import os
 import uuid
-import time
 import base64
 import hashlib
 import tempfile
@@ -14,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, HTTPException, Header, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text as sql_text
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
@@ -32,12 +31,14 @@ from src.app.services.playbook_engine import (
 )
 from src.app.services.incident_alert_adapters import dispatch_incident_alert
 from src.app.services.decision_log import log_trace_event
+from src.app.services.incident_conversation_identity import build_conversation_event, server_actor_identity
 
 
 router = APIRouter(prefix="/api/v1/admin/incidents", tags=["admin", "escalation"])
 public_router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
 
 _ROOM_SUBSCRIBERS: Dict[str, list[asyncio.Queue]] = {}
+_ROOM_STAFF_JOINED: set[str] = set()
 def _default_incident_chat_dir() -> Path:
     configured = str(os.getenv("INCIDENT_CHAT_DIR", "") or "").strip()
     if configured:
@@ -236,7 +237,8 @@ def _role_for_token(incident_id: str, token: str | None) -> str | None:
     try:
         p = _TOKENS_DIR / f"{incident_id}.json"
         if p.exists():
-            import json as _json, time as _time
+            import json as _json
+            import time as _time
 
             try:
                 data = _json.loads(p.read_text(encoding="utf-8") or "{}")
@@ -441,17 +443,14 @@ def _append_chat(
     *,
     event_type: str = "message",
     persist: bool = True,
-) -> None:
-    import time as _time
-    rec = {
-        "incident_id": incident_id,
-        "role": role,
-        "message": message,
-        "event_type": event_type,
-        "meta": meta or {},
-        # Use wall clock; avoid relying on an active asyncio loop in sync endpoints.
-        "ts": int(_time.time() * 1000),
-    }
+) -> Dict:
+    rec = build_conversation_event(
+        incident_id=incident_id,
+        role=role,
+        message=message,
+        event_type=event_type,
+        meta=meta,
+    )
     if persist:
         try:
             p = _log_path(incident_id)
@@ -470,6 +469,48 @@ def _append_chat(
                 logging.getLogger(__name__).exception("failed to publish chat to subscriber queue")
     except Exception:
         logging.getLogger(__name__).exception("failed to publish chat to subscribers for %s", incident_id)
+    return rec
+
+
+def _announce_staff_joined(incident_id: str, role: str) -> None:
+    if incident_id in _ROOM_STAFF_JOINED:
+        return
+    _ROOM_STAFF_JOINED.add(incident_id)
+    actor = server_actor_identity(role)
+    _append_chat(
+        incident_id,
+        role,
+        f"{actor['display_name']} joined the conversation.",
+        meta={"presence": "online", "channel": "admin"},
+        event_type="human_joined",
+    )
+
+
+def _announce_staff_left(incident_id: str, role: str) -> None:
+    if incident_id not in _ROOM_STAFF_JOINED:
+        return
+    _ROOM_STAFF_JOINED.discard(incident_id)
+    actor = server_actor_identity(role)
+    _append_chat(
+        incident_id,
+        role,
+        f"{actor['display_name']} left the conversation.",
+        meta={"presence": "offline", "channel": "admin"},
+        event_type="human_left",
+    )
+
+
+def _incident_room_is_closed(incident_id: str) -> bool:
+    try:
+        with _current_incident_engine().begin() as conn:
+            row = conn.execute(
+                sql_text("SELECT status FROM incidents WHERE id = :id LIMIT 1"),
+                {"id": incident_id},
+            ).fetchone()
+        return bool(row and str(row[0] or "").lower() in {"resolved", "closed"})
+    except Exception:
+        # Schema/readiness failures must not invent a closed incident.
+        return False
 
 
 def _incident_sla_minutes(severity: str | None) -> int:
@@ -867,6 +908,7 @@ async def ws_room(incident_id: str, websocket: WebSocket):
         return
 
     await websocket.accept()
+    _announce_staff_joined(incident_id, role)
     q: asyncio.Queue = asyncio.Queue()
     _ROOM_SUBSCRIBERS.setdefault(incident_id, []).append(q)
     try:
@@ -899,10 +941,15 @@ async def ws_room(incident_id: str, websocket: WebSocket):
                 subs.remove(q)
         except Exception:
             pass
+        _announce_staff_left(incident_id, role)
 
 
 @router.get("/{incident_id}/room/stream")
-async def sse_room(incident_id: str):
+async def sse_room(
+    incident_id: str,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+):
+    _announce_staff_joined(incident_id, role)
     q: asyncio.Queue = asyncio.Queue()
     _ROOM_SUBSCRIBERS.setdefault(incident_id, []).append(q)
 
@@ -938,7 +985,8 @@ async def sse_room(incident_id: str):
 
 
 class IncidentRoomMessageRequest(BaseModel):
-    message: str | None = None
+    message: str | None = Field(default=None, max_length=4000)
+    message_id: str | None = Field(default=None, max_length=96)
     role: str | None = None
     event_type: str | None = None
 
@@ -950,10 +998,24 @@ def send_message(
     message: str | None = Query(default=None),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
+    if _incident_room_is_closed(incident_id):
+        raise HTTPException(status_code=409, detail="incident_room_closed")
     event_type = str((body.event_type if body else None) or "").strip().lower() or "message"
-    actor_role = str((body.role if body else None) or "").strip().lower()
-    actor = "staff" if actor_role == "staff" else role
+    # Identity is derived from the authenticated server role. The request body cannot impersonate staff.
+    actor = role
     msg = str((body.message if body else None) or message or "")
+    if event_type == "read":
+        target_id = str((body.message_id if body else None) or "").strip()
+        if not target_id:
+            raise HTTPException(status_code=400, detail="message_id_required")
+        rec = _append_chat(
+            incident_id,
+            actor,
+            "",
+            meta={"actor": actor, "channel": "admin", "message_id": target_id},
+            event_type="message_read",
+        )
+        return {"sent": True, "role": actor, "message_id": rec["event_id"], "actor": rec["actor"]}
     if event_type == "typing":
         _append_chat(
             incident_id,
@@ -963,14 +1025,21 @@ def send_message(
             event_type="typing",
             persist=False,
         )
-        return {"sent": True, "role": actor}
+        return {"sent": True, "role": actor, "actor": server_actor_identity(actor)}
     if not msg.strip():
         raise HTTPException(status_code=400, detail="message_required")
     try:
-        _append_chat(incident_id, actor, msg.strip(), meta={"actor": actor, "channel": "admin"})
+        _announce_staff_joined(incident_id, actor)
+        rec = _append_chat(incident_id, actor, msg.strip(), meta={"actor": actor, "channel": "admin"})
     except Exception:
         raise HTTPException(status_code=500, detail="append_failed")
-    return {"sent": True, "role": actor}
+    return {
+        "sent": True,
+        "role": actor,
+        "message_id": rec["event_id"],
+        "delivery_status": rec["delivery_status"],
+        "actor": rec["actor"],
+    }
 
 
 @router.post("/{incident_id}/room/token")
@@ -988,7 +1057,7 @@ def issue_staff_token(incident_id: str, role: str = Depends(require_role([ROLE_M
         raise
     except Exception:
         pass
-    return {"ok": True, **_issue_staff_token(incident_id)}
+    return {"ok": True, **_issue_staff_token(incident_id), "staff_identity": server_actor_identity(role)}
 
 
 class IncidentAssignRequest(BaseModel):
@@ -1693,9 +1762,9 @@ def create_incident_record(
     return {"ok": True, "incident_id": incident_id, "context": context or {}, **toks}
 
 
-@public_router.post("/escalate", response_model=IncidentEscalateResponse)
+@public_router.post("/escalate", response_model=IncidentEscalateResponse, response_model_exclude_none=True)
 def public_escalate(body: EscalateRequest, request: Request) -> Dict:
-    """Create an incident + issue buyer/staff chat tokens (local-dev demo only).
+    """Create an incident and return only the incident-bound buyer chat token.
 
     In production this should be bound to an authenticated user session.
     """
@@ -1785,6 +1854,9 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
             )
         except Exception:
             logging.getLogger(__name__).exception("runtime_swarm_lab_trace_emit_failed")
+    # The internal helper creates both credentials for backwards-compatible admin workflows. Never
+    # disclose staff authority to the buyer-facing route.
+    result.pop("staff_token", None)
     return result
 
 
@@ -1823,7 +1895,8 @@ def public_analyze_linked_artifact(body: LinkedArtifactAnalyzeRequest, request: 
 
 
 class PublicChatMessage(BaseModel):
-    message: str | None = None
+    message: str | None = Field(default=None, max_length=4000)
+    message_id: str | None = Field(default=None, max_length=96)
     role: str | None = None
     event_type: str | None = None
 
@@ -1835,10 +1908,12 @@ async def public_sse_room(
     token: str | None = Query(default=None),
     x_incident_token: str | None = Header(default=None, alias="x-incident-token"),
 ):
-    _require_public_token(
+    stream_role = _require_public_token(
         incident_id,
         _extract_public_incident_token(incident_id, request=request, token=token, x_incident_token=x_incident_token),
     )
+    if stream_role in (ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER, "staff"):
+        _announce_staff_joined(incident_id, stream_role)
 
     q: asyncio.Queue = asyncio.Queue()
     _ROOM_SUBSCRIBERS.setdefault(incident_id, []).append(q)
@@ -1870,6 +1945,8 @@ async def public_sse_room(
                     subs.remove(q)
             except Exception:
                 pass
+            if stream_role in (ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER, "staff"):
+                _announce_staff_left(incident_id, stream_role)
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -1886,10 +1963,26 @@ def public_send_message(
         incident_id,
         _extract_public_incident_token(incident_id, request=request, token=token, x_incident_token=x_incident_token),
     )
-    requested_role = str(getattr(body, "role", "") or "").strip().lower()
-    role = "staff" if requested_role == "staff" and token_role in (ROLE_MERCHANT, "staff") else token_role
+    if _incident_room_is_closed(incident_id):
+        raise HTTPException(status_code=409, detail="incident_room_closed")
+    # Public tokens are incident-bound and role-bound. Ignore any caller-supplied role.
+    role = token_role
+    if role in (ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER, "staff"):
+        _announce_staff_joined(incident_id, role)
     event_type = str(getattr(body, "event_type", "") or "").strip().lower() or "message"
     msg = str(getattr(body, "message", "") or "")
+    if event_type == "read":
+        target_id = str(getattr(body, "message_id", "") or "").strip()
+        if not target_id:
+            raise HTTPException(status_code=400, detail="message_id_required")
+        rec = _append_chat(
+            incident_id,
+            role,
+            "",
+            meta={"actor": role, "channel": "public", "message_id": target_id},
+            event_type="message_read",
+        )
+        return {"sent": True, "role": role, "message_id": rec["event_id"], "actor": rec["actor"]}
     if event_type != "typing" and not msg.strip():
         raise HTTPException(status_code=400, detail="message_required")
     try:
@@ -1902,8 +1995,8 @@ def public_send_message(
                 event_type="typing",
                 persist=False,
             )
-            return {"sent": True, "role": role}
-        _append_chat(incident_id, role, msg.strip(), meta={"actor": role, "channel": "public"})
+            return {"sent": True, "role": role, "actor": server_actor_identity(role)}
+        rec = _append_chat(incident_id, role, msg.strip(), meta={"actor": role, "channel": "public"})
         # Staff notification (rate-limited to 1 per 5 min) when buyer posts
         if role == "buyer":
             _notify_staff_new_buyer_message(incident_id, msg.strip())
@@ -1929,7 +2022,13 @@ def public_send_message(
         raise
     except Exception:
         raise HTTPException(status_code=500, detail="append_failed")
-    return {"sent": True, "role": role}
+    return {
+        "sent": True,
+        "role": role,
+        "message_id": rec["event_id"],
+        "delivery_status": rec["delivery_status"],
+        "actor": rec["actor"],
+    }
 
 
 @public_router.get("/{incident_id}/summary/public")

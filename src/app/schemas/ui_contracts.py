@@ -55,7 +55,8 @@ class IncidentEscalateResponse(StrictModel):
     ok: bool
     incident_id: str
     buyer_token: str
-    staff_token: str
+    # Staff credentials are never returned on a buyer-facing escalation response.
+    staff_token: Optional[str] = None
     ttl_seconds: int
     context: Optional[Dict[str, Any]] = None
 
@@ -63,6 +64,9 @@ class IncidentEscalateResponse(StrictModel):
 class IncidentMessageResponse(StrictModel):
     sent: bool
     role: Optional[str] = None
+    message_id: Optional[str] = None
+    delivery_status: Optional[str] = None
+    actor: Optional[Dict[str, Any]] = None
 
 
 class NQEOption(StrictModel):

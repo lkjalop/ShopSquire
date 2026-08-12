@@ -6,11 +6,23 @@ import { clearIncidentTokenCookie, setIncidentTokenCookie } from '../lib/browser
 
 type RoomEvent = {
   id?: string;
+  event_id?: string;
   user?: string;
   role?: string;
   event_type?: string;
   message?: string;
   time?: string;
+  ts?: number;
+  delivery_status?: 'sent' | 'delivered' | 'read' | string;
+  actor?: {
+    actor_id?: string;
+    actor_type?: string;
+    display_name?: string;
+    title?: string;
+    avatar_url?: string | null;
+    identity_source?: string;
+  };
+  meta?: { message_id?: string; [key: string]: unknown };
 };
 
 function parseError(status: number, body: any, fallback: string) {
@@ -25,12 +37,14 @@ export default function EscalationRoom({
   incidentId,
   buyerToken,
   staffToken,
+  embedded = false,
   onClose,
   onResolve,
 }: {
   incidentId: string;
   buyerToken?: string | null;
   staffToken?: string | null;
+  embedded?: boolean;
   onClose: () => void;
   onResolve?: (incidentId: string) => void;
 }) {
@@ -171,17 +185,51 @@ export default function EscalationRoom({
       const resolveEvents = incoming.filter((e: any) =>
         ['incident_resolved', 'resolved', 'room_closed'].includes(String(e?.event_type || '').toLowerCase())
       );
+      const readEvents = incoming.filter((e: any) => String(e?.event_type || '').toLowerCase() === 'message_read');
+      if (readEvents.length > 0) {
+        const readIds = new Set(readEvents.map((e: any) => String(e?.meta?.message_id || '')).filter(Boolean));
+        setEvents((prev) => prev.map((item) => readIds.has(String(item.event_id || item.id || ''))
+          ? { ...item, delivery_status: 'read' }
+          : item));
+      }
       if (resolveEvents.length > 0 && mounted) {
         setResolved(true);
         onResolve?.(incidentId);
       }
       const messageEvents = incoming.filter((e: any) => {
         const t = String(e?.event_type || 'message').toLowerCase();
-        return t !== 'typing' && !['incident_resolved', 'resolved', 'room_closed'].includes(t);
+        return !['typing', 'message_read'].includes(t) && !['incident_resolved', 'resolved', 'room_closed'].includes(t);
       });
       if (messageEvents.length > 0) {
         setRemoteTyping(false);
-        setEvents((prev) => [...prev, ...messageEvents]);
+        setEvents((prev) => {
+          const seen = new Set(prev.map((item) => item.event_id || item.id || `${item.role}:${item.ts}:${item.message}`));
+          const unique = messageEvents.filter((item: RoomEvent) => {
+            const key = item.event_id || item.id || `${item.role}:${item.ts}:${item.message}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          return [...prev, ...unique];
+        });
+        const viewerIsBuyer = Boolean(buyerToken && !staffToken);
+        for (const item of messageEvents as RoomEvent[]) {
+          const role = String(item.role || '').toLowerCase();
+          const remote = viewerIsBuyer ? role !== 'buyer' : role === 'buyer';
+          const messageId = item.event_id || item.id;
+          if (!remote || !messageId || ['human_joined', 'human_left'].includes(String(item.event_type || '').toLowerCase())) continue;
+          const activeToken = buyerToken || staffToken || null;
+          const path = activeToken
+            ? `/api/v1/incidents/${encodeURIComponent(incidentId)}/room/message`
+            : `/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/message`;
+          const headers: Record<string, string> = { 'Content-Type': 'application/json', ...csrfHeaders() };
+          if (activeToken) headers['x-incident-token'] = activeToken;
+          else if (OWNER_API_KEY) headers['x-api-key'] = OWNER_API_KEY;
+          void fetch(apiUrl(path), {
+            method: 'POST', credentials: 'include', headers,
+            body: JSON.stringify({ event_type: 'read', message_id: messageId }),
+          }).catch(() => undefined);
+        }
       }
     };
 
@@ -238,7 +286,11 @@ export default function EscalationRoom({
 
         if (useToken) {
           setIncidentTokenCookie(incidentId, useToken);
-          es = new EventSource(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/stream`));
+          // EventSource cannot attach authorization headers. The incident-bound, expiring token is
+          // therefore sent on the supported query parameter as well as stored for same-origin use.
+          es = new EventSource(apiUrl(
+            `/api/v1/incidents/${encodeURIComponent(incidentId)}/room/stream?token=${encodeURIComponent(useToken)}`,
+          ));
         } else {
           setConnectionError('No incident token available.');
           return;
@@ -380,6 +432,7 @@ export default function EscalationRoom({
   };
 
   const roleLabel = (e: RoomEvent): string => {
+    if (e.actor?.display_name) return e.actor.display_name;
     const role = String(e.role || '').toLowerCase();
     if (buyerToken && !staffToken) {
       if (role === 'buyer') return '[You]';
@@ -393,13 +446,30 @@ export default function EscalationRoom({
     return '[Support]';
   };
 
+  const isOwnMessage = (e: RoomEvent): boolean => {
+    const role = String(e.role || '').toLowerCase();
+    return buyerToken && !staffToken
+      ? role === 'buyer'
+      : ['staff', 'merchant', 'owner', 'developer'].includes(role);
+  };
+
+  const initials = (e: RoomEvent): string => {
+    const value = e.actor?.display_name || roleLabel(e).replace(/[\[\]]/g, '');
+    return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'SS';
+  };
+
   return (
-    <div className={styles.overlay}>
-      <div className={styles.modal}>
+    <div className={embedded ? styles.embedded : styles.overlay} data-testid="human-conversation">
+      <div className={embedded ? styles.embeddedPanel : styles.modal}>
         <div className={styles.header}>
-          <div className={styles.title}>Escalation Room - {incidentId}</div>
           <div>
-            <a
+            <div className={styles.title}>Human support</div>
+            <div className={styles.presenceLine} data-testid="human-presence">
+              <span className={styles.presenceDot} /> {events.some((e) => e.actor?.actor_type === 'human_staff') ? 'Support is in this conversation' : 'Waiting for a specialist'}
+            </div>
+          </div>
+          <div>
+            {!embedded && <a
               href={`/merchant/app/index.html?tab=escalations&incident_id=${encodeURIComponent(incidentId)}`}
               target="_blank"
               rel="noreferrer"
@@ -407,7 +477,7 @@ export default function EscalationRoom({
               title="Open in Merchant Admin Console"
             >
               Open admin console
-            </a>
+            </a>}
             <span style={{ fontSize: 12, opacity: 0.8, marginRight: 8 }}>{mode}</span>
             {!buyerToken && (
               <button className={styles.resolveBtn} onClick={resolveCase} disabled={resolved || resolving}>
@@ -423,7 +493,7 @@ export default function EscalationRoom({
           </div>
         )}
         <div className={styles.contentLayout}>
-          <aside className={styles.summaryPanel}>
+          {!embedded && <aside className={styles.summaryPanel}>
             <button className={styles.summaryToggle} onClick={() => setSummaryCollapsed((v) => !v)}>
               <span className={styles.summaryTitle}>Escalation Summary</span>
               <span>{summaryCollapsed ? 'Expand' : 'Collapse'}</span>
@@ -448,15 +518,31 @@ export default function EscalationRoom({
             )}
               </>
             )}
-          </aside>
+          </aside>}
           <div ref={bodyRef} className={styles.body}>
             {events.length === 0 && <div style={{ color: '#6b7280' }}>No messages yet.</div>}
-            {events.map((e, i) => (
-              <div key={e.id || i} className={styles.msg}>
-                <div><strong>{roleLabel(e)}</strong> {e.message || ''}</div>
-                <div className={styles.meta}>{e.time || ''}</div>
-              </div>
-            ))}
+            {events.map((e, i) => {
+              const presence = ['human_joined', 'human_left'].includes(String(e.event_type || '').toLowerCase());
+              if (presence) return <div key={e.event_id || e.id || i} className={styles.presenceEvent}>{e.message}</div>;
+              const own = isOwnMessage(e);
+              return (
+                <div key={e.event_id || e.id || i} className={`${styles.messageRow} ${own ? styles.ownRow : styles.remoteRow}`}>
+                  {!own && (
+                    e.actor?.avatar_url
+                      ? <img className={styles.avatar} src={e.actor.avatar_url} alt="" />
+                      : <span className={styles.avatar} aria-hidden="true">{initials(e)}</span>
+                  )}
+                  <div className={`${styles.msgBubble} ${own ? styles.ownBubble : styles.remoteBubble}`} data-delivery-status={e.delivery_status || 'unknown'}>
+                    <div className={styles.actorLine}>
+                      <strong>{own ? 'You' : roleLabel(e)}</strong>
+                      {!own && e.actor?.title && <span>{e.actor.title}</span>}
+                    </div>
+                    <div>{e.message || ''}</div>
+                    <div className={styles.meta}>{e.time || ''}{own && e.delivery_status ? ` · ${e.delivery_status}` : ''}</div>
+                  </div>
+                </div>
+              );
+            })}
             {remoteTyping && (
               <div className={styles.typingRow}>
                 <span className={styles.typingLabel}>{buyerToken && !staffToken ? '[Support]' : '[Buyer]'} typing</span>
@@ -470,7 +556,8 @@ export default function EscalationRoom({
         <div className={styles.footer}>
           <input
             className={styles.input}
-            placeholder="Type a message..."
+            placeholder={resolved ? 'This conversation is resolved' : 'Message your specialist...'}
+            disabled={resolved}
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
@@ -478,7 +565,7 @@ export default function EscalationRoom({
             }}
             onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           />
-          <button className={styles.sendBtn} onClick={sendMessage}>Send</button>
+          <button className={styles.sendBtn} onClick={sendMessage} disabled={resolved}>Send</button>
         </div>
       </div>
     </div>

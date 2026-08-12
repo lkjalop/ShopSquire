@@ -132,9 +132,67 @@ def test_chat_with_admin_click_path_opens_escalation_room(page, frontend_server)
     page.get_by_role("button", name="Escalate and chat with admin").wait_for(timeout=10000)
     page.get_by_role("button", name="Escalate and chat with admin").click()
 
-    page.get_by_text("Escalation Room - inc-chat-001", exact=False).wait_for(timeout=10000)
+    page.get_by_text("Human support", exact=True).wait_for(timeout=10000)
+    page.get_by_test_id("human-conversation").wait_for(timeout=10000)
 
     assert captured["payload"] is not None
     assert captured["payload"].get("trace_id") == "trace-cv-1"
     assert isinstance(captured["payload"].get("context"), dict)
     assert isinstance(captured["payload"]["context"].get("evidence_tags"), list)
+
+
+def test_two_browser_buyer_and_authenticated_staff_exchange_messages(browser, frontend_server, test_server):
+    create = requests.post(
+        f"{test_server['base_url']}/api/v1/incidents/escalate",
+        json={"case_id": "two-browser-case", "trace_id": "two-browser-trace", "reason": "buyer_requested_human"},
+        headers={"host": "localhost"},
+        timeout=10,
+    )
+    assert create.status_code == 200, create.text
+    incident = create.json()
+    incident_id = incident["incident_id"]
+    assert "staff_token" not in incident
+    issue_staff = requests.post(
+        f"{test_server['base_url']}/api/v1/admin/incidents/{incident_id}/room/token",
+        headers={"x-api-key": os.getenv("MERCHANT_API_KEY", "local-merchant-key")},
+        timeout=10,
+    )
+    assert issue_staff.status_code == 200, issue_staff.text
+    staff_token = issue_staff.json()["staff_token"]
+
+    buyer_context = browser.new_context()
+    staff_context = browser.new_context()
+    buyer_page = buyer_context.new_page()
+    staff_page = staff_context.new_page()
+    try:
+        buyer_page.goto(
+            f"{frontend_server}/?surface=incident&role=buyer&incident_id={incident_id}&token={incident['buyer_token']}",
+            wait_until="domcontentloaded",
+        )
+        staff_page.goto(
+            f"{frontend_server}/?surface=incident&role=staff&incident_id={incident_id}&token={staff_token}",
+            wait_until="domcontentloaded",
+        )
+        buyer_page.get_by_test_id("human-conversation").wait_for(timeout=10000)
+        staff_page.get_by_test_id("human-conversation").wait_for(timeout=10000)
+
+        staff_page.get_by_placeholder("Message your specialist...").fill("I am Alex from ShopSquire support.")
+        staff_page.get_by_role("button", name="Send").click()
+        buyer_page.get_by_text("I am Alex from ShopSquire support.", exact=True).wait_for(timeout=10000)
+        buyer_page.get_by_text("Product specialist", exact=True).wait_for(timeout=10000)
+        staff_page.locator('[data-delivery-status="read"]', has_text="I am Alex from ShopSquire support.").wait_for(timeout=10000)
+
+        buyer_page.get_by_placeholder("Message your specialist...").fill("Please show the split option; <script>alert(1)</script>")
+        buyer_page.get_by_role("button", name="Send").click()
+        staff_page.get_by_text("Please show the split option; <script>alert(1)</script>", exact=True).wait_for(timeout=10000)
+        # The Vite page has its own bootstrap scripts; the message must remain text and create no
+        # script element inside the conversation surface.
+        assert staff_page.get_by_test_id("human-conversation").locator("script").count() == 0
+
+        buyer_page.reload(wait_until="domcontentloaded")
+        buyer_page.get_by_test_id("human-conversation").wait_for(timeout=10000)
+        buyer_page.get_by_text("I am Alex from ShopSquire support.", exact=True).wait_for(timeout=10000)
+        assert buyer_page.get_by_text("I am Alex from ShopSquire support.", exact=True).count() == 1
+    finally:
+        buyer_context.close()
+        staff_context.close()

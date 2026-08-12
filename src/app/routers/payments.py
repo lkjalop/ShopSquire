@@ -16,12 +16,19 @@ from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, R
 from src.app.security.transaction_firewall import evaluate_transaction_firewall
 from src.app.security.client_ip import client_ip
 from src.app.policy.kill_switch import assert_autonomy_allowed
+from src.app.services.checkout_readiness import buyer_checkout_readiness
 
 _log = logging.getLogger("shopsquire.payments")
 
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
 tracer = get_tracer("payments-router")
+
+
+@router.get("/readiness")
+def public_checkout_readiness() -> Dict:
+    """Buyer-safe capability truth. No credentials or private provider details are returned."""
+    return buyer_checkout_readiness()
 
 
 def _is_non_dev_env(app_env: str | None) -> bool:

@@ -341,11 +341,22 @@ def storefront() -> HTMLResponse:
 
 @router.get("/checkout")
 def checkout() -> HTMLResponse:
-    import os, re as _re, secrets as _secrets
+    import os
+    import re as _re
+    import secrets as _secrets
     from src.app.security.headers import payment_page_csp as _payment_csp
+    from src.app.services.checkout_readiness import buyer_checkout_readiness as _buyer_checkout_readiness
     raw_pk = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
     # Only inject pk_test_ / pk_live_ keys — never secret keys
     stripe_pk = raw_pk if _re.match(r"^pk_(test|live)_[A-Za-z0-9]+$", raw_pk) else ""
+    _readiness = _buyer_checkout_readiness()
+    _payment = _readiness["payment"]
+    _shipping = _readiness["shipping"]
+    _payment_label = str(_payment["label"])
+    _payment_reason = str(_payment["reason"])
+    _shipping_label = str(_shipping["label"])
+    _shipping_reason = str(_shipping["reason"])
+    _checkout_disabled = _payment["status"] == "unavailable"
     # PCI 6.4.3/11.6.1 — per-response nonce + strict payment-page CSP (self + Stripe only).
     _csp_nonce = _secrets.token_urlsafe(16)
     html = f"""<!doctype html>
@@ -364,6 +375,11 @@ def checkout() -> HTMLResponse:
     input{{display:block;width:100%;padding:.65rem .85rem;border:1px solid #d1d5db;border-radius:8px;font-size:.95rem;outline:none;transition:border-color .15s}}
     input:focus{{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,.15)}}
     .demo-strip{{background:#ede9fe;border-radius:8px;padding:.7rem 1rem;margin-bottom:1.2rem;font-size:.82rem;color:#5b21b6;display:flex;align-items:center;gap:.5rem}}
+    .readiness{{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:1.2rem}}
+    .readiness-card{{border:1px solid #e5e7eb;border-radius:8px;padding:.65rem .75rem;background:#fff}}
+    .readiness-label{{font-size:.72rem;text-transform:uppercase;color:#6b7280;font-weight:700}}
+    .readiness-value{{font-size:.86rem;font-weight:700;margin:.18rem 0;color:#152a43}}
+    .readiness-reason{{font-size:.72rem;color:#6b7280;line-height:1.35}}
     .summary-row{{display:flex;justify-content:space-between;font-size:.88rem;padding:.22rem 0;color:#374151}}
     .summary-row.total{{font-weight:700;border-top:1px solid #e5e7eb;padding-top:.5rem;margin-top:.35rem;font-size:.95rem}}
     .summary-section{{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:.75rem 1rem;margin-bottom:1.2rem}}
@@ -391,7 +407,11 @@ def checkout() -> HTMLResponse:
 
       <div class="demo-strip">
         <span>&#x26A1;</span>
-        <span id="demo-mode-label">Demo mode — no real payment will be processed.</span>
+        <span id="demo-mode-label">Payment: {_payment_label} — {_payment_reason}</span>
+      </div>
+      <div class="readiness" aria-label="Checkout readiness">
+        <div class="readiness-card"><div class="readiness-label">Payment readiness</div><div class="readiness-value">{_payment_label}</div><div class="readiness-reason">{_payment_reason}</div></div>
+        <div class="readiness-card"><div class="readiness-label">Shipping readiness</div><div class="readiness-value">{_shipping_label}</div><div class="readiness-reason">{_shipping_reason}</div></div>
       </div>
 
       <div class="summary-section" id="order-summary-section" style="display:none">
@@ -419,8 +439,8 @@ def checkout() -> HTMLResponse:
         </div>
 
         <div id="form-error"></div>
-        <button class="btn" type="submit" id="submit-btn">
-          <span id="btn-label">Place Order</span>
+        <button class="btn" type="submit" id="submit-btn"{' disabled' if _checkout_disabled else ''}>
+          <span id="btn-label">{'Payment unavailable' if _checkout_disabled else 'Place Order'}</span>
         </button>
       </form>
     </div>

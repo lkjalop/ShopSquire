@@ -66,6 +66,8 @@ def test_incident_room_public_contracts():
     assert esc.status_code == 200
     esc_body = IncidentEscalateResponse.model_validate(esc.json())
     assert esc_body.incident_id
+    assert esc_body.staff_token is None
+    assert "staff_token" not in esc.json()
 
     msg = client.post(
         f"/api/v1/incidents/{esc_body.incident_id}/room/message",
