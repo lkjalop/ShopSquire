@@ -33,6 +33,7 @@ from src.app.services.incident_alert_adapters import dispatch_incident_alert
 from src.app.services.decision_log import log_trace_event
 from src.app.services.incident_conversation_identity import build_conversation_event, server_actor_identity
 from src.app.services.incident_conversation_runtime import INCIDENT_CONVERSATION_RUNTIME
+from src.app.security.incident_staff_principal import IncidentStaffPrincipal, require_incident_staff_principal
 
 
 router = APIRouter(prefix="/api/v1/admin/incidents", tags=["admin", "escalation"])
@@ -210,6 +211,51 @@ def _issue_staff_token(incident_id: str) -> dict:
         except Exception:
             logging.getLogger(__name__).exception("failed to persist staff token to file")
     return {"staff_token": staff, "ttl_seconds": _TOKEN_TTL_SECONDS}
+
+
+def _revoke_staff_token(incident_id: str) -> bool:
+    revoked = False
+    try:
+        redis = get_redis()
+        revoked = bool(redis.delete(_token_key("staff", incident_id)))
+    except Exception:
+        pass
+    try:
+        path = _TOKENS_DIR / f"{incident_id}.json"
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8") or "{}")
+            if data.pop("staff", None):
+                revoked = True
+            path.write_text(json.dumps(data), encoding="utf-8")
+    except Exception:
+        pass
+    return revoked
+
+
+def _incident_trace_id(incident_id: str) -> str:
+    try:
+        with _current_incident_engine().begin() as conn:
+            row = conn.execute(sql_text("SELECT event_id FROM incidents WHERE id=:id LIMIT 1"), {"id": incident_id}).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        pass
+    return f"incident:{incident_id}"
+
+
+def _record_human_governance_event(incident_id: str, event_type: str, payload: Dict) -> None:
+    try:
+        log_trace_event(
+            trace_id=_incident_trace_id(incident_id),
+            event_type=event_type,
+            source_type="human_staff",
+            source_id="incident_conversation",
+            target_type="incident",
+            target_id=incident_id,
+            payload={**payload, "commercial_authority": "none", "incident_id": incident_id},
+        )
+    except Exception:
+        logging.getLogger(__name__).debug("incident governance trace failed", exc_info=True)
 
 
 def _role_for_token(incident_id: str, token: str | None) -> str | None:
@@ -475,6 +521,11 @@ def _announce_staff_joined(incident_id: str, role: str) -> None:
         meta={"presence": "online", "channel": "admin"},
         event_type="human_joined",
     )
+    _record_human_governance_event(
+        incident_id,
+        "human_joined",
+        {"actor_id": actor["actor_id"], "actor_type": actor["actor_type"], "presence": "online"},
+    )
 
 
 def _announce_staff_left(incident_id: str, role: str) -> None:
@@ -487,6 +538,11 @@ def _announce_staff_left(incident_id: str, role: str) -> None:
         f"{actor['display_name']} left the conversation.",
         meta={"presence": "offline", "channel": "admin"},
         event_type="human_left",
+    )
+    _record_human_governance_event(
+        incident_id,
+        "human_left",
+        {"actor_id": actor["actor_id"], "actor_type": actor["actor_type"], "presence": "offline"},
     )
 
 
@@ -1026,6 +1082,16 @@ def send_message(
             },
             event_type=message_kind,
         )
+        if message_kind in {"supplier_update", "proposed_substitute", "payment_status", "shipping_status"}:
+            _record_human_governance_event(
+                incident_id,
+                "human_commercial_proposal" if message_kind == "proposed_substitute" else "human_case_update",
+                {
+                    "message_kind": message_kind,
+                    "message_id": rec["event_id"],
+                    "buyer_confirmation_required": message_kind == "proposed_substitute",
+                },
+            )
     except Exception:
         raise HTTPException(status_code=500, detail="append_failed")
     return {
@@ -1038,9 +1104,11 @@ def send_message(
 
 
 @router.post("/{incident_id}/room/token")
-def issue_staff_token(incident_id: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    """Create/rotate a staff token for the public SSE room (so EventSource can connect without headers)."""
-    _ = role
+def issue_staff_token(
+    incident_id: str,
+    principal: IncidentStaffPrincipal = Depends(require_incident_staff_principal),
+) -> Dict:
+    """Create/rotate an incident-bound staff token for authenticated SSE."""
     # Verify incident exists best-effort (demo is tolerant).
     try:
         eng = get_engine()
@@ -1052,13 +1120,34 @@ def issue_staff_token(incident_id: str, role: str = Depends(require_role([ROLE_M
         raise
     except Exception:
         pass
-    return {
+    actor = server_actor_identity(principal.role, subject=principal.subject_id)
+    result = {
         "ok": True,
         **_issue_staff_token(incident_id),
-        "staff_identity": server_actor_identity(role),
+        "staff_identity": {**actor, "tenant_id": principal.tenant_id, "identity_source": principal.identity_source},
         "presence": INCIDENT_CONVERSATION_RUNTIME.active_staff(incident_id),
         "event_distribution": INCIDENT_CONVERSATION_RUNTIME.distribution_status,
     }
+    _record_human_governance_event(
+        incident_id,
+        "human_token_rotated",
+        {"actor_id": actor["actor_id"], "tenant_id": principal.tenant_id, "token_material_recorded": False},
+    )
+    return result
+
+
+@router.delete("/{incident_id}/room/token")
+def revoke_staff_token(
+    incident_id: str,
+    principal: IncidentStaffPrincipal = Depends(require_incident_staff_principal),
+) -> Dict:
+    revoked = _revoke_staff_token(incident_id)
+    _record_human_governance_event(
+        incident_id,
+        "human_token_revoked",
+        {"subject_id": principal.subject_id, "tenant_id": principal.tenant_id, "revoked": revoked},
+    )
+    return {"ok": True, "incident_id": incident_id, "revoked": revoked}
 
 
 @router.get("/{incident_id}/room/presence")
@@ -1217,9 +1306,8 @@ def incident_alert_summary(
 def assign_incident(
     incident_id: str,
     body: IncidentAssignRequest,
-    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    principal: IncidentStaffPrincipal = Depends(require_incident_staff_principal),
 ) -> Dict:
-    _ = role
     _ensure_incident_runtime_tables()
     eng = get_engine()
     with eng.begin() as conn:
@@ -1231,6 +1319,16 @@ def assign_incident(
             {"id": incident_id, "assigned_to": body.assigned_to, "team": body.team},
         )
     _append_chat(incident_id, "system", "Incident assignment updated.", meta={"assigned_to": body.assigned_to, "team": body.team})
+    _record_human_governance_event(
+        incident_id,
+        "human_assignment_changed",
+        {
+            "assigned_to": body.assigned_to,
+            "team": body.team,
+            "changed_by": principal.subject_id,
+            "tenant_id": principal.tenant_id,
+        },
+    )
     _create_incident_review_task(incident_id, reviewer_id=body.assigned_to, team=body.team)
     return {"ok": True, "incident_id": incident_id, "assigned_to": body.assigned_to, "team": body.team}
 

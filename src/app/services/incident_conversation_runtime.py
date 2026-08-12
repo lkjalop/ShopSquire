@@ -13,6 +13,7 @@ import asyncio
 import json
 import threading
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,8 +27,12 @@ class IncidentConversationRuntime:
     local_presence: dict[str, dict[str, dict[str, Any]]] = field(default_factory=lambda: defaultdict(dict))
     _lock: threading.RLock = field(default_factory=threading.RLock)
     presence_ttl_seconds: int = 90
+    instance_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    _listener_thread: threading.Thread | None = field(default=None, init=False)
+    _listener_started: bool = field(default=False, init=False)
 
     def subscribe(self, incident_id: str) -> asyncio.Queue:
+        self.ensure_broker_listener()
         queue: asyncio.Queue = asyncio.Queue()
         with self._lock:
             self.subscribers[incident_id].append(queue)
@@ -42,6 +47,18 @@ class IncidentConversationRuntime:
                 self.subscribers.pop(incident_id, None)
 
     def publish_local(self, incident_id: str, event: dict[str, Any]) -> None:
+        self._deliver_local(incident_id, event)
+        try:
+            redis = get_redis()
+            if not isinstance(redis, DummyRedis):
+                redis.publish(
+                    "shopsquire:incident_conversation",
+                    json.dumps({"origin": self.instance_id, "incident_id": incident_id, "event": event}),
+                )
+        except Exception:
+            pass
+
+    def _deliver_local(self, incident_id: str, event: dict[str, Any]) -> None:
         with self._lock:
             queues = list(self.subscribers.get(incident_id, []))
         for queue in queues:
@@ -49,6 +66,46 @@ class IncidentConversationRuntime:
                 queue.put_nowait(event)
             except Exception:
                 continue
+
+    def ensure_broker_listener(self) -> bool:
+        with self._lock:
+            if self._listener_started:
+                return True
+            try:
+                redis = get_redis()
+                if isinstance(redis, DummyRedis) or not hasattr(redis, "pubsub"):
+                    return False
+                pubsub = redis.pubsub(ignore_subscribe_messages=True)
+                pubsub.subscribe("shopsquire:incident_conversation")
+            except Exception:
+                return False
+            self._listener_started = True
+
+        def consume() -> None:
+            try:
+                for message in pubsub.listen():
+                    try:
+                        raw = message.get("data") if isinstance(message, dict) else None
+                        envelope = json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
+                        if envelope.get("origin") == self.instance_id:
+                            continue
+                        incident_id = str(envelope.get("incident_id") or "")
+                        event = envelope.get("event")
+                        if incident_id and isinstance(event, dict):
+                            self._deliver_local(incident_id, event)
+                    except Exception:
+                        continue
+            finally:
+                with self._lock:
+                    self._listener_started = False
+
+        self._listener_thread = threading.Thread(
+            target=consume,
+            name=f"incident-chat-{self.instance_id[:8]}",
+            daemon=True,
+        )
+        self._listener_thread.start()
+        return True
 
     def join(self, incident_id: str, actor: dict[str, Any]) -> bool:
         actor_id = str(actor.get("actor_id") or "staff:unknown")
@@ -89,7 +146,9 @@ class IncidentConversationRuntime:
     @property
     def distribution_status(self) -> str:
         try:
-            return "redis_presence_local_events" if not isinstance(get_redis(), DummyRedis) else "process_local"
+            if isinstance(get_redis(), DummyRedis):
+                return "process_local"
+            return "redis_pubsub" if self.ensure_broker_listener() else "redis_presence_local_events"
         except Exception:
             return "process_local"
 

@@ -27,3 +27,22 @@ def test_runtime_distribution_status_never_claims_cross_worker_event_delivery(mo
     runtime = IncidentConversationRuntime()
     monkeypatch.setattr("src.app.services.incident_conversation_runtime.get_redis", lambda: object())
     assert runtime.distribution_status == "redis_presence_local_events"
+
+
+def test_publish_uses_broker_envelope_without_duplicating_local_delivery(monkeypatch):
+    published = []
+
+    class Broker:
+        def publish(self, channel, payload):
+            published.append((channel, payload))
+
+    runtime = IncidentConversationRuntime(instance_id="worker-a")
+    monkeypatch.setattr("src.app.services.incident_conversation_runtime.get_redis", lambda: Broker())
+    queue = runtime.subscribe("inc-2")
+    runtime.publish_local("inc-2", {"event_id": "evt-2"})
+    assert queue.get_nowait()["event_id"] == "evt-2"
+    assert queue.empty()
+    assert published[0][0] == "shopsquire:incident_conversation"
+    envelope = __import__("json").loads(published[0][1])
+    assert envelope["origin"] == "worker-a"
+    assert envelope["incident_id"] == "inc-2"
