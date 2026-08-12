@@ -18,6 +18,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from src.app.services.recommendation_core.cancellation import RecommendationCancellation
+
 
 logger = logging.getLogger("shopsquire.recommendation_core.envelope")
 
@@ -112,6 +114,11 @@ class TurnEnvelope:
     # regex. None only on the no-facade path (offline replay / direct tests), where the core
     # falls back to its thin gate. Shape: {"policy_route","verdict","reasons",...}.
     pre_gate: Optional[Dict[str, Any]] = None
+    # Process-local only: omitted from wire serialization and checked between
+    # synchronous stages so an abandoned HTTP worker stops before more work.
+    cancellation: Optional[RecommendationCancellation] = field(
+        default=None, repr=False, compare=False,
+    )
 
     @classmethod
     def from_suggest_params(cls, *, query: str, uid: str = "", tenant_id: str = "default",
@@ -126,7 +133,8 @@ class TurnEnvelope:
                             intent_hint: Optional[str] = None,
                             session: Optional[Dict[str, Any]] = None,
                             cart: Optional[List[Dict[str, Any]]] = None,
-                            pre_gate: Optional[Dict[str, Any]] = None) -> "TurnEnvelope":
+                            pre_gate: Optional[Dict[str, Any]] = None,
+                            cancellation: Optional[RecommendationCancellation] = None) -> "TurnEnvelope":
         """The /suggest edge speaks DOLLARS; internal is CENTS — converted here, once."""
         to_cents = lambda v: int(round(float(v) * 100)) if v is not None else None  # noqa: E731
         # Legacy suggest() historically parsed free-text budgets after V2 dispatch. Normalize
@@ -166,7 +174,7 @@ class TurnEnvelope:
                    external_research_consent=bool(external_research_consent),
                    clarification_answer=dict(clarification_answer or {}),
                    session=dict(session or {}),
-                   cart=list(cart or []), pre_gate=pre_gate)
+                   cart=list(cart or []), pre_gate=pre_gate, cancellation=cancellation)
 
     def to_dict(self) -> Dict[str, Any]:
         """Wire form for shadow jobs (R10.1/P1.1) — CENTS-exact, every field the core reads.

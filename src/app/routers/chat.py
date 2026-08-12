@@ -1667,6 +1667,7 @@ async def _call_recommend_in_process(
     redis: Any,
     db: Any,
     role: str,
+    cancellation: Any = None,
 ) -> tuple[int, Dict[str, Any]]:
     """Dispatch through the typed facade and its V2 compatibility cutover."""
     from src.app.services.recommendation_delegation_policy import (
@@ -1708,6 +1709,7 @@ async def _call_recommend_in_process(
                 str(params.get("memory_mode") or "standard").lower() != "temporary"
             ),
             source_ip=(request.client.host if request.client else None),
+            cancellation=cancellation,
         )
         if facade.served:
             record_recommendation_dispatch(
@@ -1769,6 +1771,10 @@ async def _call_recommend_in_process(
         # forcibly stop the abandoned thread.
         data = await anyio.to_thread.run_sync(_invoke, abandon_on_cancel=True)
         return 200, data if isinstance(data, dict) else {}
+    except asyncio.CancelledError:
+        if cancellation is not None:
+            cancellation.cancel("buyer_request_cancelled")
+        raise
     except HTTPException as exc:
         detail = exc.detail
         return int(exc.status_code), detail if isinstance(detail, dict) else {"detail": detail}
@@ -2670,9 +2676,12 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         except (TypeError, ValueError):
             _upstream_timeout = 25.0
         _upstream_timeout = max(0.05, min(_upstream_timeout, 120.0))
+        from src.app.services.recommendation_core.cancellation import RecommendationCancellation
+        _recommend_cancellation = RecommendationCancellation.with_timeout(_upstream_timeout)
         status_code, data = await asyncio.wait_for(
             _call_recommend_in_process(
-                request, params, redis=redis, db=db, role=role),
+                request, params, redis=redis, db=db, role=role,
+                cancellation=_recommend_cancellation),
             timeout=_upstream_timeout,
         )
         if status_code is not None:

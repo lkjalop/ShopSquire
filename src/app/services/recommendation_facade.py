@@ -905,6 +905,7 @@ def dispatch_recommendation_core_typed(
     compatibility_cutover: bool = False,
     with_trace: Optional[Callable[[Dict[str, Any], str], Dict[str, Any]]] = None,
     record_failure: Optional[Callable[..., Any]] = None,
+    cancellation: Any = None,
 ) -> FacadeOutcome:
     """Dispatch with explicit ownership and failure semantics."""
     dispatch_started = time.perf_counter()
@@ -1194,7 +1195,8 @@ def dispatch_recommendation_core_typed(
             image_observations=image_observations,
             external_research_consent=external_research_consent,
             clarification_answer=clarification_answer,
-            session=session, cart=cart_slice, pre_gate=guard)
+            session=session, cart=cart_slice, pre_gate=guard,
+            cancellation=cancellation)
 
         # ── DISPATCH ───────────────────────────────────────────────────────────
         from src.app.services.recommendation_core.core import recommend_turn

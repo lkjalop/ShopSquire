@@ -211,10 +211,17 @@ def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None
     """Never raises. The response is always finalized (honesty invariants enforced)."""
     started = time.perf_counter()
     try:
+        if envelope.cancellation is not None:
+            envelope.cancellation.raise_if_cancelled()
         core = _recommend_turn(db, envelope, llm_fn=llm_fn, limit=limit)
-    except Exception as exc:  # the never-raise floor: degraded honesty, loudly logged
-        logger.exception("recommendation_core turn failed: %s", exc)
-        core = degraded_response(envelope, reason=f"core_error:{type(exc).__name__}")
+    except Exception as exc:
+        from src.app.services.recommendation_core.cancellation import RecommendationCancelled
+        if isinstance(exc, RecommendationCancelled):
+            logger.info("recommendation turn cooperatively cancelled: %s", exc)
+            core = degraded_response(envelope, reason=f"request_cancelled:{exc}")
+        else:
+            logger.exception("recommendation_core turn failed: %s", exc)
+            core = degraded_response(envelope, reason=f"core_error:{type(exc).__name__}")
     router_metrics = (
         last_router_call_metrics()
         if any(item.stage == "route+intent" for item in core.stage_results)
@@ -287,6 +294,8 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         llm_fn=llm_fn,
         timeout=float(router_contract["inference_timeout_s"]),
     )
+    if envelope.cancellation is not None:
+        envelope.cancellation.raise_if_cancelled()
     # Monetary changes require buyer-supplied evidence. A BYO router may propose a number
     # even when the turn only says "keep the total budget"; accepting that proposal would
     # let narration silently rewrite an order constraint. The canonical grammar is the
