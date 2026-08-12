@@ -1040,10 +1040,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       const caseViewPath = canSeeOperatorDraft
         ? `/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all/operator-view`
         : `/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all`;
-      const allView: any = await fetch(
+      const allView: any = await fetchJsonWithDeadline(
         apiUrl(caseViewPath),
         { credentials: 'include', headers },
-      ).then(safeJson).catch(() => null);
+      ).catch(() => null);
       const cases: any[] = Array.isArray(allView?.cases) ? allView.cases : [];
       // The projection may include prior superseded revisions so operators can
       // audit an amendment. Those revisions are history, not additional
@@ -1060,39 +1060,30 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       const embeddedHistory = allView?.amendment_history?.case_count
         ? allView.amendment_history
         : null;
-      if (canSeeOperatorDraft && orderGroupId.startsWith('order-')) {
-        const orderId = orderGroupId.slice('order-'.length);
-        const history: any = await fetch(
-          apiUrl(`/api/v1/fulfillment/cases/by-order/${encodeURIComponent(orderId)}`),
-          { credentials: 'include', headers },
-        ).then(safeJson).catch(() => null);
-        setProcHistory(history?.case_count ? history : embeddedHistory);
-      } else {
-        setProcHistory(embeddedHistory);
-      }
       const primary = visibleCases[0] || null;
       setProcCase(primary && (primary.case_id || primary.state) ? primary : null);
-      if (canSeeOperatorDraft && primary) {
-        const allocationSku = String(
-          primary?.state_json?.availability?.item_ref
-          || primary?.state_json?.draft?.commercial_scope?.item_ref || '',
-        ).trim();
-        const workbenchPath = `/api/v1/admin/allocation/workbench${allocationSku ? `?sku=${encodeURIComponent(allocationSku)}` : ''}`;
-        const allocation: any = await fetch(
-          apiUrl(workbenchPath), { credentials: 'include', headers },
-        ).then(safeJson).catch(() => null);
-        setAllocationView(allocation?.summary ? allocation : null);
-      } else {
-        setAllocationView(null);
-      }
       const cid = (primary && primary.case_id) || procurementCaseId;
-      if (cid) {
-        const jr: any = await fetch(
-          apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(cid)}/journey`),
-          { credentials: 'include', headers },
-        ).then(safeJson).catch(() => null);
-        setProcJourney(Array.isArray(jr?.journey) ? jr.journey : null);
-      }
+      const orderId = canSeeOperatorDraft && orderGroupId.startsWith('order-')
+        ? orderGroupId.slice('order-'.length) : '';
+      const allocationSku = canSeeOperatorDraft && primary ? String(
+        primary?.state_json?.availability?.item_ref
+        || primary?.state_json?.draft?.commercial_scope?.item_ref || '',
+      ).trim() : '';
+      const workbenchPath = `/api/v1/admin/allocation/workbench${allocationSku ? `?sku=${encodeURIComponent(allocationSku)}` : ''}`;
+      const [history, allocation, journey]: any[] = await Promise.all([
+        orderId
+          ? fetchJsonWithDeadline(apiUrl(`/api/v1/fulfillment/cases/by-order/${encodeURIComponent(orderId)}`), { credentials: 'include', headers }).catch(() => null)
+          : Promise.resolve(null),
+        canSeeOperatorDraft && primary
+          ? fetchJsonWithDeadline(apiUrl(workbenchPath), { credentials: 'include', headers }).catch(() => null)
+          : Promise.resolve(null),
+        cid
+          ? fetchJsonWithDeadline(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(cid)}/journey`), { credentials: 'include', headers }).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      setProcHistory(history?.case_count ? history : embeddedHistory);
+      setAllocationView(allocation?.summary ? allocation : null);
+      setProcJourney(Array.isArray(journey?.journey) ? journey.journey : null);
     } finally {
       setProcLoading(false);
     }
