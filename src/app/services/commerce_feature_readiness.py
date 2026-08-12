@@ -69,6 +69,17 @@ def record_external_research_runtime_observation(
         if row.get("discovery_status") == "completed"
         and int(row.get("discovery_result_count") or 0) > 0
     ]
+    discovery_receipts = [
+        row for row in research.get("receipts") or []
+        if isinstance(row, Mapping)
+        and row.get("provider_capability") == "WEB_DISCOVERY"
+    ]
+    successful_discovery_receipts = [
+        row for row in discovery_receipts
+        if row.get("execution_status") == "completed"
+        and row.get("network_execution") is True
+        and int(row.get("result_count") or 0) > 0
+    ]
     official_success = any(
         isinstance(receipt, Mapping)
         and receipt.get("provider_capability") == "OFFICIAL_ORIGIN_FETCH"
@@ -87,7 +98,7 @@ def record_external_research_runtime_observation(
         if isinstance(row, Mapping)
     ]
     with _RESEARCH_OBSERVATION_LOCK:
-        if discovery_successes:
+        if discovery_successes or successful_discovery_receipts:
             _RESEARCH_RUNTIME_OBSERVATION.update({
                 "reachable": True,
                 "degraded": False,
@@ -95,9 +106,15 @@ def record_external_research_runtime_observation(
                 "last_discovery_result_count": sum(
                     int(row.get("discovery_result_count") or 0)
                     for row in discovery_successes
+                ) + sum(
+                    int(row.get("result_count") or 0)
+                    for row in successful_discovery_receipts
                 ),
             })
-        elif any(row.get("discovery_status") == "failed" for row in executions):
+        elif (
+            any(row.get("discovery_status") == "failed" for row in executions)
+            or any(row.get("execution_status") == "failed" for row in discovery_receipts)
+        ):
             _RESEARCH_RUNTIME_OBSERVATION.update({
                 "reachable": False,
                 "degraded": True,

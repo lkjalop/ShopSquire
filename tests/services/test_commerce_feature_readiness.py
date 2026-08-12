@@ -238,6 +238,24 @@ def test_http_success_with_zero_discovery_results_is_not_effective_discovery():
     assert observed["last_discovery_result_count"] is None
 
 
+def test_open_world_discovery_receipts_update_runtime_without_source_execution():
+    reset_external_research_runtime_observation()
+    observed = record_external_research_runtime_observation({
+        "receipts": [{
+            "provider_capability": "WEB_DISCOVERY",
+            "execution_status": "completed", "network_execution": True,
+            "external_call_dispatched": True, "http_status": 200,
+            "result_count": 4,
+        }],
+        "claims": [], "unresolved": [],
+    })
+
+    assert observed["reachable"] is True
+    assert observed["degraded"] is False
+    assert observed["last_discovery_result_count"] == 4
+    assert observed["last_discovery_success_at"]
+
+
 def test_combined_health_projects_process_local_research_observations(monkeypatch):
     reset_external_research_runtime_observation()
     record_external_research_runtime_observation({

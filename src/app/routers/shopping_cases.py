@@ -1280,6 +1280,10 @@ def research_shopping_case(
             plan,
             search_url_template=str(os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or "").strip(),
         )
+        # Open-world discovery has no source_execution row yet because no
+        # publisher origin has been accepted. Its actual network receipts are
+        # nevertheless sufficient to record reachability/result observations.
+        record_external_research_runtime_observation(discovery)
         from src.app.services.case_publisher_candidate_workflow import (
             persist_discovered_candidates,
         )
