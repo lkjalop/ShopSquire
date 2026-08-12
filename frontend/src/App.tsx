@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import styles from './App.module.css';
+import { lazy, Suspense } from 'react';
 import ProductGrid from './components/ProductGrid';
 import { formatMoney, formatProductPrice, normalizeCurrency } from './lib/money';
 import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
@@ -9,8 +10,8 @@ import MultiIntentCard from './components/MultiIntentCard';
 import PendingCartChangeCard, { type PendingCartPlan } from './components/PendingCartChangeCard';
 import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
 import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
-import DecisionTrace from './components/DecisionTrace';
-import EscalationRoom from './components/EscalationRoom';
+const DecisionTrace = lazy(() => import('./components/DecisionTrace'));
+const EscalationRoom = lazy(() => import('./components/EscalationRoom'));
 import RightPanelExtras from './components/RightPanelExtras';
 import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
 import AffordabilityResolutionCard, {
@@ -33,7 +34,7 @@ import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
 import CartPanel from './components/CartPanel';
 import LoginModal from './components/LoginModal';
-import AdminDashboard from './components/AdminDashboard';
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 import { productShortLabel } from './lib/productDisplay';
 import { csrfHeaders } from './lib/csrf';
 import { detectPII } from './lib/pii';
@@ -4363,17 +4364,21 @@ export default function App() {
       {/* Decision Trace Modal */}
       {/* Open the trace on the SOURCING turn's trace when a procurement context exists, so the Procurement
           tab/badge resolves — otherwise a later upsell turn's trace would show no journey. (See lib/trace.) */}
-      {traceOpen && <DecisionTrace
-        traceId={activeShoppingCase?.case_id
-          ? normalizeTraceId(
-            ambiguityExploration?.trace_id || activeShoppingCase.case_id.replace(/^sc-/, ''),
-          )
-          : procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
-        onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} />}
+      {traceOpen && <Suspense fallback={<div role="status">Loading decision trace…</div>}>
+        <DecisionTrace
+          traceId={activeShoppingCase?.case_id
+            ? normalizeTraceId(
+              ambiguityExploration?.trace_id || activeShoppingCase.case_id.replace(/^sc-/, ''),
+            )
+            : procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
+          onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} />
+      </Suspense>}
 
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (
-        <EscalationRoom incidentId={escalationIncidentId} buyerToken={escalationBuyerToken} onClose={() => setEscalationOpen(false)} />
+        <Suspense fallback={<div role="status">Loading escalation room…</div>}>
+          <EscalationRoom incidentId={escalationIncidentId} buyerToken={escalationBuyerToken} onClose={() => setEscalationOpen(false)} />
+        </Suspense>
       )}
 
       {/* Login Modal */}
@@ -4395,7 +4400,9 @@ export default function App() {
             style={{ position: 'fixed', top: 12, right: 16, zIndex: 1200, padding: '6px 14px', cursor: 'pointer' }}
             onClick={() => setShowAdminDash(false)}
           >✕ Close</button>
-          <AdminDashboard />
+          <Suspense fallback={<div role="status">Loading administration…</div>}>
+            <AdminDashboard />
+          </Suspense>
         </div>
       )}
     </div>
