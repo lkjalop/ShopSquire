@@ -172,3 +172,46 @@ def test_project_findings_global_node_no_entity_edge():
                           "severity": "info", "confidence": 0.5}])
     assert "finding:demand_shift:global" in g.nodes
     assert g.edges == {}  # global finding has no entity edge
+def test_official_research_projects_cited_claim_and_rank_movement_paths():
+    from src.app.services.hippograph import HippoGraph, explain_path, project_research_evidence
+
+    graph = project_research_evidence(HippoGraph(), [{
+        "event_type": "official_research_rerank_completed",
+        "target_id": "sc-1",
+        "payload": {
+            "case_id": "sc-1",
+            "source_execution": [{
+                "source_id": "factory_io_official_docs",
+                "origin_selection_mode": "canonical_direct",
+            }],
+            "official_claims": [{
+                "claim_id": "claim-ram", "source_id": "factory_io_official_docs",
+                "attribute": "ram_gb", "citation_url": "https://docs.factoryio.com/requirements",
+            }],
+            "research_delta": [{
+                "configuration_id": "LAP-1", "before_rank": 5, "after_rank": 2,
+                "reason": "newly evidenced meet: ram_gb",
+            }],
+        },
+    }], sku_pattern=r"[A-Za-z0-9][\w.\-]{0,63}")
+
+    assert "publisher:factory_io_official_docs" in graph.nodes
+    assert "requirement:claim-ram" in graph.nodes
+    assert "attribute:ram_gb" in graph.nodes
+    assert "LAP-1" in graph.nodes
+    path = explain_path(graph, ["LAP-1"], "requirement:claim-ram")
+    assert path["authority"] == "evidence_only"
+    assert path["hops"] == 2
+
+
+def test_unapproved_discovery_candidates_do_not_enter_hippograph():
+    from src.app.services.hippograph import HippoGraph, project_research_evidence
+
+    graph = project_research_evidence(HippoGraph(), [{
+        "event_type": "open_world_discovery_completed",
+        "payload": {
+            "case_id": "sc-2",
+            "publisher_candidates": [{"url": "https://example.test/requirements"}],
+        },
+    }])
+    assert graph.nodes == {}

@@ -14,7 +14,7 @@ from typing import Optional
 from sqlalchemy import text
 
 from src.app.services.entity_resolution import _brand_alias_map_for_profile
-from src.app.services.hippograph import HippoGraph, project_graph
+from src.app.services.hippograph import HippoGraph, project_graph, project_research_evidence
 
 # A SKU node id is a single space-free token (GAM-0002, ATTR-1, ...); product *names* (with spaces)
 # fall through to a `name:` node and never collide with a real SKU.
@@ -73,6 +73,7 @@ def build_from_db(
     include_findings: bool = False,
     include_human_feedback: bool = False,
     include_catalog: bool = False,
+    include_research_evidence: bool = False,
     anomaly_fn=None,
     as_of: Optional[str] = None,
 ) -> HippoGraph:
@@ -141,6 +142,27 @@ def build_from_db(
         trace_rows, conv_rows, alias_map=alias_map, known=known,
         sku_pattern=sku_pattern, as_of=as_of
     )
+    if include_research_evidence:
+        research_events = []
+        try:
+            rows = db.execute(text(
+                "SELECT event_type,target_id,payload,created_at FROM decision_trace_events "
+                "WHERE COALESCE(tenant_id,'default')=:tenant AND event_type IN "
+                "('official_research_rerank_completed','buyer_evidence_source_researched') "
+                "ORDER BY created_at DESC LIMIT :lim"
+            ), {"tenant": tenant, "lim": int(limit)}).fetchall()
+            for row in rows:
+                try:
+                    payload = json.loads(row[2]) if row[2] else {}
+                except (TypeError, ValueError):
+                    payload = {}
+                research_events.append({
+                    "event_type": row[0], "target_id": row[1], "payload": payload,
+                    "observed_at": row[3],
+                })
+        except Exception:
+            research_events = []
+        graph = project_research_evidence(graph, research_events, sku_pattern=sku_pattern)
     if include_findings:
         graph = _maybe_project_findings(db, graph, tenant_id=tenant, limit=limit,
                                         sku_pattern=sku_pattern, anomaly_fn=anomaly_fn)

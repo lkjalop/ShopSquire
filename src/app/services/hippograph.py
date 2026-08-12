@@ -363,6 +363,93 @@ def project_catalog(
     return graph
 
 
+def project_research_evidence(
+    graph: HippoGraph,
+    research_events: Optional[Iterable[Dict[str, Any]]],
+    *,
+    sku_pattern: Optional[str] = None,
+) -> HippoGraph:
+    """Project official claims and reranking receipts as evidence-only graph paths.
+
+    Discovery snippets and unapproved publisher candidates are intentionally ignored. This
+    improves recall/explanation while granting no qualification, ranking, or commerce authority.
+    """
+
+    def ensure(node_id: str, kind: str, label: str) -> None:
+        if node_id not in graph.nodes:
+            graph.nodes[node_id] = HippoNode(node_id, kind, label, 0.0)
+
+    def connect(source: str, target: str, weight: float, kind: str, evidence: Dict[str, Any]) -> None:
+        key = (source, target)
+        graph.edges[key] = graph.edges.get(key, 0.0) + weight
+        kinds = graph.edge_kinds.setdefault(key, {})
+        kinds[kind] = kinds.get(kind, 0.0) + weight
+        graph.adjacency.setdefault(source, {})[target] = graph.adjacency.setdefault(source, {}).get(target, 0.0) + weight
+        graph.adjacency.setdefault(target, {})[source] = graph.adjacency.setdefault(target, {}).get(source, 0.0) + weight * 0.5
+        graph.edge_evidence.setdefault(key, []).append(evidence)
+
+    for event in research_events or []:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else event
+        if str(event.get("event_type") or "") not in {
+            "official_research_rerank_completed", "buyer_evidence_source_researched",
+        }:
+            continue
+        case_id = str(payload.get("case_id") or event.get("target_id") or "").strip()
+        if not case_id:
+            continue
+        case_node = f"shopping_case:{case_id}"
+        ensure(case_node, "shopping_case", case_id)
+        source_rows = payload.get("source_execution") or []
+        executed_sources = {
+            str(row.get("source_id") or "").strip()
+            for row in source_rows if isinstance(row, dict)
+            and str(row.get("origin_selection_mode") or "") != "unresolved"
+        }
+        for claim in payload.get("official_claims") or []:
+            if not isinstance(claim, dict):
+                continue
+            claim_id = str(claim.get("claim_id") or "").strip()
+            source_id = str(claim.get("source_id") or "").strip()
+            attribute = str(claim.get("attribute") or claim.get("attribute_key") or "").strip()
+            if not claim_id or not source_id or not attribute:
+                continue
+            if executed_sources and source_id not in executed_sources:
+                continue
+            claim_node = f"requirement:{claim_id}"
+            source_node = f"publisher:{source_id}"
+            attribute_node = f"attribute:{attribute}"
+            ensure(claim_node, "requirement", attribute)
+            ensure(source_node, "publisher", source_id)
+            ensure(attribute_node, "attribute", attribute)
+            evidence = {
+                "evidence_id": claim_id,
+                "source_id": source_id,
+                "citation_url": claim.get("citation_url") or claim.get("source_url"),
+                "observed_at": claim.get("observed_at"),
+                "claim_status": "official_compiled",
+                "authority": "evidence_only",
+            }
+            connect(source_node, claim_node, 0.35, "cites_requirement", evidence)
+            connect(claim_node, attribute_node, 0.3, "constrains_attribute", evidence)
+            connect(case_node, claim_node, 0.2, "research_context", evidence)
+        for movement in payload.get("research_delta") or []:
+            if not isinstance(movement, dict):
+                continue
+            sku = str(movement.get("configuration_id") or movement.get("sku") or movement.get("product_id") or "").strip()
+            ref = resolve_product(sku, sku_pattern=sku_pattern) if sku else None
+            if not ref:
+                continue
+            ensure(ref.id, "product", ref.label)
+            connect(case_node, ref.id, 0.15, "research_rank_movement", {
+                "evidence_id": str(movement.get("movement_id") or ""),
+                "before_rank": movement.get("before_rank") or movement.get("from"),
+                "after_rank": movement.get("after_rank") or movement.get("to"),
+                "reason": movement.get("reason"),
+                "authority": "evidence_only",
+            })
+    return graph
+
+
 def project_findings(graph: HippoGraph, findings: Optional[Iterable[Any]], *, sku_pattern: Optional[str] = None) -> HippoGraph:
     """Add M3 findings as ``finding`` nodes (in place). Each finding becomes a node
     ``finding:<type>:<entity-or-global>`` whose weight is severity×confidence; when it names an

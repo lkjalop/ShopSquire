@@ -13,7 +13,9 @@ from typing import Any, Dict, List, Optional
 
 # Buyer-/analysis-facing entity kinds. Internal graph nodes (the current user, decision nodes,
 # agents) are excluded from insights — they are graph plumbing, not evidence.
-_USEFUL_KINDS = {"product", "brand", "finding", "segment"}
+_USEFUL_KINDS = {
+    "product", "brand", "finding", "segment", "publisher", "requirement", "attribute",
+}
 
 
 def build_hippograph_insights(
@@ -46,8 +48,11 @@ def build_hippograph_insights(
         # (reachability, not reward); HIPPOGRAPH_CATALOG_EDGES=0 is the rollback since this
         # builder is shared with the procurement-draft evidence path.
         _cat_on = str(os.getenv("HIPPOGRAPH_CATALOG_EDGES", "1")).strip().lower() in ("1", "true", "yes", "on")
-        graph = build_from_db(db, tenant_id=tenant_id, limit=limit, include_findings=True, include_human_feedback=_hf_on,
-                              include_catalog=_cat_on)
+        graph = build_from_db(
+            db, tenant_id=tenant_id, limit=limit, include_findings=True,
+            include_human_feedback=_hf_on, include_catalog=_cat_on,
+            include_research_evidence=True,
+        )
         if not graph.nodes:
             return []
         seeds: List[str] = []
