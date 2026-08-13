@@ -10,7 +10,9 @@ from typing import Iterable
 
 from sqlalchemy import select
 
-from src.app.models.orm import HippographJourneyEdgeRecord
+from src.app.models.orm import (
+    HippographJourneyEdgeRecord, ProductAvailabilityObservation, ProductConfiguration,
+)
 from src.app.services.hippograph_journey_edges import TypedJourneyEdge
 
 
@@ -81,4 +83,41 @@ def load_journey_edges(
     ) for row in rows]
 
 
-__all__ = ["load_journey_edges", "persist_journey_edges"]
+def load_configuration_availability_edges(
+    db, *, tenant_id: str, limit: int = 5000,
+) -> list[TypedJourneyEdge]:
+    """Project the durable exact-configuration availability ledger into typed edges."""
+    rows = db.execute(select(
+        ProductAvailabilityObservation, ProductConfiguration,
+    ).join(
+        ProductConfiguration,
+        ProductConfiguration.id == ProductAvailabilityObservation.configuration_id,
+    ).where(
+        ProductConfiguration.tenant_id == tenant_id,
+    ).order_by(
+        ProductAvailabilityObservation.observed_at.asc(),
+        ProductAvailabilityObservation.id.asc(),
+    ).limit(max(1, int(limit)))).all()
+    return [TypedJourneyEdge(
+        edge_id=f"availability-{observation.id}", tenant_id=tenant_id,
+        source_id=f"configuration:{configuration.id}", source_kind="configuration",
+        target_id=f"availability_observation:{observation.id}",
+        target_kind="availability_observation",
+        relation="has_availability_observation", signal_class="observed",
+        evidence_id=observation.source_record_id,
+        observed_at=observation.observed_at.isoformat(),
+        effective_at=observation.observed_at.isoformat(),
+        valid_to=observation.expires_at.isoformat() if observation.expires_at else None,
+        source_authority="inventory_observation",
+        attributes={
+            "sku": configuration.sku, "location_id": observation.location_id,
+            "status": observation.status, "quantity": observation.quantity,
+            "lead_time_min_days": observation.lead_time_min_days,
+            "lead_time_max_days": observation.lead_time_max_days,
+        },
+    ) for observation, configuration in rows]
+
+
+__all__ = [
+    "load_configuration_availability_edges", "load_journey_edges", "persist_journey_edges",
+]

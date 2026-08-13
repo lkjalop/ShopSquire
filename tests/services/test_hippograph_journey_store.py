@@ -3,10 +3,14 @@ from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.models.orm import Base, HippographJourneyEdgeRecord
+from src.app.models.orm import (
+    Base, HippographJourneyEdgeRecord, ProductAvailabilityObservation, ProductConfiguration,
+)
 from src.app.services.hippograph import HippoGraph
 from src.app.services.hippograph_journey_edges import project_typed_journey_edges
-from src.app.services.hippograph_journey_store import load_journey_edges, persist_journey_edges
+from src.app.services.hippograph_journey_store import (
+    load_configuration_availability_edges, load_journey_edges, persist_journey_edges,
+)
 
 
 def _db():
@@ -51,3 +55,25 @@ def test_store_rejects_cross_tenant_edges():
         assert str(exc) == "hippograph_edge_tenant_mismatch"
     else:
         raise AssertionError("cross-tenant edge was accepted")
+
+
+def test_exact_configuration_availability_projects_as_observed_edge():
+    db = _db()
+    configuration = ProductConfiguration(
+        id="cfg-1", tenant_id="tenant-a", sku="SKU-1", title="Exact laptop",
+        configuration_hash="hash-1", form_factor="laptop", mobility="mobile",
+        device_class="mobile_workstation", price_cents=300000, currency="AUD",
+    )
+    db.add(configuration)
+    db.add(ProductAvailabilityObservation(
+        id="availability-1", configuration_id="cfg-1", location_id="sydney",
+        status="in_stock", quantity=5, lead_time_min_days=0, lead_time_max_days=1,
+        source_record_id="inventory-receipt-1",
+        observed_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
+    ))
+    db.commit()
+    edges = load_configuration_availability_edges(db, tenant_id="tenant-a")
+    assert len(edges) == 1
+    assert edges[0].source_id == "configuration:cfg-1"
+    assert edges[0].signal_class == "observed"
+    assert edges[0].attributes["quantity"] == 5

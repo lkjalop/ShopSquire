@@ -167,9 +167,14 @@ def build_from_db(
         graph = project_research_evidence(graph, research_events, sku_pattern=sku_pattern)
     try:
         from src.app.services.hippograph_journey_edges import project_typed_journey_edges
-        from src.app.services.hippograph_journey_store import load_journey_edges
+        from src.app.services.hippograph_journey_store import (
+            load_configuration_availability_edges, load_journey_edges,
+        )
 
-        typed_edges = load_journey_edges(db, tenant_id=tenant, limit=limit)
+        typed_edges = [
+            *load_journey_edges(db, tenant_id=tenant, limit=limit),
+            *load_configuration_availability_edges(db, tenant_id=tenant, limit=limit),
+        ]
         if typed_edges:
             project_typed_journey_edges(graph, typed_edges, tenant_id=tenant, as_of=as_of)
     except Exception as exc:
