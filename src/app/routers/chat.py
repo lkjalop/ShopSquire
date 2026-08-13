@@ -8,7 +8,6 @@ import uuid
 import base64
 import hashlib
 import os
-import anyio
 from threading import RLock
 from typing import Any, Dict, List, Optional
 
@@ -213,44 +212,18 @@ def _store_chat_message(
     tenant_id: str | None = None,
     session_epoch: str | None = None,
 ) -> str | None:
-    if not str(content or "").strip():
-        return None
-    from src.app.platform.tenant_context import current_tenant_id
+    from src.app.services.chat_persistence import store_chat_message
 
-    message_id = str(uuid.uuid4())
-    bounded_uid = str(uid or "anonymous")[:128]
-    bounded_session_id = str(session_id or "")[:128] or None
-    params = {
-        "id": message_id,
-        "tenant_id": str(tenant_id or current_tenant_id() or "default")[:128],
-        "uid": bounded_uid,
-        "session_id": bounded_session_id,
-        "session_epoch": str(session_epoch or bounded_session_id or bounded_uid)[:128],
-        "role": str(role or "assistant")[:32],
-        "content": str(content or "")[:8000],
-        "trace_id": str(trace_id or "")[:128] or None,
-    }
-
-    # Chat history is optional evidence. Persist it in an isolated transaction so
-    # a failed optional/retrieval query on the request session cannot turn this
-    # insert into PostgreSQL 25P02 or discard unrelated decision evidence.
-    bind = db.get_bind() if hasattr(db, "get_bind") else getattr(db, "bind", None)
-    if bind is None:
-        raise RuntimeError("chat_message_store_requires_database_bind")
-    with Session(bind=bind, future=True) as message_db:
-        message_db.execute(
-            sql_text(
-                """
-                INSERT INTO chat_messages
-                    (id, tenant_id, uid, session_id, session_epoch, role, content, trace_id)
-                VALUES
-                    (:id, :tenant_id, :uid, :session_id, :session_epoch, :role, :content, :trace_id)
-                """
-            ),
-            params,
-        )
-        message_db.commit()
-    return message_id
+    return store_chat_message(
+        db,
+        uid=uid,
+        role=role,
+        content=content,
+        trace_id=trace_id,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        session_epoch=session_epoch,
+    )
 
 
 def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
@@ -1613,115 +1586,12 @@ async def _call_recommend_in_process(
     role: str,
     cancellation: Any = None,
 ) -> tuple[int, Dict[str, Any]]:
-    """Dispatch through the typed facade and its V2 compatibility cutover."""
-    from src.app.services.recommendation_delegation_policy import (
-        compatibility_cutover_enabled,
-        v2_only_unavailable_response,
+    from src.app.services.chat_recommendation_dispatch import dispatch_chat_recommendation
+
+    return await dispatch_chat_recommendation(
+        request, params, redis=redis, db=db, role=role,
+        tenant_id_resolver=_request_tenant_id, cancellation=cancellation,
     )
-    from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
-
-    def _invoke() -> Dict[str, Any]:
-        from src.app.observability.metrics import record_recommendation_dispatch
-
-        tenant_id = _request_tenant_id(request)
-        observed_lane = str(params.get("turn_intent") or "").upper() or None
-        facade = dispatch_recommendation_core_typed(
-            db, redis,
-            query=str(params.get("query") or ""), uid=str(params.get("uid") or ""),
-            tenant_id=tenant_id,
-            budget_max=params.get("budget_max"), budget_min=params.get("budget_min"),
-            trace_id=str(params.get("trace_id") or uuid.uuid4()),
-            image_labels=params.get("image_labels"), image_ocr=params.get("image_ocr_text"),
-            image_hash=params.get("image_hash"), image_intent=params.get("image_intent"),
-            image_product_identity=params.get("image_product_identity"),
-            image_cv_signals=params.get("image_cv_signals"),
-            external_research_consent=(
-                str(params.get("external_research_consent") or "").lower() == "true"),
-            clarification_answer=(
-                params.get("clarification_answer")
-                if isinstance(params.get("clarification_answer"), dict) else None
-            ),
-            intent_hint=params.get("turn_intent"), role=role, request=request,
-            confirmed_slots=(
-                params.get("confirmed_slots")
-                if isinstance(params.get("confirmed_slots"), dict) else None
-            ),
-            session_epoch=(
-                str(params.get("session_epoch") or "").strip() or None
-            ),
-            memory_enabled=(
-                str(params.get("memory_mode") or "standard").lower() != "temporary"
-            ),
-            source_ip=(request.client.host if request.client else None),
-            cancellation=cancellation,
-        )
-        if facade.served:
-            record_recommendation_dispatch(
-                outcome="v2_served", lane=facade.lane or observed_lane, reason="served",
-            )
-            served = dict(facade.payload or {})
-            served.setdefault("execution_mode", "v2_served")
-            served.setdefault("execution_lane", facade.lane)
-            return served
-        if facade.status == "blocked":
-            record_recommendation_dispatch(
-                outcome="blocked", lane=facade.lane or observed_lane, reason=facade.reason,
-            )
-            status_code = 429 if str(facade.reason).startswith("quota:") else 403
-            raise HTTPException(status_code=status_code, detail={
-                "message": "Request blocked by recommendation guard",
-                "reason": facade.reason,
-                "trace_id": str(params.get("trace_id") or "") or None,
-            })
-        if not compatibility_cutover_enabled():
-            record_recommendation_dispatch(
-                outcome="v2_unavailable", lane=facade.lane or observed_lane,
-                reason=facade.reason or facade.status,
-            )
-            return v2_only_unavailable_response(
-                status=facade.status,
-                reason=facade.reason,
-                lane=facade.lane,
-                trace_id=str(params.get("trace_id") or ""),
-            )
-        from src.app.services.recommendation_compatibility import (
-            serve_v2_compatibility,
-        )
-        try:
-            delegated = serve_v2_compatibility(
-                request=request, params=params, redis=redis, db=db, role=role,
-            )
-        except Exception:
-            record_recommendation_dispatch(
-                outcome="error", lane=facade.lane or observed_lane,
-                reason=facade.reason or facade.status,
-            )
-            raise
-        record_recommendation_dispatch(
-            outcome="v2_compatibility", lane=facade.lane or observed_lane,
-            reason=facade.reason or facade.status,
-        )
-        delegated = dict(delegated or {})
-        delegated.setdefault("execution_mode", "v2_compatibility")
-        delegated.setdefault("delegation_reason", facade.reason or facade.status)
-        delegated.setdefault("execution_lane", facade.lane)
-        return delegated
-
-    try:
-        # The outer chat boundary applies a real deadline. AnyIO defaults to shielding worker threads
-        # from cancellation, which would make asyncio.wait_for continue waiting for a stuck sync facade.
-        # Abandon the await on cancellation so the HTTP request can degrade on time. Dependencies inside
-        # _invoke must remain side-effect-safe and carry their own I/O deadlines because Python cannot
-        # forcibly stop the abandoned thread.
-        data = await anyio.to_thread.run_sync(_invoke, abandon_on_cancel=True)
-        return 200, data if isinstance(data, dict) else {}
-    except asyncio.CancelledError:
-        if cancellation is not None:
-            cancellation.cancel("buyer_request_cancelled")
-        raise
-    except HTTPException as exc:
-        detail = exc.detail
-        return int(exc.status_code), detail if isinstance(detail, dict) else {"detail": detail}
 
 
 @router.post("/query")
@@ -2622,10 +2492,15 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         _upstream_timeout = max(0.05, min(_upstream_timeout, 120.0))
         from src.app.services.recommendation_core.cancellation import RecommendationCancellation
         _recommend_cancellation = RecommendationCancellation.with_timeout(_upstream_timeout)
+        dispatch_kwargs = {"redis": redis, "db": db, "role": role}
+        # Preserve the long-standing injectable dispatch seam used by local
+        # degradation tests and deployments while the production function
+        # receives cooperative cancellation.
+        import inspect
+        if "cancellation" in inspect.signature(_call_recommend_in_process).parameters:
+            dispatch_kwargs["cancellation"] = _recommend_cancellation
         status_code, data = await asyncio.wait_for(
-            _call_recommend_in_process(
-                request, params, redis=redis, db=db, role=role,
-                cancellation=_recommend_cancellation),
+            _call_recommend_in_process(request, params, **dispatch_kwargs),
             timeout=_upstream_timeout,
         )
         if status_code is not None:

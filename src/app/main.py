@@ -20,17 +20,13 @@ from contextlib import asynccontextmanager
 from fastapi.responses import ORJSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.app.routers import admin, pricing, inventory, support, events, payments
+from src.app.routers import admin
 from src.app.routers import tickets as tickets_module
 from src.app.routers.auth import router as auth_router
 from src.app.routers.account import router as account_router
 from src.app.routers.cart import router as cart_router
 from src.app.routers.shopping_cases import router as shopping_cases_router
 from src.app.routers.privacy import router as privacy_router
-from src.app.routers.payments_paypal import router as payments_paypal
-from src.app.routers.payments_revolut import router as payments_revolut
-from src.app.routers.payments_googlepay import router as payments_googlepay
-from src.app.routers.payments_afterpay import router as payments_afterpay
 from src.app.routers.cv import router as cv_router
 from src.app.routers.recruiting import router as recruiting_router
 from src.app.routers.scoring import router as scoring_router
@@ -79,6 +75,7 @@ from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
 from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
+from src.app.bootstrap.storefront_router_group import register_storefront_router_group
 from src.app.security.observer import emit_security_event
 from src.app.security.webhook_security import WebhookSecurityMiddleware
 from src.app.security.idempotency import IdempotencyMiddleware
@@ -2362,26 +2359,7 @@ def create_app() -> FastAPI:
         router_registration("account", account_router),
     ))
     
-    app.include_router(pricing.router)
-    app.include_router(inventory.router)
-    app.include_router(support.router)
-    app.include_router(events.router)
-    app.include_router(payments.router)
-    app.include_router(payments_paypal)
-    app.include_router(payments_revolut)
-    app.include_router(payments_googlepay)
-    app.include_router(payments_afterpay)
-    # Returns and Fraud routers
-    try:
-        from src.app.routers.returns import router as returns_router
-        app.include_router(returns_router)
-    except Exception:
-        pass
-    try:
-        from src.app.routers.fraud import router as fraud_router
-        app.include_router(fraud_router)
-    except Exception:
-        pass
+    register_storefront_router_group(app)
 
     # Inventory background worker — monitors stock levels and generates reorder recommendations.
     # Registered unconditionally; previously was erroneously inside the fraud router except block.

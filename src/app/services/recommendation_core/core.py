@@ -1409,26 +1409,39 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     #   variant-clarify (1c) — one question when a variant materially moves the floor; else assumption.
     #   complement-offer (1d.4) — declared complement → bundle-upsell if stocked, else source-it RFQ.
     #   bulk-economics (1f)  — 'N units, $T total' → ÷units viability + tradeoff menu.
-    _run_stage(resp, "capability_budget",
-               lambda: _apply_capability_budget(db, envelope, decision, resp, limit),
-               cancellation=envelope.cancellation)
-    _run_stage(resp, "shelf", lambda: _build_shelf(db, envelope, decision, resp, limit),
-               cancellation=envelope.cancellation)
-    _run_stage(resp, "variant_clarify",
-               lambda: _maybe_variant_clarify(envelope, decision, resp),
-               cancellation=envelope.cancellation)
-    _run_stage(resp, "complement_offer",
-               lambda: _maybe_complement_offer(db, envelope, decision, resp),
-               cancellation=envelope.cancellation)
-    _run_stage(resp, "bulk_economics",
-               lambda: _maybe_bulk_economics(db, envelope, decision, resp),
-               cancellation=envelope.cancellation)
-    _run_stage(resp, "fulfillment_preview",
-               lambda: _maybe_fulfillment_preview(envelope, decision, resp),
-               cancellation=envelope.cancellation)
-    _run_stage(resp, "secondary_explanation",
-               lambda: _apply_secondary_explanation(db, envelope, decision, resp),
-               cancellation=envelope.cancellation)
+    from src.app.services.recommendation_core.typed_stage_coordinator import (
+        CoordinatedStage, RecommendationPhase, run_coordinated_stages,
+    )
+    run_coordinated_stages(resp, (
+        CoordinatedStage(
+            RecommendationPhase.FIT, "capability_budget",
+            lambda: _apply_capability_budget(db, envelope, decision, resp, limit),
+        ),
+        CoordinatedStage(
+            RecommendationPhase.FIT, "shelf",
+            lambda: _build_shelf(db, envelope, decision, resp, limit),
+        ),
+        CoordinatedStage(
+            RecommendationPhase.FIT, "variant_clarify",
+            lambda: _maybe_variant_clarify(envelope, decision, resp),
+        ),
+        CoordinatedStage(
+            RecommendationPhase.COMMERCIAL, "complement_offer",
+            lambda: _maybe_complement_offer(db, envelope, decision, resp),
+        ),
+        CoordinatedStage(
+            RecommendationPhase.COMMERCIAL, "bulk_economics",
+            lambda: _maybe_bulk_economics(db, envelope, decision, resp),
+        ),
+        CoordinatedStage(
+            RecommendationPhase.COMMERCIAL, "fulfillment_preview",
+            lambda: _maybe_fulfillment_preview(envelope, decision, resp),
+        ),
+        CoordinatedStage(
+            RecommendationPhase.RESPONSE, "secondary_explanation",
+            lambda: _apply_secondary_explanation(db, envelope, decision, resp),
+        ),
+    ), cancellation=envelope.cancellation, logger=logger)
 
     # clarify (census bucket 2): v1's NQE equivalent as deterministic slot-gap UX policy
     if not resp.off_catalog and not resp.clarify:
