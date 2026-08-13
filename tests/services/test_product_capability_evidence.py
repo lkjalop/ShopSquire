@@ -319,3 +319,12 @@ def test_live_spec_refresh_appends_conflict_without_refreshing_price_or_availabi
     assert report["specification_observed_at"] != old.isoformat()
     assert report["price_observed_at"] == old.replace(tzinfo=None).isoformat()
     assert report["availability_observed_at"] == old.replace(tzinfo=None).isoformat()
+    assert report["exact_configuration_identity"] == {
+        "sku": "SCORP-125638",
+        "mpn": "GX651AX-SR004W",
+        "configuration_hash": "a" * 64,
+        "identifier_type": "manufacturer_part_number",
+        "corroboration_status": "exact_identifier_evidence_observed",
+    }
+    assert report["conflict_groups"]["operating_system"].startswith("capability-conflict-")
+    assert {row.evidence_status for row in observations} == {"conflicted"}

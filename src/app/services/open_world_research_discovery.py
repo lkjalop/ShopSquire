@@ -95,6 +95,7 @@ def _publisher_ownership_evaluation(row: dict[str, Any]) -> dict[str, Any]:
     path = str(parsed.path or "").lower()
     host_overlap = int(row.get("publisher_host_overlap_count") or 0)
     subject_overlap = int(row.get("subject_overlap_count") or 0)
+    axis_count = len(set(row.get("query_axes") or []))
     documentation_surface = bool(
         host.startswith(("docs.", "documentation.", "help.", "support."))
         or any(token in path for token in ("requirements", "system-requirements", "manual", "support"))
@@ -106,21 +107,29 @@ def _publisher_ownership_evaluation(row: dict[str, Any]) -> dict[str, Any]:
         status = "unlikely_publisher_origin"
     elif host_overlap > 0 and documentation_surface:
         status = "plausible_direct_origin"
-    elif subject_overlap > 0 and documentation_surface:
+    elif subject_overlap >= 2 and axis_count >= 2 and documentation_surface:
         status = "plausible_documentation_origin"
+    elif subject_overlap > 0 and documentation_surface:
+        status = "related_documentation_ownership_unverified"
     else:
         status = "publisher_ownership_unresolved"
-    confidence = min(0.95, 0.2 + 0.25 * host_overlap + 0.1 * subject_overlap + (0.2 if documentation_surface else 0.0))
+    confidence = min(
+        0.95,
+        0.15 + 0.25 * host_overlap + 0.08 * subject_overlap
+        + (0.15 if documentation_surface else 0.0) + min(0.15, 0.05 * axis_count),
+    )
     return {
         "status": status,
         "confidence": round(confidence, 3),
         "signals": {
             "named_subject_in_host": host_overlap > 0,
             "subject_overlap_count": subject_overlap,
+            "independent_query_axis_count": axis_count,
             "documentation_surface": documentation_surface,
             "excluded_intermediary": excluded_intermediary,
         },
         "authority": "candidate_only",
+        "ownership_basis": "semantic_origin_signals_only",
         "resolution_owner": "research_or_tenant_policy",
     }
 

@@ -121,4 +121,29 @@ def cart_outcome_edge(
     )
 
 
-__all__ = ["accepted_requirement_edges", "cart_outcome_edge", "fulfillment_selection_edges"]
+def post_order_outcome_edge(
+    *, tenant_id: str, order_id: str, outcome_kind: str, outcome_id: str,
+    status: str, source_authority: str, attributes: dict[str, Any] | None = None,
+    observed_at: Any = None,
+) -> TypedJourneyEdge:
+    """Link a durable return/cancellation/satisfaction fact to its order outcome."""
+    kind = str(outcome_kind or "").strip().lower()
+    if kind not in {"return", "cancellation", "satisfaction"}:
+        raise ValueError("unsupported_post_order_outcome_kind")
+    when = _stamp(observed_at)
+    return TypedJourneyEdge(
+        edge_id=_id("hje", tenant_id, order_id, kind, outcome_id, status),
+        tenant_id=tenant_id,
+        source_id=f"order_outcome:{order_id}", source_kind="order_outcome",
+        target_id=f"{kind}:{outcome_id}", target_kind=kind,
+        relation="has_post_order_outcome", signal_class="outcome",
+        evidence_id=outcome_id, observed_at=when, effective_at=when,
+        source_authority=source_authority,
+        attributes={"order_id": order_id, "status": status, **dict(attributes or {})},
+    )
+
+
+__all__ = [
+    "accepted_requirement_edges", "cart_outcome_edge", "fulfillment_selection_edges",
+    "post_order_outcome_edge",
+]

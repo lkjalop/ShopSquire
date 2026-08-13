@@ -5,6 +5,7 @@ Conflicting observations are appended, never overwritten or force-resolved.
 """
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any, Iterable
 
@@ -84,6 +85,32 @@ def refresh_exact_configuration_capabilities(
             newest_observed_at = observed_at
     if newest_observed_at is not None:
         configuration.specification_observed_at = newest_observed_at
+    conflict_keys = {
+        str(item.get("attribute_key") or "") for item in result.conflicts
+        if item.get("attribute_key")
+    }
+    ledger_rows = list(db.execute(select(ProductEvidenceObservation).where(
+        ProductEvidenceObservation.configuration_id == configuration.id,
+    )).scalars())
+    values_by_key: dict[str, set[str]] = {}
+    for observation in ledger_rows:
+        values_by_key.setdefault(observation.attribute_key, set()).add(
+            repr((observation.value_json or {}).get("value"))
+        )
+    conflict_keys.update(
+        attribute_key for attribute_key, values in values_by_key.items() if len(values) > 1
+    )
+    conflict_groups: dict[str, str] = {}
+    for attribute_key in conflict_keys:
+        group = "capability-conflict-" + hashlib.sha256(
+            f"{configuration.id}|{attribute_key}".encode("utf-8")
+        ).hexdigest()[:20]
+        conflict_groups[attribute_key] = group
+        for observation in ledger_rows:
+            if observation.attribute_key != attribute_key:
+                continue
+            observation.conflict_group = group
+            observation.evidence_status = "conflicted"
     db.commit()
     return {
         "status": result.status,
@@ -92,6 +119,17 @@ def refresh_exact_configuration_capabilities(
         "claims_observed": len(observed_values),
         "observations_inserted": inserted,
         "conflicts_reported_by_current_refresh": list(result.conflicts),
+        "conflict_groups": conflict_groups,
+        "exact_configuration_identity": {
+            "sku": configuration.sku,
+            "mpn": configuration.mpn,
+            "configuration_hash": configuration.configuration_hash,
+            "identifier_type": "manufacturer_part_number",
+            "corroboration_status": (
+                "exact_identifier_evidence_observed" if observed_values
+                else "exact_identifier_not_corroborated"
+            ),
+        },
         "unknown_claim_keys": list(result.unknown_claim_keys),
         "attempts": list(result.attempts),
         "specification_observed_at": (

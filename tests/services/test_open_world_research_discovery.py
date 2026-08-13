@@ -82,6 +82,12 @@ def test_discovery_prefers_cross_axis_subject_match_and_rejects_social_articles(
     assert result["candidates"][0]["subject_overlap_count"] >= 2
     assert result["candidates"][0]["quality_score"] > 10
     assert result["candidates"][0]["publisher_ownership_evaluation"]["authority"] == "candidate_only"
+    assert result["candidates"][0]["publisher_ownership_evaluation"]["ownership_basis"] == (
+        "semantic_origin_signals_only"
+    )
+    assert result["candidates"][0]["publisher_ownership_evaluation"]["signals"][
+        "independent_query_axis_count"
+    ] == 3
     assert result["candidates"][0]["publisher_ownership_evaluation"]["status"] in {
         "plausible_direct_origin", "plausible_documentation_origin",
     }

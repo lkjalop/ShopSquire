@@ -18,6 +18,29 @@ from src.app.services.pii_crypto import encrypt_pii, pii_hash
 from src.app.services.inventory_guard import reserve_inventory_for_order, release_inventory_for_order
 
 
+def _record_post_order_outcome(
+    db, *, order_id: str, kind: str, status: str, authority: str,
+) -> None:
+    """Best-effort graph projection; the canonical order transition remains authoritative."""
+    try:
+        from src.app.platform.tenant_context import current_tenant_id
+        from src.app.services.hippograph_journey_producers import post_order_outcome_edge
+        from src.app.services.hippograph_journey_store import persist_journey_edges
+
+        tenant_id = str(current_tenant_id() or "default")
+        edge = post_order_outcome_edge(
+            tenant_id=tenant_id, order_id=order_id, outcome_kind=kind,
+            outcome_id=f"{order_id}:{status}", status=status, source_authority=authority,
+        )
+        persist_journey_edges(db, [edge], tenant_id=tenant_id, case_id=order_id)
+    except Exception:
+        # Graph evidence is retryable and must never undo a committed order transition.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 router = APIRouter(prefix="/api/v1/orders", tags=["orders"])
 tracer = get_tracer("orders-router")
 
@@ -467,6 +490,10 @@ def cancel_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
         if not won:
             # order existed at read (else _get_order_status 404'd) → status changed under us
             raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
+        _record_post_order_outcome(
+            db, order_id=order_id, kind="cancellation", status="cancelled",
+            authority="authenticated_order_cancellation",
+        )
         return {"cancelled": True, "order_id": order_id}
 
 
@@ -491,6 +518,10 @@ def return_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
             raise HTTPException(status_code=503, detail="Return request could not be committed") from exc
         if int(getattr(res, "rowcount", 0) or 0) == 0:
             raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
+        _record_post_order_outcome(
+            db, order_id=order_id, kind="return", status="return_requested",
+            authority="authenticated_return_request",
+        )
         return {"return_requested": True, "order_id": order_id}
 
 
@@ -525,4 +556,9 @@ def update_status(
             raise HTTPException(status_code=503, detail="Order status update could not be committed") from exc
         if int(getattr(res, "rowcount", 0) or 0) == 0:
             raise HTTPException(status_code=409, detail="Order status changed concurrently; please retry")
+        if target == "returned":
+            _record_post_order_outcome(
+                db, order_id=order_id, kind="return", status="returned",
+                authority="authenticated_order_status_transition",
+            )
         return {"updated": True, "order_id": order_id, "status": target}

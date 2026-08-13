@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from src.app.services.hippograph_journey_producers import (
     accepted_requirement_edges, cart_outcome_edge, fulfillment_selection_edges,
+    post_order_outcome_edge,
 )
 
 
@@ -41,3 +42,17 @@ def test_fulfillment_emits_offer_option_decision_and_cart_outcome():
     )
     assert outcome.signal_class == "outcome"
     assert outcome.relation == "produced_order_outcome"
+
+
+def test_post_order_outcomes_are_typed_and_order_bound():
+    for kind in ("return", "cancellation", "satisfaction"):
+        edge = post_order_outcome_edge(
+            tenant_id="t1", order_id="order-1", outcome_kind=kind,
+            outcome_id=f"event-{kind}", status="recorded",
+            source_authority="authenticated_buyer",
+            observed_at="2026-08-13T00:00:00Z",
+        )
+        assert edge.source_id == "order_outcome:order-1"
+        assert edge.target_kind == kind
+        assert edge.relation == "has_post_order_outcome"
+        assert edge.signal_class == "outcome"
