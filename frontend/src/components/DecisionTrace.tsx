@@ -6,7 +6,6 @@ import RawTracePanel from './decision-trace/RawTracePanel';
 import AuditTracePanel from './decision-trace/AuditTracePanel';
 import SemanticResolutionTrace from './SemanticResolutionTrace';
 import WorkloadResearchTrace from './WorkloadResearchTrace';
-import { procurementGateDisplay } from '../lib/procurementGateDisplay';
 import { apiUrl, wsUrl, getApiBase, safeJson } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
 import { useProcurementTrace } from '../hooks/useProcurementTrace';
@@ -28,6 +27,8 @@ import ProcurementEventTable from './decision-trace/ProcurementEventTable';
 import ProcurementAuditPanel from './decision-trace/ProcurementAuditPanel';
 import ProcurementEconomicsPanel from './decision-trace/ProcurementEconomicsPanel';
 import ProcurementMarketPanel from './decision-trace/ProcurementMarketPanel';
+import SupplierRfqTracePanel from './decision-trace/SupplierRfqTracePanel';
+import PendingProcurementPlan from './decision-trace/PendingProcurementPlan';
 import {
   procurementQuarantineView,
   projectProcurementTraceView,
@@ -4099,7 +4100,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const draft: any = procurementView.draft;
                     const procurementTrace: any = procurementView.procurementTrace;
                     const dealProjection: any = procurementView.dealProjection;
-                    const gateView = procurementGateDisplay(draft?.send_gate || draft?.gate);
                     const quarantineView = procurementView.quarantine;
                     return (
                       <>
@@ -4117,224 +4117,19 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
                         <ProcurementEconomicsPanel deal={dealProjection} visible={canSeeOperatorDraft} classNames={styles} />
 
-                        {canSeeOperatorDraft && procHistory?.case_count > 1 && (
-                          <div data-testid="proc-amendment-history" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '8px 10px', marginBottom: 12, fontSize: 13 }}>
-                            <div style={{ fontWeight: 700, color: '#92400e' }}>
-                              RFQ revision {procHistory.case_count} - prior draft superseded
-                            </div>
-                            <div style={{ marginTop: 4, color: '#4b5563' }}>
-                              {procHistory?.draft_diff?.fields?.subject
-                                ? <><span className={styles.mono}>{procHistory.draft_diff.fields.subject.from}</span><br /><span aria-hidden="true">→ </span><span className={styles.mono}>{procHistory.draft_diff.fields.subject.to}</span></>
-                                : 'The active supplier draft was regenerated from the amended cart.'}
-                            </div>
-                            <div style={{ marginTop: 4, color: '#6b7280', fontSize: 12 }}>
-                              {procHistory?.draft_diff?.body_changed ? 'Draft body changed.' : 'Draft metadata changed.'}
-                              {' '}The prior content hash remains in the bitemporal audit; nothing was sent.
-                            </div>
-                          </div>
-                        )}
-
-                        {/* MULTI-SUPPLIER: a bulk order that splits across suppliers opens one case per supplier,
-                            each with its OWN drafted RFQ. Show them all (read-only proof) so "3 suppliers → where
-                            are the emails?" is answered in-place. Single-supplier orders fall through to the rich
-                            single card below. */}
-                        {procCases.length > 1 && (
-                          <div data-testid="proc-multi-rfq" style={{ marginBottom: 12 }}>
-                            <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                              📧 {procCases.length} supplier RFQs drafted — one per supplier · human-gated · nothing sent
-                            </div>
-                            {procCases.map((c: any, idx: number) => {
-                              const d: any = c?.state_json?.draft || {};
-                              const cp: any = d.channel_plan || {};
-                              const tm: any = d.supplier_terms || {};
-                              const chLabel = cp.requires_human
-                                ? `${String(cp.channel || '').toUpperCase()} · human-only`
-                                : cp.integration_kind
-                                  ? `${String(cp.integration_kind).toUpperCase()} integration handoff`
-                                  : `${String(cp.channel || 'email')} · agent drafts · human sends (GATE 2)`;
-                              const terms = [
-                                tm.moq != null ? `MOQ ${tm.moq}` : null,
-                                tm.lead_time_days != null ? `${tm.lead_time_days}d lead` : null,
-                                tm.contract_status ? String(tm.contract_status) : null,
-                                (tm.price_breaks || []).length ? `breaks ${(tm.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(',')}` : null,
-                              ].filter(Boolean).join(' · ');
-                              return (
-                                <details key={c.case_id || idx} data-testid={`proc-rfq-${idx}`} style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px', marginBottom: 6 }} open={idx === 0}>
-                                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-                                    Supplier {idx + 1} of {procCases.length} — {d.recipient_ref || '—'}
-                                    <span style={{ marginLeft: 8, fontSize: 12, color: '#6b7280' }}>{chLabel}</span>
-                                  </summary>
-                                  <div style={{ marginTop: 8, fontSize: 13 }}>
-                                    {d.recipient_domain && <div className={styles.kvRow}><span>Domain</span><span className={styles.mono}>{d.recipient_domain}</span></div>}
-                                    {terms && <div className={styles.kvRow}><span>Ordering terms</span><span>{terms}</span></div>}
-                                    {cp.rationale && <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{cp.rationale}</span></div>}
-                                    <div className={styles.kvRow}><span>Subject</span><span>{d.subject || '—'}</span></div>
-                                    {canSeeOperatorDraft ? (
-                                      <>
-                                        <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (quote request — no price is ever stated to the supplier)</div>
-                                        <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 220, overflow: 'auto' }}>{d.body || '(not drafted yet)'}</pre>
-                                      </>
-                                    ) : (
-                                      <div className={styles.empty} style={{ marginTop: 6 }}>Human-gated — sign in with an operator key to view the drafted email.</div>
-                                    )}
-                                  </div>
-                                </details>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {/* Drafted supplier RFQ — the "how it's made" artefact, promoted to the tab's first-class
-                            card (always expanded). Human-gated: shown only with an owner/operator key; a normal
-                            shopper never sees a supplier contact (blind-ship stays intact). It is NOT sent. */}
-                        {procCases.length <= 1 && procCase && draft && canSeeOperatorDraft && (
-                          <div data-testid="proc-drafted-rfq" style={{ border: '1px solid #d1d5db', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
-                            <div style={{ fontWeight: 700 }}>
-                              📧 Drafted supplier RFQ — {String(procCase.state || '').replace(/_/g, ' ').toLowerCase()}
-                              <span style={{ marginLeft: 8, fontWeight: 600, color: '#b45309', fontSize: 12 }}>human-gated · not sent</span>
-                            </div>
-                            <div style={{ marginTop: 8, fontSize: 13 }}>
-                              <div className={styles.kvRow}><span>To (supplier)</span><span data-testid="proc-rfq-recipient">{draft.recipient_ref || '—'}{draft.recipient_domain ? ` · ${draft.recipient_domain}` : ''}</span></div>
-                              {draft.recipient_email && <div className={styles.kvRow}><span>Contact</span><span className={styles.mono}>{draft.recipient_email}</span></div>}
-                              {draft.channel_plan && (
-                                <div className={styles.kvRow} data-testid="proc-supplier-channel"><span>Preferred channel</span><span>
-                                  <strong>{String(draft.channel_plan.channel || 'email')}</strong>
-                                  {draft.channel_plan.requires_human
-                                    ? ' · human-only (no automated outreach)'
-                                    : draft.channel_plan.integration_kind
-                                      ? ` · ${String(draft.channel_plan.integration_kind).toUpperCase()} integration handoff`
-                                      : draft.channel_plan.agent_may_draft
-                                        ? ' · agent drafts · human sends (GATE 2)'
-                                        : ''}
-                                </span></div>
-                              )}
-                              {draft.channel_plan?.rationale && (
-                                <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{draft.channel_plan.rationale}</span></div>
-                              )}
-                              {draft.supplier_terms && (draft.supplier_terms.moq != null || draft.supplier_terms.lead_time_days != null || (draft.supplier_terms.price_breaks || []).length > 0 || draft.supplier_terms.contract_status) && (
-                                <div className={styles.kvRow} data-testid="proc-supplier-terms"><span>Ordering terms</span><span>
-                                  {[
-                                    draft.supplier_terms.moq != null ? `MOQ ${draft.supplier_terms.moq}` : null,
-                                    draft.supplier_terms.lead_time_days != null ? `${draft.supplier_terms.lead_time_days}d lead` : null,
-                                    draft.supplier_terms.min_order_value_cents ? `min $${Math.round(draft.supplier_terms.min_order_value_cents / 100)}` : null,
-                                    draft.supplier_terms.contract_status ? String(draft.supplier_terms.contract_status) : null,
-                                    (draft.supplier_terms.price_breaks || []).length
-                                      ? `breaks: ${(draft.supplier_terms.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(', ')}`
-                                      : null,
-                                  ].filter(Boolean).join(' · ')}
-                                </span></div>
-                              )}
-                              {draft.commercial_scope?.quantity != null && (
-                                <div className={styles.kvRow}><span>RFQ quantity</span><span>{draft.commercial_scope.quantity} supplier-shortfall unit(s)</span></div>
-                              )}
-                              {procCase?.state_json?.availability?.requested_qty != null && (
-                                <div className={styles.kvRow}><span>Cart demand</span><span>{procCase.state_json.availability.requested_qty} requested · {procCase.state_json.availability.in_stock ?? 0} in stock · {procCase.state_json.availability.shortfall ?? draft.commercial_scope?.quantity ?? 0} sourced</span></div>
-                              )}
-                              {Array.isArray(procCase?.state_json?.availability?.lines)
-                                && procCase.state_json.availability.lines.map((line: any) => (
-                                  <div key={`availability-${line.sku}`} data-testid={`proc-availability-${line.sku}`}
-                                       style={{ borderTop: '1px solid #e5e7eb', marginTop: 6, paddingTop: 6 }}>
-                                    <div className={styles.kvRow}>
-                                      <span>Combined availability</span>
-                                      <span>{line.local_now ?? 0} local · {line.network_transfer ?? 0} network transfer · {line.supplier_rfq_qty ?? 0} RFQ</span>
-                                    </div>
-                                    <div style={{ color: '#6b7280', fontSize: 12 }}>
-                                      Supplier availability is unconfirmed until the RFQ receives a response.
-                                    </div>
-                                  </div>
-                                ))}
-                              <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
-                              {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
-                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{gateView.label}</span></div>}
-                              {gateView.reasons.length > 0 && (
-                                <div data-testid="proc-send-gate-actions" style={{ margin: '6px 0', padding: '8px 10px', border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 6 }}>
-                                  <div style={{ fontWeight: 700, color: '#92400e' }}>Resolve before supplier approval</div>
-                                  {gateView.reasons.map((reason) => (
-                                    <div key={reason.code} style={{ marginTop: 5 }}>
-                                      <strong>{reason.label}</strong> {reason.action}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (a quote request — no price is ever stated to the supplier)</div>
-                              <pre data-testid="proc-rfq-body" style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
-                            </div>
-                          </div>
-                        )}
-                        {procCases.length <= 1 && procCase && procurementTrace && !canSeeOperatorDraft && (
-                          <div data-testid="proc-rfq-safe-summary" style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 11px', marginTop: 8, fontSize: 13 }}>
-                            <div style={{ fontWeight: 700 }}>Supplier RFQ drafted <span style={{ color: '#b45309', fontSize: 12 }}>human-gated · not sent</span></div>
-                            <div className={styles.kvRow}><span>RFQ quantity</span><span>{procurementTrace.quantity ?? '—'} supplier-shortfall unit(s)</span></div>
-                            {procurementTrace.channel && <div className={styles.kvRow}><span>Preferred channel</span><span>{String(procurementTrace.channel)}{procurementTrace.requires_human ? ' · human-only' : procurementTrace.integration_kind ? ` · ${String(procurementTrace.integration_kind).toUpperCase()} handoff` : ' · human sends'}</span></div>}
-                            {procurementTrace.gate_decision && <div className={styles.kvRow}><span>Send gate</span><span>{String(procurementTrace.gate_decision)}</span></div>}
-                            <div className={styles.empty} style={{ marginTop: 6 }}>Supplier contact, ordering terms, and message content are operator-only.</div>
-                          </div>
-                        )}
-                        {procCases.length <= 1 && procCase && !draft && !canSeeOperatorDraft
-                          && String(procCase.state || '').toUpperCase().includes('DRAFTED') && (
-                          <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order, but supplier contact and message content are operator-only. Sign in with an operator key to view the read-only audit copy.</div>
-                        )}
-                        {/* Read-only proof surface: any change to the supplier or the drafted email happens in the
-                            operator console (admin), where edits re-lock the send gate — never from this trace. */}
-                        {(procCases.length > 0 || (procCase && draft)) && (
-                          <div data-testid="proc-readonly-note" style={{ marginTop: 8, marginBottom: 12, fontSize: 12, color: '#6b7280', borderTop: '1px dashed #e5e7eb', paddingTop: 6 }}>
-                            🔒 Read-only trace — this is the audit view. To change the supplier or edit the RFQ, an
-                            authorised operator does that in the admin console; any edit voids the prior approval and
-                            re-locks the send gate (GATE 2). Nothing is ever sent from here.
-                          </div>
-                        )}
-
-                        {integrityBlocks.length > 0 && (
-                          <div data-testid="proc-integrity-guard" style={{ border: '1px solid #16a34a', background: '#f0fdf4', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
-                            <div style={{ fontWeight: 700, marginBottom: 4, color: '#166534' }}>
-                              🛡 Outbound integrity guard — {integrityBlocks.length} supplier message{integrityBlocks.length > 1 ? 's' : ''} quarantined before send
-                            </div>
-                            <div style={{ color: '#166534', marginBottom: 6 }}>
-                              ShopSquire scanned its OWN drafted supplier email and did NOT relay it — bounded autonomy contained the blast radius so the platform can't become a threat vector into a supplier's inbox.
-                            </div>
-                            {integrityBlocks.map((e, i) => {
-                              const p: any = (e as any).payload || {};
-                              const findings: string[] = Array.isArray(p.findings) ? p.findings : [];
-                              const action = String(p.action || 'block');
-                              return (
-                                <div key={i} style={{ paddingLeft: 6, borderLeft: `3px solid ${action === 'block' ? '#dc2626' : '#f59e0b'}`, marginBottom: 4 }}>
-                                  <span style={{ fontWeight: 600, color: action === 'block' ? '#b91c1c' : '#92400e' }}>{action === 'block' ? 'BLOCKED' : 'HELD FOR REVIEW'}</span>
-                                  {p.recipient_domain ? <span style={{ color: '#6b7280' }}> → {p.recipient_domain}</span> : null}
-                                  {findings.length ? <span style={{ color: '#374151' }}> · {findings.join(', ')}</span> : null}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
+                        <SupplierRfqTracePanel
+                          cases={procCases}
+                          activeCase={procCase}
+                          draft={draft}
+                          procurementTrace={procurementTrace}
+                          history={procHistory}
+                          integrityEvents={integrityBlocks}
+                          canSeeOperatorDraft={canSeeOperatorDraft}
+                          classNames={styles}
+                        />
                         <ProcurementMarketPanel projection={mi} />
                         {procEvents.length === 0 && !procCase && hasProcurementSignal && pendingSplit?.split ? (
-                          <div data-testid="proc-pending-plan" style={{ border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
-                            <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ Pending sourcing plan — nothing confirmed, no supplier contacted</div>
-                            <div style={{ color: '#92400e', marginBottom: 8 }}>
-                              {pendingSplit.split.now.reduce((s, l) => s + l.qty, 0)} ship from stock · {pendingSplit.split.later.reduce((s, l) => s + l.qty, 0)} require supplier reorder
-                            </div>
-                            {Object.entries(
-                              pendingSplit.split.later.reduce((acc: Record<string, typeof pendingSplit.split.later>, l) => {
-                                const k = l.supplier_ref || 'unassigned'; (acc[k] = acc[k] || []).push(l); return acc;
-                              }, {})
-                            ).map(([ref, lines]) => {
-                              const sup: any = (pendingSplit as any).suppliers?.[ref] || {};
-                              const ch = String(sup.channel || 'email').toLowerCase();
-                              const chLabel = ch === 'email' ? '✉ EMAIL — agent drafts, human sends'
-                                : (ch === 'phone' || ch === 'portal') ? `${ch === 'phone' ? '📞 PHONE' : '🌐 PORTAL'} — HUMAN-ONLY`
-                                : `⚙ ${ch.toUpperCase()} — system integration`;
-                              const eta = Math.max(...lines.map((l) => l.eta_days ?? 0));
-                              return (
-                                <div key={ref} style={{ marginBottom: 8, paddingLeft: 6, borderLeft: '3px solid #f59e0b' }}>
-                                  <div style={{ fontWeight: 600 }}>
-                                    {sup.name || ref} <span style={{ fontWeight: 400, color: '#6b7280' }}>· {lines.reduce((s, l) => s + l.qty, 0)} unit(s){eta ? ` · ~${eta}d` : ''} · {chLabel}</span>
-                                  </div>
-                                  {lines.map((l) => (<div key={l.sku} style={{ color: '#374151' }}>{l.qty} × {l.sku}</div>))}
-                                </div>
-                              );
-                            })}
-                            <div style={{ color: '#6b7280' }}>RFQ drafts are created when the buyer confirms the delivery plan in the cart (GATE 1) — then this tab shows each drafted email + the audit trail.</div>
-                          </div>
+                          <PendingProcurementPlan plan={pendingSplit} />
                         ) : procEvents.length === 0 ? (
                           <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
                         ) : (
