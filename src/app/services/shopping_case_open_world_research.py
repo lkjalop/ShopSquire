@@ -170,6 +170,8 @@ def execute_open_world_publisher_discovery(
         target_id=case_id,
         payload={
             "case_id": case_id,
+            "execution_status": discovery.get("status"),
+            "cancellation": discovery.get("cancellation"),
             "publisher_status": "unresolved",
             "publisher_candidates": discovery["candidates"],
             "receipts": discovery["receipts"],

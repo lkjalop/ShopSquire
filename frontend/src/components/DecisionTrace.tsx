@@ -18,14 +18,16 @@ import {
   projectTraceDomains,
 } from './decision-trace/traceProjections';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
-import { explainProcEvent } from '../lib/procEventExplain';
-import { dealEconomicsStatus, formatDealMoney } from '../lib/dealEconomicsDisplay';
 import { shouldShowMissingAnchorReasoning } from '../lib/tracePresentation';
 import ArtifactSecuritySummary from './security/ArtifactSecuritySummary';
 import ProcurementOperationalTrace, { DisruptionEvidenceTrace } from './ProcurementOperationalTrace';
 import ReturnLifecycleTrace from './ReturnLifecycleTrace';
 import ProcurementTracePanel from './decision-trace/ProcurementTracePanel';
 import HippographEvidencePanel from './decision-trace/HippographEvidencePanel';
+import ProcurementEventTable from './decision-trace/ProcurementEventTable';
+import ProcurementAuditPanel from './decision-trace/ProcurementAuditPanel';
+import ProcurementEconomicsPanel from './decision-trace/ProcurementEconomicsPanel';
+import ProcurementMarketPanel from './decision-trace/ProcurementMarketPanel';
 import {
   procurementQuarantineView,
   projectProcurementTraceView,
@@ -682,7 +684,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // drafted RFQ carries a supplier contact, so it's shown ONLY when an owner/operator key is configured
   // (a normal shopper never sees it — blind-ship stays intact).
   // Procurement agent-row drill-down: row index → expanded (the payload is the evidence — one click deep).
-  const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
   // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
@@ -4098,8 +4099,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const draft: any = procurementView.draft;
                     const procurementTrace: any = procurementView.procurementTrace;
                     const dealProjection: any = procurementView.dealProjection;
-                    const dealStatus = dealProjection ? dealEconomicsStatus(dealProjection) : null;
-                    const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     const gateView = procurementGateDisplay(draft?.send_gate || draft?.gate);
                     const quarantineView = procurementView.quarantine;
                     return (
@@ -4116,58 +4115,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                           <ProcurementOperationalTrace allocationView={allocationView} />
                         )}
 
-                        {canSeeOperatorDraft && !dealProjection && (
-                          <div data-testid="proc-deal-economics" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                              <strong>Deal economics unavailable</strong>
-                              <span style={{ color: '#92400e', fontWeight: 700 }}>Evidence incomplete</span>
-                            </div>
-                            <div style={{ color: '#4b5563', marginTop: 3 }}>
-                              Operator-only · supplier cost or comparable landed-cost evidence has not been validated
-                            </div>
-                            <div data-testid="proc-discount-authorization" style={{ marginTop: 7, padding: '6px 8px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontWeight: 600 }}>
-                              Discount authority locked until landed cost is validated
-                            </div>
-                          </div>
-                        )}
-
-                        {canSeeOperatorDraft && dealProjection && dealStatus && (
-                          <div data-testid="proc-deal-economics" style={{ border: '1px solid #86efac', background: '#f0fdf4', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                              <strong>{dealProjection.simulation_only ? 'Scenario deal economics' : 'Live deal economics'}</strong>
-                              <span style={{ color: dealProjection.verdict === 'below_floor' ? '#b91c1c' : '#166534', fontWeight: 700 }}>
-                                {dealProjection.simulation_only ? 'ESTIMATED · ' : ''}{dealStatus.verdict}
-                              </span>
-                            </div>
-                            <div style={{ color: '#4b5563', marginTop: 3 }}>
-                              Operator-only · {dealStatus.costLabel}
-                              {dealProjection.simulation_only ? ' · demo scenario' : ''}
-                            </div>
-                            <div className={styles.kvRow}><span>List / unit</span><span>{formatDealMoney(dealProjection.list_unit_cents, dealProjection.currency)}</span></div>
-                            <div className={styles.kvRow}><span>Supplier cost / unit</span><span>{formatDealMoney(dealProjection.wholesale_unit_cents, dealProjection.currency)}</span></div>
-                            <div className={styles.kvRow}><span>Gross / unit</span><span>{formatDealMoney(dealProjection.gross_per_unit_cents, dealProjection.currency)}</span></div>
-                            <div className={styles.kvRow}><span>List margin</span><span>{(Number(dealProjection.margin_pct || 0) * 100).toFixed(1)}%</span></div>
-                            <div className={styles.kvRow}><span>Projected gross ({Number(dealProjection.quantity || 0)} unit{Number(dealProjection.quantity || 0) === 1 ? '' : 's'})</span><span>{formatDealMoney(dealProjection.projected_profit_cents, dealProjection.currency)}</span></div>
-                            <div data-testid="proc-discount-authorization" style={{ marginTop: 7, padding: '6px 8px', borderRadius: 6, background: dealProjection.discount_authorized ? '#dcfce7' : '#fef3c7', color: dealProjection.discount_authorized ? '#166534' : '#92400e', fontWeight: 600 }}>
-                              {dealStatus.discountLabel}
-                            </div>
-                            {Array.isArray(dealProjection.bulk_breaks) && dealProjection.bulk_breaks.length > 0 && (
-                              <div style={{ marginTop: 8 }}>
-                                <div style={{ fontWeight: 700 }}>Supplier volume scenarios</div>
-                                {dealProjection.bulk_breaks.map((tier: any) => (
-                                  <div key={`${tier.min_qty}-${tier.discount_pct}`} className={styles.kvRow}>
-                                    <span>{tier.min_qty}+ units · {Number(tier.discount_pct || 0).toFixed(0)}% supplier break</span>
-                                    <span>{(Number(tier.margin_pct || 0) * 100).toFixed(1)}% estimated margin</span>
-                                  </div>
-                                ))}
-                                <div style={{ color: '#6b7280', fontSize: 12 }}>Scenario only · not an authorized buyer discount or supplier commitment.</div>
-                              </div>
-                            )}
-                            <div style={{ borderTop: '1px dashed #86efac', marginTop: 8, paddingTop: 7, color: '#166534' }}>
-                              Model proposes · policy authorizes · connector executes · human approves supplier send
-                            </div>
-                          </div>
-                        )}
+                        <ProcurementEconomicsPanel deal={dealProjection} visible={canSeeOperatorDraft} classNames={styles} />
 
                         {canSeeOperatorDraft && procHistory?.case_count > 1 && (
                           <div data-testid="proc-amendment-history" style={{ border: '1px solid #f59e0b', background: '#fffbeb', borderRadius: 8, padding: '8px 10px', marginBottom: 12, fontSize: 13 }}>
@@ -4358,42 +4306,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             })}
                           </div>
                         )}
-                        {mi && (
-                          <div data-testid="proc-market-intel" style={{ border: '1px solid #6366f1', background: '#eef2ff', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
-                            <div style={{ fontWeight: 700, color: '#3730a3', marginBottom: 4 }}>
-                              📊 Market Intelligence — {String(mi.mode) === 'live'
-                                ? `${mi.scoped_signal_count ?? mi.signal_count} scoped signal${Number(mi.scoped_signal_count ?? mi.signal_count) === 1 ? '' : 's'}`
-                                : String(mi.mode) === 'context_only'
-                                  ? `${mi.signal_count} global context signal${Number(mi.signal_count) === 1 ? '' : 's'} (not line-authorizing)`
-                                  : 'internal-only (no external signal)'}
-                            </div>
-                            <div style={{ marginBottom: 6 }}>
-                              <span style={{ fontWeight: 700 }}>{String(mi.action_basis) === 'inventory_only' ? 'Inventory action:' : 'Recommended action:'}</span> {String(mi.recommendation || '—')}
-                              <div style={{ color: '#4b5563', marginTop: 2 }}>{String(mi.rationale || '')}</div>
-                            </div>
-                            {Array.isArray(mi.signals) && mi.signals.length > 0 && (
-                              <div>
-                                {mi.signals.map((s: any, i: number) => (
-                                  <div key={i} style={{ paddingLeft: 6, borderLeft: `3px solid ${String(s.severity) === 'critical' ? '#dc2626' : '#f59e0b'}`, marginBottom: 3, color: '#374151' }}>
-                                    {/* scope chip: this item / market / related — the tiered scoping made visible */}
-                                    {s.scope && (
-                                      <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 7, marginRight: 5,
-                                                     background: s.scope === 'this_item' ? '#dcfce7' : s.scope === 'market' ? '#e0e7ff' : '#f3f4f6',
-                                                     color: s.scope === 'this_item' ? '#166534' : s.scope === 'market' ? '#3730a3' : '#6b7280' }}>
-                                        {s.scope === 'this_item' ? 'THIS ITEM' : String(s.scope).toUpperCase()}
-                                      </span>
-                                    )}
-                                    <span className={styles.mono} style={{ fontSize: 11 }}>{String(s.type || '')}</span>
-                                    {s.summary ? <span> — {String(s.summary)}</span> : null}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            <div style={{ marginTop: 6, fontSize: 11, color: '#6b7280' }}>
-                              Deterministic finding→action synthesis (no LLM) over the market-analysis engine's persisted findings — advisory only; the human decides at the send gate.
-                            </div>
-                          </div>
-                        )}
+                        <ProcurementMarketPanel projection={mi} />
                         {procEvents.length === 0 && !procCase && hasProcurementSignal && pendingSplit?.split ? (
                           <div data-testid="proc-pending-plan" style={{ border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
                             <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ Pending sourcing plan — nothing confirmed, no supplier contacted</div>
@@ -4425,159 +4338,23 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         ) : procEvents.length === 0 ? (
                           <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
                         ) : (
-                          <table className={styles.table}>
-                            <thead><tr><th></th><th>Component</th><th>Event</th><th>Mode</th><th>Detail</th><th>When</th></tr></thead>
-                            <tbody>
-                              {procEvents.map((e, i) => {
-                                const p: any = (e as any).payload || {};
-                                const tp = Array.isArray(p.transfer_plan) ? p.transfer_plan : [];
-                                const detail = [
-                                  p.sku && `SKU ${p.sku}`,
-                                  p.order_qty != null && `qty ${p.order_qty}`,
-                                  p.in_stock != null && `in-stock ${p.in_stock}`,
-                                  p.shortfall != null && `shortfall ${p.shortfall}`,
-                                  p.now_qty != null && `ship-now ${p.now_qty}`,
-                                  p.later_qty != null && `follow ${p.later_qty}`,
-                                  p.eta_days != null && `ETA ~${p.eta_days}d`,
-                                  tp.length > 0 && `transfer ${tp.map((t: any) => `${t.qty}@${t.from_location}`).join(', ')}`,
-                                  p.status && `status ${p.status}`,
-                                  Array.isArray(p.types) && p.types.length > 0 && `options: ${p.types.join(', ')}`,
-                                  p.count != null && `${p.count} alternatives`,
-                                  p.channel && `channel: ${p.channel}`,
-                                  p.requires_human === true && '👤 HUMAN-only outreach',
-                                  p.integration_kind && `→ ${String(p.integration_kind).toUpperCase()} integration`,
-                                  p.channel && p.agent_may_draft === true && 'agent drafts · human sends',
-                                  p.case_id && `case ${String(p.case_id).slice(0, 8)}`,
-                                ].filter(Boolean).join(' · ');
-                                // deterministic-vs-LLM provenance chip: stamped by the backend emitters —
-                                // proves which steps are pure rules/scoring vs model-assisted.
-                                const exec = String(p.execution || '');
-                                const isLlm = exec.startsWith('llm');
-                                const when = String((e as any).created_at || '').replace('T', ' ').slice(11, 19);
-                                const isOpen = !!procExpanded[i];
-                                // payload for the drill-down, minus envelope/meta keys (the _-prefixed ones)
-                                const drill = Object.fromEntries(Object.entries(p).filter(([k]) => !k.startsWith('_')));
-                                return (
-                                  <Fragment key={i}>
-                                    <tr data-testid={`proc-event-row-${i}`} style={{ cursor: 'pointer' }}
-                                        onClick={() => setProcExpanded((prev) => ({ ...prev, [i]: !prev[i] }))}
-                                        title="Click to inspect this step's full recorded payload">
-                                      <td style={{ width: 18, color: '#9ca3af' }}>{isOpen ? '▾' : '▸'}</td>
-                                      <td title={`Recorded producer: ${(e as any).source_id || 'unknown'}`}>
-                                        {componentSource(e)}
-                                      </td>
-                                      <td>{displayEventType(e)}</td>
-                                      <td>{exec ? (
-                                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
-                                                       background: isLlm ? '#f3e8ff' : '#f3f4f6',
-                                                       color: isLlm ? '#7e22ce' : '#374151',
-                                                       border: `1px solid ${isLlm ? '#d8b4fe' : '#d1d5db'}` }}>
-                                          {isLlm ? exec : 'deterministic'}
-                                        </span>
-                                      ) : <span style={{ color: '#d1d5db' }}>—</span>}</td>
-                                      <td>{detail || getSummary(e)}</td>
-                                      <td className={styles.mono} style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{when || '—'}</td>
-                                    </tr>
-                                    {isOpen && (
-                                      <tr data-testid={`proc-event-drill-${i}`}>
-                                        <td></td>
-                                        <td colSpan={5}>
-                                          {(() => {
-                                            // human-readable first ("what happened / why", derived ONLY from
-                                            // recorded fields); the raw JSON evidence sits behind its own
-                                            // disclosure so the demo reads a sentence, not a wall of JSON.
-                                            const ex = explainProcEvent(displayEventType(e), p);
-                                            return ex ? (
-                                              <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6,
-                                                            padding: '6px 10px', margin: '4px 0', fontSize: 12 }}>
-                                                <div><span style={{ fontWeight: 700 }}>What happened:</span> {ex.what}</div>
-                                                {ex.why && <div style={{ marginTop: 2 }}><span style={{ fontWeight: 700 }}>Why:</span> {ex.why}</div>}
-                                              </div>
-                                            ) : null;
-                                          })()}
-                                          <details style={{ margin: '4px 0' }}>
-                                            <summary style={{ cursor: 'pointer', fontSize: 11, color: '#6b7280' }}>
-                                              Raw recorded payload (evidence)
-                                            </summary>
-                                            <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb',
-                                                          borderRadius: 6, padding: 8, margin: '4px 0', maxHeight: 220, overflow: 'auto',
-                                                          fontSize: 11 }}>{JSON.stringify(drill, null, 2)}</pre>
-                                          </details>
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </Fragment>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                          <ProcurementEventTable
+                            events={procEvents}
+                            classNames={styles}
+                            componentSource={componentSource}
+                            displayEventType={displayEventType}
+                            eventSummary={getSummary}
+                          />
                         )}
 
-                        {/* Audit trail — the case's own bitemporal journey (state · actor · reason · time),
-                            inline so the operator proves provenance without switching tabs/windows. */}
-                        {canSeeOperatorDraft && quarantineView.active && (
-                          <section
-                            data-testid="proc-supplier-quarantine"
-                            style={{
-                              marginTop: 10,
-                              border: '1px solid #f59e0b',
-                              borderRadius: 8,
-                              padding: '10px 12px',
-                              background: '#fffbeb',
-                              color: '#78350f',
-                            }}
-                          >
-                            <div style={{ fontWeight: 700 }}>Supplier response quarantined</div>
-                            <div style={{ marginTop: 4 }}>
-                              No quote, price, inventory, economics, payment, or procurement state was applied.
-                            </div>
-                            <div className={styles.kvRow}><span>Supplier domain</span><span>{quarantineView.senderDomain}</span></div>
-                            <div className={styles.kvRow}><span>Containment reason</span><span>{humanizeKey(quarantineView.reason)}</span></div>
-                            <div className={styles.kvRow}><span>Security decision</span><span>{humanizeKey(quarantineView.severity)} - {humanizeKey(quarantineView.route)}</span></div>
-                            {quarantineView.securityReasons.length > 0 && (
-                              <div className={styles.kvRow}>
-                                <span>Recorded evidence</span>
-                                <span>{quarantineView.securityReasons.map(humanizeKey).join(', ')}</span>
-                              </div>
-                            )}
-                            <div className={styles.kvRow}>
-                              <span>When</span>
-                              <span className={styles.mono}>
-                                {quarantineView.timestamp
-                                  ? quarantineView.timestamp.replace('T', ' ').slice(0, 19)
-                                  : 'not recorded'}
-                              </span>
-                            </div>
-                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #fde68a' }}>
-                              <strong>Operator actions:</strong> verify the supplier out of band, inspect the Email Security evidence,
-                              and keep this response quarantined until an authorized review workflow records a resolution.
-                            </div>
-                          </section>
-                        )}
-
-                        {procCase && Array.isArray(procJourney) && procJourney.length > 0 && (
-                          <details data-testid="proc-audit-trail" style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
-                            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
-                              🧾 Procurement audit trail <span style={{ fontWeight: 500, color: '#6b7280' }}>({procJourney.length} state transitions · bitemporal)</span>
-                            </summary>
-                            <table className={styles.table} style={{ marginTop: 8 }}>
-                              <thead><tr><th>State</th><th>Event</th><th>Actor</th><th>When</th></tr></thead>
-                              <tbody>
-                                {procJourney.map((s: any, i: number) => (
-                                  <tr key={i}>
-                                    <td>{String(s.state || '').replace(/_/g, ' ')}</td>
-                                    <td>{s.event}{s.reason_code ? ` · ${s.reason_code}` : ''}</td>
-                                    <td>{s.actor_type === 'human_operator' ? '👤 ' : ''}{s.actor_id || s.actor_type || '—'}</td>
-                                    <td className={styles.mono} style={{ fontSize: 11 }}>{String(s.valid_from || '').replace('T', ' ').slice(0, 19)}{s.valid_to == null ? ' · current' : ''}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                            {money(procCase?.state_json?.split?.subtotal_cents) && (
-                              <div className={styles.kvRow} style={{ marginTop: 6 }}><span>Order subtotal</span><span>{money(procCase.state_json.split.subtotal_cents)}</span></div>
-                            )}
-                          </details>
-                        )}
+                        <ProcurementAuditPanel
+                          procCase={procCase}
+                          journey={Array.isArray(procJourney) ? procJourney : []}
+                          quarantine={quarantineView}
+                          canSeeOperatorDraft={canSeeOperatorDraft}
+                          classNames={styles}
+                          humanize={humanizeKey}
+                        />
                       </>
                     );
                   })()}
