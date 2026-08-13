@@ -41,6 +41,30 @@ def test_middleware_limit_is_a_429_response_not_an_asgi_500(monkeypatch):
     assert response.json()["detail"].startswith("key_rate_limit_exceeded")
 
 
+def test_cors_preflight_does_not_consume_or_trip_rate_limit(monkeypatch):
+    monkeypatch.setattr(rl, "_redis_client", lambda: None)
+    rl._STATE.clear()
+    app = FastAPI()
+    app.add_middleware(rl.RateLimitMiddleware, per_min_key=1, per_min_ip=1)
+
+    @app.get("/resource")
+    def resource():
+        return {"ok": True}
+
+    client = TestClient(app)
+    for _ in range(3):
+        response = client.options(
+            "/resource",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code != 429
+
+    assert client.get("/resource").status_code == 200
+
+
 def test_redis_socket_timeout_uses_bounded_local_fallback(monkeypatch):
     from redis.exceptions import TimeoutError as RedisTimeoutError
 

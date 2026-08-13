@@ -201,6 +201,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         try:
+            # Browser CORS preflight is metadata negotiation, not an application
+            # operation. Counting it can strand an otherwise permitted request
+            # behind a 429 response that lacks the CORS headers the browser needs
+            # to expose the real outcome.
+            if request.method.upper() == "OPTIONS":
+                return await call_next(request)
             enforce_key = self.per_min_key > 0
             enforce_ip = self.per_min_ip > 0
             if not enforce_key and not enforce_ip:

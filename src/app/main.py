@@ -912,6 +912,12 @@ def create_app() -> FastAPI:
         method = (request.method or "").upper()
         path = request.url.path
 
+        # Let CORSMiddleware answer preflight without consuming concurrency or
+        # fixed-window quotas. The subsequent state-changing request remains
+        # fully subject to every guard below.
+        if method == "OPTIONS":
+            return await call_next(request)
+
         def _scope_for_path(p: str) -> str | None:
             if p.startswith("/api/v1/recommend"):
                 return "recommend"
