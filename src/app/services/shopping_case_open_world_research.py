@@ -7,7 +7,7 @@ commerce authority until the separate approval/fetch/extraction path accepts it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ from src.app.services.commerce_feature_readiness import (
 )
 from src.app.services.decision_log import log_trace_event
 from src.app.services.official_source_governance import load_official_source_manifest
-from src.app.services.open_world_research_discovery import discover_open_world_publishers
+from src.app.services import open_world_research_discovery
 from src.app.services.open_world_query_proposal import consume_open_world_query_proposal
 from src.app.services.shopping_case_research_contract import (
     project_research_execution_contract,
@@ -55,6 +55,7 @@ def execute_open_world_publisher_discovery(
     runtime_status: dict[str, Any],
     candidate_configuration_ids: list[str],
     budget_cents: int | None,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Discover and persist publisher candidates for one durable shopping case."""
 
@@ -75,9 +76,10 @@ def execute_open_world_publisher_discovery(
     # created. Consent never waits for it: a completed validated proposal is
     # consumed, otherwise the original deterministic plan executes now.
     discovery_plan, query_proposal = consume_open_world_query_proposal(plan)
-    discovery = discover_open_world_publishers(
+    discovery = open_world_research_discovery.discover_open_world_publishers(
         discovery_plan,
         search_url_template=search_url_template,
+        cancellation_requested=cancellation_requested,
     )
     discovery["query_proposal"] = query_proposal
     # Discovery receipts prove dispatch/reachability, but discovered snippets

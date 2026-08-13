@@ -83,6 +83,48 @@ def _quality(row: dict[str, Any]) -> tuple[int, str]:
     return (-_quality_score(row), str(row.get("url") or ""))
 
 
+def _publisher_ownership_evaluation(row: dict[str, Any]) -> dict[str, Any]:
+    """Assess whether a result plausibly belongs to the named publisher.
+
+    This is deliberately workload-neutral and does not maintain vendor aliases.
+    It evaluates origin shape and semantic overlap only; the result remains a
+    candidate and cannot approve a publisher or authorize a claim.
+    """
+    parsed = urlparse(str(row.get("url") or ""))
+    host = str(parsed.hostname or "").lower()
+    path = str(parsed.path or "").lower()
+    host_overlap = int(row.get("publisher_host_overlap_count") or 0)
+    subject_overlap = int(row.get("subject_overlap_count") or 0)
+    documentation_surface = bool(
+        host.startswith(("docs.", "documentation.", "help.", "support."))
+        or any(token in path for token in ("requirements", "system-requirements", "manual", "support"))
+    )
+    excluded_intermediary = any(token in host for token in (
+        "reddit.", "wikipedia.", "youtube.", "linkedin.", "facebook.", "medium.",
+    ))
+    if excluded_intermediary:
+        status = "unlikely_publisher_origin"
+    elif host_overlap > 0 and documentation_surface:
+        status = "plausible_direct_origin"
+    elif subject_overlap > 0 and documentation_surface:
+        status = "plausible_documentation_origin"
+    else:
+        status = "publisher_ownership_unresolved"
+    confidence = min(0.95, 0.2 + 0.25 * host_overlap + 0.1 * subject_overlap + (0.2 if documentation_surface else 0.0))
+    return {
+        "status": status,
+        "confidence": round(confidence, 3),
+        "signals": {
+            "named_subject_in_host": host_overlap > 0,
+            "subject_overlap_count": subject_overlap,
+            "documentation_surface": documentation_surface,
+            "excluded_intermediary": excluded_intermediary,
+        },
+        "authority": "candidate_only",
+        "resolution_owner": "research_or_tenant_policy",
+    }
+
+
 def discover_open_world_publishers(
     plan: CaseResearchPlan,
     *,
@@ -165,6 +207,7 @@ def discover_open_world_publishers(
     )[:12]
     for row in ranked:
         row["quality_score"] = _quality_score(row)
+        row["publisher_ownership_evaluation"] = _publisher_ownership_evaluation(row)
     external_calls = sum(bool(row.get("external_call_dispatched")) for row in receipts)
     return {
         "schema_version": "open-world-discovery-v1",

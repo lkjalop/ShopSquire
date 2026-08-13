@@ -26,6 +26,10 @@ import ProcurementOperationalTrace, { DisruptionEvidenceTrace } from './Procurem
 import ReturnLifecycleTrace from './ReturnLifecycleTrace';
 import ProcurementTracePanel from './decision-trace/ProcurementTracePanel';
 import {
+  procurementQuarantineView,
+  projectProcurementTraceView,
+} from './decision-trace/procurementTraceProjection';
+import {
   TRACE_LEAF_LABELS,
   TRACE_SECTIONS,
   normalizeTraceLeaf,
@@ -35,6 +39,7 @@ import {
 
 export { TRACE_LEAF_LABELS, TRACE_SECTIONS, normalizeTraceLeaf, traceSectionForLeaf } from './decision-trace/traceNavigation';
 export type { TraceLeafTab } from './decision-trace/traceNavigation';
+export { procurementQuarantineView } from './decision-trace/procurementTraceProjection';
 
 type TraceEvent = {
   id?: string;
@@ -551,47 +556,6 @@ export function compactAuthorityPath(steps: any[]): string {
   return groups.map(({ authority, count }) => (
     authority === 'executes' && count > 1 ? `${authority} (${count} stages)` : authority
   )).join(' -> ');
-}
-
-export function procurementQuarantineView(procCase: any, journey: any[]): {
-  active: boolean;
-  senderDomain: string;
-  reason: string;
-  severity: string;
-  route: string;
-  securityReasons: string[];
-  timestamp: string;
-} {
-  const quarantine = procCase?.state_json?.quarantine;
-  if (!quarantine || typeof quarantine !== 'object') {
-    return {
-      active: false,
-      senderDomain: '',
-      reason: '',
-      severity: '',
-      route: '',
-      securityReasons: [],
-      timestamp: '',
-    };
-  }
-  const security = quarantine.security && typeof quarantine.security === 'object'
-    ? quarantine.security
-    : {};
-  const transition = [...(Array.isArray(journey) ? journey : [])].reverse().find((item: any) => (
-    String(item?.event || '').toLowerCase() === 'supplier_response_quarantined'
-    || String(item?.state || '').toUpperCase() === 'SUPPLIER_RESPONSE_QUARANTINED'
-  ));
-  return {
-    active: true,
-    senderDomain: String(quarantine.sender_domain || 'not recorded'),
-    reason: String(quarantine.reason || transition?.reason_code || 'security review required'),
-    severity: String(security.severity || 'unknown'),
-    route: String(security.route || 'security_review'),
-    securityReasons: Array.isArray(security.reasons)
-      ? security.reasons.map((value: any) => String(value)).filter(Boolean)
-      : [],
-    timestamp: String(transition?.valid_from || transition?.created_at || ''),
-  };
 }
 
 function componentSource(evt: TraceEvent): string {
@@ -4160,39 +4124,28 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 >
                   {(() => {
                     const src = events.length > 0 ? events : displayEvents;
-                    const procEvents = traceDomains.procurementEvents.filter((e) => {
-                      const sid = String((e as any).source_id || '');
-                      const sidl = sid.toLowerCase();
-                      const et = String(e.event_type || '').toLowerCase();
-                      return ['Market_Intelligence_Agent', 'Procurement_Agent', 'Alternatives_Agent', 'Supplier_Selection_Agent'].includes(sid)
-                        // agents whose id carries the procurement/split/supplier/sourcing role (catches
-                        // Procurement_Split_Agent + Supplier_Channel_Agent the old allow-list missed)
-                        || sidl.includes('procurement') || sidl.includes('split') || sidl.includes('supplier') || sidl.includes('sourcing')
-                        || et.startsWith('bulk_') || et.startsWith('procurement_') || et.startsWith('alternatives_')
-                        || et.includes('availability') || et.includes('buyer_qualif') || et.includes('supplier')
-                        || et.includes('split') || et.includes('sourc') || et.includes('channel')
-                        || et.includes('integrity') || sidl.includes('integrity')
-                        || eventMatches(e, [
-                          'supplier_responses_normalized', 'fulfillment_cart_change_confirmed',
-                        ]);  // shopping-case continuation + outbound integrity guard
+                    const procurementView = projectProcurementTraceView({
+                      events: src,
+                      procurementEvents: traceDomains.procurementEvents,
+                      outboundIntegrityEvents: traceDomains.outboundIntegrityEvents,
+                      procCase,
+                      procJourney: procJourney || [],
                     });
+                    const procEvents = procurementView.events;
                     // Outbound integrity blocks — the platform quarantining its OWN drafted supplier mail
                     // before send (poisoned payload / data leak). Surfaced prominently: bounded autonomy
                     // contained ShopSquire's own potential blast radius.
-                    const integrityBlocks = traceDomains.outboundIntegrityEvents;
+                    const integrityBlocks = procurementView.outboundIntegrityEvents;
                     // The GENUINE market-intelligence step (real findings + a bounded, deterministic
                     // recommendation) — surfaced as a card so the intelligence is seen, not just logged.
-                    const miEvent: any = [...(src || [])].reverse().find((e: any) =>
-                      String(e?.payload?._original_event_type || e.event_type) === 'market_intelligence_assessed'
-                      && e?.payload?.recommendation);
-                    const mi: any = miEvent?.payload || null;
-                    const draft: any = (procCase?.state_json?.draft) || null;
-                    const procurementTrace: any = (procCase?.state_json?.procurement_trace) || null;
-                    const dealProjection: any = procCase?.margin_advice?.deal_projection || null;
+                    const mi: any = procurementView.marketIntelligence;
+                    const draft: any = procurementView.draft;
+                    const procurementTrace: any = procurementView.procurementTrace;
+                    const dealProjection: any = procurementView.dealProjection;
                     const dealStatus = dealProjection ? dealEconomicsStatus(dealProjection) : null;
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     const gateView = procurementGateDisplay(draft?.send_gate || draft?.gate);
-                    const quarantineView = procurementQuarantineView(procCase, procJourney || []);
+                    const quarantineView = procurementView.quarantine;
                     return (
                       <>
                         {/* RFQ-FIRST: the drafted supplier RFQ is the first-class object of this tab (GPT-5.5

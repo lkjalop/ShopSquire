@@ -67,3 +67,39 @@ def hippograph_recall(
         "edge_count": len(graph.edges),
         "recall": out,
     }
+
+
+@router.get("/journey")
+def hippograph_journey(
+    seed: str = Query(..., description="entity reference: shopping case, SKU, brand, or uid_hash"),
+    kind: str = Query("shopping_case", description="shopping_case | product | brand | user"),
+    top_k: int = Query(30, ge=1, le=100),
+    limit: int = Query(2000, ge=1, le=20000),
+    db=Depends(get_db),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Typed evidence journey; read-only and explicitly non-authoritative."""
+    from src.app.services.entity_resolution import _brand_alias_map_for_profile, canonical_entity
+    from src.app.services.hippograph_db import _DEFAULT_SKU_PATTERN, build_from_db
+    from src.app.services.hippograph_journey_projection import project_hippograph_journey
+
+    tenant_id = current_tenant_id()
+    graph = build_from_db(db, tenant_id=tenant_id, limit=limit)
+    normalized_kind = str(kind or "shopping_case").strip().lower()
+    kwargs: Dict[str, Any] = {}
+    if normalized_kind == "brand":
+        alias_map, known = _brand_alias_map_for_profile()
+        kwargs = {"alias_map": alias_map, "known": known}
+    elif normalized_kind == "user":
+        kwargs = {"already_hashed": True}
+    elif normalized_kind == "product":
+        kwargs = {"sku_pattern": _DEFAULT_SKU_PATTERN}
+    ref = canonical_entity(normalized_kind, seed, **kwargs)
+    seed_id = ref.id if ref else f"{normalized_kind}:{seed}"
+    projection = project_hippograph_journey(graph, [seed_id], top_k=top_k)
+    return {
+        "tenant_id": tenant_id,
+        "node_count": len(graph.nodes),
+        "edge_count": len(graph.edges),
+        **projection.model_dump(mode="json"),
+    }

@@ -124,3 +124,21 @@ def test_hippograph_recall_endpoint_contract():
     assert b["kind"] == "product"
     assert isinstance(b["recall"], list)
     assert "node_count" in b and "edge_count" in b
+
+
+def test_hippograph_journey_endpoint_is_typed_and_non_authoritative():
+    response = _client.get(
+        "/api/v1/hippograph/journey",
+        params={"seed": "case-demo", "kind": "shopping_case", "top_k": 5},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["schema_version"] == "hippograph-journey-v1"
+    assert payload["seed_ids"] == ["shopping_case:case-demo"]
+    assert payload["authority"] == "evidence_only"
+    assert payload["ranking_authority"] == "none"
+    assert payload["commerce_authority"] == "none"
+    assert [lane["lane"] for lane in payload["lanes"]] == [
+        "buyer_case", "research_evidence", "catalog_and_fit",
+        "inventory_and_procurement", "sales_and_market", "outcome_and_governance",
+    ]

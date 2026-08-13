@@ -8,9 +8,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
+import anyio
 
 from src.app.models.db import get_db
 from src.app.models.orm import (
@@ -1182,6 +1183,7 @@ def approve_case_publisher_candidate(
 def research_shopping_case(
     case_id: str,
     body: ResearchShoppingCaseRequest,
+    request: Request = None,
     x_tenant_id: str | None = Header(default=None),
     db=Depends(get_db),
 ) -> dict[str, Any]:
@@ -1237,6 +1239,17 @@ def research_shopping_case(
             execute_open_world_publisher_discovery,
         )
 
+        def request_cancelled() -> bool:
+            if request is None:
+                return False
+            try:
+                # Sync FastAPI routes run in an AnyIO worker. Bridge the ASGI
+                # disconnect probe back to the event loop between bounded
+                # discovery calls; no background watcher or orphan task.
+                return bool(anyio.from_thread.run(request.is_disconnected))
+            except RuntimeError:
+                return False
+
         try:
             return execute_open_world_publisher_discovery(
                 db,
@@ -1252,6 +1265,7 @@ def research_shopping_case(
                     db, case_id=case_id, tenant_id=tenant_id,
                 ).configuration_ids,
                 budget_cents=body.budget_cents,
+                cancellation_requested=request_cancelled,
             )
         except OpenWorldResearchUnavailable as exc:
             raise HTTPException(status_code=503, detail={
