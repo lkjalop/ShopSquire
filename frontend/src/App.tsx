@@ -7,7 +7,6 @@ import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import SourcingIntentCard from './components/SourcingIntentCard';
 import MultiIntentCard from './components/MultiIntentCard';
-import PendingCartChangeCard, { type PendingCartPlan } from './components/PendingCartChangeCard';
 import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
 import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
 const DecisionTrace = lazy(() => import('./components/DecisionTrace'));
@@ -15,23 +14,18 @@ const EscalationRoom = lazy(() => import('./components/EscalationRoom'));
 import RightPanelExtras from './components/RightPanelExtras';
 import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
 import { useHumanEscalation } from './hooks/useHumanEscalation';
-import AffordabilityResolutionCard, {
-  type AffordabilityResolution,
-} from './components/AffordabilityResolutionCard';
+import type { AffordabilityResolution } from './components/AffordabilityResolutionCard';
 import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { nextSourcingTraceId, procurementAwareTraceId } from './lib/trace';
 import { normalizePendingBulkBudget } from './lib/bulkBudget';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
-import { citationChips } from './lib/evidenceDisplay';
 import { sourcingIntentAfterSelection } from './lib/sourcing';
 import { nonRecommendationOutcome } from './lib/chatOutcome';
 import { apiErrorMessage } from './lib/apiError';
 import { selectProportionateAlternatives } from './lib/proportionateAlternatives';
-import { isActionableBuyerQuestion } from './lib/buyerQuestion';
 import { isUnsupportedPostPurchaseTracking } from './lib/postPurchaseIntent';
 import { isUnusableImageEvidence } from './lib/imageEvidenceAuthority';
 import AttachmentButton from './components/AttachmentButton';
-import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
 import CartPanel from './components/CartPanel';
 import LoginModal from './components/LoginModal';
@@ -45,13 +39,10 @@ import StorefrontTrustBanner, {
   type TrustEvidence,
 } from './components/StorefrontTrustBanner';
 import ProductWhyEvidence, { type ProductWhyExplanation } from './components/ProductWhyEvidence';
-import InlineMessageText from './components/InlineMessageText';
-import BuyerRequirementReviewCard, {
-  type BuyerRequirementClaim,
-} from './components/BuyerRequirementReviewCard';
-import BuyerClaimReconciliationCard, {
-  type BuyerClaimReconciliation,
-} from './components/BuyerClaimReconciliationCard';
+import ConversationTimeline from './components/ConversationTimeline';
+import type { ChatMessage, NqeInteraction } from './conversationTypes';
+import type { BuyerRequirementClaim } from './components/BuyerRequirementReviewCard';
+import type { BuyerClaimReconciliation } from './components/BuyerClaimReconciliationCard';
 import ProductShelvesPanel, { type ProductShelfProjection, type ShelfProduct } from './components/ProductShelvesPanel';
 import SupplierContinuationCard, {
   type SupplierContinuation,
@@ -99,46 +90,6 @@ export type Product = {
   stock_level?: number;
   stock_urgency?: string;
   cart_eligible?: boolean;
-};
-type NqeInteraction = {
-  questionId: string;
-  questionText: string;
-  optionId: string;
-  optionLabel: string;
-  optionValue?: string;
-  appliedConstraints?: Record<string, any>;
-  ts: number;
-};
-type ChatMessage = {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  images?: string[];           // data-URL thumbnails shown inline
-  disambiguation?: boolean;    // true → render DisambiguationButtons
-  disambiguationOptions?: string[];
-  nextQuestions?: { id: string; text: string; goal?: string; why_hint?: string; options?: { id: string; label: string; value?: string }[] }[];
-  complexity?: { score: number; tier: string; model: string };
-  voiceUsed?: boolean;
-  nqeSelection?: NqeInteraction;         // set on user msgs triggered by NQE option click
-  nqeSelectionApplied?: Record<string, any>;  // echoed back from backend on assistant msgs
-  agentStepsReadable?: string[];         // human-readable agent step summaries from ResponseNormalizer
-  narrationJobId?: string;               // async-narration handoff: poll /narration/{id} → replace content
-  undoClear?: { items: { sku: string; quantity: number; name?: string }[] };  // "Undo" chip after a clear → re-add these
-  undoServer?: boolean;                  // V2 cart lane: undo via the server-side snapshot (POST /cart/undo)
-  // V2 cart lane (C2): a CONFIRM-tier mutation plan — nothing has touched the cart yet; the
-  // Confirm button applies it via POST /cart/mutations/{plan_id}/apply (idempotent, stale-guarded).
-  cartConfirm?: PendingCartPlan;
-  cartPlanStatus?: string;
-  affordabilityResolution?: AffordabilityResolution;
-  evidence?: any;                        // N1: evidence block from the orchestrator → source chips + Evidence tab
-  webConsentPrompt?: { query: string };  // N3 Mode-B: consent chip — never auto-search on an imperative
-  buyerRequirementClaims?: BuyerRequirementClaim[];
-  buyerRequirementProposal?: {
-    case_id: string;
-    proposal_id: string;
-    proposal_version: number;
-  };
-  buyerClaimReconciliation?: BuyerClaimReconciliation[];
 };
 type PendingImageContext = {
   labels: string[];
@@ -3497,200 +3448,37 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {messages.map((msg, i) => (
-                  <div key={i} className={`${styles.message} ${styles[msg.role]}`}>
-                    <div className={styles.messageContent}>
-                      {/* Inline image thumbnails for user messages */}
-                      {msg.images && msg.images.length > 0 && (
-                        <div className={styles.msgImageStrip}>
-                          {msg.images.map((src, j) => (
-                            <img key={j} src={src} alt={`attachment ${j + 1}`} className={styles.msgThumb} />
-                          ))}
-                        </div>
-                      )}
-                      {msg.role === 'assistant'
-                        ? String(msg.content || '').split(/\n\n+/).filter(Boolean).map((para, pi) => {
-                            const isWarn = /^\s*(⚠️|\[security\])/i.test(para);
-                            return (
-                              <div key={pi} className={isWarn ? styles.msgSecurity : styles.msgPara}>
-                                <InlineMessageText text={para.trim()} />
-                              </div>
-                            );
-                          })
-                        : msg.content}
-                      {/* Voice badge */}
-                      {msg.voiceUsed && <span className={styles.voiceBadge} title="Sent via voice">🎤</span>}
-                      {/* Complexity badge — dev-only hint; hidden from pilot buyers (showDebugBadges gate) */}
-                      {showDebugBadges && msg.complexity && (
-                        <span
-                          className={styles.complexityBadge}
-                          title={`Complexity ${msg.complexity.score}/10 · Tier: ${msg.complexity.tier} · Model: ${msg.complexity.model}`}
-                          style={{ display: 'block', fontSize: '0.62em', opacity: 0.35, marginTop: 4, letterSpacing: '0.02em' }}
-                        >
-                          {msg.complexity.tier} · {msg.complexity.model?.split(':')[0]}
-                        </span>
-                      )}
-                      {msg.agentStepsReadable && msg.agentStepsReadable.length > 0 && (
-                        <details style={{ marginTop: 8, fontSize: '0.78em', opacity: 0.72 }}>
-                          <summary style={{ cursor: 'pointer', userSelect: 'none' }}>How I answered this</summary>
-                          <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
-                            {msg.agentStepsReadable.map((step, si) => (
-                              <li key={si} style={{ marginBottom: 2 }}>{step}</li>
-                            ))}
-                          </ul>
-                        </details>
-                      )}
-                      {i === messages.length - 1 && msg.nextQuestions
-                        && msg.nextQuestions.some(isActionableBuyerQuestion) && (
-                        /* ONE framed "narrow this down" card instead of a loose chip wall (demo
-                           feedback: "looks clunky — maybe a separate output box"). Question text is a
-                           heading, its options are compact chips beneath; capped at 2 questions. */
-                        <div data-testid="nqe-card" style={{
-                          marginTop: 10, border: '1px solid #e5e7eb', background: '#f9fafb',
-                          borderRadius: 10, padding: '10px 12px',
-                        }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-                            Help me narrow this down
-                          </div>
-                          {msg.nextQuestions.filter(isActionableBuyerQuestion).slice(0, 2).map((nq, qi) => (
-                            <div key={nq.id} style={{ marginTop: qi > 0 ? 8 : 0 }}>
-                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickAction(nq.text)}
-                                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                                           font: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f2937', textAlign: 'left' }}
-                                >
-                                  {nq.text}
-                                </button>
-                                {nq.why_hint && (
-                                  <button type="button" className={styles.hintBtn} title={nq.why_hint}
-                                          style={{ fontSize: 11 }}>
-                                    why?
-                                  </button>
-                                )}
-                              </div>
-                              {Array.isArray(nq.options) && nq.options.length > 0 && (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
-                                  {/* cap at 3 option chips per question — the full list was a clunky wall
-                                      (a business question surfaced 5-6). Top 3 keeps the card scannable. */}
-                                  {nq.options.slice(0, 3).map((opt) => (
-                                    <button
-                                      key={`${nq.id}:${opt.id}`}
-                                      type="button"
-                                      className={styles.filterBtn}
-                                      onClick={() => handleNqeOptionSelect(nq, opt)}
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    {/* Disambiguation buttons for assistant */}
-                    {msg.disambiguation && msg.disambiguationOptions && msg.disambiguationOptions.length > 0 && (
-                      <DisambiguationButtons options={msg.disambiguationOptions} onSelect={handleDisambiguationSelect} />
-                    )}
-                    {msg.webConsentPrompt && (
-                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                        <button type="button" className={styles.filterBtn} style={{ border: '1.5px solid #f59e0b' }}
-                          onClick={() => {
-                            const wq = msg.webConsentPrompt!.query;
-                            setMessages(prev => prev.map(m => m === msg ? { ...m, webConsentPrompt: undefined } : m));
-                            void handleSend({ queryOverride: wq, externalResearchConsent: true });
-                          }}>
-                          🌐 Check approved sources
-                        </button>
-                        <button type="button" className={styles.filterBtn}
-                          onClick={() => {
-                            const wq = msg.webConsentPrompt!.query;
-                            setMessages(prev => prev.map(m => m === msg ? { ...m, webConsentPrompt: undefined } : m));
-                            void handleSend({ queryOverride: wq, externalResearchConsent: false });
-                          }}>
-                          Use store data only
-                        </button>
-                      </div>
-                    )}
-                    {msg.evidence && Array.isArray(msg.evidence.citations) && msg.evidence.citations.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' }}>
-                        <span style={{ fontSize: 11, color: '#6b7280' }}>Sources:</span>
-                        {citationChips(msg.evidence).map((chip) => (
-                          <button
-                            key={chip.key}
-                            type="button"
-                            className={styles.filterBtn}
-                            style={chip.trusted ? undefined : { border: '1.5px solid #f59e0b' }}
-                            title={chip.trusted ? 'Trusted store record — open the Evidence tab' : 'External evidence (verified, never authority) — open the Evidence tab'}
-                            onClick={() => { setTraceEvidence(msg.evidence); setTraceInitialTab('evidence'); setTraceOpen(true); }}
-                          >
-                            {chip.icon} {chip.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {msg.undoClear && msg.undoClear.items.length > 0 && (
-                      <div style={{ marginTop: 8 }}>
-                        <button
-                          type="button"
-                          className={styles.filterBtn}
-                          onClick={() => {
-                            const items = msg.undoClear!.items;
-                            // consume: drop the chip so it can't be double-applied, then restore
-                            setMessages(prev => prev.map(m => m === msg ? { ...m, undoClear: undefined } : m));
-                            void restoreClearedItems(items);
-                          }}
-                          title="Put the cleared items back"
-                        >
-                          ↩️ Undo — restore {msg.undoClear.items.length} item(s)
-                        </button>
-                      </div>
-                    )}
-                    {msg.undoServer && (
-                      <div style={{ marginTop: 8 }}>
-                        <button
-                          type="button"
-                          className={styles.filterBtn}
-                          onClick={() => { void undoServerSnapshot(msg); }}
-                          title="Restore the cart from before that change (server snapshot)"
-                        >
-                          ↩️ Undo that cart change
-                        </button>
-                      </div>
-                    )}
-                    {msg.cartConfirm && (
-                      <PendingCartChangeCard
-                        plan={msg.cartConfirm}
-                        cartItems={(cart?.items || []) as any[]}
-                        onConfirm={() => { void confirmCartPlan(msg); }}
-                        onDismiss={() => { void dismissCartPlan(msg); }}
-                      />
-                    )}
-                    {msg.buyerRequirementClaims && (
-                      <BuyerRequirementReviewCard
-                        claims={msg.buyerRequirementClaims}
-                        onAccept={msg.buyerRequirementProposal
-                          ? (claimIds, choice, corrections) => acceptBuyerRequirementProposal(msg, claimIds, choice, corrections)
-                          : undefined}
-                      />
-                    )}
-                    {msg.buyerClaimReconciliation && (
-                      <BuyerClaimReconciliationCard rows={msg.buyerClaimReconciliation} />
-                    )}
-                    {msg.cartPlanStatus && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: '#92400e' }}>{msg.cartPlanStatus}</div>
-                    )}
-                    {msg.affordabilityResolution && (
-                      <AffordabilityResolutionCard
-                        resolution={msg.affordabilityResolution}
-                        onChoose={(choice) => chooseAffordabilityResolution(msg, choice)}
-                      />
-                    )}
-                  </div>
-                ))}
+                <ConversationTimeline
+                  messages={messages}
+                  classNames={styles}
+                  showDebugBadges={showDebugBadges}
+                  cartItems={(cart?.items || []) as any[]}
+                  onQuickAction={handleQuickAction}
+                  onNqeOption={handleNqeOptionSelect}
+                  onDisambiguation={handleDisambiguationSelect}
+                  onWebConsent={(message, consent) => {
+                    const query = message.webConsentPrompt!.query;
+                    setMessages(previous => previous.map(item => item === message ? { ...item, webConsentPrompt: undefined } : item));
+                    void handleSend({ queryOverride: query, externalResearchConsent: consent });
+                  }}
+                  onOpenEvidence={(evidence) => {
+                    setTraceEvidence(evidence);
+                    setTraceInitialTab('evidence');
+                    setTraceOpen(true);
+                  }}
+                  onUndoClear={(message) => {
+                    const items = message.undoClear!.items;
+                    setMessages(previous => previous.map(item => item === message ? { ...item, undoClear: undefined } : item));
+                    void restoreClearedItems(items);
+                  }}
+                  onUndoServer={(message) => { void undoServerSnapshot(message); }}
+                  onConfirmCart={(message) => { void confirmCartPlan(message); }}
+                  onDismissCart={(message) => { void dismissCartPlan(message); }}
+                  onAcceptRequirements={(message, claimIds, choice, corrections) => {
+                    void acceptBuyerRequirementProposal(message, claimIds, choice, corrections);
+                  }}
+                  onAffordabilityChoice={(message, choice) => { void chooseAffordabilityResolution(message, choice); }}
+                />
                 {humanEscalation.open && humanEscalation.incidentId && (
                   <Suspense fallback={<div role="status">Connecting to human support...</div>}>
                     <EscalationRoom
