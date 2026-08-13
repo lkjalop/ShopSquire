@@ -113,6 +113,9 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "case_operation", "case_anchor", "state_changed",
     "case_obligations",
     "router_outcome",
+    # Post-catalog retrieval reality now adjudicates false authority. The
+    # recommendation remains provisional unless positive fit evidence exists.
+    "post_catalog_adjudication", "qualification_authority",
     # Deadline feasibility and its bounded human handoff are additive procurement evidence.
     "delivery_feasibility", "human_escalation",
 })

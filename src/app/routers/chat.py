@@ -1595,69 +1595,13 @@ async def _idem_single_flight(
     *,
     wait_timeout_seconds: float = 2.0,
 ):
-    """SINGLE-FLIGHT over an Idempotency-Key (review-7 P0): the first request produces the result
-    and caches it; a concurrent DUPLICATE — the stream-timeout → /chat/query fallback carrying the
-    SAME key — WAITS for and returns that cached result instead of resolving the model a second
-    time (which would duplicate proposals, traces, and chat persistence). Cart apply was already
-    idempotent via the plan CAS; this closes the resolve/serve side. Fail-open: a flaky redis
-    never blocks a turn."""
-    result_key, lock_key = key + ":result", key + ":lock"
-    token = str(uuid.uuid4())   # OWNERSHIP token (R10.3/review-8 #8): only the current lease
-    #                             holder may release — an unconditional delete let a slow
-    #                             producer (lease expired, successor claimed) delete the
-    #                             SUCCESSOR's lock, opening a third concurrent production.
-    try:
-        cached = redis.get(result_key)
-    except Exception:
-        cached = None
-    if cached:
-        try:
-            return json.loads(cached)
-        except Exception:
-            pass
-    try:
-        claimed = bool(redis.set(lock_key, token, nx=True, ex=90))
-    except Exception:
-        claimed = True   # redis unavailable → don't block; just run (degrade to today's behavior)
-    if not claimed:
-        wait_deadline = time.monotonic() + max(
-            0.0, min(float(wait_timeout_seconds or 0.0), 10.0),
-        )
-        while time.monotonic() < wait_deadline:
-            await asyncio.sleep(
-                min(0.05, max(0.0, wait_deadline - time.monotonic())),
-            )
-            try:
-                cached = redis.get(result_key)
-            except Exception:
-                cached = None
-            if cached:
-                try:
-                    return json.loads(cached)
-                except Exception:
-                    break
-        try:
-            return _chat_in_progress(idempotency_key=key.rsplit(":", 1)[-1])
-        except Exception:
-            pass
-    try:
-        result = await producer()
-        try:
-            redis.setex(result_key, 120, json.dumps(result, default=str))
-        except Exception as _ce:
-            logger.debug("idem result cache skipped: %s", repr(_ce)[:80])
-        return result
-    finally:
-        # COMPARE-AND-DELETE: release only if the lock still carries OUR token. (get+delete has
-        # a tiny window vs a Lua CAD; it removes the whole failure class the unconditional
-        # delete had, and both redis clients here — real + Dummy — lack scripting.)
-        try:
-            held = redis.get(lock_key)
-            held = held.decode() if isinstance(held, bytes) else held
-            if held == token:
-                redis.delete(lock_key)
-        except Exception as _de:
-            logger.debug("idem lock release skipped: %s", repr(_de)[:80])
+    from src.app.services.chat_transport import idempotent_single_flight
+
+    return await idempotent_single_flight(
+        redis, key, producer, wait_timeout_seconds=wait_timeout_seconds,
+        in_progress_factory=lambda idem_key: _chat_in_progress(idempotency_key=idem_key),
+        logger=logger,
+    )
 
 
 async def _call_recommend_in_process(

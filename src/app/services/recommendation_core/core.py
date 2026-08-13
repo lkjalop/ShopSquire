@@ -118,24 +118,9 @@ def _run_stage(
     swallow-but-log any failure — a stage failure must never break the turn (the products already
     stand on their own). won_message is inferred from whether the message-priority slot advanced,
     so the trace shows exactly which stage authored the buyer's sentence."""
-    t0 = time.perf_counter()
-    prio_before = resp._msg_priority
-    status = "ok"
-    try:
-        if cancellation is not None:
-            cancellation.raise_if_cancelled()
-        fn()
-        if cancellation is not None:
-            cancellation.raise_if_cancelled()
-    except Exception as exc:
-        from src.app.services.recommendation_core.cancellation import RecommendationCancelled
-        if isinstance(exc, RecommendationCancelled):
-            raise
-        status = "error"
-        logger.warning("%s stage skipped: %s", name, repr(exc)[:120])
-    resp.record_stage(name, status=status,
-                      latency_ms=(time.perf_counter() - t0) * 1000.0,
-                      won_message=resp._msg_priority > prio_before)
+    from src.app.services.recommendation_core.stage_runner import run_guarded_stage
+
+    run_guarded_stage(resp, name, fn, cancellation=cancellation, logger=logger)
 
 
 def build_timing_breakdown(

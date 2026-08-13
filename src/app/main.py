@@ -57,7 +57,6 @@ from src.app.routers.shipping_security import router as shipping_security_router
 from src.app.routers.shipping_webhooks import router as shipping_webhooks_router
 from src.app.routers.support_complaints import router as support_complaints_router
 from src.app.routers.query import router as query_router
-from src.app.routers.session_events import router as session_events_router
 from src.app.routers.chat import router as chat_router
 from src.app.routers.safe_links import router as safe_links_router
 from src.app.routers.billing import router as billing_router
@@ -78,6 +77,8 @@ from src.app.observability.tracing import init_tracer
 from src.app.observability.logging import init_logging, bind_request_id, new_request_id
 from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
+from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
+from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
 from src.app.security.observer import emit_security_event
 from src.app.security.webhook_security import WebhookSecurityMiddleware
 from src.app.security.idempotency import IdempotencyMiddleware
@@ -254,6 +255,7 @@ def _vlm_warmup_enabled() -> bool:
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        runtime_lifecycle = RuntimeLifecycle(vlm_warmup_enabled=_vlm_warmup_enabled)
         # Ensure migrations are applied for non-SQLite DBs.
         try:
             from src.app.models.migration_guard import ensure_migrations
@@ -649,68 +651,9 @@ def create_app() -> FastAPI:
                 _submit("faq_index_build", {})
         except Exception:
             pass
-        # Start task runner consumer (Redis Streams)
-        try:
-            from src.app.workers.task_runner import start_consumer
-            start_consumer()
-        except Exception:
-            pass
-        # VLM cold-start warming: fire a tiny generate request so the first real user request
-        # doesn't pay the full model-load latency (typically 4-8 s for qwen3-vl:8b on RTX 5070 Ti).
-        try:
-            if _vlm_warmup_enabled():
-                import asyncio as _asyncio
-                import logging as _wlog
-
-                async def _warm_vlm():
-                    import httpx
-                    _log = _wlog.getLogger("shopsquire.startup")
-                    base = (os.getenv("OLLAMA_URL") or "http://127.0.0.1:11434").rstrip("/")
-                    model = (
-                        os.getenv("CV_VISION_MODEL")
-                        or os.getenv("OLLAMA_VISION_MODEL")
-                        or "qwen3-vl:8b"
-                    ).strip()
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0) as _client:
-                            await _client.post(
-                                f"{base}/api/generate",
-                                json={"model": model, "prompt": "hi", "stream": False, "options": {"num_predict": 1}},
-                            )
-                        _log.info("VLM warm-up complete: model=%s url=%s", model, base)
-                    except Exception as _exc:
-                        _log.info("VLM warm-up skipped (Ollama not ready yet): %s", _exc)
-
-                _asyncio.ensure_future(_warm_vlm())
-        except Exception:
-            pass
+        runtime_lifecycle.start(app)
         yield
-        # Stop task runner consumer
-        try:
-            from src.app.workers.task_runner import stop_consumer, shutdown_fallback_pool
-            stop_consumer()
-            shutdown_fallback_pool()
-        except Exception:
-            pass
-        try:
-            from src.app.services.trace_broker import stop_stream_consumer
-            await stop_stream_consumer()
-        except Exception:
-            pass
-        try:
-            from src.app.services.dependency_resilience import (
-                shutdown_resilience_executor,
-            )
-            shutdown_resilience_executor(wait=False)
-        except Exception:
-            pass
-        try:
-            from src.app.services.recommend_narration_jobs import (
-                shutdown_narration_resources,
-            )
-            shutdown_narration_resources(wait=False)
-        except Exception:
-            pass
+        await runtime_lifecycle.stop()
     app = FastAPI(title="ShopSquire API", default_response_class=ORJSONResponse, lifespan=lifespan)
     # Bind a fresh engine using current settings to the app state so
     # tests that mutate DATABASE_URL get an engine scoped to the app.
@@ -2327,36 +2270,7 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include public_incidents router: %s", e)
-    # Privacy-safe session events ingestion
-    app.include_router(session_events_router)
-    try:
-        from src.app.routers.consumer_signals import router as consumer_signals_router
-        app.include_router(consumer_signals_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include consumer_signals router: %s", e)
-    try:
-        from src.app.routers.decision_trace_events import router as decision_trace_events_router
-        app.include_router(decision_trace_events_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include decision_trace_events router: %s", e)
-    try:
-        from src.app.routers.hippograph import router as hippograph_router
-        app.include_router(hippograph_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include hippograph router: %s", e)
-    try:
-        from src.app.routers.decision_replay import router as decision_replay_router
-        app.include_router(decision_replay_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include decision_replay router: %s", e)
+    register_intelligence_router_group(app)
     # Admin interleaving/budget summary endpoint
     try:
         from src.app.routers.admin_interleaving import router as admin_interleaving_router
