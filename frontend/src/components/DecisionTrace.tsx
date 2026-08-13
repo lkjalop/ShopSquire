@@ -25,6 +25,7 @@ import ArtifactSecuritySummary from './security/ArtifactSecuritySummary';
 import ProcurementOperationalTrace, { DisruptionEvidenceTrace } from './ProcurementOperationalTrace';
 import ReturnLifecycleTrace from './ReturnLifecycleTrace';
 import ProcurementTracePanel from './decision-trace/ProcurementTracePanel';
+import HippographEvidencePanel from './decision-trace/HippographEvidencePanel';
 import {
   procurementQuarantineView,
   projectProcurementTraceView,
@@ -646,52 +647,7 @@ function getLinkedArtifactUrl(sigs: Record<string, any>): string | null {
 }
 
 export function HippographEvidenceSurface({ insights }: { insights: any[] }) {
-  if (!Array.isArray(insights) || insights.length === 0) return null;
-  return (
-    <section data-testid="hippograph-evidence-surface" aria-label="Hippograph provenance paths" className={styles.anchorBlock}>
-      <div className={styles.sectionTitle}>Hippograph Evidence Paths</div>
-      <div className={styles.muted}>
-        Evidence-only retrieval. It can explain or prioritize review, but cannot authorize a commercial action.
-      </div>
-      {insights.map((insight: any, index: number) => {
-        const path = insight?.evidence_path || {};
-        const health = insight?.source_health || {};
-        return (
-          <details key={`${insight?.id || 'insight'}-${index}`} style={{ marginTop: 8 }} open={index === 0}>
-            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
-              {insight?.label || insight?.id || 'Related evidence'} · score {insight?.score ?? 'undefined'}
-              {' · '}{health?.status || 'unknown source health'}
-            </summary>
-            <div className={styles.kvRow}><span>Authority</span><span>{insight?.authority || path?.authority || 'evidence_only'}</span></div>
-            <div className={styles.kvRow}><span>Path</span><span>{Array.isArray(path?.nodes) && path.nodes.length ? path.nodes.join(' → ') : 'No bounded path available'}</span></div>
-            <div className={styles.kvRow}><span>Hops</span><span>{path?.hops ?? 'undefined'}</span></div>
-            {Array.isArray(health?.degraded_sources) && health.degraded_sources.length > 0 && (
-              <div data-testid="hippograph-degraded-sources" style={{ color: '#b45309', marginTop: 6 }}>
-                Degraded sources: {health.degraded_sources.map((source: any) => (
-                  `${source?.source || 'unknown'} (${source?.reason || source?.health || 'degraded'})`
-                )).join(', ')}
-              </div>
-            )}
-            {(path?.edges || []).map((edge: any, edgeIndex: number) => (
-              <div key={`${edge?.source || 'edge'}-${edgeIndex}`} style={{ borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 8 }}>
-                <div className={styles.kvRow}><span>Edge</span><span>{edge?.source} → {edge?.target}</span></div>
-                {(edge?.evidence || []).map((item: any, evidenceIndex: number) => (
-                  <div key={`${item?.evidence_id || evidenceIndex}`} className={styles.muted}>
-                    evidence {item?.evidence_id || 'unidentified'} · edge {item?.edge_id || 'unidentified'}
-                    {' · '}observed {item?.observed_at || 'unknown'}
-                    {' · '}effective {item?.effective_at || 'unknown'}
-                    {' · '}authority {item?.source_authority || 'unknown'}
-                    {' · '}health {item?.source_health || 'unknown'}
-                    {' · '}freshness {item?.freshness_weight ?? 'undefined'}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </details>
-        );
-      })}
-    </section>
-  );
+  return <HippographEvidencePanel insights={insights} classNames={styles} />;
 }
 
 export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab, evidence }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any }) {
