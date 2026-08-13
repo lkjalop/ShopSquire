@@ -207,6 +207,36 @@ class ShoppingCaseFulfillmentSelection(Base):
     updated_at: Mapped[str] = mapped_column(TIMESTAMP)
 
 
+class HippographJourneyEdgeRecord(Base):
+    """Immutable typed journey evidence used for tenant-scoped temporal replay."""
+
+    __tablename__ = "hippograph_journey_edges"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "edge_id", name="uq_hippograph_journey_edge_tenant"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    edge_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_id: Mapped[str] = mapped_column(Text)
+    source_kind: Mapped[str] = mapped_column(Text)
+    target_id: Mapped[str] = mapped_column(Text)
+    target_kind: Mapped[str] = mapped_column(Text)
+    relation: Mapped[str] = mapped_column(Text)
+    signal_class: Mapped[str] = mapped_column(Text)
+    evidence_id: Mapped[str] = mapped_column(Text)
+    source_authority: Mapped[str] = mapped_column(Text)
+    confidence_micros: Mapped[int] = mapped_column(Integer, default=1_000_000)
+    observed_at: Mapped[str] = mapped_column(TIMESTAMP)
+    effective_at: Mapped[str] = mapped_column(TIMESTAMP)
+    valid_to: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    supersedes_edge_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contradicts_edge_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    attributes_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[str] = mapped_column(TIMESTAMP)
+
+
 class Inventory(Base):
     __tablename__ = "inventory"
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))

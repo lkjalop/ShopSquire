@@ -8,6 +8,7 @@ after a separate revision-bound confirmation.
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timezone
 from typing import Any, Literal, Sequence
 
@@ -20,6 +21,8 @@ from src.app.services.commercial_decision_reducer import (
     CommercialDecision,
     reduce_commercial_candidate,
 )
+
+logger = logging.getLogger("shopsquire.fulfillment.continuation")
 
 
 Choice = Literal[
@@ -308,7 +311,22 @@ def select_fulfillment_option(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _decode(row), None
+    selection = _decode(row)
+    try:
+        from src.app.services.hippograph_journey_producers import fulfillment_selection_edges
+        from src.app.services.hippograph_journey_store import persist_journey_edges
+
+        persist_journey_edges(
+            db,
+            fulfillment_selection_edges(
+                tenant_id=tenant_id, case_id=case_id, selection=selection,
+                observed_at=row.updated_at,
+            ),
+            tenant_id=tenant_id, case_id=case_id,
+        )
+    except Exception as exc:
+        logger.warning("fulfillment graph projection failed: %s", repr(exc)[:160])
+    return selection, None
 
 
 def resolve_confirmed_cart_target(
@@ -375,7 +393,22 @@ def record_cart_confirmation(
     updated = db.execute(select(ShoppingCaseFulfillmentSelection).where(
         ShoppingCaseFulfillmentSelection.selection_id == selection_id,
     )).scalar_one()
-    return _decode(updated), None
+    selection = _decode(updated)
+    try:
+        from src.app.services.hippograph_journey_producers import cart_outcome_edge
+        from src.app.services.hippograph_journey_store import persist_journey_edges
+
+        persist_journey_edges(
+            db,
+            [cart_outcome_edge(
+                tenant_id=tenant_id, case_id=case_id, selection=selection,
+                cart_result=cart_result, observed_at=updated.updated_at,
+            )],
+            tenant_id=tenant_id, case_id=case_id,
+        )
+    except Exception as exc:
+        logger.warning("cart outcome graph projection failed: %s", repr(exc)[:160])
+    return selection, None
 
 
 __all__ = [

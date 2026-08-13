@@ -9,6 +9,7 @@ trace/conversion product ids stay canonical without a catalog round-trip.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Optional
 
 from sqlalchemy import text
@@ -19,6 +20,7 @@ from src.app.services.hippograph import HippoGraph, project_graph, project_resea
 # A SKU node id is a single space-free token (GAM-0002, ATTR-1, ...); product *names* (with spaces)
 # fall through to a `name:` node and never collide with a real SKU.
 _DEFAULT_SKU_PATTERN = r"[A-Za-z0-9][\w.\-]{0,63}"
+logger = logging.getLogger("shopsquire.hippograph.db")
 
 
 def _maybe_project_findings(db, graph: HippoGraph, *, tenant_id: str, limit: int, sku_pattern: str, anomaly_fn) -> HippoGraph:
@@ -163,6 +165,17 @@ def build_from_db(
         except Exception:
             research_events = []
         graph = project_research_evidence(graph, research_events, sku_pattern=sku_pattern)
+    try:
+        from src.app.services.hippograph_journey_edges import project_typed_journey_edges
+        from src.app.services.hippograph_journey_store import load_journey_edges
+
+        typed_edges = load_journey_edges(db, tenant_id=tenant, limit=limit)
+        if typed_edges:
+            project_typed_journey_edges(graph, typed_edges, tenant_id=tenant, as_of=as_of)
+    except Exception as exc:
+        # Durable journey evidence is additive. Missing migrations or a read
+        # failure must not break the existing read-only recall projection.
+        logger.debug("typed journey evidence unavailable: %s", repr(exc)[:160])
     if include_findings:
         graph = _maybe_project_findings(db, graph, tenant_id=tenant, limit=limit,
                                         sku_pattern=sku_pattern, anomaly_fn=anomaly_fn)

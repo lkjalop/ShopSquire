@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -32,6 +33,8 @@ from src.app.services.commerce_feature_readiness import (
     external_research_runtime_observation,
 )
 from src.app.services.requirement_claim_reconciliation import reconcile_requirement_claims
+
+logger = logging.getLogger("shopsquire.shopping_cases")
 
 
 router = APIRouter(prefix="/api/v1/shopping-cases", tags=["shopping-cases"])
@@ -743,6 +746,22 @@ def accept_requirement_proposal(
     proposal.acceptance_idempotency_key = idempotency_key
     proposal.updated_at = _now()
     db.commit()
+    try:
+        from src.app.services.hippograph_journey_producers import accepted_requirement_edges
+        from src.app.services.hippograph_journey_store import persist_journey_edges
+
+        persist_journey_edges(
+            db,
+            accepted_requirement_edges(
+                tenant_id=tenant_id, case_id=case_id, proposal_id=proposal_id,
+                claims=accepted, observed_at=proposal.updated_at,
+            ),
+            tenant_id=tenant_id, case_id=case_id,
+        )
+    except Exception as exc:
+        # Graph memory is additive and has no qualification or commerce
+        # authority. A projection failure must not undo buyer evidence state.
+        logger.warning("accepted requirement graph projection failed: %s", repr(exc)[:160])
     try:
         log_trace_event(
             trace_id=result["trace_id"],
