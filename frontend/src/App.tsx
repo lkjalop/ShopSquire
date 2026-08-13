@@ -14,6 +14,7 @@ const EscalationRoom = lazy(() => import('./components/EscalationRoom'));
 import RightPanelExtras from './components/RightPanelExtras';
 import RecommendationShelf, { type RecommendationShelfContract } from './components/RecommendationShelf';
 import { useHumanEscalation } from './hooks/useHumanEscalation';
+import { useShoppingCaseResearch } from './hooks/useShoppingCaseResearch';
 import type { AffordabilityResolution } from './components/AffordabilityResolutionCard';
 import { apiUrl, getApiBase, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, applyCartMutation, rejectCartMutation, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { nextSourcingTraceId, procurementAwareTraceId } from './lib/trace';
@@ -379,11 +380,13 @@ export default function App() {
   const [recommendationShelf, setRecommendationShelf] = useState<RecommendationShelfContract | null>(null);
   const [productShelves, setProductShelves] = useState<ProductShelfProjection | null>(null);
   const [supplierContinuation, setSupplierContinuation] = useState<SupplierContinuation | null>(null);
-  const [ambiguityExploration, setAmbiguityExploration] = useState<AmbiguityExploration | null>(null);
-  const [activeShoppingCase, setActiveShoppingCase] = useState<{
-    case_id: string;
-    retained_purpose: string;
-  } | null>(null);
+  const {
+    ambiguityExploration,
+    setAmbiguityExploration,
+    activeShoppingCase,
+    setActiveShoppingCase,
+    executeResearch: executeShoppingCaseResearch,
+  } = useShoppingCaseResearch();
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   // Safe-internet-search results (separate labeled source; never owned catalog items).
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
@@ -2871,43 +2874,9 @@ export default function App() {
   }, [ambiguityExploration, uid]);
 
   const researchAmbiguousShoppingCase = useCallback(async (refreshAuthorized = false) => {
-    if (!ambiguityExploration?.case_id) {
-      throw new Error('This exploration is missing its shopping-case identity.');
-    }
-    if (!ambiguityExploration.research_plan_id) {
-      throw new Error('This case has no governed research plan. Upload requirements or continue provisionally.');
-    }
     setIsThinking(true);
-    const researchController = new AbortController();
-    const researchDeadline = window.setTimeout(
-      () => researchController.abort('research_deadline_exceeded'), 20_000,
-    );
     try {
-      const response = await fetch(apiUrl(
-        `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/research`,
-      ), {
-        method: 'POST', credentials: 'include',
-        signal: researchController.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
-          ...csrfHeaders(),
-        },
-        body: JSON.stringify({
-          uid,
-          research_plan_id: ambiguityExploration.research_plan_id,
-          ambiguity_object_ids: (ambiguityExploration.ambiguity_objects || []).map((item) => item.ambiguity_id),
-          hypothesis_ids: (ambiguityExploration.interpretations || [])
-            .map((item) => item.hypothesis_id)
-            .filter((value): value is string => Boolean(value)),
-          research_authorized: true,
-          refresh_authorized: refreshAuthorized,
-        }),
-      });
-      const payload = await safeJson(response);
-      if (!response.ok) {
-        throw new Error(String(payload?.detail?.message || payload?.detail?.code || payload?.detail || 'Approved-source research failed.'));
-      }
+      const payload = await executeShoppingCaseResearch({ uid, refreshAuthorized });
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
         setProductShelves(payload.product_shelves as ProductShelfProjection);
       }
@@ -2931,10 +2900,9 @@ export default function App() {
         timestamp: new Date(),
       }]);
     } finally {
-      window.clearTimeout(researchDeadline);
       setIsThinking(false);
     }
-  }, [ambiguityExploration, uid, traceId]);
+  }, [ambiguityExploration, executeShoppingCaseResearch, uid, traceId]);
 
   const resolveBuyerEvidenceSource = useCallback(async (
     hint: { source_url?: string; vendor_name?: string },
