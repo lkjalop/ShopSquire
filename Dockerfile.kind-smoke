@@ -1,0 +1,7 @@
+FROM python:3.11-alpine
+WORKDIR /app
+COPY scripts/kind_health_server.py /app/server.py
+RUN addgroup -S shopsquire && adduser -S -G shopsquire -u 1000 shopsquire
+USER shopsquire
+EXPOSE 8080
+CMD ["python", "/app/server.py"]

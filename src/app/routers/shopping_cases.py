@@ -7,6 +7,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -33,6 +34,7 @@ from src.app.services.commerce_feature_readiness import (
     external_research_runtime_observation,
 )
 from src.app.services.requirement_claim_reconciliation import reconcile_requirement_claims
+from src.app.services.shopping_case_fast_lane_timing import ShoppingCaseFastLaneTiming
 
 logger = logging.getLogger("shopsquire.shopping_cases")
 
@@ -353,6 +355,8 @@ def create_case_interpretation(
         build_case_research_plan, plan_hypothesis_labels,
     )
 
+    fast_lane_started = perf_counter()
+    stage_started = fast_lane_started
     tenant_id = _tenant(x_tenant_id)
     from src.app.services.case_catalog_candidates import build_case_catalog_candidate_set
 
@@ -362,6 +366,7 @@ def create_case_interpretation(
         tenant_id=tenant_id,
         storefront_taxonomy_handle=body.storefront_taxonomy_handle,
     )
+    catalog_candidate_ms = (perf_counter() - stage_started) * 1000.0
     if candidate_set.reason == "buyer_named_category_outside_storefront_context":
         empty_projection = project_accepted_catalog(
             db, accepted_claims=[], desired_outcome=body.retained_purpose,
@@ -381,6 +386,7 @@ def create_case_interpretation(
             "supplier_send": "not_authorized",
         }
 
+    stage_started = perf_counter()
     plan = build_case_research_plan(body.retained_purpose)
     if plan is None:
         # Positive-evidence constraints such as vendor certification or an OS
@@ -398,6 +404,7 @@ def create_case_interpretation(
             plan = build_case_research_plan(body.retained_purpose, allow_open_world=True)
     if plan is None:
         return Response(status_code=204)
+    research_plan_ms = (perf_counter() - stage_started) * 1000.0
 
     if plan.publisher_status == "unresolved":
         from src.app.services.open_world_query_proposal import (
@@ -408,6 +415,7 @@ def create_case_interpretation(
         # available and never delays provisional catalog exploration.
         schedule_open_world_query_proposal(plan)
 
+    stage_started = perf_counter()
     trace_id = "case-" + uuid.uuid4().hex[:20]
     case_id = f"sc-{trace_id}"
     case = ShoppingCase(
@@ -416,15 +424,19 @@ def create_case_interpretation(
     )
     db.add(case)
     db.commit()
+    case_persistence_ms = (perf_counter() - stage_started) * 1000.0
 
+    stage_started = perf_counter()
     projection = project_accepted_catalog(
         db, accepted_claims=[], desired_outcome=plan.retained_purpose,
         tenant_id=tenant_id, hypothesis_labels=plan_hypothesis_labels(plan),
         candidate_configuration_ids=candidate_set.configuration_ids,
     )
+    shelf_projection_ms = (perf_counter() - stage_started) * 1000.0
     from src.app.services.shopping_case_truth_projection import ShoppingCaseTruthProjection
 
-    exploration = ShoppingCaseTruthProjection.model_validate({
+    response_projection_started = perf_counter()
+    exploration_input = {
         "schema_version": "ambiguity-exploration-v1",
         "case_id": case_id,
         "trace_id": trace_id,
@@ -445,6 +457,22 @@ def create_case_interpretation(
         "ambiguity_objects": [row.model_dump(mode="json") for row in plan.ambiguities],
         "research_obligations": [row.model_dump(mode="json") for row in plan.obligations],
         "source_candidate_ids": list(plan.source_candidate_ids),
+    }
+    response_projection_ms = (perf_counter() - response_projection_started) * 1000.0
+    total_ms = (perf_counter() - fast_lane_started) * 1000.0
+    timing = ShoppingCaseFastLaneTiming.model_validate({
+        "catalog_candidate_ms": round(catalog_candidate_ms, 1),
+        "research_plan_ms": round(research_plan_ms, 1),
+        "case_persistence_ms": round(case_persistence_ms, 1),
+        "shelf_projection_ms": round(shelf_projection_ms, 1),
+        "response_projection_ms": round(response_projection_ms, 1),
+        "total_ms": round(total_ms, 1),
+        "deadline_status": "within_deadline" if total_ms <= 20_000 else "deadline_exceeded",
+        "external_calls": 0,
+    })
+    exploration = ShoppingCaseTruthProjection.model_validate({
+        **exploration_input,
+        "timing_envelope": timing.model_dump(mode="json"),
     }).model_dump(mode="json")
     log_trace_event(
         trace_id=trace_id,
@@ -1262,9 +1290,6 @@ def research_shopping_case(
             if request is None:
                 return False
             try:
-                # Sync FastAPI routes run in an AnyIO worker. Bridge the ASGI
-                # disconnect probe back to the event loop between bounded
-                # discovery calls; no background watcher or orphan task.
                 return bool(anyio.from_thread.run(request.is_disconnected))
             except RuntimeError:
                 return False
@@ -1320,6 +1345,8 @@ def research_shopping_case(
         )
     except EnrolledResearchUnavailable as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 
 
 @router.post("/{case_id}/cart-proposals")

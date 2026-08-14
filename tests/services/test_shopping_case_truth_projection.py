@@ -26,6 +26,16 @@ def _projection(**updates):
         "ambiguity_objects": plan.ambiguities,
         "research_obligations": plan.obligations,
         "source_candidate_ids": plan.source_candidate_ids,
+        "timing_envelope": {
+            "catalog_candidate_ms": 2.1,
+            "research_plan_ms": 1.2,
+            "case_persistence_ms": 3.0,
+            "shelf_projection_ms": 4.0,
+            "response_projection_ms": 0.2,
+            "total_ms": 10.5,
+            "deadline_status": "within_deadline",
+            "external_calls": 0,
+        },
     }
     payload.update(updates)
     return payload
@@ -39,6 +49,7 @@ def test_projection_preserves_one_identity_and_hypothesis_set_for_panel_and_trac
     assert rendered["trace_id"] == "case-truth-1"
     assert rendered["retained_purpose"].startswith("I need to simulate")
     assert 1 <= len(rendered["interpretations"]) <= 3
+    assert rendered["timing_envelope"]["total_ms"] == 10.5
 
 
 def test_projection_rejects_panel_trace_identity_drift():

@@ -10,6 +10,7 @@ from src.app.services.case_research_plan import (
     CaseResearchHypothesis,
     CaseResearchObligation,
 )
+from src.app.services.shopping_case_fast_lane_timing import ShoppingCaseFastLaneTiming
 
 
 class CaseQuestionProjection(BaseModel):
@@ -50,6 +51,7 @@ class ShoppingCaseTruthProjection(BaseModel):
     research_obligations: list[CaseResearchObligation] = Field(min_length=1, max_length=16)
     source_candidate_ids: list[str] = Field(default_factory=list, max_length=16)
     publisher_candidates: list[dict] = Field(default_factory=list, max_length=12)
+    timing_envelope: ShoppingCaseFastLaneTiming | None = None
 
     @model_validator(mode="after")
     def validate_case_identity_and_hypotheses(self) -> "ShoppingCaseTruthProjection":

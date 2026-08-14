@@ -26,7 +26,7 @@ test('buyer disconnect during live discovery does not strand backend responsiven
   );
   await research.click({ noWaitAfter: true });
   await dispatched;
-  await page.close();
+  await page.context().close();
 
   const started = Date.now();
   const health = await request.get('http://127.0.0.1:8080/healthz', { timeout: 15_000 });
@@ -63,7 +63,20 @@ test('forced disconnect cooperatively stops undispatched discovery queries', asy
   await research.click({ noWaitAfter: true });
   await dispatched;
   expect(traceId).not.toBe('');
-  await page.close();
+  await expect.poll(async () => {
+    const response = await request.get(`http://127.0.0.1:8080/api/v1/trace/${traceId}/events`);
+    if (!response.ok()) return false;
+    const body = await response.json();
+    const events = Array.isArray(body) ? body : (body.events || []);
+    return events.some((row: any) => (
+      String(row?.event_type || '') === 'open_world_discovery_started'
+      || String(row?.payload?._original_event_type || '') === 'open_world_discovery_started'
+    ));
+  }, { timeout: 30_000, intervals: [100, 250, 500] }).toBe(true);
+  // Close the whole browser context, not only the tab. Chromium may retain a
+  // page-initiated fetch connection after page.close(), which is navigation
+  // cancellation rather than a transport disconnect.
+  await page.context().close();
 
   await expect.poll(async () => {
     const response = await request.get(`http://127.0.0.1:8080/api/v1/trace/${traceId}/events`);
@@ -71,7 +84,8 @@ test('forced disconnect cooperatively stops undispatched discovery queries', asy
     const body = await response.json();
     const events = Array.isArray(body) ? body : (body.events || []);
     const event = [...events].reverse().find((row: any) => (
-      String(row?.event_type || row?.payload?._original_event_type || '') === 'open_world_discovery_completed'
+      String(row?.event_type || '') === 'open_world_discovery_completed'
+      || String(row?.payload?._original_event_type || '') === 'open_world_discovery_completed'
     ));
     const payload = event?.payload || {};
     return payload?.cancellation?.requested ? payload : null;

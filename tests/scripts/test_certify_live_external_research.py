@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,11 @@ def test_certification_runs_real_plan_pipeline_and_reports_actual_claims(monkeyp
     assert artifact["context_claims"] == []
     assert artifact["unresolved"] == []
     assert artifact["paid_calls"] == 0
+    assert artifact["evidence_cache_profile"] == "isolated_empty_per_certification_run"
+    output = tmp_path / "certification.json"
+    assert output.with_suffix(".json.sha256").read_text(encoding="ascii").strip() == (
+        hashlib.sha256(output.read_bytes()).hexdigest()
+    )
 
 
 @pytest.mark.parametrize(

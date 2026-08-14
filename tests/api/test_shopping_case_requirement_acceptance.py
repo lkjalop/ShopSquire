@@ -86,6 +86,15 @@ def test_interpretation_is_immediate_case_bound_and_zero_network():
     assert payload["ambiguity_exploration"]["provider_accounting"] == {
         "external_calls": 0, "paid_calls": 0,
     }
+    timing = payload["ambiguity_exploration"]["timing_envelope"]
+    assert timing["schema_version"] == "shopping-case-fast-lane-timing-v1"
+    assert timing["deadline_status"] == "within_deadline"
+    assert timing["total_ms"] <= timing["deadline_ms"]
+    assert timing["external_calls"] == 0
+    assert all(timing[name] >= 0 for name in (
+        "catalog_candidate_ms", "research_plan_ms", "case_persistence_ms",
+        "shelf_projection_ms", "response_projection_ms",
+    ))
     assert payload["product_shelves"]["schema_version"] == "product-shelves-v1"
     assert payload["cart_mutation"] == "not_authorized"
     assert payload["supplier_send"] == "not_authorized"

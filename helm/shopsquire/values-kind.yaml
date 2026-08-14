@@ -1,0 +1,46 @@
+replicaCount: 1
+
+image:
+  repository: shopsquire-kind-smoke
+  tag: kind
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: false
+
+autoscaling:
+  enabled: false
+
+migrations:
+  enabled: false
+
+syncWorker:
+  enabled: false
+
+dbBackup:
+  enabled: false
+
+env:
+  APP_ENV: development
+  API_PORT: "8080"
+  CV_WARMUP_ON_START: "0"
+  VLM_WARMUP_ON_START: "0"
+  ROUTER_PREWARM_ON_START: "0"
+  VISUAL_SEARCH_INDEX_ON_START: "0"
+  METRICS_INTERNAL_ONLY: "1"
+  DATABASE_URL: "sqlite:////tmp/shopsquire-kind.db"
+
+envFrom: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi

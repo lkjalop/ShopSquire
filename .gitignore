@@ -146,3 +146,6 @@ tmp_browser_deepdive/
 
 # taxonomy embedding index — build artifact (scripts/build_taxonomy_embedding_index.py), ~45MB
 data/taxonomy/**/embeddings.npz
+
+# Helm dependency archives are reproducibly restored from Chart.lock.
+/helm/shopsquire/charts/

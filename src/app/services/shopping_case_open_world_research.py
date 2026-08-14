@@ -72,6 +72,30 @@ def execute_open_world_publisher_discovery(
             readiness=readiness,
         )
 
+    # Persist the hand-off before the first blocking provider call. Browser
+    # disconnect certification waits for this event, then closes the buyer
+    # transport so the request-scoped cancellation probe is deterministic.
+    trace_id = case_id.removeprefix("sc-")
+    log_trace_event(
+        trace_id=trace_id,
+        event_type="open_world_discovery_started",
+        source_type="stage",
+        source_id="SearXNG_Discovery",
+        target_type="shopping_case",
+        target_id=case_id,
+        payload={
+            "case_id": case_id,
+            "execution_status": "started",
+            "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+            "qualification_authority": "none",
+            "cart_authority": "none",
+        },
+    )
+    # The provider call below can block for its bounded transport deadline.
+    # Commit this audit boundary so another connection (Decision Trace or the
+    # disconnect-certification observer) can see that execution has started.
+    db.commit()
+
     # Interpretation may have been scheduled when the provisional case was
     # created. Consent never waits for it: a completed validated proposal is
     # consumed, otherwise the original deterministic plan executes now.
@@ -122,7 +146,7 @@ def execute_open_world_publisher_discovery(
     exploration = ShoppingCaseTruthProjection.model_validate({
         "schema_version": "ambiguity-exploration-v1",
         "case_id": case_id,
-        "trace_id": case_id.removeprefix("sc-"),
+        "trace_id": trace_id,
         "retained_purpose": plan.retained_purpose,
         "status": "unresolved",
         "interpretations": [row.model_dump(mode="json") for row in plan.hypotheses],

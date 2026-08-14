@@ -8,8 +8,10 @@ and emitted claims must remain inside the publisher policy.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -198,6 +200,8 @@ def certify(
         "certification_status": "passed" if not failures else "failed",
         "gate_failures": list(dict.fromkeys(failures)),
         "execution_mode": "live_network",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "evidence_cache_profile": "isolated_empty_per_certification_run",
         "discovery_requirement": discovery_requirement,
         "retained_purpose": retained_purpose,
         "research_plan": plan.model_dump(mode="json"),
@@ -213,6 +217,10 @@ def certify(
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    output.with_suffix(output.suffix + ".sha256").write_text(
+        digest + "\n", encoding="ascii",
+    )
     return artifact
 
 

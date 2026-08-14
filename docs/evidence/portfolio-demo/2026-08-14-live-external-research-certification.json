@@ -1,0 +1,582 @@
+{
+  "schema_version": "live-external-research-certification-v2",
+  "certification_status": "passed",
+  "gate_failures": [],
+  "execution_mode": "live_network",
+  "created_at": "2026-08-14T00:04:01.530607+00:00",
+  "evidence_cache_profile": "isolated_empty_per_certification_run",
+  "discovery_requirement": "novel_required",
+  "retained_purpose": "I need to simulate a PLC-controlled factory and cyberattacks against the OT network.",
+  "research_plan": {
+    "schema_version": "case-research-plan-v1",
+    "plan_id": "crp-29a9901b8c73ded9742d",
+    "retained_purpose": "I need to simulate a PLC-controlled factory and cyberattacks against the OT network.",
+    "ambiguities": [
+      {
+        "ambiguity_id": "workload_scope",
+        "ambiguity_type": "workload_scope",
+        "subject_span": "I need to simulate a PLC-controlled factory and cyberattacks against the OT network.",
+        "description": "Several governed publisher scopes may materially change product fit.",
+        "hypothesis_ids": [
+          "scope_1_factory_io_official_docs",
+          "scope_2_mitre_attack_ics"
+        ],
+        "resolution_owners": [
+          "buyer",
+          "research",
+          "catalog"
+        ],
+        "divergent_axes": [
+          "named_software",
+          "local_execution_scope",
+          "dataset_or_project_scale"
+        ]
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "scope_1_factory_io_official_docs",
+        "label": "Factory I/O host requirements and documented PLC/OPC/Modbus integrations",
+        "source_ids": [
+          "factory_io_official_docs"
+        ],
+        "authority": "proposed"
+      },
+      {
+        "hypothesis_id": "scope_2_mitre_attack_ics",
+        "label": "ICS adversary behaviours and scenario/topology obligations",
+        "source_ids": [
+          "mitre_attack_ics"
+        ],
+        "authority": "proposed"
+      }
+    ],
+    "source_candidate_ids": [
+      "factory_io_official_docs",
+      "mitre_attack_ics"
+    ],
+    "publisher_status": "resolved_enrolled",
+    "discovery_queries": [],
+    "obligations": [
+      {
+        "obligation_id": "workload_meaning",
+        "obligation_type": "workload_interpretation",
+        "description": "Resolve which proposed workload scope the buyer intends.",
+        "resolution_owner": "buyer",
+        "status": "unresolved"
+      },
+      {
+        "obligation_id": "official_requirements",
+        "obligation_type": "current_requirements",
+        "description": "Retrieve and normalize applicable official publisher requirements.",
+        "resolution_owner": "research",
+        "status": "planned"
+      },
+      {
+        "obligation_id": "exact_product_identity",
+        "obligation_type": "product_configuration",
+        "description": "Corroborate exact catalog configurations against accepted claims.",
+        "resolution_owner": "catalog",
+        "status": "planned"
+      }
+    ],
+    "next_question": "Which named software and version will you use, and which simulation, rendering, or processing stages must run locally?",
+    "external_calls": 0,
+    "authority": "proposal_only"
+  },
+  "approved_source_ids": [
+    "mitre_attack_ics",
+    "factory_io_official_docs"
+  ],
+  "source_execution": [
+    {
+      "source_id": "mitre_attack_ics",
+      "publisher": "MITRE",
+      "parser_type": "html",
+      "parser_version": "official-source-parser-v2:mitre_attack_ics",
+      "policy_version": "operator:mitre-attack",
+      "freshness_sla_hours": 168,
+      "origin_selection_mode": "discovered_novel",
+      "canonical_url": "https://attack.mitre.org/matrices/ics/",
+      "selected_origin_url": "https://attack.mitre.org/matrices/ics/",
+      "cache_status": "miss",
+      "canonical_fetch_status": "not_attempted",
+      "discovery_status": "completed",
+      "discovery_reason": "explicitly_novel",
+      "discovery_result_count": 4,
+      "deadline_status": "within_deadline",
+      "parser_coverage": {
+        "pages_fetched": 1,
+        "candidate_claims": 1,
+        "accepted_claims": 0,
+        "rejected_claims": 0,
+        "context_claims": 1,
+        "parse_status": "completed"
+      },
+      "discovery_query_count": 2,
+      "discovery_query_axes": [
+        "named_concept",
+        "application_scope"
+      ]
+    },
+    {
+      "source_id": "factory_io_official_docs",
+      "publisher": "Real Games",
+      "parser_type": "html",
+      "parser_version": "official-source-parser-v2:factory_io_official_docs",
+      "policy_version": "operator:factory-io-docs",
+      "freshness_sla_hours": 168,
+      "origin_selection_mode": "discovered_novel",
+      "canonical_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "selected_origin_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "cache_status": "miss",
+      "canonical_fetch_status": "not_attempted",
+      "discovery_status": "completed",
+      "discovery_reason": "explicitly_novel",
+      "discovery_result_count": 2,
+      "deadline_status": "within_deadline",
+      "parser_coverage": {
+        "pages_fetched": 1,
+        "candidate_claims": 3,
+        "accepted_claims": 3,
+        "rejected_claims": 0,
+        "context_claims": 0,
+        "parse_status": "completed"
+      },
+      "discovery_query_count": 1,
+      "discovery_query_axes": [
+        "named_software"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "official-09019600fe42d6be",
+      "attribute": "operating_system",
+      "operator": "one_of",
+      "value": [
+        "Windows 11 Pro",
+        "Windows 11 Enterprise",
+        "Windows 10 Pro",
+        "Windows 10 Enterprise",
+        "Windows 7 SP1"
+      ],
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "minimum_requirements",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "factory_io_official_docs",
+      "citation_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "observed_at": "2026-08-14T00:04:01.515718+00:00",
+      "statement": "Factory I/O documents Windows 7 SP1 or higher.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "factory_io",
+          "plc_simulation",
+          "ot_cyber_range"
+        ],
+        "scope": "Factory I/O host requirements and documented PLC/OPC/Modbus integrations",
+        "resolution_owner": "research",
+        "exclusions": [
+          "generic digital twins",
+          "cyber-range VM capacity"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:factory-io-docs"
+    },
+    {
+      "claim_id": "official-5379369ef2caf3d6",
+      "attribute": "cpu_instruction_set",
+      "operator": "equals",
+      "value": "SSE2",
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "minimum_requirements",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "factory_io_official_docs",
+      "citation_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "observed_at": "2026-08-14T00:04:01.515718+00:00",
+      "statement": "Factory I/O requires a CPU with SSE2 support.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "factory_io",
+          "plc_simulation",
+          "ot_cyber_range"
+        ],
+        "scope": "Factory I/O host requirements and documented PLC/OPC/Modbus integrations",
+        "resolution_owner": "research",
+        "exclusions": [
+          "generic digital twins",
+          "cyber-range VM capacity"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:factory-io-docs"
+    },
+    {
+      "claim_id": "official-4dd7d336e52398aa",
+      "attribute": "graphics_api",
+      "operator": "one_of",
+      "value": [
+        "DX10",
+        "DX11",
+        "DX12"
+      ],
+      "unit": null,
+      "requirement_class": "minimum",
+      "claim_type": "compatibility",
+      "claim_class": "attested",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_id": "factory_io_official_docs",
+      "citation_url": "https://docs.factoryio.com/manual/system-requirements/",
+      "observed_at": "2026-08-14T00:04:01.515718+00:00",
+      "statement": "Factory I/O documents DX10, DX11 or DX12 capability.",
+      "acceptance_status": "accepted_official",
+      "source_applicability": {
+        "workloads": [
+          "factory_io",
+          "plc_simulation",
+          "ot_cyber_range"
+        ],
+        "scope": "Factory I/O host requirements and documented PLC/OPC/Modbus integrations",
+        "resolution_owner": "research",
+        "exclusions": [
+          "generic digital twins",
+          "cyber-range VM capacity"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:factory-io-docs"
+    }
+  ],
+  "context_claims": [
+    {
+      "claim_id": "context-mitre_attack_ics",
+      "source_id": "mitre_attack_ics",
+      "claim_type": "workload_scope",
+      "status": "corroborated",
+      "statement": "Official material corroborates the workload scope; it does not establish a hardware floor.",
+      "citation_url": "https://attack.mitre.org/matrices/ics/",
+      "observed_at": "2026-08-14T00:03:57.786005+00:00",
+      "authority_status": "verified_official",
+      "freshness_status": "fresh",
+      "source_applicability": {
+        "workloads": [
+          "ot_cyber_range",
+          "ics_security_simulation"
+        ],
+        "scope": "ICS adversary behaviours and scenario/topology obligations",
+        "resolution_owner": "research",
+        "exclusions": [
+          "hardware requirements",
+          "VM resource sizing"
+        ]
+      },
+      "parser_type": "html",
+      "policy_version": "operator:mitre-attack"
+    }
+  ],
+  "unresolved": [],
+  "receipts": [
+    {
+      "receipt_id": "research-3e6cb3fedc8e:1",
+      "execution_id": "research-3e6cb3fedc8e:1",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-3e6cb3fedc8e",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "mitre_attack_ics_q1",
+      "query_hash": "006853666ad560d6",
+      "query_purpose": "official_origin_discovery:named_concept",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-14T00:03:51.985718Z",
+      "completed_at": "2026-08-14T00:03:54.347935Z",
+      "http_status": 200,
+      "result_count": 30,
+      "allowlisted_result_count": 2,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 1,
+          "responses": 1,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1540.232,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 1,
+          "responses": 1,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1540.232,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 1540.232,
+      "degradation_reasons": [],
+      "provider_status": "completed",
+      "response_body_hash": "496189717b033408f8aa0c099c586cb75a94c2ef0f58d015afb4ed4d2c2e9051",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-14T00:03:54.347935Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-3e6cb3fedc8e:2",
+      "execution_id": "research-3e6cb3fedc8e:2",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-3e6cb3fedc8e",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "mitre_attack_ics_q2",
+      "query_hash": "f47839cee649498d",
+      "query_purpose": "official_origin_discovery:application_scope",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-14T00:03:54.351354Z",
+      "completed_at": "2026-08-14T00:03:56.503897Z",
+      "http_status": 200,
+      "result_count": 30,
+      "allowlisted_result_count": 2,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 2,
+          "responses": 2,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1437.654,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 2,
+          "responses": 2,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1437.654,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 1335.076,
+      "degradation_reasons": [],
+      "provider_status": "completed",
+      "response_body_hash": "79b3a10066dd7ab3023c1f59631aa8b158622dc15039677cef534eecd9e0a4c8",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-14T00:03:56.503897Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-3e6cb3fedc8e:3",
+      "execution_id": "research-3e6cb3fedc8e:3",
+      "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+      "provider_id": "governed_http_origin",
+      "certification_run_id": "research-3e6cb3fedc8e",
+      "provider_endpoint_host": "attack.mitre.org",
+      "query_id": "mitre_attack_ics",
+      "query_hash": "6d66d201f78db8cb",
+      "query_purpose": "discovered_official_origin_fetch",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-14T00:03:56.505635Z",
+      "completed_at": "2026-08-14T00:03:57.786005Z",
+      "http_status": 200,
+      "result_count": null,
+      "allowlisted_result_count": null,
+      "engines_queried": [],
+      "engines_responded": [],
+      "engine_failures": [],
+      "engine_reliability": [],
+      "suppressed_engines": [],
+      "request_latency_ms": null,
+      "degradation_reasons": [],
+      "provider_status": null,
+      "response_body_hash": "84a1a6fafbb9b42cd72be7b72f27956eaa4f790c196a22f2bfcd492273eda61b",
+      "selected_origin_urls": [
+        "https://attack.mitre.org/matrices/ics/"
+      ],
+      "origin_content_type": "text/html",
+      "origin_observed_at": "2026-08-14T00:03:57.786005Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-3e6cb3fedc8e:4",
+      "execution_id": "research-3e6cb3fedc8e:4",
+      "provider_capability": "WEB_DISCOVERY",
+      "provider_id": "searxng_compatible_discovery",
+      "certification_run_id": "research-3e6cb3fedc8e",
+      "provider_endpoint_host": "127.0.0.1",
+      "query_id": "factory_io_official_docs_q1",
+      "query_hash": "8c232e61e07e45f0",
+      "query_purpose": "official_origin_discovery:named_software",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-14T00:03:57.820900Z",
+      "completed_at": "2026-08-14T00:04:00.411259Z",
+      "http_status": 200,
+      "result_count": 30,
+      "allowlisted_result_count": 2,
+      "engines_queried": [],
+      "engines_responded": [
+        "bing",
+        "google cse"
+      ],
+      "engine_failures": [
+        {
+          "engine": "wikipedia",
+          "reason": "HTTP error"
+        }
+      ],
+      "engine_reliability": [
+        {
+          "engine": "bing",
+          "attempts": 3,
+          "responses": 3,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1543.491,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "google cse",
+          "attempts": 3,
+          "responses": 3,
+          "failures": 0,
+          "zero_results": 0,
+          "average_latency_ms": 1543.491,
+          "unhealthy_rate": 0.0,
+          "suppressed": false
+        },
+        {
+          "engine": "wikipedia",
+          "attempts": 1,
+          "responses": 0,
+          "failures": 1,
+          "zero_results": 0,
+          "average_latency_ms": 1755.166,
+          "unhealthy_rate": 1.0,
+          "suppressed": false
+        }
+      ],
+      "suppressed_engines": [],
+      "request_latency_ms": 1755.166,
+      "degradation_reasons": [
+        "engines_unresponsive"
+      ],
+      "provider_status": "degraded",
+      "response_body_hash": "db25d80915760d593239e6f712f5b094e42b631c3b24b191cd850e74391ab971",
+      "selected_origin_urls": [],
+      "origin_content_type": null,
+      "origin_observed_at": "2026-08-14T00:04:00.411259Z",
+      "rejection_reason": null
+    },
+    {
+      "receipt_id": "research-3e6cb3fedc8e:5",
+      "execution_id": "research-3e6cb3fedc8e:5",
+      "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+      "provider_id": "governed_http_origin",
+      "certification_run_id": "research-3e6cb3fedc8e",
+      "provider_endpoint_host": "docs.factoryio.com",
+      "query_id": "factory_io_official_docs",
+      "query_hash": "8b7f5e267bc35b75",
+      "query_purpose": "discovered_official_origin_fetch",
+      "obligation_ids": [
+        "official-requirements"
+      ],
+      "execution_status": "completed",
+      "fixture": false,
+      "network_execution": true,
+      "external_call_dispatched": true,
+      "cache_status": "miss",
+      "billing_class": "free",
+      "started_at": "2026-08-14T00:04:00.413655Z",
+      "completed_at": "2026-08-14T00:04:01.515718Z",
+      "http_status": 200,
+      "result_count": null,
+      "allowlisted_result_count": null,
+      "engines_queried": [],
+      "engines_responded": [],
+      "engine_failures": [],
+      "engine_reliability": [],
+      "suppressed_engines": [],
+      "request_latency_ms": null,
+      "degradation_reasons": [],
+      "provider_status": null,
+      "response_body_hash": "5145973cbadcdc3ed2b55af7632ce40a7c71493037c6bfe4f8e866fb7799806a",
+      "selected_origin_urls": [
+        "https://docs.factoryio.com/manual/system-requirements/"
+      ],
+      "origin_content_type": "text/html",
+      "origin_observed_at": "2026-08-14T00:04:01.515718Z",
+      "rejection_reason": null
+    }
+  ],
+  "provider_accounting": {
+    "external_calls": 5,
+    "discovery_calls": 3,
+    "official_origin_fetches": 2,
+    "cache_hits": 0,
+    "paid_calls": 0
+  },
+  "paid_calls": 0,
+  "authority_rule": "discovery finds; source-specific official parser establishes scoped claims"
+}
