@@ -78,6 +78,16 @@ def test_recall_deterministic():
     assert recall(g, ["u1"]) == recall(g, ["u1"])  # stable ordering
 
 
+def test_recall_normalizes_degree_so_event_volume_is_not_an_implicit_popularity_model():
+    rows = [
+        _trace("user", "u1", "product", "P1"),
+        _trace("user", "u1", "product", "P2"),
+    ]
+    graph = project_graph(rows, [], catalog_skus=["P1", "P2"])
+    scores = dict(recall(graph, ["u1"], top_k=10))
+    assert scores["P1"] == scores["P2"] == 0.5
+
+
 def test_temporal_projection_never_consumes_future_outcomes():
     rows = [
         {**_trace("user", "u1", "product", "PAST"), "id": "edge-past",

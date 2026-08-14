@@ -14,6 +14,7 @@ export default function HippographEvidencePanel({ insights, classNames }: Props)
       {insights.map((insight: any, index: number) => {
         const path = insight?.evidence_path || {};
         const health = insight?.source_health || {};
+        const trust = insight?.trust_projection || {};
         return (
           <details key={`${insight?.id || 'insight'}-${index}`} style={{ marginTop: 8 }} open={index === 0}>
             <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
@@ -23,6 +24,12 @@ export default function HippographEvidencePanel({ insights, classNames }: Props)
             <div className={classNames.kvRow}><span>Authority</span><span>{insight?.authority || path?.authority || 'evidence_only'}</span></div>
             <div className={classNames.kvRow}><span>Path</span><span>{Array.isArray(path?.nodes) && path.nodes.length ? path.nodes.join(' → ') : 'No bounded path available'}</span></div>
             <div className={classNames.kvRow}><span>Hops</span><span>{path?.hops ?? 'not recorded'}</span></div>
+            <div className={classNames.kvRow}><span>Evidence quality</span><span>{trust?.status || 'not assessed'} · {trust?.evidence_records ?? 0} records</span></div>
+            {Array.isArray(trust?.limitations) && trust.limitations.length > 0 && (
+              <div data-testid="hippograph-trust-limitations" className={classNames.muted}>
+                {trust.limitations.join(' ')}
+              </div>
+            )}
             {Array.isArray(health?.degraded_sources) && health.degraded_sources.length > 0 && (
               <div data-testid="hippograph-degraded-sources" style={{ color: '#b45309', marginTop: 6 }}>
                 Degraded sources: {health.degraded_sources.map((source: any) => (

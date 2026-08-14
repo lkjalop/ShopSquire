@@ -10,6 +10,8 @@ from typing import Any, Dict, Iterable, List
 
 from sqlalchemy import text
 
+from src.app.services.behavioral_signal_projection import project_behavioral_signals
+
 
 _ENTRY_EVENTS = {"impression", "view", "view_item", "view_item_list"}
 _CART_EVENTS = {"add_to_cart"}
@@ -55,6 +57,7 @@ def summarize_marketing_facts(db, *, tenant_id: str, min_action_sample: int = 10
         ORDER BY occurred_at, id
     """), {"tenant": tenant}).mappings().all()
     rows = [dict(row) for row in records]
+    behavioral = project_behavioral_signals(rows)
     counts = Counter(str(row.get("event_type") or "unknown").lower() for row in rows)
     stages = _session_sets(rows)
     total = len(rows)
@@ -90,12 +93,20 @@ def summarize_marketing_facts(db, *, tenant_id: str, min_action_sample: int = 10
     purchased = len(stages["purchased"])
     returned = len(stages["returned"])
     insights: List[Dict[str, Any]] = []
-    if carted >= min_action_sample:
-        abandoned = len(stages["carted"] - stages["purchased"])
-        rate = abandoned / carted
+    abandonment = next(
+        (item for item in behavioral.measurements if item.metric == "cart_abandonment_rate"),
+        None,
+    )
+    if (
+        abandonment is not None
+        and abandonment.value is not None
+        and int(abandonment.denominator or 0) >= min_action_sample
+    ):
+        rate = float(abandonment.value)
         if rate >= 0.35:
             insights.append({
-                "type": "cart_abandonment", "sample": carted, "rate": round(rate, 4),
+                "type": "cart_abandonment", "sample": abandonment.denominator,
+                "rate": round(rate, 4),
                 "confidence": "eligible", "action": "inspect checkout friction by stage and device",
                 "authority": "operator_advisory",
             })
@@ -129,7 +140,10 @@ def summarize_marketing_facts(db, *, tenant_id: str, min_action_sample: int = 10
             "provenance_time_rate": _rate(provenance_complete, total),
             "consent_state_rate": _rate(consent_known, total),
             "monetary_currency_rate": _rate(currency_complete, len(monetary)),
+            "right_censored_sessions": behavioral.right_censored_sessions,
+            "withheld_sessions": behavioral.withheld_sessions,
         },
+        "behavioral_signal_truth": behavioral.model_dump(mode="json"),
         "sku_cohorts": {sku: dict(sorted(values.items())) for sku, values in sorted(by_sku.items())},
         "campaign_cohorts": {key: dict(sorted(values.items())) for key, values in sorted(by_campaign.items())},
         "month_cohorts": {

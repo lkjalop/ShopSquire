@@ -155,10 +155,32 @@ def projections(db, *, tenant_id: str = "default", window_days: int = 30) -> Dic
     velocity = detect_velocity_dsi(inputs["sales"], inputs["inventory"], window_days=window_days)
     bulk = detect_bulk_order_frequency(inputs["cases"], window_days=90)
     for sku, item in velocity.items():
-        item["bulk_frequency"] = bulk.get(sku, {
-            "subject_id": sku, "window_days": 90, "bulk_order_count": 0,
-            "bulk_units_requested": 0, "orders_per_30d": 0.0,
-        })
+        sales_observed = inputs["sales_status"] in {"observed", "simulated"}
+        inventory_observed = inputs["inventory_status"] == "observed"
+        if not sales_observed:
+            item.update({
+                "units_sold": None, "units_per_day": None, "velocity": None,
+                "dsi_days": None, "dead_stock": None,
+            })
+        if not inventory_observed:
+            item.update({
+                "stock_on_hand": None, "velocity": None, "dsi_days": None,
+                "stockout": None, "dead_stock": None,
+            })
+        item["measurement_truth"] = {
+            "sales": "observed" if sales_observed else "not_collected",
+            "inventory": "observed" if inventory_observed else (
+                "not_disclosed" if inputs["inventory_status"] == "unavailable"
+                else "not_collected"
+            ),
+            "authority": "evidence_only",
+        }
+        item["bulk_frequency"] = bulk.get(sku)
+        item["bulk_frequency_state"] = (
+            "derived" if sku in bulk else
+            "observed_zero" if inputs["cases"] else
+            "not_collected"
+        )
         item["as_of"] = inputs["as_of"]
         statuses = {inputs["sales_status"], inputs["inventory_status"]}
         item["status"] = (
@@ -206,28 +228,37 @@ def projection_evidence(
         projection = by_sku.get(sku)
         if not projection:
             continue
-        units_per_day = float(projection.get("units_per_day") or 0.0)
+        units_per_day = (
+            float(projection["units_per_day"])
+            if projection.get("units_per_day") is not None else None
+        )
         evidence.append({
             "tenant_id": tenant_id,
             "sku": sku,
             "rank": rank,
             "demand_trend": (
-                "dead_stock" if projection.get("dead_stock")
-                else "observed_sales" if units_per_day > 0
-                else "insufficient_data"
+                "dead_stock" if projection.get("dead_stock") is True
+                else "observed_sales" if units_per_day is not None and units_per_day > 0
+                else "observed_zero" if units_per_day == 0
+                else "not_verified"
             ),
-            "forecast_units_30d": round(units_per_day * 30.0, 2),
+            "forecast_units_30d": (
+                round(units_per_day * 30.0, 2) if units_per_day is not None else None
+            ),
             "velocity_dsi_days": projection.get("dsi_days"),
             "stock_position": (
-                "stockout" if projection.get("stockout")
-                else "surplus" if projection.get("dead_stock")
-                else "balanced"
+                "stockout" if projection.get("stockout") is True
+                else "surplus" if projection.get("dead_stock") is True
+                else "balanced" if projection.get("stock_on_hand") is not None
+                else "not_verified"
             ),
             "stock_on_hand": projection.get("stock_on_hand"),
             "bulk_frequency": projection.get("bulk_frequency"),
+            "bulk_frequency_state": projection.get("bulk_frequency_state"),
             "metrics": projection.get("metrics", []),
             "status": projection.get("status"),
             "source_status": projection.get("source_status"),
+            "measurement_truth": projection.get("measurement_truth"),
             "confidence": projection.get("confidence"),
             "as_of": projection.get("as_of"),
             "economics_included": False,
@@ -268,7 +299,10 @@ def operator_product_projection(db, *, sku: str, tenant_id: str = "default") -> 
         if list_cents is not None and wholesale_cents is not None else None)
     margin_pct = (
         round(gross / float(list_cents), 4) if gross is not None and list_cents else None)
-    forecast_units = float(projection.get("units_per_day") or 0.0) * 30.0
+    forecast_units = (
+        float(projection["units_per_day"]) * 30.0
+        if projection.get("units_per_day") is not None else None
+    )
     authorized = bool(
         cost.get("cost_kind") == "validated_landed_quote"
         and not cost.get("simulation_only")
@@ -283,9 +317,10 @@ def operator_product_projection(db, *, sku: str, tenant_id: str = "default") -> 
         "wholesale_cents": wholesale_cents,
         "gross_per_unit_cents": gross,
         "gross_margin_pct": margin_pct,
-        "forecast_units_30d": round(forecast_units, 2),
+        "forecast_units_30d": round(forecast_units, 2) if forecast_units is not None else None,
         "projected_profit_30d_cents": (
-            int(round(gross * forecast_units)) if gross is not None else None),
+            int(round(gross * forecast_units))
+            if gross is not None and forecast_units is not None else None),
         "discount_headroom_cents": None,
         "discount_authorized": authorized,
         "cost_basis": cost.get("cost_kind") or cost.get("cost_basis") or "unavailable",

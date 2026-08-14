@@ -38,11 +38,14 @@ export default function MarketIntelligencePanel({
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontWeight: 700 }}>
               <span>{item.sku}</span><span>rank {item.rank ?? '—'}</span>
             </div>
-            <div className={classNames.kvRow}><span>Demand</span><span>{humanize(item.demand_trend)} · {item.forecast_units_30d ?? 0} units / 30d</span></div>
-            <div className={classNames.kvRow}><span>Inventory</span><span>{item.stock_on_hand ?? '—'} on hand · DSI {item.velocity_dsi_days ?? '—'} days</span></div>
-            <div className={classNames.kvRow}><span>Bulk frequency</span><span>{item.bulk_frequency?.bulk_order_count ?? 0} cases / {item.bulk_frequency?.window_days ?? 90}d</span></div>
+            <div className={classNames.kvRow}><span>Demand</span><span>{humanize(item.demand_trend)} · {item.forecast_units_30d ?? 'not verified'} units / 30d</span></div>
+            <div className={classNames.kvRow}><span>Inventory</span><span>{item.stock_on_hand ?? 'not disclosed'} on hand · DSI {item.velocity_dsi_days ?? 'not verified'} days</span></div>
+            <div className={classNames.kvRow}><span>Bulk frequency</span><span>{item.bulk_frequency
+              ? `${item.bulk_frequency.bulk_order_count} cases / ${item.bulk_frequency.window_days ?? 90}d`
+              : humanize(item.bulk_frequency_state || 'not_collected')}</span></div>
             <div className={classNames.kvRow}><span>Evidence</span><span>{humanize(item.status || item.confidence)} · as of {formatTime(item.as_of)}</span></div>
             <div className={classNames.kvRow}><span>Sources</span><span>{humanize(item.source_status?.sales)} sales · {humanize(item.source_status?.inventory)} inventory</span></div>
+            <div className={classNames.kvRow}><span>Observation truth</span><span>{humanize(item.measurement_truth?.sales)} sales · {humanize(item.measurement_truth?.inventory)} inventory</span></div>
             <div className={classNames.kvRow}><span>Authority</span><span>Advisory evidence only · deterministic gates authorize actions</span></div>
             {Array.isArray(item.metrics) && item.metrics.length > 0 && (
               <details style={{ marginTop: 8 }}>
@@ -50,7 +53,7 @@ export default function MarketIntelligencePanel({
                 {item.metrics.map((metric: any, metricIndex: number) => (
                   <div key={`${metric.metric || 'metric'}-${metricIndex}`} style={{ borderTop: '1px solid #dbeafe', paddingTop: 6, marginTop: 6 }}>
                     <div className={classNames.kvRow}><span>{humanize(metric.metric)}</span><span>{metric.value ?? 'unavailable'} {metric.unit || ''}</span></div>
-                    <div className={classNames.kvRow}><span>Status</span><span>{humanize(metric.status)} · confidence {Math.round(Number(metric.confidence || 0) * 100)}%</span></div>
+                    <div className={classNames.kvRow}><span>Status</span><span>{humanize(metric.status)} · confidence {metric.confidence == null ? 'not recorded' : `${Math.round(Number(metric.confidence) * 100)}%`}</span></div>
                     <div className={classNames.kvRow}><span>Lineage</span><span>{Array.isArray(metric.provenance_chain) && metric.provenance_chain.length ? metric.provenance_chain.join(' → ') : 'not supplied'}</span></div>
                   </div>
                 ))}

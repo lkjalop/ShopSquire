@@ -38,6 +38,7 @@ def build_hippograph_insights(
 
         from src.app.services.hippograph import explain_path, recall, resolve_product
         from src.app.services.hippograph_db import _DEFAULT_SKU_PATTERN, build_from_db
+        from src.app.services.hippograph_trust_projection import project_path_trust
 
         # include_findings projects persisted M3 findings as `finding` nodes (fast — batch computes
         # them); finding↔entity edges make a finding reachable from its product/term seed.
@@ -95,13 +96,15 @@ def build_hippograph_insights(
             node = graph.nodes.get(nid)
             if not node or node.kind not in _USEFUL_KINDS:
                 continue
+            evidence_path = explain_path(graph, seeds, nid)
             out.append({
                 "id": nid,
                 "kind": node.kind,
                 "label": node.label,
                 "score": round(float(score), 4),
                 "reward_weight": round(float(node.weight), 2),
-                "evidence_path": explain_path(graph, seeds, nid),
+                "evidence_path": evidence_path,
+                "trust_projection": project_path_trust(evidence_path).model_dump(mode="json"),
                 "source_health": {
                     "status": "degraded" if graph.degraded_sources else "healthy",
                     "degraded_sources": graph.degraded_sources,

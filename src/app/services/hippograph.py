@@ -45,6 +45,8 @@ class HippoGraph:
 
 
 _TRACE_EDGE_WEIGHTS = {
+    "hover": 0.05,
+    "click": 0.12,
     "viewed": 0.15,
     "shortlisted": 0.35,
     "added_to_cart": 0.55,
@@ -52,6 +54,7 @@ _TRACE_EDGE_WEIGHTS = {
     "returned": -0.8,
     "rejected": -0.6,
     "corrected": -0.35,
+    "abandoned": -0.3,
 }
 
 
@@ -293,8 +296,13 @@ def recall(
     for hop in range(max(1, int(hops))):
         nxt: Dict[str, float] = {}
         for nid, act in frontier.items():
-            for nb, w in (graph.adjacency.get(nid) or {}).items():
-                contrib = act * w * (decay ** hop)
+            neighbours = graph.adjacency.get(nid) or {}
+            # Normalize at every node. Without this, heavily instrumented or
+            # high-degree entities win merely because they emitted more events.
+            # This keeps recall about relatedness rather than popularity volume.
+            total_weight = sum(max(0.0, float(weight)) for weight in neighbours.values()) or 1.0
+            for nb, w in neighbours.items():
+                contrib = act * (max(0.0, float(w)) / total_weight) * (decay ** hop)
                 scores[nb] = scores.get(nb, 0.0) + contrib
                 if nb not in visited:
                     nxt[nb] = nxt.get(nb, 0.0) + contrib

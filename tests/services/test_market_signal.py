@@ -10,7 +10,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.app.services.market_signal import MarketSignal, ingest, is_fresh, normalize
+from src.app.services.market_signal import (
+    MarketSignal, ingest, ingest_with_receipt, is_fresh, normalize,
+)
 from tests.market_migration_helpers import apply_market_migration
 
 
@@ -68,6 +70,29 @@ def test_ingest_quarantines_low_trust(db):
 
 def test_ingest_none_safe():
     assert ingest(None, None) is False
+
+
+def test_ingestion_receipt_distinguishes_duplicate_trust_and_unknown_time(db):
+    accepted = normalize(signal_type="d", source="s", payload={"x": 1})
+    assert ingest_with_receipt(db, accepted).status == "accepted"
+    assert ingest_with_receipt(db, accepted).status == "duplicate"
+    low = normalize(signal_type="d", source="s", payload={"x": 2}, trust_score=0.1)
+    assert ingest_with_receipt(db, low, min_trust=0.5).status == "low_trust"
+    undated = normalize(signal_type="d", source="s", payload={"x": 3})
+    receipt = ingest_with_receipt(
+        db, undated, max_age_seconds=60, now_iso="2026-06-25T12:00:00",
+    )
+    assert receipt.status == "timestamp_unknown" and receipt.accepted is False
+    invalid = normalize(signal_type="d", source="s", payload={"x": 4}, occurred_at="yesterday-ish")
+    assert ingest_with_receipt(
+        db, invalid, max_age_seconds=60, now_iso="2026-06-25T12:00:00",
+    ).status == "timestamp_invalid"
+    future = normalize(
+        signal_type="d", source="s", payload={"x": 5}, occurred_at="2026-06-26T12:00:00",
+    )
+    assert ingest_with_receipt(
+        db, future, max_age_seconds=60, now_iso="2026-06-25T12:00:00",
+    ).status == "timestamp_future"
 
 
 # ── freshness ────────────────────────────────────────────────────────────────

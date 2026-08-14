@@ -15,11 +15,27 @@ table here (it routes to event_log), so search_events is the behavioral/demand s
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional
+from collections import Counter
+from typing import Any, Dict, Iterable, Literal, Optional
 
-from sqlalchemy import text
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import inspect, text
 
-from src.app.services.market_signal import MarketSignal, ensure_table, ingest, normalize
+from src.app.services.market_signal import (
+    MarketSignal, ensure_table, ingest_with_receipt, normalize,
+)
+
+
+class SourceBackfillReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal["market-source-backfill-v1"] = "market-source-backfill-v1"
+    source: str
+    status: Literal["completed", "source_unavailable", "query_failed"]
+    rows_read: int = 0
+    accepted: int = 0
+    outcomes: dict[str, int] = Field(default_factory=dict)
+    error_code: str | None = None
+    authority: Literal["ingestion_receipt_only"] = "ingestion_receipt_only"
 
 
 def from_order(row: Dict[str, Any]) -> Optional[MarketSignal]:
@@ -191,19 +207,42 @@ _SOURCES = {
 }
 
 
-def _backfill_one(db, sql: str, row_map, sig_map, *, limit: int, min_trust: float,
-                  max_age_seconds: Optional[float], now_iso: Optional[str], tenant_id: str) -> int:
-    n = 0
+def _source_table(sql: str) -> str | None:
+    tokens = str(sql).replace("\n", " ").split()
     try:
-        rows = db.execute(text(sql), {"lim": int(limit), "tenant": tenant_id}).fetchall()
-        for r in rows:
-            sig = sig_map(row_map(r))
-            if sig and ingest(db, sig, min_trust=min_trust,
-                              max_age_seconds=max_age_seconds, now_iso=now_iso):
-                n += 1
-        return n
-    except Exception:
-        return n  # source table absent / query error → partial, never raise
+        return tokens[tokens.index("FROM") + 1]
+    except (ValueError, IndexError):
+        return None
+
+
+def _backfill_one(db, source: str, sql: str, row_map, sig_map, *, limit: int, min_trust: float,
+                  max_age_seconds: Optional[float], now_iso: Optional[str],
+                  tenant_id: str) -> SourceBackfillReceipt:
+    table_name = _source_table(sql)
+    if table_name and not inspect(db.get_bind()).has_table(table_name):
+        return SourceBackfillReceipt(
+            source=source, status="source_unavailable", error_code="table_missing",
+        )
+    outcomes: Counter[str] = Counter()
+    try:
+        with db.begin_nested():
+            rows = db.execute(text(sql), {"lim": int(limit), "tenant": tenant_id}).fetchall()
+            for r in rows:
+                sig = sig_map(row_map(r))
+                receipt = ingest_with_receipt(
+                    db, sig, min_trust=min_trust,
+                    max_age_seconds=max_age_seconds, now_iso=now_iso,
+                )
+                outcomes[receipt.status] += 1
+        return SourceBackfillReceipt(
+            source=source, status="completed", rows_read=len(rows),
+            accepted=outcomes["accepted"], outcomes=dict(sorted(outcomes.items())),
+        )
+    except Exception as exc:
+        return SourceBackfillReceipt(
+            source=source, status="query_failed", error_code=type(exc).__name__,
+            outcomes=dict(sorted(outcomes.items())),
+        )
 
 
 def _safe_commit(db) -> None:
@@ -227,21 +266,42 @@ def backfill_from_db(
     """Ingest recent rows from each source into market_signal (idempotent). Trust- and (when
     ``max_age_seconds`` is set) freshness-gated at the write — bad/stale input is quarantined before it
     can drive autonomous behaviour. Returns {source: count}."""
+    receipts = backfill_from_db_with_receipts(
+        db, sources=sources, limit=limit, min_trust=min_trust,
+        max_age_seconds=max_age_seconds, now_iso=now_iso, tenant_id=tenant_id,
+        commit=commit,
+    )
+    return {receipt.source: receipt.accepted for receipt in receipts}
+
+
+def backfill_from_db_with_receipts(
+    db,
+    *,
+    sources: Optional[Iterable[str]] = None,
+    limit: int = 1000,
+    min_trust: float = 0.0,
+    max_age_seconds: Optional[float] = None,
+    now_iso: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    commit: bool = True,
+) -> list[SourceBackfillReceipt]:
+    """Auditable source-by-source ingestion without changing the legacy count API."""
     if db is None:
-        return {}
+        return []
     if not tenant_id:
         from src.app.platform.tenant_context import current_tenant_id
         tenant_id = current_tenant_id()
     tenant_id = str(tenant_id or "default").strip() or "default"
     ensure_table(db)
-    counts: Dict[str, int] = {}
+    receipts: list[SourceBackfillReceipt] = []
     want = set(sources) if sources else None
     for name, (sql, row_map, sig_map) in _SOURCES.items():
         if want is not None and name not in want:
             continue
-        counts[name] = _backfill_one(db, sql, row_map, sig_map, limit=limit, min_trust=min_trust,
-                                     max_age_seconds=max_age_seconds, now_iso=now_iso,
-                                     tenant_id=tenant_id)
+        receipts.append(_backfill_one(
+            db, name, sql, row_map, sig_map, limit=limit, min_trust=min_trust,
+            max_age_seconds=max_age_seconds, now_iso=now_iso, tenant_id=tenant_id,
+        ))
     if commit:
         _safe_commit(db)
-    return counts
+    return receipts

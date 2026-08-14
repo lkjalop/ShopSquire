@@ -13,6 +13,7 @@ from typing import Any, Iterable, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.app.services.hippograph import HippoGraph, explain_path, recall
+from src.app.services.hippograph_trust_projection import HippographPathTrust, project_path_trust
 
 
 JourneyLane = Literal[
@@ -44,6 +45,7 @@ class JourneyEntity(BaseModel):
     relatedness_score: float
     outcome_prior: float
     evidence_path: JourneyEvidencePath
+    trust_projection: HippographPathTrust
 
 
 class JourneyLaneView(BaseModel):
@@ -131,6 +133,7 @@ def project_hippograph_journey(
             continue
         lane = _lane_for_kind(node.kind)
         kind_counts[node.kind] += 1
+        raw_path = explain_path(graph, seeds, entity_id, max_hops=max_hops)
         lane_entities[lane].append(JourneyEntity(
             entity_id=entity_id,
             kind=node.kind,
@@ -138,9 +141,8 @@ def project_hippograph_journey(
             lane=lane,
             relatedness_score=round(float(score), 4),
             outcome_prior=round(float(node.weight), 4),
-            evidence_path=JourneyEvidencePath.model_validate(
-                explain_path(graph, seeds, entity_id, max_hops=max_hops)
-            ),
+            evidence_path=JourneyEvidencePath.model_validate(raw_path),
+            trust_projection=project_path_trust(raw_path),
         ))
 
     return HippographJourneyProjection(

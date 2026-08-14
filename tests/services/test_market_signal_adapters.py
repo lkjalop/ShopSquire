@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from src.app.services import attribution
 from src.app.services.market_signal_adapters import (
     backfill_from_db,
+    backfill_from_db_with_receipts,
     from_competitor,
     from_conversion,
     from_order,
@@ -109,6 +110,18 @@ def test_backfill_source_filter(db):
     counts = backfill_from_db(db, sources=["orders"])
     assert counts == {"orders": 1}
     assert db.execute(text("SELECT COUNT(*) FROM market_signal")).fetchone()[0] == 1
+
+
+def test_backfill_receipts_distinguish_missing_source_from_completed_zero(db):
+    receipts = {
+        row.source: row for row in backfill_from_db_with_receipts(
+            db, sources=["orders", "competitor"], tenant_id="default",
+        )
+    }
+    assert receipts["orders"].status == "completed"
+    assert receipts["orders"].accepted == 1
+    assert receipts["competitor"].status == "source_unavailable"
+    assert receipts["competitor"].error_code == "table_missing"
 
 
 def test_backfill_none_db_safe():

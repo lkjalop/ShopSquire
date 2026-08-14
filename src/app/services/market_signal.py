@@ -23,7 +23,9 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict
 
 from sqlalchemy import inspect as _sa_inspect
 from sqlalchemy import text
@@ -42,6 +44,23 @@ class MarketSignal:
     dedup_key: str
     tenant_id: str = DEFAULT_TENANT
     schema_version: int = SCHEMA_VERSION
+
+
+class MarketSignalIngestionReceipt(BaseModel):
+    """Truthful ingestion outcome; unlike the legacy bool, it explains a no-op."""
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal["market-signal-ingestion-v1"] = "market-signal-ingestion-v1"
+    accepted: bool
+    status: Literal[
+        "accepted", "duplicate", "invalid", "low_trust", "stale",
+        "timestamp_unknown", "timestamp_invalid", "timestamp_future",
+        "schema_unavailable", "storage_failed",
+    ]
+    dedup_key: str | None = None
+    trust_score: float | None = None
+    freshness_enforced: bool = False
+    authority: Literal["ingestion_receipt_only"] = "ingestion_receipt_only"
 
 
 def ensure_table(db) -> None:
@@ -127,32 +146,69 @@ def is_fresh(signal: Optional[MarketSignal], *, max_age_seconds: float, now_iso:
         return True
 
 
-def ingest(
+def ingest_with_receipt(
     db,
     signal: Optional[MarketSignal],
     *,
     min_trust: float = 0.0,
     max_age_seconds: Optional[float] = None,
     now_iso: Optional[str] = None,
-) -> bool:
-    """Idempotent insert (skips a duplicate dedup_key) gated by trust (quarantine below min_trust)
-    and, when ``max_age_seconds`` is given, by freshness (drop stale signals). Returns True only when
-    a new row is written. Never raises. A concurrent race is closed by the UNIQUE dedup index — the
-    losing insert raises and is caught → False."""
+) -> MarketSignalIngestionReceipt:
+    """Return an explicit receipt for acceptance, quarantine, duplicate, or failure."""
     if db is None or signal is None:
-        return False
+        return MarketSignalIngestionReceipt(accepted=False, status="invalid")
     if signal.trust_score < float(min_trust):
-        return False  # quarantine low-trust signal
-    if max_age_seconds is not None and not is_fresh(signal, max_age_seconds=max_age_seconds, now_iso=now_iso):
-        return False  # quarantine stale signal
+        return MarketSignalIngestionReceipt(
+            accepted=False, status="low_trust", dedup_key=signal.dedup_key,
+            trust_score=signal.trust_score, freshness_enforced=max_age_seconds is not None,
+        )
+    if max_age_seconds is not None:
+        if not signal.occurred_at or not now_iso:
+            return MarketSignalIngestionReceipt(
+                accepted=False, status="timestamp_unknown", dedup_key=signal.dedup_key,
+                trust_score=signal.trust_score, freshness_enforced=True,
+            )
+        try:
+            from datetime import datetime
+
+            occurred = datetime.fromisoformat(signal.occurred_at.replace("Z", "+00:00"))
+            current = datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
+            if occurred.tzinfo is None:
+                occurred = occurred.replace(tzinfo=current.tzinfo)
+            if current.tzinfo is None:
+                current = current.replace(tzinfo=occurred.tzinfo)
+        except (TypeError, ValueError):
+            return MarketSignalIngestionReceipt(
+                accepted=False, status="timestamp_invalid", dedup_key=signal.dedup_key,
+                trust_score=signal.trust_score, freshness_enforced=True,
+            )
+        if occurred > current:
+            return MarketSignalIngestionReceipt(
+                accepted=False, status="timestamp_future", dedup_key=signal.dedup_key,
+                trust_score=signal.trust_score, freshness_enforced=True,
+            )
+        if not is_fresh(signal, max_age_seconds=max_age_seconds, now_iso=now_iso):
+            return MarketSignalIngestionReceipt(
+                accepted=False, status="stale", dedup_key=signal.dedup_key,
+                trust_score=signal.trust_score, freshness_enforced=True,
+            )
     try:
         ensure_table(db)
+    except RuntimeError:
+        return MarketSignalIngestionReceipt(
+            accepted=False, status="schema_unavailable", dedup_key=signal.dedup_key,
+            trust_score=signal.trust_score, freshness_enforced=max_age_seconds is not None,
+        )
+    try:
         existing = db.execute(
             text("SELECT 1 FROM market_signal WHERE tenant_id = :t AND dedup_key = :k LIMIT 1"),
             {"t": signal.tenant_id, "k": signal.dedup_key},
         ).fetchone()
         if existing:
-            return False
+            return MarketSignalIngestionReceipt(
+                accepted=False, status="duplicate", dedup_key=signal.dedup_key,
+                trust_score=signal.trust_score, freshness_enforced=max_age_seconds is not None,
+            )
         db.execute(
             text(
                 "INSERT INTO market_signal "
@@ -171,6 +227,26 @@ def ingest(
                 "occ": signal.occurred_at or None,
             },
         )
-        return True
+        return MarketSignalIngestionReceipt(
+            accepted=True, status="accepted", dedup_key=signal.dedup_key,
+            trust_score=signal.trust_score, freshness_enforced=max_age_seconds is not None,
+        )
     except Exception:
-        return False
+        return MarketSignalIngestionReceipt(
+            accepted=False, status="storage_failed", dedup_key=signal.dedup_key,
+            trust_score=signal.trust_score, freshness_enforced=max_age_seconds is not None,
+        )
+
+
+def ingest(
+    db,
+    signal: Optional[MarketSignal],
+    *,
+    min_trust: float = 0.0,
+    max_age_seconds: Optional[float] = None,
+    now_iso: Optional[str] = None,
+) -> bool:
+    """Compatibility wrapper; new callers should retain ``ingest_with_receipt``."""
+    return ingest_with_receipt(
+        db, signal, min_trust=min_trust, max_age_seconds=max_age_seconds, now_iso=now_iso,
+    ).accepted
