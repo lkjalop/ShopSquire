@@ -1,0 +1,50 @@
+{
+  "api-runtime": {
+    "output": "requirements/api-runtime.txt",
+    "roots": [
+      "alembic",
+      "argon2-cffi",
+      "celery",
+      "cryptography",
+      "dnspython",
+      "email-validator",
+      "fastapi",
+      "httpx",
+      "imagehash",
+      "neo4j",
+      "networkx",
+      "numpy",
+      "openpyxl",
+      "opentelemetry-api",
+      "opentelemetry-exporter-jaeger-thrift",
+      "opentelemetry-exporter-otlp",
+      "opentelemetry-instrumentation-fastapi",
+      "opentelemetry-instrumentation-redis",
+      "opentelemetry-instrumentation-requests",
+      "opentelemetry-sdk",
+      "orjson",
+      "pillow",
+      "prometheus-client",
+      "psycopg2-binary",
+      "pydantic",
+      "pyjwt",
+      "python-dotenv",
+      "python-json-logger",
+      "python-multipart",
+      "redis",
+      "sqlalchemy",
+      "ujson",
+      "uvicorn[standard]"
+    ]
+  },
+  "vision-runtime": {
+    "output": "requirements/vision-runtime.txt",
+    "roots": [
+      "opencv-python-headless",
+      "paddleocr",
+      "pypdfium2",
+      "pytesseract",
+      "pyzbar"
+    ]
+  }
+}
