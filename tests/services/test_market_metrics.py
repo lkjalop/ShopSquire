@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.app.services.market_facts import record_marketing_event
-from src.app.services.market_metrics import summarize_marketing_facts
+from src.app.services.market_metrics import cohort_safe_behavior_projection, summarize_marketing_facts
 
 
 MIGRATION = Path(__file__).resolve().parents[2] / "alembic" / "versions" / "20260721_market_fact_contract.py"
@@ -74,5 +74,24 @@ def test_cart_abandonment_needs_denominator_and_is_operator_only():
         assert report["insights"][0]["type"] == "cart_abandonment"
         assert report["insights"][0]["authority"] == "operator_advisory"
         assert report["authority"] == "read_only_operator_advisory"
+    finally:
+        db.close()
+
+
+def test_decision_trace_behavior_projection_suppresses_small_cohorts_and_identifiers():
+    db = _db()
+    try:
+        for user in range(4):
+            record_marketing_event(db, {
+                "tenant_id": "tenant-a", "deduplication_id": f"small:{user}",
+                "source_system": "synthetic_lab", "source_record_id": str(user),
+                "event_type": "click", "occurred_at": "2026-07-20T00:00:00Z",
+                "session_id": f"secret-session-{user}", "consent_state": "granted",
+                "provenance_chain": ["test"],
+            }, now=datetime(2026, 7, 21, tzinfo=timezone.utc))
+        view = cohort_safe_behavior_projection(db, tenant_id="tenant-a", minimum_sessions=5)
+        assert view["status"] == "suppressed_small_cohort"
+        assert view["sample_size"] is None
+        assert "secret-session" not in str(view)
     finally:
         db.close()

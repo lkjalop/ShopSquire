@@ -160,3 +160,31 @@ def summarize_marketing_facts(db, *, tenant_id: str, min_action_sample: int = 10
         "insights": insights,
         "authority": "read_only_operator_advisory",
     }
+
+
+def cohort_safe_behavior_projection(
+    db, *, tenant_id: str, minimum_sessions: int = 5,
+) -> Dict[str, Any]:
+    """Return aggregate behavior truth without session, user, or case identifiers."""
+    report = summarize_marketing_facts(db, tenant_id=tenant_id)
+    sample = int(report.get("unique_sessions") or 0)
+    base = {
+        "schema_version": "cohort-behavior-trace-v1",
+        "cohort_scope": "tenant_aggregate",
+        "minimum_sessions": minimum_sessions,
+        "individual_behavior_hidden": True,
+        "authority": "read_only_advisory",
+    }
+    if sample < max(1, int(minimum_sessions)):
+        return {**base, "status": "suppressed_small_cohort", "sample_size": None,
+                "measurements": []}
+    behavioral = dict(report.get("behavioral_signal_truth") or {})
+    allowed_metrics = {"hover_to_click_rate", "click_to_cart_rate", "cart_abandonment_rate"}
+    measurements = [item for item in behavioral.get("measurements", [])
+                    if str(item.get("metric")) in allowed_metrics]
+    return {
+        **base, "status": "aggregated", "sample_size": sample,
+        "measurements": measurements,
+        "right_censored_sessions": behavioral.get("right_censored_sessions", 0),
+        "withheld_sessions": behavioral.get("withheld_sessions", 0),
+    }

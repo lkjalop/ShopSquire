@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "review_status": "portfolio_demo_reviewed",
+  "dimensions": {
+    "quantity": {
+      "canonical": "unit",
+      "units": {"unit": 1, "units": 1, "each": 1, "ea": 1}
+    },
+    "duration": {
+      "canonical": "second",
+      "units": {"second": 1, "minute": 60, "hour": 3600, "day": 86400, "week": 604800}
+    },
+    "decimal_storage": {
+      "canonical": "byte",
+      "units": {"B": 1, "KB": 1000, "MB": 1000000, "GB": 1000000000, "TB": 1000000000000}
+    },
+    "binary_memory": {
+      "canonical": "byte",
+      "units": {"B": 1, "KiB": 1024, "MiB": 1048576, "GiB": 1073741824, "TiB": 1099511627776}
+    }
+  },
+  "currency": {
+    "codes": ["AUD", "USD", "EUR", "GBP"],
+    "cross_currency_requires_timestamped_rate": true
+  }
+}

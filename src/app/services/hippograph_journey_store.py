@@ -14,11 +14,24 @@ from src.app.models.orm import (
     HippographJourneyEdgeRecord, ProductAvailabilityObservation, ProductConfiguration,
 )
 from src.app.services.hippograph_journey_edges import TypedJourneyEdge
+from src.app.services.evidence_measurements import EvidenceMeasurement, MeasurementState, missing_measurement
 
 
 def _datetime(value: str) -> datetime:
     parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _availability_measurement(metric: str, value, unit: str) -> dict:
+    if value is None:
+        return missing_measurement(
+            metric, MeasurementState.NOT_DISCLOSED,
+            reason="The inventory source did not disclose this field.",
+        ).model_dump(mode="json")
+    return EvidenceMeasurement(
+        metric=metric, state=MeasurementState.OBSERVED, value=value, unit=unit,
+        source_authority="inventory_observation",
+    ).model_dump(mode="json")
 
 
 def persist_journey_edges(
@@ -114,6 +127,11 @@ def load_configuration_availability_edges(
             "status": observation.status, "quantity": observation.quantity,
             "lead_time_min_days": observation.lead_time_min_days,
             "lead_time_max_days": observation.lead_time_max_days,
+            "evidence_measurements": [
+                _availability_measurement("availability_quantity", observation.quantity, "unit"),
+                _availability_measurement("lead_time_min", observation.lead_time_min_days, "day"),
+                _availability_measurement("lead_time_max", observation.lead_time_max_days, "day"),
+            ],
         },
     ) for observation, configuration in rows]
 

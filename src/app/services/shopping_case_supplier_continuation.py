@@ -16,6 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, update
 
 from src.app.models.orm import ShoppingCaseFulfillmentSelection
+from src.app.services.evidence_measurements import (
+    EvidenceMeasurement,
+    MeasurementState,
+    missing_measurement,
+)
 from src.app.services.commercial_decision_reducer import (
     CommercialCandidate,
     CommercialDecision,
@@ -43,6 +48,8 @@ class SupplierOfferInput(BaseModel):
     unit_price_cents: int | None = Field(default=None, ge=0, le=1_000_000_000)
     currency: str = Field(default="AUD", min_length=3, max_length=3)
     validity_expires_at: str | None = Field(default=None, max_length=80)
+    warranty_type: str | None = Field(default=None, max_length=120)
+    warranty_duration_months: int | None = Field(default=None, ge=0, le=240)
     trust_status: Literal["trusted", "untrusted"] = "trusted"
 
 
@@ -57,6 +64,9 @@ class BuyerSafeSupplierOffer(BaseModel):
     unit_price_cents: int | None
     currency: str
     validity_expires_at: str | None
+    warranty_type: str | None = None
+    warranty_duration_months: int | None = None
+    evidence_measurements: list[EvidenceMeasurement] = Field(default_factory=list)
     provenance: dict[str, str]
     supplier_send: Literal["not_performed"] = "not_performed"
     purchase_commitment: Literal[False] = False
@@ -83,6 +93,34 @@ class FulfillmentSelection(BaseModel):
     selected_offer_id: str | None = None
     cart_plan_id: str | None = None
     cart_result: dict[str, Any] | None = None
+
+
+def _supplier_disclosure_measurements(row: SupplierOfferInput) -> list[EvidenceMeasurement]:
+    """Represent explicit supplier values and omissions without zero-filling."""
+    source = f"supplier_response:{row.source_reference}"
+    values = [EvidenceMeasurement(
+        metric="availability_quantity", state=MeasurementState.ATTESTED,
+        value=row.quantity_available, unit="unit", source_authority=source,
+    )]
+    optional = (
+        ("lead_time", row.lead_time_days, "day"),
+        ("unit_price", row.unit_price_cents, f"{row.currency.upper()}_minor_unit"),
+        ("quote_valid_until", row.validity_expires_at, None),
+        ("warranty_type", row.warranty_type, None),
+        ("warranty_duration", row.warranty_duration_months, "month"),
+    )
+    for metric, value, unit in optional:
+        if value is None:
+            values.append(missing_measurement(
+                metric, MeasurementState.NOT_DISCLOSED,
+                reason="The supplier response did not disclose this field.",
+            ))
+        else:
+            values.append(EvidenceMeasurement(
+                metric=metric, state=MeasurementState.ATTESTED, value=value,
+                unit=unit, source_authority=source,
+            ))
+    return values
 
 
 def normalize_supplier_offers(
@@ -147,6 +185,9 @@ def normalize_supplier_offers(
             unit_price_cents=row.unit_price_cents,
             currency=row.currency.upper(),
             validity_expires_at=row.validity_expires_at,
+            warranty_type=row.warranty_type,
+            warranty_duration_months=row.warranty_duration_months,
+            evidence_measurements=_supplier_disclosure_measurements(row),
             provenance={
                 "source_type": row.source_type,
                 "source_reference": row.source_reference,

@@ -53,6 +53,21 @@ def test_existing_procurement_offer_is_buyer_safe_and_retains_provenance() -> No
     assert offers[0].response_status == "accepted"
 
 
+def test_supplier_disclosures_distinguish_zero_from_not_disclosed() -> None:
+    offer = normalize_supplier_offers([SupplierOfferInput(
+        source_type="existing_procurement_case", source_reference="case/rfq",
+        supplier_reference="supplier", offered_sku="SKU", relationship="exact",
+        quantity_available=0, lead_time_days=None, unit_price_cents=None,
+        warranty_type=None, warranty_duration_months=None,
+    )])[0]
+    by_metric = {item.metric: item for item in offer.evidence_measurements}
+    assert by_metric["availability_quantity"].state == "attested"
+    assert by_metric["availability_quantity"].value == 0
+    assert by_metric["lead_time"].state == "not_disclosed"
+    assert by_metric["unit_price"].state == "not_disclosed"
+    assert by_metric["warranty_type"].state == "not_disclosed"
+
+
 def test_supplier_responses_normalize_accept_reject_substitute_and_late() -> None:
     rows = certification_fixture_offers(
         case_id="sc-demo", preferred_sku="PREFERRED", substitute_sku="SUBSTITUTE",

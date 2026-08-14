@@ -4,12 +4,14 @@ type MarketEvent = { payload?: Record<string, any> };
 
 export default function MarketIntelligencePanel({
   events,
+  behaviorEvents = [],
   dependencyEvidence,
   classNames,
   humanize,
   formatTime,
 }: {
   events: MarketEvent[];
+  behaviorEvents?: MarketEvent[];
   dependencyEvidence?: ReactNode;
   classNames: { summaryPane: string; sectionTitle: string; empty: string; kvRow: string };
   humanize: (value: unknown) => string;
@@ -28,6 +30,23 @@ export default function MarketIntelligencePanel({
           {dependencyEvidence}
         </>
       )}
+      {behaviorEvents.map((event, index) => {
+        const item = event.payload || {};
+        return (
+          <div key={`cohort-${index}`} data-testid="cohort-behavior-projection"
+               style={{ border: '1px solid #fde68a', background: '#fffbeb', borderRadius: 8, padding: 12, marginBottom: 10 }}>
+            <strong>Aggregate buyer behavior</strong>
+            <div className={classNames.kvRow}><span>Status</span><span>{humanize(item.status)}</span></div>
+            <div className={classNames.kvRow}><span>Privacy</span><span>Individual clicks, hovers, carts, users, and cases are hidden</span></div>
+            {item.status === 'aggregated' && Array.isArray(item.measurements) && item.measurements.map((metric: any) => (
+              <div className={classNames.kvRow} key={metric.metric}>
+                <span>{humanize(metric.metric)}</span>
+                <span>{metric.value == null ? 'not verified' : `${Math.round(Number(metric.value) * 100)}%`} · cohort {item.sample_size}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })}
       {events.length === 0 ? (
         <div className={classNames.empty}>No scoped market projection was recorded for this decision.</div>
       ) : events.map((event, index) => {

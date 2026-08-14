@@ -276,6 +276,18 @@ def emit_projection_events(
             trace_id=trace_id, event_type="market_projection", source_type="stage",
             source_id="MarketProjectionStage", target_type="sku",
             target_id=str(payload["sku"]), payload=payload)
+    try:
+        from src.app.services.market_metrics import cohort_safe_behavior_projection
+        behavior = cohort_safe_behavior_projection(db, tenant_id=tenant_id)
+        log_trace_event(
+            trace_id=trace_id, event_type="market_cohort_behavior", source_type="stage",
+            source_id="CohortBehaviorProjection", target_type="cohort",
+            target_id="tenant-aggregate", payload=behavior,
+        )
+    except Exception:
+        # An unavailable analytics relation cannot fail a buyer recommendation.
+        # Absence remains visible as no recorded cohort projection.
+        pass
     return evidence
 
 

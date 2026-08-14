@@ -77,3 +77,25 @@ def test_exact_configuration_availability_projects_as_observed_edge():
     assert edges[0].source_id == "configuration:cfg-1"
     assert edges[0].signal_class == "observed"
     assert edges[0].attributes["quantity"] == 5
+    measurements = {row["metric"]: row for row in edges[0].attributes["evidence_measurements"]}
+    assert measurements["availability_quantity"]["state"] == "observed"
+    assert measurements["lead_time_min"]["value"] == 0
+
+
+def test_missing_availability_fields_are_not_disclosed_not_zero():
+    db = _db()
+    db.add(ProductConfiguration(
+        id="cfg-2", tenant_id="tenant-a", sku="SKU-2", title="Unknown availability",
+        configuration_hash="hash-2", form_factor="laptop", mobility="mobile",
+        device_class="mobile_workstation", price_cents=300000, currency="AUD",
+    ))
+    db.add(ProductAvailabilityObservation(
+        id="availability-2", configuration_id="cfg-2", location_id="supplier",
+        status="unknown", quantity=None, source_record_id="inventory-receipt-2",
+        observed_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
+    ))
+    db.commit()
+    edge = load_configuration_availability_edges(db, tenant_id="tenant-a")[0]
+    measurements = {row["metric"]: row for row in edge.attributes["evidence_measurements"]}
+    assert measurements["availability_quantity"]["state"] == "not_disclosed"
+    assert measurements["availability_quantity"]["value"] is None

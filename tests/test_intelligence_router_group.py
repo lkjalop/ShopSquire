@@ -9,5 +9,7 @@ def test_intelligence_router_group_registers_expected_surfaces():
     paths = {route.path for route in app.routes}
     assert "session_events" in registered
     assert "hippograph" in registered
+    assert "market_ingestion_admin" in registered
     assert "/api/v1/hippograph/journey" in paths
+    assert "/api/v1/admin/market-ingestion/health" in paths
     assert app.state.intelligence_router_group == registered

@@ -55,7 +55,7 @@ class MarketSignalIngestionReceipt(BaseModel):
     status: Literal[
         "accepted", "duplicate", "invalid", "low_trust", "stale",
         "timestamp_unknown", "timestamp_invalid", "timestamp_future",
-        "schema_unavailable", "storage_failed",
+        "incompatible_schema", "schema_unavailable", "storage_failed",
     ]
     dedup_key: str | None = None
     trust_score: float | None = None
@@ -157,6 +157,11 @@ def ingest_with_receipt(
     """Return an explicit receipt for acceptance, quarantine, duplicate, or failure."""
     if db is None or signal is None:
         return MarketSignalIngestionReceipt(accepted=False, status="invalid")
+    if int(signal.schema_version) != SCHEMA_VERSION:
+        return MarketSignalIngestionReceipt(
+            accepted=False, status="incompatible_schema", dedup_key=signal.dedup_key,
+            trust_score=signal.trust_score, freshness_enforced=max_age_seconds is not None,
+        )
     if signal.trust_score < float(min_trust):
         return MarketSignalIngestionReceipt(
             accepted=False, status="low_trust", dedup_key=signal.dedup_key,

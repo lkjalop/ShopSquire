@@ -40,6 +40,7 @@ import {
   traceSectionForLeaf,
   type TraceLeafTab,
 } from './decision-trace/traceNavigation';
+import { projectMarketHippographTrace } from './decision-trace/marketHippographProjection';
 
 export { TRACE_LEAF_LABELS, TRACE_SECTIONS, normalizeTraceLeaf, traceSectionForLeaf } from './decision-trace/traceNavigation';
 export type { TraceLeafTab } from './decision-trace/traceNavigation';
@@ -1186,28 +1187,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     eventFilter === 'all'
       ? allDisplayEvents
       : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
-  const marketProjectionEvents = allDisplayEvents.filter((event) => eventMatches(event, 'market_projection'));
-  const hippographInsights = (() => {
-    const candidates: any[] = [];
-    const append = (value: any) => {
-      if (Array.isArray(value)) candidates.push(...value);
-    };
-    append((trace as any)?.hippograph_insights);
-    append((trace as any)?.hippograph_shadow_insights);
-    allDisplayEvents.forEach((event) => {
-      append(event?.payload?.hippograph_insights);
-      append(event?.payload?.hippograph_shadow_insights);
-      append(event?.payload?.evidence_paths);
+  const { marketProjectionEvents, marketBehaviorEvents, hippographInsights } =
+    projectMarketHippographTrace({
+      events: allDisplayEvents,
+      trace: trace as any,
+      eventMatcher: (event, expected) => eventMatches(event as TraceEvent, expected),
     });
-    const seen = new Set<string>();
-    return candidates.filter((insight, index) => {
-      if (!insight || typeof insight !== 'object') return false;
-      const key = String(insight.id || insight.evidence_path?.path_id || `${insight.label || 'insight'}-${index}`);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  })();
 
   const ms = trace?.model_selection || {};
   const typedExecutionSteps = resolveExecutionSteps(trace, allDisplayEvents);
@@ -1258,7 +1243,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       case 'security':
         return hasSecuritySignal;
       case 'market':
-        return marketProjectionEvents.length > 0 || hippographInsights.length > 0;
+        return marketProjectionEvents.length > 0 || marketBehaviorEvents.length > 0 || hippographInsights.length > 0;
       case 'procurement':
         return hasProcurementSignal;
       case 'audit':
@@ -4066,6 +4051,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               {activeTab === 'market' && (
                 <MarketIntelligencePanel
                   events={marketProjectionEvents}
+                  behaviorEvents={marketBehaviorEvents}
                   dependencyEvidence={hippographInsights.length > 0 ? <HippographEvidenceSurface insights={hippographInsights} /> : undefined}
                   classNames={styles}
                   humanize={humanizeKey}

@@ -16,6 +16,8 @@ table here (it routes to event_log), so search_events is the behavioral/demand s
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any, Dict, Iterable, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +37,9 @@ class SourceBackfillReceipt(BaseModel):
     accepted: int = 0
     outcomes: dict[str, int] = Field(default_factory=dict)
     error_code: str | None = None
+    latency_ms: float = 0.0
+    watermark_before: str | None = None
+    watermark_after: str | None = None
     authority: Literal["ingestion_receipt_only"] = "ingestion_receipt_only"
 
 
@@ -145,21 +150,24 @@ def from_funnel(row: Dict[str, Any]) -> Optional[MarketSignal]:
 _SOURCES = {
     "orders": (
         "SELECT id, total_cents, status, created_at, tenant_id FROM orders "
-        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY created_at DESC LIMIT :lim",
+        "WHERE COALESCE(tenant_id,'default')=:tenant "
+        "AND (:watermark IS NULL OR created_at > :watermark) ORDER BY created_at ASC LIMIT :lim",
         lambda r: {"id": r[0], "total_cents": r[1], "status": r[2], "created_at": r[3],
                    "tenant_id": r[4]},
         from_order,
     ),
     "conversion_event": (
         "SELECT order_id, decision_id, value_cents, converted_at, tenant_id FROM conversion_event "
-        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY created_at DESC LIMIT :lim",
+        "WHERE COALESCE(tenant_id,'default')=:tenant "
+        "AND (:watermark IS NULL OR converted_at > :watermark) ORDER BY converted_at ASC LIMIT :lim",
         lambda r: {"order_id": r[0], "decision_id": r[1], "value_cents": r[2],
                    "converted_at": r[3], "tenant_id": r[4]},
         from_conversion,
     ),
     "search_events": (
         "SELECT id, query, result_count, event_time, uid_hash, session_id, tenant_id FROM search_events "
-        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY event_time DESC LIMIT :lim",
+        "WHERE COALESCE(tenant_id,'default')=:tenant "
+        "AND (:watermark IS NULL OR event_time > :watermark) ORDER BY event_time ASC LIMIT :lim",
         lambda r: {"id": r[0], "query": r[1], "result_count": r[2], "event_time": r[3],
                    "uid_hash": r[4], "session_id": r[5], "tenant_id": r[6]},
         from_search,
@@ -167,7 +175,7 @@ _SOURCES = {
     "returns": (
         "SELECT id, status, updated_at, created_at, tenant_id FROM orders "
         "WHERE COALESCE(tenant_id,'default')=:tenant AND status IN ('refunded','chargebacked') "
-        "ORDER BY updated_at DESC LIMIT :lim",
+        "AND (:watermark IS NULL OR updated_at > :watermark) ORDER BY updated_at ASC LIMIT :lim",
         lambda r: {"id": r[0], "status": r[1], "updated_at": r[2], "created_at": r[3],
                    "tenant_id": r[4]},
         from_return,
@@ -181,7 +189,8 @@ _SOURCES = {
         "ON pb.sku = co.sku AND COALESCE(pb.tenant_id,'default') = COALESCE(co.tenant_id,'default') "
         "AND pb.channel = 'default' AND pb.currency = 'AUD' "
         "WHERE COALESCE(co.tenant_id,'default')=:tenant "
-        "ORDER BY co.observed_at DESC LIMIT :lim",
+        "AND (:watermark IS NULL OR co.observed_at > :watermark) "
+        "ORDER BY co.observed_at ASC LIMIT :lim",
         lambda r: {"obs_id": r[0], "entity_ref": r[1], "our_price_cents": r[2],
                    "competitor_price_cents": r[3], "competitor": r[4], "observed_at": r[5],
                    "tenant_id": r[6]},
@@ -191,7 +200,8 @@ _SOURCES = {
     # detect_objection_cluster. No-op when the table is absent.
     "support_objection": (
         "SELECT id, theme, entity_ref, raised_at, tenant_id FROM support_objection "
-        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY raised_at DESC LIMIT :lim",
+        "WHERE COALESCE(tenant_id,'default')=:tenant "
+        "AND (:watermark IS NULL OR raised_at > :watermark) ORDER BY raised_at ASC LIMIT :lim",
         lambda r: {"obs_id": r[0], "theme": r[1], "entity_ref": r[2], "raised_at": r[3],
                    "tenant_id": r[4]},
         from_support_objection,
@@ -199,7 +209,8 @@ _SOURCES = {
     # funnel: a REAL source — purchase-funnel stage drop-off feeds detect_funnel_dropoff. No-op when absent.
     "funnel": (
         "SELECT id, stage, entered, abandoned, observed_at, tenant_id FROM cart_funnel_event "
-        "WHERE COALESCE(tenant_id,'default')=:tenant ORDER BY observed_at DESC LIMIT :lim",
+        "WHERE COALESCE(tenant_id,'default')=:tenant "
+        "AND (:watermark IS NULL OR observed_at > :watermark) ORDER BY observed_at ASC LIMIT :lim",
         lambda r: {"obs_id": r[0], "stage": r[1], "entered": r[2], "abandoned": r[3],
                    "observed_at": r[4], "tenant_id": r[5]},
         from_funnel,
@@ -218,15 +229,26 @@ def _source_table(sql: str) -> str | None:
 def _backfill_one(db, source: str, sql: str, row_map, sig_map, *, limit: int, min_trust: float,
                   max_age_seconds: Optional[float], now_iso: Optional[str],
                   tenant_id: str) -> SourceBackfillReceipt:
+    started = perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
+    from src.app.services.market_ingestion_observability import load_watermark
+    watermark_before = load_watermark(db, tenant_id=tenant_id, source=source)
     table_name = _source_table(sql)
-    if table_name and not inspect(db.get_bind()).has_table(table_name):
-        return SourceBackfillReceipt(
+    if table_name and not inspect(db.connection()).has_table(table_name):
+        receipt = SourceBackfillReceipt(
             source=source, status="source_unavailable", error_code="table_missing",
+            latency_ms=round((perf_counter() - started) * 1000, 3),
+            watermark_before=watermark_before,
         )
+        _persist_source_receipt(db, tenant_id, receipt, started_at)
+        return receipt
     outcomes: Counter[str] = Counter()
+    watermark: str | None = None
     try:
         with db.begin_nested():
-            rows = db.execute(text(sql), {"lim": int(limit), "tenant": tenant_id}).fetchall()
+            rows = db.execute(text(sql), {
+                "lim": int(limit), "tenant": tenant_id, "watermark": watermark_before,
+            }).fetchall()
             for r in rows:
                 sig = sig_map(row_map(r))
                 receipt = ingest_with_receipt(
@@ -234,15 +256,48 @@ def _backfill_one(db, source: str, sql: str, row_map, sig_map, *, limit: int, mi
                     max_age_seconds=max_age_seconds, now_iso=now_iso,
                 )
                 outcomes[receipt.status] += 1
-        return SourceBackfillReceipt(
+                if sig and sig.occurred_at and (watermark is None or sig.occurred_at > watermark):
+                    watermark = sig.occurred_at
+                if receipt.status not in {"accepted", "duplicate"}:
+                    from src.app.services.market_ingestion_observability import record_dead_letter
+                    record_dead_letter(
+                        db, tenant_id=tenant_id, source=source, signal=sig,
+                        reason_code=receipt.status,
+                        source_schema_version=int(getattr(sig, "schema_version", 1) or 1),
+                    )
+        result = SourceBackfillReceipt(
             source=source, status="completed", rows_read=len(rows),
             accepted=outcomes["accepted"], outcomes=dict(sorted(outcomes.items())),
+            latency_ms=round((perf_counter() - started) * 1000, 3),
+            watermark_before=watermark_before,
+            watermark_after=watermark,
         )
+        _persist_source_receipt(db, tenant_id, result, started_at)
+        return result
     except Exception as exc:
-        return SourceBackfillReceipt(
+        result = SourceBackfillReceipt(
             source=source, status="query_failed", error_code=type(exc).__name__,
             outcomes=dict(sorted(outcomes.items())),
+            latency_ms=round((perf_counter() - started) * 1000, 3),
+            watermark_before=watermark_before,
+            watermark_after=watermark,
         )
+        _persist_source_receipt(db, tenant_id, result, started_at)
+        return result
+
+
+def _persist_source_receipt(db, tenant_id: str, receipt: SourceBackfillReceipt,
+                            started_at: str) -> None:
+    try:
+        from src.app.services.market_ingestion_observability import persist_run
+        persist_run(
+            db, tenant_id=tenant_id, receipt=receipt, started_at=started_at,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception:
+        # Observability must not break canonical ingestion. Its own absence is
+        # exposed by the health endpoint as not_configured.
+        return
 
 
 def _safe_commit(db) -> None:

@@ -72,6 +72,12 @@ def test_ingest_none_safe():
     assert ingest(None, None) is False
 
 
+def test_incompatible_signal_schema_is_rejected_with_receipt(db):
+    signal = MarketSignal("d", "s", {}, "2026-06-25T12:00:00", 1.0, "future", schema_version=2)
+    receipt = ingest_with_receipt(db, signal)
+    assert receipt.status == "incompatible_schema" and receipt.accepted is False
+
+
 def test_ingestion_receipt_distinguishes_duplicate_trust_and_unknown_time(db):
     accepted = normalize(signal_type="d", source="s", payload={"x": 1})
     assert ingest_with_receipt(db, accepted).status == "accepted"
