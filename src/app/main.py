@@ -75,6 +75,9 @@ from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
 from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
+from src.app.bootstrap.security_operations_router_group import (
+    register_security_operations_router_group,
+)
 from src.app.bootstrap.storefront_router_group import register_storefront_router_group
 from src.app.security.observer import emit_security_event
 from src.app.security.webhook_security import WebhookSecurityMiddleware
@@ -2039,84 +2042,7 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include admin_fairness router: %s", e)
-    # Email security admin endpoint
-    try:
-        from src.app.routers.email_security_admin import router as email_security_admin_router
-        app.include_router(email_security_admin_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include email_security_admin router: %s", e)
-    # Email security evaluation endpoint (owner/developer)
-    try:
-        from src.app.routers.email_security import router as email_security_router
-        app.include_router(email_security_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include email_security router: %s", e)
-    # Email connector webhooks (Gmail/M365) - shared-secret auth
-    try:
-        from src.app.routers.ingest_gmail import router as gmail_ingest_router
-        app.include_router(gmail_ingest_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include gmail_ingest router: %s", e)
-    try:
-        from src.app.routers.ingest_m365 import router as m365_ingest_router
-        app.include_router(m365_ingest_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include m365_ingest router: %s", e)
-    # Admin drilldown for email incidents
-    try:
-        from src.app.routers.admin_email_security import router as admin_email_security_router
-        app.include_router(admin_email_security_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include admin_email_security router: %s", e)
-    # Playbook editor/admin APIs (validate/publish/rollback/dry-run/diff)
-    try:
-        from src.app.routers.admin_playbooks import router as admin_playbooks_router
-        app.include_router(admin_playbooks_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include admin_playbooks router: %s", e)
-    # Admin storage health
-    try:
-        from src.app.routers.admin_storage import router as admin_storage_router
-        app.include_router(admin_storage_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include admin_storage router: %s", e)
-    # Grafana proxy for embedding dashboards without exposing API key
-    try:
-        from src.app.routers.admin_grafana_proxy import router as admin_grafana_proxy_router
-        app.include_router(admin_grafana_proxy_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include admin_grafana_proxy router: %s", e)
-    # Admin email test endpoint
-    try:
-        from src.app.routers.admin_email import router as admin_email_router
-        app.include_router(admin_email_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include admin_email router: %s", e)
-    # Outbound-DLP quarantine (owner human-release queue)
-    try:
-        from src.app.routers.outbound_email_quarantine import router as outbound_quarantine_router
-        app.include_router(outbound_quarantine_router)
-    except Exception as e:
-        import logging
-        logging.getLogger("shopsquire.startup").exception("failed to include outbound_email_quarantine router: %s", e)
+    register_security_operations_router_group(app)
     # Inventory sync/admin endpoints (Phase 5 MVP)
     try:
         from src.app.routers.admin_inventory import router as admin_inventory_router
