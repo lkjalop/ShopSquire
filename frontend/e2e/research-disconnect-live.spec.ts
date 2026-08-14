@@ -73,9 +73,11 @@ test('forced disconnect cooperatively stops undispatched discovery queries', asy
       || String(row?.payload?._original_event_type || '') === 'open_world_discovery_started'
     ));
   }, { timeout: 30_000, intervals: [100, 250, 500] }).toBe(true);
-  // Close the whole browser context, not only the tab. Chromium may retain a
-  // page-initiated fetch connection after page.close(), which is navigation
-  // cancellation rather than a transport disconnect.
+  const cancellationDispatched = page.waitForRequest(req => (
+    req.method() === 'POST' && /\/shopping-cases\/[^/]+\/research-cancel$/.test(req.url())
+  ));
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await cancellationDispatched;
   await page.context().close();
 
   await expect.poll(async () => {

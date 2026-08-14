@@ -1076,3 +1076,31 @@ def test_novel_source_still_requires_effective_discovery(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "discovery_endpoint_not_configured"
+
+
+def test_buyer_can_cancel_only_their_exact_running_research_execution():
+    from src.app.services.research_cancellation_registry import DEFAULT_RESEARCH_CANCELLATIONS
+
+    client = _client()
+    created = client.post("/api/v1/shopping-cases/interpretations", json={
+        "uid": "buyer-cancel",
+        "retained_purpose": "Check an unfamiliar certified solver for this laptop.",
+    })
+    assert created.status_code == 200
+    case_id = created.json()["case_id"]
+    execution_id = "execution-cancel-123"
+    DEFAULT_RESEARCH_CANCELLATIONS.register("default", case_id, execution_id)
+
+    forbidden = client.post(f"/api/v1/shopping-cases/{case_id}/research-cancel", json={
+        "uid": "another-buyer", "execution_id": execution_id,
+        "reason": "buyer_departed",
+    })
+    assert forbidden.status_code == 403
+
+    response = client.post(f"/api/v1/shopping-cases/{case_id}/research-cancel", json={
+        "uid": "buyer-cancel", "execution_id": execution_id,
+        "reason": "buyer_departed",
+    })
+    assert response.status_code == 200
+    assert response.json() == {"status": "accepted", "execution_id": execution_id}
+    assert DEFAULT_RESEARCH_CANCELLATIONS.cancelled("default", case_id, execution_id)

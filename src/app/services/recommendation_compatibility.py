@@ -405,6 +405,18 @@ def serve_v2_compatibility(
         v2_only_unavailable_response,
     )
     from src.app.services.recommendation_facade import dispatch_recommendation_core_typed
+    from src.app.services.recommendation_core.cancellation import RecommendationCancellation
+
+    try:
+        compatibility_timeout_s = max(
+            0.5,
+            min(float(os.getenv("RECOMMEND_COMPAT_TIMEOUT_SEC", "8") or 8), 15.0),
+        )
+    except (TypeError, ValueError):
+        compatibility_timeout_s = 8.0
+    compatibility_cancellation = RecommendationCancellation.with_timeout(
+        compatibility_timeout_s
+    )
 
     tenant_id = (
         request.headers.get("X-Tenant-Id")
@@ -524,6 +536,7 @@ def serve_v2_compatibility(
             **compatibility_constraints,
         },
         compatibility_cutover=True,
+        cancellation=compatibility_cancellation,
     )
     if outcome.served:
         record_recommendation_dispatch(

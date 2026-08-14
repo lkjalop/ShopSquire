@@ -25,3 +25,13 @@ def test_expired_deadline_cancels_without_an_explicit_event() -> None:
         assert str(exc) == "request_deadline_exceeded"
     else:
         raise AssertionError("expired deadline was ignored")
+
+
+def test_remaining_seconds_exposes_provider_timeout_budget() -> None:
+    token = RecommendationCancellation.with_timeout(2)
+    assert 0 < token.remaining_seconds <= 2
+
+    token.cancel("buyer_disconnected")
+    # Cancellation is an independent signal; provider budgets still describe
+    # the original deadline while safe boundaries reject the request.
+    assert token.remaining_seconds > 0

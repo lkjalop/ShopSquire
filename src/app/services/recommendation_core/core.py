@@ -286,11 +286,19 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     from src.app.services.recommendation_core.turn_router import router_runtime_contract
 
     router_contract = router_runtime_contract()
+    router_timeout = float(router_contract["inference_timeout_s"])
+    if envelope.cancellation is not None:
+        # Bound the blocking provider call itself; a post-call cancellation
+        # check alone cannot protect the buyer's response deadline.
+        router_timeout = max(
+            0.05,
+            min(router_timeout, envelope.cancellation.remaining_seconds),
+        )
     decision = route_turn(
         db,
         envelope,
         llm_fn=llm_fn,
-        timeout=float(router_contract["inference_timeout_s"]),
+        timeout=router_timeout,
     )
     if envelope.cancellation is not None:
         envelope.cancellation.raise_if_cancelled()

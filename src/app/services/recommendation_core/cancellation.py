@@ -28,7 +28,11 @@ class RecommendationCancellation:
     def cancelled(self) -> bool:
         return self._event.is_set() or time.monotonic() >= self.deadline_monotonic
 
+    @property
+    def remaining_seconds(self) -> float:
+        """Return the request's remaining wall-clock allowance."""
+        return max(0.0, self.deadline_monotonic - time.monotonic())
+
     def raise_if_cancelled(self) -> None:
         if self.cancelled:
             raise RecommendationCancelled(self.reason or "request_deadline_exceeded")
-

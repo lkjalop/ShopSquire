@@ -34,6 +34,7 @@ from src.app.services.commerce_feature_readiness import (
     external_research_runtime_observation,
 )
 from src.app.services.requirement_claim_reconciliation import reconcile_requirement_claims
+from src.app.services.research_cancellation_registry import DEFAULT_RESEARCH_CANCELLATIONS
 from src.app.services.shopping_case_fast_lane_timing import ShoppingCaseFastLaneTiming
 
 logger = logging.getLogger("shopsquire.shopping_cases")
@@ -99,6 +100,17 @@ class ResearchShoppingCaseRequest(BaseModel):
     hypothesis_ids: list[str] = Field(min_length=1, max_length=3)
     research_authorized: Literal[True]
     refresh_authorized: bool = False
+    execution_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{8,80}$")
+
+
+class CancelShoppingCaseResearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    uid: str = Field(min_length=1, max_length=200)
+    execution_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,80}$")
+    reason: Literal[
+        "buyer_departed", "buyer_cancelled", "research_deadline_exceeded",
+        "research_superseded",
+    ]
 
 
 class ApprovePublisherCandidateRequest(BaseModel):
@@ -1226,6 +1238,46 @@ def approve_case_publisher_candidate(
     return result
 
 
+@router.post("/{case_id}/research-cancel")
+def cancel_shopping_case_research(
+    case_id: str,
+    body: CancelShoppingCaseResearchRequest,
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Signal one exact running research execution; never changes commerce state."""
+
+    tenant_id = _tenant(x_tenant_id)
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id,
+        ShoppingCase.case_id == case_id,
+    )).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="shopping_case_not_found")
+    if case.uid != body.uid:
+        raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+    accepted = DEFAULT_RESEARCH_CANCELLATIONS.cancel(
+        tenant_id, case_id, body.execution_id, body.reason,
+    )
+    if accepted:
+        log_trace_event(
+            trace_id=case_id.removeprefix("sc-"),
+            event_type="research_cancellation_requested",
+            source_type="buyer",
+            source_id=body.uid,
+            target_type="shopping_case",
+            target_id=case_id,
+            payload={
+                "execution_id": body.execution_id,
+                "reason": body.reason,
+                "commercial_authority": "none",
+                "cart_authority": "none",
+            },
+        )
+        db.commit()
+    return {"status": "accepted" if accepted else "not_running", "execution_id": body.execution_id}
+
+
 @router.post("/{case_id}/research")
 def research_shopping_case(
     case_id: str,
@@ -1276,6 +1328,8 @@ def research_shopping_case(
         )
         db.add(case)
         db.flush()
+    if body.execution_id:
+        DEFAULT_RESEARCH_CANCELLATIONS.register(tenant_id, case_id, body.execution_id)
     from src.app.services.case_research_plan import approved_sources_for_plan
 
     approved_sources = approved_sources_for_plan(plan)
@@ -1287,6 +1341,10 @@ def research_shopping_case(
         )
 
         def request_cancelled() -> bool:
+            if DEFAULT_RESEARCH_CANCELLATIONS.cancelled(
+                tenant_id, case_id, body.execution_id,
+            ):
+                return True
             if request is None:
                 return False
             try:
