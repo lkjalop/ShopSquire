@@ -1,0 +1,77 @@
+replicaCount: 1
+
+image:
+  repository: shopsquire-api
+  tag: runtime-kind-v3
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: false
+autoscaling:
+  enabled: false
+syncWorker:
+  enabled: false
+dbBackup:
+  enabled: false
+
+migrations:
+  enabled: true
+  command:
+    - sh
+    - -c
+    - >-
+      until python -c "import socket; socket.create_connection(('shopsquire-postgresql',5432),2).close()";
+      do sleep 1; done;
+      alembic -c alembic.ini upgrade head;
+      python scripts/seed_gaming_laptops.py
+
+postgresql:
+  enabled: false
+
+redis:
+  enabled: false
+
+localRuntimeDependencies:
+  enabled: true
+  postgresImage: postgres:16-alpine
+  redisImage: redis:7-alpine
+
+envFrom: []
+env:
+  APP_ENV: development
+  API_PORT: "8080"
+  DATABASE_URL: "postgresql+psycopg2://shopsquire:shopsquire-local-only@shopsquire-postgresql:5432/shopsquire"
+  REDIS_URL: "redis://:shopsquire-redis-local-only@shopsquire-redis-master:6379/0"
+  AUTO_MIGRATE: "0"
+  RUN_MIGRATIONS: "0"
+  CV_WARMUP_ON_START: "0"
+  VLM_WARMUP_ON_START: "0"
+  ROUTER_PREWARM_ON_START: "0"
+  VISUAL_SEARCH_INDEX_ON_START: "0"
+  USE_MOCK_LLM: "1"
+  METRICS_INTERNAL_ONLY: "1"
+  EXTERNAL_RESEARCH_ENABLED: "1"
+  EXTERNAL_RESEARCH_SEARCH_URL: "http://host.docker.internal:8888/search?q={query}&format=json"
+  EXTERNAL_RESEARCH_ALLOW_PRIVATE: "1"
+  EXTERNAL_RESEARCH_LOCAL_PROOF_ENROLLED: "1"
+  EXTERNAL_RESEARCH_PROVIDER_ID: "local_searxng"
+  EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS: "free"
+  EXTERNAL_RESEARCH_TENANT_ALLOWLIST: "default"
+  EXTERNAL_RESEARCH_SOURCE_REVIEWED_BY: "portfolio-policy-owner"
+  EXTERNAL_RESEARCH_SOURCE_LICENCE: "portfolio-local-proof"
+  PRODUCT_CAPABILITY_TENANT_ALLOWLIST: "default"
+  PORTFOLIO_DEMO_INVENTORY_PROFILE: "realistic"
+  FULFILLMENT_DEMO_ENABLED: "1"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi

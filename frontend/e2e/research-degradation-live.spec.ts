@@ -12,7 +12,7 @@ test('unreachable discovery degrades to canonical origin without hanging or clai
   await page.goto('/');
   await page.getByRole('button', { name: /Ask Me/i }).click({ force: true });
   const input = page.getByPlaceholder('Type your message...');
-  await input.fill('I need to simulate a PLC-controlled factory using Factory I/O.');
+  await input.fill('I need a laptop to simulate a PLC-controlled factory using Factory I/O.');
   await input.press('Enter');
   const panel = page.getByTestId('ambiguity-exploration');
   await expect(panel).toBeVisible({ timeout: 45_000 });

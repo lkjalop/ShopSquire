@@ -1,0 +1,33 @@
+{
+  "archive": {
+    "bytes": 1860887,
+    "path": "2026-08-14-timing-browser-artifacts.zip",
+    "sha256": "e8625ab181a830a3ce9205dd147aecba3fc297d861dfdd2ae8d501bf130ba995"
+  },
+  "artifact_root": "cert-timing",
+  "certificate": "timing",
+  "files": [
+    {
+      "bytes": 45,
+      "path": ".last-run.json",
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    },
+    {
+      "bytes": 118978,
+      "path": "shopping-case-fast-lane-ti-97d20-es-before-external-research-chromium/test-finished-1.png",
+      "sha256": "fabaf9cb30459411158649ade2a2e0333e86547736935db5251d2c47658b5d7d"
+    },
+    {
+      "bytes": 1598910,
+      "path": "shopping-case-fast-lane-ti-97d20-es-before-external-research-chromium/trace.zip",
+      "sha256": "01d07b89291029b1577e5b7f3a743280a10c82747e4725419227fb6f9b10c611"
+    },
+    {
+      "bytes": 218890,
+      "path": "shopping-case-fast-lane-ti-97d20-es-before-external-research-chromium/video.webm",
+      "sha256": "598465e1b4e1045a9146eeaa08031588a5d10695a2057893f3838141eebba285"
+    }
+  ],
+  "recorded_at": "2026-08-14T10:08:52.963939+00:00",
+  "schema_version": "sealed-browser-certificate-v1"
+}

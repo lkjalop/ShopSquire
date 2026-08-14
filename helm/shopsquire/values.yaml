@@ -134,6 +134,13 @@ redis:
   auth:
     password: change-me
 
+# Developer/Kind-only dependencies using current official images. Production
+# should use managed services or separately governed database charts.
+localRuntimeDependencies:
+  enabled: false
+  postgresImage: postgres:16-alpine
+  redisImage: redis:7-alpine
+
 # ── External managed services ──
 externalDatabase:
   host: ""

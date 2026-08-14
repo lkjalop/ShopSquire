@@ -1,0 +1,84 @@
+{{- if .Values.localRuntimeDependencies.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopsquire-postgresql
+  labels:
+    app.kubernetes.io/name: shopsquire-postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shopsquire-postgresql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shopsquire-postgresql
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.localRuntimeDependencies.postgresImage | quote }}
+          env:
+            - name: POSTGRES_USER
+              value: shopsquire
+            - name: POSTGRES_PASSWORD
+              value: shopsquire-local-only
+            - name: POSTGRES_DB
+              value: shopsquire
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "shopsquire", "-d", "shopsquire"]
+            periodSeconds: 2
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shopsquire-postgresql
+spec:
+  selector:
+    app.kubernetes.io/name: shopsquire-postgresql
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopsquire-redis-master
+  labels:
+    app.kubernetes.io/name: shopsquire-redis-master
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shopsquire-redis-master
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shopsquire-redis-master
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.localRuntimeDependencies.redisImage | quote }}
+          args: ["redis-server", "--requirepass", "shopsquire-redis-local-only"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli -a shopsquire-redis-local-only ping | grep PONG
+            periodSeconds: 2
+{{- end }}

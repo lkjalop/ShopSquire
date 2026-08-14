@@ -1,0 +1,28 @@
+{
+  "archive": {
+    "bytes": 3608076,
+    "path": "2026-08-14-degradation-browser-artifacts.zip",
+    "sha256": "7282ef0e07abb8a8f9021e4a5ebe064aa01c216bbfcae609c54084d5c11424ad"
+  },
+  "artifact_root": "research-degradation-live--b8880-nging-or-claiming-discovery-chromium",
+  "certificate": "degradation",
+  "files": [
+    {
+      "bytes": 131132,
+      "path": "test-finished-1.png",
+      "sha256": "5944898878f3c750c7f0f48a53a02fab006a23033bf3fd02e74210b30604e38e"
+    },
+    {
+      "bytes": 3333332,
+      "path": "trace.zip",
+      "sha256": "1794e3557fe8b6d933424f3ae9d303a593036a6ff298108426c93eb5c44f3a9d"
+    },
+    {
+      "bytes": 263424,
+      "path": "video.webm",
+      "sha256": "5c621148e9fe66d79314461a3013d29ffca8ad8d627e1af30ac1e19ac76b9687"
+    }
+  ],
+  "recorded_at": "2026-08-14T10:09:16.651229+00:00",
+  "schema_version": "sealed-browser-certificate-v1"
+}

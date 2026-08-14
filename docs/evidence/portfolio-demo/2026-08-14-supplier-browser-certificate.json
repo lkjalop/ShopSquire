@@ -1,0 +1,63 @@
+{
+  "archive": {
+    "bytes": 9437860,
+    "path": "2026-08-14-supplier-browser-artifacts.zip",
+    "sha256": "ae4ea3f5af34a54cccba1b6e80fb97ac88e73f1e8b9475a3d7a171812fbf6932"
+  },
+  "artifact_root": "cert-supplier",
+  "certificate": "supplier",
+  "files": [
+    {
+      "bytes": 45,
+      "path": ".last-run.json",
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    },
+    {
+      "bytes": 135240,
+      "path": "portfolio-supplier-continu-03834--without-silent-cart-change-chromium/test-finished-1.png",
+      "sha256": "7cc95ad584db42539d9fd1464179cda6408aa5c8538c4a0e9af7c25ea9fdef3e"
+    },
+    {
+      "bytes": 2777720,
+      "path": "portfolio-supplier-continu-03834--without-silent-cart-change-chromium/trace.zip",
+      "sha256": "51ecf681872208d431edffec7685561fdefa6a4e905228f7be73525c9e322de8"
+    },
+    {
+      "bytes": 324222,
+      "path": "portfolio-supplier-continu-03834--without-silent-cart-change-chromium/video.webm",
+      "sha256": "dff0975b3cbdaad4915748da8bd770a8e1c71fc2018901d3b4a5f90321fce8ff"
+    },
+    {
+      "bytes": 136806,
+      "path": "portfolio-supplier-continu-73ba2-explicit-exact-confirmation-chromium/test-finished-1.png",
+      "sha256": "a16e7df4dc717362d08d4bd188c409f2b8073405c3400e4a92d9cd12dbbc80da"
+    },
+    {
+      "bytes": 2724170,
+      "path": "portfolio-supplier-continu-73ba2-explicit-exact-confirmation-chromium/trace.zip",
+      "sha256": "d8435e05179c8105f1e71f0a64dc0cd9a215319c5d6f15401a4b88b4332bd355"
+    },
+    {
+      "bytes": 322458,
+      "path": "portfolio-supplier-continu-73ba2-explicit-exact-confirmation-chromium/video.webm",
+      "sha256": "d63b3b56dd32ff1a01591bf9d999115721e66858e71d232f15a7c8c78171fbc0"
+    },
+    {
+      "bytes": 119652,
+      "path": "portfolio-supplier-continu-81ca0-l-without-changing-the-cart-chromium/test-finished-1.png",
+      "sha256": "ad1c9ef18fbebbc7f8151ecef224249e696c8878021939a9af72c09b203a0c1e"
+    },
+    {
+      "bytes": 2752435,
+      "path": "portfolio-supplier-continu-81ca0-l-without-changing-the-cart-chromium/trace.zip",
+      "sha256": "47686cd5feb520fbd10dda4dfdf6fc3d4a0e20813f30939a566c504eb7f5c117"
+    },
+    {
+      "bytes": 278232,
+      "path": "portfolio-supplier-continu-81ca0-l-without-changing-the-cart-chromium/video.webm",
+      "sha256": "06cab1dc8a7efa6331fcbdd4dd6aefb47b6e3ad24b661010e92dcf8cfe88d0a0"
+    }
+  ],
+  "recorded_at": "2026-08-14T10:08:53.283451+00:00",
+  "schema_version": "sealed-browser-certificate-v1"
+}

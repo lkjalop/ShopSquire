@@ -1,0 +1,33 @@
+{
+  "archive": {
+    "bytes": 3907926,
+    "path": "2026-08-14-search-browser-artifacts.zip",
+    "sha256": "afff7db65eb7c7aaafb023421853630f59a5c69551342b678016adb09d071b04"
+  },
+  "artifact_root": "cert-search",
+  "certificate": "search",
+  "files": [
+    {
+      "bytes": 45,
+      "path": ".last-run.json",
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    },
+    {
+      "bytes": 137240,
+      "path": "buyer-evidence-source-live-31e00-thorizes-canonical-research-chromium/test-finished-1.png",
+      "sha256": "028dd34978c7381002c8e181d85988c19e0ffa1d2fef06922f320d4769a62332"
+    },
+    {
+      "bytes": 3462693,
+      "path": "buyer-evidence-source-live-31e00-thorizes-canonical-research-chromium/trace.zip",
+      "sha256": "bb802c324aa036beabf5834da0455625693313cf368917e42376975c6feb0ba5"
+    },
+    {
+      "bytes": 323418,
+      "path": "buyer-evidence-source-live-31e00-thorizes-canonical-research-chromium/video.webm",
+      "sha256": "cecbeb2a670d79ba1dbb0d5a6899c0367e2cb661990059756ddf4125dab7dc85"
+    }
+  ],
+  "recorded_at": "2026-08-14T10:08:52.777162+00:00",
+  "schema_version": "sealed-browser-certificate-v1"
+}
