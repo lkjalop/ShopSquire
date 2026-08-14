@@ -23,6 +23,26 @@ class CoordinatedStage:
     operation: Callable[[], None]
 
 
+_PHASE_ORDER = {
+    phase: index for index, phase in enumerate((
+        RecommendationPhase.INTERPRETATION,
+        RecommendationPhase.EVIDENCE,
+        RecommendationPhase.FIT,
+        RecommendationPhase.COMMERCIAL,
+        RecommendationPhase.RESPONSE,
+    ))
+}
+
+
+def validate_stage_order(stages: Iterable[CoordinatedStage]) -> tuple[CoordinatedStage, ...]:
+    """Freeze the strangler order before any stage is allowed to execute."""
+    frozen = tuple(stages)
+    positions = [_PHASE_ORDER[stage.phase] for stage in frozen]
+    if positions != sorted(positions):
+        raise ValueError("recommendation_stage_order_invalid")
+    return frozen
+
+
 def run_coordinated_stages(
     response: Any,
     stages: Iterable[CoordinatedStage],
@@ -31,7 +51,7 @@ def run_coordinated_stages(
     logger: Any = None,
 ) -> None:
     """Run ordered typed stages through the canonical failure/cancellation guard."""
-    for stage in stages:
+    for stage in validate_stage_order(stages):
         run_guarded_stage(
             response,
             stage.name,
@@ -41,4 +61,7 @@ def run_coordinated_stages(
         )
 
 
-__all__ = ["CoordinatedStage", "RecommendationPhase", "run_coordinated_stages"]
+__all__ = [
+    "CoordinatedStage", "RecommendationPhase", "run_coordinated_stages",
+    "validate_stage_order",
+]

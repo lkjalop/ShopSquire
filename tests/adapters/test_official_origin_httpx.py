@@ -1,8 +1,13 @@
+import asyncio
 import hashlib
 
 import httpx
+import pytest
 
-from src.app.adapters.official_origin_httpx import GovernedOfficialOriginFetcher
+from src.app.adapters.official_origin_httpx import (
+    AsyncGovernedOfficialOriginFetcher,
+    GovernedOfficialOriginFetcher,
+)
 
 
 def _public_resolver(_host, *_args, **_kwargs):
@@ -111,3 +116,28 @@ def test_certification_timeout_is_inert_in_production_and_explicit_in_dev(monkey
     assert result["error"] == "certification_injected_publisher_timeout"
     assert result["receipt"]["fixture"] is True
     assert result["receipt"]["external_call_dispatched"] is False
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_is_cancellable_during_active_origin_read():
+    entered = asyncio.Event()
+
+    async def slow_response(_request):
+        entered.set()
+        await asyncio.sleep(60)
+        return httpx.Response(200, content=b"late", headers={"content-type": "text/html"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(slow_response))
+    fetcher = AsyncGovernedOfficialOriginFetcher(client=client, resolver=_public_resolver)
+    task = asyncio.create_task(fetcher.fetch_async(
+        "https://csrc.nist.gov/doc", allowlist=["csrc.nist.gov"],
+    ))
+    await entered.wait()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("active official-origin read ignored cancellation")
+    await client.aclose()

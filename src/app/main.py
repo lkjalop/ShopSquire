@@ -34,12 +34,6 @@ from src.app.routers.approvals import router as approvals_router
 from src.app.routers.fulfillment_cases import router as fulfillment_cases_router
 from src.app.routers.supply_risk import router as supply_risk_router
 from src.app.routers.kyv_admin import router as kyv_admin_router
-from src.app.routers.recommend_compat import router as recommend_router
-from src.app.routers.recommend_aux import router as recommend_aux_router
-from src.app.routers.recommendation_checkout import router as recommendation_checkout_router
-from src.app.routers.recommendation_explain import router as recommendation_explain_router
-from src.app.routers.recommendation_nqe import router as recommendation_nqe_router
-from src.app.routers.recommendation_feedback import router as recommendation_feedback_router
 from src.app.routers.products_compare import router as products_router
 from src.app.routers.orchestrator_api import router as orchestrator_router
 from src.app.routers.orders import router as orders_router
@@ -75,6 +69,7 @@ from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
 from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
+from src.app.bootstrap.recommendation_router_group import register_recommendation_router_group
 from src.app.bootstrap.security_operations_router_group import (
     register_security_operations_router_group,
 )
@@ -1958,12 +1953,7 @@ def create_app() -> FastAPI:
         app.include_router(orchestrator_router)
     except Exception:
         pass
-    app.include_router(recommend_router)
-    app.include_router(recommend_aux_router)
-    app.include_router(recommendation_checkout_router)
-    app.include_router(recommendation_explain_router)
-    app.include_router(recommendation_nqe_router)
-    app.include_router(recommendation_feedback_router)
+    register_recommendation_router_group(app)
     # Product catalog and detail endpoints
     try:
         app.include_router(products_router)

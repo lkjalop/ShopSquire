@@ -63,4 +63,34 @@ describe('useShoppingCaseResearch', () => {
     await expect(request!).resolves.toMatchObject({ error: { name: 'AbortError' } });
     expect(result.current.researchState).toBe('timed_out');
   });
+
+  it('owns same-case evidence and publisher mutations', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'accepted' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useShoppingCaseResearch());
+    act(() => result.current.setAmbiguityExploration({
+      schema_version: 'ambiguity-exploration-v1', case_id: 'case-3',
+      retained_purpose: 'novel workload', status: 'provisional',
+      research_plan_id: 'plan-3', interpretations: [], ambiguity_objects: [], shelves: [],
+    } as any));
+
+    await act(async () => {
+      await result.current.submitManualSpecifications('buyer-1', 'RAM >= 32 GB');
+      await result.current.resolveEvidenceSource(
+        'buyer-1', { source_url: 'https://vendor.example/requirements' }, true,
+      );
+      await result.current.approvePublisherCandidate('buyer-1', {
+        candidate_id: 'publisher-1', candidate_version: 1,
+      });
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining('/shopping-cases/case-3/requirement-proposals/from-text'),
+      expect.stringContaining('/shopping-cases/case-3/evidence-source-resolutions'),
+      expect.stringContaining('/shopping-cases/case-3/publisher-candidates/publisher-1/approve'),
+    ]);
+  });
 });

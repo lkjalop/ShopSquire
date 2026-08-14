@@ -5,6 +5,8 @@ type MarketEvent = { payload?: Record<string, any> };
 export default function MarketIntelligencePanel({
   events,
   behaviorEvents = [],
+  connectorHealth,
+  connectorHealthStatus = 'not_requested',
   dependencyEvidence,
   classNames,
   humanize,
@@ -12,6 +14,8 @@ export default function MarketIntelligencePanel({
 }: {
   events: MarketEvent[];
   behaviorEvents?: MarketEvent[];
+  connectorHealth?: Record<string, any> | null;
+  connectorHealthStatus?: string;
   dependencyEvidence?: ReactNode;
   classNames: { summaryPane: string; sectionTitle: string; empty: string; kvRow: string };
   humanize: (value: unknown) => string;
@@ -29,6 +33,21 @@ export default function MarketIntelligencePanel({
           <div className={classNames.sectionTitle}>Dependency paths supporting this finding</div>
           {dependencyEvidence}
         </>
+      )}
+      {connectorHealthStatus !== 'not_requested' && (
+        <details style={{ marginBottom: 10 }} data-testid="market-connector-health">
+          <summary style={{ cursor: 'pointer' }}>
+            Connector health: {connectorHealthStatus === 'available'
+              ? humanize(connectorHealth?.status || 'observed') : humanize(connectorHealthStatus)}
+          </summary>
+          {(connectorHealth?.sources || []).map((source: any) => (
+            <div key={source.source} className={classNames.kvRow}>
+              <span>{humanize(source.source)}</span>
+              <span>{humanize(source.status)} · failures {Math.round(Number(source.failure_rate || 0) * 100)}% · stale {Math.round(Number(source.stale_rate || 0) * 100)}%</span>
+            </div>
+          ))}
+          <div className={classNames.kvRow}><span>Authority</span><span>Operator observability only</span></div>
+        </details>
       )}
       {behaviorEvents.map((event, index) => {
         const item = event.payload || {};

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import uuid
+import time
 from typing import Any
 
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
+
+from src.app.services.memory import Memory
 
 
 def store_chat_message(
@@ -53,3 +56,93 @@ def store_chat_message(
         )
         message_db.commit()
     return message_id
+
+
+def _recent_messages(rows: Any, *, limit: int = 16) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role") or "").strip().lower()
+        content = str(row.get("content") or "").strip()
+        if role in {"user", "assistant"} and content:
+            normalized.append({"role": role, "content": content[:500]})
+    return normalized[-max(1, int(limit)):]
+
+
+def persist_chat_structured_state(
+    *, redis: Any, uid: str, query: str, products: list[dict[str, Any]] | None,
+    trace_id: str | None, budget: dict[str, int | None], brands: list[str],
+    assistant_message: str | None = None,
+    recent_messages: list[dict[str, Any]] | None = None,
+    confirmed_slots: dict[str, Any] | None = None,
+    semantic_resolution: dict[str, Any] | None = None,
+    case_anchor: dict[str, Any] | None = None,
+    tenant_id: str | None = None, session_epoch: str | None = None,
+) -> None:
+    """Persist bounded conversational state without recommendation dispatch authority."""
+    mem = Memory(redis, tenant_id=tenant_id, session_epoch=session_epoch)
+    prior = mem.get_structured_state(uid) or {}
+    skus = [str((row or {}).get("sku") or "") for row in (products or []) if isinstance(row, dict)]
+    skus = [sku for sku in skus if sku][:12]
+    out = dict(prior)
+    out.update({
+        "last_chat_query": str(query or "")[:500], "last_chat_trace_id": trace_id,
+        "last_chat_ts": int(time.time()),
+    })
+    merged = dict(out.get("confirmed_slots") or {})
+    if budget.get("budget_min") is not None:
+        merged["budget_min"] = budget["budget_min"]
+    if budget.get("budget_max") is not None:
+        merged["budget_max"] = budget["budget_max"]
+    if brands:
+        merged["brands"] = brands[:6]
+    for key, value in (confirmed_slots or {}).items():
+        if value is not None and not (isinstance(value, list) and not value):
+            merged[str(key)] = value
+    excluded = {str(value).strip().lower() for value in merged.get("brand_excludes", [])
+                if str(value).strip()}
+    if excluded and isinstance(merged.get("brands"), list):
+        kept = [value for value in merged["brands"] if str(value).strip().lower() not in excluded]
+        if kept:
+            merged["brands"] = kept
+        else:
+            merged.pop("brands", None)
+    if merged:
+        out["confirmed_slots"] = merged
+        for key in ("budget_min", "budget_max"):
+            if merged.get(key) is not None:
+                out[key] = merged[key]
+        if merged.get("brands"):
+            out["brands"] = list(merged["brands"])[:6]
+    recent = _recent_messages(recent_messages or out.get("recent_messages"))
+    recent.append({"role": "user", "content": str(query or "")[:500]})
+    if str(assistant_message or "").strip():
+        recent.append({"role": "assistant", "content": str(assistant_message)[:500]})
+    out["recent_messages"] = _recent_messages(recent)
+    if skus:
+        out["last_shortlist_skus"] = skus
+        out["last_valid_shortlist_skus"] = skus
+    if isinstance(semantic_resolution, dict):
+        if semantic_resolution.get("catalog_authority") == "blocked":
+            out["semantic_resolution"] = dict(semantic_resolution)
+        elif semantic_resolution.get("catalog_authority") == "permitted":
+            out.pop("semantic_resolution", None)
+    if isinstance(case_anchor, dict) and str(case_anchor.get("case_id") or "").strip():
+        out["case_anchor"] = dict(case_anchor)
+    mem.set_structured_state(uid, out)
+    bank = mem.get_product_memory_bank(uid) or {}
+    history = list(bank.get("chat_turns") or [])
+    history.append({
+        "ts": int(time.time()), "trace_id": trace_id, "query": str(query or "")[:300],
+        "shortlist_skus": skus, "budget_min": out.get("budget_min"),
+        "budget_max": out.get("budget_max"),
+    })
+    bank["chat_turns"] = history[-20:]
+    if skus:
+        bank["last_shortlist_skus"] = skus
+    bank["last_trace_id"] = trace_id
+    mem.set_product_memory_bank(uid, bank)
+
+
+__all__ = ["persist_chat_structured_state", "store_chat_message"]

@@ -9,8 +9,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_main_registers_v2_compatibility_router_not_legacy_router() -> None:
     main = (ROOT / "src/app/main.py").read_text(encoding="utf-8-sig")
-    assert "from src.app.routers.recommend_compat import router as recommend_router" in main
-    assert "from src.app.routers.recommend import router as recommend_router" not in main
+    group = (ROOT / "src/app/bootstrap/recommendation_router_group.py").read_text(
+        encoding="utf-8-sig"
+    )
+    assert "register_recommendation_router_group(app)" in main
+    assert "src.app.routers.recommend_compat" in group
+    assert "src.app.routers.recommend import" not in main + group
 
 
 def test_compatibility_router_does_not_import_legacy_module() -> None:

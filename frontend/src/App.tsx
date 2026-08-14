@@ -386,6 +386,10 @@ export default function App() {
     activeShoppingCase,
     setActiveShoppingCase,
     executeResearch: executeShoppingCaseResearch,
+    acceptRequirementProposal: executeRequirementAcceptance,
+    submitManualSpecifications: executeManualSpecifications,
+    resolveEvidenceSource: executeEvidenceSourceResolution,
+    approvePublisherCandidate: executePublisherApproval,
   } = useShoppingCaseResearch();
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   // Safe-internet-search results (separate labeled source; never owned catalog items).
@@ -2779,31 +2783,12 @@ export default function App() {
     const proposal = message.buyerRequirementProposal;
     if (!proposal) throw new Error('This requirement proposal is missing its case identity.');
     const allIds = (message.buyerRequirementClaims || []).map((claim) => claim.claim_id);
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(proposal.case_id)}`
-      + `/requirement-proposals/${encodeURIComponent(proposal.proposal_id)}/accept`,
-    ), {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': `accept-${proposal.proposal_id}-${proposal.proposal_version}`,
-        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
-        ...csrfHeaders(),
-      },
-      body: JSON.stringify({
-        uid,
-        expected_proposal_version: proposal.proposal_version,
-        accepted_claim_ids: acceptedClaimIds,
-        rejected_claim_ids: allIds.filter((claimId) => !acceptedClaimIds.includes(claimId)),
-        corrections,
-        research_choice: researchChoice,
-      }),
+    const payload = await executeRequirementAcceptance({
+      uid, caseId: proposal.case_id, proposalId: proposal.proposal_id,
+      proposalVersion: proposal.proposal_version, acceptedClaimIds,
+      rejectedClaimIds: allIds.filter((claimId) => !acceptedClaimIds.includes(claimId)),
+      corrections, researchChoice,
     });
-    const payload = await safeJson(response);
-    if (!response.ok) {
-      throw new Error(String(payload?.detail?.code || payload?.detail || 'Requirement acceptance failed.'));
-    }
     if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
       setProductShelves(payload.product_shelves as ProductShelfProjection);
       switchRightPanelMode('grid');
@@ -2836,30 +2821,10 @@ export default function App() {
       buyerClaimReconciliation: Array.isArray(payload?.buyer_claim_reconciliation)
         ? payload.buyer_claim_reconciliation as BuyerClaimReconciliation[] : undefined,
     }]);
-  }, [uid, traceId, switchRightPanelMode]);
+  }, [uid, traceId, switchRightPanelMode, executeRequirementAcceptance]);
 
   const submitManualSpecifications = useCallback(async (text: string) => {
-    if (!ambiguityExploration?.case_id) {
-      throw new Error('This exploration is missing its shopping-case identity.');
-    }
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}`
-      + '/requirement-proposals/from-text',
-    ), {
-      method: 'POST', credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
-        ...csrfHeaders(),
-      },
-      body: JSON.stringify({
-        uid, text, retained_purpose: ambiguityExploration.retained_purpose,
-      }),
-    });
-    const payload = await safeJson(response);
-    if (!response.ok) {
-      throw new Error(String(payload?.detail?.message || payload?.detail?.code || payload?.detail || 'Specification extraction failed.'));
-    }
+    const payload = await executeManualSpecifications(uid, text);
     setMessages((current) => [...current, {
       role: 'assistant',
       content: `I extracted ${payload.claims?.length || 0} provisional requirement claims from your typed specifications. Review or correct them below. I have not qualified a product or changed your cart.`,
@@ -2871,7 +2836,7 @@ export default function App() {
         proposal_version: payload.proposal_version,
       },
     }]);
-  }, [ambiguityExploration, uid]);
+  }, [executeManualSpecifications, uid]);
 
   const researchAmbiguousShoppingCase = useCallback(async (refreshAuthorized = false) => {
     setIsThinking(true);
@@ -2908,24 +2873,7 @@ export default function App() {
     hint: { source_url?: string; vendor_name?: string },
     researchAuthorized: boolean,
   ) => {
-    if (!ambiguityExploration?.case_id) {
-      throw new Error('This exploration is missing its shopping-case identity.');
-    }
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/evidence-source-resolutions`,
-    ), {
-      method: 'POST', credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
-        ...csrfHeaders(),
-      },
-      body: JSON.stringify({ uid, ...hint, research_authorized: researchAuthorized }),
-    });
-    const payload = await safeJson(response);
-    if (!response.ok) {
-      throw new Error(String(payload?.detail?.message || payload?.detail?.code || payload?.detail || 'Evidence-source resolution failed.'));
-    }
+    const payload = await executeEvidenceSourceResolution(uid, hint, researchAuthorized);
     if (researchAuthorized && payload?.research_status === 'completed') {
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
         setProductShelves({
@@ -2954,46 +2902,12 @@ export default function App() {
       }]);
     }
     return payload?.resolution || { status: 'unresolved', reason: 'resolution_not_recorded' };
-  }, [ambiguityExploration, uid, traceId]);
+  }, [executeEvidenceSourceResolution, uid, traceId]);
 
   const approvePublisherCandidate = useCallback(async (
     candidate: NonNullable<AmbiguityExploration['publisher_candidates']>[number],
   ) => {
-    if (!ambiguityExploration?.case_id) {
-      throw new Error('This exploration is missing its shopping-case identity.');
-    }
-    if (!candidate.candidate_id || !candidate.candidate_version) {
-      throw new Error('This publisher candidate is not durably bound to the shopping case.');
-    }
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}`
-      + `/publisher-candidates/${encodeURIComponent(candidate.candidate_id)}/approve`,
-    ), {
-      method: 'POST', credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': `approve-${candidate.candidate_id}-${candidate.candidate_version}`,
-        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
-        ...csrfHeaders(),
-      },
-      body: JSON.stringify({
-        uid,
-        expected_candidate_version: candidate.candidate_version,
-        approval_scope: 'case_only',
-        allowed_claim_types: [
-          'minimum_requirements', 'recommended_requirements', 'target_requirements', 'compatibility',
-          'operating_system_support', 'hardware_certification',
-        ],
-        research_authorized: true,
-      }),
-    });
-    const payload = await safeJson(response);
-    if (!response.ok) {
-      throw new Error(String(
-        payload?.detail?.message || payload?.detail?.code || payload?.detail
-        || 'Publisher candidate approval failed.',
-      ));
-    }
+    const payload = await executePublisherApproval(uid, candidate);
     setTraceId(normalizeTraceId(payload?.trace_id || traceId));
     setMessages((current) => [...current, {
       role: 'assistant',
@@ -3012,7 +2926,7 @@ export default function App() {
         ? 'official_claims_pending_buyer_review' : 'zero_parser_yield',
       provider_accounting: payload?.provider_accounting || current.provider_accounting,
     } : current);
-  }, [ambiguityExploration, uid, traceId]);
+  }, [executePublisherApproval, uid, traceId]);
 
   const proposeResearchedProduct = useCallback(async (item: ShelfProduct, quantity: number) => {
     if (!ambiguityExploration?.case_id) return;

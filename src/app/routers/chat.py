@@ -1473,94 +1473,15 @@ def _persist_chat_structured_state(
     tenant_id: str | None = None,
     session_epoch: str | None = None,
 ) -> None:
-    mem = Memory(
-        redis,
-        tenant_id=tenant_id,
-        session_epoch=session_epoch,
+    from src.app.services.chat_persistence import persist_chat_structured_state
+
+    return persist_chat_structured_state(
+        redis=redis, uid=uid, query=query, products=products, trace_id=trace_id,
+        budget=_extract_budget_bounds(query), brands=_extract_brand_mentions(query),
+        assistant_message=assistant_message, recent_messages=recent_messages,
+        confirmed_slots=confirmed_slots, semantic_resolution=semantic_resolution,
+        case_anchor=case_anchor, tenant_id=tenant_id, session_epoch=session_epoch,
     )
-    prior = mem.get_structured_state(uid) or {}
-    budget = _extract_budget_bounds(query)
-    brands = _extract_brand_mentions(query)
-    skus = [str((p or {}).get("sku") or "") for p in (products or []) if isinstance(p, dict)]
-    skus = [s for s in skus if s][:12]
-
-    out = dict(prior)
-    out["last_chat_query"] = str(query or "")[:500]
-    out["last_chat_trace_id"] = trace_id
-    out["last_chat_ts"] = int(time.time())
-
-    merged_slots = out.get("confirmed_slots") if isinstance(out.get("confirmed_slots"), dict) else {}
-    merged_slots = dict(merged_slots)
-    if budget.get("budget_min") is not None:
-        merged_slots["budget_min"] = budget.get("budget_min")
-    if budget.get("budget_max") is not None:
-        merged_slots["budget_max"] = budget.get("budget_max")
-    if brands:
-        merged_slots["brands"] = brands[:6]
-    if isinstance(confirmed_slots, dict):
-        for key, value in confirmed_slots.items():
-            if value is None:
-                continue
-            if isinstance(value, list) and not value:
-                continue
-            merged_slots[str(key)] = value
-    excluded = {str(v).strip().lower() for v in (merged_slots.get("brand_excludes") or [])
-                if str(v).strip()}
-    if excluded and isinstance(merged_slots.get("brands"), list):
-        kept = [v for v in merged_slots["brands"] if str(v).strip().lower() not in excluded]
-        if kept:
-            merged_slots["brands"] = kept
-        else:
-            merged_slots.pop("brands", None)
-    if merged_slots:
-        out["confirmed_slots"] = merged_slots
-        if merged_slots.get("budget_min") is not None:
-            out["budget_min"] = merged_slots.get("budget_min")
-        if merged_slots.get("budget_max") is not None:
-            out["budget_max"] = merged_slots.get("budget_max")
-        if isinstance(merged_slots.get("brands"), list) and merged_slots.get("brands"):
-            out["brands"] = list(merged_slots.get("brands"))[:6]
-
-    base_recent = recent_messages if isinstance(recent_messages, list) and recent_messages else out.get("recent_messages")
-    recent = _normalize_recent_messages(base_recent, limit=16)
-    recent.append({"role": "user", "content": str(query or "")[:500]})
-    if str(assistant_message or "").strip():
-        recent.append({"role": "assistant", "content": str(assistant_message or "")[:500]})
-    out["recent_messages"] = _normalize_recent_messages(recent, limit=16)
-    if skus:
-        out["last_shortlist_skus"] = skus
-        out["last_valid_shortlist_skus"] = skus
-
-    # Semantic decisions are case authority, not transient presentation. Preserve both blocked
-    # and permitted decisions: permitted evidence is what a later EXPLAIN turn needs to retain the
-    # workload and provenance. A later semantic decision supersedes the prior one explicitly.
-    if isinstance(semantic_resolution, dict):
-        if semantic_resolution.get("catalog_authority") in {"blocked", "permitted"}:
-            out["semantic_resolution"] = dict(semantic_resolution)
-    if isinstance(case_anchor, dict) and str(case_anchor.get("case_id") or "").strip():
-        out["case_anchor"] = dict(case_anchor)
-
-    mem.set_structured_state(uid, out)
-
-    bank = mem.get_product_memory_bank(uid) or {}
-    hist = list(bank.get("chat_turns") or [])
-    hist.append(
-        {
-            "ts": int(time.time()),
-            "trace_id": trace_id,
-            "query": str(query or "")[:300],
-            "shortlist_skus": skus,
-            "budget_min": out.get("budget_min"),
-            "budget_max": out.get("budget_max"),
-        }
-    )
-    bank["chat_turns"] = hist[-20:]
-    if skus:
-        bank["last_shortlist_skus"] = skus
-    bank["last_trace_id"] = trace_id
-    mem.set_product_memory_bank(uid, bank)
-
-
 async def _idem_single_flight(
     redis,
     key: str,

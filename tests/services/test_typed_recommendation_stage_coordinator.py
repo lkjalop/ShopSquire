@@ -5,6 +5,7 @@ from src.app.services.recommendation_core.typed_stage_coordinator import (
     RecommendationPhase,
     run_coordinated_stages,
 )
+import pytest
 
 
 class Response:
@@ -32,3 +33,23 @@ def test_coordinator_preserves_order_and_failure_isolation():
     assert effects == ["fit", "response"]
     assert [item[0] for item in response.recorded] == ["fit", "commercial", "response"]
     assert [item[1]["status"] for item in response.recorded] == ["ok", "error", "ok"]
+
+
+def test_coordinator_rejects_phase_regression_before_side_effects():
+    response = Response()
+    effects = []
+
+    with pytest.raises(ValueError, match="recommendation_stage_order_invalid"):
+        run_coordinated_stages(response, (
+            CoordinatedStage(
+                RecommendationPhase.COMMERCIAL, "commercial",
+                lambda: effects.append("commercial"),
+            ),
+            CoordinatedStage(
+                RecommendationPhase.EVIDENCE, "evidence",
+                lambda: effects.append("evidence"),
+            ),
+        ))
+
+    assert effects == []
+    assert response.recorded == []

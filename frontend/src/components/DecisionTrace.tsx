@@ -40,7 +40,7 @@ import {
   traceSectionForLeaf,
   type TraceLeafTab,
 } from './decision-trace/traceNavigation';
-import { projectMarketHippographTrace } from './decision-trace/marketHippographProjection';
+import { useMarketHippographTrace } from '../hooks/useMarketHippographTrace';
 
 export { TRACE_LEAF_LABELS, TRACE_SECTIONS, normalizeTraceLeaf, traceSectionForLeaf } from './decision-trace/traceNavigation';
 export type { TraceLeafTab } from './decision-trace/traceNavigation';
@@ -1187,12 +1187,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     eventFilter === 'all'
       ? allDisplayEvents
       : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
-  const { marketProjectionEvents, marketBehaviorEvents, hippographInsights } =
-    projectMarketHippographTrace({
-      events: allDisplayEvents,
-      trace: trace as any,
-      eventMatcher: (event, expected) => eventMatches(event as TraceEvent, expected),
-    });
+  const {
+    marketProjectionEvents, marketBehaviorEvents, hippographInsights,
+    connectorHealth: marketConnectorHealth,
+    connectorHealthStatus: marketConnectorHealthStatus,
+  } = useMarketHippographTrace({
+    active: activeTab === 'market', events: allDisplayEvents, trace: trace as any,
+    apiKey: effectiveApiKey,
+    eventMatcher: (event, expected) => eventMatches(event as TraceEvent, expected),
+  });
 
   const ms = trace?.model_selection || {};
   const typedExecutionSteps = resolveExecutionSteps(trace, allDisplayEvents);
@@ -4052,6 +4055,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 <MarketIntelligencePanel
                   events={marketProjectionEvents}
                   behaviorEvents={marketBehaviorEvents}
+                  connectorHealth={marketConnectorHealth}
+                  connectorHealthStatus={marketConnectorHealthStatus}
                   dependencyEvidence={hippographInsights.length > 0 ? <HippographEvidenceSurface insights={hippographInsights} /> : undefined}
                   classNames={styles}
                   humanize={humanizeKey}

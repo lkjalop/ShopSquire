@@ -16,6 +16,28 @@ type ResearchRequest = {
   deadlineMs?: number;
 };
 
+const requestHeaders = (idempotencyKey?: string) => ({
+  'Content-Type': 'application/json',
+  ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+  'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+  ...csrfHeaders(),
+});
+
+async function postShoppingCase(path: string, body: Record<string, unknown>, idempotencyKey?: string) {
+  const response = await fetch(apiUrl(path), {
+    method: 'POST', credentials: 'include', headers: requestHeaders(idempotencyKey),
+    body: JSON.stringify(body),
+  });
+  const payload = await safeJson(response);
+  if (!response.ok) {
+    throw new Error(String(
+      payload?.detail?.message || payload?.detail?.code || payload?.detail
+      || 'Shopping-case operation failed.',
+    ));
+  }
+  return payload;
+}
+
 /**
  * Owns durable shopping-case identity and the cancellable research operation.
  * Rendering and buyer-facing copy deliberately remain outside this hook.
@@ -132,6 +154,73 @@ export function useShoppingCaseResearch() {
     }
   }, [ambiguityExploration, cancelResearch]);
 
+  const acceptRequirementProposal = useCallback(async ({
+    uid, caseId, proposalId, proposalVersion, acceptedClaimIds, rejectedClaimIds,
+    corrections = [], researchChoice,
+  }: {
+    uid: string; caseId: string; proposalId: string; proposalVersion: number;
+    acceptedClaimIds: string[]; rejectedClaimIds: string[];
+    corrections?: Record<string, unknown>[];
+    researchChoice: 'local_only' | 'research_and_corroborate';
+  }) => postShoppingCase(
+    `/api/v1/shopping-cases/${encodeURIComponent(caseId)}`
+      + `/requirement-proposals/${encodeURIComponent(proposalId)}/accept`,
+    {
+      uid, expected_proposal_version: proposalVersion, accepted_claim_ids: acceptedClaimIds,
+      rejected_claim_ids: rejectedClaimIds, corrections, research_choice: researchChoice,
+    },
+    `accept-${proposalId}-${proposalVersion}`,
+  ), []);
+
+  const submitManualSpecifications = useCallback(async (uid: string, text: string) => {
+    if (!ambiguityExploration?.case_id) {
+      throw new Error('This exploration is missing its shopping-case identity.');
+    }
+    return postShoppingCase(
+      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}`
+        + '/requirement-proposals/from-text',
+      { uid, text, retained_purpose: ambiguityExploration.retained_purpose },
+    );
+  }, [ambiguityExploration]);
+
+  const resolveEvidenceSource = useCallback(async (
+    uid: string,
+    hint: { source_url?: string; vendor_name?: string },
+    researchAuthorized: boolean,
+  ) => {
+    if (!ambiguityExploration?.case_id) {
+      throw new Error('This exploration is missing its shopping-case identity.');
+    }
+    return postShoppingCase(
+      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}`
+        + '/evidence-source-resolutions',
+      { uid, ...hint, research_authorized: researchAuthorized },
+    );
+  }, [ambiguityExploration]);
+
+  const approvePublisherCandidate = useCallback(async (uid: string, candidate: any) => {
+    if (!ambiguityExploration?.case_id) {
+      throw new Error('This exploration is missing its shopping-case identity.');
+    }
+    if (!candidate?.candidate_id || !candidate?.candidate_version) {
+      throw new Error('This publisher candidate is not durably bound to the shopping case.');
+    }
+    return postShoppingCase(
+      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}`
+        + `/publisher-candidates/${encodeURIComponent(candidate.candidate_id)}/approve`,
+      {
+        uid, expected_candidate_version: candidate.candidate_version,
+        approval_scope: 'case_only',
+        allowed_claim_types: [
+          'minimum_requirements', 'recommended_requirements', 'target_requirements',
+          'compatibility', 'operating_system_support', 'hardware_certification',
+        ],
+        research_authorized: true,
+      },
+      `approve-${candidate.candidate_id}-${candidate.candidate_version}`,
+    );
+  }, [ambiguityExploration]);
+
   return {
     activeShoppingCase,
     setActiveShoppingCase,
@@ -140,5 +229,9 @@ export function useShoppingCaseResearch() {
     researchState,
     executeResearch,
     cancelResearch,
+    acceptRequirementProposal,
+    submitManualSpecifications,
+    resolveEvidenceSource,
+    approvePublisherCandidate,
   };
 }
