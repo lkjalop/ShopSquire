@@ -218,6 +218,77 @@ def discover_open_world_publishers(
         row["quality_score"] = _quality_score(row)
         row["publisher_ownership_evaluation"] = _publisher_ownership_evaluation(row)
     external_calls = sum(bool(row.get("external_call_dispatched")) for row in receipts)
+    engine_failures = list({
+        (str(failure.get("engine") or "unknown"), str(failure.get("reason") or "unresponsive")):
+        dict(failure)
+        for receipt in receipts
+        for failure in receipt.get("engine_failures") or []
+    }.values())
+    evidence_ladder = [
+        {
+            "tier": 0, "mechanism": "sealed_corpus",
+            "execution_status": "not_applicable_novel_publisher",
+            "billing_class": "not_applicable",
+        },
+        {
+            "tier": 1, "mechanism": "governed_evidence_cache",
+            "execution_status": "not_attempted",
+            "rejection_reason": "publisher_not_yet_accepted",
+            "billing_class": "not_applicable",
+        },
+        {
+            "tier": 2, "mechanism": "buyer_upload_or_link",
+            "execution_status": "available_not_selected",
+            "billing_class": "free",
+        },
+        {
+            "tier": 3, "mechanism": "canonical_official_origin",
+            "execution_status": "not_attempted",
+            "rejection_reason": "publisher_approval_required",
+            "billing_class": "free",
+        },
+        {
+            "tier": 4, "mechanism": "self_hosted_discovery",
+            "execution_status": (
+                "cancelled" if cancelled
+                else "degraded" if engine_failures
+                else "completed" if external_calls
+                else "not_executed"
+            ),
+            "billing_class": "free",
+            "dispatch_count": external_calls,
+            "allowlisted_result_count": sum(
+                int(row.get("allowlisted_result_count") or 0) for row in receipts
+            ),
+            "engines_queried": sorted({
+                str(engine) for row in receipts for engine in row.get("engines_queried") or []
+            }),
+            "engines_responded": sorted({
+                str(engine) for row in receipts for engine in row.get("engines_responded") or []
+            }),
+            "engine_failures": engine_failures,
+            "engine_reliability": [
+                dict(engine)
+                for row in receipts
+                for engine in row.get("engine_reliability") or []
+            ],
+            "suppressed_engines": sorted({
+                str(engine) for row in receipts for engine in row.get("suppressed_engines") or []
+            }),
+        },
+        {
+            "tier": 5, "mechanism": "paid_discovery",
+            "execution_status": "not_attempted",
+            "rejection_reason": "provider_not_enrolled",
+            "billing_class": "paid", "paid_calls": 0,
+        },
+        {
+            "tier": 6, "mechanism": "publisher_policy_resolution",
+            "execution_status": "required",
+            "rejection_reason": "discovery_does_not_establish_authority",
+            "billing_class": "not_applicable",
+        },
+    ]
     return {
         "schema_version": "open-world-discovery-v1",
         "status": (
@@ -235,6 +306,7 @@ def discover_open_world_publishers(
             "paid_calls": 0,
         },
         "claims": [],
+        "evidence_ladder": evidence_ladder,
         "next_action": (
             "explicit_refresh_or_upload_requirements" if cancelled
             else "approve_publisher_origin_or_upload_requirements"

@@ -1,0 +1,5 @@
+# Certification overlay: discovery cannot connect. Canonical origins, cache,
+# upload, and manual-entry degradation paths remain available.
+env:
+  EXTERNAL_RESEARCH_SEARCH_URL: "http://host.docker.internal:65530/search?q={query}&format=json"
+  EXTERNAL_RESEARCH_RUNTIME_STATUS: "unreachable"

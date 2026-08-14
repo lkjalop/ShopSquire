@@ -75,3 +75,39 @@ def test_redirect_and_oversized_body_are_not_accepted_as_evidence():
 
     assert redirect["error"] == "origin_http_status"
     assert oversized["error"] == "origin_body_too_large"
+
+
+def test_transport_timeout_is_recorded_as_dispatched_network_work():
+    def timeout(_request):
+        raise httpx.ReadTimeout("publisher did not respond")
+
+    result = GovernedOfficialOriginFetcher(
+        client=httpx.Client(transport=httpx.MockTransport(timeout)),
+        resolver=_public_resolver,
+    ).fetch("https://csrc.nist.gov/doc", allowlist=["csrc.nist.gov"])
+
+    assert result["status"] == "failed"
+    assert result["error"] == "origin_transport_error:ReadTimeout"
+    assert result["receipt"]["network_execution"] is True
+    assert result["receipt"]["external_call_dispatched"] is True
+
+
+def test_certification_timeout_is_inert_in_production_and_explicit_in_dev(monkeypatch):
+    calls = []
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda request: calls.append(request) or httpx.Response(
+            200, content=b"requirements", headers={"content-type": "text/html"},
+        )
+    ))
+    monkeypatch.setenv("RESEARCH_CERTIFICATION_MODE", "1")
+    monkeypatch.setenv("RESEARCH_CERTIFICATION_FAULT_PROFILE", "publisher_timeout")
+    monkeypatch.setenv("APP_ENV", "development")
+
+    result = GovernedOfficialOriginFetcher(
+        client=client, resolver=_public_resolver,
+    ).fetch("https://csrc.nist.gov/doc", allowlist=["csrc.nist.gov"])
+
+    assert calls == []
+    assert result["error"] == "certification_injected_publisher_timeout"
+    assert result["receipt"]["fixture"] is True
+    assert result["receipt"]["external_call_dispatched"] is False

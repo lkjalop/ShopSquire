@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.app.services.research_certification_faults import active_research_fault
+
 
 _ALLOWED_CONTENT_TYPES = (
     "text/html", "text/plain", "application/json", "application/pdf",
@@ -111,6 +113,11 @@ class GovernedOfficialOriginFetcher:
             host, resolver=self._resolver, allow_private=self._allow_private,
         ):
             return self._failed(base_receipt, "origin_host_not_public")
+        if active_research_fault() == "publisher_timeout":
+            return self._failed(
+                {**base_receipt, "fixture": True},
+                "certification_injected_publisher_timeout",
+            )
 
         client = self._client or httpx.Client(
             timeout=timeout_s,
@@ -119,11 +126,16 @@ class GovernedOfficialOriginFetcher:
         )
         owns_client = self._client is None
         try:
-            response = client.get(str(url), timeout=timeout_s)
-            receipt = {
+            # Crossing this line means an external call was dispatched even if
+            # DNS, proxy negotiation, TLS, or the response later times out.
+            dispatched_receipt = {
                 **base_receipt,
                 "network_execution": True,
                 "external_call_dispatched": True,
+            }
+            response = client.get(str(url), timeout=timeout_s)
+            receipt = {
+                **dispatched_receipt,
                 "http_status": int(response.status_code),
             }
             if not 200 <= response.status_code < 300:
@@ -153,7 +165,9 @@ class GovernedOfficialOriginFetcher:
                 },
             }
         except Exception as exc:
-            return self._failed(base_receipt, f"origin_transport_error:{type(exc).__name__}")
+            return self._failed(
+                dispatched_receipt, f"origin_transport_error:{type(exc).__name__}",
+            )
         finally:
             if owns_client:
                 client.close()

@@ -11,7 +11,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from src.app.adapters.external_research_httpx import HttpxResearchFetcher
@@ -24,6 +24,7 @@ from src.app.services.official_evidence_cache import (
 )
 from src.app.services.official_source_governance import governed_sources_for_workload
 from src.app.services.publisher_origin_verification import verify_publisher_origin
+from src.app.services.research_certification_faults import active_research_fault
 from src.app.services.recommendation_core.research_contracts import ProviderExecutionReceipt
 
 
@@ -315,7 +316,8 @@ def _receipt(raw: dict[str, Any], *, run_id: str, capability: str, index: int) -
         query_id=raw.get("query_id"), query_hash=raw.get("query_hash"),
         query_purpose=raw.get("query_purpose"),
         obligation_ids=["official-requirements"],
-        execution_status=raw.get("execution_status", "failed"), fixture=False,
+        execution_status=raw.get("execution_status", "failed"),
+        fixture=bool(raw.get("fixture")),
         network_execution=bool(raw.get("network_execution")),
         external_call_dispatched=bool(raw.get("external_call_dispatched")),
         cache_status=raw.get("cache_status", "miss"),
@@ -691,12 +693,14 @@ def research_official_sources(
     evidence_cache: OfficialEvidenceCache | None = None,
     now: datetime | None = None,
     total_timeout_s: float = 30.0,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Fetch reviewed official origins using cache -> canonical -> discovery fallback."""
 
     run_id = f"research-{uuid.uuid4().hex[:12]}"
     started_monotonic = time.monotonic()
     deadline_monotonic = started_monotonic + max(0.0, float(total_timeout_s))
+    cancelled = False
 
     def remaining_timeout(cap_s: float) -> float:
         return max(0.0, min(cap_s, deadline_monotonic - time.monotonic()))
@@ -745,6 +749,12 @@ def research_official_sources(
                 "parse_status": "not_attempted",
             },
         }
+        if cancellation_requested and cancellation_requested():
+            cancelled = True
+            execution["deadline_status"] = "cancelled_before_dispatch"
+            unresolved.append({"source_id": source_id, "reason": "buyer_request_cancelled"})
+            source_execution.append(execution)
+            break
         if remaining_timeout(15.0) <= 0:
             execution["deadline_status"] = "exceeded_before_dispatch"
             unresolved.append({"source_id": source_id, "reason": "research_total_deadline_exceeded"})
@@ -809,6 +819,12 @@ def research_official_sources(
         origin: dict[str, Any] | None = None
         explicit_novel = source_id in novel
         if canonical and not explicit_novel:
+            if cancellation_requested and cancellation_requested():
+                cancelled = True
+                execution["deadline_status"] = "cancelled_before_canonical_fetch"
+                unresolved.append({"source_id": source_id, "reason": "buyer_request_cancelled"})
+                source_execution.append(execution)
+                break
             fetch_timeout = remaining_timeout(15.0)
             if fetch_timeout <= 0:
                 execution["deadline_status"] = "exceeded_before_canonical_fetch"
@@ -837,6 +853,12 @@ def research_official_sources(
                     "origin_selection_mode": "canonical_direct",
                     "selected_origin_url": canonical,
                 })
+            if cancellation_requested and cancellation_requested():
+                cancelled = True
+                execution["deadline_status"] = "cancelled_after_canonical_fetch"
+                unresolved.append({"source_id": source_id, "reason": "buyer_request_cancelled"})
+                source_execution.append(execution)
+                break
 
         needs_discovery = explicit_novel or not canonical or not origin or origin["status"] != "completed"
         if needs_discovery:
@@ -872,6 +894,10 @@ def research_official_sources(
             for query_index, (query_axis, query) in enumerate(
                 _source_discovery_query_plan(source), 1,
             ):
+                if cancellation_requested and cancellation_requested():
+                    cancelled = True
+                    execution["deadline_status"] = "cancelled_during_discovery"
+                    break
                 query_timeout = remaining_timeout(min(4.0, discovery_timeout))
                 if query_timeout <= 0:
                     execution["deadline_status"] = "exceeded_during_discovery"
@@ -898,6 +924,10 @@ def research_official_sources(
                 selected, selection_error = _discovered_origin_for_source(results, source)
                 if selected:
                     break
+            if cancelled:
+                unresolved.append({"source_id": source_id, "reason": "buyer_request_cancelled"})
+                source_execution.append(execution)
+                break
             unique_results = {
                 str(row.get("url") or ""): row for row in results if str(row.get("url") or "")
             }
@@ -945,6 +975,12 @@ def research_official_sources(
                 ),
                 "selected_origin_url": selected,
             })
+            if cancellation_requested and cancellation_requested():
+                cancelled = True
+                execution["deadline_status"] = "cancelled_after_discovered_origin_fetch"
+                unresolved.append({"source_id": source_id, "reason": "buyer_request_cancelled"})
+                source_execution.append(execution)
+                break
 
         source_execution.append(execution)
         if origin is None:
@@ -979,6 +1015,15 @@ def research_official_sources(
         if content_type not in _HTML_CONTENT_TYPES or parser_type not in {"html", "html_pdf"}:
             execution["parser_coverage"]["parse_status"] = "content_type_mismatch"
             unresolved.append({"source_id": source_id, "reason": "source_parser_content_type_mismatch"})
+            continue
+        if active_research_fault() == "zero_parser_yield":
+            execution["parser_coverage"]["parse_status"] = (
+                "certification_injected_zero_parser_yield"
+            )
+            unresolved.append({
+                "source_id": source_id,
+                "reason": "certification_injected_zero_parser_yield",
+            })
             continue
         observed_at = str(origin["receipt"].get("observed_at") or datetime.now(timezone.utc).isoformat())
         product_rows, context_rows = compile_source_claims(
@@ -1063,6 +1108,13 @@ def research_official_sources(
             "cache_hits": cache_hits, "paid_calls": 0,
         },
         "execution_mode": execution_mode,
+        "status": "cancelled" if cancelled else "completed",
+        "cancellation": {
+            "requested": cancelled,
+            "remaining_sources_not_dispatched": max(
+                0, min(4, len(sources)) - len(source_execution),
+            ),
+        },
         "runtime": {
             "total_timeout_s": max(0.0, float(total_timeout_s)),
             "elapsed_ms": round((time.monotonic() - started_monotonic) * 1000, 3),
@@ -1071,6 +1123,7 @@ def research_official_sources(
             ),
         },
         "authority_rule": "discovery finds; source-specific official parser establishes scoped claims",
+        "certification_fault_profile": active_research_fault(),
     }
 
 

@@ -199,6 +199,7 @@ def execute_open_world_publisher_discovery(
             "publisher_status": "unresolved",
             "publisher_candidates": discovery["candidates"],
             "receipts": discovery["receipts"],
+            "evidence_ladder": discovery.get("evidence_ladder") or [],
             "provider_accounting": accounting,
             "query_proposal": discovery.get("query_proposal"),
             "official_claims": [],

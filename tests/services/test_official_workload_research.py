@@ -161,6 +161,81 @@ def test_expired_total_deadline_dispatches_no_external_provider(monkeypatch) -> 
     }]
 
 
+def test_request_cancellation_prevents_enrolled_provider_dispatch(monkeypatch) -> None:
+    def unexpected_fetcher(**kwargs):
+        raise AssertionError(f"provider constructed after cancellation: {kwargs}")
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher",
+        unexpected_fetcher,
+    )
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.HttpxResearchFetcher",
+        unexpected_fetcher,
+    )
+
+    result = research_official_sources(
+        "enrolled request",
+        search_url_template="http://127.0.0.1:8888/search?q={query}&format=json",
+        sources=[_approved_source()],
+        cancellation_requested=lambda: True,
+    )
+
+    assert result["status"] == "cancelled"
+    assert result["cancellation"] == {
+        "requested": True,
+        "remaining_sources_not_dispatched": 0,
+    }
+    assert result["provider_accounting"]["external_calls"] == 0
+    assert result["source_execution"][0]["deadline_status"] == "cancelled_before_dispatch"
+    assert result["unresolved"] == [{
+        "source_id": "nist_manufacturing_digital_twins",
+        "reason": "buyer_request_cancelled",
+    }]
+
+
+def test_zero_parser_yield_fault_keeps_live_origin_but_accepts_no_claims(monkeypatch) -> None:
+    monkeypatch.setenv("RESEARCH_CERTIFICATION_MODE", "1")
+    monkeypatch.setenv("RESEARCH_CERTIFICATION_FAULT_PROFILE", "zero_parser_yield")
+    monkeypatch.setenv("APP_ENV", "test")
+
+    class Origin:
+        def __init__(self, **_kwargs):
+            pass
+
+        def fetch(self, url, **_kwargs):
+            return {
+                "status": "completed", "content": b"32 GB RAM", "content_type": "text/html",
+                "receipt": {
+                    "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+                    "provider_id": "governed_http_origin", "fixture": False,
+                    "network_execution": True, "external_call_dispatched": True,
+                    "execution_status": "completed", "cache_status": "miss",
+                    "provider_endpoint_host": "www.nist.gov", "query_hash": "a" * 16,
+                    "http_status": 200, "response_body_hash": "b" * 64,
+                    "started_at": "2026-08-14T00:00:00+00:00",
+                    "completed_at": "2026-08-14T00:00:01+00:00",
+                    "observed_at": "2026-08-14T00:00:01+00:00",
+                },
+            }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources(
+        "digital twin", search_url_template="", sources=[_approved_source()],
+    )
+
+    assert result["certification_fault_profile"] == "zero_parser_yield"
+    assert result["provider_accounting"]["external_calls"] == 1
+    assert result["claims"] == []
+    assert result["context_claims"] == []
+    assert result["evidence_outcome"] == "unresolved"
+    assert result["source_execution"][0]["parser_coverage"]["parse_status"] == (
+        "certification_injected_zero_parser_yield"
+    )
+
+
 def test_autocad_point_cloud_tier_keeps_scope_and_workstation_requirement() -> None:
     claims, _ = compile_source_claims(
         "autodesk_autocad_requirements",

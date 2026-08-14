@@ -1,0 +1,33 @@
+{
+  "archive": {
+    "bytes": 3909215,
+    "path": "2026-08-14-publisher-timeout-browser-artifacts.zip",
+    "sha256": "6cf83d0b8f21c3bf3047f22a8e5e1cb2ad5446794ca409c7aae1cd272a5093ee"
+  },
+  "artifact_root": ".tmp-cert-publisher-timeout-kind",
+  "certificate": "publisher-timeout-degradation",
+  "files": [
+    {
+      "bytes": 45,
+      "path": ".last-run.json",
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    },
+    {
+      "bytes": 129246,
+      "path": "research-origin-degradatio-2ea18-ers-buyer-evidence-fallback-chromium/test-finished-1.png",
+      "sha256": "c715128ba6ab9d584f1a449587bcb88b0eb776508e24a66205b09ca640d871d5"
+    },
+    {
+      "bytes": 3587468,
+      "path": "research-origin-degradatio-2ea18-ers-buyer-evidence-fallback-chromium/trace.zip",
+      "sha256": "2a4e7a6c3dd2dad4fe5107c2480a94dc5a80093c4e5ba668949f5113f06093f3"
+    },
+    {
+      "bytes": 287880,
+      "path": "research-origin-degradatio-2ea18-ers-buyer-evidence-fallback-chromium/video.webm",
+      "sha256": "49ec0da17c9baa412a900c85fbf7a4fe456a35619c045ddba7d21cd761ae4e2d"
+    }
+  ],
+  "recorded_at": "2026-08-14T11:03:32.771461+00:00",
+  "schema_version": "sealed-browser-certificate-v1"
+}

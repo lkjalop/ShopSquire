@@ -1,0 +1,5 @@
+# Deterministic chaos overlay. The injected receipt is marked fixture=true and
+# never claims that a live publisher network call timed out.
+env:
+  RESEARCH_CERTIFICATION_MODE: "1"
+  RESEARCH_CERTIFICATION_FAULT_PROFILE: "publisher_timeout"

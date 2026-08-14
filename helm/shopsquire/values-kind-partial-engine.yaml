@@ -1,0 +1,4 @@
+# Certification overlay: force one known-unhealthy and one healthy SearXNG
+# engine. This remains a real network call to local SearXNG, not a fixture.
+env:
+  EXTERNAL_RESEARCH_SEARCH_URL: "http://host.docker.internal:8888/search?q={query}&format=json&engines=startpage,bing"

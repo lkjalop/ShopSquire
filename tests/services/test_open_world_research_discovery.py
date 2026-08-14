@@ -44,6 +44,43 @@ def test_novel_plan_runs_bounded_discovery_without_fetching_or_claiming_authorit
     }
     assert result["claims"] == []
     assert all(item["authority"] == "not_accepted" for item in result["candidates"])
+    ladder = {row["tier"]: row for row in result["evidence_ladder"]}
+    assert ladder[4]["execution_status"] == "completed"
+    assert ladder[4]["dispatch_count"] == 3
+    assert ladder[5]["paid_calls"] == 0
+
+
+class PartialEngineFetcher(StubFetcher):
+    def fetch(self, query, *, allowlist, timeout_s, discovery_candidates_only):
+        rows = super().fetch(
+            query, allowlist=allowlist, timeout_s=timeout_s,
+            discovery_candidates_only=discovery_candidates_only,
+        )
+        self.last_receipt.update({
+            "allowlisted_result_count": len(rows),
+            "engines_queried": ["startpage", "bing"],
+            "engines_responded": ["bing"],
+            "engine_failures": [{"engine": "startpage", "reason": "CAPTCHA"}],
+            "engine_reliability": [{
+                "engine": "startpage", "health": "degraded", "latency_ms": 2000,
+            }],
+        })
+        return rows
+
+
+def test_partial_engine_failure_is_projected_without_disabling_discovery():
+    plan = build_case_research_plan("novel scientific solver", allow_open_world=True)
+    assert plan is not None
+    result = discover_open_world_publishers(
+        plan, search_url_template="http://localhost/search?q={query}",
+        fetcher=PartialEngineFetcher(),
+    )
+
+    tier = next(row for row in result["evidence_ladder"] if row["tier"] == 4)
+    assert tier["execution_status"] == "degraded"
+    assert tier["dispatch_count"] == 3
+    assert tier["engines_responded"] == ["bing"]
+    assert tier["engine_failures"] == [{"engine": "startpage", "reason": "CAPTCHA"}]
 
 
 class QualityFetcher(StubFetcher):

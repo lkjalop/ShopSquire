@@ -1,0 +1,33 @@
+{
+  "archive": {
+    "bytes": 5768541,
+    "path": "2026-08-14-partial-engine-browser-artifacts.zip",
+    "sha256": "12226cdd9705781fb53245dc14100ac621fb6699a4cb880fea60e2f1d277851f"
+  },
+  "artifact_root": ".tmp-cert-partial-engine-live",
+  "certificate": "partial-engine-degradation",
+  "files": [
+    {
+      "bytes": 45,
+      "path": ".last-run.json",
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    },
+    {
+      "bytes": 140754,
+      "path": "research-partial-engine-li-4a1b2-ile-free-discovery-succeeds-chromium/test-finished-1.png",
+      "sha256": "69c82a47980ecea27e1e11f71b27f088709b602d7d2bcc3bd8dfd4a18e6da2f4"
+    },
+    {
+      "bytes": 5256591,
+      "path": "research-partial-engine-li-4a1b2-ile-free-discovery-succeeds-chromium/trace.zip",
+      "sha256": "ca7a4da445a16bb8d2c686b25c841572d3143800ffc1e5d4f46494a54d0a5e04"
+    },
+    {
+      "bytes": 475350,
+      "path": "research-partial-engine-li-4a1b2-ile-free-discovery-succeeds-chromium/video.webm",
+      "sha256": "6aa0c2467815256f00cb6bf407dd1864f2a43a73145cac5056a88eced93514ec"
+    }
+  ],
+  "recorded_at": "2026-08-14T10:52:22.010463+00:00",
+  "schema_version": "sealed-browser-certificate-v1"
+}

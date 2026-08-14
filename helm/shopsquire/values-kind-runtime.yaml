@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: shopsquire-api
-  tag: runtime-kind-v3
+  tag: runtime-kind-v6
   pullPolicy: IfNotPresent
 
 ingress:

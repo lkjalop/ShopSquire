@@ -1334,23 +1334,23 @@ def research_shopping_case(
 
     approved_sources = approved_sources_for_plan(plan)
 
+    def request_cancelled() -> bool:
+        if DEFAULT_RESEARCH_CANCELLATIONS.cancelled(
+            tenant_id, case_id, body.execution_id,
+        ):
+            return True
+        if request is None:
+            return False
+        try:
+            return bool(anyio.from_thread.run(request.is_disconnected))
+        except RuntimeError:
+            return False
+
     if plan.publisher_status == "unresolved":
         from src.app.services.shopping_case_open_world_research import (
             OpenWorldResearchUnavailable,
             execute_open_world_publisher_discovery,
         )
-
-        def request_cancelled() -> bool:
-            if DEFAULT_RESEARCH_CANCELLATIONS.cancelled(
-                tenant_id, case_id, body.execution_id,
-            ):
-                return True
-            if request is None:
-                return False
-            try:
-                return bool(anyio.from_thread.run(request.is_disconnected))
-            except RuntimeError:
-                return False
 
         try:
             return execute_open_world_publisher_discovery(
@@ -1400,6 +1400,7 @@ def research_shopping_case(
             configured_search_url=str(
                 os.getenv("EXTERNAL_RESEARCH_SEARCH_URL") or ""
             ).strip(),
+            cancellation_requested=request_cancelled,
         )
     except EnrolledResearchUnavailable as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

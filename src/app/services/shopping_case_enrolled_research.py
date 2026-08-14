@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from sqlalchemy.orm import Session
 
@@ -70,6 +70,7 @@ def execute_enrolled_official_research(
     budget_cents: int | None,
     runtime_status: dict[str, Any],
     configured_search_url: str,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Fetch, compile, reconcile and rerank one enrolled-source case.
 
@@ -144,6 +145,7 @@ def execute_enrolled_official_research(
         hypothesis_ids=hypothesis_ids,
         tenant_id=tenant_id,
         evidence_cache=official_workload_research.DEFAULT_OFFICIAL_EVIDENCE_CACHE,
+        cancellation_requested=cancellation_requested,
     )
     research["discovery_readiness"] = {
         key: readiness.get(key) for key in (
@@ -175,7 +177,12 @@ def execute_enrolled_official_research(
         else "context_only" if research["context_claims"]
         else "unresolved"
     ))
-    status = "researched" if outcome == "product_requirements" else outcome
+    was_cancelled = research.get("status") == "cancelled"
+    status = (
+        "research_cancelled" if was_cancelled
+        else "researched" if outcome == "product_requirements"
+        else outcome
+    )
     contract = project_research_execution_contract(
         plan, requirements_compiled=outcome == "product_requirements",
     ).model_dump(mode="json")
@@ -195,7 +202,9 @@ def execute_enrolled_official_research(
     })
     mode = str(research.get("execution_mode") or "").strip().lower()
     accounting = research.get("provider_accounting") or {}
-    if mode == "evidence_cache" or (
+    if was_cancelled:
+        execution = "official_research_cancelled"
+    elif mode == "evidence_cache" or (
         int(accounting.get("cache_hits") or 0) > 0
         and int(accounting.get("external_calls") or 0) == 0
     ):
@@ -243,7 +252,7 @@ def execute_enrolled_official_research(
     result = {
         "schema_version": "shopping-case-research-v1",
         "case_id": case_id,
-        "status": "research_completed",
+        "status": "research_cancelled" if was_cancelled else "research_completed",
         "retained_purpose": plan.retained_purpose,
         "research_plan": plan.model_dump(mode="json"),
         "research_contract": contract,

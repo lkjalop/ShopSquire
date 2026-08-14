@@ -1,0 +1,5 @@
+# Deterministic chaos overlay. The official origin is fetched normally, then
+# claim extraction is forced to yield zero accepted/context claims.
+env:
+  RESEARCH_CERTIFICATION_MODE: "1"
+  RESEARCH_CERTIFICATION_FAULT_PROFILE: "zero_parser_yield"
