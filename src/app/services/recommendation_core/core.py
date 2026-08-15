@@ -924,116 +924,19 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     semantic_catalog_qualifications: list[dict[str, Any]] = []
     semantic_compiled_requirements: list[dict[str, Any]] = []
     if plan.needs_concept_resolution:
-        from src.app.services.evidence_orchestrator import (
-            EvidenceBudget,
-            gather_evidence as gather_semantic_evidence,
+        from src.app.services.recommendation_core.evidence_stage import (
+            resolve_semantic_evidence_stage,
         )
-        from src.app.services.semantic_resolution import (
-            approved_narration_evidence,
-            normalize_concept_evidence,
-            reduce_semantic_proposal,
-            validate_semantic_proposal,
-        )
+        from src.app.services.semantic_resolution import approved_narration_evidence
 
-        raw_semantic = {
-            key: value for key, value in plan.semantic_proposal.items()
-            if key not in ("validation", "reasons")
-        }
-        semantic_turn_query = (
-            envelope.buyer_query or envelope.query
-            if decision.clarification_relation in {"interrupt", "supersede"}
-            else envelope.query
-        )
-        semantic_anchor = (
-            str(raw_semantic.get("desired_outcome") or envelope.query)
-            if raw_semantic.get("persisted_case_blocker")
-            else semantic_turn_query
-        )
-        if decision.clarification_relation in {"interrupt", "supersede"}:
-            raw_semantic["desired_outcome"] = semantic_turn_query
-        raw_semantic.pop("persisted_case_blocker", None)
-        raw_semantic.pop("state_prevented", None)
-        validation = validate_semantic_proposal(raw_semantic, query=semantic_anchor)
-        from src.app.services.recommendation_core.research_trigger_decision import (
-            decide_research_trigger,
-        )
-
-        semantic_unknowns = list(raw_semantic.get("material_unknowns") or [])
-        semantic_concepts = list(raw_semantic.get("concepts") or [])
-        has_material_gap = bool(semantic_unknowns) or any(
-            isinstance(item, dict) and bool(item.get("material", True))
-            for item in semantic_concepts
-        )
-        proposal_origin = str(raw_semantic.get("proposal_origin") or "").strip()
-        hypotheses = list(raw_semantic.get("workload_hypotheses") or [])
-        profile_coverage = (
-            "miss" if proposal_origin == "coverage_abstention"
-            else "partial" if hypotheses or has_material_gap
-            else "unknown"
-        )
-        research_enabled = str(os.getenv("EXTERNAL_RESEARCH_ENABLED", "0")).strip().lower() in {
-            "1", "true", "yes", "on",
-        }
-        research_trigger = decide_research_trigger(
-            interpretation_confidence=float(raw_semantic.get("confidence") or 0.0),
-            workload_profile_coverage=profile_coverage,
-            corpus_coverage="unknown",
-            cache_coverage="unknown",
-            material_unknowns=[
-                str(item.get("description") or item.get("unknown_id") or "material unknown")
-                if isinstance(item, dict) else str(item)
-                for item in semantic_unknowns
-            ] or [
-                str(item.get("text") or "material concept")
-                for item in semantic_concepts if isinstance(item, dict)
-            ],
-            expected_decision_impact=1.0 if has_material_gap else 0.0,
-            authorization_state=(
-                "granted" if envelope.external_research_consent else "not_requested"
-            ),
-            external_research_allowed=research_enabled,
-        )
-        resp.extras["research_trigger"] = research_trigger.model_dump()
-        try:
-            semantic_lane_ms = max(100, min(int(os.getenv("RESEARCH_LANE_TIMEOUT_MS", "1800") or 1800), 30_000))
-            semantic_total_ms = max(100, min(int(os.getenv("RESEARCH_TOTAL_TIMEOUT_MS", "2000") or 2000), 60_000))
-        except (TypeError, ValueError):
-            semantic_lane_ms, semantic_total_ms = 1800, 2000
-        evidence_bundle = gather_semantic_evidence(
-            plan,
-            query=semantic_turn_query,
-            uid=envelope.uid,
-            tenant_id=envelope.tenant_id,
-            web_consent=research_trigger.should_execute_external_research,
-            evidence_budget=EvidenceBudget(
-                per_lane_ms=semantic_lane_ms,
-                total_ms=semantic_total_ms,
-                # concept resolution (3) + governed web discovery (5) must be
-                # reachable when both are selected and buyer-authorized.
-                max_cost_units=8,
-            ),
-        )
-        normalized_rows = []
-        concept_leg = (evidence_bundle.get("legs") or {}).get("concept_resolution") or {}
-        concept_data = concept_leg.get("data") or {}
-        if isinstance(concept_data.get("normalized_evidence"), list):
-            normalized_rows = concept_data["normalized_evidence"]
-        normalized = normalize_concept_evidence(normalized_rows)
-        semantic_decision = reduce_semantic_proposal(
-            validation,
-            evidence=normalized,
-            research_attempted=True,
-            research_status=str(concept_data.get("status") or ""),
-        )
+        evidence_stage = resolve_semantic_evidence_stage(plan, envelope, decision)
+        evidence_bundle = evidence_stage.evidence_bundle
+        concept_data = evidence_stage.concept_data
+        normalized = list(evidence_stage.normalized_evidence)
+        semantic_decision = evidence_stage.semantic_decision
         semantic_decision_for_alignment = semantic_decision
-        from src.app.services.recommendation_core.requirement_compiler import (
-            compile_authoritative_requirements,
-        )
-
-        compilation = compile_authoritative_requirements(
-            item for item in list(concept_data.get("claims") or [])
-            if isinstance(item, dict)
-        )
+        compilation = evidence_stage.compilation
+        resp.extras["research_trigger"] = evidence_stage.research_trigger.model_dump()
         semantic_compiled_requirements = [
             item.model_dump() for item in compilation.requirements
         ]
@@ -1044,10 +947,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             "catalog_authority_granted": bool(semantic_compiled_requirements),
             "commercial_authority_granted": False,
         }
-        semantic_catalog_qualifications = [
-            dict(item) for item in (concept_data.get("catalog_qualifications") or [])
-            if isinstance(item, dict)
-        ][:100]
+        semantic_catalog_qualifications = list(evidence_stage.catalog_qualifications)
         # Provider-qualified identities are bounded retrieval candidates, not a
         # buyer selection.  Without this join, ordinary top-N category retrieval
         # can omit a qualified (often higher-cost) SKU and the alignment stage

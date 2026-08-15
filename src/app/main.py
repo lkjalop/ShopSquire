@@ -45,18 +45,12 @@ from src.app.routers.query_clusters import router as clusters_router
 from src.app.routers.security_integrations import router as security_integrations_router
 from src.app.routers.shipping_security import router as shipping_security_router
 from src.app.routers.shipping_webhooks import router as shipping_webhooks_router
-from src.app.routers.query import router as query_router
 from src.app.routers.billing import router as billing_router
 from src.app.routers.admin_webhooks import router as admin_webhooks_router
-from src.app.routers.audit import router as audit_router
-from src.app.routers.posthoc import router as posthoc_router
-from src.app.routers.health import router as health_router
-from src.app.routers.trace_debug import router as trace_debug_router
 from src.app.routers.admin_chat_tools import router as admin_chat_tools_router
 from src.app.routers.escalation_room import router as escalation_room_router
 from src.app.routers.escalation_room import public_router as public_incidents_router
 from src.app.routers.admin_bi import router as admin_bi_router
-from src.app.routers.data_readiness import router as data_readiness_router
 from src.app.services.retention import start_retention_loop, stop_retention_loop
 from src.app.models.init_db import ensure_metadata
 from sqlalchemy import text as sql_text
@@ -66,6 +60,7 @@ from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
 from src.app.bootstrap.conversation_router_group import register_conversation_router_group
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
+from src.app.bootstrap.operational_router_group import register_operational_router_group
 from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
 from src.app.bootstrap.recommendation_router_group import register_recommendation_router_group
 from src.app.bootstrap.security_operations_router_group import (
@@ -2094,31 +2089,13 @@ def create_app() -> FastAPI:
         app.include_router(shopify_webhooks_router)
     except Exception as e:
         logging.getLogger("shopsquire.startup").exception("failed to include shopify_webhooks router: %s", e)
-    app.include_router(query_router)
-    app.include_router(audit_router)
-    app.include_router(posthoc_router)
-    app.include_router(health_router)
-    # API version metadata endpoint
-    try:
-        from src.app.versioning import get_api_version_info
-        from fastapi import APIRouter as _APIRouter
-        _ver_router = _APIRouter(tags=["meta"])
-
-        @_ver_router.get("/api/version", include_in_schema=True)
-        def api_version_info():
-            return get_api_version_info()
-
-        app.include_router(_ver_router)
-    except Exception:
-        pass
+    register_operational_router_group(app)
     # Admin/executive status summary
     try:
         from src.app.routers.status_summary import router as status_summary_router
         app.include_router(status_summary_router)
     except Exception:
         pass
-    app.include_router(data_readiness_router)
-    app.include_router(trace_debug_router)
     # DMARC ingestion + summary endpoints
     try:
         from src.app.routers.dmarc import router as dmarc_router
