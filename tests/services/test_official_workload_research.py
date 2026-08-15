@@ -1,10 +1,14 @@
+import asyncio
 from datetime import datetime, timezone
+
+import pytest
 
 from src.app.services.official_evidence_cache import OfficialEvidenceCache
 from src.app.services.official_workload_research import (
     compile_source_claims,
     ranking_delta,
     research_official_sources,
+    research_official_sources_sync,
 )
 
 
@@ -144,7 +148,7 @@ def test_expired_total_deadline_dispatches_no_external_provider(monkeypatch) -> 
         unexpected_fetcher,
     )
 
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "novel request",
         search_url_template="http://127.0.0.1:8888/search?q={query}&format=json",
         sources=[_approved_source()],
@@ -174,7 +178,7 @@ def test_request_cancellation_prevents_enrolled_provider_dispatch(monkeypatch) -
         unexpected_fetcher,
     )
 
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "enrolled request",
         search_url_template="http://127.0.0.1:8888/search?q={query}&format=json",
         sources=[_approved_source()],
@@ -192,6 +196,71 @@ def test_request_cancellation_prevents_enrolled_provider_dispatch(monkeypatch) -
         "source_id": "nist_manufacturing_digital_twins",
         "reason": "buyer_request_cancelled",
     }]
+
+
+@pytest.mark.asyncio
+async def test_async_coordinator_cancels_active_origin_and_leaves_no_worker(monkeypatch) -> None:
+    entered = asyncio.Event()
+    stopped = asyncio.Event()
+
+    class Origin:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def fetch_async(self, *_args, **_kwargs):
+            entered.set()
+            try:
+                await asyncio.sleep(60)
+            finally:
+                stopped.set()
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.AsyncGovernedOfficialOriginFetcher",
+        Origin,
+    )
+    task = asyncio.create_task(research_official_sources(
+        "digital twin", search_url_template="", sources=[_approved_source()],
+    ))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.wait_for(stopped.wait(), timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_explicit_cancellation_interrupts_active_origin_socket(monkeypatch) -> None:
+    entered = asyncio.Event()
+    stopped = asyncio.Event()
+    cancellation = {"requested": False}
+
+    class Origin:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def fetch_async(self, *_args, **_kwargs):
+            entered.set()
+            try:
+                await asyncio.sleep(60)
+            finally:
+                stopped.set()
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.AsyncGovernedOfficialOriginFetcher",
+        Origin,
+    )
+    task = asyncio.create_task(research_official_sources(
+        "digital twin", search_url_template="", sources=[_approved_source()],
+        cancellation_requested=lambda: cancellation["requested"],
+    ))
+    await entered.wait()
+    cancellation["requested"] = True
+    result = await asyncio.wait_for(task, timeout=0.5)
+    assert result["status"] == "cancelled"
+    assert result["source_execution"][0]["deadline_status"] == (
+        "cancelled_during_canonical_fetch"
+    )
+    await asyncio.wait_for(stopped.wait(), timeout=0.5)
 
 
 def test_zero_parser_yield_fault_keeps_live_origin_but_accepts_no_claims(monkeypatch) -> None:
@@ -222,7 +291,7 @@ def test_zero_parser_yield_fault_keeps_live_origin_but_accepts_no_claims(monkeyp
     monkeypatch.setattr(
         "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
     )
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "digital twin", search_url_template="", sources=[_approved_source()],
     )
 
@@ -337,7 +406,7 @@ def test_context_only_research_is_not_reported_as_product_requirements(monkeypat
     monkeypatch.setattr(
         "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
     )
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "predicting factory breakdowns", search_url_template="http://search/?q={query}",
         sources=[_approved_source()], evidence_cache=OfficialEvidenceCache(),
         workload="manufacturing_digital_twin",
@@ -417,9 +486,9 @@ def test_fresh_cache_precedes_canonical_and_is_tenant_scoped(monkeypatch):
         "workload": "manufacturing_digital_twin",
         "now": datetime(2026, 8, 8, 2, tzinfo=timezone.utc),
     }
-    first = research_official_sources(**kwargs, tenant_id="tenant-a")
-    second = research_official_sources(**kwargs, tenant_id="tenant-a")
-    third = research_official_sources(**kwargs, tenant_id="tenant-b")
+    first = research_official_sources_sync(**kwargs, tenant_id="tenant-a")
+    second = research_official_sources_sync(**kwargs, tenant_id="tenant-a")
+    third = research_official_sources_sync(**kwargs, tenant_id="tenant-b")
     assert first["source_execution"][0]["origin_selection_mode"] == "canonical_direct"
     assert second["source_execution"][0]["origin_selection_mode"] == "evidence_cache"
     assert second["provider_accounting"] == {
@@ -490,7 +559,7 @@ def test_failed_canonical_uses_discovery_as_an_honest_fallback(monkeypatch):
     monkeypatch.setattr(
         "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
     )
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "factory breakdowns", search_url_template="http://search/?q={query}",
         sources=[_approved_source()], evidence_cache=OfficialEvidenceCache(),
         workload="manufacturing_digital_twin",
@@ -550,7 +619,7 @@ def test_discovery_rejects_irrelevant_page_on_an_approved_domain(monkeypatch):
     monkeypatch.setattr(
         "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
     )
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "factory breakdowns", search_url_template="http://search/?q={query}",
         sources=[_approved_source()], evidence_cache=OfficialEvidenceCache(),
         workload="manufacturing_digital_twin", novel_source_ids={"nist_manufacturing_digital_twins"},
@@ -586,7 +655,7 @@ def test_claims_outside_source_policy_are_rejected(monkeypatch):
     monkeypatch.setattr(
         "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
     )
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "factory breakdowns", search_url_template="", sources=[_approved_source(
             allowed_claim_types=["concept_identity"],
         )], evidence_cache=OfficialEvidenceCache(), workload="manufacturing_digital_twin",
@@ -648,7 +717,7 @@ def test_discovery_uses_bounded_fallback_queries_and_stops_on_official_origin(mo
         "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
     )
 
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "factory breakdowns", search_url_template="http://search/?q={query}",
         sources=[source], evidence_cache=OfficialEvidenceCache(),
         workload="manufacturing_digital_twin",
@@ -705,7 +774,7 @@ def test_wrong_workload_applicability_blocks_network_execution(monkeypatch):
     monkeypatch.setattr(
         "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
     )
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "OT cyber range", search_url_template="", sources=[_approved_source()],
         evidence_cache=OfficialEvidenceCache(), workload="ot_cyber_range",
     )
@@ -739,7 +808,7 @@ def test_stale_origin_observation_cannot_emit_fresh_claims(monkeypatch):
     monkeypatch.setattr(
         "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
     )
-    result = research_official_sources(
+    result = research_official_sources_sync(
         "factory breakdowns", search_url_template="", sources=[_approved_source()],
         evidence_cache=OfficialEvidenceCache(), workload="manufacturing_digital_twin",
         now=datetime(2026, 8, 8, 1, tzinfo=timezone.utc),

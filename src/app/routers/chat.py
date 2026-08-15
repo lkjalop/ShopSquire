@@ -990,101 +990,15 @@ def _include_adaptive_metadata(out: Dict[str, Any], source: Dict[str, Any]) -> N
 
 
 def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any]:
-    img = image_obj if isinstance(image_obj, dict) else {}
-    sec = img.get("security") if isinstance(img.get("security"), dict) else {}
-    sec_signals = {}
-    if isinstance(img.get("cv_signals"), dict):
-        sec_signals.update(img.get("cv_signals") or {})
-    if isinstance(sec.get("signals"), dict):
-        sec_signals.update(sec.get("signals") or {})
-    if isinstance(sec.get("cv_signals"), dict):
-        sec_signals.update(sec.get("cv_signals") or {})
-    if isinstance(sec, dict):
-        for k, v in sec.items():
-            if isinstance(v, bool):
-                sec_signals[k] = v
-    # Accept direct top-level signals from triage payloads too.
-    for k in (
-        "qr_code_detected",
-        "qr_prompt_injection",
-        "qr_external_url_detected",
-        "ocr_prompt_injection",
-        "manipulation_detected",
-        "damage_detected",
-        "steg_suspicious",
-        "encoded_payload_detected",
-        "polyglot_suspected",
-        "payment_social_engineering",
-        "pci_card_exposed",
-        "crypto_payment_uri",
-        "ransomware_indicator",
-        "homoglyph_injection",
-        "invisible_text_suspected",
-        "ocr_low_confidence_uncertain",
-    ):
-        if isinstance(img.get(k), bool):
-            sec_signals[k] = bool(img.get(k))
-    reasons = []
-    if isinstance(img.get("reasons"), list):
-        reasons.extend(str(x) for x in (img.get("reasons") or []))
-    if isinstance(sec.get("reasons"), list):
-        reasons.extend(str(x) for x in (sec.get("reasons") or []))
-    qr_detected = bool(
-        sec_signals.get("qr_code_detected")
-        or sec_signals.get("qr_detected")
-        or sec_signals.get("qr_url_present")
-        or sec_signals.get("qr_url_suspicious")
-        or ("qr_code_detected" in reasons)
-    )
-    qr_external = bool(
-        sec_signals.get("qr_external_url_detected")
-        or sec_signals.get("qr_external_url")
-        or sec_signals.get("qr_url_present")
-        or sec_signals.get("qr_url_suspicious")
-        or ("qr_external_url_detected" in reasons)
-    )
-    qr_injection = bool(
-        sec_signals.get("qr_prompt_injection")
-        or sec_signals.get("prompt_injection_text_suspected")
-        or ("qr_prompt_injection" in reasons)
-    )
-    manipulation = bool(
-        sec_signals.get("manipulation_detected")
-        or sec_signals.get("adversarial_detected")
-        or sec_signals.get("steg_suspicious")
-        or sec_signals.get("duplicate_image_detected")
-        or ("manipulation_detected" in reasons)
-    )
-    qr_data = img.get("qr_data")
-    qr_data_present = bool((isinstance(qr_data, str) and qr_data.strip()) or (isinstance(qr_data, list) and len(qr_data) > 0))
-    return {
-        "qr_code_detected": bool(qr_detected or qr_data_present),
-        "qr_prompt_injection": qr_injection,
-        "qr_external_url_detected": qr_external,
-        # A URL in a requirements screenshot is provenance, not prompt
-        # injection. Only the security scanner's explicit injection signal may
-        # quarantine the OCR channel; URL retrieval remains separately gated.
-        "ocr_prompt_injection": bool(sec_signals.get("ocr_prompt_injection")),
-        "manipulation_detected": manipulation,
-        "adversarial_score": float(sec_signals.get("adversarial_score") or 0.0),
-        "steg_suspicious": bool(sec_signals.get("steg_suspicious")),
-        "ocr_low_confidence_uncertain": bool(sec_signals.get("ocr_low_confidence_uncertain")),
-        "qr_payloads": sec_signals.get("qr_payloads") if isinstance(sec_signals.get("qr_payloads"), list) else [],
-        "qr_payload_types": sec_signals.get("qr_payload_types") if isinstance(sec_signals.get("qr_payload_types"), list) else [],
-        "qr_redirect_probe": sec_signals.get("qr_redirect_probe") if isinstance(sec_signals.get("qr_redirect_probe"), dict) else {},
-    }
+    from src.app.services.chat_image_normalization import extract_image_cv_signals
+
+    return extract_image_cv_signals(image_obj)
 
 
 def _extract_image_product_identity(image_obj: Dict[str, Any] | None) -> Dict[str, Any]:
-    img = image_obj if isinstance(image_obj, dict) else {}
-    ident = img.get("product_identity")
-    if isinstance(ident, dict):
-        return dict(ident)
-    sec = img.get("security") if isinstance(img.get("security"), dict) else {}
-    ident = sec.get("product_identity")
-    if isinstance(ident, dict):
-        return dict(ident)
-    return {}
+    from src.app.services.chat_image_normalization import extract_image_product_identity
+
+    return extract_image_product_identity(image_obj)
 
 
 def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -1422,22 +1336,9 @@ def _frameworks_for_image_security(*, signals: Dict[str, Any], severity: str) ->
 
 
 def _decode_image_b64(image_obj: Dict[str, Any] | None) -> bytes:
-    img = image_obj if isinstance(image_obj, dict) else {}
-    raw = (
-        img.get("image_b64")
-        or img.get("bytes_b64")
-        or img.get("b64")
-        or img.get("data_url")
-    )
-    if not isinstance(raw, str) or not raw.strip():
-        return b""
-    s = raw.strip()
-    if s.startswith("data:") and "," in s:
-        s = s.split(",", 1)[1]
-    try:
-        return base64.b64decode(s.encode("utf-8"), validate=False)
-    except Exception:
-        return b""
+    from src.app.services.chat_image_normalization import decode_image_b64
+
+    return decode_image_b64(image_obj)
 
 
 def _stash_image_blob_for_recommend(mem: Memory, uid: str, image_hash: str, image_bytes: bytes) -> None:
@@ -1588,70 +1489,20 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     # -----------------------------------------------------------------------
     # Normalize multimodal image payload (new array format → legacy flat)
     # -----------------------------------------------------------------------
-    images_array: List[Dict[str, Any]] = (payload or {}).get("images") or []
-    image_labels_in = (payload or {}).get("image_labels")
-    image_ocr_text_in = (payload or {}).get("image_ocr_text")
-    image_hash_in = (payload or {}).get("image_hash")
-    image_intent_in = (payload or {}).get("image_intent")
-    image_product_identity_in = (payload or {}).get("image_product_identity")
-    image_cv_signals_in: Dict[str, Any] = {}
-    damage_score_in: float = 0.0
-    is_product_photo_in: bool = False
-    image_blob_bytes: bytes = b""
+    from src.app.services.chat_image_normalization import normalize_chat_images
 
-    if images_array and isinstance(images_array, list):
-        # Merge first image's data into flat fields for backward compat
-        first = images_array[0] if images_array else {}
-        if isinstance(first, dict):
-            if not image_labels_in:
-                image_labels_in = first.get("labels")
-            if not image_ocr_text_in:
-                image_ocr_text_in = first.get("ocr_text")
-            if not image_hash_in:
-                image_hash_in = first.get("image_hash") or first.get("hash")
-            if not image_product_identity_in:
-                image_product_identity_in = _extract_image_product_identity(first)
-            damage_score_in = float(first.get("damage_score") or 0.0)
-            is_product_photo_in = bool(first.get("is_product_photo"))
-            image_cv_signals_in = _extract_image_cv_signals(first)
-            image_blob_bytes = _decode_image_b64(first)
-            if not image_hash_in and image_blob_bytes:
-                image_hash_in = hashlib.sha256(image_blob_bytes).hexdigest()[:32]
-    elif isinstance((payload or {}).get("image_b64"), str):
-        image_blob_bytes = _decode_image_b64({"image_b64": (payload or {}).get("image_b64")})
-        if not image_hash_in and image_blob_bytes:
-            image_hash_in = hashlib.sha256(image_blob_bytes).hexdigest()[:32]
-
-    has_image = bool(image_labels_in or images_array)
-    if images_array and isinstance(images_array, list):
-        # Merge CV/security signals across all uploaded images so a QR hit on
-        # any frame is forwarded to the recommendation/security pipeline.
-        merged = dict(image_cv_signals_in or {})
-        for img in images_array:
-            sig = _extract_image_cv_signals(img if isinstance(img, dict) else {})
-            merged["qr_code_detected"] = bool(merged.get("qr_code_detected") or sig.get("qr_code_detected"))
-            merged["qr_prompt_injection"] = bool(merged.get("qr_prompt_injection") or sig.get("qr_prompt_injection"))
-            merged["qr_external_url_detected"] = bool(
-                merged.get("qr_external_url_detected") or sig.get("qr_external_url_detected")
-            )
-            merged["ocr_prompt_injection"] = bool(merged.get("ocr_prompt_injection") or sig.get("ocr_prompt_injection"))
-            merged["manipulation_detected"] = bool(merged.get("manipulation_detected") or sig.get("manipulation_detected"))
-            merged["steg_suspicious"] = bool(merged.get("steg_suspicious") or sig.get("steg_suspicious"))
-            merged["adversarial_score"] = max(
-                float(merged.get("adversarial_score") or 0.0),
-                float(sig.get("adversarial_score") or 0.0),
-            )
-            qp_old = merged.get("qr_payloads") if isinstance(merged.get("qr_payloads"), list) else []
-            qp_new = sig.get("qr_payloads") if isinstance(sig.get("qr_payloads"), list) else []
-            if qp_new:
-                merged["qr_payloads"] = (qp_old + qp_new)[:12]
-            qpt_old = merged.get("qr_payload_types") if isinstance(merged.get("qr_payload_types"), list) else []
-            qpt_new = sig.get("qr_payload_types") if isinstance(sig.get("qr_payload_types"), list) else []
-            if qpt_new:
-                merged["qr_payload_types"] = list(dict.fromkeys([str(x) for x in (qpt_old + qpt_new) if str(x).strip()]))[:12]
-            if not merged.get("qr_redirect_probe") and isinstance(sig.get("qr_redirect_probe"), dict):
-                merged["qr_redirect_probe"] = sig.get("qr_redirect_probe")
-        image_cv_signals_in = merged
+    normalized_images = normalize_chat_images(payload)
+    images_array = normalized_images.images
+    image_labels_in = normalized_images.labels
+    image_ocr_text_in = normalized_images.ocr_text
+    image_hash_in = normalized_images.image_hash
+    image_intent_in = normalized_images.intent
+    image_product_identity_in = normalized_images.product_identity
+    image_cv_signals_in = normalized_images.cv_signals
+    damage_score_in = normalized_images.damage_score
+    is_product_photo_in = normalized_images.is_product_photo
+    image_blob_bytes = normalized_images.blob
+    has_image = normalized_images.has_image
     image_security_posture = _derive_image_security_posture(image_cv_signals_in)
     breach_assessment: Optional[Dict[str, Any]] = None
     # How the (untrusted) image was handled downstream:

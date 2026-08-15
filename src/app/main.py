@@ -45,10 +45,7 @@ from src.app.routers.query_clusters import router as clusters_router
 from src.app.routers.security_integrations import router as security_integrations_router
 from src.app.routers.shipping_security import router as shipping_security_router
 from src.app.routers.shipping_webhooks import router as shipping_webhooks_router
-from src.app.routers.support_complaints import router as support_complaints_router
 from src.app.routers.query import router as query_router
-from src.app.routers.chat import router as chat_router
-from src.app.routers.safe_links import router as safe_links_router
 from src.app.routers.billing import router as billing_router
 from src.app.routers.admin_webhooks import router as admin_webhooks_router
 from src.app.routers.audit import router as audit_router
@@ -67,6 +64,7 @@ from src.app.observability.tracing import init_tracer
 from src.app.observability.logging import init_logging, bind_request_id, new_request_id
 from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
+from src.app.bootstrap.conversation_router_group import register_conversation_router_group
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
 from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
 from src.app.bootstrap.recommendation_router_group import register_recommendation_router_group
@@ -2087,15 +2085,7 @@ def create_app() -> FastAPI:
     except Exception as e:
         import logging
         logging.getLogger("shopsquire.startup").exception("failed to include vuln_scan router: %s", e)
-    app.include_router(support_complaints_router)
-    app.include_router(chat_router)
-    # Chat streaming SSE endpoint
-    try:
-        from src.app.routers.chat_stream import router as chat_stream_router
-        app.include_router(chat_stream_router)
-    except Exception:
-        pass
-    app.include_router(safe_links_router)
+    register_conversation_router_group(app)
     app.include_router(billing_router)
     app.include_router(admin_webhooks_router)
     try:

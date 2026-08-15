@@ -5,8 +5,12 @@ import re
 from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
-from src.app.adapters.external_research_httpx import HttpxResearchFetcher
+from src.app.adapters.external_research_httpx import (
+    AsyncHttpxResearchFetcher,
+    HttpxResearchFetcher,
+)
 from src.app.services.case_research_plan import CaseResearchPlan
+from src.app.services.cancellable_await import await_with_polling_cancel
 
 
 class DiscoveryFetcher(Protocol):
@@ -320,4 +324,59 @@ def discover_open_world_publishers(
     }
 
 
-__all__ = ["discover_open_world_publishers"]
+async def discover_open_world_publishers_async(
+    plan: CaseResearchPlan,
+    *,
+    search_url_template: str,
+    timeout_s: float = 9.0,
+    cancellation_requested: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Cancellable live transport with the exact synchronous projection semantics."""
+
+    transport = AsyncHttpxResearchFetcher(
+        search_url_template=search_url_template, allow_private=True,
+    )
+    per_query = max(1.0, min(4.0, timeout_s / max(1, len(plan.discovery_queries))))
+    replay_rows: list[tuple[list[dict[str, Any]], dict[str, Any]]] = []
+    for item in plan.discovery_queries[:3]:
+        if cancellation_requested and cancellation_requested():
+            break
+        rows, cancelled = await await_with_polling_cancel(
+            transport.fetch_async(
+                item.query, allowlist=[], timeout_s=per_query,
+                discovery_candidates_only=True,
+            ),
+            cancellation_requested=cancellation_requested,
+        )
+        if cancelled:
+            break
+        rows = rows or []
+        replay_rows.append((rows, dict(transport.last_receipt or {})))
+        if cancellation_requested and cancellation_requested():
+            break
+
+    class ReplayFetcher:
+        def __init__(self) -> None:
+            self.index = 0
+            self.last_receipt: dict[str, Any] = {}
+
+        def fetch(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+            if self.index >= len(replay_rows):
+                self.last_receipt = {
+                    "execution_status": "not_dispatched",
+                    "external_call_dispatched": False,
+                }
+                return []
+            rows, receipt = replay_rows[self.index]
+            self.index += 1
+            self.last_receipt = dict(receipt)
+            return list(rows)
+
+    replay = ReplayFetcher()
+    return discover_open_world_publishers(
+        plan, search_url_template=search_url_template, fetcher=replay,
+        timeout_s=timeout_s, cancellation_requested=cancellation_requested,
+    )
+
+
+__all__ = ["discover_open_world_publishers", "discover_open_world_publishers_async"]

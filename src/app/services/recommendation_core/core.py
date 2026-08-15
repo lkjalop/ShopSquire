@@ -278,7 +278,6 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
                 budget_max_cents=_updated_budget_max,
             )
 
-    from src.app.services.recommendation_core.intent_resolver import resolve as resolve_intent
     # time the whole DECIDE phase (the ~7s router model call + KB intent resolution + reroute +
     # continuation inheritance) — this is the turn's dominant latency, so the canary can attribute
     # the p50 to the model call vs the deterministic stages (P1 instrumentation).
@@ -417,42 +416,35 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     # the hardware requirements and merges them (by MAX) with any the shopper stated explicitly.
     # This is what makes a CS student differ from an english major and 'for AutoCAD' carry real
     # floors — all from DATA, no new decision surface. Zero added latency (folded into routing).
-    stated_keys = set(decision.requirements)   # what the SHOPPER explicitly asked for (pre-KB)
-    intent = resolve_intent(list(decision.use_cases), dict(decision.requirements),
-                            query=envelope.query,
-                            vertical=_vertical_name(decision.node_handle),
-                            use_case_variants=dict(decision.use_case_variants),
-                            workload_entities=list(decision.workload_entities),
-                            external_research_consent=envelope.external_research_consent)
-    resolved_reqs = intent["requirements"]
+    from src.app.services.recommendation_core.interpretation_stage import (
+        resolve_interpretation_stage,
+    )
+
+    interpretation = resolve_interpretation_stage(
+        decision, envelope, vertical=_vertical_name(decision.node_handle),
+        is_workload_host_product=_is_workload_host_product,
+    )
+    decision = interpretation.decision
+    intent = interpretation.intent
+    workload_interpretation_shadow = interpretation.shadow
     # Requirements merge across every use case; ordering controls only which named intent leads
     # capability prose and clarification.
-    decision = dataclasses.replace(decision, use_cases=tuple(intent["use_cases"]),
-                                   use_case_variants=dict(intent.get("use_case_variants") or {}))
     # Observation only: measure the legacy title/decomposer paths against the
     # canonical model-plus-registry interpretation before retiring them.  This
     # result is attached after response construction and never influences the
     # decision, requirements, retrieval, ranking, or authorization path.
-    from src.app.services.workload_interpretation_shadow import observe_workload_interpretations
-
-    workload_interpretation_shadow = observe_workload_interpretations(
-        envelope.query,
-        canonical_entities=decision.workload_entities,
-        canonical_use_cases=decision.use_cases,
-    )
     # review-8 #4 (accessory req-slot leak): a use-case/workload's device floors describe the
     # DEVICE, not an accessory bought FOR it. If the requested product is not a workload-host
     # device ('a mouse for gaming', 'a bag for my gaming laptop' route to accessory nodes), keep
     # ONLY the shopper's explicitly-stated requirements and drop the KB/game/software-derived
     # floors — which also keeps `decision.requirements` empty so the empty-node broad-retry (that
     # bled pharmacy into a mouse query) never fires for accessories.
-    if not _is_workload_host_product(decision.requested_product_node):
-        dropped = {k: v for k, v in resolved_reqs.items() if k not in stated_keys}
-        if dropped:
-            resolved_reqs = {k: v for k, v in resolved_reqs.items() if k in stated_keys}
-            logger.info("dropped %d workload req(s) for non-host product %s: %s",
-                        len(dropped), decision.requested_product_node, sorted(dropped))
-    decision = dataclasses.replace(decision, requirements=resolved_reqs)
+    if interpretation.dropped_requirement_keys:
+        logger.info(
+            "dropped %d workload req(s) for non-host product %s: %s",
+            len(interpretation.dropped_requirement_keys), decision.requested_product_node,
+            list(interpretation.dropped_requirement_keys),
+        )
     # UNGROUNDED-WORKLOAD REROUTE (review-8 pharmacy-bleed, 2nd hole): the router only reroutes a
     # NAMED software/media node ('so-3-1') to a device host. But 'i want to play valorant at 144fps'
     # (no device word) makes the model return node=None, and resolve_intent STILL detects the game

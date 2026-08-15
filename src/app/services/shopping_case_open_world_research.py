@@ -44,7 +44,7 @@ def _governed_domains() -> list[str]:
     })
 
 
-def execute_open_world_publisher_discovery(
+async def execute_open_world_publisher_discovery_async(
     db: Session,
     *,
     plan: CaseResearchPlan,
@@ -100,7 +100,7 @@ def execute_open_world_publisher_discovery(
     # created. Consent never waits for it: a completed validated proposal is
     # consumed, otherwise the original deterministic plan executes now.
     discovery_plan, query_proposal = consume_open_world_query_proposal(plan)
-    discovery = open_world_research_discovery.discover_open_world_publishers(
+    discovery = await open_world_research_discovery.discover_open_world_publishers_async(
         discovery_plan,
         search_url_template=search_url_template,
         cancellation_requested=cancellation_requested,
@@ -210,4 +210,22 @@ def execute_open_world_publisher_discovery(
     return result
 
 
-__all__ = ["OpenWorldResearchUnavailable", "execute_open_world_publisher_discovery"]
+def execute_open_world_publisher_discovery(
+    db: Session,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Deprecated synchronous boundary retained for offline certification/tests."""
+
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(execute_open_world_publisher_discovery_async(db, **kwargs))
+    raise RuntimeError("sync_open_world_research_called_from_async_context")
+
+
+__all__ = [
+    "OpenWorldResearchUnavailable", "execute_open_world_publisher_discovery",
+    "execute_open_world_publisher_discovery_async",
+]

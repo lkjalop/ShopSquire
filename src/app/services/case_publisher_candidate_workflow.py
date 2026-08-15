@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 
 from src.app.models.orm import RequirementProposal, ShoppingCasePublisherCandidate
+from src.app.services.awaitable_provider import await_provider_result
 
 
 CASE_ALLOWED_CLAIM_TYPES = frozenset({
@@ -189,7 +190,7 @@ def case_review_claims(
     return rows
 
 
-def execute_case_candidate_research(
+async def execute_case_candidate_research(
     db,
     *,
     candidate: ShoppingCasePublisherCandidate,
@@ -223,11 +224,11 @@ def execute_case_candidate_research(
     source = case_source_policy(
         approved, purpose=case.retained_purpose or "Buyer requested workload",
     )
-    research = research_official_sources(
+    research = await await_provider_result(research_official_sources(
         case.retained_purpose or "Buyer requested workload",
         search_url_template="", sources=[source], tenant_id=tenant_id,
         evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE, total_timeout_s=12.0,
-    )
+    ))
     from src.app.services.commerce_feature_readiness import (
         record_external_research_runtime_observation,
     )

@@ -28,7 +28,7 @@ from src.app.services.official_source_governance import (  # noqa: E402
     load_official_source_manifest,
 )
 from src.app.services.official_workload_research import (  # noqa: E402
-    research_official_sources,
+    research_official_sources_sync,
 )
 
 
@@ -122,7 +122,7 @@ def certify(
     if not sources:
         raise LiveResearchCertificationError("research_plan_has_no_approved_sources")
 
-    research = research_official_sources(
+    research = research_official_sources_sync(
         retained_purpose,
         search_url_template=search_url,
         sources=sources,

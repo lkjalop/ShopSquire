@@ -97,7 +97,9 @@ def _research(
 
 def _run(monkeypatch, tmp_path, research: dict, **kwargs) -> dict:
     monkeypatch.setattr(certification, "load_official_source_manifest", _manifest)
-    monkeypatch.setattr(certification, "research_official_sources", lambda *args, **kw: research)
+    monkeypatch.setattr(
+        certification, "research_official_sources_sync", lambda *args, **kw: research,
+    )
     return certification.certify(
         "http://127.0.0.1:8888/search?q={query}&format=json",
         "I need Factory I/O PLC simulation",

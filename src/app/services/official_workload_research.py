@@ -6,6 +6,7 @@ contracts, not interchangeable prose.  Discovery snippets are never parsed.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import time
 import uuid
@@ -14,8 +15,14 @@ from html.parser import HTMLParser
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from src.app.adapters.external_research_httpx import HttpxResearchFetcher
-from src.app.adapters.official_origin_httpx import GovernedOfficialOriginFetcher
+from src.app.adapters.external_research_httpx import (
+    AsyncHttpxResearchFetcher,
+    HttpxResearchFetcher,
+)
+from src.app.adapters.official_origin_httpx import (
+    AsyncGovernedOfficialOriginFetcher,
+    GovernedOfficialOriginFetcher,
+)
 from src.app.services.official_evidence_cache import (
     DEFAULT_OFFICIAL_EVIDENCE_CACHE,
     OfficialEvidenceCache,
@@ -23,6 +30,7 @@ from src.app.services.official_evidence_cache import (
     OfficialEvidenceCacheKey,
 )
 from src.app.services.official_source_governance import governed_sources_for_workload
+from src.app.services.cancellable_await import await_with_polling_cancel
 from src.app.services.publisher_origin_verification import verify_publisher_origin
 from src.app.services.research_certification_faults import active_research_fault
 from src.app.services.recommendation_core.research_contracts import ProviderExecutionReceipt
@@ -680,7 +688,7 @@ def _evidence_ladder_projection(
     ]
 
 
-def research_official_sources(
+async def research_official_sources(
     purpose: str,
     *,
     search_url_template: str,
@@ -694,8 +702,9 @@ def research_official_sources(
     now: datetime | None = None,
     total_timeout_s: float = 30.0,
     cancellation_requested: Callable[[], bool] | None = None,
+    _sync_transport_compat: bool = False,
 ) -> dict[str, Any]:
-    """Fetch reviewed official origins using cache -> canonical -> discovery fallback."""
+    """Fetch reviewed origins without blocking or outliving the request task."""
 
     run_id = f"research-{uuid.uuid4().hex[:12]}"
     started_monotonic = time.monotonic()
@@ -833,10 +842,29 @@ def research_official_sources(
                 })
                 source_execution.append(execution)
                 continue
-            origin = GovernedOfficialOriginFetcher(max_bytes=8 * 1024 * 1024).fetch(
-                canonical, allowlist=domains, timeout_s=fetch_timeout,
-                certification_run_id=run_id,
-            )
+            if _sync_transport_compat:
+                origin = GovernedOfficialOriginFetcher(max_bytes=8 * 1024 * 1024).fetch(
+                    canonical, allowlist=domains, timeout_s=fetch_timeout,
+                    certification_run_id=run_id,
+                )
+            else:
+                origin, cancelled_during_fetch = await await_with_polling_cancel(
+                    AsyncGovernedOfficialOriginFetcher(
+                        max_bytes=8 * 1024 * 1024,
+                    ).fetch_async(
+                        canonical, allowlist=domains, timeout_s=fetch_timeout,
+                        certification_run_id=run_id,
+                    ),
+                    cancellation_requested=cancellation_requested,
+                )
+                if cancelled_during_fetch:
+                    cancelled = True
+                    execution["deadline_status"] = "cancelled_during_canonical_fetch"
+                    unresolved.append({
+                        "source_id": source_id, "reason": "buyer_request_cancelled",
+                    })
+                    source_execution.append(execution)
+                    break
             execution["canonical_fetch_status"] = origin["status"]
             raw_canonical_receipt = dict(origin["receipt"])
             raw_canonical_receipt.update({
@@ -873,8 +901,12 @@ def research_official_sources(
                 unresolved.append({"source_id": source_id, "reason": "discovery_not_configured"})
                 source_execution.append(execution)
                 continue
-            discovery = HttpxResearchFetcher(
-                search_url_template=search_url_template, allow_private=True,
+            discovery = (
+                HttpxResearchFetcher(
+                    search_url_template=search_url_template, allow_private=True,
+                ) if _sync_transport_compat else AsyncHttpxResearchFetcher(
+                    search_url_template=search_url_template, allow_private=True,
+                )
             )
             discovery_timeout = remaining_timeout(12.0)
             if discovery_timeout <= 0:
@@ -902,9 +934,22 @@ def research_official_sources(
                 if query_timeout <= 0:
                     execution["deadline_status"] = "exceeded_during_discovery"
                     break
-                attempt_results = discovery.fetch(
-                    query, allowlist=domains, timeout_s=query_timeout,
-                )
+                if _sync_transport_compat:
+                    attempt_results = discovery.fetch(
+                        query, allowlist=domains, timeout_s=query_timeout,
+                    )
+                else:
+                    attempt_results, cancelled_during_discovery = await await_with_polling_cancel(
+                        discovery.fetch_async(
+                            query, allowlist=domains, timeout_s=query_timeout,
+                        ),
+                        cancellation_requested=cancellation_requested,
+                    )
+                    if cancelled_during_discovery:
+                        cancelled = True
+                        execution["deadline_status"] = "cancelled_during_discovery"
+                        break
+                    attempt_results = attempt_results or []
                 attempted += 1
                 query_axes.append(query_axis)
                 completed_attempt = completed_attempt or (
@@ -954,10 +999,29 @@ def research_official_sources(
                 })
                 source_execution.append(execution)
                 continue
-            origin = GovernedOfficialOriginFetcher(max_bytes=8 * 1024 * 1024).fetch(
-                selected, allowlist=domains, timeout_s=origin_timeout,
-                certification_run_id=run_id,
-            )
+            if _sync_transport_compat:
+                origin = GovernedOfficialOriginFetcher(max_bytes=8 * 1024 * 1024).fetch(
+                    selected, allowlist=domains, timeout_s=origin_timeout,
+                    certification_run_id=run_id,
+                )
+            else:
+                origin, cancelled_during_fetch = await await_with_polling_cancel(
+                    AsyncGovernedOfficialOriginFetcher(
+                        max_bytes=8 * 1024 * 1024,
+                    ).fetch_async(
+                        selected, allowlist=domains, timeout_s=origin_timeout,
+                        certification_run_id=run_id,
+                    ),
+                    cancellation_requested=cancellation_requested,
+                )
+                if cancelled_during_fetch:
+                    cancelled = True
+                    execution["deadline_status"] = "cancelled_during_discovered_origin_fetch"
+                    unresolved.append({
+                        "source_id": source_id, "reason": "buyer_request_cancelled",
+                    })
+                    source_execution.append(execution)
+                    break
             raw_discovered_receipt = dict(origin["receipt"])
             raw_discovered_receipt.update({
                 "billing_class": "free", "origin_content_type": origin.get("content_type"),
@@ -1127,12 +1191,32 @@ def research_official_sources(
     }
 
 
+def research_official_sources_sync(
+    purpose: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Explicit compatibility bridge for scripts/tests outside an event loop.
+
+    Buyer-facing HTTP paths must await ``research_official_sources`` so active
+    sockets are cancelled with the request. This bridge intentionally refuses
+    to nest an event loop instead of silently blocking one.
+    """
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(research_official_sources(
+            purpose, **kwargs, _sync_transport_compat=True,
+        ))
+    raise RuntimeError("research_official_sources_sync_called_from_async_context")
+
+
 def research_official_workload(
     purpose: str, *, search_url_template: str, workload: str = "ot_cyber_range",
 ) -> dict[str, Any]:
     """Deprecated workload-label wrapper retained for compatibility tests."""
 
-    result = research_official_sources(
+    result = research_official_sources_sync(
         purpose, search_url_template=search_url_template,
         sources=list(governed_sources_for_workload(workload)),
     )

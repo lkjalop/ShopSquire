@@ -239,7 +239,7 @@ def test_case_service_forwards_http_cancellation_to_discovery(monkeypatch):
     assert plan is not None and plan.publisher_status == "unresolved"
     observed = {}
 
-    def cancelled_discovery(*args, cancellation_requested=None, **kwargs):
+    async def cancelled_discovery(*args, cancellation_requested=None, **kwargs):
         observed["callback"] = cancellation_requested
         assert cancellation_requested is not None and cancellation_requested()
         return {
@@ -266,7 +266,7 @@ def test_case_service_forwards_http_cancellation_to_discovery(monkeypatch):
         lambda current: (current, {"status": "not_used"}),
     )
     monkeypatch.setattr(
-        "src.app.services.open_world_research_discovery.discover_open_world_publishers",
+        "src.app.services.open_world_research_discovery.discover_open_world_publishers_async",
         cancelled_discovery,
     )
     monkeypatch.setattr(

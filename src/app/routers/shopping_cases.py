@@ -1,6 +1,7 @@
 """Case-scoped buyer requirement review and acceptance API."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -13,7 +14,6 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
-import anyio
 
 from src.app.models.db import get_db
 from src.app.models.orm import (
@@ -25,6 +25,7 @@ from src.app.services.buyer_requirement_evidence import (
     ExtractedRequirementClaim,
     extract_buyer_requirement_claims,
 )
+from src.app.services.awaitable_provider import await_provider_result
 from src.app.services.accepted_catalog_projection import project_accepted_catalog
 from src.app.services.infrastructure_alternative_projection import project_infrastructure_alternatives
 from src.app.services.evidence_acquisition_ladder import choose_evidence_stage
@@ -591,7 +592,7 @@ def create_manual_requirement_proposal(
 
 
 @router.post("/{case_id}/requirement-proposals/{proposal_id}/accept")
-def accept_requirement_proposal(
+async def accept_requirement_proposal(
     case_id: str,
     proposal_id: str,
     body: AcceptRequirementProposal,
@@ -710,7 +711,7 @@ def accept_requirement_proposal(
             }
         else:
             try:
-                corroboration = research_shopping_case(
+                corroboration = await research_shopping_case(
                     case_id,
                     ResearchShoppingCaseRequest(
                         uid=body.uid, research_plan_id=plan.plan_id,
@@ -1056,7 +1057,7 @@ def confirm_fulfillment_cart(
 
 
 @router.post("/{case_id}/evidence-source-resolutions")
-def resolve_case_evidence_source(
+async def resolve_case_evidence_source(
     case_id: str,
     body: ResolveBuyerEvidenceSourceRequest,
     x_tenant_id: str | None = Header(default=None),
@@ -1115,11 +1116,11 @@ def resolve_case_evidence_source(
         DEFAULT_OFFICIAL_EVIDENCE_CACHE, research_official_sources,
     )
 
-    research = research_official_sources(
+    research = await await_provider_result(research_official_sources(
         case.retained_purpose or "Buyer supplied evidence source",
         search_url_template="", sources=[selected], tenant_id=tenant_id,
         evidence_cache=DEFAULT_OFFICIAL_EVIDENCE_CACHE,
-    )
+    ))
     shelves = project_accepted_catalog(
         db, accepted_claims=list(research.get("claims") or []),
         desired_outcome=case.retained_purpose or "Buyer supplied evidence source",
@@ -1160,7 +1161,7 @@ def resolve_case_evidence_source(
 
 
 @router.post("/{case_id}/publisher-candidates/{candidate_id}/approve")
-def approve_case_publisher_candidate(
+async def approve_case_publisher_candidate(
     case_id: str,
     candidate_id: str,
     body: ApprovePublisherCandidateRequest,
@@ -1201,7 +1202,7 @@ def approve_case_publisher_candidate(
         execute_case_candidate_research,
     )
 
-    result, error = execute_case_candidate_research(
+    result, error = await execute_case_candidate_research(
         db, candidate=candidate, case=case, tenant_id=tenant_id, uid=body.uid,
         expected_version=body.expected_candidate_version,
         idempotency_key=idempotency_key,
@@ -1279,7 +1280,7 @@ def cancel_shopping_case_research(
 
 
 @router.post("/{case_id}/research")
-def research_shopping_case(
+async def research_shopping_case(
     case_id: str,
     body: ResearchShoppingCaseRequest,
     request: Request = None,
@@ -1334,26 +1335,37 @@ def research_shopping_case(
 
     approved_sources = approved_sources_for_plan(plan)
 
+    disconnected = asyncio.Event()
+
+    async def watch_disconnect() -> None:
+        if request is None:
+            return
+        while True:
+            if await request.is_disconnected():
+                disconnected.set()
+                return
+            await asyncio.sleep(0.05)
+
+    disconnect_watcher = asyncio.create_task(watch_disconnect())
+    owner_task = asyncio.current_task()
+    if owner_task is not None:
+        owner_task.add_done_callback(lambda _task: disconnect_watcher.cancel())
+
     def request_cancelled() -> bool:
         if DEFAULT_RESEARCH_CANCELLATIONS.cancelled(
             tenant_id, case_id, body.execution_id,
         ):
             return True
-        if request is None:
-            return False
-        try:
-            return bool(anyio.from_thread.run(request.is_disconnected))
-        except RuntimeError:
-            return False
+        return disconnected.is_set()
 
     if plan.publisher_status == "unresolved":
         from src.app.services.shopping_case_open_world_research import (
             OpenWorldResearchUnavailable,
-            execute_open_world_publisher_discovery,
+            execute_open_world_publisher_discovery_async,
         )
 
         try:
-            return execute_open_world_publisher_discovery(
+            return await execute_open_world_publisher_discovery_async(
                 db,
                 plan=plan,
                 tenant_id=tenant_id,
@@ -1384,7 +1396,7 @@ def research_shopping_case(
     )
 
     try:
-        return execute_enrolled_official_research(
+        return await execute_enrolled_official_research(
             db,
             plan=plan,
             approved_sources=list(approved_sources),

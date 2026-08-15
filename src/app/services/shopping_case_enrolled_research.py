@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from src.app.models.orm import ShoppingCase
 from src.app.services.accepted_catalog_projection import project_accepted_catalog
+from src.app.services.awaitable_provider import await_provider_result
 from src.app.services.case_research_plan import CaseResearchPlan, plan_hypothesis_labels
 from src.app.services.commerce_feature_readiness import (
     external_search_readiness,
@@ -57,7 +58,7 @@ def _validate_source_policies(
         })
 
 
-def execute_enrolled_official_research(
+async def execute_enrolled_official_research(
     db: Session,
     *,
     plan: CaseResearchPlan,
@@ -137,7 +138,7 @@ def execute_enrolled_official_research(
         tenant_id=tenant_id,
         candidate_configuration_ids=candidate_configuration_ids,
     ).model_dump(mode="json")
-    research = official_workload_research.research_official_sources(
+    research = await await_provider_result(official_workload_research.research_official_sources(
         plan.retained_purpose,
         search_url_template=search_url,
         sources=sources,
@@ -146,7 +147,7 @@ def execute_enrolled_official_research(
         tenant_id=tenant_id,
         evidence_cache=official_workload_research.DEFAULT_OFFICIAL_EVIDENCE_CACHE,
         cancellation_requested=cancellation_requested,
-    )
+    ))
     research["discovery_readiness"] = {
         key: readiness.get(key) for key in (
             "configured", "reachable", "effective", "degraded", "capability_status",

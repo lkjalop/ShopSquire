@@ -5,11 +5,18 @@ in for DNS, so the SSRF guard and allowlist filtering are tested without touchin
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
+import pytest
 
-from src.app.adapters.external_research_httpx import HttpxResearchFetcher, _domain_allowed, _host_is_safe
+from src.app.adapters.external_research_httpx import (
+    AsyncHttpxResearchFetcher,
+    HttpxResearchFetcher,
+    _domain_allowed,
+    _host_is_safe,
+)
 from src.app.ports.external_product_research import ExternalResearchFetcher
 from src.app.services.discovery_engine_reliability import DiscoveryEngineReliability
 
@@ -78,6 +85,31 @@ def test_happy_path_parses_and_filters_to_allowlist():
     assert receipt["http_status"] == 200
     assert receipt["response_body_hash"]
     assert receipt["external_call_dispatched"] is True
+
+
+@pytest.mark.asyncio
+async def test_async_discovery_cancels_active_network_read_without_background_completion():
+    entered = asyncio.Event()
+    completed = asyncio.Event()
+
+    async def handler(_request):
+        entered.set()
+        try:
+            await asyncio.sleep(60)
+        finally:
+            completed.set()
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    fetcher = AsyncHttpxResearchFetcher(
+        client=client, search_url_template=_TEMPLATE, resolver=_resolver_public,
+    )
+    task = asyncio.create_task(fetcher.fetch_async("requirements", allowlist=["trusted.com"]))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.wait_for(completed.wait(), timeout=0.5)
+    await client.aclose()
 
 
 def test_searxng_engine_degradation_is_recorded_separately_from_results():

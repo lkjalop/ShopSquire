@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from src.app.services.case_publisher_candidate_workflow import (
     execute_case_candidate_research,
 )
@@ -16,7 +18,8 @@ class _Db:
         pass
 
 
-def test_zero_parser_yield_remains_unresolved_and_creates_no_proposal(monkeypatch):
+@pytest.mark.asyncio
+async def test_zero_parser_yield_remains_unresolved_and_creates_no_proposal(monkeypatch):
     candidate = SimpleNamespace(
         candidate_id="pubcand-zero", tenant_id="default", case_id="sc-zero",
         uid="buyer", url="https://publisher.example/landing",
@@ -48,7 +51,7 @@ def test_zero_parser_yield_remains_unresolved_and_creates_no_proposal(monkeypatc
         },
     )
 
-    result, error = execute_case_candidate_research(
+    result, error = await execute_case_candidate_research(
         _Db(), candidate=candidate, case=case, tenant_id="default", uid="buyer",
         expected_version=1, idempotency_key="zero-yield-1",
         allowed_claim_types=["minimum_requirements"],
