@@ -12,7 +12,6 @@ breadcrumbs, which is what the shadow differ diffs against the oracle.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import logging
 import os
 import re
@@ -26,6 +25,9 @@ from src.app.services.recommendation_core.evidence import (
     gather_evidence,
 )
 from src.app.services.recommendation_core.fit import build_cards
+from src.app.services.recommendation_core.exact_product_fit_coordinator import (
+    coordinate_exact_product_fit,
+)
 from src.app.services.recommendation_core.plan import derive_plan
 from src.app.services.recommendation_core.turn_router import (
     TurnDecision,
@@ -978,61 +980,31 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
             if isinstance(envelope.session.get("case_anchor"), dict)
             else {}
         )
-        semantic_case_id = str(prior_case_anchor.get("case_id") or "").strip()
-        if not semantic_case_id:
-            session_epoch = str(envelope.session.get("session_epoch") or "current")
-            semantic_case_id = "semantic-" + hashlib.sha256(
-                f"{envelope.tenant_id}|{envelope.uid}|{session_epoch}".encode("utf-8")
-            ).hexdigest()[:24]
-        # Persist an inspectable semantic revision. This stores no chain-of-thought:
-        # model confidence, evidence support, deterministic constraints and authority
-        # remain separate. Persistence failure is visible in the trace and never
-        # silently grants catalog authority.
-        try:
-            from src.app.services.conversation_case_state import ensure_case_state
-            from src.app.services.semantic_belief_state import persist_semantic_belief
+        from src.app.services.recommendation_core.semantic_belief_persistence import (
+            SemanticBeliefPersistenceCommand,
+            persist_computed_semantic_belief,
+        )
 
-            session_epoch = str(envelope.session.get("session_epoch") or "current")
-            ensure_case_state(
-                db,
+        session_epoch = str(envelope.session.get("session_epoch") or "current")
+        belief_persistence = persist_computed_semantic_belief(
+            db,
+            SemanticBeliefPersistenceCommand(
                 tenant_id=envelope.tenant_id,
-                case_id=semantic_case_id,
+                uid=envelope.uid,
                 session_epoch=session_epoch,
-                subject_ref=hashlib.sha256(
-                    f"{envelope.tenant_id}|{envelope.uid}".encode("utf-8")
-                ).hexdigest(),
-                authoritative_anchor={
-                    "kind": "semantic_qualification",
-                    "quantity": requested_quantity,
-                    "budget": {
-                        "scope": decision.budget_scope,
-                        "total_cents": decision.total_budget_cents,
-                        "currency": envelope.currency,
-                    },
-                },
-            )
-            belief_result = persist_semantic_belief(
-                db,
-                tenant_id=envelope.tenant_id,
-                case_id=semantic_case_id,
-                session_epoch=session_epoch,
-                semantic_decision=semantic_decision.as_dict(),
-                accepted_evidence=[item.as_dict() for item in normalized],
-                compiled_requirements=semantic_compiled_requirements,
                 trace_id=envelope.trace_id,
-            )
-            resp.extras["semantic_belief_state"] = belief_result
-        except Exception as exc:
-            logger.warning(
-                "semantic belief persistence failed for trace %s: %s",
-                envelope.trace_id,
-                type(exc).__name__,
-            )
-            resp.extras["semantic_belief_state"] = {
-                "status": "persistence_failed",
-                "persisted": False,
-                "error_type": type(exc).__name__,
-            }
+                prior_case_anchor=prior_case_anchor,
+                requested_quantity=requested_quantity,
+                budget_scope=decision.budget_scope,
+                total_budget_cents=decision.total_budget_cents,
+                currency=envelope.currency,
+                semantic_decision=semantic_decision.as_dict(),
+                accepted_evidence=tuple(item.as_dict() for item in normalized),
+                compiled_requirements=tuple(semantic_compiled_requirements),
+            ),
+        )
+        semantic_case_id = belief_persistence.case_id
+        resp.extras["semantic_belief_state"] = belief_persistence.projection
         covered_profile_exploration = allows_covered_profile_exploration(
             catalog_authority=semantic_decision.catalog_authority,
             covered_profiles=decision.use_cases,
@@ -1339,7 +1311,7 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         ),
         CoordinatedStage(
             RecommendationPhase.RESPONSE, "secondary_explanation",
-            lambda: _apply_secondary_explanation(db, envelope, decision, resp),
+            lambda: coordinate_exact_product_fit(db, envelope, decision, resp),
         ),
     ), cancellation=envelope.cancellation, logger=logger)
 
@@ -2481,107 +2453,6 @@ def _exec_retrieve(db, envelope: TurnEnvelope, decision: TurnDecision,
             else:
                 resp.set_message((f"No product in our catalog meets {reqs} — showing the closest "
                                   f"options, ranked by how near they come."), MsgPriority.LANE_BASE)
-
-
-def _apply_secondary_explanation(
-    db,
-    envelope: TurnEnvelope,
-    decision: TurnDecision,
-    resp: CoreResponse,
-) -> None:
-    """Answer a compound EXPLAIN obligation from the authorized product verdict."""
-    if "EXPLAIN" not in decision.secondary_lanes or not resp.products:
-        return
-    selected_sku = str(decision.exact_product_sku or "").strip()
-    top = next((card for card in resp.products if card.sku == selected_sku), None)
-    if selected_sku and top is None:
-        resp.extras["explanation"] = {
-            "sku": selected_sku,
-            "status": "selected_product_not_in_authorized_slate",
-            "verdict": None,
-            "basis": [],
-            "fit_ledger": [],
-        }
-        resp.message = (
-            f"{resp.message.strip()} I cannot explain the selected product from this slate because "
-            "its authorized catalog record was not returned; I will not substitute another product."
-        ).strip()
-        return
-    top = top or resp.products[0]
-    semantic = (
-        resp.extras.get("semantic_resolution")
-        if isinstance(resp.extras.get("semantic_resolution"), dict)
-        else envelope.session.get("semantic_resolution")
-        if isinstance(envelope.session.get("semantic_resolution"), dict)
-        else {}
-    )
-    compilation = (
-        resp.extras.get("semantic_requirement_compilation")
-        if isinstance(resp.extras.get("semantic_requirement_compilation"), dict)
-        else envelope.session.get("semantic_requirement_compilation")
-        if isinstance(envelope.session.get("semantic_requirement_compilation"), dict)
-        else {}
-    )
-    if semantic:
-        resp.extras.setdefault("semantic_resolution", dict(semantic))
-    if compilation:
-        resp.extras.setdefault("semantic_requirement_compilation", dict(compilation))
-    from src.app.services.recommendation_core.product_fit_explanation import (
-        build_product_fit_explanation,
-    )
-
-    product_capability: Dict[str, Any] = {
-        "status": "not_requested",
-        "commercial_authority_granted": False,
-    }
-    if envelope.external_research_consent and decision.exact_product_sku and decision.requirements:
-        from src.app.services.catalog_read_model import get_variant
-        from src.app.services.connectors.product_capability_evidence import (
-            configured_product_capability_registry,
-            identity_from_catalog_variant,
-        )
-
-        variant = get_variant(db, top.sku, tenant_id=envelope.tenant_id)
-        if variant is not None:
-            identity = identity_from_catalog_variant(variant)
-            if identity.identifier:
-                product_capability = configured_product_capability_registry().resolve(
-                    identity,
-                    claim_keys=tuple(decision.requirements),
-                    allow_live=True,
-                    tenant_id=envelope.tenant_id,
-                ).to_dict()
-
-    explanation_payload, explanation = build_product_fit_explanation(
-        product=top,
-        requirements=decision.requirements,
-        semantic_resolution=semantic,
-        requirement_compilation=compilation,
-        product_capability_evidence=product_capability,
-    )
-    resp.extras["explanation"] = explanation_payload
-    # Retain one bounded ledger per authorized card. The buyer may select a
-    # non-top product and ask about it later; reusing the top card's ledger or
-    # dropping to generic ranking would both be misleading.
-    product_explanations: Dict[str, Dict[str, Any]] = {}
-    for card in resp.products[:10]:
-        card_payload, _ = build_product_fit_explanation(
-            product=card,
-            requirements=decision.requirements,
-            semantic_resolution=semantic,
-            requirement_compilation=compilation,
-            product_capability_evidence=(
-                product_capability if card.sku == top.sku else {
-                    "status": "not_requested",
-                    "commercial_authority_granted": False,
-                }
-            ),
-        )
-        product_explanations[str(card.sku)] = card_payload
-    resp.extras["product_explanations"] = product_explanations
-    current = str(resp.message or "").strip()
-    if explanation not in current:
-        resp.message = f"{current} {explanation}".strip()
 
 
 def _exec_fit_check(db, envelope: TurnEnvelope, decision: TurnDecision,
