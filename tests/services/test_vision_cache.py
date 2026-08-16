@@ -44,12 +44,11 @@ def test_identify_caches_by_image_hash(monkeypatch):
     monkeypatch.setenv("VISION_CACHE_ENABLED", "1")
     calls = {"n": 0}
 
-    def fake_post(*a, **k):
+    def fake_execute(*a, **k):
         calls["n"] += 1
-        return _Resp()
+        return '{"identified": true, "brand": "MSI", "confidence": 0.9}'
 
-    monkeypatch.setattr(pia.requests, "post", fake_post)
-    monkeypatch.setattr(pia, "_get_ollama_urls", lambda: ["http://x"])
+    monkeypatch.setattr(pia, "execute_local_model_role", fake_execute)
     monkeypatch.setattr(pia, "_get_model_candidates", lambda: ["llava"])
 
     img = b"identical-image-bytes-123"
@@ -69,8 +68,7 @@ def test_vision_failure_is_observable_not_silent(monkeypatch):
     def boom(*a, **k):
         raise Exception("connection refused")
 
-    monkeypatch.setattr(pia.requests, "post", boom)
-    monkeypatch.setattr(pia, "_get_ollama_urls", lambda: ["http://x"])
+    monkeypatch.setattr(pia, "execute_local_model_role", boom)
     monkeypatch.setattr(pia, "_get_model_candidates", lambda: ["llava"])
 
     r = pia.identify_product_from_image(b"img-bytes-xyz")

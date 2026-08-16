@@ -42,7 +42,7 @@ def test_cache_hit_skips_vlm_network_call(monkeypatch):
     # If the cache is bypassed, the network call fires — make that an explicit failure.
     def _boom(*a, **k):
         raise AssertionError("VLM network call made despite a warm cache")
-    monkeypatch.setattr(pia.requests, "post", _boom)
+    monkeypatch.setattr(pia, "execute_local_model_role", _boom)
 
     res = pia.identify_product_from_image(blob, user_query="", trace_id=None)
     assert res.get("from_cache") is True

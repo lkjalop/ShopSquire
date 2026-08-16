@@ -13,13 +13,11 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor as _ShadowPool
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-import httpx
-
 from src.app.services.llm_provider import (
-    OLLAMA_URL,
     complexity_explain,
     is_complex_query,
     select_ollama_model,
@@ -37,8 +35,6 @@ def stable_rollout_bucket(seed: str | None) -> int:
 
 
 # Shadow-capture executor: shadow comparisons are observability and must never block a buyer's turn.
-from concurrent.futures import ThreadPoolExecutor as _ShadowPool
-
 _SHADOW_EXECUTOR = _ShadowPool(max_workers=2, thread_name_prefix="intent-shadow")
 
 
@@ -198,23 +194,36 @@ def _run_intent_routing(
         def _ollama_intent_call():
             """The Ollama intent-summary call, shared by the inline (real routing) and background
             (shadow-only) paths. Returns (summary, latency_ms); never raises."""
-            _payload: Dict[str, Any] = {
-                "model": model,
-                "prompt": (
-                    "Summarize the user's shopping intent in one sentence and list the top 2 attributes to consider.\n"
-                    f"User Query: {query_effective}"
-                ),
-                "stream": False,
-                "options": {"temperature": 0.2, "num_predict": 256},
-            }
-            if "qwen3" in model.lower():
-                _payload["think"] = False
+            prompt = (
+                "Summarize the user's shopping intent in one sentence and list the top 2 attributes to consider.\n"
+                f"User Query: {query_effective}"
+            )
             try:
+                from src.app.services.local_model_roles import (
+                    configured_digest,
+                    execute_local_model_role,
+                )
+
+                digest_name = (
+                    "OLLAMA_BIG_MODEL_DIGEST"
+                    if model == os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b")
+                    else "OLLAMA_SMALL_MODEL_DIGEST"
+                )
                 _t0 = time.perf_counter()
-                with httpx.Client(timeout=30.0) as _client:
-                    _r = _client.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=_payload)
-                    _r.raise_for_status()
-                    return (_r.json() or {}).get("response"), (time.perf_counter() - _t0) * 1000.0
+                summary = execute_local_model_role(
+                    prompt,
+                    role="recommendation_intent",
+                    purpose="shopping_intent_summary",
+                    prompt_id="recommendation-intent-summary-v1",
+                    model=model,
+                    digest=configured_digest(digest_name, "RECOMMEND_INTENT_MODEL_DIGEST"),
+                    timeout_s=30.0,
+                    max_output_tokens=256,
+                    context_hash=hashlib.sha256(
+                        f"{trace_id}:{query_effective}".encode("utf-8")
+                    ).hexdigest(),
+                )
+                return summary, (time.perf_counter() - _t0) * 1000.0
             except Exception:
                 return None, None
 

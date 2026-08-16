@@ -125,27 +125,26 @@ def _paddle_ocr(image_bytes: bytes) -> Dict[str, Any]:
 
 
 def _glm_ocr(image_bytes: bytes) -> Dict[str, Any]:
-    """OCR via glm-ocr:latest served by Ollama — no local binary required."""
+    """OCR via an artifact-bound local model; no cloud fallback is permitted."""
     import base64
     try:
-        import requests as _req  # lightweight; already in requirements
-    except Exception as exc:
-        return {"text": "", "confidence": 0.0, "boxes": [], "error": str(exc), "provider": "glm-ocr"}
-    try:
-        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        from src.app.services.local_model_roles import configured_digest, execute_local_model_role
+        from src.app.services.model_transports import make_ollama_generate_transport
+
         model = os.getenv("OLLAMA_GLM_OCR_MODEL", "glm-ocr:latest")
         img_b64 = base64.b64encode(image_bytes).decode("utf-8")
-        payload = {
-            "model": model,
-            "prompt": "Extract all text from this image. Output only the extracted text.",
-            "images": [img_b64],
-            "stream": False,
-        }
         timeout = _ocr_timeout_sec() or 30
-        resp = _req.post(f"{ollama_url}/api/generate", json=payload, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        text = str(data.get("response") or "").strip()
+        text = execute_local_model_role(
+            "Extract all text from this image. Output only the extracted text.",
+            role="image_ocr",
+            purpose="buyer_uploaded_image_text_extraction",
+            prompt_id="image-ocr-v1",
+            model=model,
+            digest=configured_digest("CV_OCR_MODEL_DIGEST"),
+            timeout_s=float(timeout),
+            max_output_tokens=1_024,
+            transport=make_ollama_generate_transport(images=[img_b64]),
+        ).strip()
         return {"text": text[:2000], "confidence": 0.85, "boxes": [], "provider": "glm-ocr"}
     except Exception as exc:
         return {"text": "", "confidence": 0.0, "boxes": [], "error": str(exc), "provider": "glm-ocr"}

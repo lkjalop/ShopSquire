@@ -9,6 +9,7 @@ This agent is designed to run in Orchestrator Phase 1 alongside CV_Label_Agent.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -16,14 +17,14 @@ import time
 from functools import lru_cache
 from typing import Any, Dict, Optional, Tuple
 
-import requests
-
 try:
     from PIL import Image  # type: ignore
 except Exception:  # pragma: no cover
     Image = None  # type: ignore
 
 from src.app.services.decision_log import log_trace_event
+from src.app.services.local_model_roles import configured_digest, execute_local_model_role
+from src.app.services.model_transports import make_ollama_generate_transport
 
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -201,82 +202,76 @@ def identify_product_from_image(
 
     prompt = _identity_prompt_for(_active_pid()) + ctx_line
 
-    urls = _get_ollama_urls()
-    models = _get_model_candidates()
+    # Artifact certification binds one exact model. Falling through to a
+    # differently tagged model would invalidate the digest and evaluation.
+    models = _get_model_candidates()[:1]
     last_err = None
 
     # Bound TOTAL time to ~timeout_s. The url×model loop previously waited up to
     # timeout_s PER iteration, so a slow/unreachable first model could stack to
     # N×timeout_s (a major contributor to the 50-86s image path).
     _deadline = time.time() + float(timeout_s)
-    for url in urls:
-        for m in models:
-            _remaining = _deadline - time.time()
-            if _remaining <= 0.5:
-                last_err = last_err or {"error": "deadline_exceeded"}
-                break
-            started = time.time()
-            try:
-                resp = requests.post(
-                    f"{url}/api/generate",
-                    json={
-                        "model": m,
-                        "prompt": prompt,
-                        "images": [img_b64],
-                        "stream": False,
-                        # keep the VLM resident between identity calls (cold reload = 2.8-6.1s each)
-                        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                        "options": {"temperature": 0.0},
-                    },
-                    timeout=max(1.0, min(float(timeout_s), _remaining)),
-                )
-                ms = int((time.time() - started) * 1000)
-                if resp.status_code >= 400:
-                    last_err = {"error": f"ollama_http_{resp.status_code}", "ms": ms}
-                    continue
-
-                data = resp.json() if "json" in resp.headers.get("content-type", "") else {}
-                raw = str(data.get("response") or "")
-                parsed = _extract_json(raw)
-                if not isinstance(parsed, dict):
-                    last_err = {"error": "non_json_response", "ms": ms}
-                    continue
-
-                result = {**empty, **parsed, "ok": True, "ms": ms, "model_used": m}
-                if _cache_key:
-                    try:
-                        from src.app.services import vision_cache as _vcache
-                        _vcache.put(_cache_key, result)
-                    except Exception:
-                        pass
-                if trace_id:
-                    try:
-                        log_trace_event(
-                            trace_id=trace_id,
-                            event_type="product_identity_extracted",
-                            source_type="agent",
-                            source_id="Product_Identity_Agent",
-                            target_type="system",
-                            target_id=None,
-                            payload={
-                                "identified": result.get("identified"),
-                                "brand": result.get("brand"),
-                                "model": result.get("model"),
-                                "cpu_tier": result.get("cpu_tier"),
-                                "price_tier": result.get("price_tier"),
-                                "confidence": result.get("confidence"),
-                                "ms": ms,
-                            },
-                        )
-                    except Exception:
-                        pass
-                return result
-            except requests.exceptions.Timeout:
-                last_err = {"error": "timeout", "ms": int((time.time() - started) * 1000)}
+    for m in models:
+        _remaining = _deadline - time.time()
+        if _remaining <= 0.5:
+            last_err = last_err or {"error": "deadline_exceeded"}
+            break
+        started = time.time()
+        try:
+            raw = execute_local_model_role(
+                prompt,
+                role="product_identity",
+                purpose="buyer_uploaded_product_identity",
+                prompt_id="product-identity-v1",
+                model=m,
+                digest=configured_digest("CV_IDENTITY_MODEL_DIGEST"),
+                timeout_s=max(1.0, min(float(timeout_s), _remaining)),
+                max_output_tokens=512,
+                context_hash=hashlib.sha256(norm_bytes).hexdigest(),
+                transport=make_ollama_generate_transport(
+                    images=[img_b64],
+                    options={"temperature": 0.0},
+                    keep_alive=os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+                ),
+            )
+            ms = int((time.time() - started) * 1000)
+            parsed = _extract_json(raw)
+            if not isinstance(parsed, dict):
+                last_err = {"error": "non_json_response", "ms": ms}
                 continue
-            except Exception as exc:
-                last_err = {"error": str(exc)[:200], "ms": int((time.time() - started) * 1000)}
-                continue
+
+            result = {**empty, **parsed, "ok": True, "ms": ms, "model_used": m}
+            if _cache_key:
+                try:
+                    from src.app.services import vision_cache as _vcache
+                    _vcache.put(_cache_key, result)
+                except Exception:
+                    pass
+            if trace_id:
+                try:
+                    log_trace_event(
+                        trace_id=trace_id,
+                        event_type="product_identity_extracted",
+                        source_type="agent",
+                        source_id="Product_Identity_Agent",
+                        target_type="system",
+                        target_id=None,
+                        payload={
+                            "identified": result.get("identified"),
+                            "brand": result.get("brand"),
+                            "model": result.get("model"),
+                            "cpu_tier": result.get("cpu_tier"),
+                            "price_tier": result.get("price_tier"),
+                            "confidence": result.get("confidence"),
+                            "ms": ms,
+                        },
+                    )
+                except Exception:
+                    pass
+            return result
+        except Exception as exc:
+            last_err = {"error": str(exc)[:200], "ms": int((time.time() - started) * 1000)}
+            continue
 
     # All attempts failed — make the otherwise-silent empty identity OBSERVABLE so a
     # vision outage shows up as a metric instead of just "no grounding" downstream.
