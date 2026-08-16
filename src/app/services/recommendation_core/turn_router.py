@@ -449,6 +449,10 @@ class TurnDecision:
     semantic_proposal: Dict[str, Any] = field(default_factory=dict)
     coverage_abstention_shadow: Dict[str, Any] = field(default_factory=dict)
     authorization_changes: Tuple[str, ...] = ()
+    # Open-vocabulary state proposal. The model proposes operations over a typed
+    # case; the durable reducer validates revision/invariants and owns acceptance.
+    # These operations never grant commerce authority.
+    case_patches: Tuple[Dict[str, Any], ...] = ()
 
     def as_dict(self) -> Dict[str, Any]:
         return {"lane": self.lane, "node_handle": self.node_handle, "node_path": self.node_path,
@@ -484,7 +488,69 @@ class TurnDecision:
                 "model_proposal": dict(self.model_proposal),
                 "semantic_proposal": dict(self.semantic_proposal),
                 "coverage_abstention_shadow": dict(self.coverage_abstention_shadow),
-                "authorization_changes": list(self.authorization_changes)}
+                "authorization_changes": list(self.authorization_changes),
+                "case_patches": [dict(item) for item in self.case_patches]}
+
+
+def _bounded_case_patches(
+    data: Dict[str, Any], query: str | None = None,
+) -> Tuple[Dict[str, Any], ...]:
+    """Validate model-proposed case operations without applying them.
+
+    When the buyer query is supplied, changed values must also be grounded in
+    that utterance. Retained values are never re-emitted as patches.
+    """
+    from pydantic import ValidationError
+
+    from src.app.services.procurement_case_state import CasePatch
+
+    raw = data.get("case_patches")
+    if not isinstance(raw, list):
+        return ()
+    accepted: list[Dict[str, Any]] = []
+    normalized_query = " ".join(str(query or "").casefold().split())
+
+    def grounded(patch: CasePatch) -> bool:
+        if not normalized_query:
+            return True
+        if patch.operation == "move_quantity":
+            return bool(
+                patch.quantity is not None
+                and str(patch.quantity) in normalized_query
+                and str(patch.from_ref or "").casefold() in normalized_query
+                and str(patch.to_ref or "").casefold() in normalized_query
+            )
+        values: list[Any]
+        if patch.path == "destinations" and isinstance(patch.value, list):
+            values = [
+                value
+                for row in patch.value if isinstance(row, dict)
+                for value in (row.get("location_ref"), row.get("quantity"))
+            ]
+        elif patch.path == "workloads" and isinstance(patch.value, list):
+            values = list(patch.value)
+        else:
+            values = [patch.value]
+        for value in values:
+            if value is None:
+                return False
+            candidate = str(value).casefold()
+            if patch.path == "budget.amount_minor" and isinstance(value, int):
+                candidate = str(value // 100)
+            if candidate not in normalized_query:
+                return False
+        return True
+    for item in raw[:8]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            patch = CasePatch.model_validate(item)
+        except ValidationError:
+            continue
+        if not grounded(patch):
+            continue
+        accepted.append(patch.model_dump(mode="json", exclude_none=True))
+    return tuple(accepted)
 
 
 def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -526,6 +592,7 @@ def _bounded_model_proposal(data: Dict[str, Any]) -> Dict[str, Any]:
         "budget_scope": short(data.get("budget_scope")),
         "subject_action": short(data.get("subject_action")),
         "procurement_context": short(data.get("procurement_context")),
+        "case_patches": [dict(item) for item in _bounded_case_patches(data)],
     }
 
 
@@ -1465,6 +1532,17 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "BULK: quantity is unit count; total_budget is whole-order dollars; budget_scope is "
         "per_unit, total or null. Never reinterpret per-unit as total. budget_cap_mode is hard "
         "for explicit limits, soft for approximate targets, ambiguous when the wording is unclear.\n"
+        "CASE_PATCHES: propose explicit buyer case facts as typed operations; never rewrite the "
+        "entire prior case. Allowed operations are set, add, remove and move_quantity. Allowed "
+        "paths are objective, workloads, selected_sku, requested_quantity, destinations, "
+        "budget.amount_minor, budget.currency, budget.scope, temporal.original_expression, "
+        "temporal.required_by, temporal.timezone. For a stated multi-location allocation, set "
+        "destinations to rows of {location_ref, quantity, location_kind}. For 'move 5 from Perth "
+        "to Sydney', emit one move_quantity patch with path=destinations, quantity=5, from_ref "
+        "and to_ref; do not repeat unchanged workload, budget, deadline or total. Use amount_minor "
+        "for money. Preserve relative time as temporal.original_expression; only emit required_by "
+        "when the input/session supplies an unambiguous timezone-aware timestamp. These are state "
+        "proposals only and never authorize cart, RFQ, payment or shipment.\n"
         "For a product request where no [in catalog] candidate fits, lane MUST be OFF_CATALOG. "
         "Include either its offered unstocked handle or a specific wanted_category; do not emit "
         "a nodeless SEARCH. SEARCH with no handle is only for a non-product service or place.\n"
@@ -1475,7 +1553,7 @@ def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...
         "audience_contexts, use_case_variant, requirements, refine, compare_targets, quantity, "
         "total_budget, budget_scope, budget_cap_mode, subject_action, procurement_context, "
         "operational_constraints, "
-        "confidence, semantic_proposal, clarification_relation. Inside refine, emit only changed keys from brand, prefer_brand, "
+        "confidence, semantic_proposal, clarification_relation, case_patches. Inside refine, emit only changed keys from brand, prefer_brand, "
         "exclude_brand, sort, brand_action. Never add prose or keys outside this contract.\n")
 
 
@@ -1985,6 +2063,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                     requirements[definition.key] = accepted_predicates
 
     operational_constraints = _bounded_operational_constraints(data, envelope.query)
+    case_patches = _bounded_case_patches(data, envelope.query)
 
     from src.app.services.recommendation_core.intent_resolver import (audience_context_keys,
                                                                       normalize_use_case)
@@ -2606,6 +2685,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
         "secondary_lanes": list(secondary_lanes),
         "clarification_relation": clarification_relation,
         "product_type_options": list(product_type_options),
+        "case_patches": [dict(item) for item in case_patches],
     }
     anchored_product_sku = explicit_product_sku
     accepted_constraints = (
@@ -2673,4 +2753,5 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
                         model_proposal=proposal,
                         semantic_proposal=semantic_proposal,
                         coverage_abstention_shadow=coverage_abstention_shadow,
-                        authorization_changes=_authorization_changes(proposal, accepted_audit))
+                        authorization_changes=_authorization_changes(proposal, accepted_audit),
+                        case_patches=case_patches)

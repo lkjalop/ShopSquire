@@ -535,6 +535,12 @@ def ensure_case_state(
         return {"case_state_id": row[0], "version": int(row[1]), "state": json.loads(row[2]), "created": False}
     state_id = f"ccs-{uuid.uuid4().hex}"
     state = {key: value for key, value in authoritative_anchor.items() if value is not None}
+    # Preserve the flat compatibility surface while establishing one typed
+    # procurement-state projection for new multi-turn consumers.
+    from src.app.services.procurement_case_state import project_legacy_case_anchor
+
+    typed_anchor = {**state, "case_id": case_id, "revision": 1}
+    state["procurement_case_state"] = project_legacy_case_anchor(typed_anchor).model_dump(mode="json")
     db.execute(
         text(
             "INSERT INTO conversation_case_state "
@@ -548,6 +554,140 @@ def ensure_case_state(
     )
     db.commit()
     return {"case_state_id": state_id, "version": 1, "state": state, "created": True}
+
+
+def record_typed_case_patch_set(
+    db,
+    *,
+    tenant_id: str,
+    case_id: str,
+    session_epoch: str,
+    subject_ref: str,
+    source_message_id: str,
+    expected_version: int,
+    patches: list[Any],
+    trace_id: str | None = None,
+    now_iso: str | None = None,
+) -> dict[str, Any]:
+    """Persist an atomic, revision-bound patch set over the canonical case.
+
+    ``patches`` must already be proposed by a model or explicit UI control. This
+    function validates and records them; it never infers patches from prose and
+    never grants cart/RFQ/payment authority.
+    """
+    from src.app.services.procurement_case_state import (
+        CasePatch,
+        ProcurementCaseState,
+        apply_case_patch_set,
+        project_legacy_case_anchor,
+    )
+
+    row = db.execute(
+        text(
+            "SELECT id,state_json,version FROM conversation_case_state "
+            "WHERE tenant_id=:tenant AND case_id=:case_id AND session_epoch=:epoch "
+            "AND subject_ref=:subject"
+        ),
+        {
+            "tenant": tenant_id, "case_id": case_id, "epoch": session_epoch,
+            "subject": subject_ref,
+        },
+    ).first()
+    if not row:
+        raise ValueError("conversation_case_not_found")
+    version = int(row[2])
+    if version != expected_version:
+        raise ValueError("case_revision_conflict")
+    state = json.loads(row[1])
+    typed_raw = state.get("procurement_case_state")
+    if isinstance(typed_raw, dict):
+        typed = ProcurementCaseState.model_validate({**typed_raw, "revision": version})
+    else:
+        typed = project_legacy_case_anchor({**state, "case_id": case_id, "revision": version})
+    normalized = [item if isinstance(item, CasePatch) else CasePatch.model_validate(item) for item in patches]
+    result = apply_case_patch_set(typed, expected_revision=version, patches=normalized)
+    updated_typed = result.state
+
+    # The nested typed state is canonical. Keep only unambiguous flat fields for
+    # V2/legacy readers while they are strangled behind typed projections.
+    state["procurement_case_state"] = updated_typed.model_dump(mode="json")
+    state["quantity"] = updated_typed.requested_quantity
+    state["sku"] = updated_typed.selected_sku
+    if updated_typed.budget:
+        state["budget"] = {
+            "amount_minor": updated_typed.budget.amount_minor,
+            "currency": updated_typed.budget.currency,
+            "scope": updated_typed.budget.scope,
+        }
+    state["destination_allocations"] = [
+        row.model_dump(mode="json") for row in updated_typed.destinations
+    ]
+    if len(updated_typed.destinations) == 1:
+        state["destination"] = updated_typed.destinations[0].location_ref
+
+    timestamp = _now(now_iso)
+    identity = f"{tenant_id}|{session_epoch}|{source_message_id}|typed_patch_set"
+    amendment_id = hashlib.sha256(identity.encode()).hexdigest()
+    existing = db.execute(
+        text("SELECT status FROM conversation_case_amendment WHERE id=:id"),
+        {"id": amendment_id},
+    ).first()
+    if existing:
+        return {
+            "amendment_id": amendment_id, "status": existing[0],
+            "state_changed": False, "idempotent": True, "version": version,
+        }
+    db.execute(
+        text(
+            "INSERT INTO conversation_case_amendment "
+            "(id,case_state_id,tenant_id,case_id,session_epoch,source_message_id,trace_id,dialogue_act,"
+            "field_name,old_value_json,proposed_value_json,confidence,risk,requires_confirmation,status,reason,"
+            "provenance_json,supersedes_id,observed_at,effective_at,created_at) VALUES "
+            "(:id,:state_id,:tenant,:case_id,:epoch,:message,:trace,'typed_patch_set',"
+            "'procurement_case_state',:old,:proposed,1.0,'low',:confirmation,'accepted',:reason,"
+            ":provenance,NULL,:observed,:effective,:created)"
+        ),
+        {
+            "id": amendment_id, "state_id": row[0], "tenant": tenant_id,
+            "case_id": case_id, "epoch": session_epoch, "message": source_message_id,
+            "trace": trace_id,
+            "old": _json(typed.model_dump(mode="json")),
+            "proposed": _json(updated_typed.model_dump(mode="json")),
+            "confirmation": False,
+            "reason": ",".join(result.changed_paths),
+            "provenance": _json({
+                "kind": "typed_case_patch_set", "source_message_id": source_message_id,
+                "authority": "accepted_case_state_only", "commerce_authority": False,
+            }),
+            "observed": timestamp, "effective": timestamp, "created": timestamp,
+        },
+    )
+    changed = db.execute(
+        text(
+            "UPDATE conversation_case_state SET state_json=:state,version=version+1,updated_at=:timestamp "
+            "WHERE id=:id AND version=:expected"
+        ),
+        {
+            "state": _json(state), "timestamp": timestamp, "id": row[0],
+            "expected": expected_version,
+        },
+    ).rowcount
+    if changed != 1:
+        db.rollback()
+        raise ValueError("case_revision_conflict")
+    _propagate_case_supersession(
+        db, tenant_id=tenant_id, case_id=case_id, amendment_id=amendment_id,
+        trace_id=trace_id, prior_version=version, new_version=version + 1,
+        timestamp=timestamp,
+    )
+    db.commit()
+    return {
+        "amendment_id": amendment_id, "status": "accepted", "state_changed": True,
+        "idempotent": False, "version": version + 1,
+        "changed_paths": list(result.changed_paths),
+        "preserved_paths": list(result.preserved_paths),
+        "commerce_authority": False,
+    }
 
 
 def get_case_state(db, *, tenant_id: str, case_id: str, session_epoch: str) -> dict[str, Any]:

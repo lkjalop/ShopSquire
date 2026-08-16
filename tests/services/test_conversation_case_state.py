@@ -11,6 +11,7 @@ from src.app.services.conversation_case_state import (
     ensure_case_state,
     get_case_state,
     record_case_turn,
+    record_typed_case_patch_set,
     reduce_case_obligations,
 )
 
@@ -137,6 +138,58 @@ def test_status_and_summary_read_case_without_proposing_a_mutation() -> None:
     assert result["retrieval_required"] is False
     assert db.execute(text("SELECT COUNT(*) FROM conversation_case_amendment")).scalar_one() == 1
     assert get_case_state(db, tenant_id="tenant-a", case_id="case-1", session_epoch="epoch-1")["sku"] == "RGAM-0007"
+
+
+def test_typed_multidestination_patch_persists_and_preserves_other_case_fields() -> None:
+    db = _db()
+    ensure_case_state(
+        db,
+        tenant_id="tenant-a",
+        case_id="case-60",
+        session_epoch="epoch-1",
+        subject_ref="buyer-hash",
+        authoritative_anchor={
+            "quantity": 60,
+            "destination_allocations": [
+                {"location_ref": "Sydney", "quantity": 40},
+                {"location_ref": "Perth", "quantity": 20},
+            ],
+            "objective": "Engineering simulation fleet",
+            "semantic_resolution": {
+                "hypotheses": [{"label": "Unreal Engine"}, {"label": "large CAD models"}],
+            },
+            "deadline": "2026-08-20T17:00:00+10:00",
+            "budget": {"total_cents": 22_000_000, "currency": "AUD", "scope": "total"},
+        },
+        now_iso="2026-08-16T02:00:00+00:00",
+    )
+    result = record_typed_case_patch_set(
+        db,
+        tenant_id="tenant-a",
+        case_id="case-60",
+        session_epoch="epoch-1",
+        subject_ref="buyer-hash",
+        source_message_id="move-5",
+        expected_version=1,
+        patches=[{
+            "operation": "move_quantity", "path": "destinations",
+            "quantity": 5, "from_ref": "Perth", "to_ref": "Sydney",
+        }],
+        trace_id="trace-60",
+        now_iso="2026-08-16T02:01:00+00:00",
+    )
+
+    updated = get_case_state(
+        db, tenant_id="tenant-a", case_id="case-60", session_epoch="epoch-1"
+    )["procurement_case_state"]
+    assert result["version"] == 2
+    assert updated["destinations"] == [
+        {"location_ref": "Sydney", "quantity": 45, "location_kind": "unknown"},
+        {"location_ref": "Perth", "quantity": 15, "location_kind": "unknown"},
+    ]
+    assert updated["workloads"] == ["Unreal Engine", "large CAD models"]
+    assert updated["objective"] == "Engineering simulation fleet"
+    assert result["commerce_authority"] is False
 
 
 def test_destination_is_an_amendment_and_never_changes_product_identity() -> None:

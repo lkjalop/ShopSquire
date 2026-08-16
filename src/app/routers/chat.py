@@ -4024,6 +4024,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                     from src.app.services.conversation_case_state import (
                         ensure_case_state,
                         record_case_turn,
+                        record_typed_case_patch_set,
                     )
 
                     bind = db.get_bind() if hasattr(db, "get_bind") else getattr(db, "bind", None)
@@ -4061,9 +4062,21 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             else None
                         ),
                         "catalog_authority": case_anchor.get("catalog_authority"),
+                        "objective": (
+                            out.get("retained_purpose")
+                            or (
+                                out.get("shopping_case", {}).get("retained_purpose")
+                                if isinstance(out.get("shopping_case"), dict) else None
+                            )
+                            or q
+                        ),
+                        "destination_allocations": (
+                            out.get("destination_allocations")
+                            if isinstance(out.get("destination_allocations"), list) else None
+                        ),
                     }
                     with Session(bind=bind, future=True) as case_db:
-                        ensure_case_state(
+                        ensured = ensure_case_state(
                             case_db,
                             tenant_id=tenant_id,
                             case_id=active_case_id,
@@ -4071,16 +4084,33 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             subject_ref=hash_uid(uid),
                             authoritative_anchor=anchor,
                         )
-                        out["case_memory"] = record_case_turn(
-                            case_db,
-                            tenant_id=tenant_id,
-                            case_id=active_case_id,
-                            session_epoch=session_epoch,
-                            subject_ref=hash_uid(uid),
-                            source_message_id=user_message_id,
-                            trace_id=decision_trace_id,
-                            message=q,
+                        decision_payload = (
+                            out.get("decision") if isinstance(out.get("decision"), dict) else {}
                         )
+                        case_patches = decision_payload.get("case_patches")
+                        if isinstance(case_patches, list) and case_patches:
+                            out["case_memory"] = record_typed_case_patch_set(
+                                case_db,
+                                tenant_id=tenant_id,
+                                case_id=active_case_id,
+                                session_epoch=session_epoch,
+                                subject_ref=hash_uid(uid),
+                                source_message_id=user_message_id,
+                                expected_version=int(ensured["version"]),
+                                patches=case_patches,
+                                trace_id=decision_trace_id,
+                            )
+                        else:
+                            out["case_memory"] = record_case_turn(
+                                case_db,
+                                tenant_id=tenant_id,
+                                case_id=active_case_id,
+                                session_epoch=session_epoch,
+                                subject_ref=hash_uid(uid),
+                                source_message_id=user_message_id,
+                                trace_id=decision_trace_id,
+                                message=q,
+                            )
                 except Exception as case_state_exc:
                     logger.warning(
                         "conversation case projection unavailable tenant=%s case=%s trace=%s: %s",
