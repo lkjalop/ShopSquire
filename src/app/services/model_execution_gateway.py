@@ -239,14 +239,32 @@ def execute_model(
 
     started = time.monotonic()
 
+    from src.app.observability.pilot_runtime_metrics import (
+        agent_ledger_persistence_failures_total,
+        model_late_results_total,
+        record_model_outcome,
+    )
+
+    def append_event(event_type: AgentRunEventType, **details: Any) -> bool:
+        try:
+            ledger.append(request, deployment, event_type, **details)
+            return True
+        except Exception:
+            agent_ledger_persistence_failures_total.inc()
+            return False
+
     def finish(status: str, *, text: str | None = None, failure: str | None = None,
                late: bool = False, dlp_hits: int = 0) -> ModelExecutionResult:
-        return ModelExecutionResult(
+        result = ModelExecutionResult(
             status=status, run_id=request.run_id, text=text,
             output_hash=sha256_text(text) if text is not None else None,
             elapsed_ms=round((time.monotonic() - started) * 1_000),
             failure_code=failure, late_result_quarantined=late, dlp_hits=dlp_hits,
         )
+        record_model_outcome(result.status, result.failure_code, result.elapsed_ms)
+        if result.late_result_quarantined:
+            model_late_results_total.inc()
+        return result
 
     block = None
     if not deployment.enabled:
@@ -268,13 +286,13 @@ def execute_model(
     elif sha256_text(prompt) != request.prompt_hash:
         block = "prompt_hash_mismatch"
     if block:
-        ledger.append(request, deployment, "blocked", failure_code=block)
+        append_event("blocked", failure_code=block)
         return finish("blocked", failure=block)
     if cancellation_requested and cancellation_requested():
-        ledger.append(request, deployment, "cancelled", failure_code="cancelled_before_dispatch")
+        append_event("cancelled", failure_code="cancelled_before_dispatch")
         return finish("cancelled", failure="cancelled_before_dispatch")
     if not _EXECUTION_SLOTS.acquire(blocking=False):
-        ledger.append(request, deployment, "blocked", failure_code="gateway_capacity_exhausted")
+        append_event("blocked", failure_code="gateway_capacity_exhausted")
         return finish("blocked", failure="gateway_capacity_exhausted")
 
     try:
@@ -284,10 +302,12 @@ def execute_model(
     except Exception as exc:
         _EXECUTION_SLOTS.release()
         failure = f"provider_policy_blocked:{type(exc).__name__}"
-        ledger.append(request, deployment, "blocked", failure_code=failure)
+        append_event("blocked", failure_code=failure)
         return finish("blocked", failure=failure)
 
-    ledger.append(request, deployment, "accepted", dlp_hits=dlp_hits)
+    if not append_event("accepted", dlp_hits=dlp_hits):
+        _EXECUTION_SLOTS.release()
+        return finish("blocked", failure="agent_ledger_persistence_failed")
     result: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
     quarantine_late_result = threading.Event()
 
@@ -295,8 +315,8 @@ def execute_model(
         try:
             value = transport(str(outbound_prompt), deployment, request)
             if quarantine_late_result.is_set():
-                ledger.append(
-                    request, deployment, "late_result_quarantined",
+                append_event(
+                    "late_result_quarantined",
                     output_hash=sha256_text(str(value or "")),
                 )
             result.put_nowait(("completed", value))
@@ -318,7 +338,7 @@ def execute_model(
     while True:
         if cancellation_requested and cancellation_requested():
             quarantine_late_result.set()
-            ledger.append(request, deployment, "cancelled", late_result_quarantined=worker.is_alive())
+            append_event("cancelled", late_result_quarantined=worker.is_alive())
             return finish("cancelled", failure="model_execution_cancelled",
                           late=worker.is_alive(), dlp_hits=dlp_hits)
         try:
@@ -326,16 +346,17 @@ def execute_model(
         except queue.Empty:
             if time.monotonic() >= deadline:
                 quarantine_late_result.set()
-                ledger.append(request, deployment, "timeout", late_result_quarantined=worker.is_alive())
+                append_event("timeout", late_result_quarantined=worker.is_alive())
                 return finish("timeout", failure="model_execution_timeout",
                               late=worker.is_alive(), dlp_hits=dlp_hits)
             continue
         if status == "failed":
-            ledger.append(request, deployment, "failed", error_type=type(value).__name__)
+            append_event("failed", error_type=type(value).__name__)
             return finish("failed", failure=f"transport_failed:{type(value).__name__}",
                           dlp_hits=dlp_hits)
         text = str(value or "")
-        ledger.append(request, deployment, "completed", output_hash=sha256_text(text))
+        if not append_event("completed", output_hash=sha256_text(text)):
+            return finish("failed", failure="agent_ledger_persistence_failed", dlp_hits=dlp_hits)
         return finish("completed", text=text, dlp_hits=dlp_hits)
 
 

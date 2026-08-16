@@ -96,6 +96,9 @@ def _router_http_post(url: str, **kwargs: Any) -> Any:
                     trust_env=False,
                 )
     return _ROUTER_HTTP_CLIENT.post(url, **kwargs)
+
+
+_DEFAULT_ROUTER_HTTP_POST = _router_http_post
 logger = logging.getLogger("shopsquire.recommendation_core.turn_router")
 
 _SEMANTIC_REFUSAL_MIN_SCORE = 0.72
@@ -199,7 +202,6 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
             metrics["provider"] = "mock" if mock_runtime else "disabled"
             metrics["outcome"] = "mock_disabled" if mock_runtime else "disabled"
             return ""
-        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
         metrics["model"] = model
         queue_started = time.monotonic()
         contract = router_runtime_contract()
@@ -216,33 +218,58 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
             _num_predict = int(os.getenv("ROUTER_NUM_PREDICT", "320") or 320)
         except Exception:
             _num_predict = 320
-        payload = {"model": model, "prompt": prompt, "stream": False, "format": "json",
-                   "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                   "options": {"temperature": 0, "num_predict": _num_predict}}
-        if "qwen3" in model.lower():
-            payload["think"] = False
         remaining = max(2.0, float(timeout or 20.0) - (metrics["queue_ms"] / 1000.0))
-        r = _router_http_post(f"{url}/api/generate", json=payload, timeout=remaining)
-        data = r.json() or {}
-        metrics.update({
-            "http_status": int(r.status_code),
-            # Ollama's total_duration is the provider-observed request lifetime. Keeping it
-            # separate from this process's wall clock lets operators distinguish model work,
-            # provider-internal scheduling/serialization, and HTTP transport overhead.
-            "provider_total_ms": round(float(data.get("total_duration") or 0) / 1_000_000.0, 1),
-            "load_ms": round(float(data.get("load_duration") or 0) / 1_000_000.0, 1),
-            "prompt_eval_ms": round(float(data.get("prompt_eval_duration") or 0) / 1_000_000.0, 1),
-            "decode_ms": round(float(data.get("eval_duration") or 0) / 1_000_000.0, 1),
-            "prompt_tokens": int(data.get("prompt_eval_count") or 0),
-            "output_tokens": int(data.get("eval_count") or 0),
-        })
-        if r.status_code != 200 or data.get("error"):
-            metrics["outcome"] = "http_error"
-            logger.warning("router model call failed: http=%s error=%s model=%s",
-                           r.status_code, str(data.get("error"))[:120], model)
-            return ""
+        from src.app.services.local_model_roles import configured_digest, execute_local_model_role
+
+        digest = configured_digest("ROUTER_MODEL_DIGEST", "OLLAMA_DEFAULT_MODEL_DIGEST")
+        # Characterization tests inject the transport and use a zero digest;
+        # production execution requires an enrolled Ollama artifact digest.
+        if _router_http_post is not _DEFAULT_ROUTER_HTTP_POST:
+            digest = "0" * 64
+
+        def gateway_transport(model_prompt, deployment, request):
+            payload = {
+                "model": model,
+                "prompt": model_prompt,
+                "stream": False,
+                "format": "json",
+                "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+                "options": {"temperature": 0, "num_predict": request.max_output_tokens},
+            }
+            if "qwen3" in model.lower():
+                payload["think"] = False
+            response = _router_http_post(
+                deployment.endpoint,
+                json=payload,
+                timeout=request.timeout_ms / 1_000.0,
+            )
+            data = response.json() or {}
+            metrics.update({
+                "http_status": int(response.status_code),
+                "provider_total_ms": round(float(data.get("total_duration") or 0) / 1_000_000.0, 1),
+                "load_ms": round(float(data.get("load_duration") or 0) / 1_000_000.0, 1),
+                "prompt_eval_ms": round(float(data.get("prompt_eval_duration") or 0) / 1_000_000.0, 1),
+                "decode_ms": round(float(data.get("eval_duration") or 0) / 1_000_000.0, 1),
+                "prompt_tokens": int(data.get("prompt_eval_count") or 0),
+                "output_tokens": int(data.get("eval_count") or 0),
+            })
+            if response.status_code != 200 or data.get("error"):
+                raise RuntimeError("router_model_http_error")
+            return str(data.get("response", "") or "")
+
+        rendered = execute_local_model_role(
+            prompt,
+            role="recommendation_turn_router",
+            purpose="route_buyer_recommendation_turn",
+            prompt_id="recommend-router-v2",
+            model=model,
+            digest=digest,
+            timeout_s=remaining,
+            max_output_tokens=_num_predict,
+            transport=gateway_transport,
+        )
         metrics["outcome"] = "ok"
-        return str(data.get("response", "") or "")
+        return rendered
     except Exception as exc:
         metrics["outcome"] = "timeout" if "timeout" in type(exc).__name__.lower() else "error"
         metrics["error_type"] = type(exc).__name__

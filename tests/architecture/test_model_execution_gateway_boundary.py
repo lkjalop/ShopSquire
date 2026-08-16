@@ -12,7 +12,6 @@ LEGACY_DIRECT_MODEL_CALLERS = {
     "src/app/bootstrap/runtime_lifecycle.py",
     "src/app/services/cv_ocr.py",
     "src/app/services/cv_vision_ollama.py",
-    "src/app/services/fulfillment/supplier_polish.py",
     "src/app/services/llm_provider.py",
     "src/app/services/llm_providers.py",
     "src/app/services/model_residency.py",
@@ -20,8 +19,6 @@ LEGACY_DIRECT_MODEL_CALLERS = {
     "src/app/services/ollama_client.py",
     "src/app/services/product_identity_agent.py",
     "src/app/services/recommend_intent_router.py",
-    "src/app/services/recommendation_core/cart_resolver.py",
-    "src/app/services/recommendation_core/turn_router.py",
     "src/app/services/vision_reasoning.py",
     "src/app/workers/rq_queue.py",
 }
@@ -60,4 +57,7 @@ def test_recently_migrated_business_roles_do_not_bypass_gateway():
         "src/app/services/multi_intent_live.py",
         "src/app/services/open_world_query_proposal.py",
         "src/app/services/portfolio_narration_preview.py",
+        "src/app/services/fulfillment/supplier_polish.py",
+        "src/app/services/recommendation_core/cart_resolver.py",
+        "src/app/services/recommendation_core/turn_router.py",
     })

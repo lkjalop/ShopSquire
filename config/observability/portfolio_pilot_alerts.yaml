@@ -1,0 +1,63 @@
+groups:
+  - name: shopsquire-portfolio-pilot
+    rules:
+      - alert: ShopSquireModelTimeouts
+        expr: increase(shopsquire_model_execution_outcomes_total{status="timeout"}[10m]) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: Governed local model execution exceeded its deadline
+      - alert: ShopSquireModelArtifactMismatch
+        expr: increase(shopsquire_model_execution_outcomes_total{failure_code=~"model_artifact_.*"}[10m]) > 0
+        for: 0m
+        labels: {severity: critical}
+        annotations:
+          summary: Enrolled Ollama artifact identity or digest did not match
+      - alert: ShopSquireAgentLedgerPersistenceFailure
+        expr: increase(shopsquire_agent_ledger_persistence_failures_total[5m]) > 0
+        for: 0m
+        labels: {severity: critical}
+        annotations:
+          summary: Model execution audit persistence failed; execution fails closed
+      - alert: ShopSquireDiscoveryFailureOrZeroResults
+        expr: increase(shopsquire_discovery_engine_outcomes_total{outcome=~"failure|zero_result"}[15m]) > 2
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Local SearXNG engines are failing or returning zero results
+      - alert: ShopSquireOfficialParserFailure
+        expr: increase(shopsquire_official_parser_outcomes_total{status=~"failed|timeout|zero_yield"}[15m]) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: An official publisher page did not yield accepted scoped claims
+      - alert: ShopSquireLateModelResultQuarantined
+        expr: increase(shopsquire_model_late_results_total[10m]) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: A late model result was discarded after timeout or cancellation
+      - alert: ShopSquireEvidenceLateResultQuarantined
+        expr: increase(shopsquire_evidence_late_results_total[10m]) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: A late research result was discarded after its authority deadline
+      - alert: ShopSquireCarrierTimeout
+        expr: increase(shopsquire_carrier_transport_outcomes_total{status="timeout"}[10m]) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: Carrier request exceeded its deadline
+      - alert: ShopSquireDatabasePoolSaturation
+        expr: shopsquire_database_pool_capacity > 0 and (shopsquire_database_pool_checked_out / shopsquire_database_pool_capacity) >= 0.9
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Database connection pool is at least 90 percent utilized
+      - alert: ShopSquireCommerceIdempotencyConflict
+        expr: increase(shopsquire_commerce_idempotency_conflicts_total[10m]) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: Cart, RFQ, payment or fulfilment retry conflicted with prior authority

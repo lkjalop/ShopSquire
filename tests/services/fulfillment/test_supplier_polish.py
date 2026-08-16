@@ -23,7 +23,7 @@ def _ok_post(safe_body):
 
 
 def test_polish_returns_safe_rewrite(monkeypatch):
-    monkeypatch.setenv("OLLAMA_URL", "http://x:11434")
+    monkeypatch.setenv("OLLAMA_URL", "http://127.0.0.1:11434")
     out = sp.polish_supplier_draft(subject="s", body="b",
                                    _post=_ok_post("Hello, please share your quote. "
                                                   "This request does not constitute a purchase order."))
@@ -31,7 +31,7 @@ def test_polish_returns_safe_rewrite(monkeypatch):
 
 
 def test_polish_passes_a_timeout(monkeypatch):
-    monkeypatch.setenv("OLLAMA_URL", "http://x:11434")
+    monkeypatch.setenv("OLLAMA_URL", "http://127.0.0.1:11434")
     seen = {}
 
     def _post(url, json=None, timeout=None):
@@ -43,7 +43,7 @@ def test_polish_passes_a_timeout(monkeypatch):
 
 
 def test_polish_returns_none_on_failure(monkeypatch):
-    monkeypatch.setenv("OLLAMA_URL", "http://x:11434")
+    monkeypatch.setenv("OLLAMA_URL", "http://127.0.0.1:11434")
 
     def _boom(url, json=None, timeout=None):
         raise RuntimeError("ollama down")

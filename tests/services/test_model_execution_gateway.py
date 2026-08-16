@@ -160,3 +160,31 @@ def test_agent_event_ledger_strips_raw_context_and_scrubs_nested_pii():
     assert "prompt" not in event.details
     assert "buyer_address" not in event.details["nested"]
     assert "buyer@example.com" not in str(event.details)
+
+
+def test_ledger_failure_blocks_dispatch_and_releases_gateway_capacity():
+    class BrokenLedger:
+        def append(self, *_args, **_kwargs):
+            raise RuntimeError("database unavailable")
+
+    called = False
+
+    def transport(*_args):
+        nonlocal called
+        called = True
+        return "must not run"
+
+    result = execute_model(
+        _request(), _deployment(), prompt="hello", transport=transport,
+        ledger=BrokenLedger(),
+    )
+    assert result.status == "blocked"
+    assert result.failure_code == "agent_ledger_persistence_failed"
+    assert called is False
+
+    # The failed audit write must not leak an execution semaphore slot.
+    follow_up = execute_model(
+        _request(), _deployment(), prompt="hello", transport=lambda *_args: "ok",
+        ledger=AgentRunEventLedger(),
+    )
+    assert follow_up.status == "completed"

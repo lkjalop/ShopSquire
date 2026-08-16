@@ -276,6 +276,9 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _conflict() -> ORJSONResponse:
+        from src.app.observability.pilot_runtime_metrics import commerce_idempotency_conflicts_total
+
+        commerce_idempotency_conflicts_total.labels(conflict_type="fingerprint_mismatch").inc()
         return ORJSONResponse(
             {"detail": "idempotency key reused with a different request"}, status_code=409
         )
@@ -286,6 +289,9 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _in_progress() -> ORJSONResponse:
+        from src.app.observability.pilot_runtime_metrics import commerce_idempotency_conflicts_total
+
+        commerce_idempotency_conflicts_total.labels(conflict_type="duplicate_in_progress").inc()
         return ORJSONResponse({"detail": "duplicate request in progress"}, status_code=409)
 
     @staticmethod

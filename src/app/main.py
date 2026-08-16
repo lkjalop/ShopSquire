@@ -1470,6 +1470,8 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health():
         from src.app.services.runtime_modes import runtime_mode_snapshot
+        from src.app.models.db import get_engine
+        from src.app.observability.pilot_runtime_metrics import observe_database_pool
 
         def _commerce_features() -> dict[str, Any]:
             from src.app.config import get_settings, load_feature_flags
@@ -1483,6 +1485,10 @@ def create_app() -> FastAPI:
 
         runtime_modes = runtime_mode_snapshot()
         commerce_features = _commerce_features()
+        try:
+            database_pool = observe_database_pool(get_engine())
+        except Exception as exc:
+            database_pool = {"status": "unavailable", "reason": type(exc).__name__}
         if str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on"):
             return {
                 "status": "ok",
@@ -1492,6 +1498,7 @@ def create_app() -> FastAPI:
                 "dependencies": {
                     "backend": {"status": "healthy", "mode": "fast_test_health"},
                 },
+                "database_pool": database_pool,
                 "timestamp": None,
             }
         from src.app.observability.health import (
@@ -1516,6 +1523,7 @@ def create_app() -> FastAPI:
                 "stale": snapshot.get("stale"),
                 "refresh_scheduled": refresh_scheduled,
             },
+            "database_pool": database_pool,
         }
 
     @app.get("/healthz")

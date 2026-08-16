@@ -40,6 +40,11 @@ def execute_local_model_role(
         timeout_s=min(max(timeout_s, 0.1), 2.0),
     ).status
     if verification_status not in {"verified", "test_fixture"}:
+        from src.app.observability.pilot_runtime_metrics import record_model_outcome
+
+        record_model_outcome(
+            "blocked", f"model_artifact_{verification_status}", 0,
+        )
         raise RuntimeError(f"model_artifact_{verification_status}")
     endpoint = base_url + "/api/generate"
     host = str(urlsplit(endpoint).hostname or "")
@@ -65,10 +70,10 @@ def execute_local_model_role(
         timeout_ms=round(min(max(timeout_s, 0.05), 120.0) * 1_000),
         max_output_tokens=max_output_tokens,
     )
-    ledger = (
-        application_agent_run_ledger()
-        if transport is None else None
-    )
+    # Specialized role transports (for example strict JSON output) still need
+    # the durable ledger. Only an explicit all-zero-digest test fixture uses
+    # the gateway's in-memory ledger.
+    ledger = None if fixture else application_agent_run_ledger()
     result = ModelExecutionGateway(
         [deployment], **({"ledger": ledger} if ledger is not None else {}),
     ).execute(

@@ -1141,11 +1141,16 @@ async def research_official_sources(
             cancellation_requested=cancellation_requested,
         )
         execution["parser_budget"] = dict(parser_outcome.projection)
+        from src.app.observability.pilot_runtime_metrics import official_parser_outcomes_total
+
         if parser_outcome.status != "completed":
             execution["parser_coverage"]["parse_status"] = parser_outcome.status
             failure_code = str(
                 parser_outcome.projection.get("failure_code") or "source_parser_failed"
             )
+            official_parser_outcomes_total.labels(
+                status=parser_outcome.status, failure_code=failure_code,
+            ).inc()
             unresolved.append({"source_id": source_id, "reason": failure_code})
             if parser_outcome.status == "timeout":
                 execution["deadline_status"] = "parser_timeout"
@@ -1167,6 +1172,10 @@ async def research_official_sources(
             "context_claims": len(context_rows),
             "parse_status": "completed" if (product_rows or context_rows) else "no_scoped_claims",
         })
+        official_parser_outcomes_total.labels(
+            status="completed" if (product_rows or context_rows) else "zero_yield",
+            failure_code="none" if (product_rows or context_rows) else "no_scoped_claims",
+        ).inc()
         claims.extend(product_rows)
         context_claims.extend(context_rows)
         observed = _parse_time(observed_at)

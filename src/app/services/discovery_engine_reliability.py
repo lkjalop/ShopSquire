@@ -98,6 +98,8 @@ class DiscoveryEngineReliability:
             return
 
     def record(self, *, endpoint: str, receipt: dict[str, Any], latency_ms: float) -> None:
+        from src.app.observability.pilot_runtime_metrics import discovery_engine_outcomes_total
+
         responded = {str(value) for value in receipt.get("engines_responded") or [] if str(value)}
         failures = {
             str(row.get("engine") or "")
@@ -119,6 +121,7 @@ class DiscoveryEngineReliability:
                 self._observations[(endpoint, engine)].append(EngineObservation(
                     outcome=outcome, latency_ms=bounded_latency,
                 ))
+                discovery_engine_outcomes_total.labels(outcome=outcome).inc()
                 persisted.append((endpoint, engine, outcome, bounded_latency))
         self._persist(persisted)
 

@@ -73,6 +73,9 @@ async def execute_carrier_request(
 
     def result(status: str, *, normalized: dict[str, Any] | None = None,
                failure: str | None = None) -> CarrierResult:
+        from src.app.observability.pilot_runtime_metrics import carrier_transport_outcomes_total
+
+        carrier_transport_outcomes_total.labels(status=status).inc()
         return CarrierResult(
             status=status, provider_id=deployment.provider_id,
             request_id=request.request_id, normalized=normalized or {},
@@ -94,6 +97,9 @@ async def execute_carrier_request(
         return result("timeout", failure="carrier_deadline_exceeded")
     except asyncio.CancelledError:
         # Preserve cooperative cancellation; callers decide the HTTP response.
+        from src.app.observability.pilot_runtime_metrics import carrier_transport_outcomes_total
+
+        carrier_transport_outcomes_total.labels(status="cancelled").inc()
         raise
     except Exception as exc:
         return result("failed", failure=f"carrier_transport_failed:{type(exc).__name__}")

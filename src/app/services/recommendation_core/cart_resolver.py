@@ -189,21 +189,19 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
     if not enabled:
         return ""
     try:
-        import httpx
-        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        from src.app.services.local_model_roles import configured_digest, execute_local_model_role
+
         model = _resolver_model()
-        payload = {"model": model, "prompt": prompt, "stream": False, "format": "json",
-                   "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                   "options": {"temperature": 0, "num_predict": 320}}
-        if "qwen3" in model.lower():
-            payload["think"] = False
-        r = httpx.post(f"{url}/api/generate", json=payload, timeout=max(2.0, float(timeout or 12.0)))
-        data = r.json() or {}
-        if r.status_code != 200 or data.get("error"):
-            logger.warning("cart resolver model call failed: http=%s error=%s model=%s",
-                           r.status_code, str(data.get("error"))[:120], model)
-            return ""
-        return str(data.get("response", "") or "")
+        return execute_local_model_role(
+            prompt,
+            role="cart_resolver",
+            purpose="resolve_buyer_cart_amendment",
+            prompt_id="cart-resolver-v1",
+            model=model,
+            digest=configured_digest("ROUTER_MODEL_DIGEST", "OLLAMA_DEFAULT_MODEL_DIGEST"),
+            timeout_s=max(2.0, float(timeout or 12.0)),
+            max_output_tokens=320,
+        )
     except Exception as exc:
         logger.warning("cart resolver model call failed: %s model=%s", repr(exc)[:120], _resolver_model())
         return ""
