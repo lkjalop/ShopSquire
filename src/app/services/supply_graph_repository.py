@@ -24,6 +24,11 @@ NODE_TYPES = frozenset({
     "material",
     "supplier",
     "facility",
+    "port",
+    "warehouse",
+    "store",
+    "carrier_service",
+    "destination_region",
     "region",
     "location",
     "logistics_lane",
@@ -40,6 +45,11 @@ RELATIONSHIP_TYPES = frozenset({
     "transported_via",
     "indexed_to",
     "certified_for",
+    "uses_facility",
+    "connects_to",
+    "served_by",
+    "delivers_to",
+    "stocks_at",
 })
 IDENTITY_STATUSES = frozenset({"resolved", "unresolved", "contested"})
 MAPPING_STATUSES = frozenset({"approved", "quarantined", "rejected"})
@@ -260,6 +270,8 @@ def bounded_dependency_paths(
     source_node_id: str,
     target_node_id: str,
     at: datetime | str | None = None,
+    effective_at: datetime | str | None = None,
+    known_at: datetime | str | None = None,
     max_depth: int = 6,
     max_paths: int = 50,
     max_edges: int = 2_000,
@@ -268,13 +280,20 @@ def bounded_dependency_paths(
     depth = max(1, min(int(max_depth), 8))
     path_limit = max(1, min(int(max_paths), 100))
     edge_limit = max(1, min(int(max_edges), 5_000))
-    stamp = _utc(at)
+    effective_stamp = _utc(effective_at or at)
+    # Backward-compatible ``at`` is effective time. Historical knowledge replay
+    # is activated only by the explicit known_at parameter.
+    known_stamp = _utc(known_at)
     edges = db.execute(text(
         "SELECT id,from_node_id,to_node_id,relationship_type,confidence,properties_json "
-        "FROM supply_dependency_edge WHERE tenant_id=:tenant AND recorded_to IS NULL "
-        "AND valid_from<=:at AND (valid_to IS NULL OR valid_to>:at) "
+        "FROM supply_dependency_edge WHERE tenant_id=:tenant "
+        "AND recorded_from<=:known_at AND (recorded_to IS NULL OR recorded_to>:known_at) "
+        "AND valid_from<=:effective_at AND (valid_to IS NULL OR valid_to>:effective_at) "
         "ORDER BY id LIMIT :limit"
-    ), {"tenant": tenant, "at": stamp, "limit": edge_limit + 1}).mappings().all()
+    ), {
+        "tenant": tenant, "known_at": known_stamp,
+        "effective_at": effective_stamp, "limit": edge_limit + 1,
+    }).mappings().all()
     truncated = len(edges) > edge_limit
     adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
     stale_edge_count = 0
@@ -284,7 +303,7 @@ def bounded_dependency_paths(
         fresh_until = row["properties"].get("fresh_until")
         if fresh_until:
             try:
-                if _utc(fresh_until) <= stamp:
+                if _utc(fresh_until) <= known_stamp:
                     stale_edge_count += 1
                     continue
             except (TypeError, ValueError):
@@ -312,6 +331,8 @@ def bounded_dependency_paths(
         "tenant_id": tenant,
         "source_node_id": str(source_node_id),
         "target_node_id": str(target_node_id),
+        "effective_at": effective_stamp.isoformat(),
+        "known_at": known_stamp.isoformat(),
         "paths": found,
         "max_depth": depth,
         "truncated": truncated or len(found) >= path_limit,

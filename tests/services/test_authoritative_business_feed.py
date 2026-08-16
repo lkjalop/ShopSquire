@@ -173,6 +173,36 @@ def test_all_authoritative_entities_are_append_only_and_tenant_scoped(tmp_path):
     }
 
 
+def test_failed_batch_receipt_never_claims_rolled_back_inserts(tmp_path):
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'rollback.sqlite'}", future=True)
+    _apply_migration(engine)
+    set_engine(engine)
+    valid = BusinessObservation(
+        entity_type="inventory_adjustment",
+        external_id="valid-first",
+        event_time="2026-07-28T00:00:00Z",
+        payload=_payload("inventory_adjustment", 1),
+    )
+    invalid = BusinessObservation(
+        entity_type="not-supported",
+        external_id="invalid-second",
+        event_time="2026-07-28T00:00:00Z",
+        payload={},
+    )
+
+    receipt = ingest_authoritative_observations(
+        tenant_id="tenant-a", source="wms", observations=[valid, invalid],
+    )
+
+    assert receipt["status"] == "malformed"
+    assert receipt["records_seen"] == 2
+    assert receipt["records_inserted"] == 0
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT COUNT(*) FROM authoritative_business_observation"
+        )).scalar_one() == 0
+
+
 def test_correction_references_prior_observation_without_mutating_payload(tmp_path):
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'correction.sqlite'}", future=True)
     _apply_migration(engine)

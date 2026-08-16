@@ -122,8 +122,11 @@ def _interaction_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
         ORDER BY event_time DESC LIMIT :lim
     """), {"tenant": tenant_id, "lim": int(limit)}).fetchall()
     event_map = {
-        "view": "view_item", "impression": "view_item", "click": "select_item",
+        "view": "view", "impression": "impression", "hover": "hover",
+        "click": "click", "select_item": "select_item",
         "add": "add_to_cart", "add_to_cart": "add_to_cart", "accepted": "add_to_cart",
+        "remove_from_cart": "remove_from_cart", "checkout_started": "checkout_started",
+        "cart_abandoned": "cart_abandoned", "session_closed": "session_closed",
     }
     written = rejected = 0
     for row in rows:
@@ -135,7 +138,12 @@ def _interaction_facts(db, tenant_id: str, limit: int) -> tuple[int, int]:
         except (TypeError, ValueError):
             context = {}
         event_type = event_map.get(str(action or "").lower())
-        if str(row_tenant) != tenant_id or not event_type or not sku:
+        if (
+            str(row_tenant) != tenant_id
+            or str(consent or "").lower() != "granted"
+            or not event_type
+            or not sku
+        ):
             continue
         accepted, quarantined = _record(record_marketing_event, db, {
             "tenant_id": tenant_id, "deduplication_id": f"cart:{rid}", "event_type": event_type,

@@ -228,3 +228,29 @@ def test_source_health_reports_only_tenant_scoped_sealed_forecast_pairs():
     onboarding = {row["family"]: row for row in health["onboarding"]}
     assert onboarding["sealed_forecast_actual"]["status"] == "connected"
     db.close()
+
+
+def test_interaction_adapter_requires_affirmative_consent_and_preserves_event_type():
+    db = sessionmaker(bind=create_engine("sqlite+pysqlite:///:memory:", future=True))()
+    _migration(db, "20260721_market_fact_contract.py", "fact_contract_consent")
+    _migration(db, "20260722_market_fact_governance.py", "fact_governance_consent")
+    _migration(db, "20260723_market_fact_quarantine_dedup.py", "fact_quarantine_consent")
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(text("CREATE TABLE recommend_interactions (id TEXT, event_time TEXT, uid_hash TEXT, "
+                    "sku TEXT, action TEXT, surface TEXT, trace_id TEXT, context_json TEXT, "
+                    "tenant_id TEXT, consent_state TEXT)"))
+    db.execute(text("""
+        INSERT INTO recommend_interactions VALUES
+          ('g1',:now,'u1','SKU-1','hover','shelf','t1','{}','tenant-a','granted'),
+          ('u1',:now,'u2','SKU-1','click','shelf','t2','{}','tenant-a','unknown'),
+          ('d1',:now,'u3','SKU-1','impression','shelf','t3','{}','tenant-a','denied')
+    """), {"now": now})
+    db.commit()
+
+    from src.app.services.canonical_fact_adapters import _interaction_facts
+
+    assert _interaction_facts(db, "tenant-a", 10) == (1, 0)
+    assert db.execute(text(
+        "SELECT event_type,consent_state FROM marketing_event_fact"
+    )).one() == ("hover", "granted")
+    db.close()

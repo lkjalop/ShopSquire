@@ -41,6 +41,18 @@ def test_edges_built_between_canonical_nodes():
     assert "u1" in g.adjacency.get("GAM-1", {})
 
 
+def test_unspecified_source_never_receives_authoritative_trust_weight():
+    base = _trace("user", "u1", "product", "GAM-1") | {"event_type": "click"}
+    unspecified = project_graph(
+        [base | {"source_authority": "unspecified"}], [], catalog_skus=["GAM-1"],
+    )
+    authoritative = project_graph(
+        [base | {"source_authority": "authoritative"}], [], catalog_skus=["GAM-1"],
+    )
+
+    assert unspecified.edges[("u1", "GAM-1")] < authoritative.edges[("u1", "GAM-1")]
+
+
 def test_conversion_reward_boosts_product_weight():
     g = project_graph(
         [_trace("decision", "D1", "product", "GAM-1")],

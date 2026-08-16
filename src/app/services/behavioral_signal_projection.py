@@ -48,7 +48,16 @@ def project_behavioral_signals(
         session_id = str(event.get("session_id") or "").strip()
         if not session_id:
             continue
-        if str(event.get("consent_state") or "").lower() == "denied":
+        consent = str(event.get("consent_state") or "").lower()
+        event_type = str(event.get("event_type") or "").lower()
+        # Exposure and interaction interpretation requires an affirmative grant.
+        # Completed commerce outcomes are canonical transactional facts and may
+        # be joined as outcomes, but they do not retroactively authorize tracking.
+        transactional_outcome = (
+            consent == "not_required"
+            and event_type in {"purchase", "refund", "return", "chargeback"}
+        )
+        if consent != "granted" and not transactional_outcome:
             withheld.add(session_id)
             continue
         sessions[session_id].append(dict(event))

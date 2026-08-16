@@ -131,6 +131,41 @@ def test_node_and_edge_revisions_are_bitemporal_and_relationships_validated(db):
         )
 
 
+def test_path_replay_uses_effective_and_known_time_without_future_leakage(db):
+    source = _node(db, "tenant-a", "supplier:one", "supplier")
+    target = _node(db, "tenant-a", "warehouse:syd", "warehouse")
+    first = put_edge_revision(
+        db, tenant_id="tenant-a", logical_key="lane:one",
+        from_node_id=source["id"], to_node_id=target["id"],
+        relationship_type="delivers_to", source_system="carrier",
+        source_record_id="lane-v1", provenance={"schedule": "v1"},
+        valid_from="2026-01-01T00:00:00Z", recorded_at="2026-01-02T00:00:00Z",
+        confidence=1.0, properties={"lead_time_days_p50": 8},
+    )
+    second = put_edge_revision(
+        db, tenant_id="tenant-a", logical_key="lane:one",
+        from_node_id=source["id"], to_node_id=target["id"],
+        relationship_type="delivers_to", source_system="carrier",
+        source_record_id="lane-v2", provenance={"schedule": "v2"},
+        valid_from="2026-03-01T00:00:00Z", recorded_at="2026-04-01T00:00:00Z",
+        confidence=1.0, properties={"lead_time_days_p50": 3},
+    )
+
+    historical = bounded_dependency_paths(
+        db, tenant_id="tenant-a", source_node_id=source["id"],
+        target_node_id=target["id"], effective_at="2026-02-01T00:00:00Z",
+        known_at="2026-02-01T00:00:00Z",
+    )
+    current = bounded_dependency_paths(
+        db, tenant_id="tenant-a", source_node_id=source["id"],
+        target_node_id=target["id"], effective_at="2026-05-01T00:00:00Z",
+        known_at="2026-05-01T00:00:00Z",
+    )
+
+    assert historical["paths"][0][0]["id"] == first["id"]
+    assert current["paths"][0][0]["id"] == second["id"]
+
+
 def test_source_record_replay_is_idempotent_and_does_not_create_revision(db):
     first = _node(db, "tenant-a", "material:copper", "material")
     replay = _node(db, "tenant-a", "material:copper", "material")

@@ -18,6 +18,8 @@ class MeasurementState(StrEnum):
     DERIVED = "derived"
     INFERRED = "inferred"
     NOT_COLLECTED = "not_collected"
+    EMPTY = "empty"
+    UNAVAILABLE = "unavailable"
     NOT_DISCLOSED = "not_disclosed"
     NOT_APPLICABLE = "not_applicable"
     RIGHT_CENSORED = "right_censored"

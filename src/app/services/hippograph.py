@@ -169,7 +169,7 @@ def project_graph(
         authority = str(row.get("source_authority") or "unspecified").lower()
         trust = {
             "authoritative": 1.0, "approved": 1.0, "verified": 0.8,
-            "trace_observation": 1.0, "unspecified": 1.0,
+            "trace_observation": 0.7, "unspecified": 0.2, "unknown": 0.2,
             "untrusted": 0.2, "synthetic": 0.1,
         }.get(authority, 0.5)
         health_factor = 0.25 if health == "degraded" else 1.0

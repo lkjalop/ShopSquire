@@ -127,6 +127,7 @@ def ingest_authoritative_observations(
     seen = inserted = replayed = 0
     try:
         with db_session() as db:
+            pending_inserted = 0
             for item in observations:
                 seen += 1
                 entity = str(item.entity_type or "").strip().lower()
@@ -205,11 +206,14 @@ def ingest_authoritative_observations(
                         "reverses_id": item.reverses_observation_id,
                     },
                 )
-                inserted += 1
+                pending_inserted += 1
             db.commit()
+            # A receipt may only claim rows after the transaction commits.
+            inserted = pending_inserted
         status = "empty" if seen == 0 else "observed"
         error = None
     except Exception as exc:
+        inserted = 0
         status = "malformed"
         error = f"{type(exc).__name__}: {exc}"
 
