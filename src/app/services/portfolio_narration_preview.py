@@ -2,11 +2,21 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import Any, Callable
 
-import requests
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.app.services.model_execution_gateway import (
+    AgentRunEventLedger,
+    ModelDeployment,
+    ModelExecutionGateway,
+    ModelExecutionRequest,
+    sha256_text,
+)
+from src.app.services.model_transports import ollama_generate_transport
+from src.app.services.ollama_artifact_verification import verify_ollama_artifact
+from src.app.services.agent_run_event_store import application_agent_run_ledger
 from src.app.services.recommendation_core.workload_narration_shadow import run_shadow_narration
 
 
@@ -56,18 +66,60 @@ def render_portfolio_narration_preview(
     except ValueError:
         timeout = 6.0
 
-    def local_generate(prompt: str) -> str:
-        response = requests.post(
-            os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/") + "/api/generate",
-            json={
-                "model": model, "prompt": prompt + "\n/no_think", "stream": False,
-                "think": False, "keep_alive": "10m",
-                "options": {"temperature": 0, "num_predict": 180},
-            },
-            timeout=timeout,
+    artifact_digest = str(os.getenv("PORTFOLIO_NARRATION_MODEL_DIGEST") or "").lower()
+    if generate is not None and len(artifact_digest) != 64:
+        artifact_digest = "0" * 64
+    base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+    endpoint = base_url + "/api/generate"
+    endpoint_host = endpoint.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+    verification_status = "test_fixture" if generate is not None else "unverified"
+    if generate is None and len(artifact_digest) == 64:
+        verification_status = verify_ollama_artifact(
+            base_url=base_url, model=model, expected_digest=artifact_digest,
+        ).status
+    try:
+        deployment = ModelDeployment(
+            deployment_id="portfolio-local-narrator",
+            provider="ollama", endpoint=endpoint, endpoint_identity=endpoint_host,
+            model_artifact_id=f"{model}@sha256:{artifact_digest[:12]}",
+            model_artifact_digest=artifact_digest,
+            jurisdiction="local-development", locality="loopback",
+            allowed_roles={"narrator"},
+            allowed_data_classes={"public_catalog", "buyer_workload"},
+            allowed_capabilities=set(), retention_policy="no-provider-retention",
+            training_policy="disabled", policy_version="portfolio-narration-v1",
+            artifact_verification_status=verification_status,
         )
-        response.raise_for_status()
-        return str(response.json().get("response") or "")
+    except Exception as exc:
+        return {
+            "status": "deterministic_fallback", "renderer": "deterministic",
+            "text": fallback, "fallback_reason": f"deployment_not_enrolled:{type(exc).__name__}",
+            "violations": [], "buyer_visible_model_copy": False,
+            "commercial_authority_granted": False,
+        }
+    ledger = AgentRunEventLedger() if generate is not None else application_agent_run_ledger()
+    gateway = ModelExecutionGateway([deployment], ledger=ledger)
+    context_hash = sha256_text(json.dumps(projection.model_dump(mode="json"), sort_keys=True))
+
+    def local_generate(prompt: str) -> str:
+        bounded_prompt = prompt + "\n/no_think"
+        request = ModelExecutionRequest(
+            tenant_id="portfolio-demo", purpose="evidence_narration", role="narrator",
+            deployment_id=deployment.deployment_id,
+            model_artifact_id=deployment.model_artifact_id,
+            prompt_id="portfolio-shelf-narration", prompt_version="v1",
+            prompt_hash=sha256_text(bounded_prompt), context_hash=context_hash,
+            data_classes={"public_catalog", "buyer_workload"},
+            timeout_ms=round(timeout * 1_000), max_output_tokens=180,
+        )
+        transport = (
+            (lambda sent, _deployment, _request: generate(sent))
+            if generate is not None else ollama_generate_transport
+        )
+        result = gateway.execute(request, prompt=bounded_prompt, transport=transport)
+        if result.status != "completed" or result.text is None:
+            raise RuntimeError(result.failure_code or result.status)
+        return result.text
 
     authorized = [projection.shelf_summary]
     authorized.extend(row.sentence for row in projection.top_product_sentences[:3])
@@ -84,7 +136,7 @@ def render_portfolio_narration_preview(
         "fit_ledger": [], "supplier_choices": [],
     }
     shadow = run_shadow_narration(
-        decision, generate=generate or local_generate, model_id=model,
+        decision, generate=local_generate, model_id=model,
     )
     accepted = shadow.get("status") == "accepted_shadow" and bool(shadow.get("candidate"))
     return {

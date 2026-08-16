@@ -178,21 +178,15 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
     live run, 2026-07-11: 15s timeout < qwen3:14b cold-load → 112/112 fallback, zero errors
     shown). Callers warm the model first via warmup()."""
     try:
-        import httpx
-        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        from src.app.services.local_model_roles import configured_digest, execute_local_model_role
+
         model = _classifier_model()
-        payload = {"model": model, "prompt": prompt, "stream": False, "format": "json",
-                   "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                   "options": {"temperature": 0, "num_predict": 128}}
-        if "qwen3" in model.lower():
-            payload["think"] = False
-        r = httpx.post(f"{url}/api/generate", json=payload, timeout=max(2.0, float(timeout or 8.0)))
-        data = r.json() or {}
-        if r.status_code != 200 or data.get("error"):
-            logger.warning("classifier model call failed: http=%s error=%s model=%s",
-                           r.status_code, str(data.get("error"))[:120], model)
-            return ""
-        return str(data.get("response", "") or "")
+        return execute_local_model_role(
+            prompt, role="catalog_classifier", purpose="catalog_taxonomy_classification",
+            prompt_id="catalog-classifier", model=model,
+            digest=configured_digest("CLASSIFIER_MODEL_DIGEST", "OLLAMA_MEDIUM_MODEL_DIGEST"),
+            timeout_s=max(2.0, float(timeout or 8.0)), max_output_tokens=128,
+        )
     except Exception as exc:
         logger.warning("classifier model call failed: %s model=%s", repr(exc)[:120], _classifier_model())
         return ""

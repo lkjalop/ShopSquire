@@ -97,17 +97,19 @@ def _default_llm_fn(prompt: str, timeout: float) -> str:
     silently dead even with LLM_PLANNER_ENABLED=1 (the error dict has no text/response key → "").
     """
     try:
-        import httpx
-        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        from src.app.services.local_model_roles import configured_digest, execute_local_model_role
+
         model = (os.getenv("LLM_PLANNER_MODEL") or os.getenv("MULTI_INTENT_LLM_MODEL")
                  or os.getenv("OLLAMA_SMALL_MODEL") or os.getenv("OLLAMA_DEFAULT_MODEL") or "qwen3:14b")
-        payload = {"model": model, "prompt": prompt, "stream": False, "format": "json",
-                   "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                   "options": {"temperature": 0, "num_predict": 384}}
-        if "qwen3" in model.lower():
-            payload["think"] = False   # qwen3 + format:json without think=False returns "{}"
-        r = httpx.post(f"{url}/api/generate", json=payload, timeout=max(2.0, float(timeout or 6.0)))
-        return str((r.json() or {}).get("response", "") or "")
+        return execute_local_model_role(
+            prompt, role="shopping_plan_extractor", purpose="shopping_plan_extraction",
+            prompt_id="shopping-plan-extractor", model=model,
+            digest=configured_digest(
+                "LLM_PLANNER_MODEL_DIGEST", "MULTI_INTENT_LLM_MODEL_DIGEST",
+                "OLLAMA_SMALL_MODEL_DIGEST", "OLLAMA_DEFAULT_MODEL_DIGEST",
+            ),
+            timeout_s=max(2.0, float(timeout or 6.0)), max_output_tokens=384,
+        )
     except Exception:
         return ""   # deterministic parse stands (flag-gated best-effort contract)
 

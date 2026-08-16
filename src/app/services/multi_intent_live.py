@@ -212,20 +212,23 @@ def _binding_llm_fn() -> Optional[Callable[[str], str]]:
     Best-effort: any error returns '' so the deterministic parse always stands."""
     if str(os.getenv("MULTI_INTENT_LLM_BINDING_ENABLED", "")).strip().lower() not in ("1", "true", "yes", "on"):
         return None
-    url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
     model = (os.getenv("MULTI_INTENT_LLM_MODEL") or os.getenv("OLLAMA_SMALL_MODEL")
              or os.getenv("OLLAMA_DEFAULT_MODEL") or "qwen3:14b")
     timeout = float(os.getenv("MULTI_INTENT_LLM_TIMEOUT_SEC", "12") or 12)
 
     def _fn(prompt: str) -> str:
         try:
-            import httpx
-            r = httpx.post(f"{url}/api/generate",
-                           json={"model": model, "prompt": prompt, "stream": False, "format": "json",
-                                 "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                                 "options": {"temperature": 0, "num_predict": 512}},
-                           timeout=timeout)
-            return str((r.json() or {}).get("response", "") or "")
+            from src.app.services.local_model_roles import configured_digest, execute_local_model_role
+
+            return execute_local_model_role(
+                prompt, role="multi_intent_binder", purpose="multi_intent_binding",
+                prompt_id="multi-intent-binder", model=model,
+                digest=configured_digest(
+                    "MULTI_INTENT_LLM_MODEL_DIGEST", "OLLAMA_SMALL_MODEL_DIGEST",
+                    "OLLAMA_DEFAULT_MODEL_DIGEST",
+                ),
+                timeout_s=timeout, max_output_tokens=512,
+            )
         except Exception:
             return ""   # deterministic parse stands
     return _fn

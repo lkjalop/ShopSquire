@@ -43,19 +43,23 @@ def _default_llm_fn() -> Optional[Callable[[str], str]]:
     so the deterministic narrative always stands (the LLM can only improve wording, never gate output)."""
     if not _llm_enabled():
         return None
-    url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
     model = (os.getenv("MARKET_DIGEST_LLM_MODEL") or os.getenv("OLLAMA_SUMMARY_MODEL")
              or os.getenv("OLLAMA_DEFAULT_MODEL") or "qwen3:14b")
     timeout = float(os.getenv("MARKET_DIGEST_LLM_TIMEOUT_SEC", "20") or 20)
 
     def _fn(prompt: str) -> str:
         try:
-            import httpx
-            r = httpx.post(f"{url}/api/generate",
-                           json={"model": model, "prompt": prompt, "stream": False,
-                                 "options": {"temperature": 0.2, "num_predict": 400}},
-                           timeout=timeout)
-            return str((r.json() or {}).get("response", "") or "")
+            from src.app.services.local_model_roles import configured_digest, execute_local_model_role
+
+            return execute_local_model_role(
+                prompt, role="market_narrator", purpose="aggregate_market_digest",
+                prompt_id="market-digest", model=model,
+                digest=configured_digest(
+                    "MARKET_DIGEST_LLM_MODEL_DIGEST", "PORTFOLIO_NARRATION_MODEL_DIGEST",
+                    "OLLAMA_MEDIUM_MODEL_DIGEST", "OLLAMA_DEFAULT_MODEL_DIGEST",
+                ),
+                timeout_s=timeout, max_output_tokens=400,
+            )
         except Exception as exc:
             logger.debug("digest llm unavailable: %s", exc)
             return ""

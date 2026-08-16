@@ -15,10 +15,18 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Lock
 from typing import Any, Callable, Literal
 
-import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.app.services.case_research_plan import CaseDiscoveryQuery, CaseResearchPlan
+from src.app.services.agent_run_event_store import application_agent_run_ledger
+from src.app.services.model_execution_gateway import (
+    ModelDeployment,
+    ModelExecutionGateway,
+    ModelExecutionRequest,
+    sha256_text,
+)
+from src.app.services.model_transports import ollama_generate_transport
+from src.app.services.ollama_artifact_verification import verify_ollama_artifact
 
 
 Axis = Literal[
@@ -95,20 +103,41 @@ def _prompt(purpose: str) -> str:
 
 def _ollama_call(prompt: str, timeout_s: float) -> str:
     base = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-    model = os.getenv("OPEN_WORLD_QUERY_MODEL", "qwen3:14b")
-    payload: dict[str, Any] = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-        "options": {"temperature": 0, "num_predict": 600},
-    }
-    if "qwen3" in model.lower():
-        payload["think"] = False
-    response = httpx.post(f"{base}/api/generate", json=payload, timeout=timeout_s)
-    response.raise_for_status()
-    return str((response.json() or {}).get("response") or "")
+    model = os.getenv("OPEN_WORLD_QUERY_MODEL", "granite4:micro")
+    digest = str(os.getenv("OPEN_WORLD_QUERY_MODEL_DIGEST") or "").lower()
+    verification = verify_ollama_artifact(
+        base_url=base, model=model, expected_digest=digest,
+        timeout_s=min(timeout_s, 2.0),
+    )
+    if verification.status != "verified":
+        raise RuntimeError(verification.error_code or verification.status)
+    endpoint = base + "/api/generate"
+    host = endpoint.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+    deployment = ModelDeployment(
+        deployment_id="local-open-world-query-planner", provider="ollama",
+        endpoint=endpoint, endpoint_identity=host,
+        model_artifact_id=f"{model}@sha256:{digest[:12]}",
+        model_artifact_digest=digest, artifact_verification_status="verified",
+        jurisdiction="local-development", locality="loopback",
+        allowed_roles={"query_planner"}, allowed_data_classes={"buyer_workload"},
+        allowed_capabilities=set(), retention_policy="no-provider-retention",
+        training_policy="disabled", policy_version="open-world-query-v1",
+    )
+    request = ModelExecutionRequest(
+        tenant_id="portfolio-demo", purpose="open_world_discovery_query_planning",
+        role="query_planner", deployment_id=deployment.deployment_id,
+        model_artifact_id=deployment.model_artifact_id,
+        prompt_id="open-world-query-proposal", prompt_version="v1",
+        prompt_hash=sha256_text(prompt), context_hash=sha256_text("open-world-research"),
+        data_classes={"buyer_workload"}, timeout_ms=round(timeout_s * 1_000),
+        max_output_tokens=600,
+    )
+    result = ModelExecutionGateway(
+        [deployment], ledger=application_agent_run_ledger(),
+    ).execute(request, prompt=prompt, transport=ollama_generate_transport)
+    if result.status != "completed" or result.text is None:
+        raise RuntimeError(result.failure_code or result.status)
+    return result.text
 
 
 def propose_open_world_queries(
@@ -161,7 +190,7 @@ def propose_open_world_queries(
         return plan.model_copy(update={"discovery_queries": queries}), {
             "status": "accepted",
             "model_calls": 1,
-            "model": os.getenv("OPEN_WORLD_QUERY_MODEL", "qwen3:14b"),
+            "model": os.getenv("OPEN_WORLD_QUERY_MODEL", "granite4:micro"),
             "latency_ms": round((time.monotonic() - started) * 1000),
             "proposal": proposal.model_dump(mode="json"),
             "authority": "discovery_proposal_only",
@@ -171,8 +200,8 @@ def propose_open_world_queries(
         ValueError,
         ValidationError,
         json.JSONDecodeError,
-        httpx.HTTPError,
         OSError,
+        RuntimeError,
         TimeoutError,
     ) as exc:
         return plan, {

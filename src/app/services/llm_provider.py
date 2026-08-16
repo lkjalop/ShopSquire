@@ -6,7 +6,6 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from src.app.services.decision_log import log_trace_event
-from src.app.security.provider_boundary import sanitize_for_provider
 
 import httpx
 
@@ -306,53 +305,8 @@ def complexity_explain(query: str, *, context: Optional[Dict[str, Any]] = None) 
     }
 
 
-async def _openai_generate_fallback(prompt: str, options: Dict | None = None, trace_id: str | None = None) -> Dict | None:
-    """Attempt OpenAI chat completion as fallback when Ollama is unavailable.
-
-    Returns a response dict or None if OpenAI is not configured or also fails.
-    """
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return None
-    prompt, _, _ = sanitize_for_provider("openai", prompt, data_categories=["llm_prompt"])
-    base_url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1").rstrip("/")
-    fallback_model = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-4o-mini")
-    opts = options or {}
-    temperature = float(opts.get("temperature", 0.2))
-    max_tokens = int(opts.get("num_predict", 256))
-    payload: Dict = {
-        "model": fallback_model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    t0 = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            r = await client.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-            r.raise_for_status()
-            data = r.json()
-        dt = (time.perf_counter() - t0) * 1000.0
-        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        try:
-            log_trace_event(trace_id, "llm_fallback", "llm", fallback_model, "system", None, {"provider": "openai", "latency_ms": dt})
-        except Exception:
-            pass
-        return {"model": fallback_model, "response": text, "total_duration_ms": dt, "provider": "openai_fallback"}
-    except Exception:
-        return None
-
-
 async def ollama_generate(model: str, prompt: str, options: Dict | None = None, trace_id: str | None = None, *, complexity_score: int = 0) -> Dict:
     if not OLLAMA_URL:
-        # Try OpenAI fallback before raising
-        fallback = await _openai_generate_fallback(prompt, options, trace_id)
-        if fallback is not None:
-            return fallback
         err = RuntimeError("OLLAMA_URL_missing")
         try:
             log_trace_event(trace_id, "llm_error", "llm", model, "system", None, {"error": str(err)})
@@ -398,12 +352,9 @@ async def ollama_generate(model: str, prompt: str, options: Dict | None = None, 
             "total_duration_ms": dt,
         }
     except Exception as e:
-        # Ollama failed — try OpenAI fallback before propagating
+        # Provider transitions are never implicit; record the local failure and propagate it.
         try:
             log_trace_event(trace_id, "llm_error", "llm", model, "system", None, {"error": str(e), "payload": {"prompt_len": len(prompt) if prompt else 0}})
         except Exception:
             pass
-        fallback = await _openai_generate_fallback(prompt, options, trace_id)
-        if fallback is not None:
-            return fallback
         raise
