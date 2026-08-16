@@ -34,6 +34,7 @@ from src.app.services.cancellable_await import await_with_polling_cancel
 from src.app.services.publisher_origin_verification import verify_publisher_origin
 from src.app.services.research_certification_faults import active_research_fault
 from src.app.services.recommendation_core.research_contracts import ProviderExecutionReceipt
+from src.app.services.bounded_parser_execution import ParserBudget, execute_parser_bounded
 
 
 class _TextExtractor(HTMLParser):
@@ -701,6 +702,9 @@ async def research_official_sources(
     evidence_cache: OfficialEvidenceCache | None = None,
     now: datetime | None = None,
     total_timeout_s: float = 30.0,
+    parser_max_input_bytes: int = 2 * 1024 * 1024,
+    parser_timeout_s: float = 1.0,
+    parser_max_claims: int = 128,
     cancellation_requested: Callable[[], bool] | None = None,
     _sync_transport_compat: bool = False,
 ) -> dict[str, Any]:
@@ -710,6 +714,11 @@ async def research_official_sources(
     started_monotonic = time.monotonic()
     deadline_monotonic = started_monotonic + max(0.0, float(total_timeout_s))
     cancelled = False
+    parser_budget = ParserBudget(
+        max_input_bytes=parser_max_input_bytes,
+        timeout_ms=max(10, round(float(parser_timeout_s) * 1_000)),
+        max_claims=parser_max_claims,
+    ).normalized()
 
     def remaining_timeout(cap_s: float) -> float:
         return max(0.0, min(cap_s, deadline_monotonic - time.monotonic()))
@@ -756,6 +765,17 @@ async def research_official_sources(
                 "rejected_claims": 0,
                 "context_claims": 0,
                 "parse_status": "not_attempted",
+            },
+            "parser_budget": {
+                "status": "not_attempted",
+                "input_bytes": 0,
+                "max_input_bytes": parser_budget.max_input_bytes,
+                "timeout_ms": parser_budget.timeout_ms,
+                "max_claims": parser_budget.max_claims,
+                "elapsed_ms": 0.0,
+                "late_result_quarantined": False,
+                "failure_code": None,
+                "error_type": None,
             },
         }
         if cancellation_requested and cancellation_requested():
@@ -812,6 +832,10 @@ async def research_official_sources(
                     "rejected_claims": 0,
                     "context_claims": len(cached.context_claims),
                     "parse_status": "cache_hit",
+                },
+                "parser_budget": {
+                    **execution["parser_budget"],
+                    "status": "not_needed_cache_hit",
                 },
             })
             if (source.get("publisher_policy") or {}).get(
@@ -1090,10 +1114,48 @@ async def research_official_sources(
             })
             continue
         observed_at = str(origin["receipt"].get("observed_at") or datetime.now(timezone.utc).isoformat())
-        product_rows, context_rows = compile_source_claims(
-            source_id, origin["content"], observed_at=observed_at, citation_url=selected,
-            allow_generic=True,
+        parse_remaining = remaining_timeout(parser_budget.timeout_ms / 1_000.0)
+        if parse_remaining <= 0:
+            execution["deadline_status"] = "exceeded_before_parse"
+            execution["parser_coverage"]["parse_status"] = "not_attempted_deadline"
+            execution["parser_budget"].update({
+                "status": "not_attempted_deadline",
+                "failure_code": "research_total_deadline_exceeded",
+            })
+            unresolved.append({
+                "source_id": source_id, "reason": "research_total_deadline_exceeded",
+            })
+            continue
+        active_parser_budget = ParserBudget(
+            max_input_bytes=parser_budget.max_input_bytes,
+            timeout_ms=max(10, round(parse_remaining * 1_000)),
+            max_claims=parser_budget.max_claims,
         )
+        parser_outcome = await execute_parser_bounded(
+            origin["content"],
+            lambda: compile_source_claims(
+                source_id, origin["content"], observed_at=observed_at,
+                citation_url=selected, allow_generic=True,
+            ),
+            budget=active_parser_budget,
+            cancellation_requested=cancellation_requested,
+        )
+        execution["parser_budget"] = dict(parser_outcome.projection)
+        if parser_outcome.status != "completed":
+            execution["parser_coverage"]["parse_status"] = parser_outcome.status
+            failure_code = str(
+                parser_outcome.projection.get("failure_code") or "source_parser_failed"
+            )
+            unresolved.append({"source_id": source_id, "reason": failure_code})
+            if parser_outcome.status == "timeout":
+                execution["deadline_status"] = "parser_timeout"
+            if parser_outcome.status == "cancelled":
+                cancelled = True
+                execution["deadline_status"] = "cancelled_during_parse"
+                break
+            continue
+        product_rows = [dict(row) for row in parser_outcome.product_claims]
+        context_rows = [dict(row) for row in parser_outcome.context_claims]
         product_rows, context_rows, claim_errors = _compiled_claims_allowed(
             source, product_rows, context_rows, observed_at=observed_at, now=current,
         )
@@ -1181,6 +1243,11 @@ async def research_official_sources(
         },
         "runtime": {
             "total_timeout_s": max(0.0, float(total_timeout_s)),
+            "parser_budget": {
+                "max_input_bytes": parser_budget.max_input_bytes,
+                "timeout_ms": parser_budget.timeout_ms,
+                "max_claims": parser_budget.max_claims,
+            },
             "elapsed_ms": round((time.monotonic() - started_monotonic) * 1000, 3),
             "deadline_exceeded": any(
                 row.get("deadline_status") != "within_deadline" for row in source_execution

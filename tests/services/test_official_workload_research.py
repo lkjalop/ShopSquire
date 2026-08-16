@@ -305,6 +305,46 @@ def test_zero_parser_yield_fault_keeps_live_origin_but_accepts_no_claims(monkeyp
     )
 
 
+def test_oversize_official_page_is_fetched_but_not_misreported_as_zero_yield(monkeypatch) -> None:
+    class Origin:
+        def __init__(self, **_kwargs):
+            pass
+
+        def fetch(self, url, **_kwargs):
+            return {
+                "status": "completed", "content": b"Digital Twin context" * 4,
+                "content_type": "text/html",
+                "receipt": {
+                    "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+                    "provider_id": "governed_http_origin", "fixture": False,
+                    "network_execution": True, "external_call_dispatched": True,
+                    "execution_status": "completed", "cache_status": "miss",
+                    "provider_endpoint_host": "nist.gov", "query_hash": "a" * 16,
+                    "http_status": 200, "response_body_hash": "b" * 64,
+                    "started_at": "2026-08-14T00:00:00+00:00",
+                    "completed_at": "2026-08-14T00:00:01+00:00",
+                    "observed_at": "2026-08-14T00:00:01+00:00",
+                },
+            }
+
+    monkeypatch.setattr(
+        "src.app.services.official_workload_research.GovernedOfficialOriginFetcher", Origin,
+    )
+    result = research_official_sources_sync(
+        "digital twin", search_url_template="", sources=[_approved_source()],
+        parser_max_input_bytes=16,
+    )
+
+    execution = result["source_execution"][0]
+    assert result["provider_accounting"]["external_calls"] == 1
+    assert result["evidence_outcome"] == "unresolved"
+    assert execution["parser_coverage"]["parse_status"] == "input_too_large"
+    assert execution["parser_budget"]["failure_code"] == "source_parser_input_too_large"
+    assert {row["reason"] for row in result["unresolved"]} >= {
+        "source_parser_input_too_large",
+    }
+
+
 def test_autocad_point_cloud_tier_keeps_scope_and_workstation_requirement() -> None:
     claims, _ = compile_source_claims(
         "autodesk_autocad_requirements",
@@ -418,7 +458,14 @@ def test_context_only_research_is_not_reported_as_product_requirements(monkeypat
     assert {row["reason"] for row in result["unresolved"]} >= {
         "no_product_requirement_claims",
     }
-    assert result["source_execution"] == [{
+    execution = result["source_execution"][0]
+    assert {key: execution[key] for key in (
+        "source_id", "publisher", "parser_type", "parser_version",
+        "policy_version", "freshness_sla_hours", "origin_selection_mode",
+        "canonical_url", "selected_origin_url", "cache_status",
+        "canonical_fetch_status", "discovery_status", "discovery_reason",
+        "discovery_result_count", "deadline_status", "parser_coverage",
+    )} == {
         "source_id": "nist_manufacturing_digital_twins",
         "publisher": "NIST",
         "parser_type": "html",
@@ -442,7 +489,9 @@ def test_context_only_research_is_not_reported_as_product_requirements(monkeypat
             "context_claims": 1,
             "parse_status": "completed",
         },
-    }]
+    }
+    assert execution["parser_budget"]["status"] == "completed"
+    assert execution["parser_budget"]["candidate_claims"] == 1
     assert all(row["provider_capability"] != "WEB_DISCOVERY" for row in result["receipts"])
 
 
