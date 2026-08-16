@@ -32,3 +32,20 @@ def test_health_uses_cached_readiness_without_live_dependency_probe(monkeypatch)
 def test_healthz_is_liveness_only():
     client = TestClient(create_app())
     assert client.get("/healthz").json() == {"status": "ok"}
+
+
+def test_health_projects_typed_startup_capabilities(monkeypatch):
+    monkeypatch.setenv("TEST_FAST_HEALTH", "1")
+    app = create_app()
+    app.state.startup_capabilities = {
+        "optional_search_warmup": {
+            "status": "degraded", "required": False,
+            "error_code": "startup_optional_search_warmup_failed",
+        }
+    }
+    response = TestClient(app).get("/health")
+    assert response.status_code == 200
+    assert response.json()["startup_capabilities"]["optional_search_warmup"] == {
+        "status": "degraded", "required": False,
+        "error_code": "startup_optional_search_warmup_failed",
+    }

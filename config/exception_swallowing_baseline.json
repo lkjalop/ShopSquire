@@ -1,0 +1,14 @@
+{
+  "src/app/main.py": {
+    "broad_handlers": 191,
+    "silent_pass_handlers": 119,
+    "owner": "application-composition",
+    "disposition": "ratchet-down-via-typed-startup-readiness"
+  },
+  "src/app/routers/chat.py": {
+    "broad_handlers": 76,
+    "silent_pass_handlers": 29,
+    "owner": "conversation-orchestration",
+    "disposition": "ratchet-down-via-typed-stage-failures"
+  }
+}

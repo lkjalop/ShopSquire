@@ -997,6 +997,18 @@ geo_asn_risk_total = Counter(
     labelnames=["asn", "org", "country", "band"],
 )
 
+startup_capability_status = Gauge(
+    "shopsquire_startup_capability_status",
+    "Whether a classified startup capability is currently ready.",
+    ["capability", "criticality"],
+)
+
+startup_capability_failures_total = Counter(
+    "shopsquire_startup_capability_failures_total",
+    "Classified startup capability failures.",
+    ["capability", "criticality", "phase", "error_type"],
+)
+
 geoip_provider_total = Counter(
     "shopsquire_geoip_provider_total",
     "GeoIP/ASN lookup results by bounded provider and health status",

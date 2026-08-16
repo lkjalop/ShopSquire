@@ -8,18 +8,24 @@ from typing import Callable
 
 from fastapi import FastAPI
 
+from src.app.bootstrap.startup_readiness import record_shutdown_result, run_startup_step
+
 
 class RuntimeLifecycle:
     def __init__(self, *, vlm_warmup_enabled: Callable[[], bool]):
         self._vlm_warmup_enabled = vlm_warmup_enabled
         self._tasks: set[asyncio.Task] = set()
+        self._app: FastAPI | None = None
 
     def start(self, app: FastAPI) -> None:
-        try:
+        self._app = app
+
+        def _start_consumer() -> None:
             from src.app.workers.task_runner import start_consumer
             start_consumer()
-        except Exception:
-            pass
+        run_startup_step(
+            app, name="task_consumer", criticality="optional", operation=_start_consumer,
+        )
         if self._vlm_warmup_enabled():
             task = asyncio.create_task(self._warm_vlm(), name="shopsquire-vlm-warmup")
             self._tasks.add(task)
@@ -42,10 +48,24 @@ class RuntimeLifecycle:
                           "options": {"num_predict": 1}},
                 )
             log.info("VLM warm-up complete: model=%s url=%s", model, base)
+            if self._app is not None:
+                from src.app.bootstrap.startup_readiness import run_startup_step
+                run_startup_step(
+                    self._app, name="vlm_warmup", criticality="optional",
+                    operation=lambda: None,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             log.info("VLM warm-up skipped (Ollama not ready yet): %s", exc)
+            if self._app is not None:
+                def _raise_warmup_error(error=exc) -> None:
+                    raise error
+
+                run_startup_step(
+                    self._app, name="vlm_warmup", criticality="optional",
+                    operation=_raise_warmup_error,
+                )
 
     async def stop(self) -> None:
         for task in tuple(self._tasks):
@@ -57,23 +77,37 @@ class RuntimeLifecycle:
             from src.app.workers.task_runner import shutdown_fallback_pool, stop_consumer
             stop_consumer()
             shutdown_fallback_pool()
-        except Exception:
-            pass
+            if self._app is not None:
+                record_shutdown_result(self._app, name="task_consumer", criticality="optional")
+        except Exception as exc:
+            if self._app is not None:
+                record_shutdown_result(
+                    self._app, name="task_consumer", criticality="optional", error=exc,
+                )
         try:
             from src.app.services.trace_broker import stop_stream_consumer
             await stop_stream_consumer()
-        except Exception:
-            pass
+        except Exception as exc:
+            if self._app is not None:
+                record_shutdown_result(
+                    self._app, name="trace_stream_consumer", criticality="optional", error=exc,
+                )
         try:
             from src.app.services.dependency_resilience import shutdown_resilience_executor
             shutdown_resilience_executor(wait=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            if self._app is not None:
+                record_shutdown_result(
+                    self._app, name="resilience_executor", criticality="optional", error=exc,
+                )
         try:
             from src.app.services.recommend_narration_jobs import shutdown_narration_resources
             shutdown_narration_resources(wait=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            if self._app is not None:
+                record_shutdown_result(
+                    self._app, name="narration_resources", criticality="optional", error=exc,
+                )
 
 
 __all__ = ["RuntimeLifecycle"]

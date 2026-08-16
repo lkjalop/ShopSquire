@@ -60,6 +60,7 @@ from src.app.bootstrap.conversation_router_group import register_conversation_ro
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
 from src.app.bootstrap.operational_router_group import register_operational_router_group
 from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
+from src.app.bootstrap.startup_readiness import run_startup_step
 from src.app.bootstrap.recommendation_router_group import register_recommendation_router_group
 from src.app.bootstrap.security_operations_router_group import (
     register_security_operations_router_group,
@@ -246,42 +247,57 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         runtime_lifecycle = RuntimeLifecycle(vlm_warmup_enabled=_vlm_warmup_enabled)
         # Ensure migrations are applied for non-SQLite DBs.
-        try:
+        def _ensure_migrations() -> None:
             from src.app.models.migration_guard import ensure_migrations
-
             ensure_migrations()
-        except Exception:
-            raise
-        try:
-            ensure_metadata()
-        except Exception:
-            pass
+        run_startup_step(
+            app, name="database_migrations", criticality="required",
+            operation=_ensure_migrations,
+        )
+        run_startup_step(
+            app, name="legacy_metadata_compatibility", criticality="optional",
+            operation=ensure_metadata,
+        )
         # Ensure event_log table exists for outbox MVP
-        try:
+        def _ensure_event_log() -> None:
             from src.app.models.event_log import ensure_event_log_table
             ensure_event_log_table()
-        except Exception:
-            pass
-        try:
+        run_startup_step(
+            app, name="event_log_compatibility", criticality="optional",
+            operation=_ensure_event_log,
+        )
+
+        def _ensure_decision_trace() -> None:
             from src.app.models.decision_trace_events import ensure_decision_trace_events_table
             ensure_decision_trace_events_table()
-        except Exception:
-            pass
-        try:
+        run_startup_step(
+            app, name="decision_trace_compatibility", criticality="optional",
+            operation=_ensure_decision_trace,
+        )
+
+        def _ensure_security_ingest() -> None:
             from src.app.security.security_event_ingest import ensure_security_event_ingest_table
             ensure_security_event_ingest_table()
-        except Exception:
-            pass
-        try:
+        run_startup_step(
+            app, name="security_event_ingest_compatibility", criticality="optional",
+            operation=_ensure_security_ingest,
+        )
+
+        def _ensure_playbook_tables() -> None:
             from src.app.services.playbook_engine import ensure_playbook_run_tables
             ensure_playbook_run_tables()
-        except Exception:
-            pass
-        try:
+        run_startup_step(
+            app, name="playbook_tables_compatibility", criticality="optional",
+            operation=_ensure_playbook_tables,
+        )
+
+        def _ensure_audit_chain_table() -> None:
             from src.app.services.audit_chain import ensure_audit_chain_table
             ensure_audit_chain_table()
-        except Exception:
-            pass
+        run_startup_step(
+            app, name="audit_chain_table_compatibility", criticality="optional",
+            operation=_ensure_audit_chain_table,
+        )
         # Eagerly validate AUDIT_CHAIN_SECRET at startup so a misconfigured production
         # deployment fails immediately rather than silently forging audit records.
         try:
@@ -1485,6 +1501,9 @@ def create_app() -> FastAPI:
 
         runtime_modes = runtime_mode_snapshot()
         commerce_features = _commerce_features()
+        startup_capabilities = dict(
+            getattr(app.state, "startup_capabilities", {}) or {}
+        )
         try:
             database_pool = observe_database_pool(get_engine())
         except Exception as exc:
@@ -1499,6 +1518,7 @@ def create_app() -> FastAPI:
                     "backend": {"status": "healthy", "mode": "fast_test_health"},
                 },
                 "database_pool": database_pool,
+                "startup_capabilities": startup_capabilities,
                 "timestamp": None,
             }
         from src.app.observability.health import (
@@ -1524,6 +1544,7 @@ def create_app() -> FastAPI:
                 "refresh_scheduled": refresh_scheduled,
             },
             "database_pool": database_pool,
+            "startup_capabilities": startup_capabilities,
         }
 
     @app.get("/healthz")

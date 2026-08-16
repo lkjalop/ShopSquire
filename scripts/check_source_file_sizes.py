@@ -24,18 +24,40 @@ def tracked_sources() -> list[Path]:
     ]
 
 
-def main() -> int:
+def evaluate_source_sizes(
+    *, root: Path = ROOT, baseline: dict[str, int] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Return warnings and failures for the maintained-source size ratchet.
+
+    Existing oversized files are debt, not permanent exemptions. Their recorded
+    size is a ceiling which may only move down; new files still fail above 2,000
+    lines and warn above 1,000.
+    """
+    limits = BASELINE if baseline is None else baseline
     failures: list[str] = []
     warnings: list[str] = []
-    for path in tracked_sources():
+    paths = tracked_sources() if root == ROOT else [
+        path for path in root.rglob("*") if path.suffix in EXTENSIONS
+    ]
+    for path in paths:
         if not path.exists():
             continue
-        relative = path.relative_to(ROOT).as_posix()
+        relative = path.relative_to(root).as_posix()
         lines = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
-        if lines > 2000 and relative not in BASELINE:
+        recorded_ceiling = limits.get(relative)
+        if recorded_ceiling is not None and lines > recorded_ceiling:
+            failures.append(
+                f"OVERSIZE_GROWTH {relative}: {lines} lines exceeds ceiling {recorded_ceiling}"
+            )
+        elif lines > 2000 and recorded_ceiling is None:
             failures.append(f"NEW_OVERSIZE {relative}: {lines} lines")
-        elif lines > 1000:
+        if lines > 1000:
             warnings.append(f"WARN_OVERSIZE {relative}: {lines} lines")
+    return warnings, failures
+
+
+def main() -> int:
+    warnings, failures = evaluate_source_sizes()
     for item in warnings:
         print(item)
     for item in failures:
