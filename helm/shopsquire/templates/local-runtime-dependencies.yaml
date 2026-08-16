@@ -37,7 +37,12 @@ spec:
               mountPath: /var/lib/postgresql/data
       volumes:
         - name: data
+          {{- if .Values.localRuntimeDependencies.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: shopsquire-postgresql-data
+          {{- else }}
           emptyDir: {}
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -70,7 +75,7 @@ spec:
       containers:
         - name: redis
           image: {{ .Values.localRuntimeDependencies.redisImage | quote }}
-          args: ["redis-server", "--requirepass", "shopsquire-redis-local-only"]
+          args: ["redis-server", "--appendonly", "yes", "--requirepass", "shopsquire-redis-local-only"]
           ports:
             - name: redis
               containerPort: 6379
@@ -81,4 +86,49 @@ spec:
                 - -c
                 - redis-cli -a shopsquire-redis-local-only ping | grep PONG
             periodSeconds: 2
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.localRuntimeDependencies.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: shopsquire-redis-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shopsquire-redis-master
+spec:
+  selector:
+    app.kubernetes.io/name: shopsquire-redis-master
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+{{- if .Values.localRuntimeDependencies.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shopsquire-postgresql-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.localRuntimeDependencies.persistence.postgresSize }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shopsquire-redis-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.localRuntimeDependencies.persistence.redisSize }}
+{{- end }}
 {{- end }}

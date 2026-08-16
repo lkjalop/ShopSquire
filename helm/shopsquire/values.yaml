@@ -103,6 +103,14 @@ migrations:
   image: {}  # inherits global image
   command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
 
+# A deployment pipeline may run migrations as a separate Job and disable the
+# per-pod init migration above. Never enable both modes for the same release.
+migrationJob:
+  enabled: false
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
+
 # ── Workers ──
 syncWorker:
   enabled: true
@@ -140,6 +148,10 @@ localRuntimeDependencies:
   enabled: false
   postgresImage: postgres:16-alpine
   redisImage: redis:7-alpine
+  persistence:
+    enabled: false
+    postgresSize: 5Gi
+    redisSize: 2Gi
 
 # ── External managed services ──
 externalDatabase:

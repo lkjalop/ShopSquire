@@ -28,6 +28,9 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       initContainers:
+        {{- if and .Values.migrations.enabled .Values.migrationJob.enabled }}
+        {{- fail "migrations.enabled and migrationJob.enabled are mutually exclusive" }}
+        {{- end }}
         {{- if .Values.migrations.enabled }}
         - name: db-migrate
           securityContext:

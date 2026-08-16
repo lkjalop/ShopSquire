@@ -1,0 +1,28 @@
+{
+  "schema_version": "portfolio-pilot-identities-v1",
+  "tenant_id": "portfolio-demo",
+  "environment_class": "local_portfolio_pilot",
+  "production_authority": false,
+  "principals": [
+    {
+      "subject_id": "portfolio-buyer-leoma",
+      "display_name": "Portfolio Buyer",
+      "role": "merchant",
+      "credential_env": "MERCHANT_API_KEY"
+    },
+    {
+      "subject_id": "portfolio-owner-leoma",
+      "display_name": "Portfolio Owner",
+      "role": "owner",
+      "credential_env": "OWNER_API_KEY"
+    },
+    {
+      "subject_id": "portfolio-engineer-leoma",
+      "display_name": "Portfolio Engineer",
+      "role": "developer",
+      "credential_env": "DEVELOPER_API_KEY"
+    }
+  ],
+  "supplier_mode": "synthetic_only",
+  "real_supplier_send_authorized": false
+}

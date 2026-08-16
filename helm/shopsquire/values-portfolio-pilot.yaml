@@ -1,0 +1,63 @@
+replicaCount: 1
+
+image:
+  repository: shopsquire-api
+  tag: portfolio-pilot
+  pullPolicy: IfNotPresent
+
+autoscaling:
+  enabled: false
+syncWorker:
+  enabled: false
+dbBackup:
+  enabled: false
+
+# The deployment script first installs dependencies plus this Job with zero
+# API replicas, waits for migration completion, then enables the API.
+migrations:
+  enabled: false
+migrationJob:
+  enabled: true
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  command:
+    - sh
+    - -c
+    - >-
+      until python -c "import socket; socket.create_connection(('shopsquire-postgresql',5432),2).close()";
+      do sleep 1; done;
+      alembic -c alembic.ini upgrade head
+
+postgresql:
+  enabled: false
+redis:
+  enabled: false
+localRuntimeDependencies:
+  enabled: true
+  postgresImage: postgres:16-alpine
+  redisImage: redis:7-alpine
+  persistence:
+    enabled: true
+    postgresSize: 5Gi
+    redisSize: 2Gi
+
+envFrom: []
+env:
+  APP_ENV: development
+  API_PORT: "8080"
+  DATABASE_URL: "postgresql+psycopg2://shopsquire:shopsquire-local-only@shopsquire-postgresql:5432/shopsquire"
+  REDIS_URL: "redis://:shopsquire-redis-local-only@shopsquire-redis-master:6379/0"
+  AUTO_MIGRATE: "0"
+  RUN_MIGRATIONS: "0"
+  OPERATOR_TENANT_MEMBERSHIP_MODE: strict
+  FULFILLMENT_SUPPLIER_TRANSPORT: sandbox
+  FULFILLMENT_AUTONOMOUS_RFQ: "0"
+  EXTERNAL_RESEARCH_PROVIDER_ID: local_searxng
+  EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS: free
+  EXTERNAL_RESEARCH_TENANT_ALLOWLIST: portfolio-demo
+  METRICS_INTERNAL_ONLY: "1"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
