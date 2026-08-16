@@ -42,6 +42,7 @@ import StorefrontTrustBanner, {
 import ProductWhyEvidence, { type ProductWhyExplanation } from './components/ProductWhyEvidence';
 import ConversationTimeline from './components/ConversationTimeline';
 import type { ChatMessage, NqeInteraction } from './conversationTypes';
+import { createPresentationEventDispatcher } from './presentationEvents';
 import type { BuyerRequirementClaim } from './components/BuyerRequirementReviewCard';
 import type { BuyerClaimReconciliation } from './components/BuyerClaimReconciliationCard';
 import ProductShelvesPanel, { type ProductShelfProjection, type ShelfProduct } from './components/ProductShelvesPanel';
@@ -391,6 +392,13 @@ export default function App() {
     resolveEvidenceSource: executeEvidenceSourceResolution,
     approvePublisherCandidate: executePublisherApproval,
   } = useShoppingCaseResearch();
+  const dispatchPresentationEvent = useMemo(() => createPresentationEventDispatcher({
+    setMessages,
+    setProductShelves,
+    setAmbiguityExploration,
+    setActiveShoppingCase,
+    setSupplierContinuation,
+  }), [setActiveShoppingCase, setAmbiguityExploration]);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   // Safe-internet-search results (separate labeled source; never owned catalog items).
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
@@ -2790,24 +2798,34 @@ export default function App() {
       corrections, researchChoice,
     });
     if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
-      setProductShelves(payload.product_shelves as ProductShelfProjection);
+      dispatchPresentationEvent({
+        type: 'shopping_case.shelves.replaced', source: 'research',
+        authority: 'presentation_only', shelves: payload.product_shelves as ProductShelfProjection,
+      });
       switchRightPanelMode('grid');
     }
     if (payload?.qualification_authority === 'requirements') {
-      setAmbiguityExploration((current) => current ? {
-        ...current,
+      dispatchPresentationEvent({
+        type: 'shopping_case.ambiguity.patched', source: 'research',
+        authority: 'presentation_only', patch: {
         status: 'researched',
         execution: 'case_origin_claims_accepted',
         evidence: 'case_approved_requirements_compiled',
         decision: 'conditional_fit_allowed',
-      } : current);
+        },
+      });
     }
     if (payload?.corroboration?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
-      setAmbiguityExploration(payload.corroboration.ambiguity_exploration as AmbiguityExploration);
+      dispatchPresentationEvent({
+        type: 'shopping_case.ambiguity.replaced', source: 'research',
+        authority: 'presentation_only',
+        exploration: payload.corroboration.ambiguity_exploration as AmbiguityExploration,
+      });
     }
     setTraceId(normalizeTraceId(payload?.trace_id || traceId));
-    setMessages((current) => [...current, {
-      role: 'assistant',
+    dispatchPresentationEvent({
+      type: 'conversation.message.appended', source: 'research',
+      authority: 'presentation_only', message: { role: 'assistant',
       content: researchChoice === 'research_and_corroborate'
         ? payload?.corroboration?.status === 'blocked'
           ? `I accepted those as provisional constraints, but corroboration is blocked: ${payload.corroboration.message || payload.corroboration.reason}. Product fit remains provisional.`
@@ -2820,8 +2838,9 @@ export default function App() {
       timestamp: new Date(),
       buyerClaimReconciliation: Array.isArray(payload?.buyer_claim_reconciliation)
         ? payload.buyer_claim_reconciliation as BuyerClaimReconciliation[] : undefined,
-    }]);
-  }, [uid, traceId, switchRightPanelMode, executeRequirementAcceptance]);
+      },
+    });
+  }, [uid, traceId, switchRightPanelMode, executeRequirementAcceptance, dispatchPresentationEvent]);
 
   const submitManualSpecifications = useCallback(async (text: string) => {
     const payload = await executeManualSpecifications(uid, text);
@@ -2843,31 +2862,40 @@ export default function App() {
     try {
       const payload = await executeShoppingCaseResearch({ uid, refreshAuthorized });
       if (payload?.product_shelves?.schema_version === 'product-shelves-v1') {
-        setProductShelves(payload.product_shelves as ProductShelfProjection);
+        dispatchPresentationEvent({
+          type: 'shopping_case.shelves.replaced', source: 'research',
+          authority: 'presentation_only', shelves: payload.product_shelves as ProductShelfProjection,
+        });
       }
       if (payload?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
-        setAmbiguityExploration(payload.ambiguity_exploration as AmbiguityExploration);
+        dispatchPresentationEvent({
+          type: 'shopping_case.ambiguity.replaced', source: 'research',
+          authority: 'presentation_only',
+          exploration: payload.ambiguity_exploration as AmbiguityExploration,
+        });
       }
       setTraceId(normalizeTraceId(payload?.trace_id || ambiguityExploration.trace_id || traceId));
-      setMessages((current) => [...current, {
-        role: 'assistant',
+      dispatchPresentationEvent({
+        type: 'conversation.message.appended', source: 'research',
+        authority: 'presentation_only', message: { role: 'assistant',
         content: payload?.status === 'publisher_resolution_required'
           ? `Discovery searched ${payload?.research?.receipts?.length || 0} bounded query axes and found ${payload?.research?.candidates?.length || 0} possible publisher origins. None has been accepted or fetched, so 0 requirement claims were established. Choose an official link, upload requirements, or continue provisionally. Paid calls: 0.`
           : payload?.evidence_outcome === 'context_only'
           ? `Approved-source research completed in the same shopping case. It established ${payload?.research?.context_claims?.length || 0} context claims but no authoritative product requirements, so the shortlist remains provisional. Tell me the named software/version or accept uploaded requirements to continue. No cart or supplier action was authorized.`
           : `Approved-source research completed in the same shopping case. I compiled ${payload?.research?.claims?.length || 0} scoped product claims and kept ${payload?.research?.unresolved?.length || 0} source or capability gaps visible. No cart or supplier action was authorized.`,
-        timestamp: new Date(),
-      }]);
+        timestamp: new Date() },
+      });
     } catch (error: any) {
-      setMessages((current) => [...current, {
-        role: 'assistant',
+      dispatchPresentationEvent({
+        type: 'conversation.message.appended', source: 'research',
+        authority: 'presentation_only', message: { role: 'assistant',
         content: `Approved-source research could not complete: ${error?.name === 'AbortError' ? 'the 20-second research deadline was reached' : (error?.message || String(error))}. You can upload requirements or continue provisionally; retry requires explicit authorization.`,
-        timestamp: new Date(),
-      }]);
+        timestamp: new Date() },
+      });
     } finally {
       setIsThinking(false);
     }
-  }, [ambiguityExploration, executeShoppingCaseResearch, uid, traceId]);
+  }, [ambiguityExploration, executeShoppingCaseResearch, uid, traceId, dispatchPresentationEvent]);
 
   const resolveBuyerEvidenceSource = useCallback(async (
     hint: { source_url?: string; vendor_name?: string },

@@ -48,8 +48,6 @@ from src.app.routers.shipping_webhooks import router as shipping_webhooks_router
 from src.app.routers.billing import router as billing_router
 from src.app.routers.admin_webhooks import router as admin_webhooks_router
 from src.app.routers.admin_chat_tools import router as admin_chat_tools_router
-from src.app.routers.escalation_room import router as escalation_room_router
-from src.app.routers.escalation_room import public_router as public_incidents_router
 from src.app.routers.admin_bi import router as admin_bi_router
 from src.app.services.retention import start_retention_loop, stop_retention_loop
 from src.app.models.init_db import ensure_metadata
@@ -65,6 +63,9 @@ from src.app.bootstrap.runtime_lifecycle import RuntimeLifecycle
 from src.app.bootstrap.recommendation_router_group import register_recommendation_router_group
 from src.app.bootstrap.security_operations_router_group import (
     register_security_operations_router_group,
+)
+from src.app.bootstrap.security_background_lifecycle import (
+    register_security_background_lifecycle,
 )
 from src.app.bootstrap.storefront_router_group import register_storefront_router_group
 from src.app.security.observer import emit_security_event
@@ -2142,20 +2143,7 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include admin_accounts router: %s", e)
-    # Escalation room (admin ↔ shopper chat stream per incident)
-    try:
-        app.include_router(escalation_room_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include escalation_room router: %s", e)
-    # Public incident chat endpoints (token-protected, local-dev demo only)
-    try:
-        app.include_router(public_incidents_router)
-    except Exception as e:
-        import logging
-
-        logging.getLogger("shopsquire.startup").exception("failed to include public_incidents router: %s", e)
+    # Decision memory, market projections, and replay surfaces.
     register_intelligence_router_group(app)
     # Admin interleaving/budget summary endpoint
     try:
@@ -2343,52 +2331,7 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
-    # DMARC poller (email security)
-    try:
-        from src.app.jobs.dmarc_poll import start_dmarc_poll, stop_dmarc_poll
-
-        def _start_dmarc_worker():
-            try:
-                return start_dmarc_poll(app)
-            except Exception:
-                return None
-
-        def _stop_dmarc_worker():
-            try:
-                stop_dmarc_poll(app)
-            except Exception:
-                pass
-
-        app.add_event_handler("startup", _start_dmarc_worker)
-        app.add_event_handler("shutdown", _stop_dmarc_worker)
-    except Exception:
-        pass
-    # Fingerprint scanning worker for GRC alerts (headers/TLS/SSH)
-    try:
-        from src.app.services.grc_fingerprint import start_fingerprint_worker, stop_fingerprint_worker
-
-        app.add_event_handler("startup", lambda: start_fingerprint_worker(app))
-        app.add_event_handler("shutdown", lambda: stop_fingerprint_worker(app))
-    except Exception:
-        pass
-
-    # Scheduled playbook DLQ reprocessor (safety-capped)
-    try:
-        from src.app.services.playbook_dlq_scheduler import start_dlq_scheduler, stop_dlq_scheduler
-
-        app.add_event_handler("startup", lambda: start_dlq_scheduler(app))
-        app.add_event_handler("shutdown", lambda: stop_dlq_scheduler(app))
-    except Exception:
-        pass
-
-    # Scheduled playbook autorun engine (interval-based)
-    try:
-        from src.app.services.playbook_scheduler import start_playbook_scheduler, stop_playbook_scheduler
-
-        app.add_event_handler("startup", lambda: start_playbook_scheduler(app))
-        app.add_event_handler("shutdown", lambda: stop_playbook_scheduler(app))
-    except Exception:
-        pass
+    register_security_background_lifecycle(app)
 
     # Incident SLA monitor (escalation room)
     try:
@@ -2406,51 +2349,6 @@ def create_app() -> FastAPI:
             start_payment_reconcile_scheduler, stop_payment_reconcile_scheduler)
         app.add_event_handler("startup", lambda: start_payment_reconcile_scheduler(app))
         app.add_event_handler("shutdown", lambda: stop_payment_reconcile_scheduler(app))
-    except Exception:
-        pass
-
-    # Automated SBOM correlation scheduler
-    try:
-        from src.app.services.sbom_scheduler import start_sbom_scheduler, stop_sbom_scheduler
-
-        app.add_event_handler("startup", lambda: start_sbom_scheduler(app))
-        app.add_event_handler("shutdown", lambda: stop_sbom_scheduler(app))
-    except Exception:
-        pass
-
-    # Automated threat intel feed ingestion scheduler
-    try:
-        from src.app.services.threat_intel_scheduler import start_threat_intel_scheduler, stop_threat_intel_scheduler
-
-        app.add_event_handler("startup", lambda: start_threat_intel_scheduler(app))
-        app.add_event_handler("shutdown", lambda: stop_threat_intel_scheduler(app))
-    except Exception:
-        pass
-
-    # Async phishing-page analysis worker for queued email landing-page jobs.
-    try:
-        from src.app.services.phishing_page_worker import start_phishing_page_worker, stop_phishing_page_worker
-
-        app.add_event_handler("startup", lambda: start_phishing_page_worker(app))
-        app.add_event_handler("shutdown", lambda: stop_phishing_page_worker(app))
-    except Exception:
-        pass
-
-    # Scheduled URL re-check worker for deferred phishing detonation (T+15m/T+2h).
-    try:
-        from src.app.services.url_recheck_scheduler import start_url_recheck_scheduler, stop_url_recheck_scheduler
-
-        app.add_event_handler("startup", lambda: start_url_recheck_scheduler(app))
-        app.add_event_handler("shutdown", lambda: stop_url_recheck_scheduler(app))
-    except Exception:
-        pass
-
-    # mTLS certificate expiry monitoring (alerts before certificate expiration)
-    try:
-        from src.app.services.mtls_cert_monitor import start_mtls_cert_monitor, stop_mtls_cert_monitor
-
-        app.add_event_handler("startup", lambda: start_mtls_cert_monitor(app))
-        app.add_event_handler("shutdown", lambda: stop_mtls_cert_monitor(app))
     except Exception:
         pass
 

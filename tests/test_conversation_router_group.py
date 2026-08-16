@@ -8,7 +8,13 @@ def test_conversation_group_registers_required_surfaces_without_silent_skip() ->
     registered = register_conversation_router_group(app)
     paths = {route.path for route in app.routes}
 
-    assert registered == ("support_complaints", "chat", "chat_stream", "safe_links")
+    assert registered == (
+        "support_complaints", "chat", "chat_stream", "safe_links",
+        "escalation_room", "public_incidents",
+    )
     assert app.state.conversation_router_group == registered
+    assert app.state.conversation_router_failures == ()
     assert "/api/v1/chat/query" in paths
     assert any("stream" in path and "chat" in path for path in paths)
+    assert any(path.startswith("/api/v1/admin/incidents") for path in paths)
+    assert any(path.startswith("/api/v1/incidents") for path in paths)

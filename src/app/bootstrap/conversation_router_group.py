@@ -1,6 +1,9 @@
 """Buyer conversation, escalation-adjacent support, and safe-link routes."""
 from __future__ import annotations
 
+import importlib
+import logging
+
 from fastapi import FastAPI
 
 from src.app.bootstrap.router_registration import RequiredRouter, register_required_routers
@@ -17,11 +20,28 @@ CONVERSATION_ROUTER_GROUP = (
     RequiredRouter("safe_links", safe_links_router),
 )
 
+_OPTIONAL_ESCALATION_ROUTERS = (
+    ("escalation_room", "src.app.routers.escalation_room", "router"),
+    ("public_incidents", "src.app.routers.escalation_room", "public_router"),
+)
+
 
 def register_conversation_router_group(app: FastAPI) -> tuple[str, ...]:
-    registered = register_required_routers(app, CONVERSATION_ROUTER_GROUP)
-    app.state.conversation_router_group = registered
-    return registered
+    registered = list(register_required_routers(app, CONVERSATION_ROUTER_GROUP))
+    failed: list[str] = []
+    log = logging.getLogger("shopsquire.startup")
+    for name, module_name, attribute in _OPTIONAL_ESCALATION_ROUTERS:
+        try:
+            module = importlib.import_module(module_name)
+            app.include_router(getattr(module, attribute))
+            registered.append(name)
+        except Exception as exc:
+            failed.append(name)
+            log.exception("failed to include %s router: %s", name, exc)
+    result = tuple(registered)
+    app.state.conversation_router_group = result
+    app.state.conversation_router_failures = tuple(failed)
+    return result
 
 
 __all__ = ["CONVERSATION_ROUTER_GROUP", "register_conversation_router_group"]
