@@ -566,6 +566,7 @@ def record_typed_case_patch_set(
     source_message_id: str,
     expected_version: int,
     patches: list[Any],
+    idempotency_key: str | None = None,
     trace_id: str | None = None,
     now_iso: str | None = None,
 ) -> dict[str, Any]:
@@ -596,6 +597,20 @@ def record_typed_case_patch_set(
     if not row:
         raise ValueError("conversation_case_not_found")
     version = int(row[2])
+    identity_token = str(idempotency_key or source_message_id).strip()
+    if not identity_token:
+        raise ValueError("case_patch_idempotency_key_required")
+    identity = f"{tenant_id}|{session_epoch}|{identity_token}|typed_patch_set"
+    amendment_id = hashlib.sha256(identity.encode()).hexdigest()
+    existing = db.execute(
+        text("SELECT status FROM conversation_case_amendment WHERE id=:id"),
+        {"id": amendment_id},
+    ).first()
+    if existing:
+        return {
+            "amendment_id": amendment_id, "status": existing[0],
+            "state_changed": False, "idempotent": True, "version": version,
+        }
     if version != expected_version:
         raise ValueError("case_revision_conflict")
     state = json.loads(row[1])
@@ -626,17 +641,6 @@ def record_typed_case_patch_set(
         state["destination"] = updated_typed.destinations[0].location_ref
 
     timestamp = _now(now_iso)
-    identity = f"{tenant_id}|{session_epoch}|{source_message_id}|typed_patch_set"
-    amendment_id = hashlib.sha256(identity.encode()).hexdigest()
-    existing = db.execute(
-        text("SELECT status FROM conversation_case_amendment WHERE id=:id"),
-        {"id": amendment_id},
-    ).first()
-    if existing:
-        return {
-            "amendment_id": amendment_id, "status": existing[0],
-            "state_changed": False, "idempotent": True, "version": version,
-        }
     db.execute(
         text(
             "INSERT INTO conversation_case_amendment "

@@ -1407,6 +1407,72 @@ def test_stale_procurement_lane_without_consequential_state_cannot_reactivate(db
     assert decision.lane == "SEARCH"
 
 
+def test_typed_active_case_keeps_quantity_free_current_order_turn_in_procurement(db):
+    raw = json.dumps({
+        "lane": "PROCUREMENT", "handle": None,
+        "requirements": {}, "quantity": None,
+        "subject_action": "continue",
+        "procurement_context": "current_order",
+        "confidence": 0.9,
+    })
+    session = {
+        "active_workflow_lane": "PROCUREMENT",
+        "procurement_case_state": {
+            "case_id": "case-60", "revision": 1,
+            "objective": "Unreal Engine fleet",
+        },
+    }
+
+    decision = route_turn(
+        db,
+        _env("What is the best delivery approach?", session=session),
+        llm_fn=lambda _prompt, _timeout: raw,
+    )
+
+    assert decision.lane == "PROCUREMENT"
+    assert decision.procurement_context == "current_order"
+
+
+def test_invalid_case_patch_is_visible_rejection_not_legacy_degradation(db, monkeypatch):
+    from src.app.services import procurement_case_preflight
+
+    def reject_patch(*_args, **_kwargs):
+        raise ValueError("source_destination_not_found")
+
+    monkeypatch.setattr(
+        procurement_case_preflight, "apply_case_patches_before_evaluation", reject_patch,
+    )
+    raw = json.dumps({
+        "lane": "PROCUREMENT", "handle": None,
+        "requirements": {}, "quantity": None,
+        "subject_action": "continue", "procurement_context": "current_order",
+        "case_patches": [{
+            "operation": "move_quantity", "path": "destinations", "quantity": 5,
+            "from_ref": "Perth", "to_ref": "Sydney",
+        }],
+        "confidence": 0.9,
+    })
+    envelope = _env("Move 5 from Perth to Sydney", session={
+        "active_workflow_lane": "PROCUREMENT",
+        "session_epoch": "epoch-1",
+        "procurement_case_state": {
+            "case_id": "case-60", "revision": 1,
+            "objective": "Unreal Engine fleet",
+        },
+    })
+
+    response = recommend_turn(db, envelope, llm_fn=lambda _prompt, _timeout: raw)
+
+    assert response.grounding == "unverified"
+    assert response.extras["case_patch_application"] == {
+        "status": "rejected",
+        "reason": "source_destination_not_found",
+        "state_changed": False,
+        "commerce_authority": False,
+    }
+    assert "did not apply" in response.message.lower()
+
+
 def test_procurement_plan_retrieves_before_advisory_handoff():
     decision = TurnDecision(
         lane="PROCUREMENT", node_handle="el-6-6", requirements={}, quantity=20,

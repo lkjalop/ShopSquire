@@ -563,6 +563,35 @@ def test_session_override_merge_discards_unknown_and_invalid_values():
     assert "admin_override" not in merged
 
 
+def test_server_loaded_procurement_case_is_merged_before_interpretation():
+    merged = F._merge_canonical_procurement_case(
+        {"accepted_constraints": {"requirements": {"ram_gb": (">=", 32)}}},
+        {
+            "case_id": "case-60",
+            "revision": 4,
+            "objective": "Unreal Engine fleet",
+            "workloads": ["Unreal Engine", "Nanite"],
+            "requested_quantity": 60,
+            "budget": {"amount_minor": 22_000_000, "currency": "AUD", "scope": "total"},
+            "destinations": [
+                {"location_ref": "Sydney", "quantity": 40, "location_kind": "city"},
+                {"location_ref": "Perth", "quantity": 20, "location_kind": "city"},
+            ],
+            "temporal": {
+                "required_by": "2026-08-20T17:00:00+10:00",
+                "timezone": "Australia/Sydney",
+            },
+        },
+    )
+
+    assert merged["procurement_case_state"]["revision"] == 4
+    assert merged["active_workflow_lane"] == "PROCUREMENT"
+    assert merged["accepted_constraints"]["quantity"] == 60
+    assert merged["accepted_constraints"]["total_budget_cents"] == 22_000_000
+    assert merged["accepted_constraints"]["requirements"] == {"ram_gb": (">=", 32)}
+    assert merged["case_anchor"]["destination_allocations"][1]["location_ref"] == "Perth"
+
+
 def test_single_persisted_cart_line_is_the_authoritative_product_anchor():
     merged = F._merge_authoritative_cart_anchor(
         {"accepted_constraints": {"budget_scope": "total"}},

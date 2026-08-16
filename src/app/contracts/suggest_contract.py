@@ -111,7 +111,7 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "semantic_requirement_compilation", "infrastructure_alternatives",
     "catalog_alignment", "supplier_enquiry_option", "preserve_current_view",
     "case_operation", "case_anchor", "state_changed",
-    "case_obligations",
+    "case_obligations", "procurement_case_state", "case_patch_application",
     "router_outcome",
     # Post-catalog retrieval reality now adjudicates false authority. The
     # recommendation remains provisional unless positive fit evidence exists.

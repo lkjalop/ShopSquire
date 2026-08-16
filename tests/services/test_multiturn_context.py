@@ -46,3 +46,35 @@ def test_prompt_can_carry_legacy_procurement_lane_without_taxonomy_subject():
                                   "budget_max_cents": None, "lane": "PROCUREMENT"})
     assert "category=current product/order" in prompt
     assert "active_lane=PROCUREMENT" in prompt
+
+
+def test_prompt_contains_server_loaded_case_before_model_interpretation():
+    prompt = _build_prompt(
+        _env("move 5 of those from Perth to Sydney"), [], [], [],
+        prior={
+            "node_path": None,
+            "use_cases": [],
+            "budget_max_cents": None,
+            "lane": "PROCUREMENT",
+            "procurement_case_state": {
+                "case_id": "case-60",
+                "revision": 3,
+                "objective": "Unreal Engine fleet",
+                "workloads": ["Unreal Engine", "Nanite"],
+                "requested_quantity": 60,
+                "destinations": [
+                    {"location_ref": "Sydney", "quantity": 40},
+                    {"location_ref": "Perth", "quantity": 20},
+                ],
+                "temporal": {"required_by": "2026-08-20T17:00:00+10:00"},
+            },
+        },
+    )
+
+    assert "CURRENT CANONICAL PROCUREMENT CASE" in prompt
+    assert "case_id=case-60" in prompt
+    assert "total_quantity=60" in prompt
+    assert "Sydney=40" in prompt and "Perth=20" in prompt
+    assert "workloads=Unreal Engine, Nanite" in prompt
+    assert "case's own quantity, destinations, delivery approach" in prompt
+    assert "never for the active case's fulfilment decision" in prompt

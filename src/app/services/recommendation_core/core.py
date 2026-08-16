@@ -429,6 +429,102 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
     decision = interpretation.decision
     intent = interpretation.intent
     workload_interpretation_shadow = interpretation.shadow
+    canonical_case_preflight = None
+    canonical_case = (
+        envelope.session.get("procurement_case_state")
+        if isinstance(envelope.session.get("procurement_case_state"), dict) else None
+    )
+    if canonical_case is not None:
+        from src.app.services.procurement_case_preflight import (
+            apply_case_patches_before_evaluation,
+        )
+
+        try:
+            canonical_case_preflight = apply_case_patches_before_evaluation(
+                db,
+                tenant_id=envelope.tenant_id,
+                uid=envelope.uid,
+                session_epoch=str(envelope.session.get("session_epoch") or envelope.uid),
+                trace_id=envelope.trace_id,
+                session=dict(envelope.session),
+                patches=decision.case_patches,
+            )
+        except ValueError as exc:
+            patch_reason = str(exc)
+            if patch_reason in {
+                "conversation_case_not_found",
+                "procurement_case_projection_missing_after_patch",
+            }:
+                raise
+            conflict = patch_reason == "case_revision_conflict"
+            response = CoreResponse(
+                envelope=envelope, lane="PROCUREMENT", grounding="unverified"
+            )
+            response.extras["procurement_case_state"] = dict(canonical_case)
+            response.extras["case_patch_application"] = {
+                "status": "rejected",
+                "reason": patch_reason,
+                "state_changed": False,
+                "commerce_authority": False,
+            }
+            response.clarify.append({
+                "id": "case_revision_conflict" if conflict else "case_patch_rejected",
+                "goal": "reload_procurement_case" if conflict else "review_procurement_case_change",
+                "reason": patch_reason,
+                "missing_slots": [],
+                "text": (
+                    "This shopping case changed in another request. I did not apply this edit. "
+                    "Reload the current case and try the change again."
+                    if conflict else
+                    "I did not apply that case edit because it conflicts with the retained "
+                    "quantity or allocation. Review the current case and restate the change."
+                ),
+                "options": [],
+            })
+            response.set_message(
+                (
+                    "This shopping case changed in another request. I did not apply this edit. "
+                    "Reload the current case and try the change again."
+                    if conflict else
+                    "I did not apply that case edit because it conflicts with the retained "
+                    "quantity or allocation. Review the current case and restate the change."
+                ),
+                MsgPriority.BULK_SCOPE_CLARIFY,
+            )
+            response.record_stage(
+                "procurement_case_preflight",
+                status="rejected",
+                won_message=True,
+                reason=patch_reason,
+            )
+            return response.finalize()
+        if canonical_case_preflight.state is not None:
+            retained = canonical_case_preflight.state
+            next_session = dict(envelope.session)
+            next_session["procurement_case_state"] = retained.model_dump(mode="json")
+            accepted = next_session.get("accepted_constraints")
+            accepted = dict(accepted) if isinstance(accepted, dict) else {}
+            if retained.requested_quantity is not None:
+                accepted["quantity"] = retained.requested_quantity
+            if retained.budget is not None:
+                accepted["budget_scope"] = retained.budget.scope
+                if retained.budget.scope == "total":
+                    accepted["total_budget_cents"] = retained.budget.amount_minor
+            accepted["retained_workloads"] = list(retained.workloads)
+            next_session["accepted_constraints"] = accepted
+            envelope = dataclasses.replace(envelope, session=next_session)
+            if decision.quantity is None and retained.requested_quantity is not None:
+                decision = dataclasses.replace(decision, quantity=retained.requested_quantity)
+            if (
+                decision.total_budget_cents is None
+                and retained.budget is not None
+                and retained.budget.scope == "total"
+            ):
+                decision = dataclasses.replace(
+                    decision,
+                    total_budget_cents=retained.budget.amount_minor,
+                    budget_scope="total",
+                )
     # Requirements merge across every use case; ordering controls only which named intent leads
     # capability prose and clarification.
     # Observation only: measure the legacy title/decomposer paths against the
@@ -562,6 +658,14 @@ def _recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn],
         quantity_inherited = False
 
     resp = CoreResponse(envelope=envelope, lane=decision.lane, grounding=grounding)
+    if canonical_case_preflight is not None and canonical_case_preflight.state is not None:
+        resp.extras["procurement_case_state"] = (
+            canonical_case_preflight.state.model_dump(mode="json")
+        )
+        if canonical_case_preflight.application is not None:
+            resp.extras["case_patch_application"] = dict(
+                canonical_case_preflight.application
+            )
     from src.app.services.recommendation_core.research_routing import (
         assess_research_trigger_shadow,
     )

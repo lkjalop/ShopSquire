@@ -225,7 +225,22 @@ def test_model_can_propose_explicit_multi_destination_allocation_without_keyword
     assert accepted == ({
         "operation": "set", "path": "destinations",
         "value": [
-            {"location_ref": "Sydney", "quantity": 40},
-            {"location_ref": "Perth", "quantity": 20},
+            {"location_ref": "Sydney", "quantity": 40, "location_kind": "unknown"},
+            {"location_ref": "Perth", "quantity": 20, "location_kind": "unknown"},
         ],
     },)
+
+
+def test_model_destination_kind_is_clamped_to_typed_unknown() -> None:
+    accepted = _bounded_case_patches({
+        "case_patches": [{
+            "operation": "set", "path": "destinations",
+            "value": [
+                {"location_ref": "Sydney", "quantity": 40, "location_kind": "delivery"},
+                {"location_ref": "Perth", "quantity": 20, "location_kind": "delivery"},
+            ],
+        }],
+    }, "Set 40 for Sydney and 20 for Perth")
+
+    assert accepted[0]["value"][0]["location_kind"] == "unknown"
+    assert accepted[0]["value"][1]["location_kind"] == "unknown"

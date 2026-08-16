@@ -727,6 +727,54 @@ def _merge_session_overrides(
     return merged
 
 
+def _merge_canonical_procurement_case(
+    session: Optional[Dict[str, Any]],
+    canonical_case: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Attach server-loaded case state before interpretation and retrieval.
+
+    This is not a client override. The chat edge loads the tenant/subject/epoch
+    scoped record and the facade carries the immutable snapshot into the turn.
+    """
+    merged = dict(session or {})
+    if not isinstance(canonical_case, dict) or not canonical_case:
+        return merged
+    from src.app.services.procurement_case_state import ProcurementCaseState
+
+    typed = ProcurementCaseState.model_validate(canonical_case)
+    case = typed.model_dump(mode="json")
+    merged["procurement_case_state"] = case
+    # Presence of a server-owned active shopping case is itself workflow state.
+    # The router still distinguishes a store-wide policy question through its
+    # independent `procurement_context=general_policy` judgment.
+    merged["prior_lane"] = "PROCUREMENT"
+    merged["active_workflow_lane"] = "PROCUREMENT"
+    accepted = merged.get("accepted_constraints")
+    accepted = dict(accepted) if isinstance(accepted, dict) else {}
+    if typed.requested_quantity is not None:
+        accepted["quantity"] = typed.requested_quantity
+    if typed.budget is not None:
+        if typed.budget.scope == "total":
+            accepted["total_budget_cents"] = typed.budget.amount_minor
+        accepted["budget_scope"] = typed.budget.scope
+    if typed.workloads:
+        accepted["retained_workloads"] = list(typed.workloads)
+    merged["accepted_constraints"] = accepted
+    merged["case_anchor"] = {
+        "case_id": typed.case_id,
+        "revision": typed.revision,
+        "selected_sku": typed.selected_sku,
+        "quantity": typed.requested_quantity,
+        "destination_allocations": [row.model_dump(mode="json") for row in typed.destinations],
+        "deadline": typed.temporal.required_by if typed.temporal else None,
+        "deadline_expression": typed.temporal.original_expression if typed.temporal else None,
+        "budget": typed.budget.model_dump(mode="json") if typed.budget else None,
+        "retained_purpose": typed.objective,
+        "catalog_authority": str(typed.authority.get("catalog_authority") or "") or None,
+    }
+    return merged
+
+
 def _merge_authoritative_cart_anchor(
     session: Optional[Dict[str, Any]], cart: List[Dict[str, Any]],
     *, db: Any = None, tenant_id: Optional[str] = None,
@@ -900,6 +948,8 @@ def dispatch_recommendation_core_typed(
     intent_hint: Optional[str] = None,
     role: str = "",
     confirmed_slots: Optional[Dict[str, Any]] = None,
+    canonical_case: Optional[Dict[str, Any]] = None,
+    case_patch_idempotency_key: Optional[str] = None,
     session_epoch: Optional[str] = None,
     memory_enabled: bool = True,
     compatibility_cutover: bool = False,
@@ -1179,6 +1229,10 @@ def dispatch_recommendation_core_typed(
             ),
             confirmed_slots,
         )
+        session = _merge_canonical_procurement_case(session, canonical_case)
+        session["session_epoch"] = str(session_epoch or uid or "")[:200]
+        if case_patch_idempotency_key:
+            session["case_patch_idempotency_key"] = str(case_patch_idempotency_key)[:128]
         # Cart mutation already had first refusal.  If it abstained, a single
         # persisted cart line is still authoritative product identity for bounded
         # delivery/payment/status amendments; the search core may read that anchor

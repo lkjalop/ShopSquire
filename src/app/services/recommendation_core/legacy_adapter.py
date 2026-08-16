@@ -179,6 +179,8 @@ def _full_pipeline(core: CoreResponse) -> Dict[str, Any]:
         "case_anchor": core.extras.get("case_anchor"),
         "state_changed": core.extras.get("state_changed"),
         "case_obligations": core.extras.get("case_obligations", []),
+        "procurement_case_state": core.extras.get("procurement_case_state"),
+        "case_patch_application": core.extras.get("case_patch_application"),
         "router_outcome": core.extras.get("router_outcome"),
         # v1 semantics: a budget-carrying search reads as FILTER (the recorded naming)
         "turn_intent": ("FILTER" if core.lane == "SEARCH"

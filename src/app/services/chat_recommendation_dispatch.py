@@ -87,6 +87,13 @@ async def dispatch_chat_recommendation(
                 command.raw_params.get("confirmed_slots")
                 if isinstance(command.raw_params.get("confirmed_slots"), dict) else None
             ),
+            canonical_case=(
+                command.raw_params.get("canonical_case")
+                if isinstance(command.raw_params.get("canonical_case"), dict) else None
+            ),
+            case_patch_idempotency_key=str(
+                command.raw_params.get("case_patch_idempotency_key") or ""
+            )[:128] or None,
             session_epoch=command.session_epoch,
             memory_enabled=command.memory_enabled,
             source_ip=request.client.host if request.client else None,

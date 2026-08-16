@@ -1618,6 +1618,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             ]
         )
         replay_key = hashlib.sha256(replay_material.encode("utf-8")).hexdigest()
+        params_case_patch_idempotency_key = replay_nonce or replay_key
         replay_ttl = int(os.getenv("CHAT_REPLAY_TTL_SECONDS", "20") or 20)
         require_nonce = str(os.getenv("CHAT_REPLAY_REQUIRE_NONCE", "0")).strip().lower() in ("1", "true", "yes", "on")
         if require_nonce and not replay_nonce and not _skip_replay:
@@ -1632,7 +1633,9 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
     except HTTPException:
         raise
     except Exception:
-        pass
+        params_case_patch_idempotency_key = hashlib.sha256(
+            f"{tenant_id}|{session_epoch}|{q}".encode("utf-8")
+        ).hexdigest()
 
     # -----------------------------------------------------------------------
     # Cross-modal security: scan merged text (user query + voice + OCR + labels + QR)
@@ -2010,6 +2013,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
               "trace_id": _recommend_ingress.trace_id,
               "session_epoch": session_epoch,
               "memory_mode": memory_mode}
+    params["case_patch_idempotency_key"] = params_case_patch_idempotency_key
     if _deficit_reorder:
         params["reorder_consent_intent"] = "true"  # emphasize the backorder-consent answer downstream
     if turn_intent and turn_intent != "SEARCH":
@@ -2029,6 +2033,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         (payload or {}).get("shopping_case_id") or ""
     ).strip()[:200]
     active_shopping_case_purpose = ""
+    canonical_case_snapshot: Dict[str, Any] = {}
     if active_shopping_case_id:
         active_case = db.execute(sql_text(
             "SELECT uid, retained_purpose FROM shopping_cases "
@@ -2044,6 +2049,48 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         active_shopping_case_purpose = str(
             active_case.get("retained_purpose") or ""
         ).strip()[:500]
+        try:
+            from src.app.deps import hash_uid
+            from src.app.services.conversation_case_state import ensure_case_state
+
+            # A shopping case created by the provisional-exploration endpoint may
+            # predate its first chat turn. Materialize its typed projection now so
+            # even that first follow-up is routed with the canonical objective.
+            ensure_case_state(
+                db,
+                tenant_id=tenant_id,
+                case_id=active_shopping_case_id,
+                session_epoch=session_epoch,
+                subject_ref=hash_uid(uid),
+                authoritative_anchor={"objective": active_shopping_case_purpose},
+            )
+
+            case_state_row = db.execute(sql_text(
+                "SELECT state_json,version FROM conversation_case_state "
+                "WHERE tenant_id=:tenant_id AND case_id=:case_id "
+                "AND session_epoch=:session_epoch AND subject_ref=:subject_ref LIMIT 1"
+            ), {
+                "tenant_id": tenant_id,
+                "case_id": active_shopping_case_id,
+                "session_epoch": session_epoch,
+                "subject_ref": hash_uid(uid),
+            }).first()
+            if case_state_row:
+                raw_state = json.loads(case_state_row[0])
+                typed_state = raw_state.get("procurement_case_state")
+                if isinstance(typed_state, dict):
+                    canonical_case_snapshot = {
+                        **typed_state,
+                        "case_id": active_shopping_case_id,
+                        "revision": int(case_state_row[1]),
+                    }
+                    params["canonical_case"] = canonical_case_snapshot
+        except Exception as exc:
+            logger.error("pre-router procurement case hydration failed", exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="procurement_case_state_unavailable",
+            ) from exc
     pending_clarification: Dict[str, Any] = {}
     try:
         pending_clarification = Memory(
@@ -3693,6 +3740,17 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "case_operation": data.get("case_operation"),
         "case_anchor": data.get("case_anchor") if isinstance(data.get("case_anchor"), dict) else None,
         "state_changed": data.get("state_changed"),
+        # Server-hydrated case context is returned even when a response branch
+        # (for example a policy answer) does not project core extras itself.
+        "procurement_case_state": (
+            data.get("procurement_case_state")
+            if isinstance(data.get("procurement_case_state"), dict)
+            else canonical_case_snapshot or None
+        ),
+        "case_patch_application": (
+            data.get("case_patch_application")
+            if isinstance(data.get("case_patch_application"), dict) else None
+        ),
         "constraints_used": (
             data.get("constraints_used")
             if isinstance(data.get("constraints_used"), dict) else {}
@@ -4088,7 +4146,13 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                             out.get("decision") if isinstance(out.get("decision"), dict) else {}
                         )
                         case_patches = decision_payload.get("case_patches")
-                        if isinstance(case_patches, list) and case_patches:
+                        preflight_application = (
+                            out.get("case_patch_application")
+                            if isinstance(out.get("case_patch_application"), dict) else None
+                        )
+                        if preflight_application is not None:
+                            out["case_memory"] = dict(preflight_application)
+                        elif isinstance(case_patches, list) and case_patches:
                             out["case_memory"] = record_typed_case_patch_set(
                                 case_db,
                                 tenant_id=tenant_id,
@@ -4096,6 +4160,7 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                                 session_epoch=session_epoch,
                                 subject_ref=hash_uid(uid),
                                 source_message_id=user_message_id,
+                                idempotency_key=params_case_patch_idempotency_key,
                                 expected_version=int(ensured["version"]),
                                 patches=case_patches,
                                 trace_id=decision_trace_id,

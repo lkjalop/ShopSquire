@@ -543,8 +543,31 @@ def _bounded_case_patches(
     for item in raw[:8]:
         if not isinstance(item, dict):
             continue
+        candidate_item = dict(item)
+        if (
+            candidate_item.get("operation") == "set"
+            and candidate_item.get("path") == "destinations"
+            and isinstance(candidate_item.get("value"), list)
+        ):
+            valid_location_kinds = {
+                "region", "city", "store", "warehouse", "address_token", "unknown",
+            }
+            candidate_item["value"] = [
+                {
+                    "location_ref": row.get("location_ref"),
+                    "quantity": row.get("quantity"),
+                    # Location classification is not buyer authority and must not
+                    # make an otherwise grounded allocation crash the turn.
+                    "location_kind": (
+                        row.get("location_kind")
+                        if row.get("location_kind") in valid_location_kinds else "unknown"
+                    ),
+                }
+                for row in candidate_item["value"][:100]
+                if isinstance(row, dict)
+            ]
         try:
-            patch = CasePatch.model_validate(item)
+            patch = CasePatch.model_validate(candidate_item)
         except ValidationError:
             continue
         if not grounded(patch):
@@ -1589,6 +1612,36 @@ def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
                    "delivery, supplier quote, RFQ, or fulfillment remain PROCUREMENT (or EXPLAIN "
                    "when only explaining a prior result); general policy questions remain "
                    "POLICY_QUESTION. Never copy the prior lane for an unrelated new request.\n")
+    canonical_case = prior.get("procurement_case_state") if isinstance(prior, dict) else None
+    if isinstance(canonical_case, dict):
+        destinations = ", ".join(
+            f"{str(row.get('location_ref') or '')[:80]}={int(row.get('quantity') or 0)}"
+            for row in list(canonical_case.get("destinations") or [])[:20]
+            if isinstance(row, dict) and row.get("location_ref")
+        )
+        temporal = (
+            canonical_case.get("temporal")
+            if isinstance(canonical_case.get("temporal"), dict) else {}
+        )
+        retained_workloads = ", ".join(
+            str(value)[:100] for value in list(canonical_case.get("workloads") or [])[:12]
+        )
+        context += (
+            "CURRENT CANONICAL PROCUREMENT CASE (server-loaded; retain unless the buyer explicitly "
+            "patches a field): "
+            f"case_id={str(canonical_case.get('case_id') or '')[:100]}; "
+            f"revision={canonical_case.get('revision')}; "
+            f"objective={str(canonical_case.get('objective') or '')[:300]}; "
+            f"workloads={retained_workloads or 'none'}; "
+            f"total_quantity={canonical_case.get('requested_quantity')}; "
+            f"destinations={destinations or 'none'}; "
+            f"deadline={str(temporal.get('required_by') or temporal.get('original_expression') or 'none')[:120]}. "
+            "Emit only changes justified by the current buyer text. Referential language may identify "
+            "a retained field, but derived arithmetic belongs to the reducer. A question about this "
+            "case's own quantity, destinations, delivery approach, deadline, availability, supplier, "
+            "or split is PROCUREMENT. Use POLICY_QUESTION only for explicitly store-wide terms or "
+            "rules, never for the active case's fulfilment decision.\n"
+        )
     budget = ""
     if envelope.budget_min_cents is not None or envelope.budget_max_cents is not None:
         low = f"${envelope.budget_min_cents//100}" if envelope.budget_min_cents else "any"
@@ -1820,12 +1873,17 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     _pn = get_node(str(_sess.get("prior_node") or ""))
     _prior_lane = str(_sess.get("active_workflow_lane")
                       or _sess.get("prior_lane") or "").strip().upper()
-    if _pn is not None or _prior_lane:
+    canonical_case = (
+        _sess.get("procurement_case_state")
+        if isinstance(_sess.get("procurement_case_state"), dict) else None
+    )
+    if _pn is not None or _prior_lane or canonical_case:
         _acc = _sess.get("accepted_constraints") or {}
         prior = {"node_path": (_pn.full_path if _pn is not None else None),
                  "use_cases": _acc.get("use_cases") or [],
                  "budget_max_cents": _acc.get("budget_max_cents"),
-                 "lane": _prior_lane or None}
+                 "lane": _prior_lane or None,
+                 "procurement_case_state": canonical_case}
     model_snapshot = None
     try:
         # Keep the potentially long/provider-backed classification boundary in
@@ -2349,6 +2407,7 @@ def route_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None,
     ).strip().upper()
     has_procurement_state = active_workflow_lane == "PROCUREMENT" and (
         bool(envelope.cart)
+        or isinstance(session.get("procurement_case_state"), dict)
         or any(session.get(key) for key in (
             "fulfillment_case_id", "procurement_case_id", "sourcing_request_id"
         ))
