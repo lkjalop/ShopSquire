@@ -1,7 +1,9 @@
 # ShopSquire AsyncSession transaction migration plan
 
 Date: 2026-08-16  
-Status: implementation plan; no production database authority implied
+Status: transitional bounded-worker isolation implemented for four async shopping-case routes;
+full AsyncSession transaction migration remains outstanding. No production database authority
+is implied.
 
 ## Purpose
 
@@ -95,6 +97,18 @@ watermark intact and writes a separate dead-letter record.
 5. Add an outbox dispatcher with retry/idempotency for supplier and other external effects.
 6. Remove the synchronous route dependency only after route ownership and compatibility tests
    show no callers remain.
+
+## Implemented transitional boundary
+
+The public requirement-acceptance, evidence-source-resolution, publisher-approval and research
+routes no longer execute a synchronous `Session` on the ASGI event-loop thread. Each operation
+creates, uses and closes its session inside a bounded worker, propagates disconnect/timeout as a
+cooperative cancellation signal and returns a typed 504 when the 45-second envelope expires.
+
+This is isolation, not completion of the target AsyncSession design. In particular, the research
+operation may retain a worker-owned session while governed network work executes. The target
+two-transaction research workflow above remains the correct next migration: reserve/commit,
+perform network work without a session, then compare-and-persist in a second short transaction.
 
 ## Concurrency controls
 
