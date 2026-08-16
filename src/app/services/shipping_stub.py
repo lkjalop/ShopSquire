@@ -7,6 +7,7 @@ with status='stub' — it never fabricates a tracking number that looks like a r
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import uuid
 from datetime import datetime, timedelta
@@ -30,7 +31,16 @@ class ShippingService:
         # Attempt the carrier call; a stub/unconfigured provider returns {"ok": False, "stub": True}
         # (or raises, for the strict providers) — both are treated as "no real label".
         try:
-            result = provider.create_label({"case_id": case_id}) or {}
+            result = await asyncio.wait_for(
+                asyncio.to_thread(provider.create_label, {"case_id": case_id}),
+                timeout=22.0,
+            ) or {}
+        except TimeoutError:
+            result = {
+                "ok": False,
+                "stub": True,
+                "error": "carrier_deadline_exceeded_late_result_quarantined",
+            }
         except Exception as exc:
             result = {"ok": False, "stub": True, "error": str(exc)}
 
