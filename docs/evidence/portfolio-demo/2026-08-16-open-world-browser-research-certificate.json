@@ -1,0 +1,316 @@
+{
+  "schema_version": "open-world-browser-research-certificate-v1",
+  "observed_at": "2026-08-16T10:36:19.178Z",
+  "execution": "playwright_browser",
+  "fixture": false,
+  "prompt": "I process large drone surveys in Agisoft Metashape. Only hardware officially supported by Agisoft is acceptable. Is this gaming laptop suitable?",
+  "case_id": "sc-case-e401190d650d47f69291",
+  "trace_id": "case-e401190d650d47f69291",
+  "consent": "buyer_authorized_discovery_then_case_only_origin",
+  "discovery": {
+    "calls": 3,
+    "paid_calls": 0,
+    "query_hashes": [
+      "49f955a54d3f0c52",
+      "c7e481f2f0c9eacc",
+      "f5bc7a84728dab94"
+    ],
+    "receipts": [
+      {
+        "provider_capability": "WEB_DISCOVERY",
+        "provider_id": "searxng_compatible_discovery",
+        "provider_endpoint_host": "127.0.0.1",
+        "query_hash": "49f955a54d3f0c52",
+        "started_at": "2026-08-16T10:36:07.610231+00:00",
+        "fixture": false,
+        "network_execution": true,
+        "cache_status": "miss",
+        "billing_class": "free",
+        "execution_status": "completed",
+        "external_call_dispatched": true,
+        "http_status": 200,
+        "completed_at": "2026-08-16T10:36:11.162329+00:00",
+        "observed_at": "2026-08-16T10:36:11.162329+00:00",
+        "response_body_hash": "89ca4015bd94d6ee900a1c0901bd2de419444342fdec0599776dd8822c78108c",
+        "response_bytes": 25072,
+        "raw_result_count": 30,
+        "result_count": 30,
+        "allowlisted_result_count": 30,
+        "engines_queried": [],
+        "engines_responded": [
+          "bing",
+          "google cse"
+        ],
+        "engine_failures": [],
+        "degradation_reasons": [],
+        "provider_status": "completed",
+        "request_latency_ms": 3329.424,
+        "engine_reliability": [
+          {
+            "engine": "bing",
+            "attempts": 12,
+            "responses": 12,
+            "failures": 0,
+            "zero_results": 0,
+            "average_latency_ms": 1646.733,
+            "unhealthy_rate": 0,
+            "suppressed": false
+          },
+          {
+            "engine": "google cse",
+            "attempts": 12,
+            "responses": 12,
+            "failures": 0,
+            "zero_results": 0,
+            "average_latency_ms": 1646.733,
+            "unhealthy_rate": 0,
+            "suppressed": false
+          }
+        ],
+        "suppressed_engines": [],
+        "query_id": "concept",
+        "query_axis": "concept_and_software",
+        "query_text_retained": false
+      },
+      {
+        "provider_capability": "WEB_DISCOVERY",
+        "provider_id": "searxng_compatible_discovery",
+        "provider_endpoint_host": "127.0.0.1",
+        "query_hash": "c7e481f2f0c9eacc",
+        "started_at": "2026-08-16T10:36:11.166139+00:00",
+        "fixture": false,
+        "network_execution": true,
+        "cache_status": "miss",
+        "billing_class": "free",
+        "execution_status": "completed",
+        "external_call_dispatched": true,
+        "http_status": 200,
+        "completed_at": "2026-08-16T10:36:12.781374+00:00",
+        "observed_at": "2026-08-16T10:36:12.781374+00:00",
+        "response_body_hash": "de8eb3675b0f09579e6f4fddf0444271abd6bd5abf74eab4c74887ffb6ae68c3",
+        "response_bytes": 25025,
+        "raw_result_count": 30,
+        "result_count": 30,
+        "allowlisted_result_count": 30,
+        "engines_queried": [],
+        "engines_responded": [
+          "bing",
+          "google cse"
+        ],
+        "engine_failures": [],
+        "degradation_reasons": [],
+        "provider_status": "completed",
+        "request_latency_ms": 1399.365,
+        "engine_reliability": [
+          {
+            "engine": "bing",
+            "attempts": 13,
+            "responses": 13,
+            "failures": 0,
+            "zero_results": 0,
+            "average_latency_ms": 1627.705,
+            "unhealthy_rate": 0,
+            "suppressed": false
+          },
+          {
+            "engine": "google cse",
+            "attempts": 13,
+            "responses": 13,
+            "failures": 0,
+            "zero_results": 0,
+            "average_latency_ms": 1627.705,
+            "unhealthy_rate": 0,
+            "suppressed": false
+          }
+        ],
+        "suppressed_engines": [],
+        "query_id": "requirements",
+        "query_axis": "requirements_and_compatibility",
+        "query_text_retained": false
+      },
+      {
+        "provider_capability": "WEB_DISCOVERY",
+        "provider_id": "searxng_compatible_discovery",
+        "provider_endpoint_host": "127.0.0.1",
+        "query_hash": "f5bc7a84728dab94",
+        "started_at": "2026-08-16T10:36:12.799508+00:00",
+        "fixture": false,
+        "network_execution": true,
+        "cache_status": "miss",
+        "billing_class": "free",
+        "execution_status": "completed",
+        "external_call_dispatched": true,
+        "http_status": 200,
+        "completed_at": "2026-08-16T10:36:13.977524+00:00",
+        "observed_at": "2026-08-16T10:36:13.977524+00:00",
+        "response_body_hash": "4a6fb1554b54f782025c233140259a9e8cecdb5cc7f0ecaaaea439f2856ce66e",
+        "response_bytes": 24089,
+        "raw_result_count": 30,
+        "result_count": 30,
+        "allowlisted_result_count": 30,
+        "engines_queried": [],
+        "engines_responded": [
+          "bing",
+          "google cse"
+        ],
+        "engine_failures": [],
+        "degradation_reasons": [],
+        "provider_status": "completed",
+        "request_latency_ms": 996.656,
+        "engine_reliability": [
+          {
+            "engine": "bing",
+            "attempts": 14,
+            "responses": 14,
+            "failures": 0,
+            "zero_results": 0,
+            "average_latency_ms": 1582.63,
+            "unhealthy_rate": 0,
+            "suppressed": false
+          },
+          {
+            "engine": "google cse",
+            "attempts": 14,
+            "responses": 14,
+            "failures": 0,
+            "zero_results": 0,
+            "average_latency_ms": 1582.63,
+            "unhealthy_rate": 0,
+            "suppressed": false
+          }
+        ],
+        "suppressed_engines": [],
+        "query_id": "support",
+        "query_axis": "support_and_constraints",
+        "query_text_retained": false
+      }
+    ],
+    "candidate_count": 12
+  },
+  "selected_origin": {
+    "url": "https://www.agisoft.com/downloads/system-requirements/",
+    "domain": "www.agisoft.com",
+    "approval_scope": "case_only",
+    "ownership": "buyer_attested_not_independently_verified",
+    "verification": {
+      "schema_version": "publisher-origin-verification-v1",
+      "status": "origin_consistent",
+      "ownership_authority": "not_independently_verified",
+      "approved_host": "www.agisoft.com",
+      "canonical_hosts": [],
+      "canonical_origin_consistent": null,
+      "identity_signal_count": 1,
+      "identity_host_overlap": [
+        "agisoft"
+      ],
+      "subject_overlap": [
+        "agisoft",
+        "laptop",
+        "large",
+        "metashape"
+      ],
+      "reasons": [
+        "identity_matches_origin_host",
+        "document_matches_buyer_subject"
+      ]
+    }
+  },
+  "official_fetch": {
+    "calls": 1,
+    "paid_calls": 0,
+    "receipts": [
+      {
+        "receipt_id": "research-2c97165cca05:1",
+        "execution_id": "research-2c97165cca05:1",
+        "provider_capability": "OFFICIAL_ORIGIN_FETCH",
+        "provider_id": "governed_async_http_origin",
+        "certification_run_id": "research-2c97165cca05",
+        "provider_endpoint_host": "www.agisoft.com",
+        "query_id": "case_source_pubcand_fd7d37043dfab001eeed",
+        "query_hash": "8012cad50602a494",
+        "query_purpose": "canonical_official_origin_fetch",
+        "obligation_ids": [
+          "official-requirements"
+        ],
+        "execution_status": "completed",
+        "fixture": false,
+        "network_execution": true,
+        "external_call_dispatched": true,
+        "cache_status": "miss",
+        "billing_class": "free",
+        "started_at": "2026-08-16T10:36:15.280000Z",
+        "completed_at": "2026-08-16T10:36:18.502679Z",
+        "http_status": 200,
+        "result_count": null,
+        "allowlisted_result_count": null,
+        "engines_queried": [],
+        "engines_responded": [],
+        "engine_failures": [],
+        "engine_reliability": [],
+        "suppressed_engines": [],
+        "request_latency_ms": null,
+        "degradation_reasons": [],
+        "provider_status": null,
+        "response_body_hash": "17b997abc84771e3aa9f2e2e386c4e209f1d5805650cf7d434799209a40f1610",
+        "selected_origin_urls": [
+          "https://www.agisoft.com/downloads/system-requirements/"
+        ],
+        "origin_content_type": "text/html",
+        "origin_observed_at": "2026-08-16T10:36:18.502679Z",
+        "rejection_reason": null
+      }
+    ]
+  },
+  "claims": [
+    {
+      "claim_id": "official-e16c544a6b8f9d72",
+      "attribute": "ram_gb",
+      "operator": ">=",
+      "value": 32,
+      "unit": "GB",
+      "citation_url": "https://www.agisoft.com/downloads/system-requirements/",
+      "authority_status": "case_origin_critic_accepted"
+    },
+    {
+      "claim_id": "official-fe3795b359b1ac13",
+      "attribute": "cpu_cores",
+      "operator": ">=",
+      "value": 6,
+      "unit": "cores",
+      "citation_url": "https://www.agisoft.com/downloads/system-requirements/",
+      "authority_status": "case_origin_critic_accepted"
+    },
+    {
+      "claim_id": "official-0cb6f882adf4ad57",
+      "attribute": "cpu_cores",
+      "operator": ">=",
+      "value": 12,
+      "unit": "cores",
+      "citation_url": "https://www.agisoft.com/downloads/system-requirements/",
+      "authority_status": "case_origin_critic_accepted"
+    }
+  ],
+  "buyer_acceptance": {
+    "status": "accepted_case_evidence",
+    "qualification_authority": "requirements",
+    "accepted_claim_count": 3,
+    "cart_mutation": "not_authorized"
+  },
+  "ranking": {
+    "before_configuration_ids": [],
+    "after_configuration_ids": [],
+    "outcome": "retained",
+    "reason": "Accepted requirements did not change relative fit among the exact candidate configurations."
+  },
+  "invariants": {
+    "paid_calls": 0,
+    "unsupported_dimensions": "not_verified",
+    "supplier_send": "not_authorized",
+    "cart_mutation": "not_authorized"
+  },
+  "seal": {
+    "algorithm": "sha256",
+    "canonical_payload_sha256": "a4c918bf2e01980187c26db7aa757ff588d79dc80c9d51e5f7acd70e7d48ba64",
+    "review_status": "machine_generated_live_browser_certificate"
+  }
+}

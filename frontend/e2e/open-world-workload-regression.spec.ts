@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { createHash } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 async function send(page: import('@playwright/test').Page, text: string) {
   const input = page.getByPlaceholder('Type your message...');
@@ -159,5 +162,83 @@ test('novel publisher is approved case-only, fetched, reviewed, and reranked in 
   expect(accepted.qualification_authority).toBe('requirements');
   expect(accepted.cart_mutation).toBe('not_authorized');
   await expect(page.getByTestId('ambiguity-exploration')).toContainText(/researched/i);
+  if (process.env.PORTFOLIO_RESEARCH_CERTIFICATE_PATH) {
+    const before = (discovery?.product_shelves?.shelves || []).flatMap(
+      (shelf: any) => (shelf.initial || []).map((item: any) => item?.product?.configuration_id),
+    ).filter(Boolean);
+    const after = (accepted?.product_shelves?.shelves || []).flatMap(
+      (shelf: any) => (shelf.initial || []).map((item: any) => item?.product?.configuration_id),
+    ).filter(Boolean);
+    const retained = JSON.stringify(before) === JSON.stringify(after);
+    const certificate: any = {
+      schema_version: 'open-world-browser-research-certificate-v1',
+      observed_at: new Date().toISOString(),
+      execution: 'playwright_browser',
+      fixture: false,
+      prompt: 'I process large drone surveys in Agisoft Metashape. Only hardware officially supported by Agisoft is acceptable. Is this gaming laptop suitable?',
+      case_id: accepted.case_id,
+      trace_id: accepted.trace_id,
+      consent: 'buyer_authorized_discovery_then_case_only_origin',
+      discovery: {
+        calls: discovery.research.provider_accounting.discovery_calls,
+        paid_calls: discovery.research.provider_accounting.paid_calls,
+        query_hashes: (discovery.research.receipts || []).map((row: any) => row.query_hash).filter(Boolean),
+        receipts: discovery.research.receipts || [],
+        candidate_count: discovery.research.candidates.length,
+      },
+      selected_origin: {
+        url: approval.candidate.url,
+        domain: approval.candidate.domain,
+        approval_scope: approval.candidate.approval_scope,
+        ownership: approval.candidate.publisher_ownership_status,
+        verification: approval.candidate.publisher_origin_verification,
+      },
+      official_fetch: {
+        calls: approval.provider_accounting.official_origin_fetches,
+        paid_calls: approval.provider_accounting.paid_calls,
+        receipts: (approval.research.receipts || []).filter(
+          (row: any) => row.provider_capability === 'OFFICIAL_ORIGIN_FETCH',
+        ),
+      },
+      claims: approval.claims.map((claim: any) => ({
+        claim_id: claim.claim_id,
+        attribute: claim.attribute,
+        operator: claim.operator,
+        value: claim.value,
+        unit: claim.unit,
+        citation_url: claim.citation_url,
+        authority_status: claim.authority_status,
+      })),
+      buyer_acceptance: {
+        status: accepted.status,
+        qualification_authority: accepted.qualification_authority,
+        accepted_claim_count: accepted.accepted_claims.length,
+        cart_mutation: accepted.cart_mutation,
+      },
+      ranking: {
+        before_configuration_ids: before,
+        after_configuration_ids: after,
+        outcome: retained ? 'retained' : 'reranked',
+        reason: retained
+          ? 'Accepted requirements did not change relative fit among the exact candidate configurations.'
+          : 'Accepted cited requirement attributes changed deterministic exact-configuration fit.',
+      },
+      invariants: {
+        paid_calls: 0,
+        unsupported_dimensions: 'not_verified',
+        supplier_send: 'not_authorized',
+        cart_mutation: 'not_authorized',
+      },
+    };
+    const canonical = JSON.stringify(certificate);
+    certificate.seal = {
+      algorithm: 'sha256',
+      canonical_payload_sha256: createHash('sha256').update(canonical).digest('hex'),
+      review_status: 'machine_generated_live_browser_certificate',
+    };
+    const target = resolve(process.env.PORTFOLIO_RESEARCH_CERTIFICATE_PATH);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, `${JSON.stringify(certificate, null, 2)}\n`, 'utf8');
+  }
   await page.screenshot({ path: '../.tmp-open-world-browser/case-origin-rerank.png', fullPage: true });
 });

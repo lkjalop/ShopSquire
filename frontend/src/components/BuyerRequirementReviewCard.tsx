@@ -10,7 +10,7 @@ export type BuyerRequirementClaim = {
   constraint_tier: string;
   source_excerpt?: string;
   condition?: string | null;
-  authority_status: 'unverified' | string;
+  authority_status: 'unverified' | 'case_origin_critic_accepted' | string;
 };
 
 type Props = {
@@ -26,7 +26,7 @@ const label = (value: string) => value.replaceAll('_', ' ');
 
 export default function BuyerRequirementReviewCard({ claims, onAccept }: Props) {
   const caseOriginEvidence = claims.some(
-    (claim) => claim.authority_status === 'verified_case_origin',
+    (claim) => claim.authority_status === 'case_origin_critic_accepted',
   );
   const [selected, setSelected] = React.useState(() => new Set(claims.map((claim) => claim.claim_id)));
   const [draftValues, setDraftValues] = React.useState<Record<string, string>>(() => Object.fromEntries(
