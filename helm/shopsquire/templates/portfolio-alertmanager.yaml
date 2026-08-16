@@ -1,0 +1,76 @@
+{{- if and .Values.localRuntimeDependencies.enabled .Values.localRuntimeDependencies.alertmanager.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shopsquire-alertmanager-config
+data:
+  alertmanager.yml: |
+    route:
+      receiver: portfolio-observation-only
+      group_by: [alertname, severity]
+      group_wait: 1s
+      group_interval: 1m
+      repeat_interval: 4h
+    receivers:
+      - name: portfolio-observation-only
+---
+{{- if .Values.localRuntimeDependencies.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shopsquire-alertmanager-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.localRuntimeDependencies.persistence.alertmanagerSize }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopsquire-alertmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: shopsquire-alertmanager}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: shopsquire-alertmanager}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534}
+      containers:
+        - name: alertmanager
+          image: {{ .Values.localRuntimeDependencies.alertmanager.image | quote }}
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --data.retention=120h
+          ports:
+            - {name: http, containerPort: 9093}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager, readOnly: true}
+            - {name: data, mountPath: /alertmanager}
+      volumes:
+        - name: config
+          configMap: {name: shopsquire-alertmanager-config}
+        - name: data
+          {{- if .Values.localRuntimeDependencies.persistence.enabled }}
+          persistentVolumeClaim: {claimName: shopsquire-alertmanager-data}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shopsquire-alertmanager
+spec:
+  selector: {app.kubernetes.io/name: shopsquire-alertmanager}
+  ports:
+    - {name: http, port: 9093, targetPort: http}
+{{- end }}

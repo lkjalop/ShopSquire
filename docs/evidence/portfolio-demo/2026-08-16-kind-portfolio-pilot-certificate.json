@@ -1,0 +1,93 @@
+{
+  "schema_version": "shopsquire-kind-pilot-certificate-v1",
+  "observed_at": "2026-08-16T11:41:12.240932+00:00",
+  "cluster": {
+    "context": "kind-shopsquire-local",
+    "server_version": "v1.36.1",
+    "namespace": "shopsquire-pilot"
+  },
+  "release": {
+    "name": "shopsquire-pilot",
+    "status": "deployed",
+    "deployments": [
+      {
+        "name": "shopsquire-alertmanager",
+        "image": "prom/alertmanager:v0.28.1",
+        "desired": 1,
+        "ready": 1,
+        "available": 1
+      },
+      {
+        "name": "shopsquire-pilot",
+        "image": "shopsquire-api:portfolio-pilot-r2",
+        "desired": 1,
+        "ready": 1,
+        "available": 1
+      },
+      {
+        "name": "shopsquire-postgresql",
+        "image": "postgres:16-alpine",
+        "desired": 1,
+        "ready": 1,
+        "available": 1
+      },
+      {
+        "name": "shopsquire-redis-master",
+        "image": "redis:7-alpine",
+        "desired": 1,
+        "ready": 1,
+        "available": 1
+      }
+    ]
+  },
+  "runtime": {
+    "healthz": {
+      "status": "ok"
+    },
+    "database_revision": "20260866_agent_run_sequence (head)",
+    "redis": "authenticated_and_ready",
+    "pilot_identity": {
+      "tenant_id": "portfolio-demo",
+      "ready": true,
+      "identity_source": "server_persisted_membership",
+      "environment_class": "local_portfolio_pilot",
+      "production_authority": false,
+      "principals": [
+        {
+          "subject_id": "portfolio-buyer-leoma",
+          "display_name": "Portfolio Buyer",
+          "role": "merchant",
+          "status": "active"
+        },
+        {
+          "subject_id": "portfolio-owner-leoma",
+          "display_name": "Portfolio Owner",
+          "role": "owner",
+          "status": "active"
+        },
+        {
+          "subject_id": "portfolio-engineer-leoma",
+          "display_name": "Portfolio Engineer",
+          "role": "developer",
+          "status": "active"
+        }
+      ],
+      "supplier_mode": "synthetic_only",
+      "real_supplier_send_authorized": false
+    },
+    "alert_receiver": {
+      "mode": "local_observation_only",
+      "outbound_destination_enrolled": false,
+      "test_alert_observed": true,
+      "observed_alert_names": [
+        "ShopsquireAlertmanagerTest"
+      ]
+    }
+  },
+  "authority_limits": {
+    "production_authority": false,
+    "real_supplier_send_authorized": false,
+    "supplier_mode": "synthetic_only"
+  },
+  "seal_sha256": "7a669c4fbdcb007627009ea7259e9d7ceac3aa519cc94417daf8c95fd56ef1ea"
+}

@@ -1,4 +1,3 @@
-import json
 import os
 import time
 from datetime import datetime, timezone
@@ -24,13 +23,23 @@ def main() -> int:
         }
     ]
     try:
-        resp = requests.post(f"{alertmanager_url}/api/v1/alerts", json=payload, timeout=5)
+        resp = requests.post(f"{alertmanager_url}/api/v2/alerts", json=payload, timeout=5)
         if resp.status_code >= 300:
             print(f"AlertManager responded with {resp.status_code}: {resp.text}")
             return 1
-        # Allow a short delay for routing and UI visibility.
+        # Allow a short delay for routing and then prove the receiver retained it.
         time.sleep(1)
-        print(f"AlertManager accepted test alert at {alertmanager_url}")
+        observed = requests.get(f"{alertmanager_url}/api/v2/alerts", timeout=5)
+        observed.raise_for_status()
+        names = {
+            item.get("labels", {}).get("alertname")
+            for item in observed.json()
+            if isinstance(item, dict)
+        }
+        if "ShopsquireAlertmanagerTest" not in names:
+            print("AlertManager accepted the request but the test alert was not observable")
+            return 1
+        print(f"AlertManager accepted and retained test alert at {alertmanager_url}")
         return 0
     except Exception as exc:
         print(f"Failed to send test alert: {exc}")

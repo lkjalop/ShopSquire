@@ -148,10 +148,14 @@ localRuntimeDependencies:
   enabled: false
   postgresImage: postgres:16-alpine
   redisImage: redis:7-alpine
+  alertmanager:
+    enabled: false
+    image: prom/alertmanager:v0.28.1
   persistence:
     enabled: false
     postgresSize: 5Gi
     redisSize: 2Gi
+    alertmanagerSize: 1Gi
 
 # ── External managed services ──
 externalDatabase:

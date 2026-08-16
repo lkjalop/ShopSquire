@@ -36,12 +36,20 @@ localRuntimeDependencies:
   enabled: true
   postgresImage: postgres:16-alpine
   redisImage: redis:7-alpine
+  alertmanager:
+    enabled: true
+    image: prom/alertmanager:v0.28.1
   persistence:
     enabled: true
     postgresSize: 5Gi
     redisSize: 2Gi
+    alertmanagerSize: 1Gi
 
-envFrom: []
+envFrom:
+  - secretRef:
+      # Created out-of-band by the portfolio pilot deployment script. The
+      # values file contains only the reference; credentials never enter Git.
+      name: shopsquire-pilot-identities
 env:
   APP_ENV: development
   API_PORT: "8080"
@@ -56,6 +64,7 @@ env:
   EXTERNAL_RESEARCH_PROVIDER_BILLING_CLASS: free
   EXTERNAL_RESEARCH_TENANT_ALLOWLIST: portfolio-demo
   METRICS_INTERNAL_ONLY: "1"
+  ALERTMANAGER_URL: http://shopsquire-alertmanager:9093
 
 podSecurityContext:
   runAsNonRoot: true
