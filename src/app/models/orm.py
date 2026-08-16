@@ -126,6 +126,33 @@ class ShoppingCase(Base):
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
+class ProcurementDecisionRunRecord(Base):
+    """Immutable decision evaluation bound to one case revision and evidence time."""
+
+    __tablename__ = "procurement_decision_runs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "run_id", name="uq_procurement_decision_run_tenant"),
+        UniqueConstraint(
+            "tenant_id", "case_id", "idempotency_key",
+            name="uq_procurement_decision_run_idempotency",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    run_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    case_revision: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    knowledge_cutoff: Mapped[str] = mapped_column(TIMESTAMP)
+    evaluation_time: Mapped[str] = mapped_column(TIMESTAMP)
+    status: Mapped[str] = mapped_column(Text)
+    state_hash: Mapped[str] = mapped_column(Text)
+    payload_hash: Mapped[str] = mapped_column(Text)
+    payload_json: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[str] = mapped_column(TIMESTAMP)
+
+
 class RequirementProposal(Base):
     __tablename__ = "requirement_proposals"
     __table_args__ = (

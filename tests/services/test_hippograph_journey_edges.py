@@ -51,6 +51,8 @@ def test_temporal_replay_excludes_future_and_uses_edge_visible_at_cutoff():
     )
     assert july_receipt.projected_edge_ids == ["old"]
     assert july_receipt.future_edge_ids == ["new"]
+    assert july_receipt.not_yet_known_edge_ids == ["new"]
+    assert july_receipt.known_future_edge_ids == []
     assert "avail:old" in july.nodes and "avail:new" not in july.nodes
 
     august = HippoGraph()
@@ -61,6 +63,42 @@ def test_temporal_replay_excludes_future_and_uses_edge_visible_at_cutoff():
     assert august_receipt.inactive_edge_ids == ["old"]
     assert august_receipt.supersession_links == 1
     assert ("evidence:new", "evidence:old") in august.edges
+
+
+def test_known_future_supplier_change_is_available_to_a_future_promise_without_leaking_history():
+    delay = _edge(
+        "delay", "offer:1", "supplier_offer", "option:late", "fulfillment_option",
+        "offers_fulfillment_option", "attested",
+        when="2026-08-16T09:00:00Z",
+        effective_at="2026-08-18T00:00:00Z",
+    )
+
+    current_graph = HippoGraph()
+    current = project_typed_journey_edges(
+        current_graph, [delay], tenant_id="t1",
+        knowledge_cutoff="2026-08-16T12:00:00Z",
+        evaluation_time="2026-08-16T12:00:00Z",
+    )
+    assert current.known_future_edge_ids == ["delay"]
+    assert current.not_yet_known_edge_ids == []
+    assert current.projected_edge_ids == []
+
+    promise_graph = HippoGraph()
+    promise = project_typed_journey_edges(
+        promise_graph, [delay], tenant_id="t1",
+        knowledge_cutoff="2026-08-16T12:00:00Z",
+        evaluation_time="2026-08-20T00:00:00Z",
+    )
+    assert promise.projected_edge_ids == ["delay"]
+
+    historical_graph = HippoGraph()
+    historical = project_typed_journey_edges(
+        historical_graph, [delay], tenant_id="t1",
+        knowledge_cutoff="2026-08-15T00:00:00Z",
+        evaluation_time="2026-08-20T00:00:00Z",
+    )
+    assert historical.not_yet_known_edge_ids == ["delay"]
+    assert historical.projected_edge_ids == []
 
 
 def test_contradictions_are_explicit_and_do_not_delete_either_observation():

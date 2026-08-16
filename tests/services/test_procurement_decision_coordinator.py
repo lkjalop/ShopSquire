@@ -1,0 +1,78 @@
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
+from src.app.models.orm import Base
+from src.app.services.procurement_case_state import ProcurementCaseState
+from src.app.services.procurement_decision_coordinator import (
+    invalidations_for_changed_paths, record_procurement_decision_run,
+)
+from src.app.services.procurement_decision_run import load_decision_runs
+from src.app.services.recommendation_core.envelope import CoreResponse, StageResult, TurnEnvelope
+
+
+def _db():
+    engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    return Session(engine)
+
+
+def test_coordinator_binds_stage_receipts_to_effective_case_revision():
+    db = _db()
+    state = ProcurementCaseState(
+        case_id="case-a", revision=4, objective="fleet",
+        workloads=["engineering"], requested_quantity=20,
+    )
+    envelope = TurnEnvelope.from_suggest_params(
+        query="move five units", uid="buyer", tenant_id="portfolio",
+        trace_id="trace-123", session={"procurement_case_state": state.model_dump(mode="json")},
+    )
+    response = CoreResponse(envelope=envelope, lane="PROCUREMENT")
+    response.extras["procurement_case_state"] = state.model_dump(mode="json")
+    response.extras["case_patch_application"] = {"changed_paths": ["destinations"]}
+    response.stage_results = [StageResult(stage="fit", status="ok", latency_ms=2)]
+
+    projection = record_procurement_decision_run(db, envelope=envelope, response=response)
+
+    assert projection["case_revision"] == 4
+    assert projection["commercial_authority_granted"] is False
+    assert projection["stage_receipts"] == [{
+        "stage": "fit", "status": "completed", "dependency_stages": [],
+        "reason_code": None,
+    }]
+    assert projection["invalidations"][0]["changed_path"] == "destinations"
+    stored = load_decision_runs(db, tenant_id="portfolio", case_id="case-a")
+    assert stored[0].stage_receipts[0].stage == "fit"
+    assert stored[0].invalidations[0].invalidated_stages == (
+        "commercial", "fulfilment", "response",
+    )
+
+
+def test_invalidation_is_dependency_based_not_place_name_based():
+    rows = invalidations_for_changed_paths(["destinations", "requested_quantity", "objective"])
+    assert rows[0].changed_path == "destinations"
+    assert "fit" not in rows[0].invalidated_stages
+    assert "fit" in rows[2].invalidated_stages
+
+
+def test_unresolved_and_skipped_legacy_stages_never_project_as_completed():
+    db = _db()
+    state = ProcurementCaseState(case_id="case-b", revision=1, objective="novel workload")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="help", uid="buyer", tenant_id="portfolio", trace_id="trace-truth",
+        session={"procurement_case_state": state.model_dump(mode="json")},
+    )
+    response = CoreResponse(envelope=envelope, lane="CLARIFY")
+    response.stage_results = [
+        StageResult(stage="interpretation", status="clarify", latency_ms=1),
+        StageResult(stage="fit", status="skipped", latency_ms=0),
+    ]
+
+    projection = record_procurement_decision_run(db, envelope=envelope, response=response)
+
+    assert [row["status"] for row in projection["stage_receipts"]] == [
+        "degraded", "not_run",
+    ]
+    assert [row["reason_code"] for row in projection["stage_receipts"]] == [
+        "legacy_stage_clarify", "legacy_stage_skipped",
+    ]

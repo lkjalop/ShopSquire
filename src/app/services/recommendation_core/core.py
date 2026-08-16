@@ -232,6 +232,10 @@ def recommend_turn(db, envelope: TurnEnvelope, *, llm_fn: Optional[LLMFn] = None
         total_ms=(time.perf_counter() - started) * 1000.0,
         router_metrics=router_metrics,
     )
+    from src.app.services.procurement_decision_coordinator import (
+        record_procurement_decision_run_safely,
+    )
+    record_procurement_decision_run_safely(db, envelope=envelope, response=core)
     return core
 
 

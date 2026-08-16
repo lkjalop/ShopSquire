@@ -105,6 +105,9 @@ class TypedJourneyProjectionReceipt(BaseModel):
     as_of: str
     projected_edge_ids: list[str]
     inactive_edge_ids: list[str]
+    known_future_edge_ids: list[str] = Field(default_factory=list)
+    not_yet_known_edge_ids: list[str] = Field(default_factory=list)
+    # Compatibility alias for callers that previously had only one time axis.
     future_edge_ids: list[str]
     contradiction_links: int
     supersession_links: int
@@ -140,10 +143,19 @@ def project_typed_journey_edges(
     *,
     tenant_id: str,
     as_of: str | None = None,
+    knowledge_cutoff: str | None = None,
+    evaluation_time: str | None = None,
 ) -> TypedJourneyProjectionReceipt:
-    """Add tenant-scoped typed edges with bitemporal replay and full lineage."""
+    """Add typed edges using separate knowledge and operational-time cutoffs.
 
-    cutoff = _time(as_of) or datetime.now(timezone.utc)
+    ``as_of`` remains a compatibility shorthand for setting both cutoffs. A
+    known supplier change that becomes effective later is therefore preserved
+    as ``known_future`` instead of being confused with evidence not yet known.
+    """
+
+    default_cutoff = _time(as_of) or datetime.now(timezone.utc)
+    known_at = _time(knowledge_cutoff) or default_cutoff
+    effective_at = _time(evaluation_time) or default_cutoff
     edges = [
         edge if isinstance(edge, TypedJourneyEdge) else TypedJourneyEdge.model_validate(edge)
         for edge in raw_edges
@@ -153,11 +165,14 @@ def project_typed_journey_edges(
     superseded_at_cutoff = {
         edge.supersedes_edge_id
         for edge in scoped
-        if edge.supersedes_edge_id and _time(edge.observed_at) <= cutoff
+        if edge.supersedes_edge_id
+        and _time(edge.observed_at) <= known_at
+        and _time(edge.effective_at) <= effective_at
     }
     projected: list[str] = []
     inactive: list[str] = []
-    future: list[str] = []
+    known_future: list[str] = []
+    not_yet_known: list[str] = []
 
     for edge in scoped:
         observed = _time(edge.observed_at)
@@ -165,10 +180,15 @@ def project_typed_journey_edges(
         valid_to = _time(edge.valid_to)
         evidence_node = f"evidence:{edge.edge_id}"
         _ensure(graph, evidence_node, "evidence", edge.evidence_id)
-        if observed > cutoff or effective > cutoff:
-            future.append(edge.edge_id)
+        if observed > known_at:
+            not_yet_known.append(edge.edge_id)
             continue
-        active = edge.edge_id not in superseded_at_cutoff and not (valid_to and valid_to <= cutoff)
+        if effective > effective_at:
+            known_future.append(edge.edge_id)
+            continue
+        active = edge.edge_id not in superseded_at_cutoff and not (
+            valid_to and valid_to <= effective_at
+        )
         evidence = {
             "edge_id": edge.edge_id,
             "evidence_id": edge.evidence_id,
@@ -201,7 +221,7 @@ def project_typed_journey_edges(
     contradiction_links = 0
     supersession_links = 0
     for edge in scoped:
-        if _time(edge.observed_at) > cutoff:
+        if _time(edge.observed_at) > known_at:
             continue
         current = f"evidence:{edge.edge_id}"
         if edge.supersedes_edge_id and edge.supersedes_edge_id in by_id:
@@ -224,10 +244,12 @@ def project_typed_journey_edges(
             contradiction_links += 1
 
     return TypedJourneyProjectionReceipt(
-        as_of=cutoff.isoformat(),
+        as_of=known_at.isoformat(),
         projected_edge_ids=sorted(projected),
         inactive_edge_ids=sorted(inactive),
-        future_edge_ids=sorted(future),
+        known_future_edge_ids=sorted(known_future),
+        not_yet_known_edge_ids=sorted(not_yet_known),
+        future_edge_ids=sorted(set(known_future + not_yet_known)),
         contradiction_links=contradiction_links,
         supersession_links=supersession_links,
     )
