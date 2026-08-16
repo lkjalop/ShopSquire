@@ -6,11 +6,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_SYNC_DB_ASYNC_HANDLERS = {
-    "accept_requirement_proposal",
-    "resolve_case_evidence_source",
-    "approve_case_publisher_candidate",
-    "research_shopping_case",
+EXPECTED_ISOLATED_HELPERS = {
+    "_accept_requirement_proposal_with_db",
+    "_resolve_case_evidence_source_with_db",
+    "_approve_case_publisher_candidate_with_db",
+    "_research_shopping_case_with_db",
 }
 
 
@@ -26,4 +26,14 @@ def test_async_route_sync_session_debt_cannot_grow():
             for argument in (*node.args.args, *node.args.kwonlyargs)
         )
     }
-    assert found == EXPECTED_SYNC_DB_ASYNC_HANDLERS
+    assert found == EXPECTED_ISOLATED_HELPERS
+
+    public_handlers = {
+        "accept_requirement_proposal",
+        "resolve_case_evidence_source",
+        "approve_case_publisher_candidate",
+        "research_shopping_case",
+    }
+    assert not found.intersection(public_handlers)
+    source = path.read_text(encoding="utf-8")
+    assert "run_isolated_sync_session(request, operation" in source

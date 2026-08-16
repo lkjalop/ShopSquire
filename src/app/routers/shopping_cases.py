@@ -1,7 +1,6 @@
 """Case-scoped buyer requirement review and acceptance API."""
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -9,7 +8,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,6 +36,7 @@ from src.app.services.commerce_feature_readiness import (
 from src.app.services.requirement_claim_reconciliation import reconcile_requirement_claims
 from src.app.services.research_cancellation_registry import DEFAULT_RESEARCH_CANCELLATIONS
 from src.app.services.shopping_case_fast_lane_timing import ShoppingCaseFastLaneTiming
+from src.app.services.bounded_sync_session import run_isolated_sync_session
 
 logger = logging.getLogger("shopsquire.shopping_cases")
 
@@ -591,14 +591,14 @@ def create_manual_requirement_proposal(
     )
 
 
-@router.post("/{case_id}/requirement-proposals/{proposal_id}/accept")
-async def accept_requirement_proposal(
+async def _accept_requirement_proposal_with_db(
     case_id: str,
     proposal_id: str,
     body: AcceptRequirementProposal,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=200),
     x_tenant_id: str | None = Header(default=None),
-    db=Depends(get_db),
+    db=None,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     tenant_id = _tenant(x_tenant_id)
     proposal = db.execute(select(RequirementProposal).where(
@@ -711,7 +711,7 @@ async def accept_requirement_proposal(
             }
         else:
             try:
-                corroboration = await research_shopping_case(
+                corroboration = await _research_shopping_case_with_db(
                     case_id,
                     ResearchShoppingCaseRequest(
                         uid=body.uid, research_plan_id=plan.plan_id,
@@ -723,6 +723,7 @@ async def accept_requirement_proposal(
                     ),
                     x_tenant_id=tenant_id,
                     db=db,
+                    cancellation_requested=cancellation_requested,
                 )
                 result["corroboration"] = corroboration
                 official_claims = list(corroboration.get("research", {}).get("claims", []))
@@ -1056,12 +1057,11 @@ def confirm_fulfillment_cart(
     }
 
 
-@router.post("/{case_id}/evidence-source-resolutions")
-async def resolve_case_evidence_source(
+async def _resolve_case_evidence_source_with_db(
     case_id: str,
     body: ResolveBuyerEvidenceSourceRequest,
     x_tenant_id: str | None = Header(default=None),
-    db=Depends(get_db),
+    db=None,
 ) -> dict[str, Any]:
     """Resolve, and optionally research, one buyer-provided official-source hint.
 
@@ -1160,14 +1160,13 @@ async def resolve_case_evidence_source(
     return result
 
 
-@router.post("/{case_id}/publisher-candidates/{candidate_id}/approve")
-async def approve_case_publisher_candidate(
+async def _approve_case_publisher_candidate_with_db(
     case_id: str,
     candidate_id: str,
     body: ApprovePublisherCandidateRequest,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=200),
     x_tenant_id: str | None = Header(default=None),
-    db=Depends(get_db),
+    db=None,
 ) -> dict[str, Any]:
     """Approve one discovered origin for this case, fetch it, and propose claims for review.
 
@@ -1279,13 +1278,12 @@ def cancel_shopping_case_research(
     return {"status": "accepted" if accepted else "not_running", "execution_id": body.execution_id}
 
 
-@router.post("/{case_id}/research")
-async def research_shopping_case(
+async def _research_shopping_case_with_db(
     case_id: str,
     body: ResearchShoppingCaseRequest,
-    request: Request = None,
     x_tenant_id: str | None = Header(default=None),
-    db=Depends(get_db),
+    db=None,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Run buyer-authorized live research and rerank inside one durable case."""
     tenant_id = _tenant(x_tenant_id)
@@ -1335,28 +1333,12 @@ async def research_shopping_case(
 
     approved_sources = approved_sources_for_plan(plan)
 
-    disconnected = asyncio.Event()
-
-    async def watch_disconnect() -> None:
-        if request is None:
-            return
-        while True:
-            if await request.is_disconnected():
-                disconnected.set()
-                return
-            await asyncio.sleep(0.05)
-
-    disconnect_watcher = asyncio.create_task(watch_disconnect())
-    owner_task = asyncio.current_task()
-    if owner_task is not None:
-        owner_task.add_done_callback(lambda _task: disconnect_watcher.cancel())
-
     def request_cancelled() -> bool:
         if DEFAULT_RESEARCH_CANCELLATIONS.cancelled(
             tenant_id, case_id, body.execution_id,
         ):
             return True
-        return disconnected.is_set()
+        return bool(cancellation_requested and cancellation_requested())
 
     if plan.publisher_status == "unresolved":
         from src.app.services.shopping_case_open_world_research import (
@@ -1416,6 +1398,83 @@ async def research_shopping_case(
         )
     except EnrolledResearchUnavailable as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+async def _run_case_db_boundary(request: Request, operation):
+    try:
+        return await run_isolated_sync_session(request, operation, timeout_s=45.0)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail={
+            "code": "shopping_case_transaction_deadline_exceeded",
+            "message": "The operation exceeded its bounded execution window; late results are not returned.",
+        }) from exc
+
+
+@router.post("/{case_id}/requirement-proposals/{proposal_id}/accept")
+async def accept_requirement_proposal(
+    case_id: str,
+    proposal_id: str,
+    body: AcceptRequirementProposal,
+    request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=200),
+    x_tenant_id: str | None = Header(default=None),
+) -> dict[str, Any]:
+    async def operation(db, cancelled):
+        return await _accept_requirement_proposal_with_db(
+            case_id, proposal_id, body, idempotency_key=idempotency_key,
+            x_tenant_id=x_tenant_id, db=db, cancellation_requested=cancelled,
+        )
+
+    return await _run_case_db_boundary(request, operation)
+
+
+@router.post("/{case_id}/evidence-source-resolutions")
+async def resolve_case_evidence_source(
+    case_id: str,
+    body: ResolveBuyerEvidenceSourceRequest,
+    request: Request,
+    x_tenant_id: str | None = Header(default=None),
+) -> dict[str, Any]:
+    async def operation(db, _cancelled):
+        return await _resolve_case_evidence_source_with_db(
+            case_id, body, x_tenant_id=x_tenant_id, db=db,
+        )
+
+    return await _run_case_db_boundary(request, operation)
+
+
+@router.post("/{case_id}/publisher-candidates/{candidate_id}/approve")
+async def approve_case_publisher_candidate(
+    case_id: str,
+    candidate_id: str,
+    body: ApprovePublisherCandidateRequest,
+    request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=200),
+    x_tenant_id: str | None = Header(default=None),
+) -> dict[str, Any]:
+    async def operation(db, _cancelled):
+        return await _approve_case_publisher_candidate_with_db(
+            case_id, candidate_id, body, idempotency_key=idempotency_key,
+            x_tenant_id=x_tenant_id, db=db,
+        )
+
+    return await _run_case_db_boundary(request, operation)
+
+
+@router.post("/{case_id}/research")
+async def research_shopping_case(
+    case_id: str,
+    body: ResearchShoppingCaseRequest,
+    request: Request,
+    x_tenant_id: str | None = Header(default=None),
+) -> dict[str, Any]:
+    async def operation(db, cancelled):
+        return await _research_shopping_case_with_db(
+            case_id, body, x_tenant_id=x_tenant_id, db=db,
+            cancellation_requested=cancelled,
+        )
+
+    return await _run_case_db_boundary(request, operation)
 
 
 
