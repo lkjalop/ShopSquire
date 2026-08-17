@@ -1,4 +1,7 @@
-from src.app.services.chat_recommendation_dispatch import ChatRecommendationCommand
+from src.app.services.chat_recommendation_dispatch import (
+    ChatRecommendationCommand,
+    normalize_chat_recommendation_result,
+)
 
 
 def test_chat_command_coerces_boundary_values_once():
@@ -24,3 +27,21 @@ def test_chat_command_generates_one_trace_identity_when_absent():
     command = ChatRecommendationCommand.from_params({"query": "laptop", "uid": "b"})
     assert command.trace_id
     assert command.raw_params.get("trace_id") is None
+
+
+def test_dispatch_result_normalization_preserves_authoritative_values():
+    command = ChatRecommendationCommand.from_params({
+        "query": "laptop", "uid": "b", "trace_id": "trace-1",
+        "turn_intent": "research",
+    })
+
+    result = normalize_chat_recommendation_result(
+        {"execution_mode": "v2_served", "trace_id": "authoritative"},
+        command=command,
+    )
+
+    assert result == {
+        "execution_mode": "v2_served",
+        "trace_id": "authoritative",
+        "execution_lane": "RESEARCH",
+    }

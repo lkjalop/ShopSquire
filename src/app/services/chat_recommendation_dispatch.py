@@ -42,6 +42,20 @@ class ChatRecommendationCommand:
         )
 
 
+def normalize_chat_recommendation_result(
+    result: Any,
+    *,
+    command: ChatRecommendationCommand,
+) -> dict[str, Any]:
+    """Project every dispatch lane into one stable, router-safe result shape."""
+    normalized = dict(result) if isinstance(result, dict) else {}
+    normalized.setdefault("trace_id", command.trace_id)
+    if command.observed_lane:
+        normalized.setdefault("execution_lane", command.observed_lane)
+    normalized.setdefault("execution_mode", "recommendation_result")
+    return normalized
+
+
 async def dispatch_chat_recommendation(
     request: Request,
     params: dict[str, Any],
@@ -106,7 +120,7 @@ async def dispatch_chat_recommendation(
             served = dict(facade.payload or {})
             served.setdefault("execution_mode", "v2_served")
             served.setdefault("execution_lane", facade.lane)
-            return served
+            return normalize_chat_recommendation_result(served, command=command)
         if facade.status == "blocked":
             record_recommendation_dispatch(
                 outcome="blocked", lane=facade.lane or command.observed_lane, reason=facade.reason,
@@ -122,10 +136,10 @@ async def dispatch_chat_recommendation(
                 outcome="v2_unavailable", lane=facade.lane or command.observed_lane,
                 reason=facade.reason or facade.status,
             )
-            return v2_only_unavailable_response(
+            return normalize_chat_recommendation_result(v2_only_unavailable_response(
                 status=facade.status, reason=facade.reason, lane=facade.lane,
                 trace_id=command.trace_id,
-            )
+            ), command=command)
         from src.app.services.recommendation_compatibility import serve_v2_compatibility
         try:
             delegated = serve_v2_compatibility(
@@ -145,7 +159,7 @@ async def dispatch_chat_recommendation(
         delegated.setdefault("execution_mode", "v2_compatibility")
         delegated.setdefault("delegation_reason", facade.reason or facade.status)
         delegated.setdefault("execution_lane", facade.lane)
-        return delegated
+        return normalize_chat_recommendation_result(delegated, command=command)
 
     try:
         data = await anyio.to_thread.run_sync(invoke, abandon_on_cancel=True)
@@ -159,4 +173,8 @@ async def dispatch_chat_recommendation(
         return int(exc.status_code), detail if isinstance(detail, dict) else {"detail": detail}
 
 
-__all__ = ["ChatRecommendationCommand", "dispatch_chat_recommendation"]
+__all__ = [
+    "ChatRecommendationCommand",
+    "dispatch_chat_recommendation",
+    "normalize_chat_recommendation_result",
+]

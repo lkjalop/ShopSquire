@@ -4208,16 +4208,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         decision_trace_id,
                         case_state_exc,
                     )
-        _store_chat_message(
-            db,
-            uid=uid,
-            role="assistant",
-            content=str(out.get("assistant_message") or ""),
-            trace_id=decision_trace_id,
-            session_id=session_id,
-            tenant_id=tenant_id,
-            session_epoch=session_epoch,
-        )
     except Exception:
         if persist_conversation:
             logger.warning("chat message persistence failed", exc_info=True)
@@ -4225,16 +4215,22 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             db.rollback()
         except Exception:
             pass
-    try:
-        if not persist_conversation:
-            raise RuntimeError("temporary_chat")
-        _persist_chat_structured_state(
+    if persist_conversation:
+        from src.app.services.chat_persistence import persist_chat_result
+
+        persistence_receipt = persist_chat_result(
+            db,
             redis=redis,
             uid=uid,
             query=q,
             products=products,
             trace_id=decision_trace_id,
             assistant_message=str(out.get("assistant_message") or ""),
+            budget=_extract_budget_bounds(q),
+            brands=_extract_brand_mentions(q),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
             recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
             confirmed_slots=response_confirmed_slots,
             semantic_resolution=(
@@ -4245,12 +4241,14 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 out.get("case_anchor")
                 if isinstance(out.get("case_anchor"), dict) else None
             ),
-            tenant_id=tenant_id,
-            session_epoch=session_epoch,
         )
-    except Exception:
-        if persist_conversation:
-            logger.warning("chat structured-state persistence failed", exc_info=True)
+        if persistence_receipt.errors:
+            logger.warning(
+                "chat result persistence degraded tenant=%s trace=%s errors=%s",
+                tenant_id,
+                decision_trace_id,
+                ",".join(persistence_receipt.errors),
+            )
     return out
 
 

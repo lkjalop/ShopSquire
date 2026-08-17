@@ -2,12 +2,86 @@ from __future__ import annotations
 
 import uuid
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from src.app.services.memory import Memory
+
+
+@dataclass(frozen=True)
+class ChatResultPersistenceReceipt:
+    assistant_message: str
+    structured_state: str
+    errors: tuple[str, ...] = ()
+
+
+def persist_chat_result(
+    db: Any,
+    *,
+    redis: Any,
+    uid: str,
+    query: str,
+    products: list[dict[str, Any]] | None,
+    trace_id: str | None,
+    assistant_message: str,
+    budget: dict[str, int | None],
+    brands: list[str],
+    session_id: str | None = None,
+    tenant_id: str | None = None,
+    session_epoch: str | None = None,
+    recent_messages: list[dict[str, Any]] | None = None,
+    confirmed_slots: dict[str, Any] | None = None,
+    semantic_resolution: dict[str, Any] | None = None,
+    case_anchor: dict[str, Any] | None = None,
+) -> ChatResultPersistenceReceipt:
+    """Persist a completed assistant result through independent optional stores."""
+    errors: list[str] = []
+    message_status = "skipped_empty"
+    structured_status = "not_attempted"
+    try:
+        message_id = store_chat_message(
+            db,
+            uid=uid,
+            role="assistant",
+            content=assistant_message,
+            trace_id=trace_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        )
+        message_status = "persisted" if message_id else "skipped_empty"
+    except Exception as exc:
+        message_status = "failed"
+        errors.append(f"assistant_message:{type(exc).__name__}")
+    try:
+        persist_chat_structured_state(
+            redis=redis,
+            uid=uid,
+            query=query,
+            products=products,
+            trace_id=trace_id,
+            budget=budget,
+            brands=brands,
+            assistant_message=assistant_message,
+            recent_messages=recent_messages,
+            confirmed_slots=confirmed_slots,
+            semantic_resolution=semantic_resolution,
+            case_anchor=case_anchor,
+            tenant_id=tenant_id,
+            session_epoch=session_epoch,
+        )
+        structured_status = "persisted"
+    except Exception as exc:
+        structured_status = "failed"
+        errors.append(f"structured_state:{type(exc).__name__}")
+    return ChatResultPersistenceReceipt(
+        assistant_message=message_status,
+        structured_state=structured_status,
+        errors=tuple(errors),
+    )
 
 
 def store_chat_message(
@@ -145,4 +219,9 @@ def persist_chat_structured_state(
     mem.set_product_memory_bank(uid, bank)
 
 
-__all__ = ["persist_chat_structured_state", "store_chat_message"]
+__all__ = [
+    "ChatResultPersistenceReceipt",
+    "persist_chat_result",
+    "persist_chat_structured_state",
+    "store_chat_message",
+]

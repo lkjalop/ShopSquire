@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from src.app.routers import chat
+from src.app.services import chat_persistence
 
 
 def _engine(tmp_path: Path):
@@ -74,3 +75,50 @@ def test_optional_chat_evidence_uses_an_isolated_transaction(tmp_path):
 def test_chat_router_contains_no_runtime_schema_creation():
     source = Path(chat.__file__).read_text(encoding="utf-8")
     assert "CREATE TABLE" not in source.upper()
+
+
+def test_completed_result_persists_message_and_structured_state(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        chat_persistence,
+        "store_chat_message",
+        lambda *_args, **_kwargs: calls.append("message") or "message-1",
+    )
+    monkeypatch.setattr(
+        chat_persistence,
+        "persist_chat_structured_state",
+        lambda **_kwargs: calls.append("structured"),
+    )
+
+    receipt = chat_persistence.persist_chat_result(
+        object(), redis=object(), uid="buyer", query="query", products=[],
+        trace_id="trace", assistant_message="answer", budget={}, brands=[],
+    )
+
+    assert calls == ["message", "structured"]
+    assert receipt.assistant_message == "persisted"
+    assert receipt.structured_state == "persisted"
+    assert receipt.errors == ()
+
+
+def test_completed_result_reports_each_optional_store_failure(monkeypatch):
+    def fail_message(*_args, **_kwargs):
+        raise RuntimeError("message unavailable")
+
+    def fail_structured(**_kwargs):
+        raise TimeoutError("memory unavailable")
+
+    monkeypatch.setattr(chat_persistence, "store_chat_message", fail_message)
+    monkeypatch.setattr(chat_persistence, "persist_chat_structured_state", fail_structured)
+
+    receipt = chat_persistence.persist_chat_result(
+        object(), redis=object(), uid="buyer", query="query", products=[],
+        trace_id="trace", assistant_message="answer", budget={}, brands=[],
+    )
+
+    assert receipt.assistant_message == "failed"
+    assert receipt.structured_state == "failed"
+    assert receipt.errors == (
+        "assistant_message:RuntimeError",
+        "structured_state:TimeoutError",
+    )
