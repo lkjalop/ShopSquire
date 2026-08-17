@@ -47,13 +47,15 @@ from src.app.routers.billing import router as billing_router
 from src.app.routers.admin_webhooks import router as admin_webhooks_router
 from src.app.routers.admin_chat_tools import router as admin_chat_tools_router
 from src.app.routers.admin_bi import router as admin_bi_router
-from src.app.services.retention import start_retention_loop, stop_retention_loop
 from src.app.models.init_db import ensure_metadata
 from sqlalchemy import text as sql_text
 from src.app.observability.tracing import init_tracer
 from src.app.observability.logging import init_logging, bind_request_id, new_request_id
 from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
+from src.app.bootstrap.business_background_lifecycle import (
+    register_business_background_lifecycle,
+)
 from src.app.bootstrap.admin_access_router_group import register_admin_access_router_group
 from src.app.bootstrap.conversation_router_group import register_conversation_router_group
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
@@ -2293,56 +2295,11 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
-    # Retention cleanup loop (DB TTL enforcement)
-    try:
-        def _start_retention_worker():
-            try:
-                return start_retention_loop(app)
-            except Exception:
-                return None
+    register_business_background_lifecycle(app)
 
-        def _stop_retention_worker():
-            try:
-                stop_retention_loop(app)
-            except Exception:
-                pass
-
-        app.add_event_handler("startup", _start_retention_worker)
-        app.add_event_handler("shutdown", _stop_retention_worker)
-    except Exception:
-        pass
-
-    # Start webhook dispatcher worker for persistent webhook delivery
-    try:
-        from src.app.services.webhook_dispatcher import start_worker, stop_worker
-
-        webhook_worker_enabled = str(os.getenv("WEBHOOK_DISPATCHER_WORKER_ENABLED", "1")).lower() in ("1", "true", "yes")
-        if webhook_worker_enabled:
-            app.add_event_handler("startup", lambda: start_worker(app))
-            app.add_event_handler("shutdown", stop_worker)
-    except Exception:
-        pass
 
     register_security_background_lifecycle(app)
 
-    # Incident SLA monitor (escalation room)
-    try:
-        from src.app.services.incident_sla_scheduler import start_incident_sla_scheduler, stop_incident_sla_scheduler
-
-        app.add_event_handler("startup", lambda: start_incident_sla_scheduler(app))
-        app.add_event_handler("shutdown", lambda: stop_incident_sla_scheduler(app))
-    except Exception:
-        pass
-
-    # Money-P0 M1: payment-attempt reconciliation (transactional-outbox reader) — heals a lost
-    # order↔intent association so a provider charge never orphans.
-    try:
-        from src.app.services.payment_reconcile_scheduler import (
-            start_payment_reconcile_scheduler, stop_payment_reconcile_scheduler)
-        app.add_event_handler("startup", lambda: start_payment_reconcile_scheduler(app))
-        app.add_event_handler("shutdown", lambda: stop_payment_reconcile_scheduler(app))
-    except Exception:
-        pass
 
     async def _on_shutdown() -> None:
         try:
