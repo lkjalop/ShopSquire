@@ -355,6 +355,7 @@ def test_case_only_publisher_approval_fetches_and_proposes_claims_before_rerank(
         "case_origin_critic_accepted"
     )
     assert accepted_payload["cart_mutation"] == "not_authorized"
+    assert accepted_payload["case_revision"] == 2
 
 
 def test_case_only_publisher_policy_rejects_cross_origin_and_forbidden_claims(monkeypatch):

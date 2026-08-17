@@ -6,6 +6,9 @@ import { csrfHeaders } from '../lib/csrf';
 export type ActiveShoppingCase = {
   case_id: string;
   retained_purpose: string;
+  uid?: string;
+  revision?: number;
+  interpretation_job_id?: string;
 };
 
 export type ShoppingCaseResearchState = 'idle' | 'running' | 'completed' | 'failed' | 'timed_out';
@@ -48,6 +51,96 @@ export function useShoppingCaseResearch() {
   const [researchState, setResearchState] = useState<ShoppingCaseResearchState>('idle');
   const controllerRef = useRef<AbortController | null>(null);
   const executionRef = useRef<{ caseId: string; uid: string; executionId: string } | null>(null);
+
+  useEffect(() => {
+    const active = activeShoppingCase;
+    if (!active?.case_id || !active.interpretation_job_id) return undefined;
+    const controller = new AbortController();
+    const traceId = active.case_id.replace(/^sc-/, '');
+    const expectedRevision = Number(active.revision || 1);
+
+    const applyInterpretations = (
+      caseId: string, revision: number, rows: any[], interpretationJob?: Record<string, unknown>,
+    ) => {
+      if (caseId !== active.case_id || revision !== expectedRevision || rows.length === 0) return;
+      setAmbiguityExploration((current) => current?.case_id === active.case_id
+        ? {
+          ...current, interpretations: rows,
+          interpretation_job: interpretationJob || current.interpretation_job,
+        }
+        : current);
+    };
+
+    const applyEvents = (items: any[]) => {
+      for (const event of items) {
+        if (String(event?.event_type || '') !== 'case_interpretation_completed') continue;
+        const payload = event?.payload || {};
+        applyInterpretations(
+          String(payload.case_id || ''), Number(payload.case_revision || 0),
+          Array.isArray(payload.interpretations) ? payload.interpretations : [],
+          {
+            job_id: payload.job_id, case_revision: payload.case_revision,
+            status: 'completed', authority: payload.authority, receipt: payload.receipt,
+          },
+        );
+      }
+    };
+
+    void (async () => {
+      try {
+        // Recover a result completed before this browser connected, then keep
+        // listening for the live transition. Both are revision-gated.
+        const latest = await fetch(apiUrl(
+          `/api/v1/shopping-cases/${encodeURIComponent(active.case_id)}`
+            + `/interpretation-jobs/latest?uid=${encodeURIComponent(active.uid || '')}`,
+        ), {
+          credentials: 'include', signal: controller.signal,
+          headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+        });
+        if (latest.ok) {
+          const job = await safeJson(latest);
+          applyInterpretations(
+            String(job?.case_id || ''), Number(job?.case_revision || 0),
+            Array.isArray(job?.result?.hypotheses) ? job.result.hypotheses : [],
+            job,
+          );
+        }
+        const response = await fetch(apiUrl(
+          `/api/v1/trace/${encodeURIComponent(traceId)}/events/stream`,
+        ), {
+          credentials: 'include', signal: controller.signal,
+          headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+        });
+        if (!response.ok || !response.body) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() || '';
+          for (const frame of frames) {
+            const data = frame.split(/\r?\n/)
+              .filter((line) => line.startsWith('data:'))
+              .map((line) => line.slice(5).trim())
+              .join('\n');
+            if (!data) continue;
+            try {
+              const parsed = JSON.parse(data);
+              applyEvents(Array.isArray(parsed) ? parsed : [parsed]);
+            } catch { /* malformed observer frames have no buyer authority */ }
+          }
+        }
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          // Trace transport is advisory; the deterministic panel remains valid.
+        }
+      }
+    })();
+    return () => controller.abort('shopping_case_changed');
+  }, [activeShoppingCase]);
 
   const cancelResearch = useCallback((reason = 'shopping_case_research_cancelled') => {
     const active = executionRef.current;

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, Optional
 
@@ -271,7 +272,7 @@ def finalize_core_response(
                      "case_obligations": out.get("case_obligations"),
                      "delivery_feasibility": out.get("delivery_feasibility")},
         )
-        persisted = log_decision(
+        audit_payload = dict(
             agent_name="Recommendation_Core",
             input_data={"query": str(query or "")[:1000], "intent": intent_analysis},
             retrieved_context={
@@ -310,7 +311,29 @@ def finalize_core_response(
             actor_id=str(uid or "") or None, actor_role="buyer",
             event_type="recommendation_result",
         )
-        out["_trace_recommendation_persisted"] = bool(persisted)
+        async_audit = str(os.getenv("RECOMMEND_AUDIT_ASYNC", "1") or "1").strip().lower() in {
+            "1", "true", "yes", "on",
+        }
+        if async_audit:
+            from src.app.services.recommendation_audit_outbox import (
+                enqueue_recommendation_audit,
+            )
+
+            queued = enqueue_recommendation_audit(
+                tenant_id=str(tenant_id or "default"), trace_id=trace_id,
+                payload=audit_payload,
+            )
+            # A committed outbox row is the fast lane's persistence boundary.
+            # The worker completes the slower audit projection afterward.
+            out["_trace_recommendation_persisted"] = bool(queued.get("durable"))
+            out["_trace_recommendation_persistence_state"] = queued.get("status")
+            out["_trace_recommendation_outbox_id"] = queued.get("outbox_id")
+        else:
+            persisted = log_decision(**audit_payload)
+            out["_trace_recommendation_persisted"] = bool(persisted)
+            out["_trace_recommendation_persistence_state"] = (
+                "completed" if persisted else "failed"
+            )
     except Exception as exc:
         out["_trace_recommendation_persisted"] = False
         logger.warning("core response trace persistence failed for %s: %s", trace_id, exc)

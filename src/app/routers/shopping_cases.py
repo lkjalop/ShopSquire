@@ -18,6 +18,7 @@ from src.app.models.db import get_db
 from src.app.models.orm import (
     RequirementProposal,
     ShoppingCase,
+    ShoppingCaseInterpretationJob,
     ShoppingCasePublisherCandidate,
 )
 from src.app.services.buyer_requirement_evidence import (
@@ -485,15 +486,6 @@ def create_case_interpretation(
         return Response(status_code=204)
     research_plan_ms = (perf_counter() - stage_started) * 1000.0
 
-    if plan.publisher_status == "unresolved":
-        from src.app.services.open_world_query_proposal import (
-            schedule_open_world_query_proposal,
-        )
-
-        # Advisory query interpretation starts after the deterministic plan is
-        # available and never delays provisional catalog exploration.
-        schedule_open_world_query_proposal(plan)
-
     stage_started = perf_counter()
     trace_id = "case-" + uuid.uuid4().hex[:20]
     case_id = f"sc-{trace_id}"
@@ -503,6 +495,16 @@ def create_case_interpretation(
     )
     db.add(case)
     db.commit()
+    interpretation_job = None
+    if plan.publisher_status == "unresolved":
+        from src.app.services.shopping_case_interpretation_jobs import (
+            schedule_case_interpretation,
+        )
+
+        # Persist the exact case revision before dispatch. The model result is
+        # advisory and arrives through the case trace stream; this request does
+        # not wait for it.
+        interpretation_job = schedule_case_interpretation(db, case=case, plan=plan)
     case_persistence_ms = (perf_counter() - stage_started) * 1000.0
 
     stage_started = perf_counter()
@@ -532,6 +534,7 @@ def create_case_interpretation(
         "decision": "exploration_allowed",
         "cart_authority": "none",
         "provider_accounting": {"external_calls": 0, "paid_calls": 0},
+        "interpretation_job": interpretation_job,
         "research_plan_id": plan.plan_id,
         "ambiguity_objects": [row.model_dump(mode="json") for row in plan.ambiguities],
         "research_obligations": [row.model_dump(mode="json") for row in plan.obligations],
@@ -575,6 +578,7 @@ def create_case_interpretation(
         "ambiguity_exploration": exploration,
         "product_shelves": projection.model_dump(mode="json"),
         "catalog_candidate_set": candidate_set.model_dump(mode="json"),
+        "interpretation_job": interpretation_job,
         "assistant_message": (
             "I created a provisional shopping case from your outcome. The shelves are local "
             "catalog exploration, not verified fit. Answer the one material question or authorize "
@@ -584,6 +588,38 @@ def create_case_interpretation(
         "cart_mutation": "not_authorized",
         "supplier_send": "not_authorized",
     }
+
+
+@router.get("/{case_id}/interpretation-jobs/latest")
+def latest_case_interpretation_job(
+    case_id: str,
+    uid: str = Query(min_length=1, max_length=200),
+    x_tenant_id: str | None = Header(default=None),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Reconnect-safe status for the advisory interpretation phase."""
+
+    tenant_id = _tenant(x_tenant_id)
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id,
+        ShoppingCase.case_id == case_id,
+    )).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail="shopping_case_not_found")
+    if case.uid != uid:
+        raise HTTPException(status_code=403, detail="shopping_case_not_owned")
+    job = db.execute(select(ShoppingCaseInterpretationJob).where(
+        ShoppingCaseInterpretationJob.tenant_id == tenant_id,
+        ShoppingCaseInterpretationJob.case_id == case_id,
+    ).order_by(
+        ShoppingCaseInterpretationJob.case_revision.desc(),
+        ShoppingCaseInterpretationJob.created_at.desc(),
+    )).scalars().first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="interpretation_job_not_found")
+    from src.app.services.shopping_case_interpretation_jobs import project_job
+
+    return project_job(job)
 
 
 @router.post("/{case_id}/requirement-proposals", status_code=201)
@@ -848,6 +884,8 @@ async def _accept_requirement_proposal_with_db(
                 }
     # Ensure the JSON remains serializable before making the state transition durable.
     json.dumps(result, sort_keys=True)
+    case.revision = int(case.revision or 1) + 1
+    result["case_revision"] = case.revision
     proposal.version += 1
     proposal.status = result["status"]
     proposal.acceptance_json = result

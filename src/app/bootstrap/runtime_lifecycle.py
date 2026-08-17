@@ -21,8 +21,21 @@ class RuntimeLifecycle:
         self._app = app
 
         def _start_consumer() -> None:
+            from src.app.services.shopping_case_interpretation_jobs import (
+                recover_pending_case_interpretations,
+                register_interpretation_task_handler,
+            )
+            from src.app.services.recommendation_audit_outbox import (
+                recover_pending_recommendation_audits,
+                register_recommendation_audit_handler,
+            )
             from src.app.workers.task_runner import start_consumer
+
+            register_interpretation_task_handler()
+            register_recommendation_audit_handler()
             start_consumer()
+            recover_pending_case_interpretations()
+            recover_pending_recommendation_audits()
         run_startup_step(
             app, name="task_consumer", criticality="optional", operation=_start_consumer,
         )

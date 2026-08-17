@@ -4,6 +4,7 @@ from src.app.services import recommendation_response_finalizer as finalizer
 
 
 def test_finalizer_freezes_one_trace_and_ordered_sku_identity(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_AUDIT_ASYNC", "0")
     recorded = {}
 
     def fake_trace(**kwargs):

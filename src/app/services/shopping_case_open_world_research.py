@@ -21,7 +21,9 @@ from src.app.services.commerce_feature_readiness import (
 from src.app.services.decision_log import log_trace_event
 from src.app.services.official_source_governance import load_official_source_manifest
 from src.app.services import open_world_research_discovery
-from src.app.services.open_world_query_proposal import consume_open_world_query_proposal
+from src.app.services.shopping_case_interpretation_jobs import (
+    consume_completed_case_interpretation,
+)
 from src.app.services.shopping_case_research_contract import (
     project_research_execution_contract,
 )
@@ -96,10 +98,22 @@ async def execute_open_world_publisher_discovery_async(
     # disconnect-certification observer) can see that execution has started.
     db.commit()
 
-    # Interpretation may have been scheduled when the provisional case was
-    # created. Consent never waits for it: a completed validated proposal is
-    # consumed, otherwise the original deterministic plan executes now.
-    discovery_plan, query_proposal = consume_open_world_query_proposal(plan)
+    # Interpretation was durably scheduled with the provisional case. Consent
+    # never waits: consume only a completed result for the current revision.
+    from sqlalchemy import select
+    from src.app.models.orm import ShoppingCase
+
+    case = db.execute(select(ShoppingCase).where(
+        ShoppingCase.tenant_id == tenant_id,
+        ShoppingCase.case_id == case_id,
+    )).scalar_one()
+    discovery_plan, query_proposal = consume_completed_case_interpretation(
+        db,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        case_revision=int(case.revision or 1),
+        plan=plan,
+    )
     discovery = await open_world_research_discovery.discover_open_world_publishers_async(
         discovery_plan,
         search_url_template=search_url_template,

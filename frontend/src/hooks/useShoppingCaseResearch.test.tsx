@@ -93,4 +93,44 @@ describe('useShoppingCaseResearch', () => {
       expect.stringContaining('/shopping-cases/case-3/publisher-candidates/publisher-1/approve'),
     ]);
   });
+
+  it('applies only revision-matched durable interpretation SSE events', async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          event_type: 'case_interpretation_completed',
+          payload: {
+            case_id: 'sc-case-4', case_revision: 2, job_id: 'sci-4',
+            interpretations: [{ hypothesis_id: 'hyp-improved', label: 'Improved interpretation' }],
+          },
+        })}\n\n`));
+        controller.close();
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true, body }));
+    const { result } = renderHook(() => useShoppingCaseResearch());
+    act(() => {
+      result.current.setAmbiguityExploration({
+        schema_version: 'ambiguity-exploration-v1', case_id: 'sc-case-4',
+        retained_purpose: 'novel workload', status: 'provisional',
+        research_plan_id: 'plan-4',
+        interpretations: [{ hypothesis_id: 'hyp-fast', label: 'Fast interpretation' }],
+        ambiguity_objects: [], shelves: [],
+      } as any);
+      result.current.setActiveShoppingCase({
+        case_id: 'sc-case-4', retained_purpose: 'novel workload', uid: 'buyer-1',
+        revision: 2, interpretation_job_id: 'sci-4',
+      });
+    });
+
+    await waitFor(() => expect(
+      result.current.ambiguityExploration?.interpretations?.[0]?.hypothesis_id,
+    ).toBe('hyp-improved'));
+    expect(result.current.ambiguityExploration?.interpretation_job).toMatchObject({
+      job_id: 'sci-4', case_revision: 2, status: 'completed',
+    });
+  });
 });

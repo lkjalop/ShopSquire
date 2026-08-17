@@ -51,6 +51,7 @@ class ShoppingCaseTruthProjection(BaseModel):
     research_obligations: list[CaseResearchObligation] = Field(min_length=1, max_length=16)
     source_candidate_ids: list[str] = Field(default_factory=list, max_length=16)
     publisher_candidates: list[dict] = Field(default_factory=list, max_length=12)
+    interpretation_job: dict | None = None
     timing_envelope: ShoppingCaseFastLaneTiming | None = None
 
     @model_validator(mode="after")

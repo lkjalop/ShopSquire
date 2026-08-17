@@ -148,6 +148,13 @@ export default function WorkloadResearchTrace({ executionSteps = [], events = []
                 </ul>
               </div>
             )}
+            {provisionalExploration?.interpretation_job?.job_id ? (
+              <div data-testid="trace-interpretation-job" style={{ marginTop: 5, color: '#475569' }}>
+                Interpretation refinement: {words(provisionalExploration.interpretation_job.status)}
+                {' · '}case revision {String(provisionalExploration.interpretation_job.case_revision)}
+                {' · '}authority {words(provisionalExploration.interpretation_job.authority || 'none')}
+              </div>
+            ) : null}
             <div data-testid="provisional-provider-accounting" style={{ marginTop: 7, color: '#475569' }}>
               Execution: {words(provisionalExploration.execution)}
               {' · '}Evidence: {words(provisionalExploration.evidence)}

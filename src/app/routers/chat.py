@@ -3525,18 +3525,6 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
             )
         except Exception as exc:
             logger.debug("open-world research-plan projection skipped: %s", exc)
-    if (
-        _case_research_plan is not None
-        and _case_research_plan.publisher_status == "unresolved"
-    ):
-        try:
-            from src.app.services.open_world_query_proposal import (
-                schedule_open_world_query_proposal,
-            )
-
-            schedule_open_world_query_proposal(_case_research_plan)
-        except Exception as exc:
-            logger.debug("open-world query shadow scheduling skipped: %s", exc)
     if provisional_exploration_needed and not buyer_requirement_claims:
         try:
             from src.app.services.accepted_catalog_projection import project_accepted_catalog
@@ -3642,6 +3630,8 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                         updated_at=now,
                     ))
                     db.commit()
+                active_shopping_case_id = generated_case_id
+                active_shopping_case_purpose = _retained_case_purpose
             if decision_trace_id:
                 log_trace_event(
                     trace_id=decision_trace_id,
@@ -3700,6 +3690,35 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
                 exc_info=True,
             )
 
+    durable_interpretation_job: Dict[str, Any] | None = None
+    if (
+        active_shopping_case_id
+        and _case_research_plan is not None
+        and _case_research_plan.publisher_status == "unresolved"
+    ):
+        try:
+            from sqlalchemy import select as _select
+            from src.app.models.orm import ShoppingCase
+            from src.app.services.shopping_case_interpretation_jobs import (
+                schedule_case_interpretation,
+            )
+
+            durable_case = db.execute(_select(ShoppingCase).where(
+                ShoppingCase.tenant_id == tenant_id,
+                ShoppingCase.case_id == active_shopping_case_id,
+            )).scalar_one()
+            durable_interpretation_job = schedule_case_interpretation(
+                db, case=durable_case, plan=_case_research_plan,
+            )
+            if ambiguity_exploration is not None:
+                ambiguity_exploration["interpretation_job"] = durable_interpretation_job
+        except Exception as exc:
+            logger.warning(
+                "durable open-world interpretation scheduling failed; "
+                "preserving deterministic exploration: %s",
+                repr(exc)[:160],
+            )
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -3714,6 +3733,11 @@ async def _chat_query_impl(request: Request, payload: Dict, redis, db, role: str
         "shopping_case_obligations": case_commercial_obligations,
         "shopping_case_id": active_shopping_case_id or None,
         "shopping_case_retained_purpose": active_shopping_case_purpose or None,
+        "shopping_case_revision": (
+            durable_interpretation_job.get("case_revision")
+            if durable_interpretation_job else None
+        ),
+        "interpretation_job": durable_interpretation_job,
         "needs_disambiguation": False if turn_intent == "POLICY_QUESTION" else bool(
             data.get("needs_disambiguation") or (not products and next_questions)
         ),

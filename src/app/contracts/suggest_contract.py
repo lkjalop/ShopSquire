@@ -75,6 +75,10 @@ KNOWN_FIELDS = frozenset(CORE_FIELDS | {
     "buyer_token", "human_review", "incident_id", "needs_human_review", "status",
     # policy/FAQ + clarify variants
     "availability", "fulfillment_options", "nqe_selection_applied",
+    # Durable fast-lane audit hand-off and provider-neutral inventory source
+    # selection. These are truth receipts, not recommendation authority.
+    "_trace_recommendation_persistence_state", "_trace_recommendation_outbox_id",
+    "inventory_tool_selection_receipt",
     # ── reviewed contract ADDITIONS (V2 recommendation_core, Phase 4) ──
     # grounding_status: taxonomy grounding state (grounded|empty|error) — degradation made
     # visible at the contract level instead of implied (added 2026-07-11 with legacy_adapter)

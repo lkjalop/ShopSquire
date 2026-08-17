@@ -18,6 +18,10 @@ export type AmbiguityExploration = {
   decision: string;
   cart_authority: string;
   provider_accounting: { external_calls: number; paid_calls: number };
+  interpretation_job?: {
+    job_id?: string | null; case_revision?: number; status?: string;
+    authority?: string; receipt?: Record<string, unknown> | null;
+  } | null;
   research_plan_id?: string | null;
   ambiguity_objects?: { ambiguity_id: string }[];
   research_obligations?: {
@@ -251,6 +255,13 @@ export default function AmbiguityExplorationPanel({
           </div>
         ) : null}
         <div data-testid="ambiguity-accounting" style={{ marginTop: 5 }}>
+        {exploration.interpretation_job?.job_id ? (
+          <div data-testid="interpretation-job-receipt">
+            Interpretation refinement: {exploration.interpretation_job.status}
+            {' · '}case revision {exploration.interpretation_job.case_revision}
+            {' · '}authority {exploration.interpretation_job.authority || 'none'}
+          </div>
+        ) : null}
         Execution: {exploration.execution} · Evidence: {exploration.evidence} · Decision: {exploration.decision}
         {' · '}External calls: {exploration.provider_accounting.external_calls}
         {' · '}Paid calls: {exploration.provider_accounting.paid_calls}

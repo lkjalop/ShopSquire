@@ -1811,6 +1811,9 @@ export default function App() {
             setActiveShoppingCase({
               case_id: String(interpretation.ambiguity_exploration.case_id),
               retained_purpose: String(interpretation.ambiguity_exploration.retained_purpose || q),
+              uid,
+              revision: Number(interpretation?.interpretation_job?.case_revision || 1),
+              interpretation_job_id: String(interpretation?.interpretation_job?.job_id || ''),
             });
           }
           if (interpretation?.catalog_boundary?.schema_version === 'catalog-candidate-set-v1') {
@@ -2545,6 +2548,9 @@ export default function App() {
           setActiveShoppingCase({
             case_id: incomingCaseId,
             retained_purpose: String(data.ambiguity_exploration.retained_purpose || ''),
+            uid,
+            revision: Number(data?.interpretation_job?.case_revision || 1),
+            interpretation_job_id: String(data?.interpretation_job?.job_id || ''),
           });
           if (!continuesActiveCase && data?.product_shelves?.schema_version === 'product-shelves-v1') {
             setProductShelves(data.product_shelves as ProductShelfProjection);
@@ -2559,6 +2565,8 @@ export default function App() {
           setActiveShoppingCase({
             case_id: String(data.shopping_case_id),
             retained_purpose: String(data.shopping_case_retained_purpose),
+            uid,
+            revision: Number(data?.shopping_case_revision || 1),
           });
         }
         setTraceEvidence(data.evidence || null);

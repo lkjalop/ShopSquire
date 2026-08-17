@@ -1,6 +1,8 @@
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import TIMESTAMP, JSON, Boolean, Integer, Text, ForeignKey, UniqueConstraint
+from datetime import datetime
 import uuid
+
+from sqlalchemy import TIMESTAMP, JSON, Boolean, Integer, Text, ForeignKey, UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -122,8 +124,59 @@ class ShoppingCase(Base):
     uid: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="active")
     retained_purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class ShoppingCaseInterpretationJob(Base):
+    """Durable, revision-bound advisory interpretation work."""
+
+    __tablename__ = "shopping_case_interpretation_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "case_id", "case_revision", "plan_id",
+            name="uq_case_interpretation_revision_plan",
+        ),
+    )
+
+    job_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    uid: Mapped[str] = mapped_column(Text)
+    case_revision: Mapped[int] = mapped_column(Integer)
+    plan_id: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    input_plan_json: Mapped[dict] = mapped_column(JSON)
+    result_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    receipt_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    task_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class RecommendationAuditOutboxRecord(Base):
+    """Bounded durable hand-off for recommendation decision persistence."""
+
+    __tablename__ = "recommendation_audit_outbox"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "trace_id", name="uq_recommendation_audit_trace"),
+    )
+
+    outbox_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    trace_id: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    payload_json: Mapped[dict] = mapped_column(JSON)
+    task_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
 
 
 class ProcurementDecisionRunRecord(Base):
