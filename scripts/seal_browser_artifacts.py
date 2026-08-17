@@ -23,6 +23,9 @@ def main() -> int:
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--certificate", required=True)
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--git-head", required=True)
+    parser.add_argument("--runtime-profile", required=True)
+    parser.add_argument("--runtime-endpoint")
     args = parser.parse_args()
     root = args.artifact_dir.resolve()
     if not root.is_dir():
@@ -45,6 +48,9 @@ def main() -> int:
         "schema_version": "sealed-browser-certificate-v1",
         "certificate": args.certificate,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "git_head": args.git_head,
+        "runtime_profile": args.runtime_profile,
+        "runtime_endpoint": args.runtime_endpoint,
         "artifact_root": root.name,
         "files": [
             {

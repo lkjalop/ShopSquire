@@ -350,9 +350,12 @@ def select_fulfillment_option(
         created_at=stamp, updated_at=stamp,
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    # Decode while the row is still attached and populated.  Refreshing after
+    # commit made this path vulnerable to test/runtime connection replacement
+    # and needlessly added another database round trip.
+    db.flush()
     selection = _decode(row)
+    db.commit()
     try:
         from src.app.services.hippograph_journey_producers import fulfillment_selection_edges
         from src.app.services.hippograph_journey_store import persist_journey_edges

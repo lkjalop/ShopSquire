@@ -205,7 +205,7 @@ def create_decision_run(
     )
 
 
-def persist_decision_run(db, run: DecisionRun) -> DecisionRun:
+def persist_decision_run(db, run: DecisionRun, *, commit: bool = True) -> DecisionRun:
     """Append one immutable run, returning the prior identical retry if present."""
     snapshot = run.snapshot
     existing = db.execute(select(ProcurementDecisionRunRecord).where(
@@ -241,7 +241,10 @@ def persist_decision_run(db, run: DecisionRun) -> DecisionRun:
         run_id=run.run_id, tenant_id=snapshot.tenant_id, case_id=snapshot.case_id,
         stage_receipts=run.stage_receipts,
     ))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return run
 
 

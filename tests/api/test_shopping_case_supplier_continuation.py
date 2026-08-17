@@ -55,8 +55,8 @@ def client(monkeypatch):
             ), {"id": str(uuid.uuid4()), "product": product_id, "stock": stock})
         conn.execute(text(
             "INSERT INTO shopping_cases "
-            "(id, case_id, tenant_id, uid, status, retained_purpose) "
-            "VALUES (:id, 'sc-supplier-1', 'default', 'buyer-1', 'active', 'same case')"
+            "(id, case_id, tenant_id, uid, status, retained_purpose, revision) "
+            "VALUES (:id, 'sc-supplier-1', 'default', 'buyer-1', 'active', 'same case', 1)"
         ), {"id": str(uuid.uuid4())})
     from src.app.main import create_app
     app = create_app()
@@ -93,6 +93,17 @@ def test_same_case_offer_selection_and_cart_confirmation_are_exactly_once(client
     replay = _select(http)
     assert replay["selection_id"] == selection["selection_id"]
     assert selection["supplier_send"] == "not_performed"
+    assert selection["procurement_decision_run"]["persistence_status"] == "persisted"
+    assert selection["procurement_decision_run"]["commercial_authority_granted"] is False
+    history = http.get(
+        "/api/v1/shopping-cases/sc-supplier-1/decision-runs?uid=buyer-1",
+    )
+    assert history.status_code == 200, history.text
+    assert history.json()["history_count"] == 1
+    assert {row["stage"] for row in history.json()["latest"]["stage_receipts"]} == {
+        "commercial", "fulfilment", "response",
+    }
+    assert history.json()["dependency_edges"]
     substitute = next(row for row in selection["offers"] if row["relationship"] == "compatible_substitute")
 
     rejected = http.post(

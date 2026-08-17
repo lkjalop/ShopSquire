@@ -5,6 +5,20 @@ test.skip(
   'Set RUN_PORTFOLIO_SUPPLIER_CERTIFICATION=1 against the portfolio-demo stack.',
 );
 
+test.beforeEach(async ({ request }) => {
+  const requiredProfile = process.env.CERTIFICATION_RUNTIME_PROFILE;
+  expect(
+    requiredProfile,
+    'configuration failure: set CERTIFICATION_RUNTIME_PROFILE for supplier certification',
+  ).toBeTruthy();
+  const response = await request.get('/health');
+  expect(response.ok(), 'configuration failure: backend readiness endpoint unavailable').toBeTruthy();
+  const readiness = await response.json();
+  expect(readiness.runtime_modes?.profile).toBe(requiredProfile);
+  expect(readiness.runtime_modes?.active?.supplier_transport).toBe('sandbox');
+  expect(readiness.runtime_modes?.active?.supplier_autonomy).toBe('off');
+});
+
 test('high-value bulk request shows governed fulfilment choices and explicit exact confirmation', async ({ page }) => {
   test.setTimeout(150_000);
   const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;

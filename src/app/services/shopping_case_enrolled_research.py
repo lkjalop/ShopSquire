@@ -268,6 +268,27 @@ async def execute_enrolled_official_research(
     }
     case.retained_purpose = plan.retained_purpose
     case.updated_at = datetime.now(timezone.utc)
+    from src.app.services.shopping_case_decision_persistence import (
+        persist_requirement_acceptance_decision,
+    )
+
+    result["procurement_decision_run"] = persist_requirement_acceptance_decision(
+        db,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        case_revision=int(case.revision or 1),
+        retained_purpose=plan.retained_purpose,
+        proposal_id=plan.plan_id,
+        proposal_version=int(case.revision or 1),
+        accepted_claims=[dict(row) for row in research.get("claims") or []],
+        product_shelves=after,
+        corroboration=result,
+        qualification_authority=(
+            "requirements" if outcome == "product_requirements" else "none"
+        ),
+        observed_at=case.updated_at,
+        idempotency_key=f"research:{plan.plan_id}:case-revision:{int(case.revision or 1)}",
+    )
     db.commit()
     log_trace_event(
         trace_id=result["trace_id"],

@@ -1,8 +1,21 @@
 import { expect, test } from '@playwright/test';
 
+test.skip(
+  process.env.RUN_DISTURBANCE_CERTIFICATION !== '1',
+  'Set RUN_DISTURBANCE_CERTIFICATION=1 against a portfolio-certification backend.',
+);
 
 test('real backend seals a topology-neutral side-effect-free disturbance matrix', async ({ request }, testInfo) => {
   const baseUrl = process.env.DISTURBANCE_CERT_BASE_URL || 'http://127.0.0.1:8099';
+  const requiredProfile = process.env.CERTIFICATION_RUNTIME_PROFILE;
+  expect(
+    requiredProfile,
+    'configuration failure: set CERTIFICATION_RUNTIME_PROFILE for disturbance certification',
+  ).toBeTruthy();
+  const readinessResponse = await request.get(`${baseUrl}/health`);
+  expect(readinessResponse.ok(), 'configuration failure: disturbance backend readiness unavailable').toBeTruthy();
+  const readiness = await readinessResponse.json();
+  expect(readiness.runtime_modes?.profile).toBe(requiredProfile);
   const now = '2026-08-17T00:00:00+00:00';
   const kinds = [
     'supplier_delay', 'stock_correction', 'price_change', 'buyer_quantity_change',
@@ -46,7 +59,12 @@ test('real backend seals a topology-neutral side-effect-free disturbance matrix'
   expect(artifact.commercial_authority_granted).toBe(false);
   expect(artifact.artifact_sha256).toMatch(/^[a-f0-9]{64}$/);
   await testInfo.attach('sealed-disturbance-certificate.json', {
-    body: Buffer.from(JSON.stringify(artifact, null, 2)),
+    body: Buffer.from(JSON.stringify({
+      git_head: process.env.CERTIFICATION_GIT_HEAD || 'not_recorded',
+      runtime_profile: requiredProfile,
+      recorded_at: new Date().toISOString(),
+      ...artifact,
+    }, null, 2)),
     contentType: 'application/json',
   });
 });

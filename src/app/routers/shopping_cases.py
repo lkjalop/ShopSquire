@@ -902,9 +902,27 @@ async def _accept_requirement_proposal_with_db(
     )
     proposal.version += 1
     proposal.status = result["status"]
-    proposal.acceptance_json = result
     proposal.acceptance_idempotency_key = idempotency_key
     proposal.updated_at = _now()
+    from src.app.services.shopping_case_decision_persistence import (
+        persist_requirement_acceptance_decision,
+    )
+
+    result["procurement_decision_run"] = persist_requirement_acceptance_decision(
+        db,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        case_revision=case_revision,
+        retained_purpose=case.retained_purpose or "Buyer accepted requirements",
+        proposal_id=proposal_id,
+        proposal_version=proposal.version,
+        accepted_claims=accepted,
+        product_shelves=result["product_shelves"],
+        corroboration=result.get("corroboration"),
+        qualification_authority=result["qualification_authority"],
+        observed_at=proposal.updated_at,
+    )
+    proposal.acceptance_json = result
     db.commit()
     try:
         from src.app.services.hippograph_journey_producers import accepted_requirement_edges
@@ -1018,6 +1036,18 @@ def select_fulfillment_continuation(
     if error:
         raise HTTPException(status_code=409, detail={"code": error})
     assert selected is not None
+    from src.app.services.shopping_case_decision_persistence import (
+        persist_fulfilment_selection_decision,
+    )
+
+    decision_run = persist_fulfilment_selection_decision(
+        db,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        case_revision=int(case.revision or 1),
+        retained_purpose=case.retained_purpose or "Buyer fulfilment decision",
+        selection=selected,
+    )
     try:
         counts: dict[str, int] = {}
         for offer in selected.offers:
@@ -1043,6 +1073,7 @@ def select_fulfillment_continuation(
         pass
     return {
         **selected.model_dump(mode="json"),
+        "procurement_decision_run": decision_run,
         "supplier_send": "not_performed",
         "rfq_status": "deterministic_fixture_response_only",
         "cart_mutation": "not_authorized",

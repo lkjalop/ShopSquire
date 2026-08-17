@@ -867,6 +867,22 @@ def test_same_case_corroboration_reconciles_every_buyer_claim_without_promotion(
     assert payload["product_shelves"][
         "buyer_claim_reconciliation_status_counts"
     ] == payload["buyer_claim_reconciliation_status_counts"]
+    assert payload["procurement_decision_run"]["persistence_status"] == "persisted"
+    assert payload["procurement_decision_run"]["case_revision"] == payload["case_revision"]
+    assert payload["procurement_decision_run"]["stage_count"] >= 6
+
+    decision_history = client.get(
+        f"/api/v1/shopping-cases/{case_id}/decision-runs?uid=buyer-reconciliation",
+    )
+    assert decision_history.status_code == 200, decision_history.text
+    history = decision_history.json()
+    # Research is recorded at the original revision, then buyer acceptance is
+    # a second immutable run at the superseding material revision.
+    assert history["history_count"] == 2
+    assert history["latest"]["case_revision"] == payload["case_revision"]
+    assert history["latest"]["evidence_watermarks"]
+    assert history["dependency_edges"]
+    assert history["latest"]["commercial_authority_granted"] is False
 
 
 def test_research_scope_cannot_be_changed_by_the_browser(monkeypatch):
