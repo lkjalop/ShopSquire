@@ -33,6 +33,7 @@ import LoginModal from './components/LoginModal';
 const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 import { productShortLabel } from './lib/productDisplay';
 import { csrfHeaders } from './lib/csrf';
+import { postShoppingCaseAction, shoppingCaseActionPath } from './lib/shoppingCaseActions';
 import { detectPII } from './lib/pii';
 import StorefrontTrustBanner, {
   trustEvidenceFromPayload,
@@ -1771,30 +1772,23 @@ export default function App() {
         && !hasImages
         && !complaintIntent
       ) {
-        const interpretationResponse = await fetch(apiUrl('/api/v1/shopping-cases/interpretations'), {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
-            ...csrfHeaders(),
-          },
-          body: JSON.stringify({
+        const interpretationAction = await postShoppingCaseAction(
+          shoppingCaseActionPath.interpretation(), {
             uid,
             retained_purpose: q,
             // The current storefront is the pinned laptop category. The backend
             // clamps buyer-named categories against it before exposing any shelf.
             storefront_taxonomy_handle: 'el-6-6',
-          }),
-        });
-        if (interpretationResponse.status !== 204) {
-          const interpretation = await safeJson(interpretationResponse);
-          if (!interpretationResponse.ok || !interpretation) {
+          },
+        );
+        if (interpretationAction.status !== 204) {
+          const interpretation = interpretationAction.payload;
+          if (!interpretationAction.ok || !interpretation) {
             throw new Error(String(
               interpretation?.detail?.message
               || interpretation?.detail?.code
               || interpretation?.detail
-              || `case_interpretation_failed (${interpretationResponse.status})`,
+              || `case_interpretation_failed (${interpretationAction.status})`,
             ));
           }
           if (interpretation?.ambiguity_exploration?.schema_version === 'ambiguity-exploration-v1') {
@@ -3001,19 +2995,11 @@ export default function App() {
       return;
     }
     const sku = item.product.sku;
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/cart-proposals`,
-    ), {
-      method: 'POST', credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
-        ...csrfHeaders(),
-      },
-      body: JSON.stringify({ uid, sku, quantity }),
-    });
-    const payload = await safeJson(response);
-    if (!response.ok) {
+    const action = await postShoppingCaseAction(
+      shoppingCaseActionPath.cartProposal(ambiguityExploration.case_id), { uid, sku, quantity },
+    );
+    const payload = action.payload;
+    if (!action.ok) {
       setMessages((current) => [...current, {
         role: 'assistant',
         content: String(payload?.detail?.message || payload?.detail?.code || payload?.detail || 'Cart proposal failed.'),
@@ -3039,15 +3025,11 @@ export default function App() {
     if (!ambiguityExploration?.case_id) {
       return { text: projection.shelf_summary, renderer: 'deterministic', status: 'no_case', fallback_reason: 'no_case' };
     }
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(ambiguityExploration.case_id)}/narration-preview`,
-    ), {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders() },
-      body: JSON.stringify({ uid, projection }),
-    });
-    const payload = await safeJson(response);
-    if (!response.ok) {
+    const action = await postShoppingCaseAction(
+      shoppingCaseActionPath.narrationPreview(ambiguityExploration.case_id), { uid, projection },
+    );
+    const payload = action.payload;
+    if (!action.ok) {
       return {
         text: projection.shelf_summary, renderer: 'deterministic', status: 'request_failed',
         fallback_reason: apiErrorMessage(payload, 'preview request failed'),
@@ -3058,21 +3040,17 @@ export default function App() {
 
   const assessSupplierContinuation = useCallback(async (deadlineDays: number) => {
     if (!supplierContinuation) return;
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(supplierContinuation.caseId)}/fulfillment-options`,
-    ), {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders() },
-      body: JSON.stringify({
+    const action = await postShoppingCaseAction(
+      shoppingCaseActionPath.fulfilmentOptions(supplierContinuation.caseId), {
         uid, requested_quantity: supplierContinuation.requestedQuantity,
         available_now: supplierContinuation.availableNow ?? 0,
         known_lead_time_days: 8, deadline_days: deadlineDays,
         has_next_best: Boolean(supplierContinuation.substituteSku),
         has_architecture_alternative: true,
-      }),
-    });
-    const payload = await safeJson(response);
-    if (!response.ok) {
+      },
+    );
+    const payload = action.payload;
+    if (!action.ok) {
       setSupplierContinuation((current) => current ? { ...current, error: apiErrorMessage(payload, 'Fulfilment assessment failed.') } : current);
       return;
     }
@@ -3093,25 +3071,18 @@ export default function App() {
     }
     const choice = choiceId === 'next_best_now' ? 'next_best_now' : choiceId;
     setSupplierContinuation((current) => current ? { ...current, status: 'selecting' } : current);
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(supplierContinuation.caseId)}/fulfillment-selections`,
-    ), {
-      method: 'POST', credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json', 'Idempotency-Key': supplierContinuation.selectionKey,
-        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders(),
-      },
-      body: JSON.stringify({
+    const action = await postShoppingCaseAction(
+      shoppingCaseActionPath.fulfilmentSelection(supplierContinuation.caseId), {
         uid, expected_revision: supplierContinuation.revision ?? 0, choice,
         preferred_sku: supplierContinuation.preferredSku,
         substitute_sku: supplierContinuation.substituteSku,
         requested_quantity: supplierContinuation.requestedQuantity,
         available_now: supplierContinuation.availableNow ?? 0,
         deadline_days: supplierContinuation.deadlineDays,
-      }),
-    });
-    const payload = await safeJson(response);
-    if (!response.ok) {
+      }, { idempotencyKey: supplierContinuation.selectionKey },
+    );
+    const payload = action.payload;
+    if (!action.ok) {
       setSupplierContinuation((current) => current ? { ...current, status: 'review', error: apiErrorMessage(payload, 'Supplier fixture failed.') } : current);
       return;
     }
@@ -3125,22 +3096,17 @@ export default function App() {
     if (!supplierContinuation?.selectionId || supplierContinuation.revision == null) return;
     const offer = supplierContinuation.offers?.find((row) => row.offer_id === supplierContinuation.selectedOfferId);
     setSupplierContinuation((current) => current ? { ...current, status: 'confirming' } : current);
-    const response = await fetch(apiUrl(
-      `/api/v1/shopping-cases/${encodeURIComponent(supplierContinuation.caseId)}/fulfillment-selections/${encodeURIComponent(supplierContinuation.selectionId)}/confirm-cart`,
-    ), {
-      method: 'POST', credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json', 'Idempotency-Key': supplierContinuation.confirmationKey,
-        'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''), ...csrfHeaders(),
-      },
-      body: JSON.stringify({
+    const action = await postShoppingCaseAction(
+      shoppingCaseActionPath.confirmFulfilment(
+        supplierContinuation.caseId, supplierContinuation.selectionId,
+      ), {
         uid, expected_revision: supplierContinuation.revision,
         selected_offer_id: supplierContinuation.selectedOfferId || null,
         substitution_authorized: offer?.relationship === 'compatible_substitute',
-      }),
-    });
-    const payload = await safeJson(response);
-    if (!response.ok) {
+      }, { idempotencyKey: supplierContinuation.confirmationKey },
+    );
+    const payload = action.payload;
+    if (!action.ok) {
       setSupplierContinuation((current) => current ? { ...current, status: 'offers', error: apiErrorMessage(payload, 'Cart confirmation failed.') } : current);
       return;
     }
