@@ -29,7 +29,6 @@ import os
 import re as _re
 import threading
 import time
-from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -39,6 +38,9 @@ from src.app.services.recommendation_core.envelope import LANES, TurnEnvelope
 from src.app.services.recommendation_core.evidence import refusal_allowed
 from src.app.services.recommendation_core.fit import DEFAULT_VERTICALS
 from src.app.services.recommendation_core.router_policy_clamp import _LANE_ALIASES
+from src.app.services.recommendation_core.router_prompt import (
+    _instruction_prefix,
+)
 from src.app.services.taxonomy_registry import (classification_nodes_for_skus, get_node,
                                                 primary_sold_node, search_nodes, sells_within,
                                                 sold_nodes)
@@ -167,136 +169,6 @@ def active_router_model() -> str:
 _router_model = active_router_model
 
 
-def _legacy_default_llm_fn(prompt: str, timeout: float) -> str:
-    started = time.monotonic()
-    model = _router_model()
-    metrics: Dict[str, Any] = {
-        "provider": "ollama",
-        "model": model,
-        "model_version": os.getenv("ROUTER_MODEL_VERSION") or model,
-        "prompt_version": "recommend-router-v2",
-        "policy_version": "semantic-authority-v1",
-        "outcome": "error",
-        "queue_ms": 0.0,
-        "wall_ms": 0.0,
-    }
-    _ROUTER_CALL_STATE.metrics = metrics
-    acquired = False
-    try:
-        explicit_enabled = str(os.getenv("ROUTER_MODEL_ENABLED", "")).strip().lower()
-        mock_runtime = str(os.getenv("USE_MOCK_LLM", "")).strip().lower() in {
-            "1", "true", "yes", "on",
-        }
-        enabled = (
-            explicit_enabled in {"1", "true", "yes", "on"}
-            if explicit_enabled else not mock_runtime
-        )
-        if not enabled:
-            metrics["provider"] = "mock" if mock_runtime else "disabled"
-            metrics["outcome"] = "mock_disabled" if mock_runtime else "disabled"
-            return ""
-        metrics["model"] = model
-        queue_started = time.monotonic()
-        contract = router_runtime_contract()
-        acquired = _ROUTER_GATE.acquire(timeout=float(contract["queue_timeout_s"]))
-        metrics["queue_ms"] = round((time.monotonic() - queue_started) * 1000.0, 1)
-        if not acquired:
-            metrics["outcome"] = "queue_timeout"
-            return ""
-        # P1 latency lever: the router emits a compact JSON decision — capping generated tokens cuts
-        # the dominant model time. Configurable so an 8B (better routing quality) can fit the p95 gate
-        # by generating less, rather than dropping to a dumber model. 192 covers the bounded
-        # schema with headroom; sealed replay guards against truncation-induced fallback.
-        try:
-            _num_predict = int(os.getenv("ROUTER_NUM_PREDICT", "320") or 320)
-        except Exception:
-            _num_predict = 320
-        remaining = max(2.0, float(timeout or 20.0) - (metrics["queue_ms"] / 1000.0))
-        from src.app.services.local_model_roles import configured_digest, execute_local_model_role
-
-        digest = configured_digest("ROUTER_MODEL_DIGEST", "OLLAMA_DEFAULT_MODEL_DIGEST")
-        # Characterization tests inject the transport and use a zero digest;
-        # production execution requires an enrolled Ollama artifact digest.
-        if _router_http_post is not _DEFAULT_ROUTER_HTTP_POST:
-            digest = "0" * 64
-
-        def gateway_transport(model_prompt, deployment, request):
-            payload = {
-                "model": model,
-                "prompt": model_prompt,
-                "stream": False,
-                "format": "json",
-                "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-                "options": {"temperature": 0, "num_predict": request.max_output_tokens},
-            }
-            if "qwen3" in model.lower():
-                payload["think"] = False
-            response = _router_http_post(
-                deployment.endpoint,
-                json=payload,
-                timeout=request.timeout_ms / 1_000.0,
-            )
-            data = response.json() or {}
-            metrics.update({
-                "http_status": int(response.status_code),
-                "provider_total_ms": round(float(data.get("total_duration") or 0) / 1_000_000.0, 1),
-                "load_ms": round(float(data.get("load_duration") or 0) / 1_000_000.0, 1),
-                "prompt_eval_ms": round(float(data.get("prompt_eval_duration") or 0) / 1_000_000.0, 1),
-                "decode_ms": round(float(data.get("eval_duration") or 0) / 1_000_000.0, 1),
-                "prompt_tokens": int(data.get("prompt_eval_count") or 0),
-                "output_tokens": int(data.get("eval_count") or 0),
-            })
-            if response.status_code != 200 or data.get("error"):
-                raise RuntimeError("router_model_http_error")
-            return str(data.get("response", "") or "")
-
-        rendered = execute_local_model_role(
-            prompt,
-            role="recommendation_turn_router",
-            purpose="route_buyer_recommendation_turn",
-            prompt_id="recommend-router-v2",
-            model=model,
-            digest=digest,
-            timeout_s=remaining,
-            max_output_tokens=_num_predict,
-            transport=gateway_transport,
-        )
-        metrics["outcome"] = "ok"
-        return rendered
-    except Exception as exc:
-        metrics["outcome"] = "timeout" if "timeout" in type(exc).__name__.lower() else "error"
-        metrics["error_type"] = type(exc).__name__
-        logger.warning("router model call failed: %s model=%s", repr(exc)[:120], _router_model())
-        return ""
-    finally:
-        if acquired:
-            _ROUTER_GATE.release()
-        metrics["wall_ms"] = round((time.monotonic() - started) * 1000.0, 1)
-        metrics["model_execution_ms"] = round(
-            float(metrics.get("load_ms") or 0.0)
-            + float(metrics.get("prompt_eval_ms") or 0.0)
-            + float(metrics.get("decode_ms") or 0.0),
-            1,
-        )
-        provider_total_ms = float(metrics.get("provider_total_ms") or 0.0)
-        metrics["provider_internal_overhead_ms"] = round(max(
-            0.0,
-            provider_total_ms - float(metrics["model_execution_ms"]),
-        ), 1)
-        metrics["transport_overhead_ms"] = round(max(
-            0.0,
-            float(metrics["wall_ms"])
-            - float(metrics.get("queue_ms") or 0.0)
-            - provider_total_ms,
-        ), 1) if provider_total_ms else 0.0
-        # Compatibility aggregate retained for existing telemetry consumers. New consumers
-        # should use the two explicit overhead fields above.
-        metrics["provider_overhead_ms"] = round(
-            float(metrics.get("provider_internal_overhead_ms") or 0.0)
-            + float(metrics.get("transport_overhead_ms") or 0.0),
-            1,
-        )
-        _ROUTER_CALL_STATE.metrics = metrics
 
 
 def _default_llm_fn(prompt: str, timeout: float) -> str:
@@ -1495,105 +1367,6 @@ def _build_prompt_legacy(envelope: TurnEnvelope, cands: List, req_keys: List[str
     )
 
 
-@lru_cache(maxsize=8)
-def _instruction_prefix(req_keys: tuple[str, ...], use_case_keys: tuple[str, ...]) -> str:
-    """Stable prefix first, allowing the model server to reuse its prompt/KV prefix."""
-    from src.app.services.recommendation_core.intent_resolver import audience_context_keys
-    context_keys = tuple(audience_context_keys())
-    workload_keys = tuple(key for key in use_case_keys if key not in context_keys)
-    return (
-        "Route one commerce turn into bounded JSON. The model interprets language; the platform "
-        "validates every category, product, constraint and action.\n"
-        f"LANES: {', '.join(LANES)}. Pick one. POLICY_QUESTION is general payment/delivery/returns "
-        "policy only. For an active procurement, RFQ drafts, supplier channels, requested delivery "
-        "dates, quantities, budgets, MOQ blockers, send status, and keep/change-constraint turns are "
-        "PROCUREMENT (or FILTER for a product-only refinement), not POLICY_QUESTION. Questions such "
-        "as 'which supplier channel would be used?' and 'has the supplier draft been sent?' are "
-        "PROCUREMENT status questions. Requests to pause, retain, resume, or keep a sourcing request "
-        "as a draft are also PROCUREMENT. A price-affordability question by itself ('is $X enough "
-        "for a laptop?') is SEARCH/FILTER, not PROCUREMENT; PROCUREMENT requires a quantity, supplier, "
-        "quote/RFQ, sourcing/reorder action, or an existing procurement case.\n"
-        "Set procurement_context=current_order only when the message concerns the active order, "
-        "sourcing case, supplier interaction, quantity, delivery plan, or RFQ; set general_policy "
-        "for store-wide delivery/returns/payment policy; otherwise none.\n"
-        "EXPLAIN is for why a prior recommendation or 'the first one' fits; COMPARE is for explicit "
-        "side-by-side product comparisons. Do not turn an explanation follow-up into COMPARE.\n"
-        "Pick what the shopper wants to buy, not a mentioned object. A game, application or "
-        "workload maps to the device that runs it. OFF_CATALOG is only for a clearly unsold "
-        "category. Buy/quote/source/do-you-sell requests remain commerce even when no exact "
-        "candidate exists: use OFF_CATALOG. If no candidate handle fits, wanted_category MUST "
-        "name the specific taxonomy-style leaf being requested, include its parent noun when the "
-        "leaf is ambiguous, and name the requested product rather than its parts or accessories. "
-        "Translate coined workload/form-factor wording to the standard category of the complete "
-        "product instead of repeating the shopper's phrase. "
-        "It MUST NOT be null. A non-product "
-        "service/location request uses SEARCH with handle=null, request_scope=service_or_place, "
-        "and confidence=0; lane itself is "
-        "never null. Prefer an [in catalog] sibling only when meaning is otherwise equivalent.\n"
-        f"WORKLOAD_USE_CASE keys: {', '.join(workload_keys)}. Name zero or more in use_cases; "
-        "do not put the buyer's school/audience context there and do not invent hardware "
-        "floors because the platform resolves those from evidence. When a listed bounded variant "
-        "materially describes the PRIMARY workload, return its exact scalar name in "
-        "use_case_variant. It must belong to one selected use case. Use null when uncertain.\n"
-        f"AUDIENCE_CONTEXT keys: {', '.join(context_keys)}. Put explicit buyer context in "
-        "audience_contexts. Context affects explanation/preferences and never weakens workload floors.\n"
-        f"REQUIREMENT keys: {', '.join(req_keys)}. Extract only explicit numeric specs in an "
-        "object mapping key to [operator,number]. Price and item count are not specs.\n"
-        "OPERATIONAL_CONSTRAINTS are not product specs. Put an explicitly requested relative "
-        "delivery window in delivery_window_days. Put an explicit payment preference in "
-        "payment_plan using only full_payment, deposit, balance_after_confirmation, or b2b_terms. "
-        "These are proposals; calendar, provider and policy services authorize them.\n"
-        "WORKLOAD_ENTITIES: copy at most three explicitly named games or software applications "
-        "from the message as {kind: game|software, name: literal title}. Never infer names.\n"
-        "SEMANTIC_PROPOSAL: when unfamiliar or materially ambiguous wording could change whether "
-        "a product is suitable, emit one generic resolution record. Put the exact buyer wording "
-        "in concepts.query_span and concepts.text. You may add an advisory normalized_label, but "
-        "do not invent product facts. Include desired_outcome; zero to five product_category_candidates "
-        "as proposed labels; concepts (text, query_span, normalized_label, status=unresolved|ambiguous, "
-        "material, optional interpretations); zero to five competing workload_hypotheses with a stable "
-        "hypothesis_id, label, evidence_needed, confidence, and authority=proposed. A hypothesis may "
-        "name required_claim_types only from concept_identity, minimum_requirements, "
-        "recommended_requirements, target_requirements, compatibility, certification, and may name "
-        "discriminating_unknown_ids that exist in material_unknowns; and material_unknowns "
-        "classified by resolution_source=research|buyer|either. Hypotheses are alternatives to investigate, "
-        "never accepted facts. Each evidence_question must name resolves_unknown_ids and one or more bounded "
-        "decision_impacts from architecture, capability, affordable_quantity, product_set. Ask buyers only "
-        "about unknowns classified buyer or either; official requirements belong to research. Include only "
-        "questions whose answers could change catalog fit, proposed_action, and confidence. Omit the entire "
-        "object when the request is already specific enough for catalog search.\n"
-        "REFINE: brand=hard-only, prefer_brand=soft, exclude_brand=negation, sort=price_asc, "
-        "price_desc or null. brand_action=keep when brands are unmentioned, set when adding or "
-        "replacing a brand constraint, clear only when the shopper explicitly removes all brand "
-        "constraints. compare_targets contains only specifically named products. When a prior "
-        "product subject exists and the message only changes brand, sort, budget, capability "
-        "filters, or quantity without switching category, use FILTER (or PROCUREMENT for the "
-        "active order). A sort-only continuation is FILTER, not a new SEARCH.\n"
-        "BULK: quantity is unit count; total_budget is whole-order dollars; budget_scope is "
-        "per_unit, total or null. Never reinterpret per-unit as total. budget_cap_mode is hard "
-        "for explicit limits, soft for approximate targets, ambiguous when the wording is unclear.\n"
-        "CASE_PATCHES: propose explicit buyer case facts as typed operations; never rewrite the "
-        "entire prior case. Allowed operations are set, add, remove and move_quantity. Allowed "
-        "paths are objective, workloads, selected_sku, requested_quantity, destinations, "
-        "budget.amount_minor, budget.currency, budget.scope, temporal.original_expression, "
-        "temporal.required_by, temporal.timezone. For a stated multi-location allocation, set "
-        "destinations to rows of {location_ref, quantity, location_kind}. For 'move 5 from Perth "
-        "to Sydney', emit one move_quantity patch with path=destinations, quantity=5, from_ref "
-        "and to_ref; do not repeat unchanged workload, budget, deadline or total. Use amount_minor "
-        "for money. Preserve relative time as temporal.original_expression; only emit required_by "
-        "when the input/session supplies an unambiguous timezone-aware timestamp. These are state "
-        "proposals only and never authorize cart, RFQ, payment or shipment.\n"
-        "For a product request where no [in catalog] candidate fits, lane MUST be OFF_CATALOG. "
-        "Include either its offered unstocked handle or a specific wanted_category; do not emit "
-        "a nodeless SEARCH. SEARCH with no handle is only for a non-product service or place.\n"
-        "Return ONLY one sparse JSON object. Always include lane. Omit optional fields when "
-        "their value would be null, empty, unchanged, or unknown; the platform supplies bounded "
-        "defaults. Allowed optional keys: handle, wanted_category, request_scope, use_cases, "
-        "workload_entities, "
-        "audience_contexts, use_case_variant, requirements, refine, compare_targets, quantity, "
-        "total_budget, budget_scope, budget_cap_mode, subject_action, procurement_context, "
-        "operational_constraints, "
-        "confidence, semantic_proposal, clarification_relation, case_patches. Inside refine, emit only changed keys from brand, prefer_brand, "
-        "exclude_brand, sort, brand_action. Never add prose or keys outside this contract.\n")
 
 
 def _build_prompt(envelope: TurnEnvelope, cands: List, req_keys: List[str],
