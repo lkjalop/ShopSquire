@@ -158,6 +158,13 @@ def _set_path(data: dict[str, Any], path: str, value: Any) -> None:
             cursor[part] = {}
         cursor = cursor[part]
     cursor[parts[-1]] = value
+    # A single destination is the entire order allocation. Keep that invariant
+    # when the buyer amends total quantity; multi-destination cases must use the
+    # explicit move_quantity operation so no location allocation is guessed.
+    if path == "requested_quantity":
+        destinations = data.get("destinations")
+        if isinstance(destinations, list) and len(destinations) == 1:
+            destinations[0]["quantity"] = int(value)
 
 
 def _move_quantity(data: dict[str, Any], patch: CasePatch) -> None:

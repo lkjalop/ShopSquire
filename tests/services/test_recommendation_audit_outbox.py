@@ -9,6 +9,7 @@ from src.app.models.orm import Base, RecommendationAuditOutboxRecord
 from src.app.services.recommendation_audit_outbox import (
     enqueue_recommendation_audit,
     execute_recommendation_audit_job,
+    recommendation_audit_outbox_metrics,
     recover_pending_recommendation_audits,
 )
 
@@ -92,3 +93,26 @@ def test_restart_reclaims_stale_running_audit(monkeypatch):
         record = db.execute(select(RecommendationAuditOutboxRecord)).scalar_one()
     assert record.status == "retry"
     assert record.error_code == "stale_running_reclaimed"
+
+
+def test_terminal_failure_is_dead_lettered_and_visible_to_operator(monkeypatch):
+    engine = _database()
+    monkeypatch.setenv("RECOMMEND_AUDIT_MAX_ATTEMPTS", "1")
+    monkeypatch.setattr(
+        "src.app.workers.task_runner.submit_task", lambda *_args, **_kwargs: "task-audit",
+    )
+    queued = enqueue_recommendation_audit(
+        tenant_id="portfolio", trace_id="trace-dead", payload=_payload("trace-dead"),
+    )
+    monkeypatch.setattr(
+        "src.app.services.decision_log.log_decision",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("storage unavailable")),
+    )
+    execute_recommendation_audit_job({
+        "outbox_id": queued["outbox_id"], "tenant_id": "portfolio",
+    })
+    with Session(engine) as db:
+        health = recommendation_audit_outbox_metrics(db, tenant_id="portfolio")
+    assert health["dead_letter_count"] == 1
+    assert health["health"] == "degraded"
+    assert health["oldest_pending_age_seconds"] == 0.0

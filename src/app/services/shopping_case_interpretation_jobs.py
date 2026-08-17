@@ -8,6 +8,7 @@ revision changed while it was running.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -187,11 +188,39 @@ def execute_case_interpretation_job(payload: dict[str, Any]) -> None:
             job.updated_at = stamp
             db.commit()
             return
+        proposed_json = proposed.model_dump(mode="json")
+        watermark = {
+            "source": f"case_interpretation:{job_id}",
+            "observed_at": stamp.isoformat(),
+            "source_version": plan.plan_id,
+            "content_hash": hashlib.sha256(json.dumps(
+                proposed_json, sort_keys=True, separators=(",", ":"),
+            ).encode()).hexdigest(),
+            "state": "current",
+        }
         job.status = "completed"
-        job.result_plan_json = proposed.model_dump(mode="json")
-        job.receipt_json = receipt
+        job.result_plan_json = proposed_json
+        job.receipt_json = {**receipt, "evidence_watermark": watermark}
         job.completed_at = stamp
         job.updated_at = stamp
+        from src.app.services.decision_dependency_graph import (
+            DecisionDependencyEdge, persist_decision_dependency_edges,
+        )
+
+        stage_ref = f"stage:interpretation:{job_id}"
+        evidence_ref = f"evidence:interpretation:{case_id}@v{expected_revision}"
+        persist_decision_dependency_edges(db, (
+            DecisionDependencyEdge(
+                edge_id=f"dde-{hashlib.sha256(f'{job_id}|produces'.encode()).hexdigest()[:24]}",
+                run_id=f"interpretation-{job_id}", tenant_id=tenant_id, case_id=case_id,
+                source_ref=stage_ref, target_ref=evidence_ref, relation="produced_by",
+            ),
+            DecisionDependencyEdge(
+                edge_id=f"dde-{hashlib.sha256(f'{job_id}|consumed'.encode()).hexdigest()[:24]}",
+                run_id=f"interpretation-{job_id}", tenant_id=tenant_id, case_id=case_id,
+                source_ref=evidence_ref, target_ref="stage:evidence", relation="consumed_by",
+            ),
+        ))
         db.commit()
 
     proposal_authority = str(receipt.get("authority") or "none")
@@ -212,7 +241,7 @@ def execute_case_interpretation_job(payload: dict[str, Any]) -> None:
             "discovery_queries": [
                 row.model_dump(mode="json") for row in proposed.discovery_queries
             ],
-            "receipt": receipt,
+            "receipt": {**receipt, "evidence_watermark": watermark},
             "authority": proposal_authority,
             "qualification_authority": "none",
             "commercial_authority": "none",

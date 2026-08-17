@@ -76,6 +76,7 @@ class StageReceipt(BaseModel):
     input_artifact_refs: tuple[str, ...] = Field(default_factory=tuple, max_length=32)
     output_artifact_refs: tuple[str, ...] = Field(default_factory=tuple, max_length=32)
     dependency_stage_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
+    tool_selection_receipts: tuple[dict[str, Any], ...] = Field(default_factory=tuple, max_length=16)
 
     @model_validator(mode="after")
     def validate_timing_and_output(self) -> "StageReceipt":

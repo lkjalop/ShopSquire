@@ -3,6 +3,8 @@ import json
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+from src.app.models.orm import ShoppingCase
+
 from src.app.services.conversation_case_state import (
     CaseTurn,
     apply_case_amendment,
@@ -117,6 +119,34 @@ def _seed(db: Session, *, tenant: str = "tenant-a", epoch: str = "epoch-1") -> N
         },
         now_iso="2026-08-04T01:00:00+00:00",
     )
+
+
+def test_material_patch_advances_one_revision_across_case_projections() -> None:
+    db = _db()
+    ShoppingCase.__table__.create(db.bind)
+    db.add(ShoppingCase(
+        case_id="case-1", tenant_id="tenant-a", uid="buyer-1",
+        status="active", retained_purpose="fleet", revision=1,
+    ))
+    db.commit()
+    _seed(db)
+
+    result = record_typed_case_patch_set(
+        db, tenant_id="tenant-a", case_id="case-1", session_epoch="epoch-1",
+        subject_ref="buyer-hash", source_message_id="message-quantity",
+        expected_version=1,
+        patches=[{"operation": "set", "path": "requested_quantity", "value": 30}],
+    )
+
+    assert result["version"] == 2
+    assert db.query(ShoppingCase).filter_by(case_id="case-1").one().revision == 2
+    row = db.execute(text(
+        "SELECT version,state_json FROM conversation_case_state WHERE case_id='case-1'"
+    )).one()
+    assert row.version == 2
+    state = json.loads(row.state_json)
+    assert state["procurement_case_state"]["revision"] == 2
+    assert state["procurement_case_state"]["requested_quantity"] == 30
 
 
 def test_status_and_summary_read_case_without_proposing_a_mutation() -> None:

@@ -324,7 +324,7 @@ class _DurableOnlyCache:
         return None
 
 
-def _propagate_case_supersession(
+def propagate_case_supersession(
     db,
     *,
     tenant_id: str,
@@ -539,21 +539,27 @@ def ensure_case_state(
     # procurement-state projection for new multi-turn consumers.
     from src.app.services.procurement_case_state import project_legacy_case_anchor
 
-    typed_anchor = {**state, "case_id": case_id, "revision": 1}
+    from src.app.services.shopping_case_revision import canonical_case_revision
+
+    revision = canonical_case_revision(
+        db, tenant_id=tenant_id, case_id=case_id, fallback=1,
+    )
+    typed_anchor = {**state, "case_id": case_id, "revision": revision}
     state["procurement_case_state"] = project_legacy_case_anchor(typed_anchor).model_dump(mode="json")
     db.execute(
         text(
             "INSERT INTO conversation_case_state "
             "(id,tenant_id,case_id,session_epoch,subject_ref,version,state_json,created_at,updated_at) "
-            "VALUES (:id,:tenant,:case_id,:epoch,:subject,1,:state,:timestamp,:timestamp)"
+            "VALUES (:id,:tenant,:case_id,:epoch,:subject,:revision,:state,:timestamp,:timestamp)"
         ),
         {
             "id": state_id, "tenant": tenant_id, "case_id": case_id, "epoch": session_epoch,
-            "subject": subject_ref, "state": _json(state), "timestamp": timestamp,
+            "subject": subject_ref, "revision": revision,
+            "state": _json(state), "timestamp": timestamp,
         },
     )
     db.commit()
-    return {"case_state_id": state_id, "version": 1, "state": state, "created": True}
+    return {"case_state_id": state_id, "version": revision, "state": state, "created": True}
 
 
 def record_typed_case_patch_set(
@@ -666,28 +672,22 @@ def record_typed_case_patch_set(
             "observed": timestamp, "effective": timestamp, "created": timestamp,
         },
     )
-    changed = db.execute(
-        text(
-            "UPDATE conversation_case_state SET state_json=:state,version=version+1,updated_at=:timestamp "
-            "WHERE id=:id AND version=:expected"
-        ),
-        {
-            "state": _json(state), "timestamp": timestamp, "id": row[0],
-            "expected": expected_version,
-        },
-    ).rowcount
-    if changed != 1:
-        db.rollback()
-        raise ValueError("case_revision_conflict")
-    _propagate_case_supersession(
+    from src.app.services.shopping_case_revision import advance_material_case_revision
+
+    new_version = advance_material_case_revision(
+        db, tenant_id=tenant_id, case_id=case_id,
+        expected_revision=expected_version, reason="typed_case_patch_set",
+        conversation_state_overrides={str(row[0]): state}, now_iso=timestamp,
+    )
+    propagate_case_supersession(
         db, tenant_id=tenant_id, case_id=case_id, amendment_id=amendment_id,
-        trace_id=trace_id, prior_version=version, new_version=version + 1,
+        trace_id=trace_id, prior_version=version, new_version=new_version,
         timestamp=timestamp,
     )
     db.commit()
     return {
         "amendment_id": amendment_id, "status": "accepted", "state_changed": True,
-        "idempotent": False, "version": version + 1,
+        "idempotent": False, "version": new_version,
         "changed_paths": list(result.changed_paths),
         "preserved_paths": list(result.preserved_paths),
         "commerce_authority": False,
@@ -780,23 +780,23 @@ def record_case_turn(
         if prior:
             db.execute(text("UPDATE conversation_case_amendment SET status='superseded' WHERE id=:id"), {"id": prior[0]})
         current[turn.field_name] = turn.proposed_value
-        changed = db.execute(
-            text(
-                "UPDATE conversation_case_state SET state_json=:state,version=version+1,updated_at=:timestamp "
-                "WHERE id=:id"
-            ),
-            {"state": _json(current), "timestamp": timestamp, "id": row[0]},
-        ).rowcount
-        state_changed = changed == 1
+        from src.app.services.shopping_case_revision import advance_material_case_revision
+
+        new_version = advance_material_case_revision(
+            db, tenant_id=tenant_id, case_id=case_id,
+            expected_revision=int(row[2]), reason=turn.dialogue_act,
+            conversation_state_overrides={str(row[0]): current}, now_iso=timestamp,
+        )
+        state_changed = True
         if state_changed:
-            _propagate_case_supersession(
+            propagate_case_supersession(
                 db,
                 tenant_id=tenant_id,
                 case_id=case_id,
                 amendment_id=amendment_id,
                 trace_id=trace_id,
                 prior_version=int(row[2]),
-                new_version=int(row[2]) + 1,
+                new_version=new_version,
                 timestamp=timestamp,
             )
     db.commit()
@@ -836,9 +836,12 @@ def apply_case_amendment(
     timestamp = _now(now_iso)
     state = json.loads(row[4])
     state[row[1]] = json.loads(row[2])
-    db.execute(
-        text("UPDATE conversation_case_state SET state_json=:state,version=version+1,updated_at=:timestamp WHERE id=:id"),
-        {"state": _json(state), "timestamp": timestamp, "id": row[0]},
+    from src.app.services.shopping_case_revision import advance_material_case_revision
+
+    new_version = advance_material_case_revision(
+        db, tenant_id=tenant_id, case_id=case_id,
+        expected_revision=int(row[5]), reason="buyer_confirmed_case_amendment",
+        conversation_state_overrides={str(row[0]): state}, now_iso=timestamp,
     )
     db.execute(
         text(
@@ -850,14 +853,14 @@ def apply_case_amendment(
             "provenance": _json({"kind": "buyer_confirmation", "actor_id": actor_id, "classifier": "bounded_case_turns_v1"}),
         },
     )
-    _propagate_case_supersession(
+    propagate_case_supersession(
         db,
         tenant_id=tenant_id,
         case_id=case_id,
         amendment_id=amendment_id,
         trace_id=row[6],
         prior_version=int(row[5]),
-        new_version=int(row[5]) + 1,
+        new_version=new_version,
         timestamp=timestamp,
     )
     db.commit()

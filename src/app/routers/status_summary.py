@@ -14,8 +14,20 @@ from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
+from src.app.platform.tenant_context import current_tenant_id
+from src.app.services.recommendation_audit_outbox import recommendation_audit_outbox_metrics
 
 router = APIRouter(tags=["status"])
+
+
+@router.get("/api/v1/status/recommendation-audit-outbox")
+def recommendation_audit_status(
+    _role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    with db_session() as session:
+        return recommendation_audit_outbox_metrics(
+            session, tenant_id=str(current_tenant_id() or "default"),
+        )
 
 
 @router.get("/status/summary")

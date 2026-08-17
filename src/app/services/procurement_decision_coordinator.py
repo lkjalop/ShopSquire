@@ -37,11 +37,14 @@ class ProcurementDecisionCoordinator:
         self.envelope = envelope
 
     def evaluate(self, execute: Callable[[], Any]) -> Any:
+        from src.app.services.inventory_source import capture_inventory_tool_receipts
+
         cancellation = getattr(self.envelope, "cancellation", None)
         if cancellation is not None:
             cancellation.raise_if_cancelled()
         started = time.perf_counter()
-        response = execute()
+        with capture_inventory_tool_receipts() as inventory_receipts:
+            response = execute()
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         if cancellation is not None:
             cancellation.raise_if_cancelled()
@@ -60,6 +63,7 @@ class ProcurementDecisionCoordinator:
             "buyer_visible_authority": False,
             "commercial_authority_granted": False,
         }
+        response.extras["inventory_tool_selection_receipts"] = list(inventory_receipts)
         return response
 
     def persist(self, response: Any) -> None:
@@ -132,12 +136,17 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
         evaluation_time = datetime.fromisoformat(
             state.temporal.required_by.replace("Z", "+00:00")
         ).astimezone(timezone.utc)
+    evidence_watermarks = _case_evidence_watermarks(
+        db, tenant_id=envelope.tenant_id, case_id=state.case_id,
+        case_revision=state.revision,
+    )
     snapshot = create_decision_snapshot(
         state, tenant_id=envelope.tenant_id, knowledge_cutoff=now,
         evaluation_time=evaluation_time,
         catalog_snapshot_id=str(response.extras.get("catalog_snapshot_id") or "") or None,
         market_snapshot_id=str(response.extras.get("market_snapshot_id") or "") or None,
         policy_snapshot_id=str(response.extras.get("policy_snapshot_id") or "") or None,
+        evidence_watermarks=evidence_watermarks,
     )
     receipts: list[StageReceipt] = []
     for index, item in enumerate(response.stage_results):
@@ -179,6 +188,22 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
                 or ((receipts[-1].stage_id,) if receipts else ())
             ),
         ))
+    inventory_receipts = tuple(response.extras.get("inventory_tool_selection_receipts") or ())
+    if inventory_receipts:
+        inventory_status = (
+            "completed" if all(row.get("outcome") == "selected" for row in inventory_receipts)
+            else "degraded"
+        )
+        receipts.append(StageReceipt(
+            stage="inventory_source", stage_id="stage-inventory-tool-scope",
+            status=inventory_status, started_at=now.isoformat(), completed_at=now.isoformat(),
+            input_hash=snapshot.state_hash,
+            output_hash=_digest(inventory_receipts) if inventory_status == "completed" else None,
+            reason_code=None if inventory_status == "completed" else "inventory_source_not_selected",
+            input_artifact_refs=("case:constraints",),
+            output_artifact_refs=("inventory:tool-scope-receipt",),
+            tool_selection_receipts=inventory_receipts,
+        ))
     application = response.extras.get("case_patch_application")
     changed = list(application.get("changed_paths") or []) if isinstance(application, dict) else []
     raw_claims = response.extras.get("temporal_claims")
@@ -212,6 +237,8 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
                 "status": item.status,
                 "dependency_stages": list(item.dependency_stages),
                 "reason_code": item.reason_code,
+                **({"tool_selection_receipts": list(item.tool_selection_receipts)}
+                   if item.tool_selection_receipts else {}),
             }
             for item in persisted.stage_receipts
         ],
@@ -228,6 +255,31 @@ def record_procurement_decision_run(db, *, envelope: Any, response: Any) -> dict
     }
     response.extras["procurement_decision_run"] = projection
     return projection
+
+
+def _case_evidence_watermarks(
+    db: Any, *, tenant_id: str, case_id: str, case_revision: int,
+) -> tuple[Any, ...]:
+    """Project completed, same-revision interpretation evidence into a run."""
+
+    from sqlalchemy import select
+
+    from src.app.models.orm import ShoppingCaseInterpretationJob
+    from src.app.services.procurement_decision_run import EvidenceWatermark
+
+    job = db.execute(select(ShoppingCaseInterpretationJob).where(
+        ShoppingCaseInterpretationJob.tenant_id == tenant_id,
+        ShoppingCaseInterpretationJob.case_id == case_id,
+        ShoppingCaseInterpretationJob.case_revision == case_revision,
+        ShoppingCaseInterpretationJob.status == "completed",
+    ).order_by(ShoppingCaseInterpretationJob.completed_at.desc())).scalars().first()
+    if job is None:
+        return ()
+    receipt = dict(job.receipt_json or {})
+    raw = receipt.get("evidence_watermark")
+    if not isinstance(raw, dict):
+        return ()
+    return (EvidenceWatermark.model_validate(raw),)
 
 
 def record_procurement_decision_run_safely(db, *, envelope: Any, response: Any) -> None:

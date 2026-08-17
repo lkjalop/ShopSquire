@@ -3,12 +3,29 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select, update
 
 from src.app.models.orm import RecommendationAuditOutboxRecord
+
+
+_METRIC_LOCK = threading.Lock()
+_CAPACITY_REJECTIONS: dict[str, int] = {}
+
+
+def _record_capacity_rejection(tenant_id: str) -> None:
+    with _METRIC_LOCK:
+        _CAPACITY_REJECTIONS[tenant_id] = _CAPACITY_REJECTIONS.get(tenant_id, 0) + 1
+
+
+def _max_attempts() -> int:
+    try:
+        return max(1, min(int(os.getenv("RECOMMEND_AUDIT_MAX_ATTEMPTS", "3")), 20))
+    except (TypeError, ValueError):
+        return 3
 
 
 TASK_NAME = "recommendation_audit_persist"
@@ -57,6 +74,7 @@ def enqueue_recommendation_audit(
             "queued", "running", "retry", "enqueue_degraded",
         )))).scalar() or 0)
         if pending >= maximum:
+            _record_capacity_rejection(tenant_id)
             return {
                 "outbox_id": None, "status": "capacity_rejected",
                 "task_id": None, "durable": False,
@@ -122,11 +140,20 @@ def execute_recommendation_audit_job(payload: dict[str, Any]) -> None:
             raise RuntimeError("recommendation_decision_not_persisted")
     except Exception as exc:
         with db_session() as db:
+            current = db.execute(select(RecommendationAuditOutboxRecord).where(
+                RecommendationAuditOutboxRecord.outbox_id == outbox_id,
+            )).scalar_one()
+            terminal = int(current.attempts or 0) >= _max_attempts()
             db.execute(update(RecommendationAuditOutboxRecord).where(
                 RecommendationAuditOutboxRecord.outbox_id == outbox_id,
                 RecommendationAuditOutboxRecord.status == "running",
-            ).values(status="retry", error_code=type(exc).__name__, updated_at=_now()))
+            ).values(
+                status="dead_letter" if terminal else "retry",
+                error_code=type(exc).__name__, updated_at=_now(),
+            ))
             db.commit()
+        if terminal:
+            return
         raise
 
     with db_session() as db:
@@ -179,7 +206,49 @@ def register_recommendation_audit_handler() -> None:
     register_handler(TASK_NAME, execute_recommendation_audit_job)
 
 
+def recommendation_audit_outbox_metrics(
+    db, *, tenant_id: str, now: datetime | None = None,
+) -> dict[str, Any]:
+    """Operator projection; absence and terminal failure are never collapsed."""
+
+    stamp = now or _now()
+    rows = db.execute(select(RecommendationAuditOutboxRecord).where(
+        RecommendationAuditOutboxRecord.tenant_id == tenant_id,
+    )).scalars().all()
+    statuses = {
+        name: sum(1 for row in rows if row.status == name)
+        for name in (
+            "queued", "running", "retry", "enqueue_degraded", "completed", "dead_letter",
+        )
+    }
+    pending = [row for row in rows if row.status in {
+        "queued", "running", "retry", "enqueue_degraded",
+    }]
+    oldest_age = max(
+        (max(0.0, (stamp - row.created_at.replace(
+            tzinfo=row.created_at.tzinfo or timezone.utc,
+        )).total_seconds()) for row in pending),
+        default=0.0,
+    )
+    with _METRIC_LOCK:
+        rejected = int(_CAPACITY_REJECTIONS.get(tenant_id, 0))
+    return {
+        "schema_version": "recommendation-audit-outbox-health-v1",
+        "tenant_id": tenant_id,
+        "status_counts": statuses,
+        "pending_count": len(pending),
+        "oldest_pending_age_seconds": round(oldest_age, 3),
+        "retry_attempt_count": sum(int(row.attempts or 0) for row in rows if row.status == "retry"),
+        "capacity_rejection_count": rejected,
+        "dead_letter_count": statuses["dead_letter"],
+        "health": "degraded" if statuses["dead_letter"] or statuses["enqueue_degraded"] else "healthy",
+        "authority": "operator_observability_only",
+        "observed_at": stamp.isoformat(),
+    }
+
+
 __all__ = [
     "enqueue_recommendation_audit", "execute_recommendation_audit_job",
     "recover_pending_recommendation_audits", "register_recommendation_audit_handler",
+    "recommendation_audit_outbox_metrics",
 ]

@@ -63,6 +63,19 @@ def test_completed_stage_requires_an_output_hash():
         )
 
 
+def test_stage_receipt_preserves_inventory_tool_selection_receipt():
+    now = datetime.now(timezone.utc).isoformat()
+    receipt = StageReceipt(
+        stage="inventory_source", stage_id="stage-inventory", status="completed",
+        started_at=now, completed_at=now, input_hash="a" * 64, output_hash="b" * 64,
+        tool_selection_receipts=({
+            "capability": "inventory_availability", "outcome": "selected",
+            "selected_deployment_ids": ["catalog"],
+        },),
+    )
+    assert receipt.tool_selection_receipts[0]["outcome"] == "selected"
+
+
 def test_decision_run_is_append_only_and_idempotent():
     db = _db()
     now = datetime(2026, 8, 16, tzinfo=timezone.utc)

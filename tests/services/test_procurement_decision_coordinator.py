@@ -165,3 +165,32 @@ def test_shadow_coordinator_reports_overrun_and_checks_cancellation(monkeypatch)
             lambda: calls.append("should-not-run") or response,
         )
     assert calls == []
+
+
+def test_inventory_tool_scope_receipt_is_persisted_as_decision_stage(monkeypatch):
+    from src.app.services.inventory_source import stock_levels
+    from src.app.services import commerce_catalog
+
+    db = _db()
+    state = ProcurementCaseState(case_id="case-inventory", revision=1, objective="fleet")
+    envelope = TurnEnvelope.from_suggest_params(
+        query="what is available", uid="buyer", tenant_id="portfolio",
+        trace_id="trace-inventory",
+        session={"procurement_case_state": state.model_dump(mode="json")},
+    )
+    response = CoreResponse(envelope=envelope, lane="SEARCH")
+    response.extras["procurement_case_state"] = state.model_dump(mode="json")
+    response.stage_results = [StageResult(stage="commercial", status="ok")]
+    monkeypatch.setattr(commerce_catalog, "catalog_enabled", lambda: False)
+
+    def execute():
+        assert stock_levels(["SKU-1"], tenant_id="portfolio", legacy_fn=lambda _: {"SKU-1": 4})["SKU-1"] == 4
+        return response
+
+    coordinator = ProcurementDecisionCoordinator(db, envelope)
+    result = coordinator.evaluate(execute)
+    coordinator.persist(result)
+    stored = load_decision_runs(db, tenant_id="portfolio", case_id="case-inventory")[0]
+    inventory = next(row for row in stored.stage_receipts if row.stage == "inventory_source")
+    assert inventory.tool_selection_receipts[0]["capability"] == "inventory_availability"
+    assert inventory.tool_selection_receipts[0]["outcome"] == "selected"

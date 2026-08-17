@@ -1,0 +1,28 @@
+{
+  "schema_version": "shopping-case-sse-revision-certificate-v1",
+  "observed_at": "2026-08-17T09:23:40.301Z",
+  "execution": "live_playwright_browser",
+  "fixture": false,
+  "case_id": "sc-case-c2e011c1c5ca41f6a916",
+  "trace_id": "case-c2e011c1c5ca41f6a916",
+  "disconnected_after_revision": 1,
+  "reconnected_at_revision": 2,
+  "initial_event_count": 1,
+  "reconnected_event_count": 3,
+  "supersession": {
+    "active_version": 2,
+    "amendment_id": "requirement:rp-c06ed19d9661491e88de0806b9bfb8b7:v2",
+    "authority": "evidence_only",
+    "superseded_version": 1
+  },
+  "invariants": {
+    "stale_interpretation_revision": 1,
+    "cart_mutation": "not_authorized",
+    "supplier_send": "not_authorized"
+  },
+  "seal": {
+    "algorithm": "sha256",
+    "canonical_payload_sha256": "ddf86687327edece84fa3df726f66d00640499814e489c7d8cd0dbef3fcc310e",
+    "review_status": "machine_generated_live_browser_certificate"
+  }
+}

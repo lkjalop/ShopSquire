@@ -24,9 +24,26 @@ export default function DecisionRunTracePanel({ data, status, classNames }: {
           <li key={receipt.stage_id || receipt.stage}>
             {receipt.stage}: {receipt.status}
             {receipt.reason_code ? ` (${receipt.reason_code})` : ''}
+            {(receipt.tool_selection_receipts || []).map((tool: any, index: number) => (
+              <div key={`${receipt.stage}:tool:${index}`}>
+                ToolScope {String(tool.capability || 'capability not recorded')}: {String(tool.outcome || 'not recorded')}
+                {Array.isArray(tool.selected_deployment_ids) && tool.selected_deployment_ids.length > 0
+                  ? ` via ${tool.selected_deployment_ids.join(', ')}` : ''}
+              </div>
+            ))}
           </li>
         ))}
       </ul>
+      {(run.evidence_watermarks || []).length > 0 && (
+        <>
+          <h4>Evidence watermarks</h4>
+          <ul>{run.evidence_watermarks.map((row: any) => (
+            <li key={`${row.source}:${row.source_version || ''}`}>
+              {row.source}: {row.state}; observed <time dateTime={row.observed_at}>{row.observed_at}</time>
+            </li>
+          ))}</ul>
+        </>
+      )}
       {(run.temporal_conflicts || []).length > 0 && (
         <>
           <h4>Unresolved temporal conflicts</h4>

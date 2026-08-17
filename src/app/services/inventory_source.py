@@ -13,10 +13,40 @@ Vertical-blind (sku → count); both sources own their own DB session; injectabl
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from src.app.services.operational_tool_scope import operational_read_receipt
 from src.app.services.tool_capability_selector import ToolCapability
+
+
+_RECEIPT_SINK: ContextVar[list[dict[str, Any]] | None] = ContextVar(
+    "inventory_tool_receipt_sink", default=None,
+)
+
+
+@contextmanager
+def capture_inventory_tool_receipts() -> Iterator[list[dict[str, Any]]]:
+    """Collect request-scoped inventory source receipts without global state."""
+
+    rows: list[dict[str, Any]] = []
+    token = _RECEIPT_SINK.set(rows)
+    try:
+        yield rows
+    finally:
+        _RECEIPT_SINK.reset(token)
+
+
+def _record_receipt(receipt: dict[str, Any]) -> None:
+    sink = _RECEIPT_SINK.get()
+    if sink is not None:
+        identity = (
+            receipt.get("capability"), tuple(receipt.get("selected_deployment_ids") or ()),
+            receipt.get("outcome"),
+        )
+        if all((row.get("capability"), tuple(row.get("selected_deployment_ids") or ()), row.get("outcome")) != identity for row in sink):
+            sink.append(dict(receipt))
 
 
 class InventoryLevels(dict[str, int]):
@@ -75,6 +105,7 @@ def stock_levels(
         enabled=True, freshness_state="unknown", health_status="healthy",
         authority_score=90 if canonical_enabled else 55,
     ).model_dump(mode="json")
+    _record_receipt(receipt)
     if not skus:
         return InventoryLevels({}, receipt=receipt)
     legacy = (legacy_fn or _legacy_levels)(skus) or {}
@@ -111,3 +142,9 @@ def stock_levels_with_receipt(
         "levels": levels,
         "tool_selection_receipt": receipt.model_dump(mode="json"),
     }
+
+
+__all__ = [
+    "InventoryLevels", "capture_inventory_tool_receipts", "stock_levels",
+    "stock_levels_with_receipt",
+]

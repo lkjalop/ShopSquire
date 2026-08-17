@@ -5,7 +5,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from src.app.models.db import set_engine
-from src.app.models.orm import Base, ShoppingCase, ShoppingCaseInterpretationJob
+from src.app.models.orm import (
+    Base, ProcurementDecisionDependencyRecord, ShoppingCase,
+    ShoppingCaseInterpretationJob,
+)
 from src.app.services.case_research_plan import build_case_research_plan
 from src.app.services.shopping_case_interpretation_jobs import (
     consume_completed_case_interpretation,
@@ -76,6 +79,11 @@ def test_interpretation_is_durable_revision_bound_and_reconnectable(monkeypatch)
     assert consumed.plan_id == plan.plan_id
     assert receipt["status"] == "completed_durable"
     assert receipt["authority"] == "discovery_proposal_only"
+    assert receipt["evidence_watermark"]["source"] == f"case_interpretation:{scheduled['job_id']}"
+    assert len(receipt["evidence_watermark"]["content_hash"]) == 64
+    with Session(engine) as db:
+        dependencies = db.execute(select(ProcurementDecisionDependencyRecord)).scalars().all()
+    assert {row.relation for row in dependencies} == {"produced_by", "consumed_by"}
 
 
 def test_late_interpretation_is_superseded_not_applied(monkeypatch):

@@ -884,8 +884,22 @@ async def _accept_requirement_proposal_with_db(
                 }
     # Ensure the JSON remains serializable before making the state transition durable.
     json.dumps(result, sort_keys=True)
-    case.revision = int(case.revision or 1) + 1
-    result["case_revision"] = case.revision
+    from src.app.services.conversation_case_state import propagate_case_supersession
+    from src.app.services.shopping_case_revision import advance_material_case_revision
+
+    prior_case_revision = int(case.revision or 1)
+    case_revision = advance_material_case_revision(
+        db, tenant_id=tenant_id, case_id=case_id,
+        expected_revision=prior_case_revision,
+        reason="buyer_requirement_acceptance", now_iso=_now().isoformat(),
+    )
+    result["case_revision"] = case_revision
+    propagate_case_supersession(
+        db, tenant_id=tenant_id, case_id=case_id,
+        amendment_id=f"requirement:{proposal_id}:v{proposal.version + 1}",
+        trace_id=result["trace_id"], prior_version=prior_case_revision,
+        new_version=case_revision, timestamp=_now().isoformat(),
+    )
     proposal.version += 1
     proposal.status = result["status"]
     proposal.acceptance_json = result
