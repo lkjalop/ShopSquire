@@ -1,6 +1,5 @@
 import os
 import json
-import logging
 import re
 import shutil
 import subprocess
@@ -20,7 +19,6 @@ from contextlib import asynccontextmanager
 from fastapi.responses import ORJSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.app.routers import admin
 from src.app.routers import tickets as tickets_module
 from src.app.routers.auth import router as auth_router
 from src.app.routers.account import router as account_router
@@ -56,6 +54,7 @@ from src.app.observability.tracing import init_tracer
 from src.app.observability.logging import init_logging, bind_request_id, new_request_id
 from src.app.observability.init import instrument_app
 from src.app.bootstrap.core_router_group import register_core_router_group
+from src.app.bootstrap.admin_access_router_group import register_admin_access_router_group
 from src.app.bootstrap.conversation_router_group import register_conversation_router_group
 from src.app.bootstrap.intelligence_router_group import register_intelligence_router_group
 from src.app.bootstrap.operational_router_group import register_operational_router_group
@@ -1882,46 +1881,10 @@ def create_app() -> FastAPI:
             except Exception:
                 ui_router = None
 
-    app.include_router(admin.router)
-    try:
-        from src.app.routers.admin_mfa_routes import router as admin_mfa_router
-        app.include_router(admin_mfa_router)
-    except Exception:
-        pass
-    try:
-        from src.app.routers.admin_api_keys import router as admin_api_keys_router
-        app.include_router(admin_api_keys_router)
-    except Exception:
-        pass
-    try:
-        from src.app.routers.connectors_auth import router as connectors_auth_router
-        app.include_router(connectors_auth_router)
-    except Exception:
-        pass
-    # Connectors admin (JWKS management)
-    try:
-        from src.app.routers.connectors_admin import router as connectors_admin_router
-        app.include_router(connectors_admin_router)
-    except Exception:
-        pass
+    register_admin_access_router_group(app)
     # P2: two fully-built admin routers were never included → their endpoints 404'd. Register them
     # (case cockpit: /api/v1/admin/cases/{id}/cockpit+/tags; decision time-travel: /admin/decisions/asof).
-    try:
-        from src.app.routers.case_cockpit import router as case_cockpit_router
-        app.include_router(case_cockpit_router)
-    except Exception as e:
-        logging.getLogger("shopsquire.startup").exception("failed to include case_cockpit router: %s", e)
-    try:
-        from src.app.routers.decision_time_travel import router as decision_time_travel_router
-        app.include_router(decision_time_travel_router)
-    except Exception as e:
-        logging.getLogger("shopsquire.startup").exception("failed to include decision_time_travel router: %s", e)
     register_core_router_group(app)
-    try:
-        from src.app.routers.authz_audit import router as authz_audit_router
-        app.include_router(authz_audit_router)
-    except Exception as e:
-        logging.getLogger("shopsquire.startup").exception("failed to include authz_audit router: %s", e)
     # CV analysis endpoint (complaints triage)
     try:
         app.include_router(cv_router)
