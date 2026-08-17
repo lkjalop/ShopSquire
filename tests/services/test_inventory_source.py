@@ -14,6 +14,9 @@ def test_flag_off_returns_legacy_only(monkeypatch):
     out = isrc.stock_levels(["GAM-0003", "LAP-021"], legacy_fn=_legacy,
                             canonical_fn=lambda s, t: {"LAP-021": 4})
     assert out["LAP-021"] == 14 and out["GAM-0003"] == 14  # canonical ignored when flag off
+    assert out.tool_selection_receipt["capability"] == "inventory_availability"
+    assert out.tool_selection_receipt["outcome"] == "selected"
+    assert out.tool_selection_receipt["commercial_authority_granted"] is False
 
 
 def test_flag_on_overlays_canonical_per_sku(monkeypatch):

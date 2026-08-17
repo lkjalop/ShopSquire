@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Scatter-gather recommendation pipeline (Sprint R5 foundation).
 
 This module is the TARGET architecture for recommend.py refactoring.
@@ -40,6 +38,8 @@ The legacy monolith remains the authoritative path until parity promotes a mode.
 Usage:
     result = await run_recommend_pipeline(payload, context)
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -145,8 +145,8 @@ async def _scatter_inventory(skus: List[str]) -> Dict[str, int]:
     if not skus:
         return {}
     try:
-        from src.app.services.inventory_query_service import batch_stock_levels
-        return await asyncio.to_thread(batch_stock_levels, skus)
+        from src.app.services.inventory_source import stock_levels
+        return await asyncio.to_thread(stock_levels, skus)
     except Exception as exc:
         logger.debug("scatter_inventory failed: %s", exc)
         return {}

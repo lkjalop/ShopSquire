@@ -319,9 +319,9 @@ def apply_inventory_filter(
 
     if stock_map is None:
         try:
-            from src.app.services.inventory_query_service import batch_stock_levels
+            from src.app.services.inventory_source import stock_levels
             skus = [str(c.get("sku") or "") for c in candidates if c.get("sku")]
-            stock_map = batch_stock_levels(skus) if skus else {}
+            stock_map = stock_levels(skus) if skus else {}
         except Exception:
             stock_map = {}
 

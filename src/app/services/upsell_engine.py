@@ -193,8 +193,8 @@ def get_upsell_candidates(
         return []
 
     try:
-        from src.app.services.inventory_query_service import batch_stock_levels
-        stock_map = batch_stock_levels(all_candidate_skus)
+        from src.app.services.inventory_source import stock_levels
+        stock_map = stock_levels(all_candidate_skus)
     except Exception:
         stock_map = {}
 

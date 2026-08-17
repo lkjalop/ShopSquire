@@ -501,8 +501,9 @@ def finalize_recommendation_response(
     stock_map: Dict[str, int] = {}
     if skus_to_check:
         try:
-            from src.app.services.inventory_query_service import batch_stock_levels
-            stock_map = dict(batch_stock_levels(skus_to_check) or {})
+            from src.app.services.inventory_source import stock_levels
+            inventory_read = stock_levels(skus_to_check)
+            stock_map = dict(inventory_read or {})
         except Exception as exc:
             _log.debug("finalizer: batch_stock_levels unavailable: %s", exc)
             # Fall back to whatever stock/stock_level is already on each result

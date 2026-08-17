@@ -825,8 +825,8 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
         # stamp CURRENT stock per resolved SKU so shortfall is real (canonical batch read; best-effort —
         # an unreadable stock level defaults to 0 → the line sources, never silently drops).
         try:
-            from src.app.services.inventory_query_service import batch_stock_levels
-            stock = batch_stock_levels(
+            from src.app.services.inventory_source import stock_levels
+            stock = stock_levels(
                 [str(line.get("item_ref")) for line in resolved if line.get("item_ref")]
             )
         except Exception:

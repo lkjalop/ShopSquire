@@ -544,48 +544,16 @@ def _get_cart_sku_qty(uid: str, sku: str) -> int:
 
 def _get_stock_level(sku: str) -> int:
     """Return current stock for *sku* joining through products (inventory has no sku column)."""
-    try:
-        from sqlalchemy import text as _text
-        with db_session() as db:
-            row = db.execute(
-                _text(
-                    "SELECT COALESCE(SUM(i.stock), 0) "
-                    "FROM inventory i "
-                    "JOIN products p ON p.id = i.product_id "
-                    "WHERE p.sku = :sku"
-                ),
-                {"sku": str(sku)},
-            ).fetchone()
-            return int(row[0] or 0) if row else 0
-    except Exception:
-        return 0
+    from src.app.services.inventory_source import stock_levels
+
+    return int(stock_levels([sku]).get(sku, 0))
 
 
 def _batch_stock_levels(skus: List[str]) -> Dict[str, int]:
     """Batch variant of _get_stock_level for the PUT stock gate."""
-    if not skus:
-        return {}
-    try:
-        from sqlalchemy import text as _text
-        params = {f"s{i}": s for i, s in enumerate(skus)}
-        placeholders = ", ".join(f":{k}" for k in params)
-        with db_session() as db:
-            rows = db.execute(
-                _text(
-                    f"SELECT p.sku, COALESCE(SUM(i.stock), 0) "
-                    f"FROM products p "
-                    f"LEFT JOIN inventory i ON i.product_id = p.id "
-                    f"WHERE p.sku IN ({placeholders}) "
-                    f"GROUP BY p.sku"
-                ),
-                params,
-            ).fetchall()
-        result = {str(r[0]): int(r[1] or 0) for r in rows}
-        for sku in skus:
-            result.setdefault(sku, 0)
-        return result
-    except Exception:
-        return {sku: 0 for sku in skus}
+    from src.app.services.inventory_source import stock_levels
+
+    return stock_levels(skus)
 
 
 @router.post("/items")

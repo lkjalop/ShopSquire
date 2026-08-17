@@ -13,10 +13,18 @@ Vertical-blind (sku → count); both sources own their own DB session; injectabl
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from src.app.services.operational_tool_scope import operational_read_receipt
 from src.app.services.tool_capability_selector import ToolCapability
+
+
+class InventoryLevels(dict[str, int]):
+    """Mapping-compatible inventory result with its ToolScope receipt."""
+
+    def __init__(self, values: Dict[str, int], *, receipt: dict[str, Any]) -> None:
+        super().__init__(values)
+        self.tool_selection_receipt = receipt
 
 
 def _legacy_levels(skus: List[str]) -> Dict[str, int]:
@@ -50,18 +58,31 @@ def stock_levels(
     tenant_id: str = "default",
     legacy_fn: Optional[Callable[[List[str]], Dict[str, int]]] = None,
     canonical_fn: Optional[Callable[[List[str], str], Dict[str, int]]] = None,
-) -> Dict[str, int]:
+) -> InventoryLevels:
     """{sku: stock_count}. Legacy baseline, with the canonical catalog overlaid per-sku when
     COMMERCE_CATALOG_ENABLED is set. Deps injectable for tests; never raises."""
     skus = [str(s) for s in (skus or []) if str(s).strip()]
-    if not skus:
-        return {}
-    legacy = (legacy_fn or _legacy_levels)(skus) or {}
     from src.app.services import commerce_catalog
-    if not commerce_catalog.catalog_enabled():
+
+    canonical_enabled = commerce_catalog.catalog_enabled()
+    receipt = operational_read_receipt(
+        capability=ToolCapability.INVENTORY_AVAILABILITY,
+        tenant_id=tenant_id,
+        deployment_id=(
+            "commerce_catalog.inventory_level" if canonical_enabled
+            else "legacy_inventory_query"
+        ),
+        enabled=True, freshness_state="unknown", health_status="healthy",
+        authority_score=90 if canonical_enabled else 55,
+    ).model_dump(mode="json")
+    if not skus:
+        return InventoryLevels({}, receipt=receipt)
+    legacy = (legacy_fn or _legacy_levels)(skus) or {}
+    legacy = InventoryLevels(legacy, receipt=receipt)
+    if not canonical_enabled:
         return legacy  # flag off → legacy only (default behaviour unchanged)
     canonical = (canonical_fn or _canonical_levels)(skus, tenant_id) or {}
-    return _overlay(legacy, canonical)
+    return InventoryLevels(_overlay(legacy, canonical), receipt=receipt)
 
 
 def stock_levels_with_receipt(
