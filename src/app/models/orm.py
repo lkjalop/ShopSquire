@@ -330,6 +330,79 @@ class ShoppingCaseOperationalObservationRecord(Base):
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
 
 
+class OperationalConnectorEnrollmentRecord(Base):
+    """Tenant-owned connector policy; credentials remain in a secret store."""
+
+    __tablename__ = "operational_connector_enrollments"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "connector_id", name="uq_operational_connector_tenant"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id: Mapped[str] = mapped_column(Text)
+    connector_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    capability: Mapped[str] = mapped_column(Text)
+    endpoint_origin: Mapped[str] = mapped_column(Text)
+    auth_mode: Mapped[str] = mapped_column(Text)
+    credential_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allowed_schema_versions_json: Mapped[list] = mapped_column(JSON)
+    freshness_sla_seconds: Mapped[int] = mapped_column(Integer)
+    execution_mode: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    reviewed_by: Mapped[str] = mapped_column(Text)
+    reviewed_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+
+
+class OperationalConnectorRunRecord(Base):
+    """Append-only delivery/run receipt; a fixture can never establish live health."""
+
+    __tablename__ = "operational_connector_runs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "run_id", name="uq_operational_connector_run_tenant"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    run_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    connector_id: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    execution_mode: Mapped[str] = mapped_column(Text)
+    source_schema_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivery_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    watermark_after: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normalized_count: Mapped[int] = mapped_column(Integer, default=0)
+    rejected_count: Mapped[int] = mapped_column(Integer, default=0)
+    external_calls: Mapped[int] = mapped_column(Integer, default=0)
+    paid_calls: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    completed_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+
+
+class CommercialOutcomeRecord(Base):
+    """PII-free realized commerce fact joined to an order and decision trace."""
+
+    __tablename__ = "commercial_outcomes"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "outcome_id", name="uq_commercial_outcome_tenant"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    outcome_id: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    order_id: Mapped[str] = mapped_column(Text)
+    trace_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outcome_type: Mapped[str] = mapped_column(Text)
+    amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    line_items_json: Mapped[list] = mapped_column(JSON)
+    source_authority: Mapped[str] = mapped_column(Text)
+    observed_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    effective_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP)
+
+
 class HippographJourneyEdgeRecord(Base):
     """Immutable typed journey evidence used for tenant-scoped temporal replay."""
 

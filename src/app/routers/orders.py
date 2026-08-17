@@ -41,6 +41,24 @@ def _record_post_order_outcome(
             pass
 
 
+def _record_commercial_outcome(db, *, order_id: str, status: str) -> None:
+    """Project a committed order transition into the PII-free outcome ledger."""
+
+    try:
+        from src.app.services.commercial_outcome_ledger import (
+            record_order_transition_outcome,
+        )
+
+        record_order_transition_outcome(db, order_id=order_id, status=status)
+    except Exception as exc:
+        # The canonical order transition has already committed. Emit a typed
+        # partial failure so outcome projection can be replayed without lying
+        # to the buyer or rolling the order back.
+        from src.app.services.safe_stage import record_partial_failure
+
+        record_partial_failure("commercial_outcome_projection", exc, trace_id=order_id)
+
+
 router = APIRouter(prefix="/api/v1/orders", tags=["orders"])
 tracer = get_tracer("orders-router")
 
@@ -289,6 +307,7 @@ def create_order_core(db, *, uid: str, items: list, customer_id: str | None = No
             from src.app.services.safe_stage import record_partial_failure as _rpf
             _rpf("attribution_order", _e_attr, trace_id=req.trace_id)
 
+        _record_commercial_outcome(db, order_id=order_id, status="created")
         summary = {"order_id": order_id, "total_cents": total_cents, "created_at": datetime.utcnow().isoformat()}
         return {"created": True, "order_id": order_id, "total_cents": total_cents, "created_at": summary["created_at"], "status": "created", "customer_id": customer_id}
 
@@ -494,6 +513,7 @@ def cancel_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
             db, order_id=order_id, kind="cancellation", status="cancelled",
             authority="authenticated_order_cancellation",
         )
+        _record_commercial_outcome(db, order_id=order_id, status="cancelled")
         return {"cancelled": True, "order_id": order_id}
 
 
@@ -522,6 +542,7 @@ def return_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
             db, order_id=order_id, kind="return", status="return_requested",
             authority="authenticated_return_request",
         )
+        _record_commercial_outcome(db, order_id=order_id, status="return_requested")
         return {"return_requested": True, "order_id": order_id}
 
 
@@ -561,4 +582,6 @@ def update_status(
                 db, order_id=order_id, kind="return", status="returned",
                 authority="authenticated_order_status_transition",
             )
+        if target in {"paid", "returned"}:
+            _record_commercial_outcome(db, order_id=order_id, status=target)
         return {"updated": True, "order_id": order_id, "status": target}

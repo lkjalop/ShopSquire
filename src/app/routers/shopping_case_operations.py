@@ -6,14 +6,29 @@ from sqlalchemy import select
 
 from src.app.models.db import get_db
 from src.app.models.orm import ShoppingCase
+from src.app.platform.tenant_context import current_tenant_id
 from src.app.security.auth import ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER, require_role
 from src.app.services.shopping_case_operational_observations import (
     OperationalObservationInput,
     record_case_operational_observation,
 )
+from src.app.services.operational_connector_registry import (
+    project_operational_connector_health,
+)
 
 
 router = APIRouter(prefix="/api/v1/shopping-cases", tags=["shopping-case-operations"])
+
+
+@router.get("/operational-connectors/health")
+def operational_connector_health(
+    _role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER, ROLE_MERCHANT])),
+    db=Depends(get_db),
+):
+    """Operator truth: enrollment and observed health are separate facts."""
+
+    tenant_id = str(current_tenant_id() or "default").strip() or "default"
+    return project_operational_connector_health(db, tenant_id=tenant_id)
 
 
 @router.post("/{case_id}/operational-observations", status_code=201)
