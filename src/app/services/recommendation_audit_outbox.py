@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -16,6 +17,7 @@ _METRIC_LOCK = threading.Lock()
 _CAPACITY_REJECTIONS: dict[str, int] = {}
 _CAPACITY_REDIS: Any | None = None
 _CAPACITY_REDIS_INITIALIZED = False
+_CAPACITY_REDIS_RETRY_AFTER = 0.0
 _CAPACITY_METRIC_PREFIX = "shopsquire:recommendation_audit:capacity_rejections:v1"
 
 
@@ -25,10 +27,13 @@ def _capacity_redis_client() -> Any | None:
     Redis provides the cross-worker aggregate. The process counter remains an
     explicitly labelled fallback for local/degraded profiles.
     """
-    global _CAPACITY_REDIS, _CAPACITY_REDIS_INITIALIZED
+    global _CAPACITY_REDIS, _CAPACITY_REDIS_INITIALIZED, _CAPACITY_REDIS_RETRY_AFTER
+    now = time.monotonic()
     with _METRIC_LOCK:
-        if _CAPACITY_REDIS_INITIALIZED:
+        if _CAPACITY_REDIS is not None:
             return _CAPACITY_REDIS
+        if _CAPACITY_REDIS_INITIALIZED and now < _CAPACITY_REDIS_RETRY_AFTER:
+            return None
         _CAPACITY_REDIS_INITIALIZED = True
         try:
             from src.app.services.redis_factory import create_redis_client
@@ -39,7 +44,29 @@ def _capacity_redis_client() -> Any | None:
                 _CAPACITY_REDIS = candidate
         except Exception:
             _CAPACITY_REDIS = None
+        if _CAPACITY_REDIS is None:
+            try:
+                retry_seconds = max(1.0, min(float(os.getenv(
+                    "RECOMMEND_AUDIT_METRIC_REDIS_RETRY_SEC", "30",
+                )), 300.0))
+            except (TypeError, ValueError):
+                retry_seconds = 30.0
+            _CAPACITY_REDIS_RETRY_AFTER = now + retry_seconds
         return _CAPACITY_REDIS
+
+
+def _mark_capacity_redis_failed(redis_client: Any) -> None:
+    global _CAPACITY_REDIS, _CAPACITY_REDIS_RETRY_AFTER
+    with _METRIC_LOCK:
+        if _CAPACITY_REDIS is redis_client:
+            _CAPACITY_REDIS = None
+            try:
+                retry_seconds = max(1.0, min(float(os.getenv(
+                    "RECOMMEND_AUDIT_METRIC_REDIS_RETRY_SEC", "30",
+                )), 300.0))
+            except (TypeError, ValueError):
+                retry_seconds = 30.0
+            _CAPACITY_REDIS_RETRY_AFTER = time.monotonic() + retry_seconds
 
 
 def _capacity_key(tenant_id: str) -> str:
@@ -65,7 +92,7 @@ def _record_capacity_rejection(tenant_id: str) -> None:
         except Exception:
             # The local counter remains truthful for this process. Do not call
             # the aggregate cross-worker value authoritative after Redis fails.
-            pass
+            _mark_capacity_redis_failed(redis_client)
 
 
 def _capacity_rejection_projection(tenant_id: str) -> tuple[int, str]:
@@ -74,7 +101,7 @@ def _capacity_rejection_projection(tenant_id: str) -> tuple[int, str]:
         try:
             return int(redis_client.get(_capacity_key(tenant_id)) or 0), "redis_cross_worker"
         except Exception:
-            pass
+            _mark_capacity_redis_failed(redis_client)
     with _METRIC_LOCK:
         return int(_CAPACITY_REJECTIONS.get(tenant_id, 0)), "process_fallback"
 

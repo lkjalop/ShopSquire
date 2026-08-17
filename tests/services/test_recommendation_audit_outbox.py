@@ -152,3 +152,28 @@ def test_capacity_rejection_labels_process_fallback(monkeypatch):
         health = recommendation_audit_outbox_metrics(db, tenant_id="fallback")
     assert health["capacity_rejection_count"] == 4
     assert health["capacity_rejection_metric_scope"] == "process_fallback"
+
+
+def test_capacity_redis_recovers_after_bounded_retry(monkeypatch):
+    class HealthyRedis:
+        def ping(self):
+            return True
+
+    healthy = HealthyRedis()
+    attempts = iter((None, healthy))
+    clock = {"now": 100.0}
+    monkeypatch.setenv("RECOMMEND_AUDIT_METRIC_REDIS_RETRY_SEC", "5")
+    monkeypatch.setattr(audit_outbox.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        "src.app.services.redis_factory.create_redis_client",
+        lambda **_kwargs: next(attempts),
+    )
+    monkeypatch.setattr(audit_outbox, "_CAPACITY_REDIS", None)
+    monkeypatch.setattr(audit_outbox, "_CAPACITY_REDIS_INITIALIZED", False)
+    monkeypatch.setattr(audit_outbox, "_CAPACITY_REDIS_RETRY_AFTER", 0.0)
+
+    assert audit_outbox._capacity_redis_client() is None
+    clock["now"] = 104.0
+    assert audit_outbox._capacity_redis_client() is None
+    clock["now"] = 105.0
+    assert audit_outbox._capacity_redis_client() is healthy
