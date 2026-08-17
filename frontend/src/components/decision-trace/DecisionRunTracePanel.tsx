@@ -55,6 +55,13 @@ export default function DecisionRunTracePanel({ data, status, classNames }: {
                   {' '}No stock was reserved.
                 </p>
               )}
+              {selectedView.commercial_decision && (
+                <p>
+                  Commercial decision: {selectedView.commercial_decision.status}; quantity{' '}
+                  {selectedView.commercial_decision.quantity_outcome}; budget{' '}
+                  {selectedView.commercial_decision.budget_outcome}.
+                </p>
+              )}
               <ul>{(selectedView.supplier_candidates || []).map((candidate: any, index: number) => (
                 <li key={`${candidate.supplier_reference}:${candidate.offered_sku}:${index}`}>
                   {candidate.supplier_reference}: {candidate.quantity_available ?? 'undisclosed'} × {candidate.offered_sku || 'configuration undisclosed'}; {candidate.response_status}

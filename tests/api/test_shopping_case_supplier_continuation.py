@@ -217,6 +217,13 @@ def test_real_inventory_observation_advances_case_and_selectively_recomputes(cli
         "quantity_outcome": "shortfall",
     }
     assert result["operational_projection"]["allocation"]["status"] == "not_evaluated"
+    assert result["tool_selection_receipt"]["outcome"] == "selected"
+    assert result["tool_selection_receipt"]["capability"] == "inventory_availability"
+    assert result["tool_selection_receipt"]["selected_deployment_ids"] == [
+        "operator_intake:inventory_system"
+    ]
+    assert result["ingestion_mode"] == "operator_submitted_observation"
+    assert result["evidence_watermark"]["source"].startswith("inventory_system:")
     assert result["external_calls"] == result["rfq_calls"] == result["cart_mutations"] == 0
     replay = http.post(
         "/api/v1/shopping-cases/sc-supplier-1/operational-observations",
@@ -231,6 +238,12 @@ def test_real_inventory_observation_advances_case_and_selectively_recomputes(cli
     assert history["history_count"] == 2
     assert history["latest"]["case_revision"] == 3
     assert history["latest"]["invalidations"][0]["changed_path"] == "fulfilment.inventory"
+    assert history["latest"]["evidence_watermarks"][-1][
+        "source_version"
+    ] == payload["observation_id"]
+    assert history["latest"]["stage_receipts"][0]["tool_selection_receipts"][0][
+        "capability"
+    ] == "inventory_availability"
     assert history["views"]["what_changed"]["from_revision"] == 2
     assert history["views"]["what_changed"]["to_revision"] == 3
     assert history["views"]["who_can_fulfil_now"]["available_now"] == 4
@@ -260,6 +273,11 @@ def test_real_inventory_observation_advances_case_and_selectively_recomputes(cli
     ("supplier_lead_time", {"days": 14}, "delivery:observations"),
     ("quote_validity", {"valid_until": "2026-08-31T00:00:00+00:00"}, "supplier:offers"),
     ("supplier_response", {"status": "rejected"}, "supplier:offers"),
+    ("carrier_calendar", {
+        "lane_id": "supplier-lane:fixture-offer",
+        "lead_time_days": 2,
+        "lane_available": True,
+    }, "delivery:observations"),
 ])
 def test_operational_fact_classes_are_append_only_and_non_authoritative(
     client, kind, value, changed_ref,
@@ -276,7 +294,11 @@ def test_operational_fact_classes_are_append_only_and_non_authoritative(
             "subject_ref": "configuration:PREFERRED",
             "location_ref": "facility:eligible",
             "value": value,
-            "source_type": "supplier" if kind.startswith("supplier") else "human_admin",
+            "source_type": (
+                "supplier" if kind.startswith("supplier")
+                else "carrier_system" if kind == "carrier_calendar"
+                else "human_admin"
+            ),
             "evidence_ref": f"operator-ledger:{kind}",
             "known_at": now,
             "effective_at": now,
@@ -293,6 +315,10 @@ def test_operational_fact_classes_are_append_only_and_non_authoritative(
     assert result["recomputed_stages"] == expected_stages
     assert result["recomputation_basis"] == "persisted_dependency_edges"
     assert result["commercial_authority_granted"] is False
+    if kind == "price":
+        assert result["operational_projection"]["price_intelligence"][
+            "history_scope"
+        ] == "tenant_subject_cutoff_safe"
     with engine.connect() as conn:
         stored = conn.execute(text(
             "SELECT kind, value_json FROM shopping_case_operational_observations"

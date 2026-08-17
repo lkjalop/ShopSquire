@@ -24,6 +24,7 @@ from src.app.services.procurement_decision_coordinator import (
     invalidations_for_changed_paths,
 )
 from src.app.services.procurement_decision_run import (
+    EvidenceWatermark,
     StageReceipt,
     create_decision_run,
     create_decision_snapshot,
@@ -33,13 +34,20 @@ from src.app.services.procurement_decision_run import (
 from src.app.services.shopping_case_revision import advance_material_case_revision
 from src.app.services.case_price_intelligence import project_price_baselines
 from src.app.services.shopping_case_allocation_projection import project_case_allocation
+from src.app.services.shopping_case_commercial_projection import (
+    project_case_commercial_decision,
+)
+from src.app.services.operational_tool_scope import operational_read_receipt
+from src.app.services.tool_capability_selector import ToolCapability
 
 
 ObservationKind = Literal[
     "inventory_quantity", "price", "supplier_lead_time",
-    "quote_validity", "supplier_response",
+    "quote_validity", "supplier_response", "carrier_calendar",
 ]
-SourceType = Literal["inventory_system", "price_feed", "supplier", "human_admin"]
+SourceType = Literal[
+    "inventory_system", "price_feed", "supplier", "carrier_system", "human_admin",
+]
 
 _CHANGE = {
     "inventory_quantity": ("fulfilment.inventory", "inventory:current"),
@@ -47,6 +55,16 @@ _CHANGE = {
     "supplier_lead_time": ("fulfilment.supplier_lead_time", "delivery:observations"),
     "quote_validity": ("fulfilment.quote_validity", "supplier:offers"),
     "supplier_response": ("fulfilment.supplier_offer", "supplier:offers"),
+    "carrier_calendar": ("fulfilment.carrier_calendar", "delivery:observations"),
+}
+
+_CAPABILITY = {
+    "inventory_quantity": ToolCapability.INVENTORY_AVAILABILITY,
+    "price": ToolCapability.FORECAST_OBSERVATION_READ,
+    "supplier_lead_time": ToolCapability.SUPPLIER_OFFER_READ,
+    "quote_validity": ToolCapability.SUPPLIER_OFFER_READ,
+    "supplier_response": ToolCapability.SUPPLIER_OFFER_READ,
+    "carrier_calendar": ToolCapability.CARRIER_SERVICE_READ,
 }
 
 
@@ -87,6 +105,7 @@ class OperationalObservationInput(BaseModel):
             "supplier_lead_time": "days",
             "quote_validity": "valid_until",
             "supplier_response": "status",
+            "carrier_calendar": "lane_id",
         }[self.kind]
         if required not in self.value:
             raise ValueError(f"{self.kind}_requires_{required}")
@@ -98,12 +117,23 @@ class OperationalObservationInput(BaseModel):
             raise ValueError("price_requires_currency")
         if self.kind == "quote_validity":
             _utc(str(self.value[required]))
+        if self.kind == "carrier_calendar":
+            for key in ("lead_time_days", "cost_minor_per_unit"):
+                if key in self.value:
+                    number = self.value[key]
+                    if not isinstance(number, int) or isinstance(number, bool) or number < 0:
+                        raise ValueError(f"{key}_requires_nonnegative_integer")
+            if "lane_available" in self.value and not isinstance(
+                self.value["lane_available"], bool,
+            ):
+                raise ValueError("lane_available_requires_boolean")
         return self
 
 
 def _receipt(
     *, stage: str, index: int, now: datetime, state_hash: str,
     changed_ref: str, prior_stage_id: str | None, projection: dict[str, Any],
+    tool_selection_receipt: dict[str, Any] | None = None,
 ) -> StageReceipt:
     stage_id = f"stage-observation-{index:02d}-{stage}"
     output = {
@@ -123,12 +153,15 @@ def _receipt(
         input_artifact_refs=(changed_ref,) if index == 0 else (f"{stage}:input",),
         output_artifact_refs=(f"{stage}:output",),
         dependency_stage_ids=(prior_stage_id,) if prior_stage_id else (),
+        tool_selection_receipts=(tool_selection_receipt,) if index == 0 and tool_selection_receipt else (),
     )
 
 
 def _apply_operational_consequence(
     *, state_data: dict[str, Any], fulfilment: dict[str, Any],
     observation: OperationalObservationInput, facts: list[dict[str, Any]],
+    evaluation_time: datetime,
+    tenant_price_facts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compute the bounded commercial consequence of the newly observed fact."""
 
@@ -159,18 +192,29 @@ def _apply_operational_consequence(
         valid_until = str(observation.value["valid_until"])
         fulfilment["quote_valid_until"] = valid_until
         projection["quote_valid_until"] = valid_until
-    else:
+    elif observation.kind == "supplier_response":
         response_status = str(observation.value["status"])
         fulfilment["supplier_response_status"] = response_status
         projection["supplier_response_status"] = response_status
-    if observation.kind in {"inventory_quantity", "supplier_lead_time", "supplier_response"}:
+    else:
+        fulfilment["carrier_calendar_observed"] = True
+        projection["carrier_calendar"] = dict(observation.value)
+    if observation.kind in {
+        "inventory_quantity", "supplier_lead_time", "supplier_response", "carrier_calendar",
+    }:
         allocation = project_case_allocation(state_data=state_data, observations=facts)
         fulfilment["allocation_projection"] = allocation
         projection["allocation"] = allocation
     if observation.kind == "price":
-        price_intelligence = project_price_baselines(facts)
+        price_intelligence = project_price_baselines(tenant_price_facts or facts)
+        price_intelligence["history_scope"] = "tenant_subject_cutoff_safe"
         fulfilment["price_intelligence"] = price_intelligence
         projection["price_intelligence"] = price_intelligence
+    commercial = project_case_commercial_decision(
+        state_data=state_data, fulfilment=fulfilment, evaluation_time=evaluation_time,
+    )
+    fulfilment["commercial_decision"] = commercial
+    projection["commercial_decision"] = commercial
     fulfilment["operational_projection"] = projection
     return projection
 
@@ -271,8 +315,31 @@ def record_case_operational_observation(
     })
     fulfilment["operational_observations"] = facts[-128:]
     fulfilment["latest_operational_observation"] = facts[-1]
+    tenant_price_facts: list[dict[str, Any]] | None = None
+    if observation.kind == "price":
+        history_rows = db.execute(select(
+            ShoppingCaseOperationalObservationRecord
+        ).where(
+            ShoppingCaseOperationalObservationRecord.tenant_id == tenant_id,
+            ShoppingCaseOperationalObservationRecord.kind == "price",
+            ShoppingCaseOperationalObservationRecord.subject_ref == observation.subject_ref,
+            ShoppingCaseOperationalObservationRecord.known_at <= now,
+        ).order_by(
+            ShoppingCaseOperationalObservationRecord.known_at.asc(),
+            ShoppingCaseOperationalObservationRecord.observation_id.asc(),
+        ).limit(511)).scalars().all()
+        tenant_price_facts = [{
+            "observation_id": item.observation_id,
+            "kind": item.kind,
+            "known_at": item.known_at.isoformat(),
+            "value": dict(item.value_json or {}),
+            "case_id": item.case_id,
+        } for item in history_rows]
+        tenant_price_facts.append(facts[-1])
     operational_projection = _apply_operational_consequence(
         state_data=state_data, fulfilment=fulfilment, observation=observation, facts=facts,
+        evaluation_time=now,
+        tenant_price_facts=tenant_price_facts,
     )
     state_data.update({
         "revision": new_revision,
@@ -280,12 +347,38 @@ def record_case_operational_observation(
         "fulfilment": fulfilment,
     })
     state = prior.snapshot.case_state.model_validate(state_data)
+    watermark = EvidenceWatermark(
+        source=f"{observation.source_type}:{observation.evidence_ref}",
+        observed_at=known_at.isoformat(),
+        source_version=observation.observation_id,
+        content_hash=_digest({
+            "kind": observation.kind,
+            "subject_ref": observation.subject_ref,
+            "location_ref": observation.location_ref,
+            "value": observation.value,
+            "effective_at": effective_at.isoformat(),
+        }),
+        state="current",
+    )
+    watermarks = tuple(prior.snapshot.evidence_watermarks) + (watermark,)
+    tool_receipt = operational_read_receipt(
+        capability=_CAPABILITY[observation.kind],
+        tenant_id=tenant_id,
+        # This route is a governed operator intake seam, not proof that a live
+        # WMS/carrier/supplier connector is enrolled.  A real adapter can use
+        # the same capability while emitting its own deployment identity.
+        deployment_id=f"operator_intake:{observation.source_type}",
+        enabled=True,
+        freshness_state="fresh",
+        health_status="unknown",
+        authority_score=70 if observation.source_type != "human_admin" else 60,
+    ).model_dump(mode="json")
     snapshot = create_decision_snapshot(
         state,
         tenant_id=tenant_id,
         knowledge_cutoff=now,
         evaluation_time=now,
-        evidence_watermarks=prior.snapshot.evidence_watermarks,
+        evidence_watermarks=watermarks[-128:],
         catalog_snapshot_id=prior.snapshot.catalog_snapshot_id,
         market_snapshot_id=prior.snapshot.market_snapshot_id,
         policy_snapshot_id=prior.snapshot.policy_snapshot_id,
@@ -301,6 +394,7 @@ def record_case_operational_observation(
             changed_ref=changed_ref,
             prior_stage_id=dependency,
             projection=operational_projection,
+            tool_selection_receipt=tool_receipt,
         )
         receipts.append(receipt)
         dependency = receipt.stage_id
@@ -333,6 +427,9 @@ def record_case_operational_observation(
         "recomputed_stages": list(recomputed),
         "recomputation_basis": recomputation_basis,
         "operational_projection": operational_projection,
+        "tool_selection_receipt": tool_receipt,
+        "ingestion_mode": "operator_submitted_observation",
+        "evidence_watermark": watermark.model_dump(mode="json"),
         "dependency_traversal": traversal.model_dump(mode="json"),
         "knowledge_cutoff": snapshot.knowledge_cutoff,
         "evaluation_time": snapshot.evaluation_time,

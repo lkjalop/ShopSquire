@@ -35,6 +35,7 @@ describe('DecisionRunTracePanel', () => {
         who_can_fulfil_now: {
           evidence_warning: 'Latest evidence, not a live stock promise.',
           allocation_projection: { allocated_units: 12, shortfall_units: 18 },
+          commercial_decision: { status: 'QUALIFIED_PARTIAL', quantity_outcome: 'partial', budget_outcome: 'within' },
           supplier_candidates: [{ supplier_reference: 'supplier-a', quantity_available: 12, offered_sku: 'SKU-A', response_status: 'conditional' }],
         },
       },
@@ -50,6 +51,7 @@ describe('DecisionRunTracePanel', () => {
     expect(screen.getByTestId('decision-record-view')).toHaveTextContent('Future evidence is excluded');
     fireEvent.click(screen.getByRole('button', { name: 'Who can fulfil now?' }));
     expect(screen.getByTestId('decision-record-view')).toHaveTextContent('12 allocated; 18 shortfall');
+    expect(screen.getByTestId('decision-record-view')).toHaveTextContent('Commercial decision: QUALIFIED_PARTIAL');
     expect(screen.getByTestId('decision-record-view')).toHaveTextContent('supplier-a: 12 × SKU-A; conditional');
   });
 });

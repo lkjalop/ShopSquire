@@ -102,12 +102,13 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
   await expect(continuation.getByRole('button', { name: 'Cart updated' })).toBeVisible({ timeout: 30_000 });
   const caseId = String(selectionResult.case_id);
   const now = new Date().toISOString();
+  const inventoryObservationId = `browser-stock-correction-${suffix}`;
   const observation = await page.request.post(
     `/api/v1/shopping-cases/${caseId}/operational-observations`,
     {
       headers: { 'x-api-key': process.env.OWNER_API_KEY || 'local-owner-key' },
       data: {
-        observation_id: `browser-stock-correction-${suffix}`,
+        observation_id: inventoryObservationId,
         expected_revision: confirmationResult.revision,
         kind: 'inventory_quantity',
         subject_ref: `configuration:${confirmationResult.confirmed_sku}`,
@@ -138,8 +139,23 @@ test('high-value bulk request shows governed fulfilment choices and explicit exa
     quantity_outcome: 'shortfall',
   });
   expect(observationResult.operational_projection.allocation).toMatchObject({
-    status: 'partial', allocated_units: 2, shortfall_units: 28,
+    status: 'complete', allocated_units: 30, shortfall_units: 0,
     authority: 'advisory_only', execution_allowed: false,
+  });
+  expect(observationResult.operational_projection.commercial_decision).toMatchObject({
+    quantity_outcome: 'complete_by_deadline',
+    cart_authority: 'none', supplier_send_authority: 'none',
+  });
+  expect(observationResult.tool_selection_receipt).toMatchObject({
+    capability: 'inventory_availability', outcome: 'selected',
+    commercial_authority_granted: false,
+  });
+  expect(observationResult.tool_selection_receipt.selected_deployment_ids).toEqual([
+    'operator_intake:inventory_system',
+  ]);
+  expect(observationResult.ingestion_mode).toBe('operator_submitted_observation');
+  expect(observationResult.evidence_watermark).toMatchObject({
+    state: 'current', source_version: inventoryObservationId,
   });
   expect(observationResult.cart_mutations).toBe(0);
 

@@ -5,6 +5,7 @@ supplier names and has advisory authority only.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from src.app.services.bounded_allocation_solver import (
@@ -45,8 +46,6 @@ def project_case_allocation(
         missing.append("destination_kind")
     if not isinstance(deadline, int) or isinstance(deadline, bool) or deadline < 0:
         missing.append("deadline_days")
-    if not inventory:
-        missing.append("inventory_observations")
     if missing:
         return {
             "status": "not_evaluated",
@@ -83,6 +82,55 @@ def project_case_allocation(
             lead_time_days=int(value.get("lead_time_days") or 0),
             cost_minor_per_unit=int(value.get("transfer_cost_minor_per_unit") or 0),
             available=bool(value.get("lane_available", True)),
+        ))
+    evaluation = max(
+        (
+            datetime.fromisoformat(str(row.get("known_at")).replace("Z", "+00:00"))
+            for row in observations if row.get("known_at")
+        ),
+        default=datetime.now(timezone.utc),
+    )
+    carrier_by_lane = {
+        str((row.get("value") or {}).get("lane_id")): dict(row.get("value") or {})
+        for row in observations if row.get("kind") == "carrier_calendar"
+    }
+    for offer in fulfilment.get("offers") or []:
+        offered_sku = str(offer.get("offered_sku") or "").strip()
+        if offered_sku != selected_sku:
+            continue
+        if str(offer.get("trust_status") or "unverified") != "trusted":
+            continue
+        if str(offer.get("response_status") or "") in {"rejected", "quarantined"}:
+            continue
+        validity = offer.get("validity_expires_at")
+        if validity:
+            try:
+                expiry = datetime.fromisoformat(str(validity).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if expiry.tzinfo is None or expiry.astimezone(timezone.utc) <= evaluation.astimezone(timezone.utc):
+                continue
+        provenance = dict(offer.get("provenance") or {})
+        offer_id = str(offer.get("offer_id") or "unknown")
+        supplier_reference = str(provenance.get("supplier_reference") or "unidentified")
+        facility_id = f"supplier:{supplier_reference}:{offer_id}"
+        lane_id = f"supplier-lane:{offer_id}"
+        carrier = carrier_by_lane.get(lane_id, {})
+        quantity = int(offer.get("quantity_available") or 0)
+        if quantity <= 0:
+            continue
+        lead_time = int(carrier.get("lead_time_days", offer.get("lead_time_days") or 0))
+        supplies.append(FacilitySupply(
+            facility_id=facility_id, facility_kind="supplier", sku=offered_sku,
+            on_hand_units=quantity, observed_at=evaluation.isoformat(),
+        ))
+        lanes.append(TransferLane(
+            lane_id=lane_id, origin_facility_id=facility_id,
+            destination_id=destination_id, capacity_units=quantity,
+            lead_time_days=lead_time,
+            # Prefer eligible observed local/network stock before supplier stock.
+            cost_minor_per_unit=int(carrier.get("cost_minor_per_unit", 1_000)),
+            available=bool(carrier.get("lane_available", True)),
         ))
     if not supplies:
         return {

@@ -54,3 +54,66 @@ def test_projection_abstains_when_destination_or_deadline_is_undisclosed():
     assert set(result["missing_inputs"]) == {
         "destination_id", "destination_kind", "deadline_days",
     }
+
+
+def test_supplier_offer_and_carrier_calendar_share_the_allocation_model():
+    result = project_case_allocation(
+        state_data={
+            "requested_quantity": 30,
+            "selected_sku": "CFG-1",
+            "fulfilment": {
+                "destination_id": "buyer-region-token",
+                "destination_kind": "region",
+                "deadline_days": 3,
+                "offers": [{
+                    "offer_id": "offer-a",
+                    "offered_sku": "CFG-1",
+                    "quantity_available": 30,
+                    "lead_time_days": 8,
+                    "validity_expires_at": "2027-08-17T00:00:00+00:00",
+                    "trust_status": "trusted",
+                    "response_status": "accepted",
+                    "provenance": {"supplier_reference": "supplier-a"},
+                }],
+            },
+        },
+        observations=[{
+            "observation_id": "carrier-a",
+            "kind": "carrier_calendar",
+            "known_at": "2026-08-17T00:00:00+00:00",
+            "value": {
+                "lane_id": "supplier-lane:offer-a",
+                "lead_time_days": 2,
+                "lane_available": True,
+                "cost_minor_per_unit": 800,
+            },
+        }],
+    )
+    assert result["status"] == "complete"
+    assert result["allocated_units"] == 30
+    assert result["lines"][0]["facility_kind"] == "supplier"
+    assert result["lines"][0]["lead_time_days"] == 2
+
+
+def test_untrusted_supplier_offer_never_becomes_allocatable_supply():
+    result = project_case_allocation(
+        state_data={
+            "requested_quantity": 4,
+            "selected_sku": "CFG-1",
+            "fulfilment": {
+                "destination_id": "buyer-region-token",
+                "destination_kind": "region",
+                "deadline_days": 3,
+                "offers": [{
+                    "offer_id": "offer-b",
+                    "offered_sku": "CFG-1",
+                    "quantity_available": 10,
+                    "trust_status": "untrusted",
+                    "response_status": "quarantined",
+                }],
+            },
+        },
+        observations=[],
+    )
+    assert result["status"] == "not_evaluated"
+    assert result["missing_inputs"] == ["eligible_exact_configuration_supply"]
