@@ -33,6 +33,7 @@ def _job_id(tenant_id: str, case_id: str, revision: int, plan_id: str) -> str:
 
 
 def project_job(job: ShoppingCaseInterpretationJob) -> dict[str, Any]:
+    receipt_authority = str((job.receipt_json or {}).get("authority") or "none")
     return {
         "schema_version": "shopping-case-interpretation-job-v1",
         "job_id": job.job_id,
@@ -43,7 +44,7 @@ def project_job(job: ShoppingCaseInterpretationJob) -> dict[str, Any]:
         "receipt": job.receipt_json,
         "result": job.result_plan_json if job.status == "completed" else None,
         "error_code": job.error_code,
-        "authority": "discovery_proposal_only" if job.status == "completed" else "none",
+        "authority": receipt_authority if job.status == "completed" else "none",
         "commercial_authority": False,
     }
 
@@ -193,6 +194,7 @@ def execute_case_interpretation_job(payload: dict[str, Any]) -> None:
         job.updated_at = stamp
         db.commit()
 
+    proposal_authority = str(receipt.get("authority") or "none")
     log_trace_event(
         trace_id=case_id.removeprefix("sc-"),
         event_type="case_interpretation_completed",
@@ -211,7 +213,7 @@ def execute_case_interpretation_job(payload: dict[str, Any]) -> None:
                 row.model_dump(mode="json") for row in proposed.discovery_queries
             ],
             "receipt": receipt,
-            "authority": "discovery_proposal_only",
+            "authority": proposal_authority,
             "qualification_authority": "none",
             "commercial_authority": "none",
             "observed_at": _now().isoformat(),
@@ -248,7 +250,7 @@ def consume_completed_case_interpretation(
         "status": "completed_durable",
         "job_id": job.job_id,
         "case_revision": job.case_revision,
-        "authority": "discovery_proposal_only",
+        "authority": str((job.receipt_json or {}).get("authority") or "none"),
     }
 
 

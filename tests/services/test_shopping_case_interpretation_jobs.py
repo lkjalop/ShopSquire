@@ -128,3 +128,35 @@ def test_failed_interpretation_returns_to_retry_instead_of_sticking_running(monk
         stored = db.execute(select(ShoppingCaseInterpretationJob)).scalar_one()
     assert stored.status == "retry"
     assert stored.error_code == "RuntimeError"
+
+
+def test_completed_fallback_does_not_claim_model_proposal_authority(monkeypatch):
+    engine = _database()
+    monkeypatch.setenv("OPEN_WORLD_QUERY_PROPOSER_ASYNC_ENABLED", "1")
+    monkeypatch.setattr(
+        "src.app.workers.task_runner.submit_task", lambda *_args, **_kwargs: "task-4",
+    )
+    plan = build_case_research_plan("unfamiliar materials workload", allow_open_world=True)
+    assert plan is not None
+    with Session(engine) as db:
+        scheduled = schedule_case_interpretation(db, case=_case(db), plan=plan)
+    monkeypatch.setattr(
+        "src.app.services.open_world_query_proposal.propose_open_world_queries",
+        lambda incoming, timeout_s: (
+            incoming, {"status": "rejected_or_unavailable", "authority": "none"},
+        ),
+    )
+    monkeypatch.setattr(
+        "src.app.services.decision_log.log_trace_event", lambda **_kwargs: None,
+    )
+    execute_case_interpretation_job({
+        "job_id": scheduled["job_id"], "tenant_id": "portfolio",
+    })
+    with Session(engine) as db:
+        stored = db.execute(select(ShoppingCaseInterpretationJob)).scalar_one()
+        projected = consume_completed_case_interpretation(
+            db, tenant_id="portfolio", case_id="sc-case-1",
+            case_revision=1, plan=plan,
+        )[1]
+    assert stored.status == "completed"
+    assert projected["authority"] == "none"
